@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from parsing import extract_text
 from storage import save_file
+from retrieval import search
 
 app = FastAPI()
 
@@ -21,5 +22,11 @@ async def upload(file: UploadFile = File(...)):
         "name": file.filename,
         "text": text
     })
+@app.post("/query")
+def query(q: str):
+    results = search(q, DOCUMENTS)
 
+    return {
+        "results": results
+    }
     return {"filename": file.filename, "chars": len(text)}
