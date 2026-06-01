@@ -1,0 +1,19 @@
+# --- Core API ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# --- File handling ---
+python-multipart==0.0.9
+
+# --- Document parsing ---
+pypdf==4.3.1
+python-docx==1.1.2
+
+# --- HTTP (for Ollama / APIs) ---
+requests==2.32.3
+
+# --- Data handling ---
+pydantic==2.9.2
+
+# --- Optional but useful ---
+python-dotenv==1.0.1
