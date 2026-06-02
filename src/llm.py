@@ -1,18 +1,22 @@
 import requests
 
-OLLAMA_URL = "http://localhost:114343/api/generate"
+OLLAMA_URL = "http://localhost:11434/api/generate"
 
-def ask_ollama(prompt:str): 
+def ask_ollama(prompt):
     response = requests.post(
-        OLLAMA_URL,
-        json = {
-            "model" : "mistral",
-            "prompt" : prompt,
-            "stream" : False
+        "http://localhost:11434/api/generate",
+        json={
+            "model": "mistral",
+            "prompt": prompt,
+            "stream": False
         }
     )
 
-    return response.json()["response"]
+    if response.status_code != 200:
+        return f"LLM error: {response.status_code}"
+
+    data = response.json()
+    return data.get("response", "No response from model")
 
 #multi model support
 

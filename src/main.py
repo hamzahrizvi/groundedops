@@ -2,21 +2,25 @@ from fastapi import FastAPI, UploadFile, File
 from parsing import extract_text
 from storage import save_file
 from retrieval import search
-from llm import ask_ollama
+from llm import ask_ollama, generate
 from logger import log
 from chunking import chunk_text
+from pydantic import BaseModel
 
+class QueryRequest(BaseModel):
+    q: str
+    provider: str = "ollama"
 app = FastAPI()
 
 DOCUMENTS = []
-CHUNKS =[]
-
+CHUNKS = []
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-#doc uploader (knowledge base)    
+
+#upload
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     content = await file.read()
@@ -24,72 +28,55 @@ async def upload(file: UploadFile = File(...)):
 
     text = extract_text(path)
 
-    DOCUMENTS.append({
-        "name": file.filename,
-        "text": text
-    })
+    if not text or not text.strip():
+        return {
+            "error": "No text extracted",
+            "filename": file.filename
+        }
+
+    chunks = chunk_text(text)
+
+    for c in chunks:
+        CHUNKS.append({
+            "source": file.filename,
+            "text": c
+        })
+
+    return {
+        "filename": file.filename,
+        "chunks_added": len(chunks)
+    }
 
 
-#OLLAMA response gen
+# Query
 @app.post("/query")
-def query(q: str):
-    results = search(q, CHUNKS)
+def query(req: QueryRequest):
+    try:
+        if not CHUNKS:
+            return {"error": "No documents uploaded"}
 
-    context = "\n\n".join(results)
+        results = search(req.q, CHUNKS)
 
-    prompt = f"""
+        if not results:
+            return {"error": "No relevant content found"}
+
+        context = "\n\n".join(results[:5])
+
+        prompt = f"""
 Answer ONLY using the context.
 
 Context:
 {context}
 
-Question: {q}
+Question: {req.q}
 """
 
-    answer = ask_ollama(prompt)
+        answer = generate(req.provider, prompt)
 
-    return {
-        "answer": answer
-    }
+        log(req.q, answer)
 
-#logger function
-@app.post("/query")
+        return {"answer": answer}
 
-def query(q:str) :
-    results = search (q, DOCUMENTS)
-    context = "\n\n" .join(results)
-
-    answer = ask_ollama(context)
-
-    log (q, answer)
-    return {"answer": answer}
-
-#multiple models
-
-@app.post ("/query")
-def query (q: str, provider: str ="ollama"):
-    results = search (q, DOCUMENTS)
-    context = "\n\n".join (results)
-    prompt = f"""
-Context: {context}
-
-Question: {q}
-"""
-    answer = generate(provider,prompt)
-    return{"answer": answer}
-
-#cheeky chunks
-@app.post ("/upload")
-async def upload (file:UploadFile = File (...)):
-    content = await file.read()
-    path = save_file(content, file.filename)
-
-    text = extract_text(path)
-    chunks = chunk_text (text)
-
-    for c in chunks: 
-        CHUNKS.append({
-            "source": file.filename
-            "text": c
-        })
-    return {"chunks added" : len (chunks)}
+    except Exception as e:
+        print("ERROR:", str(e))
+        return {"error": str(e)}
