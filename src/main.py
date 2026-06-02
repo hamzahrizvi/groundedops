@@ -70,3 +70,17 @@ def query(q:str) :
 
     log (q, answer)
     return {"answer": answer}
+
+#multiple models
+
+@app.post ("/query")
+def query (q: str, provider: str ="ollama"):
+    results = search (q, DOCUMENTS)
+    context = "\n\n".join (results)
+    prompt = f"""
+Context: {context}
+
+Question: {q}
+"""
+    answer = generate(provider,prompt)
+    return{"answer": answer}

@@ -13,3 +13,15 @@ def ask_ollama(prompt:str):
     )
 
     return response.json()["response"]
+
+#multi model support
+
+def generate (provider, prompt):
+
+    if provider == "ollama":
+        return ask_ollama(prompt)
+    
+    elif provider == "mock":
+        return "Mock Response"
+    
+    return "Provider not supported"
