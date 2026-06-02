@@ -5,6 +5,9 @@ from retrieval import search
 from llm import ask_ollama
 from logger import log
 
+app = FastAPI()
+
+DOCUMENTS = []
 
 
 @app.get("/health")
@@ -55,10 +58,6 @@ Question: {q}
     return {
         "answer": answer
     }
-
-app = FastAPI()
-
-DOCUMENTS = []
 
 #logger function
 @app.post("/query")

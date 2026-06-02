@@ -2,7 +2,7 @@ import requests
 
 OLLAMA_URL = "http://localhost:114343/api/generate"
 
-def ask_ollama(prompt:str)
+def ask_ollama(prompt:str): 
     response = requests.post(
         OLLAMA_URL,
         json = {
@@ -12,4 +12,4 @@ def ask_ollama(prompt:str)
         }
     )
 
-    return response.json ()["response"]
+    return response.json()["response"]
