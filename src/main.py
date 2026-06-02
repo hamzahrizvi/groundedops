@@ -2,15 +2,15 @@ from fastapi import FastAPI, UploadFile, File
 from parsing import extract_text
 from storage import save_file
 from retrieval import search
+from llm import ask_ollama
 
-app = FastAPI()
 
-DOCUMENTS = []
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
+#doc uploader (knowledge base)    
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     content = await file.read()
@@ -22,6 +22,8 @@ async def upload(file: UploadFile = File(...)):
         "name": file.filename,
         "text": text
     })
+
+#search function    
 @app.post("/query")
 def query(q: str):
     results = search(q, DOCUMENTS)
@@ -30,3 +32,29 @@ def query(q: str):
         "results": results
     }
     return {"filename": file.filename, "chars": len(text)}
+
+#OLLAMA response gen
+@app.post("/query")
+def query(q: str):
+    results = search(q, DOCUMENTS)
+
+    context = "\n\n".join(results)
+
+    prompt = f"""
+Answer ONLY using the context.
+
+Context:
+{context}
+
+Question: {q}
+"""
+
+    answer = ask_ollama(prompt)
+
+    return {
+        "answer": answer
+    }
+
+app = FastAPI()
+
+DOCUMENTS = []
