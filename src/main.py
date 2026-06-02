@@ -3,6 +3,7 @@ from parsing import extract_text
 from storage import save_file
 from retrieval import search
 from llm import ask_ollama
+from logger import log
 
 
 
@@ -58,3 +59,15 @@ Question: {q}
 app = FastAPI()
 
 DOCUMENTS = []
+
+#logger function
+@app.post("/query")
+
+def query(q:str) :
+    results = search (q, DOCUMENTS)
+    context = "\n\n" .join(results)
+
+    answer = ask_ollama(context)
+
+    log (q, answer)
+    return {"answer": answer}

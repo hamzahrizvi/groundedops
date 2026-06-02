@@ -1,12 +1,13 @@
-def search(query, documents, k=3):
+#
+def search(query, documents, k=5):
     scored = []
 
     for doc in documents:
-        score = sum(
-            1 for word in query.lower().split()
-            if word in doc["text"].lower()
-        )
-        scored.append((score, doc["text"]))
+        text = doc["text"].lower()
+        score = sum(word in text for word in query.lower().split())
+
+        if score > 0:
+            scored.append((score, doc["text"]))
 
     scored.sort(reverse=True)
-    return [text for _, text in scored[:k]]
+    return [t for _, t in scored[:k]]
