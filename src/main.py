@@ -4,10 +4,12 @@ from storage import save_file
 from retrieval import search
 from llm import ask_ollama
 from logger import log
+from chunking import chunk_text
 
 app = FastAPI()
 
 DOCUMENTS = []
+CHUNKS =[]
 
 
 @app.get("/health")
@@ -27,20 +29,11 @@ async def upload(file: UploadFile = File(...)):
         "text": text
     })
 
-#search function    
-@app.post("/query")
-def query(q: str):
-    results = search(q, DOCUMENTS)
-
-    return {
-        "results": results
-    }
-    return {"filename": file.filename, "chars": len(text)}
 
 #OLLAMA response gen
 @app.post("/query")
 def query(q: str):
-    results = search(q, DOCUMENTS)
+    results = search(q, CHUNKS)
 
     context = "\n\n".join(results)
 
@@ -84,3 +77,19 @@ Question: {q}
 """
     answer = generate(provider,prompt)
     return{"answer": answer}
+
+#cheeky chunks
+@app.post ("/upload")
+async def upload (file:UploadFile = File (...)):
+    content = await file.read()
+    path = save_file(content, file.filename)
+
+    text = extract_text(path)
+    chunks = chunk_text (text)
+
+    for c in chunks: 
+        CHUNKS.append({
+            "source": file.filename
+            "text": c
+        })
+    return {"chunks added" : len (chunks)}
