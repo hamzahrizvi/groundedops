@@ -6,5 +6,9 @@
   {
     "query": "default credentials?",
     "response": " The default credentials for logging into the MyConnect App are as follows:\n\n- Username: user1\n- Password: password1"
+  },
+  {
+    "query": "list steps to install myconnect",
+    "response": " Based on the context provided, here are the steps to install MyConnect:\n\n1. Mount and Power the Devices (MyCheckr): Install the MyCheckr, power it on with the visible display powered up.\n2. Install and Power the MyConnect Hub: Unscrew the hub lid using a TR8 screwdriver, connect it to the network switch via Ethernet cable, and power it on by plugging it into a power source.\n3. Wire Any Relays (If Using Access Control): If access control is being used, wire any necessary relays according to the relay output layout and wiring steps provided.\n4. Secure all terminal screws: After wiring, make sure all terminal screws are securely tightened.\n5. Confirm GPIO settings in MyConnect App: Ensure the GPIO duration is set to 1s from Hub settings unless otherwise intended within the MyConnect App.\n6. Connect the Tablet & Open MyConnect App: Connect the tablet and open the MyConnect App.\n7. Add and Register the MyCheckr: Within the app, add and register the MyCheckr device.\n8. Configure Device Rules: Set up device rules within the app as required.\n9. Assign Relay Actions (Hub Outputs): Within the app, assign relay actions to hub outputs as necessary.\n10. Test the System: Test the system by confirming alerts appear on the tablet, confirming the relay activates (e.g., door/light), and confirming logs update within the app.\n11. Post-installation verification (installer sign-off): Verify all steps before leaving site, focusing on basic checks such as power status, visible display, alerts, relay activation, and log updates."
   }
 ]

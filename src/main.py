@@ -1,39 +1,22 @@
 from fastapi import FastAPI, UploadFile, File
 from parsing import extract_text
 from storage import save_file
-from retrieval import search
-from llm import ask_ollama, generate
-from logger import log
 from chunking import chunk_text
-from pydantic import BaseModel
+from retrieval import search
+from structure import extract_structured_block
+from llm import ask_ollama
 
-class QueryRequest(BaseModel):
-    q: str
-    provider: str = "ollama"
 app = FastAPI()
 
-DOCUMENTS = []
 CHUNKS = []
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
-
-#upload
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     content = await file.read()
     path = save_file(content, file.filename)
 
     text = extract_text(path)
-
-    if not text or not text.strip():
-        return {
-            "error": "No text extracted",
-            "filename": file.filename
-        }
-
     chunks = chunk_text(text)
 
     for c in chunks:
@@ -42,41 +25,41 @@ async def upload(file: UploadFile = File(...)):
             "text": c
         })
 
-    return {
-        "filename": file.filename,
-        "chunks_added": len(chunks)
-    }
+    return {"chunks_added": len(chunks)}
 
 
-# Query
 @app.post("/query")
-def query(req: QueryRequest):
-    try:
-        if not CHUNKS:
-            return {"error": "No documents uploaded"}
+def query(q: str):
+    # retrieval
+    results = search(q, CHUNKS, k=10)
 
-        results = search(req.q, CHUNKS)
+    # structured extraction
+    extracted = extract_structured_block(results)
 
-        if not results:
-            return {"error": "No relevant content found"}
+    if extracted:
+        return {
+            "answer": extracted,
+            "mode": "structured"
+        }
 
-        context = "\n\n".join(results[:5])
+    # llm fallback
+    context = "\n\n".join(c["text"] for c in results)
 
-        prompt = f"""
-Answer ONLY using the context.
+    prompt = f"""
+You must answer using ONLY the context.
 
 Context:
 {context}
 
-Question: {req.q}
+Question: {q}
+
+If the answer is not clearly present, say:
+"I could not find that in the knowledge base."
 """
 
-        answer = generate(req.provider, prompt)
+    answer = ask_ollama(prompt)
 
-        log(req.q, answer)
-
-        return {"answer": answer}
-
-    except Exception as e:
-        print("ERROR:", str(e))
-        return {"error": str(e)}
+    return {
+        "answer": answer,
+        "mode": "llm"
+    }

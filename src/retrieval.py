@@ -1,17 +1,16 @@
-
-def search(query, chunks, k=5):
+def search(query, chunks, k=10):
     scored = []
 
+    q_words = query.lower().split()
+
     for c in chunks:
-        text = c["text"]
-        score = sum(
-            word in text.lower()
-            for word in query.lower().split()
-        )
+        text = c["text"].lower()
+
+        score = sum(word in text for word in q_words)
 
         if score > 0:
-            scored.append((score, text))  # only store text
+            scored.append((score, c))
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    scored.sort(reverse=True, key=lambda x: x[0])
 
-    return [text for _, text in scored[:k]]
+    return [c for _, c in scored[:k]]
