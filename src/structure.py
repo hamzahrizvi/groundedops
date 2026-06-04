@@ -3,8 +3,8 @@ from collections import Counter
 
 
 def normalize_line(line):
-    line = re.sub(r"^\d+\.\s*", "", line)  # remove numbered prefix
-    line = re.sub(r"[^\w\s]", "", line)    # remove punctuation
+    line = re.sub(r"^\d+[\.\)]\s*", "", line)  
+    line = re.sub(r"[^\w\s]", "", line)
     return line.strip().lower()
 
 
@@ -27,8 +27,27 @@ def starts_with_verb(line):
     if first_word in common_verbs:
         return True
 
-    # fallback: short + instruction style
     if len(words) <= 6 and not line.endswith("."):
+        return True
+
+    return False
+
+
+def is_bad_line(line):
+    l = line.lower()
+
+    if any(k in l for k in [
+        "introduction",
+        "overview",
+        "table of contents",
+        "download manual"
+    ]):
+        return True
+
+    if re.match(r"^\d+[a-z]?\.\s*[A-Z]", line):
+        return True
+
+    if len(line.split()) <= 3:
         return True
 
     return False
@@ -53,12 +72,19 @@ def extract_structured_block(chunks):
     for idx, c in enumerate(chunks):
         raw_lines = [l.strip() for l in c["text"].split("\n") if l.strip()]
 
-        if len(raw_lines) < 3:
+        if len(raw_lines) < 4:
             continue
 
-        normalized = [normalize_line(l) for l in raw_lines]
+        filtered_lines = [
+            l for l in raw_lines
+            if not is_bad_line(l)
+        ]
 
-        # --- 1. Length consistency ---
+        if len(filtered_lines) < 3:
+            continue
+
+        normalized = [normalize_line(l) for l in filtered_lines]
+
         lengths = [len(l.split()) for l in normalized if l]
 
         if not lengths:
@@ -70,27 +96,21 @@ def extract_structured_block(chunks):
             1 for l in lengths if abs(l - avg_len) < avg_len * 0.5
         )
 
-        # --- 2. Repeated structure ---
         starts = [l.split()[0] for l in normalized if l]
         common = Counter(starts).most_common(1)
         start_score = common[0][1] if common else 0
 
-        # --- 3. Sentence independence ---
         independent = sum(1 for l in normalized if len(l.split()) > 4)
 
-        # --- 4. Verb detection ---
-        verb_starts = sum(1 for l in raw_lines if starts_with_verb(l))
+        verb_starts = sum(1 for l in filtered_lines if starts_with_verb(l))
 
-        # --- 5. Similarity (FIXED) ---
         similarity_score = 0
 
         for i in range(len(normalized) - 1):
-            # structural similarity (word-level, not char-level)
             words_i = normalized[i].split()[:3]
             words_j = normalized[i + 1].split()[:3]
 
             structural = words_i == words_j
-
             semantic = simple_similarity(normalized[i], normalized[i + 1]) > 0.5
 
             if structural:
@@ -99,25 +119,44 @@ def extract_structured_block(chunks):
             if semantic:
                 similarity_score += 1
 
-        # --- 6. Position bias ---
         position_weight = idx / total_chunks
 
-        # --- FINAL SCORE ---
         score = (
             length_consistency * 1.5 +
             start_score * 2 +
             independent * 1 +
-            verb_starts * 2 +
+            verb_starts * 3 +   # 🔥 increased importance
             similarity_score * 1.5 +
-            position_weight * 2
+            position_weight * 1.5
         )
+
+        if verb_starts < 2:
+            continue
 
         if score > best_score:
             best_score = score
-            best_block = raw_lines
+            best_block = filtered_lines
 
-    # --- Threshold ---
-    if best_block and best_score > 8:
-        return "\n".join(best_block[:10])
+def is_meaningful_line(line):
+    l = line.lower()
 
+    # must contain action or meaningful words
+    return any(k in l for k in [
+        "check", "verify", "ensure", "confirm",
+        "test", "connected", "configured",
+        "working", "trigger", "available",
+        "power", "network", "device"
+    ])
+
+    if best_block and best_score > 12:
+
+        meaningful = [
+            l for l in best_block
+            if is_meaningful_line(l)
+        ]
+
+        if len(meaningful) < 3:
+            return None
+
+        return "\n".join(meaningful[:10])
     return None

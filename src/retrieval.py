@@ -1,4 +1,4 @@
-def search(query, chunks, k=10):
+def search(query, chunks, k=5):
     scored = []
 
     q_words = query.lower().split()
@@ -6,7 +6,7 @@ def search(query, chunks, k=10):
     for c in chunks:
         text = c["text"].lower()
 
-        score = sum(word in text for word in q_words)
+        score = sum(1 for word in q_words if word in text)
 
         if score > 0:
             scored.append((score, c))
