@@ -1,4 +1,3 @@
-````markdown
 # RAG Backend (Hybrid Retrieval + Grounded QA)
 
 A FastAPI-based retrieval-augmented generation (RAG) system with hybrid search, reranking, structured extraction, and grounded answer validation.
@@ -502,4 +501,3 @@ Grounding Validation
      ↓
 Response + Metrics
 ```
-````
