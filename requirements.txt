@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+numpy
+sentence-transformers
+rank-bm25
+pypdf
+python-docx

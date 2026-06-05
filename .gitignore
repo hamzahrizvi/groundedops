@@ -1,9 +1,5 @@
 __pycache__/
 *.pyc
 .env
-venv/
-node_modules/
 uploads/
-vector_store/
 *.log
-.DS_Store

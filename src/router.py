@@ -1,50 +1,70 @@
-def classify_query(query):
+"""
+Query router.
+
+Classifies an incoming query into one of four roles:
+  extract   → structured list/checklist extraction  → mistral
+  fast      → short factual lookup                  → phi  (mistral fallback)
+  accurate  → multi-sentence explanation             → mistral (deepseek fallback)
+  reasoning → causal / comparative / multi-hop       → mistral (deepseek fallback)
+
+The fallback chain is enforced in llm.generate_with_fallback().
+"""
+
+# Primary (provider, model) per role
+MODEL_MAP: dict[str, tuple[str, str]] = {
+    "extract":   ("local", "mistral"),
+    "fast":      ("local", "phi"),
+    "accurate":  ("local", "mistral"),
+    "reasoning": ("local", "mistral"),   # deepseek used as fallback via llm.py
+}
+
+# Keywords that trigger each role (checked in priority order)
+_REASONING_KW = [
+    "why", "explain", "how does", "what causes", "reason for",
+    "difference between", "compare", "relationship between",
+    "what happens when", "impact of", "effect of", "works with",
+]
+
+_EXTRACT_KW = [
+    "checklist", "steps to", "procedure", "list", "instructions",
+    "give me", "show me the steps", "what are the steps",
+    "how to", "walkthrough", "sign off",
+]
+
+_FAST_KW = [
+    "what is", "define", "default", "credentials", "password",
+    "username", "ip address", "version", "what does", "name of",
+    "introduction",
+]
+
+
+def requires_multi_hop(query: str) -> bool:
+    """Detect queries that likely span more than one document section."""
     q = query.lower()
+    indicators = [
+        "compared to", "relationship between", "works with",
+        "integration", "interact", "together with", "depends on",
+        "how does", "and verify",
+    ]
+    return any(kw in q for kw in indicators)
 
-    # for extracting
-    if any(k in q for k in [
-        "checklist", "check list",
-        "steps", "step by step", "step-by-step",
-        "procedure", "process", "workflow",
-        "verify", "verification", "validate",
-        "before leaving", "after installation", "post installation",
-        "what should i check", "what to check",
-        "requirements", "pre requisites", "prerequisites",
-        "setup guide", "installation steps",
-        "how to install", "how to setup"
-    ]):
-        return "extract"
 
-    # for reasoning
-    if any(k in q for k in [
-        "why", "explain", "explanation",
-        "logic", "reason", "how does it work",
-        "what happens if", "what would happen",
-        "difference between", "compare",
-        "pros and cons", "advantages", "disadvantages"
-    ]):
-        return "reasoning"
+def route_model(query: str) -> tuple[str, tuple[str, str]]:
+    """
+    Returns: (role, (provider, model))
 
-    #fast response
-    if any(k in q for k in [
-        "what is", "who is", "where is",
-        "default", "credentials", "username", "password",
-        "ip", "port", "url", "endpoint",
-        "name", "version"
-    ]) or len(q.split()) <= 5:
-        return "fast"
+    Usage in main.py:
+        role, (provider, model) = route_model(q)
+    """
+    q = query.lower().strip()
 
-    #default
-    return "accurate"
+    if any(kw in q for kw in _REASONING_KW) or requires_multi_hop(q):
+        return "reasoning", MODEL_MAP["reasoning"]
 
-def route_model(query):
-    role = classify_query(query)
+    if any(kw in q for kw in _EXTRACT_KW):
+        return "extract", MODEL_MAP["extract"]
 
-    mapping = {
-        "extract": ("local", "mistral"),
-        "fast": ("local", "phi"),
-        "accurate": ("local", "mistral-nemo"),
-        "reasoning": ("deepseek", "deepseek-chat"),
-    }
+    if any(kw in q for kw in _FAST_KW):
+        return "fast", MODEL_MAP["fast"]
 
-    return role, mapping[role]
+    return "accurate", MODEL_MAP["accurate"]
