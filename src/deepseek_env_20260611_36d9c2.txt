@@ -1,0 +1,2 @@
+# .env
+DEEPSEEK_API_KEY=sk-74ccf52143f04a7fbbde10a45aef882a
