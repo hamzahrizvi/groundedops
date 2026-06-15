@@ -1,35 +1,84 @@
-## README Changes (v4.0)
+# GroundedOps v4.1
 
-### Core Additions
-- Introduced **Hybrid Retrieval (BM25 + Dense + RRF)** for improved relevance
-- Added **Chroma Vector DB** for persistent storage (replaces in-memory chunks)
-- Implemented **LLM fallback chain** (phi → mistral → deepseek)
-- Added **Grounding validation layer (NLI-based)** to reduce hallucinations
-- Introduced **query routing system** (extract / fast / accurate / reasoning)
+## Overview
+v4.1 focuses on stabilising the RAG pipeline, fixing routing errors, enforcing grounding, and reducing incorrect outputs while maintaining acceptable latency.
 
-### Pipeline Improvements
-- Added **retrieval confidence gate** (rejects out-of-domain queries early)
-- Integrated **reranking (CrossEncoder)** after retrieval
-- Added **structured extraction path** for checklists/steps (bypass LLM)
-- Improved **prompt design** (strict context-bound answering)
+---
 
-### Performance & Stability
-- Added **model warmup** to reduce first-call latency
-- Implemented **request locking for Ollama** to prevent overload
-- Added **fallback retry logic** for failed LLM calls
-- Improved **timeout handling and error recovery**
+## Key Changes
 
-### Data Handling
-- Added **background ingestion + caching**
-- Prevented **duplicate document ingestion**
-- Introduced **source tracking for chunks**
+### 1. Routing Fix
+- Correct classification into:
+  - `extract` → checklist/steps only
+  - `fast` → short factual queries
+  - `reasoning` → why/how/comparisons
+  - `accurate` → default
+- Prevented misrouting of generic queries to extraction
 
-### UX / System Behavior
-- Added **memory context for short follow-up queries**
-- Improved **response structure (timing, grounding score, flags)**
-- Enabled **clean rejection for unsupported queries**
+---
 
-### Dev / Infra
-- Cleaned repo (ignored DB + logs)
-- Standardized **branch/tag versioning (vX.0)**
-- Updated README to reflect actual architecture (not legacy FAISS/LangChain claims)
+### 2. Extraction Guard
+- Structured extraction only runs if query contains:
+  - `checklist`, `steps`, `procedure`, `verify`, `instructions`
+- Prevents extraction hijacking normal answers
+
+---
+
+### 3. LLM Execution Stabilised
+- Ensured LLM is always called unless valid extraction exists
+- Fixed fallback chain:
+  - `phi → mistral → deepseek`
+- Removed repeated/looping retries
+
+---
+
+### 4. Grounding Enforcement
+- Added retrieval confidence gate before LLM
+- Rejects:
+  - out-of-domain queries
+  - weak matches
+- Uses reranker score threshold
+
+---
+
+### 5. True Hybrid Retrieval
+- BM25 and dense retrieval run independently on full corpus
+- Combined using RRF (Reciprocal Rank Fusion)
+- Fixes missed keyword-heavy results
+
+---
+
+### 6. Latency Improvements
+- Reduced context size (≤300 chars per chunk)
+- Limited chunks to top 3
+- Eliminated duplicate LLM calls
+- Reduced unnecessary processing
+
+---
+
+### 7. Refusal Handling
+- Added post-processing:
+  - `truncate_after_refusal()`
+- Removes hallucinated continuation after refusal
+
+---
+
+### 8. Logging Improvements
+- Added logs for:
+  - routing decision
+  - retrieval score
+  - fallback usage
+  - grounding score
+
+---
+
+## Behaviour Improvements
+
+- Extraction only triggers when appropriate
+- Fewer hallucinations
+- Better rejection of irrelevant queries
+- Stable fallback handling
+- More predictable outputs
+
+---
+
