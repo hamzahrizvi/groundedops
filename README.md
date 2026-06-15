@@ -1,4 +1,3 @@
-````markdown
 # RAG Backend (Hybrid Retrieval + Grounded QA)
 
 A FastAPI-based retrieval-augmented generation (RAG) system with hybrid search, reranking, structured extraction, and grounded answer validation.
@@ -458,27 +457,27 @@ Collected metrics include:
 
 ### Currently Working
 
-✅ Hybrid retrieval
+Hybrid retrieval
 
-✅ BM25 + dense search
+BM25 + dense search
 
-✅ Reciprocal Rank Fusion
+Reciprocal Rank Fusion
 
-✅ Cross-encoder reranking
+Cross-encoder reranking
 
-✅ Structured extraction
+Structured extraction
 
-✅ Multi-model generation
+Multi-model generation
 
-✅ Ollama integration
+Ollama integration
 
-✅ DeepSeek fallback
+DeepSeek fallback
 
-✅ Grounding validation
+Grounding validation
 
-✅ Memory injection
+Memory injection
 
-✅ Observability metrics
+Observability metrics
 
 ---
 
@@ -501,5 +500,5 @@ Extraction OR Generation
 Grounding Validation
      ↓
 Response + Metrics
-```
-````
+```  
+
