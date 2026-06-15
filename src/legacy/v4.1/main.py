@@ -1,12 +1,11 @@
 import logging
-import re
 import threading
 import time
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
-from db import get_collection, reset_collection, get_stats, delete_source
+from db import get_collection, reset_collection, get_stats
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
 from structure import extract_structured_block
@@ -14,7 +13,7 @@ from logger import log_interaction
 from router import route_model
 from grounding import check_grounding, _get_nli_model
 from llm import generate, generate_with_fallback, warmup_local_models
-from memory import add_to_memory, get_memory_context, clear_memory, should_use_memory
+from memory import add_to_memory, get_memory_context
 from ingest import ingest_file
 from retrieval_db import retrieve_from_db
 from text_utils import passes_retrieval_gate, REFUSAL_PHRASE_VARIANTS
@@ -25,6 +24,13 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 GROUNDING_THRESHOLD = 0.55
+
+# Sigmoid-calibrated reranker score (see reranker.py): 0.5 is the model's
+# own relevance/irrelevance boundary. Below this, the top chunk is judged
+# irrelevant and we refuse BEFORE generation rather than after — this is
+# what actually fixes "capital of France"-style queries (9/11): no
+# generation call is made at all, so there's nothing for the model to
+# ramble about. Tune by inspecting rerank_score in logs.jsonl for your corpus.
 RETRIEVAL_GATE_THRESHOLD = 0.5
 
 APP_STATE = {
@@ -39,10 +45,6 @@ APP_STATE_LOCK = threading.Lock()
 class QueryRequest(BaseModel):
     q: str
     deepseek_api_key: str | None = None
-
-
-class DeleteSourceRequest(BaseModel):
-    source: str
 
 
 def _set_app_state(*, ready=None, progress=None, message=None, error=None):
@@ -106,49 +108,18 @@ def stats():
 @app.post("/reset")
 def reset():
     reset_collection()
-    clear_memory()
     return {"status": "reset"}
-
-
-@app.post("/delete_source")
-def remove_source(payload: DeleteSourceRequest):
-    removed = delete_source(payload.source)
-    clear_memory()
-    return {"removed_chunks": removed, "source": payload.source}
 
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     if not APP_STATE["ready"]:
         raise HTTPException(status_code=503, detail="System is still loading")
-
     content = await file.read()
     count = ingest_file(content, file.filename)
-
     if count == 0:
         return {"chunks_added": 0, "warning": "File already exists or no usable text found"}
-
     return {"chunks_added": count, "file": file.filename}
-
-
-def _format_answer_markdown(answer: str, role: str) -> str:
-    lines = [line.strip() for line in answer.splitlines() if line.strip()]
-    list_re = re.compile(r"^\s*(?:[-*•☐]|\d+[.)])\s*(.+)$")
-
-    items = []
-    for line in lines:
-        m = list_re.match(line)
-        if m:
-            items.append(m.group(1).strip())
-
-    if role == "extract":
-        if not items:
-            items = [re.sub(r"^\s*(?:[-*•☐]|\d+[.)])\s*", "", line).strip() for line in lines]
-        items = [item for item in items if item]
-        if items:
-            return "\n".join(f"- {item}" for item in items[:12])
-
-    return answer.strip()
 
 
 @app.post("/query")
@@ -160,19 +131,27 @@ def query(payload: QueryRequest):
     deepseek_api_key = payload.deepseek_api_key
     start_total = time.time()
 
+    # ── Retrieval ────────────────────────────
     t1 = time.time()
     results = retrieve_from_db(q, top_k=10)
     results = rerank(q, results, top_k=5)
     retrieval_time = time.time() - t1
 
+    # ── Retrieval confidence gate ────────────
+    # Refuse BEFORE generation if the top chunk isn't actually relevant.
+    # This is the primary defence against out-of-domain queries (e.g.
+    # "capital of france") producing rambling/hallucinated output: no
+    # LLM call happens, so there's nothing to ramble.
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
 
     if not passes_retrieval_gate(results, RETRIEVAL_GATE_THRESHOLD):
         total_time = time.time() - start_total
-        answer = "I could not find that in the knowledge base."
-        log_interaction(q, answer, "none", "none", [], grounding_score=None, flagged=False)
+        log_interaction(
+            q, "I could not find that in the knowledge base.",
+            "none", "none", [], grounding_score=None, flagged=False,
+        )
         return {
-            "answer": answer,
+            "answer": "I could not find that in the knowledge base.",
             "model": "none",
             "role": "rejected",
             "reason": "low_retrieval_confidence",
@@ -181,35 +160,38 @@ def query(payload: QueryRequest):
             "response_time": round(total_time, 3),
         }
 
+    # ── Routing ──────────────────────────────
     role, (provider, model) = route_model(q)
 
+    # ── Structured extraction shortcut ───────
     t2 = time.time()
-    extracted = extract_structured_block(results[:5], query=q)
+    extracted = extract_structured_block(results[:3])
     extraction_time = time.time() - t2
 
     if extracted and role == "extract":
         total_time = time.time() - start_total
-        extracted = _format_answer_markdown(extracted, "extract")
         sources = list({r.get("source", "") for r in results})
-        log_interaction(q, extracted, "extract", "structured", sources, grounding_score=None, flagged=False)
+        log_interaction(q, extracted, "extract", "structured", sources,
+                        grounding_score=None, flagged=False)
         return {
-            "answer": extracted,
-            "mode": "extracted",
-            "model": "structured",
-            "role": "extract",
-            "provider": "local",
+            "answer":        extracted,
+            "mode":          "extracted",
+            "model":         "structured",
+            "role":          "extract",
+            "provider":      "local",
             "fallback_used": False,
             "response_time": round(total_time, 3),
-            "sources": sources,
+            "sources":       sources,
         }
 
+    # ── Context + memory ──────────────────────
     top_chunks = results[:3]
     context = "\n\n".join(r["text"][:250] for r in top_chunks)
 
     memory_context = get_memory_context()
     combined_context = (
         memory_context + "\n\n" + context
-        if (memory_context and should_use_memory(q))
+        if (memory_context and len(q.split()) < 8)
         else context
     )
 
@@ -222,22 +204,19 @@ If the context does not contain enough information, respond with exactly:
 "I could not find that in the knowledge base."
 Do not use any knowledge from outside the context.
 
-Formatting rules:
-- Use simple, direct wording.
-- If the answer is a list, checklist, or procedure, format it as markdown bullet points.
-- Do not ask follow-up questions.
-- Do not add filler introductions.
-
 Question: {q}
 Answer:"""
 
+    # ── LLM with fallback ────────────────────
     t3 = time.time()
     output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key)
     llm_time = time.time() - t3
 
     answer = output.get("text", "").strip() or "I could not generate a response."
-    answer = _format_answer_markdown(answer, role)
 
+    # ── Grounding check ──────────────────────
+    # Skip if the model already refused — refusal text naturally scores
+    # low/unstable against context and shouldn't be flagged as hallucination.
     is_refusal = any(phrase in answer.lower() for phrase in REFUSAL_PHRASE_VARIANTS)
 
     if is_refusal:
@@ -249,19 +228,20 @@ Answer:"""
         )
         flagged = not is_grounded
 
+    # ── DeepSeek escalation on grounding failure ──
     if flagged and output.get("provider") == "local":
         logger.warning(f"Grounding score {grounding_score:.3f} — escalating to DeepSeek for: {q[:60]}")
         deepseek_result = generate("deepseek", prompt, "deepseek-chat", deepseek_api_key=deepseek_api_key)
         if deepseek_result and deepseek_result.get("text"):
             output = deepseek_result
-            answer = _format_answer_markdown(deepseek_result["text"].strip(), role)
+            answer = output["text"].strip()
             is_grounded, grounding_score = check_grounding(
                 answer, top_chunks, threshold=GROUNDING_THRESHOLD
             )
             flagged = not is_grounded
 
+    # ── Memory + logging ──────────────────────
     add_to_memory(q, answer)
-
     sources = list({r.get("source", "") for r in results})
     log_interaction(q, answer, role, output.get("model"), sources,
                     grounding_score=grounding_score, flagged=flagged)
@@ -269,18 +249,18 @@ Answer:"""
     total_time = time.time() - start_total
 
     return {
-        "answer": answer,
-        "role": role,
-        "model": output.get("model"),
-        "provider": output.get("provider"),
-        "fallback_used": output.get("fallback_used", False),
+        "answer":          answer,
+        "role":            role,
+        "model":           output.get("model"),
+        "provider":        output.get("provider"),
+        "fallback_used":   output.get("fallback_used", False),
         "grounding_score": grounding_score,
-        "flagged": flagged,
+        "flagged":         flagged,
         "timing": {
-            "retrieval_time": round(retrieval_time, 3),
+            "retrieval_time":  round(retrieval_time, 3),
             "extraction_time": round(extraction_time, 3),
-            "llm_time": round(llm_time, 3),
-            "total_time": round(total_time, 3),
+            "llm_time":        round(llm_time, 3),
+            "total_time":      round(total_time, 3),
         },
         "sources": sources,
     }

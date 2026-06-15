@@ -1,15 +1,13 @@
 import logging
-import os
 import threading
 import requests
 
-from text_utils import truncate_after_refusal
-
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+OLLAMA_URL = "http://localhost:11434/api/generate"
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
+# Per-model locks (NOT global)
 MODEL_LOCKS = {
     "phi": threading.Lock(),
     "mistral": threading.Lock(),
@@ -23,6 +21,9 @@ FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
 }
 
 
+# ---------------------------
+# OLLAMA CALL
+# ---------------------------
 def _call_ollama(
     model: str,
     prompt: str,
@@ -30,10 +31,12 @@ def _call_ollama(
     num_predict: int | None = None,
     keep_alive: str = "10m",
 ) -> dict | None:
+
+    # Keep YOUR timings exactly
     if timeout is None:
         timeout = 40 if model == "phi" else 90
     if num_predict is None:
-        num_predict = 120 if model == "phi" else 160
+        num_predict = 120 if model == "phi" else 200
 
     lock = MODEL_LOCKS.get(model)
 
@@ -50,7 +53,6 @@ def _call_ollama(
                 "options": {
                     "temperature": 0,
                     "num_predict": num_predict,
-                    "stop": ["\n\nQuestion:", "\n\nContext:", "<context>"],
                 },
                 "keep_alive": keep_alive,
             },
@@ -64,9 +66,11 @@ def _call_ollama(
             logger.warning(f"Ollama empty response ({model})")
             return None
 
-        text = truncate_after_refusal(text)
-
-        return {"text": text, "model": model, "provider": "local"}
+        return {
+            "text": text,
+            "model": model,
+            "provider": "local"
+        }
 
     except Exception as e:
         logger.warning(f"Ollama failed ({model}): {e}")
@@ -77,14 +81,17 @@ def _call_ollama(
             lock.release()
 
 
+# ---------------------------
+# DEEPSEEK CALL
+# ---------------------------
 def _call_deepseek(
     prompt: str,
     model: str = "deepseek-chat",
     timeout: int = 60,
     api_key: str | None = None,
 ) -> dict | None:
-    key = api_key or os.getenv("DEEPSEEK_API_KEY")
-    if not key:
+
+    if not api_key:
         logger.info("No DeepSeek key — skipping")
         return None
 
@@ -92,8 +99,8 @@ def _call_deepseek(
         res = requests.post(
             DEEPSEEK_URL,
             headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
             },
             json={
                 "model": model,
@@ -108,26 +115,35 @@ def _call_deepseek(
             return None
 
         text = res.json()["choices"][0]["message"]["content"].strip()
+
         if not text:
             logger.warning("DeepSeek empty response")
             return None
 
-        text = truncate_after_refusal(text)
-        return {"text": text, "model": model, "provider": "deepseek"}
+        return {
+            "text": text,
+            "model": model,
+            "provider": "deepseek"
+        }
 
     except Exception as e:
         logger.warning(f"DeepSeek failed ({model}): {e}")
         return None
 
 
+# ---------------------------
+# SINGLE GENERATE
+# ---------------------------
 def generate(
     provider: str,
     prompt: str,
     model: str,
-    deepseek_api_key: str | None = None,
+    deepseek_api_key: str | None = None
 ) -> dict | None:
+
     if provider == "local":
         return _call_ollama(model, prompt)
+
     if provider == "deepseek":
         return _call_deepseek(prompt, model=model, api_key=deepseek_api_key)
 
@@ -135,30 +151,40 @@ def generate(
     return None
 
 
+# ---------------------------
+# SAFE GENERATE (RETRY)
+# ---------------------------
 def safe_generate(
     provider: str,
     prompt: str,
     model: str,
-    deepseek_api_key: str | None = None,
+    deepseek_api_key: str | None = None
 ) -> dict | None:
-    for attempt in range(2):
+
+    for attempt in range(2):  # lightweight retry
         result = generate(provider, prompt, model, deepseek_api_key)
         if result and result.get("text"):
             return result
-        logger.warning(f"Retry {attempt + 1} failed for {provider}/{model}")
+        logger.warning(f"Retry {attempt+1} failed for {provider}/{model}")
+
     return None
 
 
+# ---------------------------
+# FALLBACK CHAIN
+# ---------------------------
 def generate_with_fallback(
     role: str,
     prompt: str,
-    deepseek_api_key: str | None = None,
+    deepseek_api_key: str | None = None
 ) -> dict:
+
     chain = FALLBACK_CHAIN.get(role, [("local", "mistral")])
     tried = set()
 
     for i, (provider, model) in enumerate(chain):
         tried.add((provider, model))
+
         logger.info(f"Attempt {i+1}: {provider}/{model}")
 
         result = safe_generate(provider, prompt, model, deepseek_api_key)
@@ -169,14 +195,18 @@ def generate_with_fallback(
 
         logger.warning(f"[{role}] {provider}/{model} failed")
 
+    # Only force mistral if NOT already tried
     if ("local", "mistral") not in tried:
         logger.warning("Forcing mistral final attempt")
+
         forced = safe_generate("local", prompt, "mistral", deepseek_api_key)
+
         if forced:
             forced["fallback_used"] = True
             return forced
 
     logger.error(f"All fallbacks failed for role {role}")
+
     return {
         "text": "I was unable to generate a response.",
         "model": "none",
@@ -185,12 +215,16 @@ def generate_with_fallback(
     }
 
 
+# ---------------------------
+# WARMUP
+# ---------------------------
 def warmup_local_models(models: list[str] | None = None) -> dict[str, bool]:
     models = models or ["phi", "mistral"]
     results: dict[str, bool] = {}
 
     for model in models:
         logger.info(f"Warming model: {model}")
+
         result = _call_ollama(
             model=model,
             prompt="ping",

@@ -1,28 +1,11 @@
-MAX_MEMORY = 6
-MAX_ANSWER_LEN = 300
+MAX_MEMORY     = 5
+MAX_ANSWER_LEN = 300    # Truncate long answers to avoid polluting context
 
 MEMORY: list[dict] = []
 
-FOLLOW_UP_MARKERS = [
-    "more",
-    "tell me more",
-    "what about",
-    "and",
-    "also",
-    "that",
-    "those",
-    "it",
-    "them",
-    "this",
-    "these",
-    "why",
-    "how",
-    "further",
-    "elaborate",
-]
-
 
 def add_to_memory(query: str, answer: str) -> None:
+    # Don't store "not found" or failure messages — they add noise
     lower = answer.lower()
     if "could not find" in lower or "unable to generate" in lower:
         return
@@ -44,13 +27,6 @@ def get_memory_context() -> str:
         f"User: {m['q']}\nAssistant: {m['a']}"
         for m in MEMORY
     )
-
-
-def should_use_memory(query: str) -> bool:
-    q = query.lower().strip()
-    if len(q.split()) <= 10:
-        return True
-    return any(marker in q for marker in FOLLOW_UP_MARKERS)
 
 
 def clear_memory() -> None:

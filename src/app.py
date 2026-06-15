@@ -1,311 +1,229 @@
-import streamlit as st
+import json
+import os
+import time
 import requests
-from datetime import datetime
+import streamlit as st
 
-API = "http://localhost:8000"
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+KEY_FILE = ".deepseek_key.json"
 
-st.set_page_config(
-    page_title="RAG Assistant",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ── CSS ────────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-/* Tighten default padding */
-.block-container { padding-top: 1.5rem; }
-
-/* Inline badge spans */
-.badge {
-    display: inline-block;
-    padding: 2px 9px;
-    border-radius: 10px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    margin: 2px 3px 2px 0;
-    letter-spacing: 0.2px;
-}
-.b-green  { background:#052e0f; color:#4ade80; border:1px solid #166534; }
-.b-yellow { background:#2d1e00; color:#fbbf24; border:1px solid #b45309; }
-.b-red    { background:#2d0000; color:#f87171; border:1px solid #b91c1c; }
-.b-blue   { background:#001c3d; color:#60a5fa; border:1px solid #1d4ed8; }
-.b-purple { background:#1a0030; color:#c084fc; border:1px solid #7e22ce; }
-.b-gray   { background:#1c1c1c; color:#9ca3af; border:1px solid #374151; }
-.b-orange { background:#2d1000; color:#fb923c; border:1px solid #c2410c; }
-
-/* Source chips */
-.src-chip {
-    display: inline-block;
-    padding: 2px 8px;
-    background:#1e293b;
-    border-radius:5px;
-    font-size:0.73rem;
-    color:#94a3b8;
-    border:1px solid #334155;
-    margin:2px 3px 2px 0;
-}
-
-/* Query input stretch */
-div[data-testid="stTextInput"] input {
-    font-size: 1rem;
-}
-
-/* Sidebar file entries */
-.doc-row {
-    padding: 5px 8px;
-    border-left: 3px solid #3b82f6;
-    background: #111827;
-    border-radius: 0 5px 5px 0;
-    margin: 4px 0;
-    font-size: 0.82rem;
-    color: #cbd5e1;
-}
-.doc-row span { color: #64748b; font-size: 0.72rem; }
-
-/* Subtle meta row */
-.meta-row { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid rgba(255,255,255,0.07); }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="GroundedOps", layout="wide")
+st.title("GroundedOps")
 
 
-# ── Session state ──────────────────────────────────────────────────────────────
-if "history"     not in st.session_state: st.session_state.history     = []
-if "upload_log"  not in st.session_state: st.session_state.upload_log  = {}  # filename→chunks
-if "query_count" not in st.session_state: st.session_state.query_count = 0
-if "flag_count"  not in st.session_state: st.session_state.flag_count  = 0
+def load_saved_key() -> str:
+    if os.path.exists(KEY_FILE):
+        try:
+            with open(KEY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("key", "")
+        except Exception:
+            return ""
+    return ""
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-def api_get(path: str) -> dict | None:
-    try:
-        r = requests.get(f"{API}{path}", timeout=5)
-        return r.json() if r.ok else None
-    except Exception:
-        return None
+def save_key(key: str) -> None:
+    with open(KEY_FILE, "w", encoding="utf-8") as f:
+        json.dump({"key": key}, f)
 
 
-def api_post(path: str, **kwargs) -> dict | None:
-    try:
-        r = requests.post(f"{API}{path}", timeout=90, **kwargs)
-        return r.json() if r.ok else None
-    except Exception as e:
-        st.error(f"API error: {e}")
-        return None
+def clear_key() -> None:
+    if os.path.exists(KEY_FILE):
+        os.remove(KEY_FILE)
 
 
-def badge(text: str, cls: str) -> str:
-    return f'<span class="badge {cls}">{text}</span>'
+if "system_ready" not in st.session_state:
+    st.session_state.system_ready = False
+if "deepseek_key" not in st.session_state:
+    st.session_state.deepseek_key = load_saved_key()
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 
-def grounding_html(score: float | None, flagged: bool) -> str:
-    if score is None:
-        return ""
-    if flagged:
-        return badge(f"✗ Flagged {score:.2f}", "b-red")
-    elif score >= 0.7:
-        return badge(f"✓ {score:.2f}", "b-green")
-    elif score >= 0.45:
-        return badge(f"~ {score:.2f}", "b-yellow")
-    else:
-        return badge(f"↓ {score:.2f}", "b-orange")
-
-
-def render_result(item: dict, compact: bool = False):
-    """Render a result dict (from history) as a card."""
-    data      = item["data"]
-    query     = item["query"]
-    ts        = item.get("ts", "")
-
-    answer    = data.get("answer", "")
-    role      = data.get("role", "")
-    model     = data.get("model", "none")
-    provider  = data.get("provider", "")
-    fallback  = data.get("fallback_used", False)
-    grounding = data.get("grounding_score")
-    flagged   = data.get("flagged", False)
-    sources   = data.get("sources") or []
-    timing    = data.get("timing", {})
-    reason    = data.get("reason", "")
-    rejected  = role == "rejected"
-
-    if compact:
-        label = f"🕐 {ts}  —  {query[:75]}{'…' if len(query)>75 else ''}"
-        with st.expander(label, expanded=False):
-            _render_card_body(answer, role, model, provider, fallback,
-                              grounding, flagged, sources, timing, reason, rejected)
-        return
-
-    _render_card_body(answer, role, model, provider, fallback,
-                      grounding, flagged, sources, timing, reason, rejected)
-
-
-def _render_card_body(answer, role, model, provider, fallback,
-                       grounding, flagged, sources, timing, reason, rejected):
-
-    with st.container(border=True):
-
-        if rejected:
-            st.warning(f"**No relevant content found.** {reason or ''}", icon="🔍")
-
-        else:
-            st.markdown(answer)
-
-            # ── Metadata badges ──────────────────────────────
-            parts = []
-            if role    and role  != "none":  parts.append(badge(role,     "b-blue"))
-            if model   and model != "none":  parts.append(badge(model,    "b-purple"))
-            if provider and provider!="none":parts.append(badge(provider, "b-gray"))
-            if fallback:                     parts.append(badge("⚡ fallback", "b-orange"))
-            parts.append(grounding_html(grounding, flagged))
-
-            st.markdown(
-                f'<div class="meta-row">{"".join(parts)}</div>',
-                unsafe_allow_html=True,
-            )
-
-            # ── Sources ──────────────────────────────────────
-            if sources:
-                chips = "".join(
-                    f'<span class="src-chip">📄 {s}</span>'
-                    for s in sources if s
-                )
-                st.markdown(chips, unsafe_allow_html=True)
-
-    # ── Timing (outside container so expander renders cleanly) ───
-    if timing and not rejected:
-        with st.expander("⏱ Timing breakdown", expanded=False):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total",      f"{timing.get('total_time',      0):.2f}s")
-            c2.metric("LLM",        f"{timing.get('llm_time',        0):.2f}s")
-            c3.metric("Retrieval",  f"{timing.get('retrieval_time',  0):.2f}s")
-            c4.metric("Extraction", f"{timing.get('extraction_time', 0):.2f}s")
-
-
-# ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🔍 RAG Assistant")
+    st.subheader("DeepSeek Settings")
 
-    # Status pill
-    status = api_get("/status")
-    if status:
-        st.success("API online", icon="🟢")
-    else:
-        st.error("API offline", icon="🔴")
-        st.caption("Start with: `uvicorn main:app --reload`")
-
-    st.divider()
-
-    # ── Documents section ──────────────────────────────────────────
-    st.subheader("📁 Knowledge Base")
-
-    if status:
-        kb_docs   = status.get("doc_count",    0)
-        kb_chunks = status.get("total_chunks", 0)
-        st.caption(f"{kb_docs} document{'s' if kb_docs!=1 else ''}  •  {kb_chunks} chunks")
-
-        # Show stored sources
-        for src in status.get("sources", []):
-            st.markdown(
-                f'<div class="doc-row">📄 {src}</div>',
-                unsafe_allow_html=True,
-            )
-
-    # Upload widget
-    st.markdown("**Upload documents**")
-    uploaded = st.file_uploader(
-        "PDF, DOCX or TXT",
-        type=["pdf", "docx", "txt"],
-        accept_multiple_files=True,
-        label_visibility="collapsed",
+    key_input = st.text_input(
+        "API Key",
+        value=st.session_state.deepseek_key,
+        type="password",
     )
 
-    if uploaded:
-        for f in uploaded:
-            if f.name not in st.session_state.upload_log:
-                with st.spinner(f"Ingesting {f.name}…"):
-                    result = api_post("/upload", files={"file": (f.name, f, f.type)})
-                if result:
-                    chunks = result.get("chunks_added", 0)
-                    warn   = result.get("warning", "")
-                    if chunks:
-                        st.session_state.upload_log[f.name] = chunks
-                        st.success(f"✓ {f.name} — {chunks} chunks")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Save Key"):
+            if key_input.strip():
+                save_key(key_input.strip())
+                st.session_state.deepseek_key = key_input.strip()
+                st.success("Key saved")
+            else:
+                st.warning("Empty key")
+    with c2:
+        if st.button("Reset Key"):
+            clear_key()
+            st.session_state.deepseek_key = ""
+            st.success("Key cleared")
+
+    if st.session_state.deepseek_key:
+        st.success("Key loaded")
+    else:
+        st.info("No key set")
+
+    st.divider()
+
+    if st.button("Reset Knowledge Base"):
+        try:
+            requests.post(f"{API_BASE}/reset", timeout=30)
+            st.session_state.messages = []
+            st.success("Knowledge base reset")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Reset failed: {e}")
+
+    st.divider()
+    st.subheader("Documents")
+
+    try:
+        stats = requests.get(f"{API_BASE}/stats", timeout=10).json()
+        sources = stats.get("sources", [])
+        st.caption(f"Chunks: {stats.get('total_chunks', 0)}")
+
+        if not sources:
+            st.info("No documents uploaded")
+        else:
+            for src in sources:
+                row1, row2 = st.columns([4, 1])
+                row1.caption(src)
+                if row2.button("X", key=f"del_{src}"):
+                    res = requests.post(
+                        f"{API_BASE}/delete_source",
+                        json={"source": src},
+                        timeout=30,
+                    )
+                    if res.ok:
+                        st.session_state.messages = []
+                        st.success(f"Removed: {src}")
+                        st.rerun()
                     else:
-                        st.warning(f"⚠ {f.name}: {warn or 'No chunks added'}")
+                        st.error(res.text)
+
+    except Exception as e:
+        st.warning(f"Could not load documents: {e}")
+
+
+if not st.session_state.system_ready:
+    st.subheader("Loading system")
+    progress_bar = st.progress(0)
+    status_box = st.empty()
+    error_box = st.empty()
+
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        try:
+            res = requests.get(f"{API_BASE}/status", timeout=5)
+            data = res.json()
+
+            progress_bar.progress(int(data.get("progress", 0)))
+            status_box.info(data.get("message", "Starting..."))
+
+            if data.get("error"):
+                error_box.warning(
+                    f"Startup issue: {data['error']} — continuing with limited functionality"
+                )
+                st.session_state.system_ready = True
+                st.rerun()
+
+            if data.get("ready"):
+                st.session_state.system_ready = True
+                st.rerun()
+
+        except Exception:
+            status_box.warning("Waiting for backend...")
+
+        time.sleep(1)
+
+    st.error("System did not become ready in time.")
+    st.stop()
+
+st.success("System ready — models loaded")
+
+st.subheader("Upload documents")
+uploaded_files = st.file_uploader(
+    "Upload .txt / .pdf / .docx files",
+    accept_multiple_files=True,
+    type=["txt", "pdf", "docx"],
+)
+
+if uploaded_files:
+    for f in uploaded_files:
+        with st.spinner(f"Uploading {f.name}..."):
+            try:
+                res = requests.post(
+                    f"{API_BASE}/upload",
+                    files={"file": (f.name, f.getvalue(), f.type or "application/octet-stream")},
+                    timeout=300,
+                )
+                if res.ok:
+                    st.write(res.json())
                 else:
-                    st.error(f"Failed to upload {f.name}")
+                    st.error(res.text)
+            except Exception as e:
+                st.error(f"Upload failed for {f.name}: {e}")
 
-    st.divider()
+st.divider()
+st.subheader("Conversation")
 
-    # ── Session stats ──────────────────────────────────────────────
-    st.subheader("📊 This Session")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Queries",  st.session_state.query_count)
-    m2.metric("Answered", st.session_state.query_count - st.session_state.flag_count)
-    m3.metric("Flagged",  st.session_state.flag_count)
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg["role"] == "assistant" and msg.get("meta"):
+            with st.expander("Details"):
+                st.json(msg["meta"])
 
-    st.divider()
+user_query = st.chat_input("Ask a question")
 
-    # ── Controls ───────────────────────────────────────────────────
-    st.subheader("⚙️ Controls")
+if user_query:
+    st.session_state.messages.append({"role": "user", "content": user_query})
 
-    if st.button("🗑️ Reset Knowledge Base", use_container_width=True):
-        with st.spinner("Resetting…"):
-            api_post("/reset")
-        st.session_state.upload_log  = {}
-        st.session_state.history     = []
-        st.session_state.query_count = 0
-        st.session_state.flag_count  = 0
-        st.rerun()
+    with st.chat_message("user"):
+        st.markdown(user_query)
 
-    if st.button("🧹 Clear History", use_container_width=True):
-        st.session_state.history     = []
-        st.session_state.query_count = 0
-        st.session_state.flag_count  = 0
-        st.rerun()
+    payload = {
+        "q": user_query,
+        "deepseek_api_key": st.session_state.deepseek_key or None,
+    }
 
+    with st.chat_message("assistant"):
+        with st.spinner("Querying..."):
+            try:
+                res = requests.post(f"{API_BASE}/query", json=payload, timeout=300)
 
-# ── Main area ──────────────────────────────────────────────────────────────────
-st.header("Ask your documents")
+                if not res.ok:
+                    st.error(res.text)
+                else:
+                    data = res.json()
+                    answer = data.get("answer", "")
+                    st.markdown(answer)
 
-with st.form("query_form", clear_on_submit=True):
-    col_input, col_btn = st.columns([5, 1])
-    with col_input:
-        q = st.text_input(
-            "Question",
-            placeholder="e.g. give me the checklist before leaving site",
-            label_visibility="collapsed",
-        )
-    with col_btn:
-        submitted = st.form_submit_button("Ask →", use_container_width=True)
+                    meta = {
+                        "role": data.get("role"),
+                        "model": data.get("model"),
+                        "provider": data.get("provider"),
+                        "fallback_used": data.get("fallback_used"),
+                        "grounding_score": data.get("grounding_score"),
+                        "flagged": data.get("flagged"),
+                        "timing": data.get("timing"),
+                        "sources": data.get("sources"),
+                    }
 
-# ── Handle query ───────────────────────────────────────────────────────────────
-if submitted and q and q.strip():
-    with st.spinner("Searching and generating…"):
-        data = api_post("/query", params={"q": q.strip()})
+                    with st.expander("Details"):
+                        st.json(meta)
 
-    if data:
-        ts = datetime.now().strftime("%H:%M:%S")
-        st.session_state.history.insert(0, {"query": q.strip(), "data": data, "ts": ts})
-        st.session_state.query_count += 1
-        if data.get("flagged"):
-            st.session_state.flag_count += 1
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "meta": meta,
+                    })
 
-elif submitted and not q.strip():
-    st.warning("Please enter a question.", icon="💬")
-
-# ── Latest result ──────────────────────────────────────────────────────────────
-if st.session_state.history:
-    latest = st.session_state.history[0]
-    st.markdown(f"**Q:** {latest['query']}")
-    render_result(latest, compact=False)
-
-# ── History ────────────────────────────────────────────────────────────────────
-if len(st.session_state.history) > 1:
-    st.divider()
-    st.subheader("📜 Query History")
-    for item in st.session_state.history[1:]:
-        render_result(item, compact=True)
+            except Exception as e:
+                st.error(f"API error: {e}")

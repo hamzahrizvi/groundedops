@@ -44,16 +44,9 @@ def requires_multi_hop(query: str) -> bool:
     indicators = [
         "compared to", "relationship between", "works with",
         "integration", "interact", "together with", "depends on",
-        "how does",
-        # NOTE: "and verify" was removed — "give me steps to install
-        # and verify system is working" is a procedural checklist
-        # request (should route to "extract", like "how to connect
-        # tablet to hub" does), not multi-hop reasoning. Having it
-        # here caused those two near-identical query types to route
-        # to different roles.
+        "how does", "and verify",
     ]
     return any(kw in q for kw in indicators)
-
 
 
 def route_model(query: str) -> tuple[str, tuple[str, str]]:

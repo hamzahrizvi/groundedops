@@ -1,0 +1,20 @@
+# Secrets — never commit
+deepseek_key.json
+.env
+*.env
+deepseek_env_*.txt
+
+# Generated data
+chroma_db/
+logs.json
+uploads/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store

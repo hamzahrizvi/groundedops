@@ -1,10 +1,10 @@
 """
 Grounding checker using a small NLI cross-encoder.
 
-Splits the generated answer into checkable units (see text_utils.split_units)
-and verifies each is entailed by at least one retrieved context chunk.
-Returns the minimum entailment score across all units — so a single
-unsupported claim will pull the score below threshold.
+Splits the generated answer into sentences and verifies each is
+entailed by at least one retrieved context chunk. Returns the minimum
+entailment score across all sentences — so a single unsupported claim
+will pull the score below threshold.
 
 Model used: cross-encoder/nli-deberta-v3-small (~180 MB, CPU-ok)
 Labels:  0 = contradiction  |  1 = neutral  |  2 = entailment
@@ -12,8 +12,6 @@ Labels:  0 = contradiction  |  1 = neutral  |  2 = entailment
 
 import logging
 from sentence_transformers import CrossEncoder
-
-from text_utils import split_units
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +35,7 @@ def check_grounding(
     """
     Returns (is_grounded, min_entailment_score).
 
-    is_grounded=False means at least one unit in the answer
+    is_grounded=False means at least one sentence in the answer
     is not supported by the retrieved context.
     Fails open (returns True, 1.0) if the NLI model itself crashes,
     so a model error never hard-blocks a response.
@@ -45,9 +43,14 @@ def check_grounding(
     try:
         model = _get_nli_model()
 
-        units = split_units(answer)
+        # Split into checkable sentences (skip very short fragments)
+        sentences = [
+            s.strip()
+            for s in answer.replace("?", ".").split(".")
+            if len(s.strip()) > 15
+        ]
 
-        if not units:
+        if not sentences:
             return True, 1.0
 
         context_texts = [
@@ -60,8 +63,9 @@ def check_grounding(
 
         min_score = 1.0
 
-        for unit in units:
-            pairs = [(ctx, unit) for ctx in context_texts]
+        for sentence in sentences:
+            pairs = [(ctx, sentence) for ctx in context_texts]
+            # apply_softmax=True → column 2 is entailment probability
             logits = model.predict(pairs, apply_softmax=True)
             best_entailment = float(max(logits[:, 2]))
             min_score = min(min_score, best_entailment)
