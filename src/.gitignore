@@ -1,20 +1,27 @@
-# Secrets — never commit
-deepseek_key.json
+# ── Vector DB / Chroma ─────────────────────
+src/chroma_db/
+chroma_db/
+
+# ── Binary / index files ───────────────────
+*.bin
+*.sqlite3
+*.db
+
+# ── Logs ──────────────────────────────────
+logs.json
+logs.jsonl
+
+# ── Secrets ───────────────────────────────
+.deepseek_key.json
 .env
 *.env
-deepseek_env_*.txt
 
-# Generated data
-chroma_db/
-logs.json
-uploads/
-*.log
-
-# Python
+# ── Python ────────────────────────────────
 __pycache__/
 *.pyc
-.venv/
-venv/
 
-# OS
+# ── OS / IDE ──────────────────────────────
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -3,3 +3,4 @@ __pycache__/
 .env
 uploads/
 *.log
+deepseek_env_20260611_36d9c2*.txt

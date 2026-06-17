@@ -1,3 +1,8 @@
+"""
+Shared ChromaDB client. Both ingest.py and retrieval_db.py import from
+here so they operate on the SAME persistent collection.
+"""
+
 import os
 import logging
 import chromadb
@@ -64,3 +69,20 @@ def delete_source(source: str) -> int:
         col.delete(ids=ids)
         logger.info(f"Deleted source '{source}' ({len(ids)} chunks)")
     return len(ids)
+
+
+def get_chunks_by_ids(ids: list[str]) -> list[dict]:
+    """Fetch full chunk text/source for a list of chunk ids — backs the
+    'clickable source' feature (show the actual retrieved content)."""
+    if not ids:
+        return []
+    col = get_collection()
+    result = col.get(ids=ids, include=["documents", "metadatas"])
+    chunks = []
+    for doc_id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"]):
+        chunks.append({
+            "id": doc_id,
+            "text": doc,
+            "source": meta.get("source", "unknown"),
+        })
+    return chunks

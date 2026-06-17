@@ -1,25 +1,9 @@
+from text_utils import looks_like_followup
+
 MAX_MEMORY = 6
 MAX_ANSWER_LEN = 300
 
 MEMORY: list[dict] = []
-
-FOLLOW_UP_MARKERS = [
-    "more",
-    "tell me more",
-    "what about",
-    "and",
-    "also",
-    "that",
-    "those",
-    "it",
-    "them",
-    "this",
-    "these",
-    "why",
-    "how",
-    "further",
-    "elaborate",
-]
 
 
 def add_to_memory(query: str, answer: str) -> None:
@@ -46,11 +30,13 @@ def get_memory_context() -> str:
     )
 
 
+def get_last_query() -> str | None:
+    """Most recent user query, used to enrich follow-up retrieval queries."""
+    return MEMORY[-1]["q"] if MEMORY else None
+
+
 def should_use_memory(query: str) -> bool:
-    q = query.lower().strip()
-    if len(q.split()) <= 10:
-        return True
-    return any(marker in q for marker in FOLLOW_UP_MARKERS)
+    return looks_like_followup(query)
 
 
 def clear_memory() -> None:

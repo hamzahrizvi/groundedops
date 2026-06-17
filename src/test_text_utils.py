@@ -32,10 +32,10 @@ def test_split_units_numbered_list():
 
 
 def test_split_units_bulleted_list():
-    answer = "- Check power\n- Verify network connection\n- Confirm hub IP is reachable"
+    answer = "- Check the power supply\n- Verify network connection\n- Confirm hub IP is reachable"
     units = split_units(answer)
     assert len(units) == 3
-    assert units[0] == "Check power"
+    assert units[0] == "Check the power supply"
 
 
 def test_split_units_short_fragments_dropped():

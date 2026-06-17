@@ -22,6 +22,13 @@ FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
     "reasoning": [("local", "mistral"), ("deepseek", "deepseek-chat")],
 }
 
+# Models offered for the manual "rethink with a different model" feature.
+RETHINK_OPTIONS: list[tuple[str, str]] = [
+    ("local", "phi"),
+    ("local", "mistral"),
+    ("deepseek", "deepseek-chat"),
+]
+
 
 def _call_ollama(
     model: str,

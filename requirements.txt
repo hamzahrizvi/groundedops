@@ -1,8 +1,9 @@
 fastapi
 uvicorn
-requests
-numpy
+chromadb
 sentence-transformers
-rank-bm25
 pypdf
 python-docx
+requests
+rank-bm25
+python-dotenv

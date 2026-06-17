@@ -5,6 +5,7 @@ pydantic
 chromadb
 sentence-transformers
 rank-bm25
+torch
 
 pypdf
 python-docx
