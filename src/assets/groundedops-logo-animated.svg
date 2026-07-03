@@ -1,0 +1,81 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>GroundedOps animated GO logo</title>
+  <style>
+    :root {
+      --charcoal: #252728;
+      --bronze: #B77A35;
+      --cream: #FBF7F0;
+    }
+    .card {
+      fill: var(--cream);
+      stroke: rgba(37,39,40,.08);
+    }
+    .g-path, .o-path {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 34;
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+    .g-path {
+      stroke: var(--charcoal);
+      animation: drawG 900ms cubic-bezier(.22,1,.36,1) 120ms forwards;
+    }
+    .o-path {
+      stroke: var(--bronze);
+      animation: drawO 900ms cubic-bezier(.22,1,.36,1) 360ms forwards;
+    }
+    .bridge {
+      stroke: var(--charcoal);
+      stroke-width: 24;
+      stroke-linecap: round;
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      animation: drawBridge 520ms cubic-bezier(.22,1,.36,1) 420ms forwards;
+    }
+    .dot {
+      fill: var(--bronze);
+      opacity: 0;
+      transform-origin: 256px 256px;
+      animation: dotIn 520ms cubic-bezier(.22,1,.36,1) 0ms forwards;
+    }
+    .shine {
+      fill: var(--bronze);
+      opacity: 0;
+      transform-origin: 326px 256px;
+      animation: shine 1200ms cubic-bezier(.22,1,.36,1) 980ms forwards;
+    }
+    @keyframes drawG { to { stroke-dashoffset: 0; } }
+    @keyframes drawO { to { stroke-dashoffset: 0; } }
+    @keyframes drawBridge { to { stroke-dashoffset: 0; } }
+    @keyframes dotIn {
+      0% { opacity: 0; transform: scale(.72); }
+      55% { opacity: 1; transform: scale(1.06); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    @keyframes shine {
+      0% { opacity: 0; transform: rotate(-28deg) translateX(0); }
+      20% { opacity: .7; }
+      100% { opacity: 0; transform: rotate(42deg) translateX(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .g-path, .o-path, .bridge { animation: none; stroke-dashoffset: 0; }
+      .dot { animation: none; opacity: 1; transform: scale(1); }
+      .shine { display: none; }
+    }
+  </style>
+
+  <rect class="card" x="82" y="82" width="348" height="348" rx="96"/>
+
+  <!-- G: round charcoal form -->
+  <path class="g-path" pathLength="1" d="M262 182C241 165 207 163 180 181C143 205 132 256 156 294C181 332 232 343 269 319C287 307 299 291 304 272"/>
+
+  <!-- O: merged bronze ring -->
+  <path class="o-path" pathLength="1" d="M303 190C333 171 374 180 395 210C421 247 412 298 375 324C339 349 288 341 262 305"/>
+
+  <!-- Grounded/RAG connector line -->
+  <path class="bridge" pathLength="1" d="M198 256H292"/>
+  <circle class="dot" cx="306" cy="256" r="15"/>
+  <circle class="shine" cx="365" cy="205" r="5"/>
+</svg>

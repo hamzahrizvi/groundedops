@@ -12,15 +12,18 @@ from structure import extract_structured_block
 from logger import log_interaction
 from router import route_model
 from grounding import check_grounding, _get_nli_model
-from llm import generate, generate_with_fallback, warmup_local_models, RETHINK_OPTIONS
-from memory import add_to_memory, get_memory_context, clear_memory, should_use_memory, get_last_query
+from llm import generate, generate_with_fallback, warmup_local_models, RETHINK_OPTIONS, condense_query
+from memory import add_to_memory, clear_memory, get_history, get_last_query
 from ingest import ingest_file
 from retrieval_db import retrieve_from_db
 from text_utils import (
     passes_retrieval_gate,
     retrieval_confidence_band,
     is_refusal,
-    build_retrieval_query,
+    is_followup_turn,
+    has_domain_vocabulary,
+    is_template_leak,
+    build_clarification_options,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +37,14 @@ GROUNDING_THRESHOLD = 0.55
 # boundary). Below this, the top chunk is judged irrelevant — refuse
 # BEFORE generation rather than after, so out-of-domain queries don't
 # trigger a 50s+ generation call that produces rambling output.
-RETRIEVAL_GATE_THRESHOLD = 0.5
+#
+# TUNING (v7.1, round 1): lowered 0.5 -> 0.35. At 0.5, borderline-but-real
+# queries (e.g. "why might MyCheckr registration fail…", reranker≈0.43)
+# were shunted to clarify/reject and never got a chance to answer. Genuine
+# out-of-domain queries ("capital of France") score ≈0.0, so 0.35 still
+# rejects those cleanly; the grounding check (0.55) + suppression remain the
+# backstop against hallucination on anything borderline that slips through.
+RETRIEVAL_GATE_THRESHOLD = 0.35
 
 # Above this, treat retrieval as unambiguous even with a borderline score,
 # as long as results aren't scattered across many sources (see
@@ -42,6 +52,13 @@ RETRIEVAL_GATE_THRESHOLD = 0.5
 AMBIGUOUS_CEILING = 0.65
 
 SNIPPET_LEN = 160
+
+# session_id is required for correct multi-turn behaviour. Callers that
+# omit it land in this shared bucket — fine for a one-off manual request,
+# but it means unrelated callers can see each other's "previous query"
+# during condensation. Every real client (app.py, test_queries.py)
+# generates and sends its own id.
+DEFAULT_SESSION_ID = "default"
 
 APP_STATE = {
     "ready": False,
@@ -54,11 +71,10 @@ APP_STATE_LOCK = threading.Lock()
 
 class QueryRequest(BaseModel):
     q: str
+    session_id: str | None = None
     deepseek_api_key: str | None = None
     # "Rethink with a different model": when set, skips routing/fallback
-    # and calls this exact (provider, model) directly. Retrieval still
-    # runs fresh (the API is stateless), but the SAME prompt-construction
-    # path is used so the answer is directly comparable to the original.
+    # and calls this exact (provider, model) directly.
     force_provider: str | None = None
     force_model: str | None = None
     # Scope retrieval to one previously-seen source (from a clickable
@@ -72,6 +88,10 @@ class DeleteSourceRequest(BaseModel):
 
 class SourceChunksRequest(BaseModel):
     chunk_ids: list[str]
+
+
+class ClearSessionRequest(BaseModel):
+    session_id: str
 
 
 def _set_app_state(*, ready=None, progress=None, message=None, error=None):
@@ -140,9 +160,19 @@ def rethink_options():
 
 @app.post("/reset")
 def reset():
+    """Full reset: wipes the document collection AND every conversation
+    session's memory."""
     reset_collection()
     clear_memory()
     return {"status": "reset"}
+
+
+@app.post("/clear_session")
+def clear_session(payload: ClearSessionRequest):
+    """Clear one conversation's memory without touching the document
+    collection — backs a "New conversation" button."""
+    clear_memory(payload.session_id)
+    return {"status": "cleared", "session_id": payload.session_id}
 
 
 @app.post("/delete_source")
@@ -154,11 +184,8 @@ def remove_source(payload: DeleteSourceRequest):
 
 @app.post("/source_chunks")
 def source_chunks(payload: SourceChunksRequest):
-    """
-    Fetch full chunk text for the given chunk ids — backs the clickable
-    "view source" feature in the UI. The UI calls this with the chunk_ids
-    returned alongside a query's `sources` field.
-    """
+    """Fetch full chunk text for the given chunk ids — backs the
+    clickable "view source" feature in the UI."""
     return {"chunks": get_chunks_by_ids(payload.chunk_ids)}
 
 
@@ -180,8 +207,7 @@ def _build_sources(results: list[dict]) -> list[dict]:
     """
     Build clickable source objects: one entry per unique source filename,
     with the chunk ids belonging to it (for /source_chunks lookup) and a
-    short snippet from its best-scoring chunk (for an inline preview
-    without an extra round-trip).
+    short snippet from its best-scoring chunk.
     """
     by_source: dict[str, dict] = {}
 
@@ -204,21 +230,30 @@ def query(payload: QueryRequest):
         raise HTTPException(status_code=503, detail="System is still loading")
 
     q = payload.q
+    session_id = payload.session_id or DEFAULT_SESSION_ID
     deepseek_api_key = payload.deepseek_api_key
     start_total = time.time()
 
-    # ── Conversational query rewriting ───────
-    # A short/pronoun-heavy follow-up ("give me that from step 1") has
-    # almost no retrieval signal on its own. If memory holds a recent
-    # query, fold it in for retrieval purposes only — the LLM prompt
-    # below still gets the raw memory context separately, this is just
-    # to give the search step something concrete to match against.
-    retrieval_query = build_retrieval_query(q, get_last_query())
+    # ── Conversational query resolution (Rewrite-Retrieve-Read) ──
+    # Resolves pronoun/ellipsis-dependent follow-ups ("give me that from
+    # step 1") into a standalone query using THIS session's own history,
+    # via a fast local LLM call rather than a surface-level heuristic.
+    # See llm.condense_query / text_utils' "conversational query
+    # condensation" section for the full rationale and references.
+    #
+    # `resolved_query` is used for everything downstream (retrieval,
+    # routing, extraction, the final generation prompt) — by the time
+    # we've worked out what the user actually means, that's the query
+    # that matters everywhere. The RAW `q` is what gets stored back into
+    # memory and logged, so future condensation prompts see the
+    # conversation as the user actually typed it.
+    history = get_history(session_id)
+    resolved_query = condense_query(q, history)
 
     # ── Retrieval ────────────────────────────
     t1 = time.time()
-    results = retrieve_from_db(retrieval_query, top_k=10, source_filter=payload.source_filter)
-    results = rerank(retrieval_query, results, top_k=5)
+    results = retrieve_from_db(resolved_query, top_k=10, source_filter=payload.source_filter)
+    results = rerank(resolved_query, results, top_k=5)
     retrieval_time = time.time() - t1
 
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
@@ -227,23 +262,79 @@ def query(payload: QueryRequest):
     # ── No relevant content at all ───────────
     if confidence == "none":
         total_time = time.time() - start_total
-        answer = "I could not find that in the knowledge base."
-        log_interaction(q, answer, "none", "none", [], grounding_score=None, flagged=False)
+
+        # A query that referenced prior context (or got rewritten by the
+        # condensation step) is a follow-up, not a fresh out-of-domain
+        # question. Retrieval failing on it doesn't mean the topic is
+        # outside the knowledge base — it usually means the rewrite/
+        # retrieval pairing didn't land. Treating it the same as a
+        # genuinely standalone miss (e.g. "capital of France") produces
+        # the flat, conversation-breaking "I could not find that"
+        # response the user is reporting. Ask for clarification instead;
+        # standalone misses (no reference markers, no history) are
+        # completely unaffected and still get the blunt rejection.
+        is_followup = is_followup_turn(q, history, resolved_query)
+
+        # A STANDALONE query (no history dependency) can still be too
+        # vague to retrieve well while clearly being about something in
+        # our domain — "explain why device registration might fail"
+        # never says WHICH device, "post installation verification
+        # installer sign off" never says which product's installation.
+        # These aren't out-of-domain misses like "capital of France"
+        # (zero domain vocabulary); they're underspecified ones. Ask
+        # which device/product instead of flatly rejecting, and surface
+        # whatever low-scoring candidate sources retrieval DID turn up
+        # as a concrete hint rather than a generic "which one?".
+        is_vague_in_domain = (not is_followup) and has_domain_vocabulary(q)
+
+        if is_followup:
+            # is_followup_turn requires non-empty history, so this is
+            # always available here — referencing the actual prior topic
+            # instead of a generic line is what makes this feel like a
+            # continued conversation rather than a second flat rejection.
+            last_topic = history[-1]["q"]
+            answer = (
+                f"I don't have more detail beyond what we already covered for "
+                f'"{last_topic}" — could you tell me more concretely what you\'d '
+                f"like me to check or expand on?"
+            )
+            role_out = "clarify"
+            reason = "low_retrieval_confidence_followup"
+            needs_clarification = True
+            clarification_options = build_clarification_options("followup", history, results)
+        elif is_vague_in_domain:
+            candidate_sources = sorted({r.get("source") for r in results[:4] if r.get("source")})
+            hint = f" The closest matches I found were in: {', '.join(candidate_sources)}." if candidate_sources else ""
+            answer = (
+                "I'm not sure which specific device or product area you mean here "
+                "— could you say which one you're asking about?" + hint
+            )
+            role_out = "clarify"
+            reason = "ambiguous_in_domain_query"
+            needs_clarification = True
+            clarification_options = build_clarification_options("ambiguous_in_domain", history, results)
+        else:
+            answer = "I could not find that in the knowledge base."
+            role_out = "rejected"
+            reason = "low_retrieval_confidence"
+            needs_clarification = False
+            clarification_options = []
+
+        log_interaction(q, answer, role_out, "none", [], grounding_score=None, flagged=False)
         return {
             "answer": answer,
             "model": "none",
-            "role": "rejected",
-            "reason": "low_retrieval_confidence",
+            "role": role_out,
+            "needs_clarification": needs_clarification,
+            "clarification_options": clarification_options,
+            "reason": reason,
             "retrieval_score": round(top_score, 4),
+            "resolved_query": resolved_query if resolved_query != q else None,
             "sources": [],
             "response_time": round(total_time, 3),
         }
 
     # ── Ambiguous: ask a clarifying question instead of guessing ──
-    # Borderline relevance score AND results scattered across several
-    # distinct sources/sections — a sign the query plausibly matches more
-    # than one topic in this corpus. Rather than silently picking one
-    # (which is how Bug 1 happened), ask which the user means.
     if confidence == "ambiguous":
         candidate_sources = sorted({r.get("source") for r in results[:4] if r.get("source")})
         total_time = time.time() - start_total
@@ -260,6 +351,7 @@ def query(payload: QueryRequest):
             "role": "clarify",
             "needs_clarification": True,
             "candidate_sources": candidate_sources,
+            "resolved_query": resolved_query if resolved_query != q else None,
             "sources": _build_sources(results),
             "retrieval_score": round(top_score, 4),
             "response_time": round(total_time, 3),
@@ -269,15 +361,12 @@ def query(payload: QueryRequest):
     if payload.force_provider and payload.force_model:
         role = "rethink"
     else:
-        role, (provider, model) = route_model(q)
+        role, (provider, model) = route_model(resolved_query)
 
     # ── Structured extraction shortcut ───────
-    # Skipped on a forced rethink — if the user explicitly asked to
-    # rethink with a specific model, they want a generated answer from
-    # THAT model, not the deterministic structured-extraction shortcut.
     if role != "rethink":
         t2 = time.time()
-        extracted = extract_structured_block(results[:5], query=q)
+        extracted = extract_structured_block(results[:5], query=resolved_query)
         extraction_time = time.time() - t2
 
         if extracted and role == "extract":
@@ -286,6 +375,7 @@ def query(payload: QueryRequest):
             log_interaction(q, extracted, "extract", "structured",
                             [s["source"] for s in sources],
                             grounding_score=None, flagged=False)
+            add_to_memory(session_id, q, extracted)
             return {
                 "answer": extracted,
                 "mode": "extracted",
@@ -293,25 +383,23 @@ def query(payload: QueryRequest):
                 "role": "extract",
                 "provider": "local",
                 "fallback_used": False,
+                "resolved_query": resolved_query if resolved_query != q else None,
                 "response_time": round(total_time, 3),
                 "sources": sources,
             }
     else:
         extraction_time = 0.0
 
-    # ── Context + memory ──────────────────────
+    # ── Context ──────────────────────────────
+    # No separate memory-context injection here: resolved_query already
+    # carries whatever context was needed from prior turns (that's the
+    # whole point of the condensation step above), so the document
+    # context retrieved against IT is what the model should answer from.
     top_chunks = results[:3]
     context = "\n\n".join(r["text"][:250] for r in top_chunks)
 
-    memory_context = get_memory_context()
-    combined_context = (
-        memory_context + "\n\n" + context
-        if (memory_context and should_use_memory(q))
-        else context
-    )
-
     prompt = f"""<context>
-{combined_context}
+{context}
 </context>
 
 Using ONLY the information inside <context> above, answer the question below.
@@ -319,7 +407,7 @@ If the context does not contain enough information, respond with exactly:
 "I could not find that in the knowledge base."
 Do not use any knowledge from outside the context.
 
-Question: {q}
+Question: {resolved_query}
 Answer:"""
 
     # ── LLM ──────────────────────────────────
@@ -333,12 +421,38 @@ Answer:"""
         output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key)
     llm_time = time.time() - t3
 
-    answer = output.get("text", "").strip() or "I could not generate a response."
+    raw_text = output.get("text", "").strip()
+    generation_failed = (output.get("model") == "none") or not raw_text
+    answer = raw_text or "I could not generate a response."
 
     # ── Grounding check ──────────────────────
     refusal = is_refusal(answer)
+    template_leak = is_template_leak(answer)
 
-    if refusal:
+    # A total generation failure (every provider in the fallback chain
+    # failed — output model=="none", e.g. mistral timed out AND no
+    # DeepSeek key) must NOT be run through the grounding check. The
+    # sentinel string "I was unable to generate a response." is generic
+    # enough that NLI entailment scored it 0.993 "grounded" in
+    # production — a meaningless score for a non-answer. Treat it as an
+    # ungrounded non-answer up front.
+    if generation_failed:
+        is_grounded, grounding_score = False, None
+        flagged = True
+        refusal = False
+    # Checked BEFORE the NLI grounding call: a known chat-template leak
+    # (e.g. "...a chat between a curious user and an artificial
+    # intelligence assistant...") makes no concrete factual claim, so
+    # NLI entailment has nothing to contradict and can score it as
+    # "grounded" — reproduced in production at 0.934, well above
+    # threshold. is_template_leak catches this deterministically; the
+    # semantic check is skipped entirely when it fires, same as for a
+    # clean refusal.
+    elif template_leak:
+        is_grounded, grounding_score = False, 0.0
+        flagged = True
+        refusal = False
+    elif refusal:
         is_grounded, grounding_score = True, None
         flagged = False
     else:
@@ -348,22 +462,44 @@ Answer:"""
         flagged = not is_grounded
 
     # ── DeepSeek escalation on grounding failure ──
-    # Skipped on a forced rethink — escalating past the model the user
-    # explicitly chose would be confusing ("I asked for phi's answer, why
-    # did I get DeepSeek's?").
-    if flagged and role != "rethink" and output.get("provider") == "local":
-        logger.warning(f"Grounding score {grounding_score:.3f} — escalating to DeepSeek for: {q[:60]}")
+    # Auto-retry on DeepSeek whenever the local answer is flagged (bad
+    # grounding, a template leak, or a total local failure) AND a key is
+    # available. This is the "auto-retry on DeepSeek if key present"
+    # behaviour.
+    escalated = False
+    if flagged and role != "rethink" and output.get("provider") in ("local", "none"):
+        logger.warning(
+            f"Flagged local answer (grounding={grounding_score}, "
+            f"template_leak={template_leak}, failed={generation_failed}) — "
+            f"escalating to DeepSeek for: {resolved_query[:60]}"
+        )
         deepseek_result = generate("deepseek", prompt, "deepseek-chat", deepseek_api_key=deepseek_api_key)
         if deepseek_result and deepseek_result.get("text"):
             output = deepseek_result
             answer = output["text"].strip()
-            is_grounded, grounding_score = check_grounding(
-                answer, top_chunks, threshold=GROUNDING_THRESHOLD
-            )
-            flagged = not is_grounded
+            escalated = True
+            template_leak = is_template_leak(answer)
+            if template_leak:
+                is_grounded, grounding_score, flagged = False, 0.0, True
+            else:
+                is_grounded, grounding_score = check_grounding(
+                    answer, top_chunks, threshold=GROUNDING_THRESHOLD
+                )
+                flagged = not is_grounded
+
+    # ── Suppress an answer we could not verify ──
+    # If after any escalation attempt the answer is STILL a template
+    # leak or a total generation failure, we must not surface the
+    # garbage/boilerplate to the user (this is the #12 "weird
+    # non-grounded answer" that was still being displayed). "Else hide
+    # the answer" — replace it with the standard not-found response.
+    if template_leak or generation_failed:
+        answer = "I could not find that in the knowledge base."
+        grounding_score = None
+        flagged = True
 
     # ── Memory + logging ──────────────────────
-    add_to_memory(q, answer)
+    add_to_memory(session_id, q, answer)
     sources = _build_sources(results)
     log_interaction(q, answer, role, output.get("model"),
                     [s["source"] for s in sources],
@@ -377,8 +513,11 @@ Answer:"""
         "model": output.get("model"),
         "provider": output.get("provider"),
         "fallback_used": output.get("fallback_used", False),
+        "escalated_to_deepseek": escalated,
         "grounding_score": grounding_score,
         "flagged": flagged,
+        "retrieval_score": round(top_score, 4),
+        "resolved_query": resolved_query if resolved_query != q else None,
         "timing": {
             "retrieval_time": round(retrieval_time, 3),
             "extraction_time": round(extraction_time, 3),

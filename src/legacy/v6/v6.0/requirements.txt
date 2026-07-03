@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+
+chromadb
+sentence-transformers
+rank-bm25
+torch
+
+pypdf
+python-docx
+
+streamlit
+requests

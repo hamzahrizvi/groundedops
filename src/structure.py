@@ -39,28 +39,94 @@ def normalize_line(line: str) -> str:
     return line.strip().lower()
 
 
+# Imperative verbs that open a genuine checklist/step item. Hoisted to
+# module level so both starts_with_verb (which also has a looser
+# "short line, no period" fallback for headings like "Network status
+# indicator") and _looks_like_title_case_heading's gate (which needs
+# the STRICT check only — see is_bad_line) can share one definition.
+_COMMON_VERBS = {
+    "check", "verify", "ensure", "confirm", "connect",
+    "install", "open", "close", "restart", "power",
+    "set", "enter", "select", "press", "run",
+    "make", "use", "add", "remove", "test", "enable",
+    "download", "launch", "scan", "tap", "attach",
+    "choose", "mount", "wait", "approach", "assign",
+}
+
+
 def starts_with_verb(line: str) -> bool:
     line = line.strip().lower()
     if not line:
         return False
 
     first_word = line.split()[0]
-    common_verbs = {
-        "check", "verify", "ensure", "confirm", "connect",
-        "install", "open", "close", "restart", "power",
-        "set", "enter", "select", "press", "run",
-        "make", "use", "add", "remove", "test", "enable",
-        "download", "launch", "scan", "tap", "attach",
-        "choose", "mount", "wait", "approach", "assign",
-    }
 
-    if first_word in common_verbs:
+    if first_word in _COMMON_VERBS:
         return True
 
     if len(line.split()) <= 6 and not line.endswith("."):
         return True
 
     return False
+
+
+def _starts_with_imperative_verb(line: str) -> bool:
+    """
+    Strict version of starts_with_verb: True only if the first word is
+    an actual imperative verb from _COMMON_VERBS — none of
+    starts_with_verb's "short line with no trailing period" fallback.
+
+    That fallback exists so a short heading-shaped line like "Network
+    status indicator" is treated as legitimate checklist content
+    elsewhere in this module, but it ALSO matches genuine document
+    section titles ("MyConnect Environment Installation - Advance
+    Pre-requisites" is 6 words with no trailing period). Using the loose
+    version here would let those titles slip past the Title-Case heading
+    filter in is_bad_line just because they happen to be short.
+    """
+    line = line.strip().lower()
+    if not line:
+        return False
+    return line.split()[0] in _COMMON_VERBS
+
+
+# Connector words ignored when checking whether every significant word
+# in a line is capitalized (Title Case) — these are conventionally
+# lowercase even within an actual title ("Advance Pre-requisites" has
+# no connector, but "Steps to Install and Verify" would).
+_HEADING_CONNECTOR_WORDS = {
+    "a", "an", "the", "and", "or", "of", "to", "for",
+    "in", "on", "with", "from", "as", "is", "are",
+}
+
+
+def _looks_like_title_case_heading(line: str) -> bool:
+    """
+    True if every significant word in `line` is capitalized — the shape
+    of a document section title ("MyConnect Environment Installation -
+    Advance Pre-requisites") rather than a sentence-case checklist item
+    ("Confirm that a dedicated Ethernet cable is available...").
+
+    Deliberately requires at least 2 significant (non-connector) words
+    so it can't fire on a single capitalized word, and the caller
+    additionally requires the line not be verb-led/list-like before
+    treating this as disqualifying — see is_bad_line.
+    """
+    words = line.strip().split()
+    if len(words) < 2:
+        return False
+
+    significant = [
+        w.strip("-\u2013\u2014,:;()")
+        for w in words
+        if w.lower().strip("-\u2013\u2014,:;()") not in _HEADING_CONNECTOR_WORDS
+    ]
+    significant = [w for w in significant if w and w[0].isalpha()]
+
+    if len(significant) < 2:
+        return False
+
+    return all(w[0].isupper() for w in significant)
 
 
 def is_bad_line(line: str) -> bool:
@@ -81,6 +147,25 @@ def is_bad_line(line: str) -> bool:
         line-wrap artifact), not a new standalone item
       - lines whose last word is a conjunction/preposition/article — a
         strong truncation signal ("All devices powered, connected, and")
+      - PDF running-header artifacts of the form "<Document Title> – N"
+        (a page header/footer repeated on every page, ending in a bare
+        page number after a dash) — these were surviving every previous
+        filter because they're short and don't look like truncated
+        prose, then getting marked "meaningful" downstream purely
+        because they contain the product name. Reproduced directly from
+        production output: "MyConnect Environment – 9", "MyConnect
+        Environment – 17", "MyConnect Environment – 18" all passed this
+        function unfiltered before this fix.
+      - Title-Case section headings (e.g. "MyConnect Environment
+        Installation - Advance Pre-requisites") — every significant word
+        capitalized, not an imperative checklist item, not a list line.
+        Real checklist content in this corpus is consistently
+        sentence-case ("Confirm that a dedicated Ethernet cable is
+        available...") even when extracted oddly from PDF tables, so
+        this is a deliberately narrow signal: it only fires when there
+        are no lowercase significant words AND the line isn't verb-led
+        AND isn't already recognized as a list/step line, to avoid
+        catching genuine imperative items that happen to be short.
 
     NOTE: this is a heuristic, not a parser. Severely table-heavy PDF
     sections can still produce an occasional truncated fragment that
@@ -89,6 +174,7 @@ def is_bad_line(line: str) -> bool:
     extraction, which needs the actual source document to build against.
     """
     l = line.lower()
+    stripped = line.strip()
 
     if any(k in l for k in [
         "introduction", "overview", "table of contents",
@@ -100,6 +186,13 @@ def is_bad_line(line: str) -> bool:
         return True
 
     if len(line.split()) <= 3:
+        return True
+
+    # PDF running-header artifact: "<title words> – <page number>".
+    # Matches an en-dash, em-dash, or hyphen followed by a bare trailing
+    # number and nothing else — the exact shape of a repeated page
+    # header, not of any real checklist content in this corpus.
+    if re.match(r"^[A-Za-z][\w\s]*[-\u2013\u2014]\s*\d+\s*$", stripped):
         return True
 
     words = line.split()
@@ -128,7 +221,17 @@ def is_bad_line(line: str) -> bool:
     if last_word in TRAILING_STOPWORDS:
         return True
 
+    if (
+        _looks_like_title_case_heading(line)
+        and not _starts_with_imperative_verb(line)
+        and not LIST_LINE_RE.match(line)
+        and not STEP_HEADER_RE.match(line)
+    ):
+        return True
+
     return False
+
+
 
 
 def is_meaningful_line(line: str) -> bool:

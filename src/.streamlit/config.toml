@@ -1,0 +1,29 @@
+# GroundedOps theme. This makes STREAMLIT ITSELF render the warm cream
+# palette, so its own chrome (header, chat-input bar, widgets) matches the
+# custom CSS in app.py instead of leaking white/dark bands.
+#
+# IMPORTANT: config.toml must sit in a ".streamlit" folder next to where
+# you launch `streamlit run app.py` (i.e. inside src/). If you run from a
+# different directory, move this file to that directory's .streamlit/.
+#
+# Dark variant: to switch the whole app to the dark version of the same
+# palette, comment out the light [theme] block below and uncomment the
+# dark one. (We no longer auto-switch on OS dark mode, because that left
+# Streamlit's own chrome mismatched.)
+
+[theme]
+base = "light"
+primaryColor = "#B0764F"
+backgroundColor = "#F4EDE3"
+secondaryBackgroundColor = "#FBF6EF"
+textColor = "#26221D"
+font = "sans serif"
+
+# ── Dark variant (same palette) — uncomment to use, comment out above ──
+# [theme]
+# base = "dark"
+# primaryColor = "#C98A5E"
+# backgroundColor = "#1B1714"
+# secondaryBackgroundColor = "#241E19"
+# textColor = "#EDE4D7"
+# font = "sans serif"
