@@ -30,3 +30,6 @@ __pycache__/
 *.pyc
 logs.jsonl
 ../cls
+*.enc deepseek_key
+eval_results.json 
+eval_baseline*.json
