@@ -1,0 +1,247 @@
+{
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "q": "what is MyCheckr and what is it used for",
+      "outcome": "answered",
+      "grounding": 0.9983,
+      "retrieval": 0.9996,
+      "provider": "local",
+      "answer": "MyCheckr is a low-cost solution designed to assist with the sale of age-restricted goods. It helps servers make informed decisions during the age check process by automating the Challenge 25 retailing strategy, which aims to restrict any illegal sales of age-restricted items to underaged customers. This helps avoid unpleasant confrontations regarding ID checks. MyCheckr comes equipped with an inbuilt camera and a display screen that can be used in multiple modes to display various information.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "grade": true,
+        "_grade_reason": "The answer accurately describes MyCheckr as a low-cost device for age estimation and its use in automating Challenge 25 for age-restricted sales."
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "what are the default login credentials for the MyConnect app",
+      "outcome": "answered",
+      "grounding": 0.997,
+      "retrieval": 0.9987,
+      "provider": "local",
+      "answer": "The default login credentials for the MyConnect app are Username: user1 and Password: password1.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "keywords_absent": true,
+        "grade": true,
+        "_grade_reason": "The provided answer matches the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "what are the default API credentials for registering a MyCheckr device",
+      "outcome": "answered",
+      "grounding": 0.9992,
+      "retrieval": 0.9997,
+      "provider": "local",
+      "answer": "The default API credentials for registering a MyCheckr device are: Username: apiuser, Password: apipassword.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "keywords_absent": true,
+        "grade": true,
+        "_grade_reason": "The answer matches the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "MYCONNECT APP DEFAULT LOGIN???",
+      "outcome": "answered",
+      "grounding": 0.9967,
+      "retrieval": 0.9961,
+      "provider": "local",
+      "answer": "Username: user1\nPassword: password1",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "keywords_absent": true,
+        "grade": true,
+        "_grade_reason": "Answers match the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "what network connection does the MyConnect hub require",
+      "outcome": "answered",
+      "grounding": 0.9994,
+      "retrieval": 0.9995,
+      "provider": "local",
+      "answer": "The MyConnect Hub requires a dedicated Ethernet cable for connectivity.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "grade": true,
+        "_grade_reason": "Answer matches the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "does MyCheckr Mini have a physical screen",
+      "outcome": "answered",
+      "grounding": 0.921,
+      "retrieval": 0.9999,
+      "provider": "local",
+      "answer": "No, the MyCheckr Mini does not have a physical screen.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "grade": true,
+        "_grade_reason": "The answer correctly matches the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "how is the MyCheckr Mini powered",
+      "outcome": "answered",
+      "grounding": 0.9941,
+      "retrieval": 0.9986,
+      "provider": "local",
+      "answer": "The MyCheckr Mini can be plugged into any USB A-type port to power up and function.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "grade": true,
+        "_grade_reason": "The provided answer correctly states the method of powering MyCheckr Mini as per the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "why might MyCheckr registration fail when connecting it to MyConnect",
+      "outcome": "answered",
+      "grounding": 0.9991,
+      "retrieval": 0.7363,
+      "provider": "local",
+      "answer": "The MyCheckr registration might fail when connecting it to MyConnect due to incorrect SSID and credentials if Wi-Fi is being used for connection, or static IP conflicts on the network.",
+      "checks": {
+        "outcome": true,
+        "grade": true,
+        "_grade_reason": "The answer mentions firewall/discovery and static IP conflicts which are included in the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "how do myconnect and mycheckr communicate with each other",
+      "outcome": "answered",
+      "grounding": 0.9989,
+      "retrieval": 0.9995,
+      "provider": "local",
+      "answer": "MyConnect and MyCheckr communicate with each other using bidirectional REST API communication. MyCheckr devices send POST requests to the Hub.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "grade": true,
+        "_grade_reason": "The answer correctly describes the method of communication between MyConnect and MyCheckr as stated in the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "how do I contact ITL support",
+      "outcome": "answered",
+      "grounding": 0.997,
+      "retrieval": 0.9995,
+      "provider": "local",
+      "answer": "Contact ITL Support by providing a detailed description of the issue, including steps taken to reproduce it, after collecting Hub logs and any device logs available from the MyConnect App.",
+      "checks": {
+        "outcome": true,
+        "grade": true,
+        "_grade_reason": "The answer suggests contacting ITL support and includes steps to collect necessary information, which aligns with the reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "explain why device registration might fail",
+      "outcome": "clarify",
+      "grounding": null,
+      "retrieval": 0.0155,
+      "provider": null,
+      "answer": "I'm not sure which specific device or product area you mean here \u2014 could you say which one you're asking about? The closest matches I found were in: MyCheckr Mini User Manual-v5.pdf, MyCheckr User Manual-v7 (1).pdf, MyConnect Environment-v4.pdf.",
+      "checks": {
+        "outcome": true
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "which device is that for",
+      "outcome": "clarify",
+      "grounding": null,
+      "retrieval": 0.0709,
+      "provider": null,
+      "answer": "I'm not sure which specific device or product area you mean here \u2014 could you say which one you're asking about? The closest matches I found were in: MyCheckr Mini User Manual-v5.pdf, MyCheckr User Manual-v7 (1).pdf.",
+      "checks": {
+        "outcome": true
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "what is the capital of france",
+      "outcome": "rejected",
+      "grounding": null,
+      "retrieval": 0.0,
+      "provider": null,
+      "answer": "I could not find that in the knowledge base.",
+      "checks": {
+        "outcome": true
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "how do I reset my Cisco router password",
+      "outcome": "rejected",
+      "grounding": null,
+      "retrieval": 0.1166,
+      "provider": null,
+      "answer": "I could not find that in the knowledge base.",
+      "checks": {
+        "outcome": true
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "does MyCheckr Mini have a screen",
+      "outcome": "answered",
+      "grounding": 0.921,
+      "retrieval": 0.9999,
+      "provider": "local",
+      "answer": "No, the MyCheckr Mini does not have a physical screen.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "grade": true,
+        "_grade_reason": "MyCheckr Mini does not have a screen as stated in reference facts"
+      },
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "q": "how is it powered",
+      "outcome": "answered",
+      "grounding": 0.9981,
+      "retrieval": 0.9983,
+      "provider": "local",
+      "answer": "The MyCheckr Mini is powered via a pre-attached non-detachable USB-A cable when connected to a host machine.",
+      "checks": {
+        "outcome": true
+      },
+      "passed": true,
+      "skipped": false
+    }
+  ]
+}

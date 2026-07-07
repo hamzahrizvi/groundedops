@@ -1,0 +1,148 @@
+{
+  "_README": "PRIMARY regression suite (v8.3). Tight, one case per distinct behavior/fix. Run this after every change. The 40-case eval_cases_extensive.json is the SURVEY suite — run it only when validating a new benchmark or before a release, not every iteration. ICU/API cases are in eval_cases_api.json (run only when the ICU doc is ingested).",
+  "cases": [
+    {
+      "q": "what is MyCheckr and what is it used for",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "age"
+      ],
+      "reference": "Low-cost device for anonymous age estimation, automating Challenge 25 for age-restricted sales.",
+      "grade": true
+    },
+    {
+      "q": "what are the default login credentials for the MyConnect app",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "user1",
+        "password1"
+      ],
+      "keywords_absent": [
+        "apiuser",
+        "apipassword"
+      ],
+      "reference": "App login is user1/password1. NOT apiuser/apipassword (those are API/device-registration creds).",
+      "grade": true
+    },
+    {
+      "q": "what are the default API credentials for registering a MyCheckr device",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "apiuser",
+        "apipassword"
+      ],
+      "keywords_absent": [
+        "user1",
+        "password1"
+      ],
+      "reference": "API/device-registration creds are apiuser/apipassword. NOT the user1/password1 app login.",
+      "grade": true
+    },
+    {
+      "q": "MYCONNECT APP DEFAULT LOGIN???",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "user1"
+      ],
+      "keywords_absent": [
+        "apiuser"
+      ],
+      "reference": "Robustness: shouty/malformed phrasing must still return the app login user1/password1, not bail to not-found. Guards the v8.3 query-normalization fix.",
+      "grade": true
+    },
+    {
+      "q": "what network connection does the MyConnect hub require",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "ethernet"
+      ],
+      "reference": "Hub requires Ethernet (dedicated cable). Wi-Fi is a fallback per the checklist doc.",
+      "grade": true
+    },
+    {
+      "q": "does MyCheckr Mini have a physical screen",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "does not have"
+      ],
+      "reference": "Mini has NO physical screen/ports; USB-A powered; camera streamed via URL. Cross-doc contamination guard vs full MyCheckr.",
+      "grade": true
+    },
+    {
+      "q": "how is the MyCheckr Mini powered",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "usb"
+      ],
+      "reference": "Powered via USB-A (+5VDC).",
+      "grade": true
+    },
+    {
+      "q": "why might MyCheckr registration fail when connecting it to MyConnect",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Any grounded subset of: power, Ethernet/Wi-Fi, firewall/discovery, static IP conflicts.",
+      "grade": true
+    },
+    {
+      "q": "how do myconnect and mycheckr communicate with each other",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "rest"
+      ],
+      "reference": "Bidirectional REST API; MyCheckr POSTs to the Hub.",
+      "grade": true
+    },
+    {
+      "q": "how do I contact ITL support",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "support@innovative-technology.com / +44 (0)161 626 9999 / innovative-technology.com/support; collect logs + firmware build first.",
+      "grade": true
+    },
+    {
+      "q": "explain why device registration might fail",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "which device is that for",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "what is the capital of france",
+      "new_session": true,
+      "outcome": "rejected"
+    },
+    {
+      "q": "how do I reset my Cisco router password",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "Adversarial: domain-adjacent words (reset/password/router) but wrong product. Must reject, not hallucinate."
+    },
+    {
+      "q": "does MyCheckr Mini have a screen",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "does not have"
+      ],
+      "reference": "Sets up the follow-up below.",
+      "grade": true
+    },
+    {
+      "q": "how is it powered",
+      "outcome": "answered",
+      "reference": "'it' = MyCheckr Mini -> USB-A. Pronoun-resolution guard. Acceptable to answer USB power or, if resolution is uncertain, to clarify."
+    }
+  ]
+}

@@ -1,0 +1,350 @@
+{
+  "_README": "EXTENSIVE suite (~45 cases). Same schema as eval_cases.json: q; outcome answered|clarify|rejected; keywords_all/keywords_absent optional (case-insensitive substrings); reference (ground-truth for LLM grader); grade true to run LLM grading; force_provider/force_model optional; new_session true resets conversation. Cases run in order within a session so follow-ups work. Every 'answered' fact here is verified against the source PDFs. Run: `python eval.py` pointed at this file (or copy over eval_cases.json). Groups are labeled with _group comments (ignored by the harness) so you can see coverage areas. Cases likely to be RETRIEVAL-SENSITIVE or currently-known-hard are marked in their reference with [PROBE] — treat those as tuning signals, not hard regressions.",
+  "cases": [
+    {
+      "_section": "=== A. Core definitions / single-doc factual (should be easy passes) ===",
+      "q": "what is MyCheckr and what is it used for",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "age"
+      ],
+      "reference": "MyCheckr is a low-cost all-in-one device performing anonymous age estimation to assist the sale of age-restricted goods, automating the Challenge 25 strategy.",
+      "grade": true
+    },
+    {
+      "q": "what is the MyConnect environment",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "hub"
+      ],
+      "reference": "The MyConnect Environment enables real-time communication between MyCheckr devices, the MyConnect Hub, and the MyConnect App, providing secure alerts, access control decisions, and monitoring. Three components: Hub (central relay), Android App (client), MyCheckr devices.",
+      "grade": true
+    },
+    {
+      "q": "what are the three main components of the MyConnect system",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "hub",
+        "app"
+      ],
+      "reference": "Ideal: Hub, App, and MyCheckr Devices. [KNOWN SOURCE ISSUE] The Environment doc's own overview text sloppily lists 'MyCheckr Hub, MyConnect App, and MyConnect Environment' as the three components, so a model faithfully echoing the source may name the Environment as the third. Grade leniently: pass if Hub+App are present and the answer is grounded; this case exists to track the source-wording problem, which is a future conflict-detection feature target, not a retrieval bug.",
+      "grade": true
+    },
+    {
+      "q": "what does the MyConnect Hub do",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "relay"
+      ],
+      "reference": "The Hub acts as the central relay managing all communication between connected MyCheckr devices and the MyConnect App, and controls onboard relays for access control based on device inputs.",
+      "grade": true
+    },
+    {
+      "q": "is any internet access required for MyConnect to work",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Internet is NOT required for core functionality. It is only used for Google push notifications when the app is backgrounded or the tablet is locked (to trigger sound/chime alerts). The app and hub must be on the same local network/VLAN.",
+      "grade": true
+    },
+    {
+      "q": "does MyCheckr store images of people",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "no"
+      ],
+      "reference": "No. By default MyCheckr devices do NOT store images; only anonymized, non-reversible face templates (FaceIDs) are processed locally. It is GDPR certified by the Age Check Certification Scheme (ACCS).",
+      "grade": true
+    },
+    {
+      "_section": "=== B. Network / connectivity ===",
+      "q": "what network connection does the MyConnect hub require",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "ethernet"
+      ],
+      "reference": "The MyConnect Hub connects via Ethernet only (a dedicated Ethernet cable is required).",
+      "grade": true
+    },
+    {
+      "q": "can MyCheckr devices use Wi-Fi or do they need Ethernet",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "MyCheckr supports both: Ethernet is preferred for stability, but Wi-Fi is also supported. (The Hub itself, by contrast, is Ethernet-only.)",
+      "grade": true
+    },
+    {
+      "q": "how do I connect a tablet to the MyConnect hub",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "same network"
+      ],
+      "reference": "The Android tablet running the MyConnect App must be on the same network/VLAN as the Hub. Launch the app and use 'Search For Hub...' to discover it, or 'Select last used', or manually enter the Hub IP if discovery is blocked.",
+      "grade": true
+    },
+    {
+      "q": "what should I do if no hubs appear when searching in the app",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Ensure the network allows multicast/device discovery; confirm the Android device is on the correct VLAN; use IMS Local to retrieve the hub IP and enter it manually; contact the network administrator if devices remain hidden.",
+      "grade": true
+    },
+    {
+      "_section": "=== C. CREDENTIAL DISAMBIGUATION (the flagship conflict — both directions) ===",
+      "q": "what are the default login credentials for the MyConnect app",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "user1",
+        "password1"
+      ],
+      "keywords_absent": [
+        "apiuser",
+        "apipassword"
+      ],
+      "reference": "MyConnect app default login is username user1 / password password1 (Step 3, Login to the Hub). apiuser/apipassword are API/device-registration credentials, NOT the app login. [PROBE] Known-hard: retriever tends to surface the API-credential block for this query.",
+      "grade": true
+    },
+    {
+      "q": "what are the default API credentials for registering a MyCheckr device",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "apiuser",
+        "apipassword"
+      ],
+      "keywords_absent": [
+        "user1",
+        "password1"
+      ],
+      "reference": "Default API/device-registration credentials are apiuser / apipassword (used when registering a new MyCheckr to the Hub; same defaults as the ICU Network API). Distinct from the user1/password1 app login.",
+      "grade": true
+    },
+    {
+      "q": "what username do I use to log into the MyConnect android app",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "user1"
+      ],
+      "keywords_absent": [
+        "apiuser"
+      ],
+      "reference": "The MyConnect app login username is user1 (password password1). Not apiuser. [PROBE] Paraphrase variant of the credential-conflict case to check robustness of the fix.",
+      "grade": true
+    },
+    {
+      "q": "can I change the MyConnect app login credentials",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Yes — credentials can be changed from within the app's settings. A 'Remember me' box saves login info for future sessions.",
+      "grade": true
+    },
+    {
+      "_section": "=== D. MyCheckr vs MyCheckr Mini disambiguation (cross-doc contamination test) ===",
+      "q": "does MyCheckr Mini have a physical screen",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "does not have"
+      ],
+      "reference": "MyCheckr Mini does NOT have a physical screen or connection ports (unlike the full MyCheckr). Its camera feed can be streamed via a URL in IMSLocal instead.",
+      "grade": true
+    },
+    {
+      "q": "how is the MyCheckr Mini powered",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "usb"
+      ],
+      "reference": "MyCheckr Mini is powered by plugging into any USB A-type port (+5VDC USB power). It needs only a USB connection to power up and function.",
+      "grade": true
+    },
+    {
+      "q": "what is the difference between MyCheckr and MyCheckr Mini",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "MyCheckr Mini is a more compact version without a physical screen or connection ports, powered via USB-A, but can be configured to perform the same age-check functions as the full MyCheckr. The Mini's camera can be streamed via a URL rather than shown on an onboard display.",
+      "grade": true
+    },
+    {
+      "q": "how is MyCheckr mounted",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "The (full) MyCheckr is securely mounted to a flat surface using 4mm screws in the 4 mounting holes provided, or via a 1/4-inch 20-thread screw in the bottom-centre of the device. [PROBE] Should draw from the full MyCheckr manual, not the Mini.",
+      "grade": true
+    },
+    {
+      "_section": "=== F. Troubleshooting / procedural ===",
+      "q": "why might MyCheckr registration fail when connecting it to MyConnect",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Registration/connectivity failures: power not connected/reliable; loose Ethernet or wrong Wi-Fi SSID/credentials; firewall blocking REST API ports or multicast discovery; static IP conflicts (duplicate IPs). Any reasonable subset (network, power, discovery) is acceptable.",
+      "grade": true
+    },
+    {
+      "q": "the MyConnect hub is unresponsive, what should I try",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Restart the Hub by cycling power; check the Hub's build/firmware version is current; use Download Logs in the Hub tab to capture diagnostics.",
+      "grade": true
+    },
+    {
+      "q": "how do I contact ITL support",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Email support@innovative-technology.com; phone +44 (0)161 626 9999; online http://www.innovative-technology.com/support. Collect Hub/device logs and note the firmware build number before contacting.",
+      "grade": true
+    },
+    {
+      "q": "what are the face recognition groups available in MyConnect",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Groups include Enrolled (registered users, standard access), Employee (staff with specific permissions), Self-Excluded (flagged/excluded users), Temp Enrollment (temporary registrations), Premium (VIP/priority), and Manage Unrecognised (visitors not in any group).",
+      "grade": true
+    },
+    {
+      "q": "what user roles can a MyConnect account have",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Accounts have permission levels / roles set at creation, e.g. viewer, operator, admin.",
+      "grade": true
+    },
+    {
+      "_section": "=== G. Communication / architecture ===",
+      "q": "how do myconnect and mycheckr communicate with each other",
+      "new_session": true,
+      "outcome": "answered",
+      "force_provider": "deepseek",
+      "force_model": "deepseek-chat",
+      "keywords_all": [
+        "rest"
+      ],
+      "reference": "MyCheckr <-> Hub: bidirectional REST API; MyCheckr sends POST requests to the Hub. App <-> Hub: REST API plus multicast discovery. MyCheckr <-> MyCheckr direct communication is permitted within the VLAN.",
+      "grade": true,
+      "requires_deepseek": true
+    },
+    {
+      "q": "how do myconnect and mycheckr communicate with each other",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "rest"
+      ],
+      "reference": "Same as the DeepSeek variant but on the default (local) provider: bidirectional REST API, MyCheckr POSTs to the Hub. Checks the local path produces the same core fact.",
+      "grade": true
+    },
+    {
+      "_section": "=== H. CLARIFY: in-domain but underspecified (should ask, not answer, not reject) ===",
+      "q": "explain why device registration might fail",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "how do I set it up",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "what are the mounting instructions",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "Acceptable: mounting instructions for either or both devices. Full MyCheckr: 4mm screws in the 4 mounting holes, or 1/4-inch 20-thread screw bottom-centre. Mini: 1/4-inch 20-thread screw to the mount, or adhesive pad. Answering both with clear device labels is IDEAL behavior (previously mis-specified as clarify; the system answering both devices was correct).",
+      "grade": true
+    },
+    {
+      "_section": "=== I. REJECT: genuinely out of domain (should refuse cleanly) ===",
+      "q": "what is the capital of france",
+      "new_session": true,
+      "outcome": "rejected"
+    },
+    {
+      "q": "who won the world cup in 2018",
+      "new_session": true,
+      "outcome": "rejected"
+    },
+    {
+      "q": "write me a python script to sort a list",
+      "new_session": true,
+      "outcome": "rejected"
+    },
+    {
+      "q": "what is the weather today",
+      "new_session": true,
+      "outcome": "rejected"
+    },
+    {
+      "q": "how do I reset my Cisco router password",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "[PROBE] Adversarial: contains domain-adjacent words (reset, password, router/network) but is about an unrelated product. Should reject, not hallucinate a MyConnect answer."
+    },
+    {
+      "_section": "=== J. ROBUSTNESS: typos, casing, phrasing (should still answer) ===",
+      "q": "waht network conection does teh myconnect hub need",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "ethernet"
+      ],
+      "reference": "[PROBE] Heavy typos. Hub requires Ethernet. Tests retrieval robustness to misspelling.",
+      "grade": true
+    },
+    {
+      "q": "MYCONNECT APP DEFAULT LOGIN???",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "user1"
+      ],
+      "keywords_absent": [
+        "apiuser"
+      ],
+      "reference": "[PROBE] All-caps, terse. Still the app login user1/password1, not apiuser.",
+      "grade": true
+    },
+    {
+      "_section": "=== K. MULTI-TURN follow-ups (order matters, do NOT reset session) ===",
+      "q": "what network does the MyConnect hub need",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "ethernet"
+      ],
+      "reference": "Hub requires Ethernet. Sets up the follow-up below.",
+      "grade": true
+    },
+    {
+      "q": "and what about the MyCheckr devices",
+      "outcome": "answered",
+      "reference": "Follow-up resolving against the prior turn about network connections: MyCheckr supports Ethernet (preferred) or Wi-Fi. [PROBE] Tests condense_query + follow-up handling; may clarify instead if condensation misses — note which."
+    },
+    {
+      "q": "give me step 1 from that",
+      "outcome": "answered",
+      "reference": "Follow-up on the network-requirements exchange. With the installation checklist doc ingested, step-style content genuinely exists (dedicated Ethernet for Hub, Ethernet-preferred for devices), so a grounded step answer is acceptable. A clarify is also acceptable. [NOTE] outcome was previously clarify-only, mis-specified before the checklist doc was known."
+    },
+    {
+      "q": "does MyCheckr Mini have a screen",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "does not have"
+      ],
+      "reference": "Mini has no screen. Sets up the pronoun follow-up below.",
+      "grade": true
+    },
+    {
+      "q": "how is it powered",
+      "outcome": "answered",
+      "reference": "Follow-up: 'it' = MyCheckr Mini, powered via USB-A. [PROBE] Tests pronoun resolution across turns."
+    }
+  ]
+}

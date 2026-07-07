@@ -1,0 +1,64 @@
+{
+  "_README": "Edit these cases to define 'correct'. Each case: q (query); outcome one of answered|clarify|rejected; keywords_all (every string must appear in the answer, case-insensitive) optional; keywords_absent (none may appear — use to catch known-wrong answers) optional; reference (ground-truth facts for the LLM grader) optional; grade true|false (run LLM correctness grading, needs a model); force_provider/force_model optional (exercise a specific model, e.g. DeepSeek); new_session true to reset conversation before this case. Cases run in order within a session so follow-ups work. Curate keywords/reference over time — only outcome is required.",
+
+  "cases": [
+    { "q": "what is MyCheckr and what is it used for", "new_session": true,
+      "outcome": "answered", "keywords_all": ["age"], "reference": "MyCheckr is a low-cost device that helps servers make age-check decisions, automating the Challenge 25 strategy.", "grade": true },
+
+    { "q": "what are the default login credentials for the MyConnect app", "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["user1", "password1"],
+      "keywords_absent": ["apiuser", "apipassword"],
+      "reference": "The MyConnect app default login is username user1 / password password1 (from the MyConnect Environment doc). apiuser/apipassword are API credentials, NOT the MyConnect app login.",
+      "grade": true },
+
+    { "q": "what network connection does the MyConnect hub require", "new_session": true,
+      "outcome": "answered", "keywords_all": ["ethernet"], "grade": true },
+
+    { "q": "how do I connect a tablet to the MyConnect hub", "new_session": true,
+      "outcome": "answered", "keywords_all": ["same network"],
+      "reference": "The Android tablet running the MyConnect App must be on the same network (VLAN) as the Hub. Use 'Search For Hub...' to discover it, or 'Select last used', or manually enter the Hub's IP if discovery is blocked.",
+      "grade": true },
+
+    { "q": "why might MyCheckr registration fail when connecting it to MyConnect", "new_session": true,
+      "outcome": "answered",
+      "reference": "Registration/connectivity failures: power not connected/reliable; Ethernet cable loose or wrong Wi-Fi SSID/credentials; firewall blocking REST API ports or multicast discovery; static IP conflicts (duplicate IP on the network). Any subset of these (network, power, device communication) is acceptable.",
+      "grade": true },
+
+    { "q": "explain why device registration might fail", "new_session": true,
+      "outcome": "clarify" },
+
+    { "q": "what is the capital of france", "new_session": true, "outcome": "rejected" },
+
+    { "q": "what are the default API credentials for registering a MyCheckr device", "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["apiuser", "apipassword"],
+      "keywords_absent": ["user1", "password1"],
+      "reference": "The default API/device-registration credentials are Username: apiuser, Password: apipassword — used when registering a new MyCheckr to the Hub, and documented as the ICU Network API default. This is DISTINCT from user1/password1, which is the MyConnect app login, not the API credentials.",
+      "grade": true },
+
+    { "q": "does MyCheckr Mini have a physical screen", "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["does not have"],
+      "reference": "MyCheckr Mini does NOT have a physical screen or connection ports (unlike the full MyCheckr). It is powered via USB-A only, and its camera feed can be streamed via a URL in IMSLocal software instead of an onboard display.",
+      "grade": true },
+
+    { "q": "what port does the ICU device HTTPS API use", "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["44345"],
+      "reference": "The ICU device HTTPS API port is 44345 (HTTPS only). Example base URL: https://192.168.137.8:44345. NOTE: known borderline-retrieval probe — retrieval score sits near the gate; if this returns 'could not find', it is a retrieval-tuning signal, not a generation bug.",
+      "grade": true },
+    { "q": "who won the world cup in 2018", "new_session": true, "outcome": "rejected" },
+
+    { "q": "how do myconnect and mycheckr communicate with each other", "new_session": true,
+      "outcome": "answered", "force_provider": "deepseek", "force_model": "deepseek-chat",
+      "reference": "A real DeepSeek answer about MyConnect/MyCheckr communication (hub manages network communication between devices).",
+      "grade": true, "requires_deepseek": true },
+
+    { "q": "why might MyCheckr registration fail when connecting it to MyConnect", "new_session": true, "outcome": "answered" },
+    { "q": "which device is that for", "outcome": "clarify" },
+    { "q": "give me step 1 from that", "outcome": "clarify" },
+
+    { "q": "what is the capital of france", "outcome": "rejected" }
+  ]
+}

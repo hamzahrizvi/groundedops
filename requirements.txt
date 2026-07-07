@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-chromadb
-sentence-transformers
-pypdf
-python-docx
-requests
-rank-bm25
-python-dotenv

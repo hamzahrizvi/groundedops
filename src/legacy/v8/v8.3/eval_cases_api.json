@@ -1,0 +1,43 @@
+{
+  "_README": "ICU Network API cases. Run ONLY when ICU_Network_API-1_0_49_1.pdf is ingested. Kept separate so the main suite's pass rate is not polluted by doc-presence.",
+  "cases": [
+    {
+      "_section": "=== E. ICU Network API (the large, under-tested doc) ===",
+      "q": "what port does the ICU device HTTPS API use",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "44345"
+      ],
+      "reference": "ICU device HTTPS API port is 44345 (HTTPS only). Example base URL https://192.168.137.8:44345. [PROBE] borderline retrieval — near the gate.",
+      "grade": true
+    },
+    {
+      "q": "is the ICU Network API available over plain HTTP",
+      "new_session": true,
+      "outcome": "answered",
+      "reference": "No — the API is available via HTTPS only.",
+      "grade": true
+    },
+    {
+      "q": "how does the ICU Network API authenticate users",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "token"
+      ],
+      "reference": "It uses a token request system: the user sends a token request, then includes that token string in subsequent request headers.",
+      "grade": true
+    },
+    {
+      "q": "what HTTP status code does the ICU API return for an unauthorised request",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "401"
+      ],
+      "reference": "401 Unauthorised. (The API uses standard HTTP codes: 200 OK, 201 Created, 400 Bad Request, 401 Unauthorised, 404 Not Found, 500 Internal Server Error.)",
+      "grade": true
+    }
+  ]
+}

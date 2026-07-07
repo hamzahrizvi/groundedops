@@ -1,0 +1,19 @@
+{
+  "pass_rate": 0.8125,
+  "cases": {
+    "what is MyCheckr and what is it used for": false,
+    "what are the default login credentials for the MyConnect app": true,
+    "what network connection does the MyConnect hub require": true,
+    "how do I connect a tablet to the MyConnect hub": false,
+    "why might MyCheckr registration fail when connecting it to MyConnect": true,
+    "explain why device registration might fail": true,
+    "what is the capital of france": true,
+    "what are the default API credentials for registering a MyCheckr device": true,
+    "does MyCheckr Mini have a physical screen": true,
+    "what port does the ICU device HTTPS API use": false,
+    "who won the world cup in 2018": true,
+    "how do myconnect and mycheckr communicate with each other": true,
+    "which device is that for": true,
+    "give me step 1 from that": true
+  }
+}

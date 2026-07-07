@@ -1,0 +1,51 @@
+{
+  "_README": "TEMPLATE eval suite — replace these with cases for YOUR corpus. Schema per case: q (the question); outcome: answered | clarify | rejected; keywords_all (optional, case-insensitive substrings that MUST appear in the answer); keywords_absent (optional, substrings that must NOT appear); reference (ground-truth facts for the LLM grader); grade: true to enable LLM grading; new_session: true starts a fresh conversation (omit to test follow-ups against the previous case); force_provider/force_model (optional) pin a specific model. Workflow: ingest your documents -> write cases -> python eval.py --update-baseline to lock -> python eval.py after every change. See BENCHMARKS.md for what a mature suite looks like.",
+  "cases": [
+    {
+      "q": "what is <YOUR PRODUCT> and what is it used for",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["<a term the correct answer must contain>"],
+      "reference": "<2-3 sentences of ground truth, copied faithfully from your documents — the LLM grader compares the answer against THIS, so accuracy here is everything>",
+      "grade": true
+    },
+    {
+      "q": "<a question whose answer has a near-identical WRONG twin in your docs — e.g. two credential sets, two ports, two versions>",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["<the RIGHT value>"],
+      "keywords_absent": ["<the WRONG twin value>"],
+      "reference": "<state both values and which applies to what — this is the single most valuable case type; write one in each direction>",
+      "grade": true
+    },
+    {
+      "q": "<an underspecified question that could apply to several products in your corpus>",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "what is the capital of france",
+      "new_session": true,
+      "outcome": "rejected"
+    },
+    {
+      "q": "<an off-domain question that SHARES VOCABULARY with your docs — e.g. mentions passwords/reset/network but about an unrelated product>",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "Adversarial guard: domain-adjacent words must not produce a confident answer from unrelated chunks."
+    },
+    {
+      "q": "<a fact question about your corpus>",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["<expected term>"],
+      "reference": "<ground truth>",
+      "grade": true
+    },
+    {
+      "q": "how is it powered",
+      "outcome": "answered",
+      "reference": "Follow-up test: 'it' must resolve against the PREVIOUS case's subject (note: no new_session on this one). Adapt the pronoun question to your domain."
+    }
+  ]
+}

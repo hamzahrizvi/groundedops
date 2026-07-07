@@ -1,4 +1,6 @@
 import logging
+import os
+import re
 import threading
 import time
 
@@ -13,6 +15,7 @@ from logger import log_interaction
 from router import route_model
 from grounding import check_grounding, _get_nli_model
 from llm import generate, generate_with_fallback, warmup_local_models, RETHINK_OPTIONS, condense_query
+from runtime_config import get_settings, set_generation_mode, set_local_models_loaded, set_online_provider
 from memory import add_to_memory, clear_memory, get_history, get_last_query
 from ingest import ingest_file
 from retrieval_db import retrieve_from_db
@@ -22,6 +25,7 @@ from text_utils import (
     is_refusal,
     is_followup_turn,
     has_domain_vocabulary,
+    has_reference_markers,
     is_template_leak,
     build_clarification_options,
 )
@@ -33,31 +37,71 @@ app = FastAPI()
 
 GROUNDING_THRESHOLD = 0.55
 
-# Sigmoid-calibrated reranker score (0.5 = the model's own relevance
-# boundary). Below this, the top chunk is judged irrelevant — refuse
-# BEFORE generation rather than after, so out-of-domain queries don't
-# trigger a 50s+ generation call that produces rambling output.
-#
-# TUNING (v7.1, round 1): lowered 0.5 -> 0.35. At 0.5, borderline-but-real
-# queries (e.g. "why might MyCheckr registration fail…", reranker≈0.43)
-# were shunted to clarify/reject and never got a chance to answer. Genuine
-# out-of-domain queries ("capital of France") score ≈0.0, so 0.35 still
-# rejects those cleanly; the grounding check (0.55) + suppression remain the
-# backstop against hallucination on anything borderline that slips through.
 RETRIEVAL_GATE_THRESHOLD = 0.35
 
-# Above this, treat retrieval as unambiguous even with a borderline score,
-# as long as results aren't scattered across many sources (see
-# text_utils.retrieval_confidence_band).
 AMBIGUOUS_CEILING = 0.65
 
-SNIPPET_LEN = 160
+CONTEXT_FLOOR_RATIO = float(os.getenv("CONTEXT_FLOOR_RATIO", "0.5"))
 
-# session_id is required for correct multi-turn behaviour. Callers that
-# omit it land in this shared bucket — fine for a one-off manual request,
-# but it means unrelated callers can see each other's "previous query"
-# during condensation. Every real client (app.py, test_queries.py)
-# generates and sends its own id.
+EXCLUDED_SOURCES = [
+    s.strip().lower()
+    for s in os.getenv("EXCLUDED_SOURCES", "icu_network_api").split(",")
+    if s.strip()
+]
+
+SNIPPET_LEN = 160
+NOT_FOUND_ANSWER = "I don't have the answer for that. Please contact support as above."
+
+
+_BREADCRUMB_RE = re.compile(r"^\[[^\]\n]*\]\n")
+
+
+_PREAMBLE_RE = re.compile(
+    r"^(?:"
+    r"based\s+(?:solely\s+)?(?:on|upon)\s+(?:the\s+)?(?:provided\s+|given\s+)?(?:context|information|documents?|knowledge\s+base)"
+    r"|according\s+to\s+(?:the\s+)?(?:provided\s+|given\s+)?(?:context|information|documents?)"
+    r"|from\s+(?:the\s+)?(?:provided\s+|given\s+)?context"
+    r")\s*[,:.]?\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_preamble(answer: str) -> str:
+    stripped = _PREAMBLE_RE.sub("", answer.strip(), count=1)
+    if stripped and stripped != answer.strip():
+        return stripped[0].upper() + stripped[1:]
+    return answer
+
+
+def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
+    numbers = re.findall(r"\d+(?:\.\d+)?", answer)
+    if not numbers:
+        return False
+    if answer.count(".") > 3 or len(answer) > 400:
+        return False
+    context = " ".join(c.get("text", "") for c in chunks)
+    return all(n in context for n in set(numbers))
+
+
+def _normalize_query(q: str) -> str:
+    s = q.strip()
+    s = re.sub(r"([?!.,])\1+", r"\1", s)
+    letters = [c for c in s if c.isalpha()]
+    if len(letters) >= 8 and sum(c.isupper() for c in letters) / len(letters) > 0.8:
+        s = s.lower()
+    return s
+
+
+def _strip_breadcrumb(result: dict) -> dict:
+    text = result.get("text", "")
+    stripped = _BREADCRUMB_RE.sub("", text, count=1)
+    if stripped == text:
+        return result
+    out = dict(result)
+    out["text"] = stripped
+    return out
+
+
 DEFAULT_SESSION_ID = "default"
 
 APP_STATE = {
@@ -73,12 +117,10 @@ class QueryRequest(BaseModel):
     q: str
     session_id: str | None = None
     deepseek_api_key: str | None = None
-    # "Rethink with a different model": when set, skips routing/fallback
-    # and calls this exact (provider, model) directly.
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
     force_provider: str | None = None
     force_model: str | None = None
-    # Scope retrieval to one previously-seen source (from a clickable
-    # source link) — "ask more about this document".
     source_filter: str | None = None
 
 
@@ -120,8 +162,7 @@ def _warmup_stack():
         _set_app_state(progress=70, message="Loading grounding model")
         _get_nli_model()
 
-        _set_app_state(progress=85, message="Warming local LLMs")
-        warmup_local_models(["phi", "mistral"])
+        _set_app_state(progress=85, message="Local LLMs available (load via settings)")
 
         _set_app_state(progress=100, message="Ready", ready=True, error=None)
         logger.info("System warmup complete")
@@ -154,14 +195,11 @@ def stats():
 
 @app.get("/rethink_options")
 def rethink_options():
-    """Models available for the 'rethink with a different model' feature."""
     return {"options": [{"provider": p, "model": m} for p, m in RETHINK_OPTIONS]}
 
 
 @app.post("/reset")
 def reset():
-    """Full reset: wipes the document collection AND every conversation
-    session's memory."""
     reset_collection()
     clear_memory()
     return {"status": "reset"}
@@ -169,8 +207,6 @@ def reset():
 
 @app.post("/clear_session")
 def clear_session(payload: ClearSessionRequest):
-    """Clear one conversation's memory without touching the document
-    collection — backs a "New conversation" button."""
     clear_memory(payload.session_id)
     return {"status": "cleared", "session_id": payload.session_id}
 
@@ -184,8 +220,6 @@ def remove_source(payload: DeleteSourceRequest):
 
 @app.post("/source_chunks")
 def source_chunks(payload: SourceChunksRequest):
-    """Fetch full chunk text for the given chunk ids — backs the
-    clickable "view source" feature in the UI."""
     return {"chunks": get_chunks_by_ids(payload.chunk_ids)}
 
 
@@ -204,11 +238,6 @@ async def upload(file: UploadFile = File(...)):
 
 
 def _build_sources(results: list[dict]) -> list[dict]:
-    """
-    Build clickable source objects: one entry per unique source filename,
-    with the chunk ids belonging to it (for /source_chunks lookup) and a
-    short snippet from its best-scoring chunk.
-    """
     by_source: dict[str, dict] = {}
 
     for r in results:
@@ -224,6 +253,147 @@ def _build_sources(results: list[dict]) -> list[dict]:
     return list(by_source.values())
 
 
+@app.get("/settings")
+def settings():
+    return get_settings()
+
+
+class ModeRequest(BaseModel):
+    mode: str
+
+
+@app.post("/settings/mode")
+def set_mode(payload: ModeRequest):
+    try:
+        mode = set_generation_mode(payload.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Generation mode switched to: {mode}")
+    return {"mode": mode, **get_settings()}
+
+
+class ModelsRequest(BaseModel):
+    models: list[str] | None = None
+
+
+class ProviderRequest(BaseModel):
+    provider: str
+
+
+@app.post("/settings/online_provider")
+def set_provider(payload: ProviderRequest):
+    try:
+        p = set_online_provider(payload.provider)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Online provider set to: {p}")
+    return get_settings()
+
+
+_PULL_STATE: dict = {}
+_PULL_LOCK = threading.Lock()
+
+
+def _ollama_base() -> str:
+    from llm import OLLAMA_URL
+    return OLLAMA_URL.replace("/api/generate", "")
+
+
+@app.get("/models/status")
+def models_status():
+    import requests as _requests
+    try:
+        r = _requests.get(f"{_ollama_base()}/api/tags", timeout=5)
+        r.raise_for_status()
+        names = [m.get("name", "") for m in r.json().get("models", [])]
+        installed = {m: any(n.split(":")[0] == m for n in names)
+                     for m in ("mistral", "phi")}
+        return {"ollama_up": True, "installed": installed, **get_settings()}
+    except Exception as e:
+        return {"ollama_up": False, "installed": {"mistral": False, "phi": False},
+                "error": str(e), **get_settings()}
+
+
+def _pull_worker(model: str):
+    import json as _json
+    import requests as _requests
+    try:
+        with _requests.post(f"{_ollama_base()}/api/pull",
+                            json={"name": model}, stream=True, timeout=3600) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                try:
+                    d = _json.loads(line)
+                except Exception:
+                    continue
+                total, done = d.get("total"), d.get("completed")
+                pct = round(done / total * 100, 1) if total and done else None
+                with _PULL_LOCK:
+                    st = _PULL_STATE.setdefault(model, {})
+                    st["status"] = d.get("status", "downloading")
+                    if pct is not None:
+                        st["pct"] = pct
+                if d.get("status") == "success":
+                    break
+        with _PULL_LOCK:
+            _PULL_STATE[model] = {"status": "success", "pct": 100.0, "done": True}
+    except Exception as e:
+        logger.warning(f"Model pull failed for {model}: {e}")
+        with _PULL_LOCK:
+            _PULL_STATE[model] = {"status": "error", "error": str(e), "done": True}
+
+
+@app.post("/models/pull")
+def models_pull(payload: ModelsRequest = None):
+    models = (payload.models if payload and payload.models else ["phi", "mistral"])
+    models = [m for m in models if m in ("phi", "mistral")]
+    with _PULL_LOCK:
+        for m in models:
+            _PULL_STATE[m] = {"status": "starting", "pct": 0.0, "done": False}
+    for m in models:
+        threading.Thread(target=_pull_worker, args=(m,), daemon=True).start()
+    return {"pulling": models}
+
+
+@app.get("/models/pull_status")
+def models_pull_status():
+    with _PULL_LOCK:
+        return dict(_PULL_STATE)
+
+
+@app.post("/models/warmup")
+def models_warmup(payload: ModelsRequest = None):
+    models = (payload.models if payload and payload.models else ["phi", "mistral"])
+    models = [m for m in models if m in ("phi", "mistral")]
+    results = warmup_local_models(models)
+    ok = all(results.values()) and bool(results)
+    set_local_models_loaded(ok)
+    return {"loaded": ok, "models": results}
+
+
+@app.post("/models/unload")
+def models_unload(payload: ModelsRequest = None):
+    import requests as _requests
+    from llm import OLLAMA_URL
+    models = (payload.models if payload and payload.models else ["phi", "mistral"])
+    models = [m for m in models if m in ("phi", "mistral")]
+    results = {}
+    for model in models:
+        try:
+            _requests.post(OLLAMA_URL,
+                           json={"model": model, "prompt": "", "keep_alive": 0},
+                           timeout=15)
+            results[model] = True
+        except Exception as e:
+            logger.warning(f"Unload failed for {model}: {e}")
+            results[model] = False
+    if set(models) >= {"phi", "mistral"} and all(results.values()):
+        set_local_models_loaded(False)
+    return {"unloaded": all(results.values()), "models": results}
+
+
 @app.post("/query")
 def query(payload: QueryRequest):
     if not APP_STATE["ready"]:
@@ -232,66 +402,41 @@ def query(payload: QueryRequest):
     q = payload.q
     session_id = payload.session_id or DEFAULT_SESSION_ID
     deepseek_api_key = payload.deepseek_api_key
+    api_keys = {"deepseek": payload.deepseek_api_key,
+                "openai": payload.openai_api_key,
+                "anthropic": payload.anthropic_api_key}
     start_total = time.time()
 
-    # ── Conversational query resolution (Rewrite-Retrieve-Read) ──
-    # Resolves pronoun/ellipsis-dependent follow-ups ("give me that from
-    # step 1") into a standalone query using THIS session's own history,
-    # via a fast local LLM call rather than a surface-level heuristic.
-    # See llm.condense_query / text_utils' "conversational query
-    # condensation" section for the full rationale and references.
-    #
-    # `resolved_query` is used for everything downstream (retrieval,
-    # routing, extraction, the final generation prompt) — by the time
-    # we've worked out what the user actually means, that's the query
-    # that matters everywhere. The RAW `q` is what gets stored back into
-    # memory and logged, so future condensation prompts see the
-    # conversation as the user actually typed it.
     history = get_history(session_id)
-    resolved_query = condense_query(q, history)
+    resolved_query = condense_query(_normalize_query(q), history)
 
-    # ── Retrieval ────────────────────────────
+    if (history and has_reference_markers(q)
+            and resolved_query.strip().lower() == _normalize_query(q).strip().lower()):
+        last_q = history[-1].get("q", "")
+        if last_q:
+            resolved_query = f"{last_q} — {_normalize_query(q)}"
+            logger.info(f"Follow-up fallback combined query: {resolved_query[:80]}")
+
     t1 = time.time()
     results = retrieve_from_db(resolved_query, top_k=10, source_filter=payload.source_filter)
+    if EXCLUDED_SOURCES and not payload.source_filter:
+        results = [
+            r for r in results
+            if not any(ex in (r.get("source") or "").lower() for ex in EXCLUDED_SOURCES)
+        ]
     results = rerank(resolved_query, results, top_k=5)
     retrieval_time = time.time() - t1
 
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
     confidence = retrieval_confidence_band(results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
 
-    # ── No relevant content at all ───────────
     if confidence == "none":
         total_time = time.time() - start_total
 
-        # A query that referenced prior context (or got rewritten by the
-        # condensation step) is a follow-up, not a fresh out-of-domain
-        # question. Retrieval failing on it doesn't mean the topic is
-        # outside the knowledge base — it usually means the rewrite/
-        # retrieval pairing didn't land. Treating it the same as a
-        # genuinely standalone miss (e.g. "capital of France") produces
-        # the flat, conversation-breaking "I could not find that"
-        # response the user is reporting. Ask for clarification instead;
-        # standalone misses (no reference markers, no history) are
-        # completely unaffected and still get the blunt rejection.
         is_followup = is_followup_turn(q, history, resolved_query)
-
-        # A STANDALONE query (no history dependency) can still be too
-        # vague to retrieve well while clearly being about something in
-        # our domain — "explain why device registration might fail"
-        # never says WHICH device, "post installation verification
-        # installer sign off" never says which product's installation.
-        # These aren't out-of-domain misses like "capital of France"
-        # (zero domain vocabulary); they're underspecified ones. Ask
-        # which device/product instead of flatly rejecting, and surface
-        # whatever low-scoring candidate sources retrieval DID turn up
-        # as a concrete hint rather than a generic "which one?".
         is_vague_in_domain = (not is_followup) and has_domain_vocabulary(q)
 
         if is_followup:
-            # is_followup_turn requires non-empty history, so this is
-            # always available here — referencing the actual prior topic
-            # instead of a generic line is what makes this feel like a
-            # continued conversation rather than a second flat rejection.
             last_topic = history[-1]["q"]
             answer = (
                 f"I don't have more detail beyond what we already covered for "
@@ -314,7 +459,7 @@ def query(payload: QueryRequest):
             needs_clarification = True
             clarification_options = build_clarification_options("ambiguous_in_domain", history, results)
         else:
-            answer = "I could not find that in the knowledge base."
+            answer = NOT_FOUND_ANSWER
             role_out = "rejected"
             reason = "low_retrieval_confidence"
             needs_clarification = False
@@ -323,6 +468,7 @@ def query(payload: QueryRequest):
         log_interaction(q, answer, role_out, "none", [], grounding_score=None, flagged=False)
         return {
             "answer": answer,
+            "response_time_ms": round(total_time * 1000),
             "model": "none",
             "role": role_out,
             "needs_clarification": needs_clarification,
@@ -334,7 +480,6 @@ def query(payload: QueryRequest):
             "response_time": round(total_time, 3),
         }
 
-    # ── Ambiguous: ask a clarifying question instead of guessing ──
     if confidence == "ambiguous":
         candidate_sources = sorted({r.get("source") for r in results[:4] if r.get("source")})
         total_time = time.time() - start_total
@@ -347,6 +492,7 @@ def query(payload: QueryRequest):
                         grounding_score=None, flagged=False)
         return {
             "answer": clarifying,
+            "response_time_ms": round(total_time * 1000),
             "model": "none",
             "role": "clarify",
             "needs_clarification": True,
@@ -357,13 +503,11 @@ def query(payload: QueryRequest):
             "response_time": round(total_time, 3),
         }
 
-    # ── Routing ──────────────────────────────
     if payload.force_provider and payload.force_model:
         role = "rethink"
     else:
         role, (provider, model) = route_model(resolved_query)
 
-    # ── Structured extraction shortcut ───────
     if role != "rethink":
         t2 = time.time()
         extracted = extract_structured_block(results[:5], query=resolved_query)
@@ -378,6 +522,7 @@ def query(payload: QueryRequest):
             add_to_memory(session_id, q, extracted)
             return {
                 "answer": extracted,
+                "response_time_ms": round(total_time * 1000),
                 "mode": "extracted",
                 "model": "structured",
                 "role": "extract",
@@ -390,64 +535,48 @@ def query(payload: QueryRequest):
     else:
         extraction_time = 0.0
 
-    # ── Context ──────────────────────────────
-    # No separate memory-context injection here: resolved_query already
-    # carries whatever context was needed from prior turns (that's the
-    # whole point of the condensation step above), so the document
-    # context retrieved against IT is what the model should answer from.
-    top_chunks = results[:3]
-    context = "\n\n".join(r["text"][:250] for r in top_chunks)
+    _top = results[0].get("rerank_score", 0.0) if results else 0.0
+    top_chunks = [
+        _strip_breadcrumb(r) for r in results[:3]
+        if r.get("rerank_score", 0.0) >= _top * CONTEXT_FLOOR_RATIO
+    ]
+    context = "\n\n".join(r["text"][:1200] for r in top_chunks)
 
     prompt = f"""<context>
 {context}
 </context>
 
 Using ONLY the information inside <context> above, answer the question below.
+Answer directly - do NOT begin with phrases like "Based on the context" or "Based solely on the provided context"; state the answer itself.
+If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
 If the context does not contain enough information, respond with exactly:
-"I could not find that in the knowledge base."
+"{NOT_FOUND_ANSWER}"
 Do not use any knowledge from outside the context.
 
 Question: {resolved_query}
 Answer:"""
 
-    # ── LLM ──────────────────────────────────
     t3 = time.time()
     if role == "rethink":
-        output = generate(payload.force_provider, prompt, payload.force_model, deepseek_api_key)
+        output = generate(payload.force_provider, prompt, payload.force_model, deepseek_api_key, api_keys=api_keys)
         if not output:
             output = {"text": "", "model": payload.force_model, "provider": payload.force_provider}
         output["fallback_used"] = False
     else:
-        output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key)
+        output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
     llm_time = time.time() - t3
 
     raw_text = output.get("text", "").strip()
     generation_failed = (output.get("model") == "none") or not raw_text
-    answer = raw_text or "I could not generate a response."
+    answer = _strip_preamble(raw_text) if raw_text else "I could not generate a response."
 
-    # ── Grounding check ──────────────────────
     refusal = is_refusal(answer)
     template_leak = is_template_leak(answer)
 
-    # A total generation failure (every provider in the fallback chain
-    # failed — output model=="none", e.g. mistral timed out AND no
-    # DeepSeek key) must NOT be run through the grounding check. The
-    # sentinel string "I was unable to generate a response." is generic
-    # enough that NLI entailment scored it 0.993 "grounded" in
-    # production — a meaningless score for a non-answer. Treat it as an
-    # ungrounded non-answer up front.
     if generation_failed:
         is_grounded, grounding_score = False, None
         flagged = True
         refusal = False
-    # Checked BEFORE the NLI grounding call: a known chat-template leak
-    # (e.g. "...a chat between a curious user and an artificial
-    # intelligence assistant...") makes no concrete factual claim, so
-    # NLI entailment has nothing to contradict and can score it as
-    # "grounded" — reproduced in production at 0.934, well above
-    # threshold. is_template_leak catches this deterministically; the
-    # semantic check is skipped entirely when it fires, same as for a
-    # clean refusal.
     elif template_leak:
         is_grounded, grounding_score = False, 0.0
         flagged = True
@@ -459,13 +588,12 @@ Answer:"""
         is_grounded, grounding_score = check_grounding(
             answer, top_chunks, threshold=GROUNDING_THRESHOLD
         )
+        if not is_grounded and _lexically_supported(answer, top_chunks):
+            is_grounded = True
+            logger.info("Grounding rescued by lexical containment "
+                        f"(nli={grounding_score}) for: {resolved_query[:60]}")
         flagged = not is_grounded
 
-    # ── DeepSeek escalation on grounding failure ──
-    # Auto-retry on DeepSeek whenever the local answer is flagged (bad
-    # grounding, a template leak, or a total local failure) AND a key is
-    # available. This is the "auto-retry on DeepSeek if key present"
-    # behaviour.
     escalated = False
     if flagged and role != "rethink" and output.get("provider") in ("local", "none"):
         logger.warning(
@@ -476,7 +604,7 @@ Answer:"""
         deepseek_result = generate("deepseek", prompt, "deepseek-chat", deepseek_api_key=deepseek_api_key)
         if deepseek_result and deepseek_result.get("text"):
             output = deepseek_result
-            answer = output["text"].strip()
+            answer = _strip_preamble(output["text"].strip())
             escalated = True
             template_leak = is_template_leak(answer)
             if template_leak:
@@ -485,20 +613,18 @@ Answer:"""
                 is_grounded, grounding_score = check_grounding(
                     answer, top_chunks, threshold=GROUNDING_THRESHOLD
                 )
+                if not is_grounded and _lexically_supported(answer, top_chunks):
+                    is_grounded = True
+                    logger.info("Escalated answer rescued by lexical "
+                                f"containment (nli={grounding_score})")
                 flagged = not is_grounded
 
-    # ── Suppress an answer we could not verify ──
-    # If after any escalation attempt the answer is STILL a template
-    # leak or a total generation failure, we must not surface the
-    # garbage/boilerplate to the user (this is the #12 "weird
-    # non-grounded answer" that was still being displayed). "Else hide
-    # the answer" — replace it with the standard not-found response.
-    if template_leak or generation_failed:
-        answer = "I could not find that in the knowledge base."
-        grounding_score = None
+    if template_leak or generation_failed or flagged:
+        answer = NOT_FOUND_ANSWER
+        if template_leak or generation_failed:
+            grounding_score = None
         flagged = True
 
-    # ── Memory + logging ──────────────────────
     add_to_memory(session_id, q, answer)
     sources = _build_sources(results)
     log_interaction(q, answer, role, output.get("model"),
@@ -509,6 +635,7 @@ Answer:"""
 
     return {
         "answer": answer,
+        "response_time_ms": round(total_time * 1000),
         "role": role,
         "model": output.get("model"),
         "provider": output.get("provider"),
