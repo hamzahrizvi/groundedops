@@ -1,11 +1,16 @@
 # GroundedOps — Conversational RAG with Grounding Verification
 
-A retrieval-augmented question-answering system that runs primarily on
-local LLMs (via Ollama), with optional escalation to DeepSeek when a
-local answer fails a grounding check, and a chat-style UI with clickable
-sources and manual model re-answering.
+A retrieval-augmented question-answering system with a verification
+layer: every answer is checked against its retrieved sources before it's
+shown, and the system refuses (or asks for clarification) rather than
+guessing. Runs in two modes — **Online** (DeepSeek / OpenAI / Claude, via
+your own API key) or **Free/offline** (local models via Ollama) —
+switchable at runtime. Chat-style UI with clickable per-answer sources,
+persistent chat history, and manual model re-answering.
 
-> **New here? See [USER_GUIDE.md](USER_GUIDE.md) for how to use the app** — this README covers architecture and development.
+> **Run it with Docker in one command — see [DOCKER.md](DOCKER.md).**
+> New to the app? See [USER_GUIDE.md](USER_GUIDE.md). Evaluation results
+> and methodology: [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Why this exists
 
@@ -135,6 +140,19 @@ retrieved chunk text via `/source_chunks`, with an inline "ask more about
 this document" field that scopes the next query to that one source.
 
 ## Setup
+
+### Run with Docker (recommended)
+
+```bash
+docker compose up -d --build      # first build downloads models (a few minutes)
+# open http://localhost:8080
+```
+
+Brings up backend, frontend, and Ollama (for Free mode) together. Full
+details, data volumes, GPU notes, and production caveats: **DOCKER.md**.
+
+### Or run natively
+
 
 ### Quick install (recommended)
 

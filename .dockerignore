@@ -1,0 +1,14 @@
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/dist
+chroma_db/
+logs.jsonl
+logs.json
+eval_results.json
+*.enc
+deepseek_key
+deepseek_env_*
+.env
+legacy/
+uploads/

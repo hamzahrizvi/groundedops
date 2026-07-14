@@ -1,0 +1,37 @@
+# GroundedOps backend — FastAPI + sentence-transformer models
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps kept minimal; add build-essential only if a wheel needs it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl && rm -rf /var/lib/apt/lists/*
+
+# Python deps first (layer cache)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Pre-download the three HF models INTO the image so first run is instant
+# and the container works fully offline for the local pipeline. If you'd
+# rather keep the image small, delete this block and mount a cache volume
+# at /root/.cache instead (models download on first request).
+ENV HF_HOME=/root/.cache/huggingface
+RUN python -c "\
+from sentence_transformers import SentenceTransformer, CrossEncoder; \
+SentenceTransformer('all-MiniLM-L6-v2'); \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+CrossEncoder('cross-encoder/nli-deberta-v3-small')"
+
+COPY . .
+
+# chroma_db and uploads live on mounted volumes (see compose)
+ENV CHROMA_DIR=/data/chroma_db \
+    OLLAMA_URL=http://ollama:11434/api/generate \
+    GENERATION_MODE=api
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl -fs http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

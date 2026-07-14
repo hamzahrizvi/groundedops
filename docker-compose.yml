@@ -1,0 +1,49 @@
+# GroundedOps — full stack. Bring up with:  docker compose up -d
+# Then open http://localhost:8080
+services:
+  backend:
+    build:
+      context: ./src
+      dockerfile: ../Dockerfile.backend
+    environment:
+      # Online by default; set to "local" for fully offline (needs Ollama below).
+      GENERATION_MODE: ${GENERATION_MODE:-api}
+      OLLAMA_URL: http://ollama:11434/api/generate
+      CHROMA_DIR: /data/chroma_db
+      # Keys can be provided per-request from the UI; env is optional fallback.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - grounded-data:/data          # chroma_db persists here
+      - ./corpus:/app/corpus:ro      # OPTIONAL: drop PDFs here to ingest
+    restart: unless-stopped
+    # No host port needed — only the frontend talks to it, over the compose network.
+
+  frontend:
+    build:
+      context: ./src
+      dockerfile: ../Dockerfile.frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Local-model service. Only needed for Free/offline mode. Safe to leave
+  # running; models download into the named volume on first use (or via
+  # the app's Free-mode dialog / `docker compose exec ollama ollama pull mistral`).
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    # GPU (optional, big speedup for Free mode) — uncomment if you have NVIDIA+toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+volumes:
+  grounded-data:
+  ollama-models:
