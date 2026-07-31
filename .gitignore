@@ -33,3 +33,12 @@ logs.jsonl
 *.enc deepseek_key
 eval_results.json 
 eval_baseline*.json
+
+corpus/*
+!corpus/README.md
+
+uploads/
+faq_store.json
+catalog_config.json
+ingest_stamp.txt
+conversations.db
