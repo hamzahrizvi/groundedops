@@ -40,6 +40,24 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# ── CORS (v10.17) ────────────────────────────────────────────────────
+# The embeddable website widget runs on a DIFFERENT origin (the customer's
+# site) and calls /query cross-origin, so the browser requires CORS. This
+# is deliberately wide-open for now to get the widget functional; lock
+# `allow_origins` down to the specific customer domains — and add auth /
+# rate limiting — before this faces real public traffic. Origins can be
+# supplied as a comma-separated WIDGET_ALLOWED_ORIGINS env var; default "*".
+from fastapi.middleware.cors import CORSMiddleware
+
+_cors_origins = [o.strip() for o in os.getenv("WIDGET_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 convo_store.init_db()
 
 GROUNDING_THRESHOLD = 0.55
