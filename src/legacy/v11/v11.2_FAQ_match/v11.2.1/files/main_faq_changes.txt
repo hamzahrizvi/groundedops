@@ -1,0 +1,139 @@
+main.py changes for FAQ disambiguation (v3.2.0)
+================================================
+
+THREE edits. The first two are one-liners.
+
+------------------------------------------------------------------------
+EDIT 1 — QueryRequest: add two fields
+------------------------------------------------------------------------
+
+    class QueryRequest(BaseModel):
+        ...
+        # v3.2.0: the user EXPLICITLY selected a curated FAQ from the
+        # suggestions. Serve that entry by id — no matching, so no
+        # possibility of a mismatch.
+        faq_id: str | None = None
+        # v3.2.0: the user said "I'm asking something else". Skip the FAQ
+        # entirely and answer from the documents.
+        skip_faq: bool = False
+
+
+------------------------------------------------------------------------
+EDIT 2 — replace the whole FAQ block (currently lines ~1028-1090,
+from the `# v10.14: curated-FAQ short-circuit` comment through the end
+of the `if _faq_mode == "answer":` return) with this
+------------------------------------------------------------------------
+
+    # ── Curated FAQ (v3.2.0: ask, don't guess) ───────────────────────
+    # Previous versions tried to DECIDE whether the user's question was
+    # equivalent to a curated one. Two implementations failed; the second
+    # served "no requirement for internet" to "does it have WiFi or
+    # Ethernet ports?" — semantically adjacent, factually opposite.
+    # Deciding equivalence is the hard part, and it's the part a human
+    # does effortlessly, so we now SUGGEST and let the user choose.
+    _faq_scope = payload.product or payload.category
+
+    # (a) The user picked a specific curated question. Serve exactly that.
+    if payload.faq_id:
+        _entry = faq_store.get_by_id(payload.faq_id)
+        if _entry:
+            total_time = time.time() - start_total
+            _uid = convo_store.resolve_user_id(x_user_id)
+            _convo_id = None
+            if _uid:
+                try:
+                    _convo_id = convo_store.save_turn(
+                        _uid, payload.session_id, payload.product,
+                        _entry["question"], _entry["answer"], [])
+                except Exception:
+                    pass
+            return {
+                "answer": _entry["answer"],
+                "response_time_ms": round(total_time * 1000),
+                "conversation_id": _convo_id,
+                "role": "answered",
+                "model": "faq-curated",
+                "provider": "faq",
+                # No grounding was performed — report that honestly rather
+                # than asserting 1.0 as the old code did. It doesn't need
+                # grounding: a human wrote the answer AND a human chose it.
+                "grounding_score": None,
+                "flagged": False,
+                "from_faq": True,
+                "faq_matched_question": _entry["question"],
+                "sources": [],
+            }
+        logger.warning(f"faq_id {payload.faq_id} not found — falling through")
+
+    # (b) The user rejected the suggestions. Log the gap, answer from docs.
+    if payload.skip_faq:
+        faq_store.record_gap(resolved_query, _faq_scope)
+
+    # (c) Normal path: near-verbatim serves directly, anything ambiguous
+    #     comes back as suggestions for the user to confirm.
+    if not payload.skip_faq:
+        _faq = faq_store.suggest_candidates(resolved_query, _faq_scope)
+
+        if _faq["mode"] == "answer":
+            _entry = _faq["entry"]
+            total_time = time.time() - start_total
+            _uid = convo_store.resolve_user_id(x_user_id)
+            _convo_id = None
+            if _uid:
+                try:
+                    _convo_id = convo_store.save_turn(
+                        _uid, payload.session_id, payload.product, q,
+                        _entry["answer"], [])
+                except Exception:
+                    pass
+            return {
+                "answer": _entry["answer"],
+                "response_time_ms": round(total_time * 1000),
+                "conversation_id": _convo_id,
+                "role": "answered",
+                "model": "faq-curated",
+                "provider": "faq",
+                "grounding_score": None,
+                "flagged": False,
+                "from_faq": True,
+                "faq_matched_question": _entry["question"],
+                "faq_exact": True,
+                "sources": [],
+            }
+
+        if _faq["mode"] == "disambiguate":
+            total_time = time.time() - start_total
+            return {
+                "answer": ("I have reviewed answers to these questions — "
+                           "is one of them what you meant?"),
+                "response_time_ms": round(total_time * 1000),
+                "role": "clarify",
+                "model": "none",
+                "provider": "faq",
+                "needs_clarification": True,
+                "from_faq": False,
+                # The widget/UI renders these as tappable options. Each
+                # carries its id so the follow-up serves that exact entry.
+                "faq_candidates": _faq["candidates"],
+                "grounding_score": None,
+                "flagged": False,
+                "sources": [],
+            }
+        # mode == "none" -> fall through to retrieval below.
+
+
+------------------------------------------------------------------------
+EDIT 3 — new admin endpoint: the FAQ gap report
+------------------------------------------------------------------------
+Add near the other /faq endpoints. This is the payoff of asking instead
+of guessing: a user-confirmed list of questions your docs are asked but
+your FAQ doesn't cover, ranked by how often they're asked.
+
+    @app.get("/faq/gaps")
+    def faq_gaps(product: str | None = None,
+                 x_admin_password: str = Header(default="")):
+        _require_admin(x_admin_password)
+        return {"gaps": faq_store.list_gaps(product)}
+
+(Use whatever admin-check helper the other admin endpoints use — match
+the existing pattern rather than copying this name.)

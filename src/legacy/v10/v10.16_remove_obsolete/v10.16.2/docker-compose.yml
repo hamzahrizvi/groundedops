@@ -1,0 +1,75 @@
+# GroundedOps — full stack. Bring up with:  docker compose up -d
+# Then open http://localhost:8080   (widget API on http://localhost:8000)
+services:
+  backend:
+    build:
+      context: ./src
+      dockerfile: ../Dockerfile.backend
+    environment:
+      # Online by default; set to "local" for fully offline (needs Ollama below).
+      GENERATION_MODE: ${GENERATION_MODE:-api}
+      ONLINE_PROVIDER: ${ONLINE_PROVIDER:-deepseek}
+      OLLAMA_URL: http://ollama:11434/api/generate
+      CHROMA_DIR: /data/chroma_db
+      # v3.0.0: keep the conversation SQLite db on the persistent volume.
+      # It defaulted to ./conversations.db — i.e. /app inside the image —
+      # so in a production run (no source bind-mount) every rebuild
+      # silently discarded all saved conversations.
+      CONVO_DB_PATH: /data/conversations.db
+      CORPUS_DIR: /app/corpus
+      # v3.0.0: CORS origins for the embeddable widget. Comma-separated.
+      # "*" is a DEV default — set your real site origins in .env before
+      # exposing this publicly, e.g.
+      #   WIDGET_ALLOWED_ORIGINS=https://acme.com,https://docs.acme.com
+      WIDGET_ALLOWED_ORIGINS: ${WIDGET_ALLOWED_ORIGINS:-*}
+      # Gates every admin endpoint. CHANGE THIS — it defaults to "admin".
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      # Widget traffic can't supply a key from the browser, so an env key
+      # is required for Online mode when serving the widget.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      # v3.0.0: the backend now needs a reachable origin, because the
+      # widget runs on a THIRD-PARTY site and calls /query directly from
+      # the visitor's browser — it can't reach the compose-internal
+      # network the way the bundled frontend can.
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - grounded-data:/data          # chroma_db + conversations.db persist here
+      - ./corpus:/app/corpus:ro      # OPTIONAL: drop PDFs here to ingest
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./src
+      dockerfile: ../Dockerfile.frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    # The widget file ships inside this image: it lives at
+    # src/frontend/public/widget/groundedops-widget.js, so the built
+    # nginx image serves it at
+    #   http://localhost:8080/widget/groundedops-widget.js
+    # Put it behind a CDN for real deployments; the file is static and
+    # cacheable indefinitely (version the URL when you change it).
+
+  # Local-model service. Only needed for Free/offline mode. Safe to leave
+  # running; models download into the named volume on first use (or via
+  # the app's Free-mode dialog / `docker compose exec ollama ollama pull mistral`).
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    # GPU (optional, big speedup for Free mode) — uncomment if you have NVIDIA+toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+volumes:
+  grounded-data:
+  ollama-models:

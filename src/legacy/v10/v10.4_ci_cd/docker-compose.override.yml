@@ -1,0 +1,21 @@
+# DEV ONLY — Compose auto-merges this over docker-compose.yml.
+# Bind-mounts source + hot-reload so code changes reflect WITHOUT a
+# rebuild. Delete/rename this file for a production run.
+# Rename to disable: mv docker-compose.override.yml override.disabled
+services:
+  backend:
+    volumes:
+      - ./src:/app
+      - grounded-data:/data
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      INGEST_PROVIDER: ${INGEST_PROVIDER:-deepseek}   # fast ingest in dev
+  frontend:
+    # Vite dev server (hot module reload) instead of the built nginx image.
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host --port 80"
+    volumes:
+      - ./src/frontend:/app
+    ports:
+      - "8080:80"

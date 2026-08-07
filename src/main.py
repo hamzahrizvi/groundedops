@@ -5,7 +5,10 @@ import threading
 import time
 import uuid
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header
+from urllib.parse import quote
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from db import get_collection, reset_collection, get_stats, delete_source, get_chunks_by_ids
@@ -40,6 +43,45 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# ── CORS (v10.17) ────────────────────────────────────────────────────
+# The embeddable website widget runs on a DIFFERENT origin (the customer's
+# site) and calls /query cross-origin, so the browser requires CORS. This
+# is deliberately wide-open for now to get the widget functional; lock
+# `allow_origins` down to the specific customer domains — and add auth /
+# rate limiting — before this faces real public traffic. Origins can be
+# supplied as a comma-separated WIDGET_ALLOWED_ORIGINS env var; default "*".
+from fastapi.middleware.cors import CORSMiddleware
+
+_cors_origins = [o.strip() for o in os.getenv("WIDGET_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# ── /api prefix compatibility (v3.4.2) ───────────────────────────────
+# The React app calls "/api/status", "/api/query", etc. In development
+# Vite proxied "/api" to the backend on :8000 and stripped the prefix. When
+# the built app is served BY this process there is no proxy, so those calls
+# hit FastAPI as "/api/..." and match nothing.
+#
+# Rewriting here means the frontend needs no change and no rebuild, and the
+# widget can keep calling "/query" directly. Both spellings work.
+@app.middleware("http")
+async def _strip_api_prefix(request, call_next):
+    path = request.scope.get("path", "")
+    if path == "/api" or path.startswith("/api/"):
+        request.scope["path"] = path[4:] or "/"
+        # Flag it so the SPA fallback below does NOT serve index.html for a
+        # missing API route: returning HTML with 200 to a fetch() that
+        # expects JSON is what made the UI retry forever instead of showing
+        # an error.
+        request.scope["_is_api_call"] = True
+    return await call_next(request)
+
+
 convo_store.init_db()
 
 GROUNDING_THRESHOLD = 0.55
@@ -110,6 +152,39 @@ def _strip_preamble(answer: str) -> str:
     if stripped and stripped != answer.strip():
         return stripped[0].upper() + stripped[1:]
     return answer
+
+
+# v3.3.0: the prompt forbids referring to the retrieval context, but small
+# models still emit trailing evidence-pointing:
+#   "...supporting 100Base-T, as indicated by the WiFi Config section."
+#   "...RJ45. The context does not specify the number of ports."
+# The reader cannot see the context, so these are meaningless to them and
+# they undercut the answer. Deterministic cleanup, same rationale as
+# _strip_preamble above.
+_META_TAIL_RE = re.compile(
+    r"(?:[,;]?\s*(?:as|which is)\s+(?:indicated|shown|stated|mentioned|listed|described|specified)"
+    r"(?:\s+\w+){0,4}?\s+(?:in|by)\s+the\s+[^.]*?)(?=[.]|$)",
+    re.IGNORECASE,
+)
+_META_SENT_RE = re.compile(
+    r"(?:^|(?<=[.!?]))\s*[^.!?]*\b(?:the\s+)?(?:context|provided\s+(?:context|information|text)|"
+    r"above\s+(?:context|text))\b[^.!?]*[.!?]",
+    re.IGNORECASE,
+)
+
+
+def _strip_meta(answer: str) -> str:
+    """Remove references to the retrieval context from a generated answer."""
+    if not answer:
+        return answer
+    out = _META_TAIL_RE.sub("", answer)
+    # Never touch the sanctioned refusal string.
+    if "could not find that in the knowledge base" not in out:
+        out = _META_SENT_RE.sub(" ", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    out = re.sub(r"\s+([.,;:])", r"\1", out)
+    # If cleanup consumed everything, keep the original.
+    return out if out.strip(" .") else answer
 
 
 def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
@@ -201,6 +276,12 @@ class QueryRequest(BaseModel):
     source_filter: str | None = None
     product: str | None = None   # product OR category key (scope)
     category: str | None = None  # v10.3 category context (for product disambiguation)
+    # v3.2: the user picked a specific curated FAQ from the suggestions.
+    # Served by id — no matching, so no possibility of a mismatch.
+    faq_id: str | None = None
+    # v3.2: the user said "I'm asking something else". Skip the FAQ and
+    # answer from the documents.
+    skip_faq: bool = False
 
 
 class DeleteSourceRequest(BaseModel):
@@ -356,22 +437,37 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...),
-                 category_key: str | None = Header(default=None),
-                 product_key: str | None = Header(default=None),
-                 ingest_provider: str | None = Header(default=None),
+async def upload(request: Request,
+                 file: UploadFile = File(...),
                  x_user_id: str | None = Header(default=None)):
     """v10.x: ASYNC ingest. Returns a job_id immediately; the document is
-    indexed in a background thread (doc2query on a large PDF can take
-    minutes). Poll /upload/status/{job_id} for progress.
+    indexed in a background thread. Poll /upload/status/{job_id}.
 
-    v10.3: optional category_key + product_key headers (admin uploads)
-    attach the ingested source to that product for scoping.
-    v10.6: optional ingest_provider header ("deepseek"/"openai"/
-    "anthropic"/"local"/"auto") overrides INGEST_PROVIDER per upload,
-    so the admin can choose local vs API from the GUI."""
+    v10.3: optional category/product scope headers (admin uploads) attach
+    the ingested source to that product.
+
+    v3.4.0: those scope headers are now read off the RAW request so both
+    "category-key" and "category_key" work. They were Header() params,
+    which FastAPI maps to the HYPHENATED name only — so a frontend sending
+    the underscored form produced None, the attach_source call in
+    _ingest_worker was skipped silently, and the document then appeared in
+    the "needs assignment" list despite a category having been chosen.
+    """
     if not APP_STATE["ready"]:
         raise HTTPException(status_code=503, detail="System is still loading")
+
+    _h = request.headers
+    category_key = _h.get("category-key") or _h.get("category_key")
+    product_key = _h.get("product-key") or _h.get("product_key")
+    ingest_provider = _h.get("ingest-provider") or _h.get("ingest_provider")
+
+    if not (category_key and product_key):
+        # Loud, with the header names actually received — one upload tells
+        # you exactly what the frontend is sending.
+        logger.warning(
+            f"upload: missing scope headers (category={category_key!r}, "
+            f"product={product_key!r}) — '{file.filename}' will need manual "
+            f"assignment. Headers received: {list(_h.keys())}")
 
     content = await file.read()
     filename = file.filename
@@ -398,8 +494,15 @@ def upload_status(job_id: str):
 def _build_sources(results: list[dict]) -> list[dict]:
     """
     Build clickable source objects: one entry per unique source filename,
-    with the chunk ids belonging to it (for /source_chunks lookup) and a
-    short snippet from its best-scoring chunk.
+    with the chunk ids belonging to it (for /source_chunks lookup), a short
+    snippet from its best-scoring chunk, the PAGE NUMBERS those chunks came
+    from, and a download URL for the original file (v3.3.0).
+
+    Pages are collected as a sorted set because one source usually
+    contributes several chunks — the reader wants "pages 12, 14", not one
+    arbitrary page. Requires a re-ingest: page metadata is written at
+    ingest time, so chunks indexed before v3.3.0 have none and simply
+    report no page.
     """
     by_source: dict[str, dict] = {}
 
@@ -410,10 +513,27 @@ def _build_sources(results: list[dict]) -> list[dict]:
                 "source": src,
                 "chunk_ids": [],
                 "snippet": r["text"][:SNIPPET_LEN].strip() + ("…" if len(r["text"]) > SNIPPET_LEN else ""),
+                "pages": [],
+                # Served by /source_file. Quoted because these filenames
+                # contain spaces and parentheses.
+                "download_url": f"/source_file/{quote(src)}",
             }
         by_source[src]["chunk_ids"].append(r.get("id"))
+        _pg = r.get("page")
+        if isinstance(_pg, int) and _pg not in by_source[src]["pages"]:
+            by_source[src]["pages"].append(_pg)
 
-    return list(by_source.values())
+    out = []
+    for sdict in by_source.values():
+        sdict["pages"] = sorted(sdict["pages"])
+        # Pre-formatted so every UI renders it identically.
+        if sdict["pages"]:
+            sdict["page_label"] = ("page " if len(sdict["pages"]) == 1 else "pages ") + \
+                                  ", ".join(str(pg) for pg in sdict["pages"])
+        else:
+            sdict["page_label"] = None
+        out.append(sdict)
+    return out
 
 
 @app.get("/settings")
@@ -737,22 +857,119 @@ def faq_generate(payload: FaqGenerateReq, x_admin_password: str | None = Header(
           for q in payload.questions if q.get("question", "").strip()]
     if not qa:
         raise HTTPException(status_code=400, detail="No questions provided")
-    faq_store.record_questions(payload.source, payload.product, qa,
-                               category=payload.category)
-    return {"stored": len(qa), "source": payload.source}
+
+    # v3.4.0: MERGE by default. record_questions() replaces every entry for
+    # a source, so regenerating destroyed manually-added questions and reset
+    # curated answers. merge_questions() adds only questions not already
+    # present in the same product scope (compared case- and punctuation-
+    # insensitively) and never overwrites an existing entry, which makes
+    # "Generate" safe to press repeatedly.
+    if getattr(payload, "replace", False):
+        faq_store.record_questions(payload.source, payload.product, qa,
+                                   category=payload.category)
+        return {"stored": len(qa), "replaced": True, "source": payload.source}
+
+    result = faq_store.merge_questions(payload.source, payload.product, qa,
+                                       category=payload.category)
+    return {**result, "replaced": False, "source": payload.source}
 
 
 class FaqEdit(BaseModel):
-    answer: str
+    # v3.4.0: the QUESTION is editable too. Previously only the answer could
+    # be changed, so a badly-worded generated question could only be deleted
+    # and retyped.
+    question: str | None = None
+    answer: str | None = None
+
+
+class FaqCreate(BaseModel):
+    question: str
+    answer: str = ""
+    product: str = ""
+    category: str = ""
+
+
+@app.post("/faq")
+def faq_create(payload: FaqCreate, x_admin_password: str | None = Header(default=None)):
+    """Add a FAQ question by hand (v3.4.0). Stored with origin="manual" and
+    edited=True so a later Generate can neither overwrite nor duplicate it."""
+    _require_admin(x_admin_password)
+    try:
+        return faq_store.add_entry(payload.question, payload.answer,
+                                   products=payload.product,
+                                   category=payload.category)
+    except ValueError as e:
+        # 409 so the UI can show "that question already exists".
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @app.patch("/faq/{faq_id}")
 def faq_edit(faq_id: str, payload: FaqEdit, x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    updated = faq_store.update_answer(faq_id, payload.answer)
+    updated = faq_store.update_entry(faq_id, payload.question, payload.answer)
     if not updated:
         raise HTTPException(status_code=404, detail="FAQ entry not found")
     return updated
+
+
+@app.delete("/faq")
+def faq_delete_all(product: str | None = None,
+                   source: str | None = None,
+                   confirm: bool = False,
+                   x_admin_password: str | None = Header(default=None)):
+    """Bulk-delete FAQ entries (v3.4.0).
+
+    Requires ?confirm=true — a second lock behind the UI's warning dialog.
+    With no scope this wipes the entire curated FAQ, which is hand-written
+    content with no undo.
+    """
+    _require_admin(x_admin_password)
+    if not confirm:
+        raise HTTPException(status_code=400,
+                            detail="Refusing bulk delete without confirm=true")
+    removed = faq_store.delete_all(scope_key=product, source=source)
+    return {"deleted": removed, "scope": product or source or "ALL"}
+
+
+SOURCE_FILE_DIR = os.getenv("SOURCE_FILE_DIR", "/data/source_files")
+
+
+@app.get("/source_file/{filename}")
+def source_file(filename: str):
+    """Serve the original ingested document so an answer can link back to it
+    (v3.3.0). Requires a re-ingest: originals are retained at ingest time,
+    and documents indexed earlier were never kept.
+
+    SECURITY: the filename comes from the URL, so it is reduced to a bare
+    basename — without that, "../../etc/passwd" escapes the directory.
+    Excluded (internal) sources are refused so they can't be downloaded.
+
+    NOTE: deliberately unauthenticated so the public widget can offer
+    downloads, which means ANY retained document is publicly retrievable by
+    name. Gate this per tenant/product before real customer traffic.
+    """
+    safe = os.path.basename(filename)
+    _lower = safe.lower()
+    for _ex in EXCLUDED_SOURCES:
+        if _ex and _ex in _lower:
+            raise HTTPException(status_code=404, detail="Not found")
+    path = os.path.join(SOURCE_FILE_DIR, safe)
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=404,
+            detail="Source file not retained. Re-ingest to enable downloads.")
+    return FileResponse(path, filename=safe)
+
+
+@app.get("/faq/gaps")
+def faq_gaps(product: str | None = None,
+             x_admin_password: str | None = Header(default=None)):
+    """Questions the FAQ could not answer — either nothing was close enough
+    to suggest, or the user rejected the suggestions (v3.4.0). Ranked by how
+    often each was asked: this is the FAQ backlog, prioritised by real
+    demand rather than guesswork."""
+    _require_admin(x_admin_password)
+    return {"gaps": faq_store.list_gaps(product)}
 
 
 @app.delete("/faq/{faq_id}")
@@ -1007,33 +1224,109 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     elif payload.category:
         _scope = {"category": payload.category}
 
-    # v10.14: curated-FAQ short-circuit. If this question closely matches a
-    # saved FAQ that has a human-reviewed answer, serve that directly — no
-    # LLM call, instant, and consistent with what the admin approved.
+    # ── Curated FAQ (v3.2: ask, don't guess) ─────────────────────────
+    # Earlier versions DECIDED whether the user's question was equivalent to
+    # a curated one and served the answer if so. That failed in production:
+    # "does the MyCheckr have WiFi or Ethernet ports?" was served the
+    # curated answer to "does MyCheckr require an internet connection?" —
+    # semantically adjacent, factually opposite. Judging equivalence is the
+    # hard part and the part a human does effortlessly, so we now SUGGEST
+    # and let the user choose. Only a near-verbatim match auto-serves.
     _faq_scope = payload.product or payload.category
-    _faq_hit = faq_store.match_answer(resolved_query, _faq_scope)
-    if _faq_hit:
-        total_time = time.time() - start_total
-        _uid = convo_store.resolve_user_id(x_user_id)
-        _convo_id = None
-        if _uid:
-            try:
-                _convo_id = convo_store.save_turn(
-                    _uid, payload.session_id, payload.product, q, _faq_hit["answer"], [])
-            except Exception:
-                pass
-        return {
-            "answer": _faq_hit["answer"],
-            "response_time_ms": round(total_time * 1000),
-            "conversation_id": _convo_id,
-            "role": "answered",
-            "model": "faq-cache",
-            "provider": "faq",
-            "grounding_score": 1.0,
-            "flagged": False,
-            "from_faq": True,
-            "sources": [],
-        }
+
+    # (a) The user selected a specific curated question.
+    if payload.faq_id:
+        _entry = faq_store.get_by_id(payload.faq_id)
+        if _entry:
+            total_time = time.time() - start_total
+            _uid = convo_store.resolve_user_id(x_user_id)
+            _convo_id = None
+            if _uid:
+                try:
+                    _convo_id = convo_store.save_turn(
+                        _uid, payload.session_id, payload.product,
+                        _entry["question"], _entry["answer"], [])
+                except Exception:
+                    pass
+            return {
+                "answer": _entry["answer"],
+                "response_time_ms": round(total_time * 1000),
+                "response_time": round(total_time, 3),
+                "conversation_id": _convo_id,
+                "role": "answered",
+                "model": "faq-curated",
+                "provider": "faq",
+                # No grounding was performed, so report that honestly rather
+                # than asserting 1.0 as the old code did. It doesn't need it:
+                # a human wrote this answer AND a human chose it.
+                "grounding_score": None,
+                "flagged": False,
+                "from_faq": True,
+                "faq_matched_question": _entry["question"],
+                "sources": [],
+            }
+        logger.warning(f"faq_id {payload.faq_id} not found — falling through")
+
+    # (b) The user rejected the suggestions: log the gap, answer from docs.
+    if payload.skip_faq:
+        faq_store.record_gap(resolved_query, _faq_scope)
+
+    # (c) Normal path.
+    if not payload.skip_faq:
+        _faq = faq_store.suggest_candidates(resolved_query, _faq_scope)
+
+        if _faq["mode"] == "answer":
+            _entry = _faq["entry"]
+            total_time = time.time() - start_total
+            _uid = convo_store.resolve_user_id(x_user_id)
+            _convo_id = None
+            if _uid:
+                try:
+                    _convo_id = convo_store.save_turn(
+                        _uid, payload.session_id, payload.product, q,
+                        _entry["answer"], [])
+                except Exception:
+                    pass
+            return {
+                "answer": _entry["answer"],
+                "response_time_ms": round(total_time * 1000),
+                "response_time": round(total_time, 3),
+                "conversation_id": _convo_id,
+                "role": "answered",
+                "model": "faq-curated",
+                "provider": "faq",
+                "grounding_score": None,
+                "flagged": False,
+                "from_faq": True,
+                "faq_matched_question": _entry["question"],
+                "faq_exact": True,
+                "sources": [],
+            }
+
+        if _faq["mode"] == "disambiguate":
+            total_time = time.time() - start_total
+            _n = len(_faq["candidates"])
+            _msg = ("These FAQs match your query — please select the one you "
+                    "meant:") if _n > 1 else \
+                   ("This FAQ looks like a match for your query — is this "
+                    "what you meant?")
+            return {
+                "answer": _msg,
+                "response_time_ms": round(total_time * 1000),
+                "response_time": round(total_time, 3),
+                "role": "clarify",
+                "model": "none",
+                "provider": "faq",
+                "needs_clarification": True,
+                "from_faq": False,
+                # The UI renders these as options; each carries its id so the
+                # follow-up serves that exact entry.
+                "faq_candidates": _faq["candidates"],
+                "grounding_score": None,
+                "flagged": False,
+                "sources": [],
+            }
+        # mode == "none" -> fall through to retrieval.
 
     results = retrieve_from_db(resolved_query, top_k=10,
                                source_filter=payload.source_filter,
@@ -1227,10 +1520,15 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
 </context>
 
 Using ONLY the information inside <context> above, answer the question below.
-Answer directly - do NOT begin with phrases like "Based on the context" or "Based solely on the provided context"; state the answer itself.
+
+Write the answer as a product expert would state it to a customer.
+NEVER refer to the source material or to your own reasoning. Do not write "the context", "the document", "the provided information", "as indicated by", "as shown in", "according to the", or "the section". The reader cannot see the context and does not know what it is; sources are attached separately, so you never need to point at them.
+Answer directly and factually, then stop. No preamble, no meta-commentary.
+If the question asks whether something exists or is supported, begin with a plain Yes or No, then give the specifics.
 If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
 If the context does not contain enough information, respond with exactly:
 "I could not find that in the knowledge base."
+Do not state what the context does or does not contain in any other words.
 Do not use any knowledge from outside the context.
 
 Question: {resolved_query}
@@ -1249,7 +1547,7 @@ Answer:"""
 
     raw_text = output.get("text", "").strip()
     generation_failed = (output.get("model") == "none") or not raw_text
-    answer = _strip_preamble(raw_text) if raw_text else "I could not generate a response."
+    answer = _strip_meta(_strip_preamble(raw_text)) if raw_text else "I could not generate a response."
 
     # ── Grounding check ──────────────────────
     refusal = is_refusal(answer)
@@ -1305,10 +1603,15 @@ Answer:"""
             f"template_leak={template_leak}, failed={generation_failed}) — "
             f"escalating to DeepSeek for: {resolved_query[:60]}"
         )
-        deepseek_result = generate("deepseek", prompt, "deepseek-chat", deepseek_api_key=deepseek_api_key)
+        # v3.4.1: model name comes from env. "deepseek-chat" was hardcoded
+        # here, and DeepSeek RETIRED that alias on 24 July 2026 — calls to it
+        # are no longer routed anywhere, so this escalation path was silently
+        # dead. Keep it aligned with ONLINE_DEEPSEEK_MODEL.
+        _ds_model = os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
+        deepseek_result = generate("deepseek", prompt, _ds_model, deepseek_api_key=deepseek_api_key)
         if deepseek_result and deepseek_result.get("text"):
             output = deepseek_result
-            answer = _strip_preamble(output["text"].strip())
+            answer = _strip_meta(_strip_preamble(output["text"].strip()))
             escalated = True
             template_leak = is_template_leak(answer)
             if template_leak:
@@ -1382,3 +1685,49 @@ Answer:"""
         },
         "sources": sources,
     }
+
+
+# ── Serve the built frontend (v3.4.1) ────────────────────────────────
+# Native installs previously needed Node running a second dev server on
+# :5173 alongside the API on :8000 — two terminal windows and two URLs,
+# which is a lot to ask of a non-technical tester. When a production build
+# exists we serve it from here instead, so the whole app is ONE process on
+# ONE port and the installer never needs Node.
+#
+# Registered last on purpose. Starlette matches in registration order, so
+# every API route above still wins; this only catches what's left.
+_FRONTEND_DIST = os.getenv(
+    "FRONTEND_DIST",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist"),
+)
+
+if os.path.isdir(_FRONTEND_DIST):
+    from fastapi.staticfiles import StaticFiles
+    from starlette.responses import FileResponse as _FR
+
+    class _SPAStatic(StaticFiles):
+        """Serve the SPA, falling back to index.html for unknown paths so
+        client-side routes survive a page refresh (a bare 404 there looks
+        like the app is broken)."""
+
+        async def get_response(self, path: str, scope):
+            try:
+                return await super().get_response(path, scope)
+            except Exception:
+                # Never fall back for API calls or for anything that looks
+                # like a file request - a genuine 404 is far more useful
+                # than silently returning the app shell.
+                if scope.get("_is_api_call") or "." in os.path.basename(path):
+                    raise
+                index = os.path.join(_FRONTEND_DIST, "index.html")
+                if os.path.isfile(index):
+                    return _FR(index)
+                raise
+
+    app.mount("/", _SPAStatic(directory=_FRONTEND_DIST, html=True), name="frontend")
+    logger.info(f"Serving frontend from {_FRONTEND_DIST}")
+else:
+    logger.info(
+        f"No frontend build at {_FRONTEND_DIST} — API only. "
+        f"Run 'npm run build' in frontend/ to serve the UI from this process."
+    )

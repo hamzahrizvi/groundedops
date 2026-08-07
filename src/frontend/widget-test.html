@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GroundedOps widget — local test harness</title>
+<style>
+  :root { --ink:#14201c; --muted:#5b6b64; --line:#e4e7e4; --accent:#1F6F5C; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:#fbfcfb; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; padding:56px 24px 120px; }
+  h1 { font-size:30px; letter-spacing:-.02em; margin:0 0 6px; }
+  .sub { color:var(--muted); margin:0 0 32px; }
+  .card { border:1px solid var(--line); border-radius:14px; padding:20px; background:#fff; margin-bottom:24px; }
+  .card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:0 0 4px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:9px; font:inherit; font-size:14px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:200px; }
+  button.go { margin-top:14px; background:var(--accent); color:#fff; border:0; border-radius:9px;
+              padding:11px 18px; font:inherit; font-weight:600; cursor:pointer; }
+  code { background:#f2f4f2; padding:2px 6px; border-radius:5px; font-size:13px; }
+  .hint { font-size:13px; color:var(--muted); margin-top:8px; }
+  #diag { font-size:13px; margin-top:10px; }
+  #diag div { padding:2px 0; }
+  .ok { color:#1F6F5C; } .bad { color:#a3341f; }
+  ul { padding-left:20px; } li { margin:4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Widget test harness</h1>
+  <p class="sub">Launcher appears bottom-right. Ask something answerable from the ingested corpus, e.g.
+  <em>&ldquo;How do I set up RNDIS between an ICU device and a local Ethernet adapter in Linux?&rdquo;</em></p>
+
+  <div class="card">
+    <h2>Backend</h2>
+    <div class="row">
+      <div>
+        <label for="api">Backend base URL</label>
+        <input id="api" value="/api" />
+      </div>
+      <div>
+        <label for="scope">Scope — product/category key (optional)</label>
+        <input id="scope" placeholder="blank = whole corpus" />
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label for="wsrc">Widget script URL</label>
+        <input id="wsrc" value="http://localhost:8081/groundedops-widget.js" />
+      </div>
+    </div>
+    <button class="go" id="connect">Reload widget</button>
+    <p class="hint">
+      <code>/api</code> is the <strong>same-origin</strong> nginx/Vite proxy, so the browser needs no CORS —
+      this is the path that works today. Using <code>http://localhost:8000</code> instead exercises the real
+      cross-origin embed, which currently fails: the backend has no CORS middleware
+      (<code>add_cors.patch</code> is unapplied), so the browser blocks the response.
+    </p>
+    <div id="diag"></div>
+  </div>
+
+  <div class="card">
+    <h2>What this harness is</h2>
+    <p>A throwaway page for local testing. It sits at the frontend root so Vite treats it as an HTML
+    entry and serves it at <code>/widget-test.html</code> (HTML in <code>public/</code> is not served
+    as an entry). It loads the widget from <code>/widget/groundedops-widget.js</code>.</p>
+    <p>The widget ships in <code>public/widget/</code>, so that URL is the same in dev and in the built
+    nginx image — and because Vite copies <code>public/</code> verbatim, the file is actually present in
+    <code>dist/</code>. This harness is dev-only: it is not listed as a build input, so it is not emitted.</p>
+  </div>
+</div>
+
+<script>
+  var diag = document.getElementById("diag");
+  function say(msg, ok) {
+    var d = document.createElement("div");
+    d.className = ok ? "ok" : "bad";
+    d.textContent = (ok ? "✓ " : "✗ ") + msg;
+    diag.appendChild(d);
+  }
+
+  function loadWidget() {
+    diag.innerHTML = "";
+    var api = document.getElementById("api").value.trim();
+    var scope = document.getElementById("scope").value.trim();
+    if (!api) { alert("Enter a backend URL first."); return; }
+
+    // Tear down any previous instance (the widget guards double-inclusion).
+    window.__groundedOpsWidgetLoaded = false;
+    var old = document.querySelector("[data-go-root]");
+    if (old) old.remove();
+    var prev = document.getElementById("go-script");
+    if (prev) prev.remove();
+
+    // Confirm the backend answers before blaming the widget.
+    fetch(api.replace(/\/+$/, "") + "/stats")
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (d) {
+        say("backend reachable — " + d.total_chunks + " chunks, " + d.sources.length + " sources", true);
+      })
+      .catch(function (e) {
+        say("backend unreachable at " + api + " (" + e + ") — if this is a cross-origin URL it is almost certainly the missing CORS middleware", false);
+      });
+
+    var s = document.createElement("script");
+    s.id = "go-script";
+    // Defaults to the standalone `widget` service on :8081, so this page
+    // reproduces the production topology: host page, widget script and API
+    // all on DIFFERENT origins. A cross-origin <script src> needs no CORS;
+    // the widget's fetch to /query does, and that is what :8000 must allow.
+    // Fall back to /widget/... (same-origin, from the frontend image) if the
+    // widget container is not running.
+    s.src = document.getElementById("wsrc").value.trim() || "/widget/groundedops-widget.js";
+    s.setAttribute("data-api", api);
+    s.setAttribute("data-title", "Product support");
+    s.setAttribute("data-accent", "#1F6F5C");
+    if (scope) s.setAttribute("data-scope-product", scope);
+    s.onload = function () { say("widget script loaded", true); };
+    s.onerror = function () { say("widget script FAILED to load from " + s.src, false); };
+    document.body.appendChild(s);
+  }
+
+  document.getElementById("connect").addEventListener("click", loadWidget);
+  loadWidget();
+</script>
+</body>
+</html>

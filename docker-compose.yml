@@ -1,5 +1,5 @@
 # GroundedOps — full stack. Bring up with:  docker compose up -d
-# Then open http://localhost:8080
+# Then open http://localhost:8080   (widget API on http://localhost:8000)
 services:
   backend:
     build:
@@ -8,17 +8,37 @@ services:
     environment:
       # Online by default; set to "local" for fully offline (needs Ollama below).
       GENERATION_MODE: ${GENERATION_MODE:-api}
+      ONLINE_PROVIDER: ${ONLINE_PROVIDER:-deepseek}
       OLLAMA_URL: http://ollama:11434/api/generate
       CHROMA_DIR: /data/chroma_db
-      # Keys can be provided per-request from the UI; env is optional fallback.
+      # v3.0.0: keep the conversation SQLite db on the persistent volume.
+      # It defaulted to ./conversations.db — i.e. /app inside the image —
+      # so in a production run (no source bind-mount) every rebuild
+      # silently discarded all saved conversations.
+      CONVO_DB_PATH: /data/conversations.db
+      CORPUS_DIR: /app/corpus
+      # v3.0.0: CORS origins for the embeddable widget. Comma-separated.
+      # "*" is a DEV default — set your real site origins in .env before
+      # exposing this publicly, e.g.
+      #   WIDGET_ALLOWED_ORIGINS=https://acme.com,https://docs.acme.com
+      WIDGET_ALLOWED_ORIGINS: ${WIDGET_ALLOWED_ORIGINS:-*}
+      # Gates every admin endpoint. CHANGE THIS — it defaults to "admin".
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      # Widget traffic can't supply a key from the browser, so an env key
+      # is required for Online mode when serving the widget.
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      # v3.0.0: the backend now needs a reachable origin, because the
+      # widget runs on a THIRD-PARTY site and calls /query directly from
+      # the visitor's browser — it can't reach the compose-internal
+      # network the way the bundled frontend can.
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - grounded-data:/data          # chroma_db persists here
+      - grounded-data:/data          # chroma_db + conversations.db persist here
       - ./corpus:/app/corpus:ro      # OPTIONAL: drop PDFs here to ingest
     restart: unless-stopped
-    # No host port needed — only the frontend talks to it, over the compose network.
 
   frontend:
     build:
@@ -29,6 +49,48 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    # The widget also ships inside this image (it lives in
+    # src/frontend/public/widget/, which Vite copies verbatim into dist/),
+    # so it is reachable at
+    #   http://localhost:8080/widget/groundedops-widget.js
+    # That copy is convenient for local testing and for the bundled demo
+    # pages. For customer embeds prefer the dedicated `widget` service
+    # below — same file, but versioned and deployed independently of this
+    # React build.
+
+  # v3.0.0: standalone widget origin. Serves ONLY the embeddable bundle,
+  # from the SAME file the frontend image ships — one source of truth on
+  # disk (src/frontend/public/widget/), two servers.
+  #
+  # Why its own container: customer sites embed this script, so its cache
+  # policy, version and uptime should not be coupled to the app frontend's
+  # React build. Point a CDN at this origin in production.
+  #
+  # NOTE: hosting the script here does NOT remove the need for CORS. The
+  # script executes in the CUSTOMER page's origin regardless of where it
+  # was downloaded from, so its fetch to POST /query is still cross-origin
+  # — see WIDGET_ALLOWED_ORIGINS on the backend.
+  widget:
+    image: nginx:alpine
+    ports:
+      - "${WIDGET_PORT:-8081}:80"
+    volumes:
+      - ./src/frontend/public/widget:/usr/share/nginx/html:ro
+      - ./src/frontend/widget-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      # 127.0.0.1, NOT localhost: nginx `listen 80` binds IPv4 only
+      # (0.0.0.0:80), while inside the container "localhost" resolves to
+      # ::1 first — so the probe gets connection-refused and the container
+      # is reported unhealthy while serving traffic perfectly.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    # Embed snippet for a customer page:
+    #   <script src="http://localhost:8081/groundedops-widget.js"
+    #           data-api="http://localhost:8000"
+    #           data-title="Product support"></script>
 
   # Local-model service. Only needed for Free/offline mode. Safe to leave
   # running; models download into the named volume on first use (or via
