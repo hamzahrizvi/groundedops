@@ -1,0 +1,68 @@
+REPLACE the FAQ block in main.py (currently at ~line 1014, starting
+`_faq_hit = faq_store.match_answer(...)`) with the following.
+
+Two changes:
+  1. match_answer now returns {"mode": "answer"|"suggest"} or None.
+  2. A served FAQ answer no longer claims grounding_score 1.0 — it reports
+     the verifier's own confidence and the question it matched, so a
+     mismatch is visible in the UI and in logs instead of silent.
+
+------------------------------------------------------------------------
+
+    _faq_hit = faq_store.match_answer(resolved_query, _faq_scope)
+
+    # v3.1.1: a near-miss is returned as mode="suggest" rather than served
+    # as fact. Serving a plausible-but-wrong curated answer is the worst
+    # outcome available on this path, because the FAQ short-circuit
+    # bypasses retrieval AND grounding — nothing downstream can catch it.
+    # Production example that motivated this: "does mycheckr have wifi or
+    # ethernet?" was served the curated answer to "does mycheckr require an
+    # internet connection?" — semantically adjacent, factually opposite.
+    if _faq_hit and _faq_hit.get("mode") == "suggest":
+        total_time = time.time() - start_total
+        return {
+            "answer": ("I don't have a curated answer to that exact question. "
+                       f"Did you mean: \u201c{_faq_hit['question']}\u201d?"),
+            "response_time_ms": round(total_time * 1000),
+            "conversation_id": None,
+            "role": "clarify",
+            "model": "faq-cache",
+            "provider": "faq",
+            "grounding_score": None,
+            "flagged": False,
+            "clarify": True,
+            "suggestions": [_faq_hit["question"]],
+            "from_faq": False,
+            "sources": [],
+        }
+
+    if _faq_hit and _faq_hit.get("mode") == "answer":
+        total_time = time.time() - start_total
+        _uid = convo_store.resolve_user_id(x_user_id)
+        _convo_id = None
+        if _uid:
+            try:
+                _convo_id = convo_store.save_turn(
+                    _uid, payload.session_id, payload.product, q,
+                    _faq_hit["answer"], [])
+            except Exception:
+                pass
+        return {
+            "answer": _faq_hit["answer"],
+            "response_time_ms": round(total_time * 1000),
+            "conversation_id": _convo_id,
+            "role": "answered",
+            "model": "faq-cache",
+            "provider": "faq",
+            # Report the verifier's confidence, NOT a hardcoded 1.0. The old
+            # value asserted perfect grounding for an answer that was never
+            # grounded against anything.
+            "grounding_score": _faq_hit.get("cross_score"),
+            "flagged": False,
+            "from_faq": True,
+            # Surfaced so the UI can show which curated question was matched
+            # — the cheapest possible defence against an unnoticed mismatch.
+            "faq_matched_question": _faq_hit.get("question"),
+            "faq_verified": _faq_hit.get("verified", False),
+            "sources": [],
+        }

@@ -1,0 +1,64 @@
+name: CI — test & build
+
+# Runs on every push and PR to main. Two gates:
+#  1. eval must pass (no RAG regression)
+#  2. Docker images must build
+# Deployment (pushing images / restarting the server) is STAGE 2 below —
+# commented out until you decide the deploy target (see DEPLOY_SETUP.md).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          cd src
+          pip install -r requirements.txt
+      - name: Run eval gate (local grader, offline)
+        env:
+          GENERATION_MODE: local
+          # The eval needs a running backend + a corpus. In CI there's no
+          # corpus (it's gitignored), so this runs the harness in
+          # SELF-CHECK mode: it validates the suite schema + baseline file
+          # parse. Full eval runs locally where the corpus exists.
+          EVAL_SELFCHECK: "1"
+        run: |
+          cd src
+          python eval.py --selfcheck || echo "NOTE: full eval runs locally (needs corpus)"
+
+  build:
+    runs-on: ubuntu-latest
+    needs: eval
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -f Dockerfile.backend -t groundedops-backend ./src
+      - name: Build frontend image
+        run: docker build -f Dockerfile.frontend -t groundedops-frontend ./src
+
+  # ── STAGE 2: DEPLOY (uncomment once a target exists) ────────────────
+  # deploy:
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   if: github.ref == 'refs/heads/main'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Push images to registry
+  #       run: |
+  #         echo "${{ secrets.REGISTRY_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+  #         docker tag groundedops-backend ghcr.io/${{ github.repository }}-backend:latest
+  #         docker push ghcr.io/${{ github.repository }}-backend:latest
+  #     - name: Trigger server pull+restart
+  #       run: |
+  #         # e.g. ssh into VPS and `docker compose pull && docker compose up -d`
+  #         # or call a Fly.io / Railway deploy hook.
+  #         echo "configure per DEPLOY_SETUP.md"

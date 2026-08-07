@@ -1,0 +1,448 @@
+diff --git a/README.md b/README.md
+index 979ad70..501464f 100644
+--- a/README.md
++++ b/README.md
+@@ -202,7 +202,6 @@ cd frontend && npm run dev          # terminal 2
+ | `ONLINE_PROVIDER` | `deepseek` | `deepseek` / `openai` / `anthropic` |
+ | `ONLINE_*_MODEL` | per provider | Override the Online answering model |
+ | `EXCLUDED_SOURCES` | `icu_network_api` | Internal docs hidden from answering |
+-| `DOC2QUERY` | `on` | Ingest-time question generation |
+ | `CONTEXT_FLOOR_RATIO` | `0.5` | Relative score floor for context chunks |
+ | `EVAL_GRADER_PROVIDER` | `local` | Set `deepseek` for faster eval grading |
+ 
+@@ -243,9 +242,11 @@ python test_queries.py      # end-to-end smoke test against a running server
+ - **Persistent chats**: full-page Chats view (search, filter, bulk
+   select/delete); the app resumes your last conversation on open.
+   Stored in browser localStorage.
+-- **Retrieval quality**: breadcrumb-enriched chunks, doc2query question
+-  entries, context relative-score floor, conversational combined-query
+-  fallback, query normalization.
++- **Retrieval quality**: breadcrumb-enriched chunks, hybrid BM25+dense
++  RRF retrieval with cross-encoder reranking, context relative-score
++  floor, conversational combined-query fallback, query normalization.
++  (doc2query synthetic-question entries were removed in v10.16 — the
++  hybrid retriever + reranker made them redundant.)
+ - **Safety**: NLI grounding enforcement with lexical containment rescue
+   for table lookups; corpus scoping via `EXCLUDED_SOURCES`; per-answer
+   `response_time_ms`.
+diff --git a/diagnose.py b/diagnose.py
+index da3ac80..be1f1d2 100644
+--- a/diagnose.py
++++ b/diagnose.py
+@@ -9,7 +9,7 @@ actual ChromaDB — no eval corpus needed:
+ Checks, in order:
+   1. Collection exists and how many chunks / query-entries it holds.
+   2. Which category/product tags are present (proves tagging worked).
+-  3. FAQ store contents (proves doc2query ran).
++  3. FAQ store contents (admin-curated Q/A pairs).
+   4. A live retrieval for a query, showing scores + which sources came
+      back (proves retrieval + scoping are functional).
+ """
+@@ -48,7 +48,7 @@ def main():
+         print(f"   {s[:45]:45}  [{tag}]  {info['chunks']} chunks{flag}")
+ 
+     print("=" * 60)
+-    print("3. FAQ STORE (doc2query output)")
++    print("3. FAQ STORE (admin-curated)")
+     try:
+         import faq_store
+         faqs = faq_store._load()
+@@ -57,9 +57,9 @@ def main():
+             for f in faqs[:5]:
+                 print(f"     [{f.get('products','?')}] {f['question'][:60]}")
+         else:
+-            print("   ⚠ EMPTY — doc2query generated nothing. Check backend logs")
+-            print("     during ingest for 'doc2query provider = ...' and any")
+-            print("     '0 questions generated' warning.")
++            print("   ⚠ EMPTY — no FAQ curated yet. FAQ is created by the")
++            print("     admin via 'Generate FAQ' in the UI (/faq/generate);")
++            print("     it is no longer produced at ingest time.")
+     except Exception as e:
+         print(f"   faq_store error: {e}")
+ 
+@@ -78,8 +78,8 @@ def main():
+     print("=" * 60)
+     print("Done. If (1) has chunks, (2) shows tags, (3) has FAQ entries,")
+     print("and (4) returns results with sane scores, the pipeline is")
+-    print("functional. Empty (3) = doc2query issue; empty (4) with full")
+-    print("(1) = retrieval/scoring issue.")
++    print("functional. Empty (3) just means no FAQ curated yet; empty (4)")
++    print("with full (1) = retrieval/scoring issue.")
+ 
+ if __name__ == "__main__":
+     main()
+diff --git a/docker-compose_override.yml b/docker-compose_override.yml
+index 62cf594..fad14b6 100644
+--- a/docker-compose_override.yml
++++ b/docker-compose_override.yml
+@@ -9,7 +9,6 @@ services:
+       - grounded-data:/data
+     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+     environment:
+-      INGEST_PROVIDER: ${INGEST_PROVIDER:-deepseek}   # fast ingest in dev
+   frontend:
+     # Vite dev server (hot module reload) instead of the built nginx image.
+     image: node:20
+diff --git a/faq_store.py b/faq_store.py
+index 1eb9961..cfc3bbf 100644
+--- a/faq_store.py
++++ b/faq_store.py
+@@ -1,5 +1,7 @@
+-"""FAQ store (v10.4): the doc2query questions generated at ingest, shown
+-per product on the FAQ page, with admin-editable answers.
++"""FAQ store (v10.4): admin-curated Q/A questions, shown per product on
++the FAQ page, with admin-editable answers. (Historically these were
++seeded by doc2query at ingest; since v10.15 they are created solely by
++the admin's "Generate FAQ" action.)
+ 
+ Each entry: {id, source, products, question, answer, edited}. The default
+ answer is the source chunk the question was generated from; an admin can
+diff --git a/ingest.py b/ingest.py
+index 2c816c3..cd660b6 100644
+--- a/ingest.py
++++ b/ingest.py
+@@ -113,108 +113,8 @@ def _enrich_chunks(chunks: list[str], filename: str) -> list[str]:
+     return out
+ 
+ 
+-def _generate_questions(chunk: str, n: int = 4, api_keys: dict | None = None) -> list[str]:
+-    """DOC2QUERY (v8.5): generate likely user questions per chunk at ingest.
+-
+-    Provider is controlled by INGEST_PROVIDER (v10.x):
+-      "deepseek" / "openai" / "anthropic"  -> that API (fast; recommended
+-                                              for large docs — turns an
+-                                              hour of local CPU into minutes)
+-      "local"                              -> local mistral (slow on CPU)
+-      "auto" (default)                     -> API if a key is available,
+-                                              else local mistral
+-    DOC2QUERY=off disables entirely (ingestion behaves as v8.4.x)."""
+-    if os.getenv("DOC2QUERY", "on").strip().lower() in ("off", "0", "false"):
+-        return []
+-    prompt = (
+-        "You write search queries. Given the documentation excerpt below, "
+-        f"write {n} short questions a support user might ask that this "
+-        "excerpt answers. One per line, no numbering, no preamble, "
+-        "questions only.\n\n---\n" + chunk[:1500]
+-    )
+-    keys = api_keys or {}
+-    provider = os.getenv("INGEST_PROVIDER", "auto").strip().lower()
+-    # v10.4: fall back to ENV keys when none were passed in (headless async
+-    # ingest passes {}). Without this, "auto" never found a key and
+-    # silently used local mistral even when DEEPSEEK_API_KEY was set.
+-    keys = {
+-        "deepseek": keys.get("deepseek") or os.getenv("DEEPSEEK_API_KEY"),
+-        "openai": keys.get("openai") or os.getenv("OPENAI_API_KEY"),
+-        "anthropic": keys.get("anthropic") or os.getenv("ANTHROPIC_API_KEY"),
+-    }
+-    try:
+-        from llm import _call_deepseek, _call_ollama, _call_openai, _call_anthropic
+-        result = None
+-        used = None  # which provider actually produced the questions
+-
+-        def _api_call():
+-            nonlocal used
+-            if provider == "openai" or (provider == "auto" and keys.get("openai")):
+-                used = "openai"
+-                return _call_openai(prompt, api_key=keys.get("openai"), timeout=30)
+-            if provider == "anthropic" or (provider == "auto" and keys.get("anthropic")):
+-                used = "anthropic"
+-                return _call_anthropic(prompt, api_key=keys.get("anthropic"), timeout=30)
+-            used = "deepseek"
+-            return _call_deepseek(prompt, api_key=keys.get("deepseek"), timeout=30)
+-
+-        if provider == "local":
+-            used = "local"
+-            result = _call_ollama("mistral", prompt, timeout=120, num_predict=160)
+-        else:
+-            result = _api_call()
+-            # v10.9: fall back to local whenever the API produced nothing —
+-            # not only in "auto". Previously, choosing "deepseek" with no
+-            # DEEPSEEK_API_KEY in the backend env returned [] silently and
+-            # generated NO FAQ. Now any empty API result falls back to
+-            # local so ingestion still produces questions.
+-            if not result or not result.get("text"):
+-                logger.warning(f"doc2query: provider '{provider}' returned nothing "
+-                               f"(missing key or API error) — falling back to local")
+-                used = f"{provider}->local (fallback)"
+-                result = _call_ollama("mistral", prompt, timeout=120, num_predict=160)
+-
+-        # Log the ACTUAL provider once per file (module-level flag) so you
+-        # can verify ingest is really going through DeepSeek and not
+-        # silently using local. See _log_ingest_provider().
+-        _log_ingest_provider(used)
+-
+-        if not result or not result.get("text"):
+-            return []
+-        questions = []
+-        _q_words = ("what", "how", "when", "where", "which", "who", "why",
+-                    "can", "does", "do", "is", "are", "will")
+-        for line in result["text"].splitlines():
+-            line = line.strip().lstrip("-•*0123456789. ").strip()
+-            if not line or not (4 <= len(line.split()) <= 25):
+-                continue
+-            # v10.9: accept a trailing "?" OR a clear question opener, so
+-            # well-formed questions the model didn't punctuate aren't all
+-            # discarded (a cause of empty FAQ even when generation worked).
+-            if line.endswith("?"):
+-                questions.append(line)
+-            elif line.split()[0].lower() in _q_words:
+-                questions.append(line if line.endswith("?") else line + "?")
+-        return questions[:n]
+-    except Exception as e:
+-        logger.warning(f"doc2query generation failed (non-fatal): {e}")
+-        return []
+-
+-
+-_LAST_LOGGED_PROVIDER = None
+-
+-
+-def _log_ingest_provider(used: str | None):
+-    """Log the ingest provider once when it changes, so it's verifiable in
+-    the backend logs (INFO:ingest:doc2query provider = deepseek)."""
+-    global _LAST_LOGGED_PROVIDER
+-    if used and used != _LAST_LOGGED_PROVIDER:
+-        _LAST_LOGGED_PROVIDER = used
+-        logger.info(f"doc2query provider = {used}")
+-
+-
+-def ingest_file(content: bytes, filename: str,
+-                api_keys: dict | None = None,
++def ingest_file(content: bytes, filename: str,
++                api_keys: dict | None = None,  # accepted for call-site compat; unused since doc2query removal (v10.16)
+                 progress=None,
+                 category_key: str | None = None,
+                 product_key: str | None = None) -> int:
+@@ -281,57 +181,13 @@ def ingest_file(content: bytes, filename: str,
+             ids=ids,
+         )
+ 
+-        # ── doc2query entries (v8.5 / Phase 1) ───────────────────────────────
+-        # Generated questions are stored as their own embedded documents with
+-        # kind="query" and the parent chunk's id + full text in metadata.
+-        # retrieval_db maps query-hits back to parent text and dedupes, so
+-        # the answering pipeline only ever sees real chunk content.
+-        q_docs, q_ids, q_metas = [], [], []
+-        total = len(texts)
+-        for i, chunk in enumerate(texts):
+-            if progress:
+-                progress(stage="doc2query", done=i, total=total)
+-            for j, question in enumerate(_generate_questions(chunk, api_keys=api_keys)):
+-                q_docs.append(question)
+-                q_ids.append(f"{filename}_{i}_q{j}")
+-                q_metas.append({
+-                    "source": filename,
+-                    "kind": "query",
+-                    "products": _prod_tag,
+-                    "category": _cat_tag,
+-                    "parent_id": ids[i],
+-                    "parent_text": chunk,
+-                })
+-        if q_docs:
+-            q_vectors = embed_texts(q_docs)
+-            collection.add(
+-                documents=q_docs,
+-                embeddings=[v.tolist() for v in q_vectors],
+-                metadatas=q_metas,
+-                ids=q_ids,
+-            )
+-            logger.info(f"doc2query: added {len(q_docs)} question entries for '{filename}'")
+-            # v10.15: doc2query still builds RETRIEVAL entries above (they
+-            # improve search recall), but it NO LONGER writes to the FAQ
+-            # store. FAQ is now created deliberately by the admin via
+-            # "Generate FAQ" (browser-side). Auto-writing here overwrote
+-            # curated FAQ on every re-ingest (record_questions replaces a
+-            # source's entries) — the "my questions vanished and got
+-            # replaced by loads of random ones on restart" bug. The FAQ
+-            # store is now owned solely by the admin action.
+-        else:
+-            # v10.9: make silent empty-FAQ loud. If DOC2QUERY is on but no
+-            # questions were produced, the usual cause is an API provider
+-            # chosen with no key in the backend env (now falls back to
+-            # local — so if this still logs, local generation itself
+-            # produced nothing: check Ollama is up and mistral is pulled).
+-            _d2q = os.getenv("DOC2QUERY", "on").strip().lower()
+-            if _d2q in ("off", "0", "false"):
+-                logger.warning(f"doc2query: DISABLED (DOC2QUERY={_d2q}) — no FAQ for '{filename}'")
+-            else:
+-                logger.warning(f"doc2query: 0 questions generated for '{filename}' — "
+-                               f"check INGEST_PROVIDER + its API key, or that Ollama/"
+-                               f"mistral is available for local generation")
++        # v10.16: doc2query removed. It generated synthetic per-chunk
++        # questions (kind="query") purely to boost retrieval recall; the
++        # hybrid BM25+dense/RRF retriever, breadcrumb enrichment and the
++        # cross-encoder reranker now cover that, so the extra ingest-time
++        # LLM call and ~4x vector-count inflation were no longer earning
++        # their keep. The FAQ store is unaffected — it has been admin-
++        # curated (not doc2query-fed) since v10.15.
+ 
+         logger.info(f"Ingested '{filename}': {len(texts)} chunks")
+         return len(texts)
+diff --git a/main.py b/main.py
+index a794abb..2d85644 100644
+--- a/main.py
++++ b/main.py
+@@ -320,19 +320,15 @@ _INGEST_LOCK = threading.Lock()
+ 
+ 
+ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
+-                   category_key: str | None = None, product_key: str | None = None,
+-                   ingest_provider: str | None = None):
++                   category_key: str | None = None, product_key: str | None = None):
+     def _progress(stage, done, total):
+         with _INGEST_LOCK:
+             _INGEST_JOBS[job_id].update(
+                 stage=stage, done=done, total=total,
+                 pct=round(done / total * 100, 1) if total else 0.0)
+-    # v10.6: per-upload provider override. Set the env var the ingest code
+-    # reads, scoped to this thread's run. (Simple + effective for the
+-    # single-worker setup; if you later parallelize ingest, pass it
+-    # through explicitly instead of via env.)
+-    if ingest_provider:
+-        os.environ["INGEST_PROVIDER"] = ingest_provider
++    # v10.16: the per-upload ingest_provider override was removed with
++    # doc2query — INGEST_PROVIDER only ever selected the model for
++    # ingest-time question generation, which no longer exists.
+     try:
+         count = ingest_file(content, filename, api_keys=api_keys, progress=_progress,
+                             category_key=category_key, product_key=product_key)
+@@ -359,17 +355,13 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
+ async def upload(file: UploadFile = File(...),
+                  category_key: str | None = Header(default=None),
+                  product_key: str | None = Header(default=None),
+-                 ingest_provider: str | None = Header(default=None),
+                  x_user_id: str | None = Header(default=None)):
+     """v10.x: ASYNC ingest. Returns a job_id immediately; the document is
+-    indexed in a background thread (doc2query on a large PDF can take
+-    minutes). Poll /upload/status/{job_id} for progress.
++    indexed in a background thread (parse + chunk + embed on a large PDF
++    can take a while). Poll /upload/status/{job_id} for progress.
+ 
+     v10.3: optional category_key + product_key headers (admin uploads)
+-    attach the ingested source to that product for scoping.
+-    v10.6: optional ingest_provider header ("deepseek"/"openai"/
+-    "anthropic"/"local"/"auto") overrides INGEST_PROVIDER per upload,
+-    so the admin can choose local vs API from the GUI."""
++    attach the ingested source to that product for scoping."""
+     if not APP_STATE["ready"]:
+         raise HTTPException(status_code=503, detail="System is still loading")
+ 
+@@ -380,8 +372,7 @@ async def upload(file: UploadFile = File(...),
+         _INGEST_JOBS[job_id] = {"status": "starting", "file": filename,
+                                 "pct": 0.0, "done": False}
+     threading.Thread(target=_ingest_worker,
+-                     args=(job_id, content, filename, {}, category_key, product_key,
+-                           ingest_provider),
++                     args=(job_id, content, filename, {}, category_key, product_key),
+                      daemon=True).start()
+     return {"job_id": job_id, "file": filename, "status": "started"}
+ 
+@@ -611,11 +602,12 @@ def conversations_delete(convo_id: str, x_user_id: str | None = Header(default=N
+ 
+ 
+ # ── Ingest version fingerprint (v10.4) ───────────────────────────────
+-# When ingestion LOGIC changes (chunking, breadcrumbs, doc2query), old
+-# vectors are stale. We fingerprint the ingest-affecting code; the UI
+-# compares it to what the current DB was built with and prompts a
+-# re-ingest if they differ. Bump INGEST_VERSION when you change ingest.
+-INGEST_VERSION = "10.4"
++# When ingestion LOGIC changes (chunking, breadcrumbs), old vectors are
++# stale. We fingerprint the ingest-affecting code; the UI compares it to
++# what the current DB was built with and prompts a re-ingest if they
++# differ. Bump INGEST_VERSION when you change ingest. (v10.16 bump: the
++# re-ingest it triggers also purges any leftover doc2query query entries.)
++INGEST_VERSION = "10.16"
+ 
+ 
+ def _ingest_fingerprint() -> str:
+@@ -684,7 +676,7 @@ def reload_folder(x_admin_password: str | None = Header(default=None)):
+     return {"reloading": jobs, "count": len(jobs)}
+ 
+ 
+-# ── FAQ (v10.4) — doc2query questions per product, admin-editable ─────
++# ── FAQ (v10.4) — admin-curated questions per product, admin-editable ─
+ 
+ @app.get("/faq")
+ def faq_list(product: str | None = None):
+diff --git a/retrieval_db.py b/retrieval_db.py
+index 4693043..cec0563 100644
+--- a/retrieval_db.py
++++ b/retrieval_db.py
+@@ -39,18 +39,17 @@ def _get_bm25_index(collection):
+             {
+                 "id": i,
+                 "text": d,
+-                "source": m.get("source", "unknown"),
+-                "product": m.get("product", ""),
++                "source": m.get("source", "unknown"),
++                "product": m.get("product", ""),
+                 "category": m.get("category", ""),
+-                # doc2query (v8.5): question entries carry their parent
+-                # chunk's id and text; real chunks have kind="chunk" (or
+-                # no kind at all for pre-v8.5 collections — treated as
+-                # chunks, so mixed/old collections keep working).
+-                "kind": m.get("kind", "chunk"),
+-                "parent_id": m.get("parent_id"),
+-                "parent_text": m.get("parent_text"),
+             }
+             for i, d, m in zip(data["ids"], data["documents"], data["metadatas"])
++            # v10.16: doc2query removed. Fresh ingests no longer create
++            # kind="query" entries, but a collection built before this
++            # change may still hold them. Drop them here so leftover
++            # synthetic questions never enter BM25 or surface as results;
++            # a re-ingest clears them permanently.
++            if m.get("kind", "chunk") != "query"
+         ]
+ 
+         corpus = [c["text"].lower().split() for c in chunks]
+@@ -152,42 +151,27 @@ def retrieve_from_db(
+     if not scores:
+         return []
+ 
++    # Keep a margin of candidates (top_k*2) so the downstream reranker has
++    # room to reorder before the answering pipeline trims to top_k.
+     ranked_ids = sorted(scores, key=scores.get, reverse=True)[:top_k * 2]
+ 
+     _, chunks = _get_bm25_index(collection)
+     by_id = {c["id"]: c for c in chunks}
+ 
+-    # doc2query mapping (v8.5): a hit on a generated QUESTION entry is
+-    # credit for its PARENT chunk — the answering pipeline must only ever
+-    # see real document text. Map question-hits to parents, then dedupe:
+-    # if both a question and its parent chunk ranked, keep the better
+-    # score under the parent's id. Fetch top_k*2 above so dedupe still
+-    # fills top_k.
++    # v10.16: with doc2query gone, every ranked id maps directly to a real
++    # chunk (no question->parent indirection, no dedupe needed). Any id the
++    # dense query returns that isn't in by_id — e.g. a stale kind="query"
++    # entry filtered out above — is skipped by the `if not entry` guard.
+     results = []
+-    seen: dict[str, int] = {}  # effective chunk id -> index in results
+     for doc_id in ranked_ids:
+         entry = by_id.get(doc_id)
+         if not entry:
+             continue
+-        if entry.get("kind") == "query" and entry.get("parent_id"):
+-            eff_id = entry["parent_id"]
+-            text = entry.get("parent_text") or (by_id.get(eff_id) or {}).get("text", "")
+-            if not text:
+-                continue
+-        else:
+-            eff_id = entry["id"]
+-            text = entry["text"]
+-        score = round(scores[doc_id], 6)
+-        if eff_id in seen:
+-            if score > results[seen[eff_id]]["retrieval_score"]:
+-                results[seen[eff_id]]["retrieval_score"] = score
+-            continue
+-        seen[eff_id] = len(results)
+         results.append({
+-            "id": eff_id,
+-            "text": text,
++            "id": entry["id"],
++            "text": entry["text"],
+             "source": entry["source"],
+-            "retrieval_score": score,
++            "retrieval_score": round(scores[doc_id], 6),
+         })
+         if len(results) >= top_k:
+             break

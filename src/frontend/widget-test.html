@@ -46,6 +46,12 @@
         <input id="scope" placeholder="blank = whole corpus" />
       </div>
     </div>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label for="wsrc">Widget script URL</label>
+        <input id="wsrc" value="http://localhost:8081/groundedops-widget.js" />
+      </div>
+    </div>
     <button class="go" id="connect">Reload widget</button>
     <p class="hint">
       <code>/api</code> is the <strong>same-origin</strong> nginx/Vite proxy, so the browser needs no CORS —
@@ -101,13 +107,19 @@
 
     var s = document.createElement("script");
     s.id = "go-script";
-    s.src = "/widget/groundedops-widget.js";   // ships in public/widget/
+    // Defaults to the standalone `widget` service on :8081, so this page
+    // reproduces the production topology: host page, widget script and API
+    // all on DIFFERENT origins. A cross-origin <script src> needs no CORS;
+    // the widget's fetch to /query does, and that is what :8000 must allow.
+    // Fall back to /widget/... (same-origin, from the frontend image) if the
+    // widget container is not running.
+    s.src = document.getElementById("wsrc").value.trim() || "/widget/groundedops-widget.js";
     s.setAttribute("data-api", api);
     s.setAttribute("data-title", "Product support");
     s.setAttribute("data-accent", "#1F6F5C");
     if (scope) s.setAttribute("data-scope-product", scope);
     s.onload = function () { say("widget script loaded", true); };
-    s.onerror = function () { say("widget script FAILED to load from /widget/groundedops-widget.js", false); };
+    s.onerror = function () { say("widget script FAILED to load from " + s.src, false); };
     document.body.appendChild(s);
   }
 

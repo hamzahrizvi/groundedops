@@ -1,0 +1,112 @@
+diff --git a/llm.py b/llm.py
+index f474066..e0bdf5d 100644
+--- a/llm.py
++++ b/llm.py
+@@ -23,11 +23,31 @@ FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
+     # "fast"-classified queries ("what is a MyCheckr?") were still being
+     # answered by phi. Phi condenses queries; it does not answer them.
+     "fast":      [("local", "mistral")],
+-    "accurate":  [("local", "mistral"), ("deepseek", "deepseek-chat")],
+-    "reasoning": [("local", "mistral"), ("deepseek", "deepseek-chat")],
++    # v10.17: DeepSeek removed from the fallback chains. In local
++    # ("free") mode the answering path now stays fully local — if mistral
++    # fails, it fails rather than silently escalating query + context to a
++    # third-party API. DeepSeek is still available as a DELIBERATE choice:
++    # as the selected Online provider (api mode, see _chain_for) and in the
++    # manual "Rethink" menu (RETHINK_OPTIONS) — neither of which is a
++    # fallback.
++    "accurate":  [("local", "mistral")],
++    "reasoning": [("local", "mistral")],
+ }
+ 
+-_API_ONLY_CHAIN: list[tuple[str, str]] = [("deepseek", "deepseek-chat")]
++
++def _online_provider_model() -> tuple[str, str]:
++    """The single (provider, model) used in Online (api) mode. The provider
++    is user-selectable in Settings (deepseek default / openai / anthropic);
++    default models are env-overridable. Shared by the answering path
++    (_chain_for) and query condensation so both honour the same choice."""
++    from runtime_config import get_online_provider
++    provider = get_online_provider()
++    model = {
++        "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-chat"),
++        "openai": os.getenv("ONLINE_OPENAI_MODEL", "gpt-4o-mini"),
++        "anthropic": os.getenv("ONLINE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
++    }.get(provider, "deepseek-chat")
++    return provider, model
+ 
+ 
+ def _chain_for(role: str) -> list[tuple[str, str]]:
+@@ -37,19 +57,9 @@ def _chain_for(role: str) -> list[tuple[str, str]]:
+     observed result: mode=api still logged 'Attempt 1: local/phi' and
+     cold-loaded Ollama. In api mode every role answers via DeepSeek and
+     Ollama is never touched."""
+-    from runtime_config import get_generation_mode, get_online_provider
++    from runtime_config import get_generation_mode
+     if get_generation_mode() == "api":
+-        # v9.1.1: Online provider is user-selectable (Settings): deepseek
+-        # (default), openai, or anthropic. Default models are
+-        # env-overridable (ONLINE_OPENAI_MODEL / ONLINE_ANTHROPIC_MODEL /
+-        # ONLINE_DEEPSEEK_MODEL).
+-        provider = get_online_provider()
+-        model = {
+-            "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-chat"),
+-            "openai": os.getenv("ONLINE_OPENAI_MODEL", "gpt-4o-mini"),
+-            "anthropic": os.getenv("ONLINE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+-        }.get(provider, "deepseek-chat")
+-        return [(provider, model)]
++        return [_online_provider_model()]
+     return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
+ 
+ # Models offered for the manual "rethink with a different model" feature.
+@@ -285,23 +295,12 @@ def generate_with_fallback(
+     Try each (provider, model) in FALLBACK_CHAIN[role] in order, ONE
+     attempt per entry, returning the first success.
+ 
+-    BUG FIX: this used to call safe_generate() per chain entry, which
+-    internally retries the SAME model twice before returning failure —
+-    each retry paying the full _call_ollama timeout (90s for non-phi
+-    models). For role="reasoning"/"accurate" (chain = [mistral,
+-    deepseek]), a slow/timing-out mistral could burn up to 180s on
+-    mistral ALONE before the loop even reached the deepseek entry —
+-    exceeding typical client-side request timeouts before the actual
+-    fallback provider was ever attempted. Reproduced from a production
+-    run where query role="reasoning" timed out client-side at 180s with
+-    no evidence deepseek was reached.
+-
+-    Each chain entry now gets exactly one attempt via generate() (no
+-    internal retry), so the chain advances to the next provider as soon
+-    as the current one fails — matching the actual intent of
+-    FALLBACK_CHAIN. The single extra "forced mistral" safety net at the
+-    end (for chains that don't already include local/mistral) is
+-    unchanged and still gets a fresh single attempt.
++    Each chain entry gets exactly one attempt via generate() (no internal
++    retry), so the chain advances to the next entry as soon as the current
++    one fails. (Historically the local chains also had a DeepSeek entry;
++    that was removed in v10.17 — local mode now stays local.) The extra
++    "forced mistral" safety net at the end, for a chain that somehow
++    doesn't already include local/mistral, is unchanged.
+     """
+     chain = _chain_for(role)  # v8.6.1: honors GENERATION_MODE=api
+     tried = set()
+@@ -358,11 +357,16 @@ def condense_query(current_query: str, history: list[dict], model: str = CONDENS
+         return current_query
+ 
+     prompt = build_condense_prompt(current_query, history)
+-    # GENERATION_MODE=api (v8.5): condensation runs on DeepSeek so the
+-    # whole answering path is Ollama-free (website/production config).
+-    from runtime_config import get_generation_mode
++    # GENERATION_MODE=api: condensation runs on the SELECTED Online
++    # provider so the whole answering path is Ollama-free (website/
++    # production config). v10.17: was hardcoded to DeepSeek — a leftover
++    # from before Online mode became multi-provider, which meant an
++    # openai/anthropic deployment still silently sent condensation prompts
++    # to DeepSeek. Now it follows the same provider _chain_for uses.
++    from runtime_config import get_generation_mode
+     if get_generation_mode() == "api":
+-        result = _call_deepseek(prompt, timeout=30)
++        provider, model = _online_provider_model()
++        result = generate(provider, prompt, model)
+         if not result or not result.get("text"):
+             logger.warning("API-mode condensation failed — using original query")
+             return current_query

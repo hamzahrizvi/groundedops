@@ -1,0 +1,186 @@
+main.py changes — answer style, page citations, source download (v3.3.0)
+=========================================================================
+
+FOUR edits.
+
+------------------------------------------------------------------------
+EDIT 1 — the answering prompt (~line 1276)
+------------------------------------------------------------------------
+The current prompt forbids only the OPENING phrase "Based on the
+context", which is why answers still leak mid- and end-sentence
+references: "…as indicated by the 'WiFi Config' and 'Ethernet' sections
+in the context" and "The context does not specify the number of ports."
+The model is describing its evidence instead of answering. Replace the
+instruction lines (keep the <context> block and the Question/Answer tail
+exactly as they are) with:
+
+    Using ONLY the information inside <context> above, answer the question below.
+
+    Write the answer as a product expert would state it to a customer.
+    NEVER refer to the source material or your own reasoning process. Do not
+    write "the context", "the document", "the provided information", "as
+    indicated by", "as shown in", "according to the", or "the section". The
+    reader cannot see the context and has no idea what it is. Sources are
+    attached separately, so you never need to point at them.
+    Answer directly and factually, then stop. No preamble, no meta-commentary.
+    If the question asks whether something exists or is supported, begin with a
+    plain Yes or No, then give the specifics.
+    If the context contains multiple similar-looking facts serving different
+    purposes (e.g. different credential sets for different actions), give ONLY
+    the one matching the question's subject and briefly note what the other is for.
+    If the context does not contain enough information, respond with exactly:
+    "I could not find that in the knowledge base."
+    Do not state what the context does or does not contain in any other words.
+    Do not use any knowledge from outside the context.
+
+
+------------------------------------------------------------------------
+EDIT 2 — belt-and-braces cleanup of meta-references
+------------------------------------------------------------------------
+Prompts are guidance, not a guarantee — small local models drift. Add
+this near _PREAMBLE_RE and apply it to the generated answer wherever
+_PREAMBLE_RE is currently applied.
+
+    # v3.3.0: strip trailing/inline evidence-pointing that the prompt asks
+    # the model to avoid but small models still emit, e.g.
+    #   "...supporting 100Base-T, as indicated by the WiFi Config section."
+    #   "...RJ45. The context does not specify the number of ports."
+    # These are meaningless to a reader who cannot see the context, and
+    # they undercut the answer's authority.
+    _META_TAIL_RE = re.compile(
+        r"(?:[,;]?\s*(?:as|which is)\s+(?:indicated|shown|stated|mentioned|listed|described|specified)"
+        r"(?:\s+\w+){0,4}?\s+(?:in|by)\s+the\s+[^.]*?)(?=[.]|$)",
+        re.IGNORECASE,
+    )
+    _META_SENT_RE = re.compile(
+        r"(?:^|(?<=[.!?]))\s*[^.!?]*\b(?:the\s+)?(?:context|provided\s+(?:context|information|text)|"
+        r"above\s+(?:context|text))\b[^.!?]*[.!?]",
+        re.IGNORECASE,
+    )
+
+    def _strip_meta(answer: str) -> str:
+        """Remove references to the retrieval context from an answer."""
+        if not answer:
+            return answer
+        out = _META_TAIL_RE.sub("", answer)
+        # Don't touch the sanctioned refusal string.
+        if "could not find that in the knowledge base" not in out:
+            out = _META_SENT_RE.sub(" ", out)
+        out = re.sub(r"\s{2,}", " ", out).strip()
+        out = re.sub(r"\s+([.,;:])", r"\1", out)
+        # If cleanup ate everything, keep the original rather than return "".
+        return out if out.strip(" .") else answer
+
+
+------------------------------------------------------------------------
+EDIT 3 — _build_sources: page numbers + download link (~line 398)
+------------------------------------------------------------------------
+Replace the function body with:
+
+    def _build_sources(results: list[dict]) -> list[dict]:
+        """One entry per unique source document, with the chunk ids that
+        belong to it, a snippet from its best-scoring chunk, the PAGE
+        NUMBERS those chunks came from, and a download URL for the original
+        file (v3.3.0).
+
+        Pages are collected as a sorted set because a source usually
+        contributes several chunks; the reader wants "pages 12, 14", not one
+        arbitrary page.
+        """
+        by_source: dict[str, dict] = {}
+
+        for r in results:
+            src = r.get("source", "unknown")
+            if src not in by_source:
+                by_source[src] = {
+                    "source": src,
+                    "chunk_ids": [],
+                    "snippet": r["text"][:SNIPPET_LEN].strip()
+                               + ("…" if len(r["text"]) > SNIPPET_LEN else ""),
+                    "pages": [],
+                    # Served by /source_file below. URL-encoded because
+                    # filenames here contain spaces and parentheses
+                    # ("MyCheckr User Manual-v7 (1).pdf").
+                    "download_url": f"/source_file/{quote(src)}",
+                }
+            by_source[src]["chunk_ids"].append(r.get("id"))
+            _pg = r.get("page")
+            if isinstance(_pg, int) and _pg not in by_source[src]["pages"]:
+                by_source[src]["pages"].append(_pg)
+
+        out = []
+        for s in by_source.values():
+            s["pages"] = sorted(s["pages"])
+            # Ready-made label so every UI doesn't reimplement it.
+            if s["pages"]:
+                s["page_label"] = ("page " if len(s["pages"]) == 1 else "pages ") + \
+                                  ", ".join(str(p) for p in s["pages"])
+            else:
+                s["page_label"] = None
+            out.append(s)
+        return out
+
+Add to the imports at the top of main.py:
+
+    from urllib.parse import quote
+
+
+------------------------------------------------------------------------
+EDIT 4 — the download endpoint
+------------------------------------------------------------------------
+Add near the other read-only endpoints. NOT admin-gated, because the
+widget on a public site must be able to offer the link — but note the
+warning below.
+
+    from fastapi.responses import FileResponse
+
+    SOURCE_FILE_DIR = os.getenv("SOURCE_FILE_DIR", "/data/source_files")
+
+    @app.get("/source_file/{filename}")
+    def source_file(filename: str):
+        """Serve the original ingested document so an answer can link back
+        to it (v3.3.0).
+
+        SECURITY: filename comes from the URL, so it is reduced to a bare
+        basename before use — without that, "../../etc/passwd" would escape
+        the directory. Only files that were actually ingested exist here.
+
+        NOTE: this is deliberately unauthenticated so the public widget can
+        offer downloads. That means ANY ingested document is publicly
+        retrievable by name. Before exposing this beyond a trial, gate it
+        per tenant/product, or restrict it to sources whose product is
+        marked customer-facing — EXCLUDED_SOURCES already exists for
+        internal docs and should be honoured here too.
+        """
+        safe = os.path.basename(filename)
+        if safe in _excluded_sources():          # reuse the existing helper
+            raise HTTPException(status_code=404, detail="Not found")
+        path = os.path.join(SOURCE_FILE_DIR, safe)
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404,
+                                detail="Source file not retained. Re-ingest to enable downloads.")
+        return FileResponse(path, filename=safe)
+
+(If EXCLUDED_SOURCES is read differently in your code, match that — the
+point is that internal docs like icu_network_api must not be downloadable.)
+
+
+------------------------------------------------------------------------
+DEPLOY — a re-ingest is required
+------------------------------------------------------------------------
+Page numbers and retained originals are both produced AT INGEST, so
+existing chunks have neither. Bump INGEST_VERSION, then:
+
+    docker compose exec backend rm -rf /data/chroma_db
+    docker compose restart backend
+    docker compose exec backend python -c "import urllib.request as u, os; \
+      r=u.Request('http://localhost:8000/ingest/reload_folder', method='POST', \
+      headers={'x-admin-password': os.getenv('ADMIN_PASSWORD','admin')}); \
+      print(u.urlopen(r).read().decode())"
+
+Add the volume path to docker-compose.yml backend environment:
+
+    SOURCE_FILE_DIR: /data/source_files
+
+It must sit on the `grounded-data` volume, or retained originals vanish on
+every rebuild.

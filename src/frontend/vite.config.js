@@ -11,7 +11,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: process.env.API_TARGET || "http://localhost:8000",
+        target: process.env.API_TARGET || "http://backend:8000",
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/api/, ""),
         configure: (proxy) => {
@@ -23,7 +23,7 @@ export default defineConfig({
               lastWarn = now;
               console.log(
                 "\x1b[33m[api]\x1b[0m backend not reachable yet on " +
-                  (process.env.API_TARGET || "http://localhost:8000") +
+                  (process.env.API_TARGET || "http://backend:8000") +
                   " — still starting or not running."
               );
             }

@@ -13,6 +13,8 @@ logs.jsonl
 
 # ── Secrets ───────────────────────────────
 .deepseek_key.json
+.deepseek_key.enc
+*.enc
 .env
 *.env
 
@@ -24,14 +26,13 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/.deepseek_key.enc
+.idea/
 .deepseek_key.json
 __pycache__/
 *.pyc
 logs.jsonl
 ../cls
-*.enc deepseek_key
-eval_results.json 
+eval_results.json
 eval_baseline*.json
 
 corpus/*

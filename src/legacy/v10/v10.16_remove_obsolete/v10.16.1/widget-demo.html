@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GroundedOps widget — demo</title>
+<style>
+  :root { --ink:#14201c; --muted:#5b6b64; --line:#e4e7e4; --accent:#1F6F5C; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:#fbfcfb; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; padding:56px 24px 120px; }
+  h1 { font-size:30px; letter-spacing:-.02em; margin:0 0 6px; }
+  .sub { color:var(--muted); margin:0 0 32px; }
+  .card { border:1px solid var(--line); border-radius:14px; padding:20px; background:#fff; margin-bottom:24px; }
+  .card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:0 0 4px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:9px; font:inherit; font-size:14px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  button.go { margin-top:14px; background:var(--accent); color:#fff; border:0; border-radius:9px;
+              padding:11px 18px; font:inherit; font-weight:600; cursor:pointer; }
+  button.go:hover { filter:brightness(1.05); }
+  code { background:#f2f4f2; padding:2px 6px; border-radius:5px; font-size:13px; }
+  pre { background:#14201c; color:#e7f0ec; padding:16px; border-radius:11px; overflow:auto; font-size:13px; }
+  .hint { font-size:13px; color:var(--muted); margin-top:8px; }
+  .doc p { margin:0 0 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>GroundedOps widget</h1>
+  <p class="sub">A demo host page. The chat launcher sits in the bottom-right corner. Point it at a running backend, then ask a question about your ingested docs.</p>
+
+  <div class="card">
+    <h2>Connect to your backend</h2>
+    <div class="row">
+      <div>
+        <label for="api">Backend base URL</label>
+        <input id="api" value="http://localhost:8000" />
+      </div>
+      <div>
+        <label for="scope">Scope — product or category key (optional)</label>
+        <input id="scope" placeholder="leave blank for whole corpus" />
+      </div>
+    </div>
+    <button class="go" id="connect">Load widget</button>
+    <p class="hint">The backend must run in a mode it can actually answer in (local Ollama, or Online with a key set server-side), and must allow this page's origin via CORS — see the shipped CORS snippet.</p>
+  </div>
+
+  <div class="card doc">
+    <h2>Sample doc content</h2>
+    <p>This block just stands in for a real documentation or product page so you can see the widget in context. In production you paste one <code>&lt;script&gt;</code> tag before <code>&lt;/body&gt;</code> and the launcher appears on every page it's included on.</p>
+    <pre>&lt;script
+  src="https://your-cdn/groundedops-widget.js"
+  data-api="https://your-backend.example.com"
+  data-title="Product support"
+  data-scope-product=""
+  data-accent="#1F6F5C"&gt;&lt;/script&gt;</pre>
+  </div>
+</div>
+
+<script>
+  // Load / reload the widget with the chosen settings. (The widget guards
+  // against double-inclusion, so we clear its flag + DOM to re-init.)
+  function loadWidget() {
+    var api = document.getElementById("api").value.trim();
+    var scope = document.getElementById("scope").value.trim();
+    if (!api) { alert("Enter a backend URL first."); return; }
+
+    // tear down any previous instance
+    window.__groundedOpsWidgetLoaded = false;
+    var old = document.querySelector("[data-go-root]");
+    if (old) old.remove();
+    var prev = document.getElementById("go-script");
+    if (prev) prev.remove();
+
+    var s = document.createElement("script");
+    s.id = "go-script";
+    s.src = "groundedops-widget.js";
+    s.setAttribute("data-api", api);
+    s.setAttribute("data-title", "Product support");
+    s.setAttribute("data-accent", "#1F6F5C");
+    if (scope) s.setAttribute("data-scope-product", scope);
+    document.body.appendChild(s);
+  }
+  document.getElementById("connect").addEventListener("click", loadWidget);
+  // auto-load once on open with the default URL
+  loadWidget();
+</script>
+</body>
+</html>
