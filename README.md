@@ -35,23 +35,23 @@ model, the system asks instead of deciding. See
 ```
 Upload → Parse (per page) → Chunk (step-boundary aware) → Breadcrumb enrich
        → Embed → ChromaDB   (originals retained for download)
-                                                    │
+                                   │
 Query → query condensation (Rewrite-Retrieve-Read, session-scoped)
-                                                    │
+                                   │
                             curated FAQ check
                      ┌──────────┬──────────┬──────────┐
                  verbatim    plausible    nothing close
                   serve       ASK user      continue
-                                                    │
+                                   │
         Hybrid Retrieval (BM25 + dense, full corpus, RRF-merged)
                        → Rerank (cross-encoder)
-                                                    │
+                                   │
                           retrieval confidence band
                      ┌──────────┬──────────┬──────────┐
                   "none"   "ambiguous"   "confident"
                   refuse    ask to        proceed
                             clarify
-                                                    │
+                                     │
                           ┌──────────┴──────────┐
                           │   Structured path    │  → checklist/list
                           │  (rerank-score-aware │     extraction
