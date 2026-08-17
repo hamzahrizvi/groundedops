@@ -1,10 +1,12 @@
-# GroundedOps — full stack. Bring up with:  docker compose up -d
+# GroundedOps — full stack, for real deployment (NOT local dev — use
+# run.cmd/run.ps1 at the repo root for that). Bring up with, from this
+# directory:  docker compose up -d --build
 # Then open http://localhost:8080   (widget API on http://localhost:8000)
 services:
   backend:
     build:
-      context: ./src
-      dockerfile: ../Dockerfile.backend
+      context: ../src
+      dockerfile: ../docker/Dockerfile.backend
     environment:
       # Online by default; set to "local" for fully offline (needs Ollama below).
       GENERATION_MODE: ${GENERATION_MODE:-api}
@@ -37,13 +39,13 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - grounded-data:/data          # chroma_db + conversations.db persist here
-      - ./corpus:/app/corpus:ro      # OPTIONAL: drop PDFs here to ingest
+      - ../corpus:/app/corpus:ro     # OPTIONAL: drop PDFs here to ingest
     restart: unless-stopped
 
   frontend:
     build:
-      context: ./src
-      dockerfile: ../Dockerfile.frontend
+      context: ../src
+      dockerfile: ../docker/Dockerfile.frontend
     ports:
       - "8080:80"
     depends_on:
@@ -75,8 +77,8 @@ services:
     ports:
       - "${WIDGET_PORT:-8081}:80"
     volumes:
-      - ./src/frontend/public/widget:/usr/share/nginx/html:ro
-      - ./src/frontend/widget-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../src/frontend/public/widget:/usr/share/nginx/html:ro
+      - ../src/frontend/widget-nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
     healthcheck:
       # 127.0.0.1, NOT localhost: nginx `listen 80` binds IPv4 only
