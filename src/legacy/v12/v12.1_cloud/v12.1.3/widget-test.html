@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GroundedOps widget - test harness</title>
+<style>
+  :root { --ink:#1a1d1f; --mut:#6b7480; --line:#e4e7ea; --accent:#E4002B; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:#fafbfc; line-height:1.6; }
+  .wrap { max-width:820px; margin:0 auto; padding:44px 24px 140px; }
+  h1 { font-size:27px; letter-spacing:-.02em; margin:0 0 4px; }
+  .sub { color:var(--mut); margin:0 0 28px; }
+  .card { border:1px solid var(--line); border-radius:13px; padding:20px; background:#fff; margin-bottom:20px; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:var(--mut); margin:0 0 14px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:0 0 4px; }
+  input { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font:inherit; font-size:13px; }
+  input[type=radio] { width:auto; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:220px; }
+  .modes { display:flex; gap:18px; margin:4px 0 14px; }
+  .modes label { display:flex; align-items:center; gap:7px; color:var(--ink); font-size:14px; cursor:pointer; }
+  button.go { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px;
+              font:inherit; font-weight:600; cursor:pointer; }
+  button.go:hover { filter:brightness(1.06); }
+  code { background:#f1f3f5; padding:2px 6px; border-radius:5px; font-size:12.5px; }
+  pre { background:#1a1d1f; color:#e7ecef; padding:14px; border-radius:10px; overflow:auto; font-size:12.5px; }
+  .hint { font-size:12.5px; color:var(--mut); margin-top:9px; }
+  ol.checks { padding-left:22px; font-size:14.5px; }
+  ol.checks li { margin-bottom:9px; }
+  .pill { display:inline-block; font-size:11px; font-weight:700; text-transform:uppercase;
+          letter-spacing:.05em; padding:2px 8px; border-radius:99px; background:#eef1f4; color:var(--mut); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Widget test harness</h1>
+  <p class="sub">Reproduces what the WordPress plugin does, so the widget can be
+  exercised as a guest and as a signed-in member before WordPress is involved.
+  The launcher appears bottom-right.</p>
+
+  <div class="card">
+    <h2>Backend</h2>
+    <label for="api">API base URL</label>
+    <input id="api" placeholder="https://your-tunnel.trycloudflare.com" />
+    <p class="hint">Use the tunnel hostname to test the real path, or
+    <code>http://127.0.0.1:8000</code> to test locally.</p>
+
+    <h2 style="margin-top:22px">Identity</h2>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="guest" checked /> Guest <span class="pill">FAQ only</span></label>
+      <label><input type="radio" name="mode" value="member" /> Signed in <span class="pill">credits + AI</span></label>
+    </div>
+    <label for="token">Token (signed-in only)</label>
+    <input id="token" placeholder="paste output of: python mint_token.py" />
+    <p class="hint">Generate one in the app folder with
+    <code>python mint_token.py</code>. WordPress mints these automatically;
+    this stands in for it.</p>
+
+    <div class="row" style="margin-top:16px">
+      <div>
+        <label for="product">Scope: product key (optional)</label>
+        <input id="product" placeholder="leave blank to choose in the widget" />
+      </div>
+      <div>
+        <label for="signin">Sign-in URL</label>
+        <input id="signin" value="https://example.com/wp-login.php" />
+      </div>
+    </div>
+
+    <button class="go" id="load" style="margin-top:16px">Load widget</button>
+  </div>
+
+  <div class="card">
+    <h2>What to verify</h2>
+    <ol class="checks">
+      <li><b>As guest, ask something covered by the FAQ.</b> You should get the
+      curated answer, or a "these FAQs match your query" list.</li>
+      <li><b>As guest, ask something NOT in the FAQ</b> (e.g. "what are the
+      dimensions?"). You must get the sign-in prompt and
+      <b>never a generated answer</b>. This is the whole security model: no
+      LLM call is reachable without an account.</li>
+      <li><b>Open the gear icon.</b> Guest should show FAQ lookups remaining and
+      the sign-in note; member should show credits and the per-answer costs.</li>
+      <li><b>As member, ask a documentation question.</b> Expect a generated
+      answer with sources, page numbers, and a working Download source link.</li>
+      <li><b>Watch credits fall</b> in the gear panel. A curated FAQ answer
+      should cost nothing; a generated answer costs 1.</li>
+      <li><b>Reload the page mid-conversation.</b> You should be offered
+      Continue or Start new.</li>
+      <li><b>Click Start over, then reopen the gear.</b> The guest allowance must
+      NOT reset - the visitor id is deliberately separate from the chat session.</li>
+      <li><b>Exhaust the guest allowance</b> (set <code>QUOTA_ANON_FAQ=3</code>
+      and restart) and confirm the limit message appears rather than an error.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>What WordPress will emit</h2>
+    <pre id="snippet">Load the widget to see the equivalent script tag.</pre>
+  </div>
+</div>
+
+<script>
+  function el(id) { return document.getElementById(id); }
+
+  function loadWidget() {
+    var api = el("api").value.trim().replace(/\/+$/, "");
+    if (!api) { alert("Enter the API base URL first."); return; }
+    var mode = document.querySelector('input[name=mode]:checked').value;
+    var token = el("token").value.trim();
+    if (mode === "member" && !token) {
+      alert("Signed-in mode needs a token. Run: python mint_token.py");
+      return;
+    }
+
+    // Tear down any previous instance. The widget guards against double
+    // inclusion, so its flag and DOM must both be cleared to re-init.
+    window.__groundedOpsWidgetLoaded = false;
+    var old = document.querySelector("[data-go-root]");
+    if (old) old.remove();
+    var prev = document.getElementById("go-script");
+    if (prev) prev.remove();
+
+    var attrs = {
+      id: "go-script",
+      src: api + "/widget/groundedops-widget.js",
+      "data-api": api,
+      "data-agent-name": "Support",
+      "data-accent": "#E4002B",
+      "data-sign-in-url": el("signin").value.trim()
+    };
+    if (el("product").value.trim()) attrs["data-scope-product"] = el("product").value.trim();
+    if (mode === "member") attrs["data-token"] = token;
+
+    var s = document.createElement("script");
+    Object.keys(attrs).forEach(function (k) { s.setAttribute(k, attrs[k]); });
+    s.onerror = function () {
+      alert("Could not load the widget script from " + attrs.src +
+            "\n\nCheck the URL, and that /widget/ is reachable.");
+    };
+    document.body.appendChild(s);
+
+    var shown = Object.keys(attrs).filter(function (k) { return k !== "id"; })
+      .map(function (k) {
+        var v = attrs[k];
+        if (k === "data-token") v = v.slice(0, 18) + "...(truncated)";
+        return "  " + k + '="' + v + '"';
+      }).join("\n");
+    el("snippet").textContent = "<script\n" + shown + "\n><\/script>";
+  }
+
+  el("load").addEventListener("click", loadWidget);
+</script>
+</body>
+</html>
