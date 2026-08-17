@@ -1,0 +1,19 @@
+# Normalize line endings so every clone/checkout is consistent regardless
+# of core.autocrlf — this repo has hit CRLF/LF warnings on nearly every
+# git operation on Windows, which is exactly what this file prevents.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF - some cmd.exe parsers misbehave on
+# bare LF batch files.
+*.cmd text eol=crlf
+
+# Binary files - never touch line endings, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.svg -text
+*.ico binary
+*.pdf binary
+*.zip binary
+*.db binary
+*.sqlite3 binary
