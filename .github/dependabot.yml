@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Backend (FastAPI + ML stack)
+  - package-ecosystem: "pip"
+    directory: "/src"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    # torch/sentence-transformers major bumps are worth a human looking at
+    # rather than an auto-merge — group everything into fewer, reviewable PRs.
+    groups:
+      backend-deps:
+        patterns: ["*"]
+
+  # Frontend (React + Vite)
+  - package-ecosystem: "npm"
+    directory: "/src/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-deps:
+        patterns: ["*"]
+
+  # The CI workflow's own actions (actions/checkout, actions/setup-python, …)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

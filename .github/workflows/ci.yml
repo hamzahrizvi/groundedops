@@ -18,19 +18,30 @@ on:
     branches: [ main ]
 
 jobs:
-  # ── Gate 1: unit tests ───────────────────────────────────────────────
-  # Deliberately installs NO ML dependencies. The pure-logic modules
-  # (chunking, structure, text_utils, memory) are fully testable without
-  # them, and tests needing sentence-transformers raise SkipTest, which
-  # run_tests.py reports as SKIP rather than disguising as a pass. This
-  # keeps the gate meaningful and the run fast (seconds, not minutes).
+  # ── Gate 1: unit + route tests ─────────────────────────────────────────
+  # Deliberately installs only the lightweight web deps (fastapi/uvicorn/
+  # pydantic), not the heavy ML stack (torch/chromadb/sentence-transformers)
+  # — the pure-logic modules (chunking, structure, text_utils, memory) and
+  # the FastAPI route tests (tests/test_new_routes.py, via _harness.py's
+  # ML stubs) are both fully testable without it. Tests that genuinely
+  # need sentence-transformers raise SkipTest, which run_tests.py reports
+  # as SKIP rather than disguising as a pass. This keeps the gate
+  # meaningful and the run fast (seconds, not minutes).
+  #
+  # CAVEAT: run_tests.py silently excludes any test_*.py file that fails
+  # to IMPORT (a bad import doesn't fail the run — see run_tests.py's
+  # "COULD NOT LOAD" handling) rather than counting it as a failure. Check
+  # this job's log for "COULD NOT LOAD" lines; a green run does not
+  # guarantee every test file executed.
   unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - name: Run unit test suite
+      - name: Install lightweight web deps (needed for tests/test_new_routes.py)
+        run: pip install fastapi "uvicorn[standard]" pydantic
+      - name: Run unit + route test suite
         run: |
           cd src
           python run_tests.py
@@ -42,9 +53,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build backend image
-        run: docker build -f Dockerfile.backend -t groundedops-backend ./src
+        run: docker build -f docker/Dockerfile.backend -t groundedops-backend ./src
       - name: Build frontend image
-        run: docker build -f Dockerfile.frontend -t groundedops-frontend ./src
+        run: docker build -f docker/Dockerfile.frontend -t groundedops-frontend ./src
 
   # ── Advisory: eval suite schema ──────────────────────────────────────
   # continue-on-error surfaces a visible warning instead of silently
