@@ -288,17 +288,24 @@ about this document" field that scopes the next query to that one source.
 ### Native install (recommended)
 
 ```
-install.cmd      one-time setup
-start.cmd        run on this PC        http://127.0.0.1:8000
-start-lan.cmd    share on your network http://<your-ip>:8000
+install.cmd                            one-time setup
+run.cmd                                run on this PC + LAN + tunnel + test page
+run.cmd -Local -NoTunnel -NoTestPage   plain local run only  http://127.0.0.1:8000
+run.cmd -NoTunnel                      share on your network, no Cloudflare
 ```
+
+`run.cmd` is the one launcher — see the flag table at the top of `run.ps1`.
 
 macOS / Linux:
 
 ```bash
 ./install.sh
-./start.sh          # or ./start.sh --lan
+cd src && ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
+
+There's no `run.sh` equivalent of the Windows launcher yet (auto frontend
+rebuild, LAN firewall rule, Cloudflare tunnel, token minting) — macOS/Linux
+users start the backend directly as above.
 
 The installer needs only **Python 3.11+**, and fetches it via `winget` on
 Windows if missing. Everything lands in a local `.venv`; nothing is
@@ -309,26 +316,40 @@ first question doesn't stall.
 **Node is not required at runtime** — the release ships a pre-built
 frontend, which FastAPI serves directly. One process, one port, one URL.
 (Working from a clone rather than the release? Run `npm run build` in
-`frontend/` once.)
+`frontend/` once, or just run `run.cmd`, which does this automatically
+whenever the sources are newer than the build.)
 
 Colleagues on the same network need **nothing installed** — just the
-address `start-lan.cmd` prints.
+address `run.cmd` prints under "On the LAN".
+
+The admin console (manage documents, FAQ, gaps, categories/products) is
+at `/admin` on the same backend — `run.cmd`'s summary prints this too.
 
 ### Run with Docker
 
+Docker Compose is for **deploying this as a real service**, not local
+day-to-day development — use `run.cmd` for that (faster to iterate on,
+and it's how this app is actually packaged for install). The Compose
+files live in `docker/`:
+
 ```bash
+cd docker
 docker compose up -d --build      # first build downloads models
 # app on http://localhost:8080, API on http://localhost:8000
 ```
 
 Brings up backend, frontend, and Ollama (for Free mode) together.
+`docker/docker-compose.override.yml` (auto-merged when present) switches
+this to a hot-reloading dev stack instead — see the comment at its top for
+how to disable it for a real production run.
 
 > Compose publishes the backend on port **8000**, the same port the
-> native launcher uses. Run `docker compose down` before `start.cmd`.
+> native launcher uses. Run `cd docker && docker compose down` before `run.cmd`.
 
 ### Manual / development
 
 ```bash
+cd src
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 uvicorn main:app --port 8000        # terminal 1
