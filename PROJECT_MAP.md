@@ -184,10 +184,14 @@ groundedops/
         │          v12.1_cloud/{v12.1.1 … v12.1.5}   main.py 1842 ln, PHP plugin
         │          v12.2_admin_rebuild     admin.html + main.py 2077 ln
         │          v12.3_redesign/v12.3.1  admin.html, styles.css, main.py 2077 ln
-        └── v13/   v13.0                   ← in-flight release. DEPLOY_v13.md, admin.html,
-                                           main.py, faq_store.py, gaps.py, widget_config.py,
-                                           styles.css, _harness.py, test_new_routes.py,
-                                           test_ui.py
+        └── v13/   v13.0    the raw drop that caused BROKEN STATE. DEPLOY_v13.md,
+                            admin.html, main.py, faq_store.py, gaps.py,
+                            widget_config.py, styles.css, _harness.py,
+                            test_new_routes.py, test_ui.py
+                   v13.1    ← current release. Same v13.0 intent, actually merged
+                            onto v12.3's main.py instead of replacing it — see
+                            CHANGELOG_v13.1.md. main.py, faq_store.py, admin.html,
+                            _harness.py, test_new_routes.py, files.zip
 ```
 
 ---
