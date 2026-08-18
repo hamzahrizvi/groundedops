@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GroundedOps Console</title>
+<style>
+  /* Instrument-panel palette: this is a service terminal for a machine
+     that answers questions, so the surfaces are cool steel, the data is
+     monospaced like a readout, and the one brand red is reserved for
+     state and action - never decoration. */
+  :root{
+    --ink:#12161c; --steel:#5a6472; --faint:#8b95a1;
+    --line:#dde3e9; --surface:#f2f5f8; --panel:#ffffff;
+    --red:#e4002b; --red-soft:#fdeaee;
+    --amber:#b26a00; --amber-soft:#fdf4e3;
+    --green:#0e7a54; --green-soft:#e8f5ef;
+    --rail:224px;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--surface);
+       font-size:14.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font:inherit;color:inherit}
+
+  /* micro-label: the vocabulary of the panel */
+  .lbl{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---------- shell ---------- */
+  .shell{display:flex;height:100vh;overflow:hidden}
+  .rail{width:var(--rail);flex:0 0 auto;background:var(--ink);color:#e8ecf1;
+        display:flex;flex-direction:column;padding:18px 0}
+  .brand{padding:0 20px 18px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:12px}
+  .brand b{display:block;font-size:15px;letter-spacing:-.01em}
+  .brand span{font-size:11px;color:#8b95a1}
+  .nav{flex:1;padding:0 10px;display:flex;flex-direction:column;gap:2px}
+  .nav button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+              background:transparent;border:0;color:#b9c2cc;padding:9px 11px;border-radius:7px;
+              cursor:pointer;font-size:14px}
+  .nav button:hover{background:rgba(255,255,255,.06);color:#fff}
+  .nav button[aria-current="page"]{background:var(--red);color:#fff;font-weight:600}
+  .nav button:focus-visible{outline:2px solid #fff;outline-offset:1px}
+  .nav .badge{margin-left:auto;font-family:var(--mono);font-size:11px;background:rgba(255,255,255,.14);
+              padding:1px 6px;border-radius:99px}
+  .nav button[aria-current="page"] .badge{background:rgba(0,0,0,.22)}
+  .rail-foot{padding:12px 16px 0;border-top:1px solid rgba(255,255,255,.08);margin-top:12px}
+  .rail-foot button{width:100%;background:rgba(255,255,255,.08);border:0;color:#e8ecf1;
+                    padding:9px;border-radius:7px;cursor:pointer;font-size:13px}
+  .rail-foot button:hover{background:rgba(255,255,255,.16)}
+
+  .main{flex:1;overflow-y:auto;padding:26px 30px 80px}
+  .wrap{max-width:940px}
+  h1{font-size:24px;letter-spacing:-.02em;margin:0 0 3px}
+  .lede{color:var(--steel);margin:0 0 22px;max-width:64ch}
+
+  /* ---------- readout: the signature element ---------- */
+  .readout{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+           border:1px solid var(--line);border-radius:11px;overflow:hidden;margin-bottom:24px}
+  .readout div{background:var(--panel);padding:13px 15px}
+  .readout b{display:block;font-family:var(--mono);font-size:23px;font-weight:600;letter-spacing:-.02em;
+             line-height:1.15;margin-top:3px}
+  .readout .warn b{color:var(--amber)} .readout .ok b{color:var(--green)}
+
+  /* ---------- cards ---------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:20px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 3px;letter-spacing:-.01em}
+  .card .hint{color:var(--steel);font-size:13px;margin:0 0 16px;max-width:60ch}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .row>div{flex:1;min-width:170px}
+  label.f{display:block;margin-bottom:5px}
+  input[type=text],input[type=password],select,textarea{
+      width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--red);outline-offset:-1px;border-color:var(--red)}
+  textarea{resize:vertical;min-height:74px}
+
+  .btn{background:var(--ink);color:#fff;border:0;border-radius:8px;padding:9px 16px;cursor:pointer;font-weight:600;font-size:13.5px}
+  .btn:hover{background:#000}
+  .btn.primary{background:var(--red)} .btn.primary:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.ghost:hover{background:var(--surface)}
+  .btn.danger{background:transparent;color:var(--red);border:1px solid var(--red)}
+  .btn.danger:hover{background:var(--red-soft)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+  .btn.sm{padding:6px 11px;font-size:12.5px}
+
+  /* ---------- checklist ---------- */
+  .step{display:flex;gap:13px;padding:14px 0;border-top:1px solid var(--line)}
+  .step:first-of-type{border-top:0}
+  .mark{width:24px;height:24px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;
+        justify-content:center;font-family:var(--mono);font-size:12px;font-weight:700}
+  .mark.done{background:var(--green-soft);color:var(--green)}
+  .mark.todo{background:var(--amber-soft);color:var(--amber)}
+  .mark.idle{background:var(--surface);color:var(--faint)}
+  .step-b{flex:1}
+  .step-b b{display:block;font-size:14px}
+  .step-b p{margin:2px 0 0;color:var(--steel);font-size:13px}
+  .step-b .acts{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ---------- lists ---------- */
+  .item{display:flex;gap:12px;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+  .item:first-child{border-top:0}
+  .item .grow{flex:1;min-width:0}
+  .item .grow b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .grow span{font-size:12px;color:var(--steel)}
+  .tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:5px;
+       background:var(--surface);color:var(--steel);border:1px solid var(--line)}
+  .tag.warn{background:var(--amber-soft);color:var(--amber);border-color:#eddcb8}
+  .tag.ok{background:var(--green-soft);color:var(--green);border-color:#c5e4d6}
+
+  .empty{text-align:center;padding:30px 20px;color:var(--steel)}
+  .empty b{display:block;color:var(--ink);margin-bottom:4px}
+
+  /* ---------- drop zone ---------- */
+  .drop{border:1.5px dashed var(--line);border-radius:10px;padding:26px;text-align:center;
+        color:var(--steel);background:var(--surface);transition:border-color .12s,background .12s}
+  .drop.on{border-color:var(--red);background:var(--red-soft)}
+  .drop.off{opacity:.55}
+  .drop b{display:block;color:var(--ink)}
+
+  /* ---------- chat ---------- */
+  .chat{border:1px solid var(--line);border-radius:10px;height:340px;overflow-y:auto;padding:14px;background:var(--surface)}
+  .bub{max-width:80%;padding:9px 13px;border-radius:12px;margin-bottom:9px;font-size:13.5px;white-space:pre-wrap}
+  .bub.u{margin-left:auto;background:var(--ink);color:#fff}
+  .bub.a{background:var(--panel);border:1px solid var(--line)}
+
+  /* ---------- guide ---------- */
+  .veil{position:fixed;inset:0;background:rgba(18,22,28,.55);display:flex;align-items:center;
+        justify-content:center;padding:22px;z-index:60}
+  .modal{background:var(--panel);border-radius:13px;max-width:620px;width:100%;max-height:86vh;
+         overflow-y:auto;padding:26px}
+  .modal h2{margin:0 0 4px;font-size:19px}
+  .guide-step{border-top:1px solid var(--line);padding:15px 0}
+  .guide-step:first-of-type{border-top:0}
+  .guide-step .n{font-family:var(--mono);font-size:11px;color:var(--red);font-weight:700}
+  .guide-step b{display:block;margin:3px 0 4px}
+  .guide-step p{margin:0;color:var(--steel);font-size:13.5px}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);
+         color:#fff;padding:11px 18px;border-radius:9px;font-size:13.5px;z-index:80;max-width:90vw}
+  .toast.bad{background:var(--red)}
+
+  .gate{height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .gate .card{max-width:380px;width:100%}
+
+  @media (max-width:820px){
+    .shell{flex-direction:column}
+    .rail{width:100%;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
+    .brand{border:0;padding:0 14px 0 6px;margin:0}
+    .nav{flex-direction:row;flex:1}
+    .rail-foot{border:0;margin:0;padding:0 6px}
+    .readout{grid-template-columns:repeat(2,1fr)}
+    .main{padding:18px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * GroundedOps Console (v12.0)
+ *
+ * One self-contained file, served by the backend at /admin. No build
+ * step: replace the file, reload the page.
+ *
+ * The organising idea is that the console should answer "what do I do
+ * next?" without anyone reading a manual. The Overview reads live state
+ * and turns it into a short list of actions, so an unassigned document
+ * or an empty FAQ announces itself instead of waiting to be discovered.
+ * ------------------------------------------------------------------ */
+
+const API = location.origin;
+let pw = sessionStorage.getItem("go_admin_pw") || "";
+let view = "overview";
+let cache = { catalog: null, sources: [], faq: [], gaps: [] };
+
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
+  }
+  kids.flat().forEach(c => c && n.append(c.nodeType ? c : document.createTextNode(c)));
+  return n;
+};
+
+function toast(msg, bad) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const t = el("div", { class: "toast" + (bad ? " bad" : "") }, msg);
+  document.body.append(t);
+  setTimeout(() => t.remove(), bad ? 6000 : 3200);
+}
+
+async function api(path, opts = {}) {
+  const o = Object.assign({ headers: {} }, opts);
+  o.headers["x-admin-password"] = pw;
+  if (o.body && !(o.body instanceof FormData)) o.headers["Content-Type"] = "application/json";
+  const r = await fetch(API + path, o);
+  if (r.status === 401) { pw = ""; sessionStorage.removeItem("go_admin_pw"); render(); throw new Error("Password rejected"); }
+  if (!r.ok) {
+    let d; try { d = (await r.json()).detail; } catch (e) { d = r.statusText; }
+    throw new Error(typeof d === "string" ? d : JSON.stringify(d));
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+/* ---------------- data ---------------- */
+async function refresh() {
+  const [cat, src] = await Promise.all([
+    api("/catalog").catch(() => ({ categories: [] })),
+    api("/admin/sources").catch(() => ({ sources: [] })),
+  ]);
+  cache.catalog = cat.categories || [];
+  cache.sources = src.sources || src || [];
+  cache.faq = (await api("/faq").catch(() => ({ faq: [] }))).faq || [];
+  cache.gaps = (await api("/faq/gaps").catch(() => ({ gaps: [] }))).gaps || [];
+}
+
+const products = () => cache.catalog.flatMap(c =>
+  (c.products || []).map(p => ({ ...p, category: c.key, categoryName: c.name })));
+const unassigned = () => cache.sources.filter(s => !(s.product || s.products));
+const answered = () => cache.faq.filter(f => (f.answer || "").trim());
+
+/* ---------------- shell ---------------- */
+function render() {
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  if (!pw) return app.append(gate());
+
+  const nav = (id, label, count) =>
+    el("button", {
+      onclick: () => { view = id; render(); },
+      "aria-current": view === id ? "page" : null,
+    }, label, count !== undefined ? el("span", { class: "badge mono" }, String(count)) : null);
+
+  app.append(el("div", { class: "shell" },
+    el("aside", { class: "rail" },
+      el("div", { class: "brand" }, el("b", {}, "GroundedOps"), el("span", {}, "Support console")),
+      el("nav", { class: "nav" },
+        nav("overview", "Overview"),
+        nav("documents", "Documents", cache.sources.length),
+        nav("faq", "Answers", answered().length),
+        nav("catalog", "Products", products().length),
+        nav("test", "Test chat"),
+      ),
+      el("div", { class: "rail-foot" },
+        el("button", { onclick: openGuide }, "How do I…?")),
+    ),
+    el("main", { class: "main" }, el("div", { class: "wrap" }, body()))
+  ));
+}
+
+function body() {
+  if (view === "overview") return viewOverview();
+  if (view === "documents") return viewDocuments();
+  if (view === "faq") return viewFaq();
+  if (view === "catalog") return viewCatalog();
+  if (view === "test") return viewTest();
+}
+
+/* ---------------- gate ---------------- */
+function gate() {
+  const input = el("input", { type: "password", placeholder: "Admin password", autofocus: "true" });
+  const go = async () => {
+    pw = input.value;
+    try {
+      await api("/admin/login", { method: "POST" });
+      sessionStorage.setItem("go_admin_pw", pw);
+      await refresh(); render();
+    } catch (e) { pw = ""; toast("That password was not accepted", true); }
+  };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  return el("div", { class: "gate" },
+    el("div", { class: "card" },
+      el("h2", {}, "GroundedOps console"),
+      el("p", { class: "hint" }, "Manage the documents and answers behind the support widget."),
+      input,
+      el("div", { style: "margin-top:12px" },
+        el("button", { class: "btn primary", onclick: go }, "Open console"))));
+}
+
+/* ---------------- overview ---------------- */
+function viewOverview() {
+  const prods = products(), un = unassigned(), ans = answered();
+
+  const stat = (label, value, tone) =>
+    el("div", { class: tone || "" }, el("div", { class: "lbl" }, label), el("b", {}, String(value)));
+
+  const step = (state, title, desc, actions) =>
+    el("div", { class: "step" },
+      el("div", { class: "mark " + state }, state === "done" ? "\u2713" : state === "todo" ? "!" : "\u00b7"),
+      el("div", { class: "step-b" },
+        el("b", {}, title), el("p", {}, desc),
+        actions && actions.length ? el("div", { class: "acts" }, actions) : null));
+
+  const goTo = (id, label, cls) =>
+    el("button", { class: "btn sm " + (cls || "ghost"), onclick: () => { view = id; render(); } }, label);
+
+  const steps = [];
+
+  steps.push(prods.length
+    ? step("done", "Products are set up",
+        prods.length + " product" + (prods.length === 1 ? "" : "s") +
+        " across " + cache.catalog.length + " range" + (cache.catalog.length === 1 ? "" : "s") + ".",
+        [goTo("catalog", "Manage products")])
+    : step("todo", "Set up your products first",
+        "Documents are filed against a product, and the widget asks visitors to pick one. Nothing else works until at least one exists.",
+        [goTo("catalog", "Add a product", "primary")]));
+
+  steps.push(cache.sources.length
+    ? step(un.length ? "todo" : "done",
+        un.length ? un.length + " document" + (un.length === 1 ? "" : "s") + " need a product"
+                  : cache.sources.length + " documents, all filed",
+        un.length ? "Unfiled documents are searchable but never offered in the widget, because it can only show products it can answer about."
+                  : "Every document belongs to a product and can be found by the widget.",
+        [goTo("documents", un.length ? "File them now" : "View documents", un.length ? "primary" : "ghost")])
+    : step("todo", "Add your first document",
+        "PDF, Word or text. This is what answers are drawn from.",
+        [goTo("documents", "Add documents", "primary")]));
+
+  steps.push(ans.length
+    ? step("done", ans.length + " reviewed answers",
+        "Signed-out visitors only ever see these, so they are the public face of the widget.",
+        [goTo("faq", "Review answers")])
+    : step(cache.sources.length ? "todo" : "idle", "Write the reviewed answers",
+        "Visitors who are not signed in can only be shown answers you have approved. Draft them from a document, then edit.",
+        cache.sources.length ? [goTo("faq", "Start writing", "primary")] : []));
+
+  steps.push(cache.gaps.length
+    ? step("todo", cache.gaps.length + " unanswered questions logged",
+        "Real questions the reviewed answers did not cover. This is your to-do list, ordered by how often each was asked.",
+        [goTo("faq", "See what people asked", "primary")])
+    : step("idle", "Questions people could not get answered",
+        "Anything the widget could not answer shows up here once visitors start using it.", []));
+
+  return [
+    el("h1", {}, "Overview"),
+    el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked."),
+    el("div", { class: "readout" },
+      stat("Documents", cache.sources.length),
+      stat("Need filing", un.length, un.length ? "warn" : "ok"),
+      stat("Reviewed answers", ans.length, ans.length ? "ok" : ""),
+      stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "ok")),
+    el("div", { class: "card" }, steps),
+  ];
+}
+
+/* ---------------- documents ---------------- */
+function viewDocuments() {
+  const prods = products();
+  let chosen = prods.length === 1 ? prods[0].key : "";
+
+  const sel = el("select", { onchange: e => { chosen = e.target.value; sync(); } },
+    el("option", { value: "" }, prods.length ? "Choose a product\u2026" : "No products yet"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  if (chosen) sel.value = chosen;
+
+  const drop = el("div", { class: "drop off" },
+    el("b", {}, "Choose a product first"),
+    "Then drop files here, or click to browse");
+  const file = el("input", { type: "file", multiple: "true", accept: ".pdf,.docx,.txt", style: "display:none" });
+  const progress = el("div", {});
+
+  function sync() {
+    const ok = !!chosen;
+    drop.className = "drop" + (ok ? "" : " off");
+    drop.innerHTML = "";
+    drop.append(el("b", {}, ok ? "Drop files here" : "Choose a product first"),
+      ok ? "PDF, Word or text \u2014 or click to browse"
+         : "Documents must belong to a product so the widget can offer them");
+  }
+  sync();
+
+  async function upload(files) {
+    if (!chosen) return toast("Choose a product first", true);
+    const p = prods.find(x => x.key === chosen);
+    for (const f of files) {
+      const line = el("div", { class: "item" },
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading\u2026")));
+      progress.append(line);
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await fetch(API + "/upload", {
+          method: "POST", body: fd,
+          headers: { "x-admin-password": pw, "category-key": p.category, "product-key": p.key },
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const { job_id } = await r.json();
+        await track(job_id, line, f.name);
+      } catch (e) {
+        line.querySelector("span").textContent = "Failed: " + e.message;
+      }
+    }
+    await refresh(); render();
+  }
+
+  async function track(job, line, name) {
+    for (let i = 0; i < 600; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      let s; try { s = await api("/upload/status/" + job); } catch (e) { break; }
+      const span = line.querySelector("span");
+      if (s.status === "done") { span.textContent = "Added \u2014 " + (s.chunks || 0) + " sections"; return; }
+      if (s.status === "error") { span.textContent = "Failed: " + (s.error || "unknown"); return; }
+      span.textContent = (s.stage || "working") + " " + (s.pct || 0) + "%";
+    }
+  }
+
+  drop.addEventListener("click", () => chosen && file.click());
+  drop.addEventListener("dragover", e => { e.preventDefault(); if (chosen) drop.classList.add("on"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("on"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("on");
+    if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
+  });
+  file.addEventListener("change", () => file.files.length && upload(file.files));
+
+  const list = cache.sources.length ? cache.sources.map(s => {
+    const cur = s.product || s.products || "";
+    const move = el("select", { onchange: async e => {
+      const p = prods.find(x => x.key === e.target.value);
+      if (!p) return;
+      try {
+        await api("/admin/reassign_source", { method: "POST",
+          body: JSON.stringify({ source: s.source, category_key: p.category, product_key: p.key }) });
+        toast("Filed under " + p.name);
+        await refresh(); render();
+      } catch (err) { toast(err.message, true); }
+    } }, el("option", { value: "" }, cur ? "Move to\u2026" : "File under\u2026"),
+       prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+
+    return el("div", { class: "item" },
+      el("div", { class: "grow" },
+        el("b", {}, s.source),
+        el("span", {}, (s.chunks || 0) + " sections")),
+      cur ? el("span", { class: "tag ok" }, cur) : el("span", { class: "tag warn" }, "no product"),
+      move,
+      el("button", { class: "btn ghost sm", onclick: async () => {
+        if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
+        try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });
+              toast("Removed"); await refresh(); render(); }
+        catch (e) { toast(e.message, true); }
+      } }, "Remove"));
+  }) : [el("div", { class: "empty" }, el("b", {}, "No documents yet"),
+        "Add a manual or datasheet above and the widget can start answering from it.")];
+
+  return [
+    el("h1", {}, "Documents"),
+    el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
+    el("div", { class: "card" },
+      el("h2", {}, "Add documents"),
+      el("p", { class: "hint" }, "Pick the product the document describes, then drop the files in."),
+      el("div", { class: "row" }, el("div", {}, el("label", { class: "f lbl" }, "Product"), sel)),
+      el("div", { style: "margin-top:14px" }, drop, file),
+      progress),
+    el("div", { class: "card" }, el("h2", {}, "All documents"),
+      el("p", { class: "hint" }, "A document with no product is searchable but never offered in the widget."),
+      list),
+  ];
+}
+
+/* ---------------- answers (FAQ) ---------------- */
+function viewFaq() {
+  const prods = products();
+  let scope = "";
+  const shown = () => cache.faq.filter(f => !scope ||
+    (f.products || "").split(",").includes(scope) || f.category === scope);
+
+  const scopeSel = el("select", { onchange: e => { scope = e.target.value; render2(); } },
+    el("option", { value: "" }, "All products"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+
+  const listBox = el("div", {});
+  function render2() {
+    scopeSel.value = scope;
+    listBox.innerHTML = "";
+    const items = shown();
+    if (!items.length) {
+      listBox.append(el("div", { class: "empty" }, el("b", {}, "No answers yet"),
+        "Draft some from a document below, or write one by hand."));
+      return;
+    }
+    items.forEach(f => {
+      const q = el("input", { type: "text", value: f.question });
+      const a = el("textarea", {}, f.answer || "");
+      const box = el("div", { class: "item", style: "display:block" },
+        el("div", { class: "row", style: "margin-bottom:8px" },
+          el("div", { style: "flex:3" }, el("label", { class: "f lbl" }, "Question"), q)),
+        el("label", { class: "f lbl" }, "Answer"), a,
+        el("p", { class: "hint", style: "margin:7px 0 0" },
+          "Write it so it reads correctly on its own \u2014 it may be shown to someone whose wording was slightly different."),
+        el("div", { style: "margin-top:9px;display:flex;gap:8px" },
+          el("button", { class: "btn sm", onclick: async () => {
+            try { await api("/faq/" + f.id, { method: "PATCH",
+                    body: JSON.stringify({ question: q.value, answer: a.value }) });
+                  toast("Saved"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Save"),
+          el("button", { class: "btn ghost sm", onclick: async () => {
+            if (!confirm("Delete this answer?")) return;
+            try { await api("/faq/" + f.id, { method: "DELETE" }); toast("Deleted");
+                  await refresh(); render(); } catch (e) { toast(e.message, true); }
+          } }, "Delete")));
+      listBox.append(box);
+    });
+  }
+  render2();
+
+  // draft from a document, server-side
+  const srcSel = el("select", {}, el("option", { value: "" }, "Choose a document\u2026"),
+    cache.sources.map(s => el("option", { value: s.source }, s.source)));
+  const draftBtn = el("button", { class: "btn primary", onclick: async () => {
+    const src = srcSel.value;
+    if (!src) return toast("Choose a document first", true);
+    const s = cache.sources.find(x => x.source === src) || {};
+    draftBtn.disabled = true; draftBtn.textContent = "Drafting\u2026";
+    try {
+      const r = await api("/admin/faq/autogenerate", { method: "POST",
+        body: JSON.stringify({ source: src, product: s.product || s.products || "", category: s.category || "" }) });
+      toast("Added " + r.added + " new, skipped " + r.skipped_duplicates + " already there");
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+    finally { draftBtn.disabled = false; draftBtn.textContent = "Draft answers"; }
+  } }, "Draft answers");
+
+  // add by hand
+  const nq = el("input", { type: "text", placeholder: "Does it need an internet connection?" });
+  const na = el("textarea", { placeholder: "No. Everything is processed on the device; no connection is required." });
+
+  const gapList = cache.gaps.length
+    ? cache.gaps.slice(0, 12).map(g => el("div", { class: "item" },
+        el("div", { class: "grow" }, el("b", {}, g.question),
+          el("span", {}, "asked " + (g.times_asked || 1) + "\u00d7")),
+        el("button", { class: "btn ghost sm", onclick: () => {
+          nq.value = g.question; na.focus();
+          window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+        } }, "Answer this")))
+    : [el("div", { class: "empty" }, el("b", {}, "Nothing unanswered"),
+        "Questions the widget could not answer will collect here.")];
+
+  return [
+    el("h1", {}, "Answers"),
+    el("p", { class: "lede" }, "Reviewed answers are shown exactly as written and cost nothing to serve. Visitors who are not signed in see only these."),
+    el("div", { class: "card" },
+      el("h2", {}, "Draft from a document"),
+      el("p", { class: "hint" }, "Suggests questions and answers from a document you have added. Nothing is published until you have read it \u2014 and drafting again never overwrites answers you have edited."),
+      el("div", { class: "row" },
+        el("div", { style: "flex:2" }, el("label", { class: "f lbl" }, "Document"), srcSel),
+        el("div", { style: "flex:0 0 auto" }, draftBtn))),
+    el("div", { class: "card" },
+      el("h2", {}, "Write one yourself"),
+      el("p", { class: "hint" }, "Hand-written answers are protected \u2014 drafting will never replace them."),
+      el("label", { class: "f lbl" }, "Question"), nq,
+      el("label", { class: "f lbl", style: "margin-top:10px" }, "Answer"), na,
+      el("div", { class: "row", style: "margin-top:10px" },
+        el("div", {}, el("label", { class: "f lbl" }, "Applies to"), scopeSel.cloneNode(true)),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn primary", onclick: async ev => {
+            const applies = ev.target.closest(".row").querySelector("select").value;
+            if (!nq.value.trim()) return toast("Add a question first", true);
+            try {
+              await api("/faq", { method: "POST", body: JSON.stringify({
+                question: nq.value, answer: na.value, product: applies }) });
+              nq.value = ""; na.value = ""; toast("Added");
+              await refresh(); render();
+            } catch (e) { toast(e.message, true); }
+          } }, "Add answer")))),
+    el("div", { class: "card" },
+      el("h2", {}, "People asked, we could not answer"),
+      el("p", { class: "hint" }, "Ordered by how often each came up \u2014 the top of this list is the most useful thing to write next."),
+      gapList),
+    el("div", { class: "card" },
+      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:4px" },
+        el("h2", { style: "flex:1;margin:0" }, "All answers"), scopeSel),
+      el("p", { class: "hint" }, "Edit the wording, or delete anything out of date."),
+      listBox,
+      el("div", { style: "margin-top:14px" },
+        el("button", { class: "btn danger sm", onclick: async () => {
+          const label = scope || "ALL products";
+          if (!confirm("Delete every answer for " + label + "?\n\nHand-written answers cannot be recovered.")) return;
+          if (prompt('Type DELETE to confirm') !== "DELETE") return toast("Cancelled");
+          try {
+            await api("/faq?confirm=true" + (scope ? "&product=" + encodeURIComponent(scope) : ""),
+                      { method: "DELETE" });
+            toast("Deleted"); await refresh(); render();
+          } catch (e) { toast(e.message, true); }
+        } }, "Delete all shown"))),
+  ];
+}
+
+/* ---------------- catalog ---------------- */
+function viewCatalog() {
+  const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const cName = el("input", { type: "text", placeholder: "Coin hoppers" });
+  const pCat = el("select", {}, cache.catalog.map(c => el("option", { value: c.key }, c.name)));
+  const pName = el("input", { type: "text", placeholder: "SMART Hopper" });
+
+  const rows = cache.catalog.length ? cache.catalog.map(c =>
+    el("div", { class: "card", style: "margin-bottom:12px" },
+      el("div", { style: "display:flex;align-items:center;gap:10px" },
+        el("h2", { style: "flex:1;margin:0" }, c.name),
+        el("span", { class: "tag mono" }, c.key),
+        el("button", { class: "btn ghost sm", onclick: async () => {
+          if (!confirm("Delete the " + c.name + " range and its products?")) return;
+          try { await api("/admin/category/" + encodeURIComponent(c.key), { method: "DELETE" });
+                toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Delete")),
+      (c.products || []).length
+        ? (c.products || []).map(p => el("div", { class: "item" },
+            el("div", { class: "grow" }, el("b", {}, p.name),
+              el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents")),
+            el("span", { class: "tag mono" }, p.key),
+            el("button", { class: "btn ghost sm", onclick: async () => {
+              if (!confirm("Delete " + p.name + "?")) return;
+              try { await api("/admin/product/" + encodeURIComponent(c.key) + "/" + encodeURIComponent(p.key),
+                              { method: "DELETE" });
+                    toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Delete")))
+        : el("p", { class: "hint", style: "margin:10px 0 0" }, "No products in this range yet.")))
+    : [el("div", { class: "card" }, el("div", { class: "empty" },
+        el("b", {}, "No ranges yet"),
+        "A range groups related products \u2014 Coin hoppers, Note validators, Biometrics."))];
+
+  return [
+    el("h1", {}, "Products"),
+    el("p", { class: "lede" }, "Ranges group products; documents are filed against a product. This is what the widget asks visitors to choose from."),
+    el("div", { class: "card" },
+      el("h2", {}, "Add a range"),
+      el("p", { class: "hint" }, "A family of products, such as Coin hoppers."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "f lbl" }, "Name"), cName),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn", onclick: async () => {
+            if (!cName.value.trim()) return toast("Give the range a name", true);
+            try { await api("/admin/category", { method: "POST",
+                    body: JSON.stringify({ key: slug(cName.value), name: cName.value.trim() }) });
+                  cName.value = ""; toast("Range added"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Add range")))),
+    cache.catalog.length ? el("div", { class: "card" },
+      el("h2", {}, "Add a product"),
+      el("p", { class: "hint" }, "Documents and widget conversations are scoped to a product."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "f lbl" }, "Range"), pCat),
+        el("div", {}, el("label", { class: "f lbl" }, "Name"), pName),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn", onclick: async () => {
+            if (!pName.value.trim()) return toast("Give the product a name", true);
+            try { await api("/admin/product", { method: "POST", body: JSON.stringify({
+                    category_key: pCat.value, key: slug(pName.value), name: pName.value.trim(), sources: [] }) });
+                  pName.value = ""; toast("Product added"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Add product")))) : null,
+    rows,
+  ];
+}
+
+/* ---------------- test ---------------- */
+function viewTest() {
+  const prods = products();
+  const sel = el("select", {}, el("option", { value: "" }, "Whole knowledge base"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  const log = el("div", { class: "chat" },
+    el("div", { class: "bub a" }, "Ask something a customer might ask. This uses the same pipeline as the widget, so what you see here is what they would get."));
+  const input = el("input", { type: "text", placeholder: "Does it need an internet connection?" });
+  const sid = "console-" + Math.random().toString(36).slice(2);
+
+  async function send() {
+    const q = input.value.trim(); if (!q) return;
+    input.value = "";
+    log.append(el("div", { class: "bub u" }, q));
+    const wait = el("div", { class: "bub a" }, "Checking the documentation\u2026");
+    log.append(wait); log.scrollTop = log.scrollHeight;
+    try {
+      const r = await api("/query", { method: "POST", body: JSON.stringify({
+        q, session_id: sid, product: sel.value || null }) });
+      wait.remove();
+      const bub = el("div", { class: "bub a" }, r.answer || "No answer");
+      if (r.sources && r.sources.length) {
+        bub.append(el("div", { class: "lbl", style: "margin-top:9px" }, "Sources"));
+        r.sources.forEach(s => bub.append(el("div", { style: "font-size:12px;color:var(--steel)" },
+          s.source + (s.page_label ? " \u00b7 " + s.page_label : ""))));
+      }
+      if (r.from_faq) bub.append(el("div", { class: "tag ok", style: "margin-top:8px" }, "reviewed answer"));
+      log.append(bub);
+    } catch (e) { wait.textContent = "Failed: " + e.message; }
+    log.scrollTop = log.scrollHeight;
+  }
+  input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+  return [
+    el("h1", {}, "Test chat"),
+    el("p", { class: "lede" }, "Check what the widget would say before customers do. Nothing here is shown to visitors."),
+    el("div", { class: "card" },
+      el("div", { class: "row", style: "margin-bottom:12px" },
+        el("div", {}, el("label", { class: "f lbl" }, "Ask about"), sel)),
+      log,
+      el("div", { class: "row", style: "margin-top:12px" },
+        el("div", { style: "flex:1" }, input),
+        el("div", { style: "flex:0 0 auto" }, el("button", { class: "btn primary", onclick: send }, "Ask")))),
+  ];
+}
+
+/* ---------------- guide ---------------- */
+function openGuide() {
+  const steps = [
+    ["01", "Set up a product",
+     "Products \u203a Add a range (say, Coin hoppers), then add a product inside it. Documents are filed against a product, and the widget asks visitors to pick one before they can ask anything."],
+    ["02", "Add a document",
+     "Documents \u203a choose the product, then drop in a PDF, Word or text file. Reading it takes a minute or two; the progress line tells you when it is ready."],
+    ["03", "Draft the reviewed answers",
+     "Answers \u203a Draft from a document. It suggests questions and answers taken from that document. Read every one before trusting it \u2014 they are shown to customers word for word."],
+    ["04", "Fix the wording",
+     "Edit any answer so it reads correctly on its own. Someone may be shown it after asking a slightly different question, so \u201cNo, instant results\u201d reads badly where \u201cNo internet connection is required\u201d reads well."],
+    ["05", "Try it",
+     "Test chat \u203a ask what a customer would ask. Same pipeline as the widget, so if it looks wrong here, it is wrong there."],
+    ["06", "Keep it current",
+     "Answers \u203a \u201cPeople asked, we could not answer\u201d collects real questions the widget could not handle, most frequent first. Working down that list is the single most useful upkeep."],
+  ];
+  const veil = el("div", { class: "veil", onclick: e => { if (e.target === veil) veil.remove(); } },
+    el("div", { class: "modal" },
+      el("h2", {}, "How do I\u2026?"),
+      el("p", { class: "hint" }, "The whole job, in order. Each step takes a minute."),
+      steps.map(([n, t, d]) => el("div", { class: "guide-step" },
+        el("div", { class: "n mono" }, n), el("b", {}, t), el("p", {}, d))),
+      el("div", { style: "margin-top:18px;display:flex;gap:8px" },
+        el("button", { class: "btn primary", onclick: () => { veil.remove(); view = "overview"; render(); } }, "Start at the overview"),
+        el("button", { class: "btn ghost", onclick: () => veil.remove() }, "Close"))));
+  document.body.append(veil);
+  document.addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape") { veil.remove(); document.removeEventListener("keydown", esc); }
+  });
+}
+
+/* ---------------- boot ---------------- */
+(async () => {
+  if (pw) { try { await api("/admin/login", { method: "POST" }); await refresh(); }
+            catch (e) { pw = ""; } }
+  render();
+})();
+</script>
+</body>
+</html>

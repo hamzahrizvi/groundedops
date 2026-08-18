@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GroundedOps Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Nocturne tokens, carried from the design system so the built console
+   matches the mockup. Inter loads from Google Fonts with system-ui as the
+   fallback, since this often runs on a machine with no outbound internet. */
+:root{
+  --color-bg:#161826; --color-surface:#232532; --color-text:#e9e9ed;
+  --color-accent:#9184d9; --color-divider:color-mix(in srgb,#e9e9ed 16%,transparent);
+  --color-neutral-100:#f3f5fe; --color-neutral-200:#e4e7f5; --color-neutral-400:#b2b6ca;
+  --color-neutral-500:#9397ab; --color-neutral-700:#595d6c; --color-neutral-800:#3f424d;
+  --color-neutral-900:#292b31;
+  --color-accent-100:#f5f4ff; --color-accent-300:#d2cefd; --color-accent-400:#b5abfc;
+  --color-accent-800:#423a6a;
+  --font-heading:"Inter",system-ui,sans-serif; --font-body:"Inter",system-ui,sans-serif;
+  --space-1:2.8px; --space-2:5.6px; --space-3:8.4px;
+  --radius-sm:4px; --radius-md:8px; --radius-lg:14px;
+  --shadow-sm:0 0 0 1px #3f424d;
+  --shadow-md:0 0 0 1px #595d6c,0 6px 18px rgba(0,0,0,.55);
+  --shadow-lg:0 0 0 1px #9397ab,0 16px 40px rgba(0,0,0,.65);
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;overflow:hidden;background:var(--color-bg);color:var(--color-text);
+     font-family:var(--font-body);font-size:14px;line-height:1.55}
+h1,h2{font-family:var(--font-heading);font-weight:500;line-height:1.12;letter-spacing:-.015em;margin:0}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--color-neutral-800);border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+::selection{background:color-mix(in srgb,var(--color-accent) 30%,transparent)}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes slidein{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;
+     font-family:var(--font-heading);font-weight:500;font-size:14px;line-height:1.2;
+     color:var(--color-text);background:transparent;border:1px solid transparent;
+     padding:var(--space-2) calc(var(--space-3)*1.2);border-radius:var(--radius-md)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{color:var(--color-accent);border-color:var(--color-accent)}
+.btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--color-accent) 12%,transparent)}
+.btn-secondary{border-color:var(--color-divider)}
+.btn-secondary:hover:not(:disabled){background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.btn-ghost{color:var(--color-accent);padding-inline:var(--space-1)}
+.btn-ghost:hover{background:color-mix(in srgb,var(--color-accent) 10%,transparent)}
+.btn-block{width:100%;margin-top:var(--space-2)}
+.field>label{display:block;font-size:12px;margin-bottom:5px;
+             color:color-mix(in srgb,var(--color-text) 70%,transparent)}
+.input{width:100%;min-height:36px;padding:6px 10px;font:inherit;font-size:14px;
+       color:var(--color-text);caret-color:var(--color-accent);background:var(--color-surface);
+       border:1px solid var(--color-divider);border-radius:var(--radius-md)}
+.input:hover{border-color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+.input:focus-visible{border-color:var(--color-accent);outline-offset:0}
+textarea.input{min-height:90px;resize:vertical}
+.card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);
+      border-radius:var(--radius-md);background:var(--color-surface)}
+.elev-sm{box-shadow:var(--shadow-sm)}
+.elev-lg{box-shadow:var(--shadow-lg)}
+.tag{display:inline-flex;align-items:center;font-size:11px;padding:3px 10px;
+     border-radius:calc(var(--radius-md)*.75)}
+.tag-accent{background:var(--color-accent-800);color:var(--color-accent-100)}
+.tag-neutral{background:var(--color-neutral-800);color:var(--color-neutral-100)}
+.tag-outline{border:1px solid var(--color-accent);color:var(--color-accent)}
+.rule{border-top:1px solid color-mix(in srgb,var(--color-text) 9%,transparent)}
+.mono{font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ==================================================================
+ * GroundedOps Console - implementation of the Nocturne design.
+ * Served by the backend at /admin. One file, no build step.
+ *
+ * The pipeline metaphor is load-bearing rather than decorative:
+ * Catalogue feeds Documents feeds Reviewed answers feeds the Widget,
+ * and the Overview reads live state to show which stage is stuck.
+ * ================================================================== */
+const API = new URLSearchParams(location.search).get("api")
+         || (location.protocol === "file:" ? null : location.origin);
+let pw = sessionStorage.getItem("go_admin_pw") || "";
+const S = { view:"overview", help:false, helpQuery:"", helpTopic:null,
+  wizard:0, wizRange:"", wizProduct:"", wizProductKey:"", wizCatKey:"",
+  wizSource:"", wizDrafts:[], wizChat:[],
+  catalogue:[], sources:[], faq:[], gaps:[],
+  docProduct:"", draftSource:"", testScope:"", prefillQ:"" };
+
+const h = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "style") n.style.cssText = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2).toLowerCase(), v);
+    else n.setAttribute(k, v === true ? "" : v);
+  }
+  kids.flat().forEach(c => c !== null && c !== undefined && c !== false &&
+    n.append(c.nodeType ? c : document.createTextNode(String(c))));
+  return n;
+};
+const MUTED = "color-mix(in srgb,var(--color-text) 55%,transparent)";
+const FAINT = "color-mix(in srgb,var(--color-text) 42%,transparent)";
+
+function toast(msg, bad) {
+  document.querySelectorAll("[data-toast]").forEach(t => t.remove());
+  const t = h("div", { "data-toast": true, style:
+    "position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:90;padding:10px 18px;" +
+    "border-radius:var(--radius-md);font-size:13px;background:var(--color-surface);max-width:90vw;" +
+    "box-shadow:var(--shadow-md);animation:rise .18s ease both;" +
+    (bad ? "color:var(--color-accent-300)" : "") }, msg);
+  document.body.append(t);
+  setTimeout(() => t.remove(), bad ? 6500 : 3200);
+}
+
+async function api(path, opts = {}) {
+  const o = Object.assign({ headers: {} }, opts);
+  o.headers["x-admin-password"] = pw;
+  if (o.body && !(o.body instanceof FormData)) o.headers["Content-Type"] = "application/json";
+  const r = await fetch(API + path, o);
+  if (r.status === 401) { pw = ""; sessionStorage.removeItem("go_admin_pw"); render(); throw new Error("Password rejected"); }
+  if (!r.ok) {
+    let d; try { d = (await r.json()).detail; } catch (e) { d = r.statusText; }
+    throw new Error(typeof d === "string" ? d : (d && d.message) || "Request failed");
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+async function refresh() {
+  const [cat, src, faq, gaps] = await Promise.all([
+    api("/catalog").catch(() => ({ categories: [] })),
+    api("/admin/sources").catch(() => ({ sources: [] })),
+    api("/faq").catch(() => ({ faq: [] })),
+    api("/faq/gaps").catch(() => ({ gaps: [] })),
+  ]);
+  S.catalogue = cat.categories || [];
+  S.sources = src.sources || (Array.isArray(src) ? src : []);
+  S.faq = faq.faq || [];
+  S.gaps = gaps.gaps || [];
+}
+
+const products = () => S.catalogue.flatMap(c => (c.products || []).map(p =>
+  ({ ...p, cat: c.key, catName: c.name, label: c.name + " \u203a " + p.name })));
+const docProduct = s => s.product || s.products || "";
+const unfiled = () => S.sources.filter(s => !docProduct(s));
+const answered = () => S.faq.filter(f => (f.answer || "").trim());
+const docsFor = k => S.sources.filter(s => docProduct(s) === k);
+
+/* ================= shell ================= */
+function render() {
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  if (!API) return app.append(notServed());
+  if (!pw) return app.append(gateView());
+  app.append(h("div", { style: "display:flex;height:100vh;overflow:hidden" }, sidebar(),
+    h("main", { style: "flex:1;overflow-y:auto;padding:30px 34px 90px" },
+      h("div", { style: "max-width:1000px" }, viewBody()))));
+  if (S.help) app.append(helpDrawer());
+  if (S.wizard) app.append(wizard());
+}
+
+function navBtn(id, label, o = {}) {
+  const on = S.view === id;
+  return h("button", { onClick: () => { S.view = id; render(); },
+    style: "display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:0;" +
+      "border-radius:var(--radius-md);padding:8px 10px 8px 9px;cursor:pointer;font:inherit;font-size:13.5px;" +
+      "background:" + (on ? "color-mix(in srgb,var(--color-accent) 14%,transparent)" : "transparent") +
+      ";color:" + (on ? "var(--color-text)" : "color-mix(in srgb,var(--color-text) 68%,transparent)") },
+    h("span", { style: "width:3px;height:15px;border-radius:2px;flex:0 0 auto;background:" +
+      (on ? "var(--color-accent)" : "transparent") }),
+    o.num ? h("span", { class: "mono", style: "font-size:10.5px;opacity:.5;width:9px" }, o.num) : null,
+    h("span", { style: "flex:1" }, label),
+    o.badge !== undefined ? h("span", { class: "mono", style: "font-size:11px;padding:1px 7px;border-radius:99px;background:" +
+      (o.att ? "var(--color-accent-800)" : "var(--color-neutral-800)") + ";color:" +
+      (o.att ? "var(--color-accent-100)" : "var(--color-neutral-100)") }, String(o.badge)) : null);
+}
+
+function sidebar() {
+  const grp = t => h("div", { style: "padding:18px 19px 7px;font-size:9.5px;letter-spacing:.13em;" +
+    "text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 33%,transparent)" }, t);
+  const un = unfiled().length;
+  return h("aside", { style: "width:246px;flex:0 0 auto;display:flex;flex-direction:column;" +
+      "padding:18px 0 14px;border-right:1px solid var(--color-divider)" },
+    h("div", { style: "padding:0 18px 18px" },
+      h("div", { style: "font-size:16px;font-weight:500;letter-spacing:-.01em" }, "GroundedOps"),
+      h("div", { style: "font-size:11.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" }, "Support console")),
+    h("div", { style: "padding:0 10px;display:flex;flex-direction:column;gap:2px" }, navBtn("overview", "Overview")),
+    grp("Pipeline"),
+    h("div", { style: "padding:0 10px;display:flex;flex-direction:column;gap:2px" },
+      navBtn("catalogue", "Catalogue", { num: "1", badge: products().length }),
+      navBtn("documents", "Documents", { num: "2", badge: S.sources.length, att: un > 0 }),
+      navBtn("answers", "Reviewed answers", { num: "3", badge: answered().length })),
+    grp("Upkeep"),
+    h("div", { style: "padding:0 10px;display:flex;flex-direction:column;gap:2px" },
+      navBtn("gaps", "Unanswered", { badge: S.gaps.length, att: S.gaps.length > 0 }),
+      navBtn("test", "Test chat")),
+    h("div", { style: "flex:1" }),
+    h("div", { style: "padding:12px 14px 0;margin:0 6px;border-top:1px solid var(--color-divider)" },
+      h("button", { class: "btn btn-primary btn-block", style: "margin-top:0",
+        onClick: () => { S.help = true; render(); } }, "Tutorial & help")));
+}
+
+const viewBody = () => ({ overview: vOverview, catalogue: vCatalogue, documents: vDocuments,
+  answers: vAnswers, gaps: vGaps, test: vTest }[S.view] || vOverview)();
+
+const page = (title, lede, ...rest) => h("div", { style: "animation:rise .22s ease both" },
+  h("h1", { style: "font-size:26px;letter-spacing:-.025em;margin:0 0 4px" }, title),
+  h("p", { style: "margin:0 0 22px;max-width:66ch;font-size:14px;text-wrap:pretty;" +
+    "color:color-mix(in srgb,var(--color-text) 60%,transparent)" }, lede), rest);
+
+/* ================= overview ================= */
+function vOverview() {
+  const prods = products(), un = unfiled(), ans = answered();
+  const started = prods.length || S.sources.length || ans.length;
+
+  const stage = (n, kicker, count, note, view, glow, foot) =>
+    h("div", { onClick: view ? () => { S.view = view; render(); } : null,
+      style: "min-width:0;display:flex;flex-direction:column;border-radius:var(--radius-md);" +
+        "padding:15px 16px 13px;box-shadow:" + glow + ";cursor:" + (view ? "pointer" : "default") +
+        ";background:" + (view ? "var(--color-surface)" : "transparent") },
+      h("div", { style: "display:flex;align-items:center;gap:8px;margin-bottom:11px" },
+        h("span", { class: "mono", style: "width:17px;height:17px;flex:0 0 auto;border-radius:50%;display:grid;" +
+          "place-items:center;font-size:9.5px;font-weight:600;" + (view
+            ? "background:var(--color-neutral-800);color:var(--color-neutral-200)"
+            : "box-shadow:inset 0 0 0 1px var(--color-neutral-700);color:var(--color-neutral-400)") }, n),
+        h("span", { style: "font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;" +
+          "color:color-mix(in srgb,var(--color-text) 62%,transparent)" }, kicker)),
+      h("div", { class: "mono", style: "font-size:29px;font-weight:500;letter-spacing:-.03em;line-height:1" }, count),
+      h("div", { style: "font-size:12px;margin-top:6px;line-height:1.45;text-wrap:pretty;flex:1;color:" + MUTED }, note),
+      h("div", { style: "margin-top:10px;padding-top:9px;font-size:10px;letter-spacing:.05em;" +
+        "text-transform:uppercase;color:" + FAINT + ";border-top:1px solid " +
+        (foot ? "color-mix(in srgb,var(--color-text) 9%,transparent)" : "transparent") }, foot || "\u00a0"));
+
+  const steps = [];
+  steps.push(prods.length
+    ? { m: "\u2713", done: 1, t: "Catalogue is set up",
+        d: prods.length + " product" + (prods.length === 1 ? "" : "s") + " across " + S.catalogue.length +
+           " range" + (S.catalogue.length === 1 ? "" : "s") + ".", a: "Manage catalogue", v: "catalogue" }
+    : { m: "!", att: 1, t: "Set up the catalogue first",
+        d: "Documents are filed against a product and the widget asks visitors to pick one. Nothing else works until at least one product exists.",
+        a: "Add a product", v: "catalogue" });
+  steps.push(S.sources.length
+    ? (un.length
+      ? { m: "!", att: 1, t: un.length + " document" + (un.length === 1 ? "" : "s") + " need a product",
+          d: "Unfiled documents are searchable but never offered in the widget, because it can only show products it can answer about.",
+          a: "File them now", v: "documents" }
+      : { m: "\u2713", done: 1, t: S.sources.length + " documents, all filed",
+          d: "Every document belongs to a product and can be found by the widget.", a: "View documents", v: "documents" })
+    : { m: "!", att: 1, t: "Add your first document",
+        d: "PDF, Word or text. This is what answers are drawn from.", a: "Add documents", v: "documents" });
+  steps.push(ans.length
+    ? { m: "\u2713", done: 1, t: ans.length + " reviewed answers",
+        d: "Signed-out visitors only ever see these, so they are the public face of the widget.",
+        a: "Review the wording", v: "answers" }
+    : { m: S.sources.length ? "!" : "\u00b7", att: !!S.sources.length, idle: !S.sources.length,
+        t: "Write the reviewed answers",
+        d: "Visitors who are not signed in can only be shown answers you have approved. Draft them from a document, then edit.",
+        a: S.sources.length ? "Start drafting" : null, v: "answers" });
+  steps.push(S.gaps.length
+    ? { m: "!", att: 1, t: S.gaps.length + " unanswered question" + (S.gaps.length === 1 ? "" : "s") + " logged",
+        d: "Real questions the reviewed answers did not cover, ordered by how often each was asked.",
+        a: "See what people asked", v: "gaps" }
+    : { m: "\u00b7", idle: 1, t: "Questions nobody could answer",
+        d: "Anything the widget cannot answer collects here once visitors start using it." });
+
+  const ACC = "0 0 0 1px color-mix(in srgb,var(--color-accent) 35%,transparent)";
+  return page("Overview",
+    "Everything the support widget knows comes from this console. The pipeline below runs left to right \u2014 each stage feeds the next.",
+    h("div", { style: "display:flex;align-items:center;gap:14px;background:var(--color-surface);" +
+      "border-radius:var(--radius-md);padding:13px 16px;margin-bottom:22px;box-shadow:" + ACC },
+      h("div", { style: "flex:1;min-width:0" },
+        h("div", { style: "font-size:13.5px;font-weight:500" },
+          started ? "Run the guided setup again" : "New here? Run the four-step setup"),
+        h("div", { style: "font-size:12.5px;text-wrap:pretty;color:" + MUTED },
+          "Four steps, about five minutes. It builds a real product, document and answer as you go \u2014 you can leave at any point.")),
+      h("button", { class: "btn btn-primary", style: "flex:0 0 auto",
+        onClick: () => { S.wizard = 1; render(); } }, started ? "Run setup" : "Start setup")),
+    h("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:26px" },
+      stage("1", "Catalogue", prods.length, prods.length ? "Products a visitor can pick from." : "Nothing to pick from yet.",
+        "catalogue", prods.length ? "none" : ACC, "filed against documents \u25b6"),
+      stage("2", "Documents", S.sources.length,
+        un.length ? un.length + " not filed against a product." : "All filed and searchable.",
+        "documents", un.length ? ACC : "none", "drafted into answers \u25b6"),
+      stage("3", "Reviewed answers", ans.length,
+        ans.length ? "Served word for word, no model call." : "Signed-out visitors see nothing yet.",
+        "answers", ans.length ? "none" : ACC, "served to the widget \u25b6"),
+      stage("\u25c6", "The widget", ans.length ? "live" : "idle",
+        ans.length ? "Answering from what is above." : "Waiting on a reviewed answer.",
+        null, "inset 0 0 0 1px var(--color-divider)", null)),
+    h("div", { class: "card elev-sm", style: "padding:18px 20px 8px;gap:0" },
+      h("div", { style: "font-size:15px;font-weight:500;margin-bottom:2px" }, "What to do next"),
+      h("div", { style: "font-size:12.5px;margin-bottom:12px;color:" + MUTED },
+        "Read from live state. Anything needing attention is marked in the accent."),
+      steps.map(s => h("div", { class: "rule", style: "display:flex;gap:12px;padding:13px 0" },
+        h("span", { style: "width:21px;height:21px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;" +
+          "font-size:11px;line-height:1;background:" +
+          (s.done ? "var(--color-neutral-800)" : s.att ? "var(--color-accent-800)" : "transparent") + ";color:" +
+          (s.done ? "var(--color-neutral-200)" : s.att ? "var(--color-accent-100)" : "var(--color-neutral-500)") +
+          (s.idle ? ";box-shadow:inset 0 0 0 1px var(--color-neutral-700)" : "") }, s.m),
+        h("div", { style: "flex:1;min-width:0" },
+          h("div", { style: "font-size:13.5px;font-weight:500;color:" +
+            (s.att ? "var(--color-accent-300)" : "var(--color-text)") }, s.t),
+          h("div", { style: "font-size:12.5px;margin-top:2px;line-height:1.5;text-wrap:pretty;color:" + MUTED }, s.d),
+          s.a ? h("button", { class: "btn btn-secondary", style: "margin-top:9px;font-size:12.5px;padding:4px 10px",
+            onClick: () => { S.view = s.v; render(); } }, s.a) : null)))));
+}
+
+/* ================= catalogue ================= */
+const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+function vCatalogue() {
+  const rangeIn = h("input", { class: "input", placeholder: "Ticket printers" });
+  const prodIn = h("input", { class: "input", placeholder: "SMART Ticket" });
+  const rangeSel = h("select", { class: "input" }, S.catalogue.map(c => h("option", { value: c.key }, c.name)));
+
+  return page("Catalogue",
+    "Stage 1. Ranges group products; every document is filed against a product. This list is also what the widget asks a visitor to pick from, so nothing can be answered about a product that is not here.",
+    h("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      h("div", { style: "font-size:15px;font-weight:500;margin-bottom:2px" }, "Add"),
+      h("div", { style: "font-size:12.5px;margin-bottom:14px;color:" + MUTED },
+        "A range is a family \u2014 Coin hoppers, Note validators. A product sits inside one."),
+      h("div", { style: "display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap" },
+        h("div", { class: "field", style: "flex:1;min-width:150px" }, h("label", {}, "New range"), rangeIn),
+        h("button", { class: "btn btn-secondary", onClick: async () => {
+          if (!rangeIn.value.trim()) return toast("Give the range a name", true);
+          try { await api("/admin/category", { method: "POST",
+                  body: JSON.stringify({ key: slug(rangeIn.value), name: rangeIn.value.trim() }) });
+                toast("Range added"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Add range"),
+        h("div", { style: "width:1px;align-self:stretch;background:var(--color-divider);margin:0 4px" }),
+        h("div", { class: "field", style: "flex:0 0 170px" }, h("label", {}, "Range"), rangeSel),
+        h("div", { class: "field", style: "flex:1;min-width:150px" }, h("label", {}, "New product"), prodIn),
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          if (!rangeSel.value) return toast("Add a range first", true);
+          if (!prodIn.value.trim()) return toast("Give the product a name", true);
+          try { await api("/admin/product", { method: "POST", body: JSON.stringify({
+                  category_key: rangeSel.value, key: slug(prodIn.value),
+                  name: prodIn.value.trim(), sources: [] }) });
+                toast("Product added"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Add product"))),
+    S.catalogue.length ? S.catalogue.map(c => {
+      const prods = c.products || [];
+      const docs = prods.reduce((n, p) => n + docsFor(p.key).length, 0);
+      return h("div", { class: "card elev-sm", style: "padding:16px 20px 8px;gap:0;margin-bottom:12px" },
+        h("div", { style: "display:flex;align-items:center;gap:10px;padding-bottom:6px" },
+          h("span", { style: "font-size:15px;font-weight:500;flex:1" }, c.name),
+          h("span", { class: "tag tag-neutral mono" }, c.key),
+          h("span", { style: "font-size:12px;color:" + FAINT },
+            prods.length + " product" + (prods.length === 1 ? "" : "s") + " \u00b7 " + docs + " documents"),
+          h("button", { class: "btn btn-ghost", style: "font-size:12px", onClick: async () => {
+            if (!confirm("Delete the " + c.name + " range and its products?")) return;
+            try { await api("/admin/category/" + encodeURIComponent(c.key), { method: "DELETE" });
+                  toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+          } }, "Delete")),
+        prods.length ? prods.map(p => h("div", { class: "rule",
+            style: "display:flex;align-items:center;gap:12px;padding:10px 0" },
+          h("span", { style: "flex:1;font-size:13.5px" }, p.name),
+          h("span", { style: "font-size:12px;color:" + MUTED }, docsFor(p.key).length + " documents"),
+          h("span", { class: "tag tag-neutral mono" }, p.key),
+          h("button", { class: "btn btn-ghost", style: "font-size:12px", onClick: async () => {
+            if (!confirm("Delete " + p.name + "?")) return;
+            try { await api("/admin/product/" + encodeURIComponent(c.key) + "/" + encodeURIComponent(p.key),
+                    { method: "DELETE" }); toast("Deleted"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); } } }, "Delete")))
+          : h("div", { class: "rule", style: "padding:10px 0;font-size:12.5px;color:" + FAINT },
+              "No products in this range yet."));
+    }) : h("div", { class: "card elev-sm", style: "padding:28px 10px;text-align:center;gap:0" },
+      h("div", { style: "font-size:14px;font-weight:500" }, "No ranges yet"),
+      h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+        "A range groups related products \u2014 Coin hoppers, Note validators, Biometrics.")));
+}
+
+/* ================= documents ================= */
+function vDocuments() {
+  const prods = products();
+  const sel = h("select", { class: "input", onChange: e => { S.docProduct = e.target.value; render(); } },
+    h("option", { value: "" }, "Choose a product\u2026"),
+    prods.map(p => h("option", { value: p.key, selected: S.docProduct === p.key }, p.label)));
+  const file = h("input", { type: "file", multiple: true, accept: ".pdf,.docx,.txt", style: "display:none" });
+  const prog = h("div", {});
+  const ready = !!S.docProduct;
+  const dropBg = "color-mix(in srgb,var(--color-text) 3%,transparent)";
+
+  const drop = h("div", { onClick: () => ready && file.click(),
+    style: "margin-top:14px;border:1.5px dashed " + (ready ? "var(--color-accent)" : "var(--color-divider)") +
+      ";border-radius:var(--radius-md);padding:26px;text-align:center;background:" + dropBg +
+      ";cursor:" + (ready ? "pointer" : "default") + ";opacity:" + (ready ? "1" : ".55") },
+    h("div", { style: "font-size:14px;font-weight:500" }, ready ? "Drop files here" : "Choose a product first"),
+    h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+      ready ? "PDF, Word or text \u2014 or click to browse"
+            : "Documents must belong to a product so the widget can offer them"));
+
+  async function upload(files) {
+    const p = prods.find(x => x.key === S.docProduct);
+    if (!p) return toast("Choose a product first", true);
+    for (const f of files) {
+      const pct = h("span", { class: "mono", style: "color:var(--color-accent-400)" }, "0%");
+      const bar = h("div", { style: "height:3px;background:var(--color-accent);width:0%" });
+      prog.append(h("div", { style: "margin-top:14px" },
+        h("div", { style: "display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px" },
+          h("span", {}, f.name), pct),
+        h("div", { style: "height:3px;border-radius:2px;background:var(--color-neutral-800);overflow:hidden" }, bar)));
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await fetch(API + "/upload", { method: "POST", body: fd,
+          headers: { "x-admin-password": pw, "category-key": p.cat, "product-key": p.key } });
+        if (!r.ok) throw new Error("Upload rejected");
+        const { job_id } = await r.json();
+        for (let i = 0; i < 900; i++) {
+          await new Promise(x => setTimeout(x, 1000));
+          const st = await api("/upload/status/" + job_id).catch(() => null);
+          if (!st) break;
+          if (st.status === "done") { pct.textContent = (st.chunks || 0) + " sections"; bar.style.width = "100%"; break; }
+          if (st.status === "error") { pct.textContent = "failed"; break; }
+          pct.textContent = (st.pct || 0) + "%"; bar.style.width = (st.pct || 0) + "%";
+        }
+      } catch (e) { pct.textContent = "failed"; toast(e.message, true); }
+    }
+    await refresh(); render();
+  }
+  file.addEventListener("change", () => file.files.length && upload(file.files));
+  drop.addEventListener("dragover", e => { e.preventDefault();
+    if (ready) drop.style.background = "color-mix(in srgb,var(--color-accent) 10%,transparent)"; });
+  drop.addEventListener("dragleave", () => drop.style.background = dropBg);
+  drop.addEventListener("drop", e => { e.preventDefault(); drop.style.background = dropBg;
+    if (ready && e.dataTransfer.files.length) upload(e.dataTransfer.files); });
+
+  const fileMenu = s => h("select", { class: "input", style: "width:auto;min-height:30px;font-size:12px",
+    onChange: async e => {
+      const p = prods.find(x => x.key === e.target.value); if (!p) return;
+      try { await api("/admin/reassign_source", { method: "POST",
+              body: JSON.stringify({ source: s.source, category_key: p.cat, product_key: p.key }) });
+            toast("Filed under " + p.name); await refresh(); render(); }
+      catch (err) { toast(err.message, true); }
+    } }, h("option", { value: "" }, docProduct(s) ? "Move\u2026" : "File under\u2026"),
+    prods.map(p => h("option", { value: p.key }, p.label)));
+
+  const un = unfiled();
+  const groups = S.catalogue.map(c => {
+    const pg = (c.products || []).map(p => ({ p, docs: docsFor(p.key) })).filter(x => x.docs.length);
+    return pg.length ? { c, pg } : null;
+  }).filter(Boolean);
+
+  return page("Documents",
+    "Stage 2. The manuals and datasheets answers are drawn from. A document with no product is still searchable, but the widget will never offer it \u2014 it can only show products it can answer about.",
+    h("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      h("div", { style: "font-size:15px;font-weight:500;margin-bottom:2px" }, "Add documents"),
+      h("div", { style: "font-size:12.5px;margin-bottom:14px;color:" + MUTED },
+        "Pick the product the document describes, then drop the files in. PDF, Word or text."),
+      h("div", { class: "field", style: "max-width:300px" }, h("label", {}, "Product"), sel),
+      drop, file, prog),
+    h("div", { style: "display:flex;align-items:baseline;gap:10px;margin-bottom:12px" },
+      h("span", { style: "font-size:15px;font-weight:500;flex:1" }, "All documents, by range"),
+      h("span", { style: "font-size:12px;color:" + MUTED },
+        S.sources.length + " document" + (S.sources.length === 1 ? "" : "s"))),
+    groups.map(({ c, pg }) => h("div", { class: "card elev-sm", style: "padding:16px 20px 6px;gap:0;margin-bottom:12px" },
+      h("div", { style: "display:flex;align-items:center;gap:10px;padding-bottom:8px" },
+        h("span", { style: "font-size:14px;font-weight:500;flex:1" }, c.name),
+        h("span", { style: "font-size:12px;color:" + FAINT }, pg.reduce((n, x) => n + x.docs.length, 0) + " documents")),
+      pg.map(({ p, docs }) => h("div", { class: "rule", style: "padding:10px 0" },
+        h("div", { style: "font-size:12.5px;font-weight:500;margin-bottom:6px;" +
+          "color:color-mix(in srgb,var(--color-text) 78%,transparent)" }, p.name),
+        docs.map(d => h("div", { style: "display:flex;align-items:center;gap:12px;padding:7px 0 7px 12px" },
+          h("span", { style: "flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, d.source),
+          h("span", { class: "mono", style: "font-size:11.5px;color:" + MUTED }, (d.chunks || 0) + " sections"),
+          fileMenu(d),
+          h("button", { class: "btn btn-ghost", style: "font-size:12px", onClick: async () => {
+            if (!confirm("Remove " + d.source + "?")) return;
+            try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: d.source }) });
+                  toast("Removed"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+          } }, "Remove"))))))),
+    un.length ? h("div", { class: "card elev-sm", style: "padding:16px 20px 6px;gap:0;margin-bottom:12px;" +
+        "box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 35%,transparent)" },
+      h("div", { style: "display:flex;align-items:center;gap:10px;padding-bottom:8px" },
+        h("span", { style: "font-size:14px;font-weight:500;flex:1;color:var(--color-accent-300)" },
+          "No product \u2014 never offered in the widget"),
+        h("span", { style: "font-size:12px;color:" + FAINT }, un.length + " document" + (un.length === 1 ? "" : "s"))),
+      un.map(d => h("div", { class: "rule", style: "display:flex;align-items:center;gap:12px;padding:9px 0" },
+        h("span", { style: "flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, d.source),
+        h("span", { class: "mono", style: "font-size:11.5px;color:" + MUTED }, (d.chunks || 0) + " sections"),
+        fileMenu(d)))) : null,
+    !S.sources.length ? h("div", { class: "card elev-sm", style: "padding:28px 10px;text-align:center;gap:0" },
+      h("div", { style: "font-size:14px;font-weight:500" }, "No documents yet"),
+      h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+        "Add a manual above and the widget can start answering from it.")) : null);
+}
+
+/* ================= reviewed answers ================= */
+function vAnswers() {
+  const prods = products();
+  const srcSel = h("select", { class: "input", onChange: e => S.draftSource = e.target.value },
+    h("option", { value: "" }, "Choose a document\u2026"),
+    S.sources.map(s => h("option", { value: s.source, selected: S.draftSource === s.source }, s.source)));
+  const draftBtn = h("button", { class: "btn btn-primary" }, "Draft answers");
+  draftBtn.addEventListener("click", async () => {
+    if (!S.draftSource) return toast("Choose a document first", true);
+    const s = S.sources.find(x => x.source === S.draftSource) || {};
+    draftBtn.disabled = true; draftBtn.textContent = "Drafting\u2026";
+    try {
+      const r = await api("/admin/faq/autogenerate", { method: "POST", body: JSON.stringify(
+        { source: S.draftSource, product: docProduct(s), category: s.category || "" }) });
+      toast("Added " + r.added + " new, skipped " + r.skipped_duplicates + " already there");
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); draftBtn.disabled = false; draftBtn.textContent = "Draft answers"; }
+  });
+
+  const nq = h("input", { class: "input", placeholder: "Does it need an internet connection?", value: S.prefillQ });
+  const na = h("textarea", { class: "input",
+    placeholder: "No internet connection is required; results are instant and processed on the device." });
+  const scopeSel = h("select", { class: "input" }, h("option", { value: "" }, "All products"),
+    prods.map(p => h("option", { value: p.key }, p.label)));
+  S.prefillQ = "";
+
+  return page("Reviewed answers",
+    "Stage 3. These are shown to visitors word for word and cost nothing to serve. Anyone not signed in sees only these, so treat the wording as published copy.",
+    h("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      h("div", { style: "font-size:15px;font-weight:500;margin-bottom:2px" }, "Draft from a document"),
+      h("div", { style: "font-size:12.5px;margin-bottom:14px;max-width:62ch;text-wrap:pretty;color:" + MUTED },
+        "Suggests questions and answers from a document you have already added. Nothing is published until you have read it, and drafting again never overwrites an answer you edited by hand."),
+      h("div", { style: "display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap" },
+        h("div", { class: "field", style: "flex:1;min-width:220px;max-width:340px" },
+          h("label", {}, "Document"), srcSel), draftBtn)),
+    h("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      h("div", { style: "font-size:15px;font-weight:500;margin-bottom:2px" }, "Write one yourself"),
+      h("div", { style: "font-size:12.5px;margin-bottom:14px;color:" + MUTED },
+        "Hand-written answers are protected \u2014 drafting will never replace them."),
+      h("div", { class: "field" }, h("label", {}, "Question"), nq),
+      h("div", { class: "field", style: "margin-top:10px" }, h("label", {}, "Answer"), na),
+      h("div", { style: "display:flex;gap:10px;align-items:flex-end;margin-top:10px;flex-wrap:wrap" },
+        h("div", { class: "field", style: "flex:0 0 220px" }, h("label", {}, "Applies to"), scopeSel),
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          if (!nq.value.trim()) return toast("Add a question first", true);
+          try { await api("/faq", { method: "POST", body: JSON.stringify(
+                  { question: nq.value, answer: na.value, product: scopeSel.value }) });
+                nq.value = ""; na.value = ""; toast("Added"); await refresh(); render(); }
+          catch (e) { toast(e.message, true); }
+        } }, "Add answer"))),
+    h("div", { class: "card elev-sm", style: "padding:18px 20px 14px;gap:0" },
+      h("div", { style: "display:flex;align-items:baseline;gap:10px;margin-bottom:6px" },
+        h("span", { style: "font-size:15px;font-weight:500;flex:1" }, "All answers"),
+        h("span", { style: "font-size:12px;color:" + MUTED },
+          answered().length + " of " + S.faq.length + " have an answer")),
+      S.faq.length ? S.faq.map(f => {
+        const q = h("input", { class: "input", value: f.question });
+        const a = h("textarea", { class: "input" }, f.answer || "");
+        const editor = h("div", { style: "display:none;margin-top:10px" },
+          h("div", { class: "field" }, h("label", {}, "Question"), q),
+          h("div", { class: "field", style: "margin-top:8px" }, h("label", {}, "Answer"), a),
+          h("div", { style: "display:flex;gap:8px;margin-top:10px" },
+            h("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px", onClick: async () => {
+              try { await api("/faq/" + f.id, { method: "PATCH",
+                      body: JSON.stringify({ question: q.value, answer: a.value }) });
+                    toast("Saved"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Save"),
+            h("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:4px 12px", onClick: async () => {
+              if (!confirm("Delete this answer?")) return;
+              try { await api("/faq/" + f.id, { method: "DELETE" }); toast("Deleted");
+                    await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Delete")));
+        const toggle = h("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:4px 10px" }, "Edit wording");
+        toggle.addEventListener("click", () => {
+          const open = editor.style.display === "none";
+          editor.style.display = open ? "block" : "none";
+          toggle.textContent = open ? "Close" : "Edit wording";
+        });
+        return h("div", { class: "rule", style: "padding:14px 0" },
+          h("div", { style: "display:flex;gap:10px;align-items:baseline" },
+            h("div", { style: "flex:1;font-size:13.5px;font-weight:500;text-wrap:pretty" }, f.question),
+            f.products ? h("span", { class: "tag tag-accent" }, f.products) : null),
+          h("div", { style: "font-size:12.8px;margin-top:5px;line-height:1.55;max-width:76ch;text-wrap:pretty;" +
+            "color:color-mix(in srgb,var(--color-text) 68%,transparent)" },
+            (f.answer || "").trim() || "\u2014 no answer written yet"),
+          h("div", { style: "margin-top:8px;display:flex;gap:8px;align-items:center" }, toggle,
+            h("span", { style: "font-size:11.5px;color:" + FAINT },
+              f.origin === "manual" ? "written by hand" : f.edited ? "edited" : "drafted")),
+          editor);
+      }) : h("div", { class: "rule", style: "padding:28px 10px;text-align:center" },
+        h("div", { style: "font-size:14px;font-weight:500" }, "No answers yet"),
+        h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+          "Draft some from a document above, or write one by hand.")),
+      S.faq.length ? h("div", { style: "margin-top:14px" },
+        h("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:4px 10px", onClick: async () => {
+          if (!confirm("Delete every reviewed answer?\n\nHand-written answers cannot be recovered.")) return;
+          if (prompt("Type DELETE to confirm") !== "DELETE") return toast("Cancelled");
+          try { await api("/faq?confirm=true", { method: "DELETE" }); toast("Deleted");
+                await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Delete all answers")) : null));
+}
+
+/* ================= unanswered ================= */
+function vGaps() {
+  return page("Unanswered",
+    "Questions real visitors asked that the reviewed answers did not cover, most frequent first. Working down this list is the single most useful piece of upkeep.",
+    h("div", { class: "card elev-sm", style: "padding:8px 20px 14px;gap:0" },
+      S.gaps.length ? S.gaps.slice(0, 40).map(g => h("div", { class: "rule",
+        style: "display:flex;gap:14px;align-items:center;padding:14px 0" },
+        h("span", { class: "mono", style: "font-size:15px;color:var(--color-accent-400);flex:0 0 42px" },
+          (g.times_asked || 1) + "\u00d7"),
+        h("div", { style: "flex:1;min-width:0" },
+          h("div", { style: "font-size:13.5px;text-wrap:pretty" }, g.question),
+          h("div", { style: "font-size:11.5px;margin-top:2px;color:" + FAINT },
+            (g.scope ? g.scope + " \u00b7 " : "") + (g.ts ? new Date(g.ts * 1000).toLocaleDateString() : ""))),
+        h("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px",
+          onClick: () => { S.prefillQ = g.question; S.view = "answers"; render();
+                           toast("Question copied into the form"); } }, "Answer this")))
+        : h("div", { style: "padding:28px 10px;text-align:center" },
+          h("div", { style: "font-size:14px;font-weight:500" }, "Nothing unanswered"),
+          h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+            "Questions the widget could not answer will collect here."))));
+}
+
+/* ================= test chat ================= */
+function vTest() {
+  const prods = products();
+  const sel = h("select", { class: "input", onChange: e => S.testScope = e.target.value },
+    h("option", { value: "" }, "Whole knowledge base"),
+    prods.map(p => h("option", { value: p.key, selected: S.testScope === p.key }, p.label)));
+  const log = h("div", { style: "border-radius:var(--radius-md);height:330px;overflow-y:auto;padding:14px;" +
+    "background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" });
+  const input = h("input", { class: "input", style: "flex:1",
+    placeholder: "Does the SMART Hopper need an internet connection?" });
+  const sid = "console-" + Math.random().toString(36).slice(2);
+
+  const bub = (text, mine, extra) => h("div", { style: "max-width:78%;padding:9px 13px;" +
+    "border-radius:var(--radius-md);margin-bottom:9px;font-size:13px;line-height:1.5;text-wrap:pretty;" +
+    "margin-left:" + (mine ? "auto" : "0") + ";background:" +
+    (mine ? "var(--color-accent-800)" : "var(--color-surface)") +
+    ";box-shadow:" + (mine ? "none" : "0 0 0 1px var(--color-divider)") }, h("div", {}, text), extra);
+
+  log.append(bub("Ask what a customer would ask. Same pipeline as the widget \u2014 nothing here is shown to visitors.", false));
+
+  async function send() {
+    const q = input.value.trim(); if (!q) return;
+    input.value = "";
+    log.append(bub(q, true));
+    const wait = bub("Checking the documentation\u2026", false);
+    log.append(wait); log.scrollTop = log.scrollHeight;
+    try {
+      const r = await api("/query", { method: "POST",
+        body: JSON.stringify({ q, session_id: sid, product: S.testScope || null }) });
+      wait.remove();
+      const extras = [];
+      if (r.sources && r.sources.length) extras.push(h("div", { style: "margin-top:9px;padding-top:8px;" +
+        "border-top:1px solid color-mix(in srgb,var(--color-text) 12%,transparent)" },
+        h("div", { style: "font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:3px;color:" + FAINT }, "Sources"),
+        r.sources.map(s => h("div", { style: "font-size:11.5px;color:" + MUTED },
+          s.source + (s.page_label ? " \u00b7 " + s.page_label : "")))));
+      if (r.from_faq) extras.push(h("div", { style: "margin-top:8px" },
+        h("span", { class: "tag tag-outline" }, "reviewed answer")));
+      log.append(bub(r.answer || "No answer", false, extras));
+    } catch (e) { wait.firstChild.textContent = "Failed: " + e.message; }
+    log.scrollTop = log.scrollHeight;
+  }
+  input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+  return page("Test chat",
+    "Ask what a customer would ask. Same pipeline as the widget, so if it reads wrong here it reads wrong there. Nothing you type is shown to visitors.",
+    h("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;max-width:760px" },
+      h("div", { class: "field", style: "max-width:300px;margin-bottom:14px" }, h("label", {}, "Ask about"), sel),
+      log, h("div", { style: "display:flex;gap:10px;margin-top:12px" }, input,
+        h("button", { class: "btn btn-primary", onClick: send }, "Ask"))));
+}
+
+/* ================= help ================= */
+const HELP = [
+  { id:"flow", group:"Concepts", title:"How the four stages fit together",
+    body:"Nothing in this console stands alone. A product is what a visitor picks in the widget. A document is filed against that product, and is what answers are drawn from. A reviewed answer is written from a document and is the only thing a signed-out visitor is ever shown. Break any link and the stage after it goes quiet.",
+    flow:["Catalogue","Documents","Reviewed answers","The widget"] },
+  { id:"first", group:"Getting started", title:"I have just installed this \u2014 where do I start?",
+    body:"Run the four-step setup from the button above. It creates a product, adds a document, drafts answers from it and lets you ask a test question, in that order. Five minutes end to end, and everything it creates is real." },
+  { id:"product", group:"Getting started", title:"Why must a document belong to a product?",
+    body:"The widget asks a visitor which product they are asking about before anything else, and then searches only that product\u2019s documents. An unfiled document is still indexed and still searchable, but it is never offered, because the widget will not name a product it cannot answer about.",
+    flow:["Unfiled document","never offered"] },
+  { id:"draft", group:"Everyday tasks", title:"Drafting answers from a document",
+    body:"Reviewed answers \u203a Draft from a document. It reads the document and suggests question-and-answer pairs. Nothing is published until you have read it. Drafting the same document twice skips anything already there and never overwrites an answer you edited by hand." },
+  { id:"wording", group:"Everyday tasks", title:"Writing an answer that reads well",
+    body:"An answer may be shown to someone whose wording was slightly different from the question you wrote it against, so it has to stand on its own. \u201cNo, instant results\u201d reads badly. \u201cNo internet connection is required; results are instant\u201d reads well." },
+  { id:"gaps", group:"Everyday tasks", title:"Working the unanswered list",
+    body:"Unanswered collects the real questions the reviewed answers did not cover, most frequent first. Answer this moves a question straight into reviewed answers with the wording already filled in. The top of that list is always the most useful thing to write next." },
+  { id:"reviewed", group:"Concepts", title:"Reviewed answers versus live search",
+    body:"A signed-out visitor only ever sees reviewed answers \u2014 written by you, served verbatim, no model call. Signed-in visitors also get live search over the documents. That is why the reviewed set is treated as published copy." },
+  { id:"test", group:"Everyday tasks", title:"Testing before customers do",
+    body:"Test chat runs the same pipeline the widget runs, scoped to whichever product you pick. If an answer reads wrong here it reads wrong in the widget. Nothing you type there is visible to visitors or logged as an unanswered question." },
+  { id:"stuck", group:"Troubleshooting", title:"The widget will not offer one of my products",
+    body:"A product with no filed documents is hidden from the picker, because there is nothing to answer from. Check Documents for that product; if the count is zero, either upload a document or file an existing one against it." },
+  { id:"jam", group:"Troubleshooting", title:"A document uploaded but has zero sections",
+    body:"Zero sections means no text could be extracted \u2014 almost always a scanned PDF with no text layer. Run it through OCR and upload it again; the console does not do OCR itself." },
+];
+
+function helpDrawer() {
+  const q = S.helpQuery.trim().toLowerCase();
+  const topics = HELP.filter(t => !q || (t.title + " " + t.body + " " + t.group).toLowerCase().includes(q));
+  const search = h("input", { class: "input", style: "flex:1", value: S.helpQuery,
+    placeholder: "Search help \u2014 try \u201cproduct\u201d, \u201cdraft\u201d, \u201cjam\u201d",
+    onInput: e => { S.helpQuery = e.target.value; render(); } });
+  return h("div", { style: "position:fixed;inset:0;z-index:70;display:flex;justify-content:flex-end;" +
+      "background:color-mix(in srgb,var(--color-neutral-900) 55%,transparent)",
+      onClick: e => { if (e.currentTarget === e.target) { S.help = false; render(); } } },
+    h("div", { style: "width:min(560px,100%);height:100%;background:var(--color-surface);" +
+        "box-shadow:var(--shadow-lg);display:flex;flex-direction:column;animation:slidein .2s ease both" },
+      h("div", { style: "padding:20px 24px 14px;border-bottom:1px solid var(--color-divider)" },
+        h("div", { style: "display:flex;align-items:flex-start;gap:12px" },
+          h("div", { style: "flex:1" },
+            h("div", { style: "font-size:19px;font-weight:500;letter-spacing:-.015em" }, "Tutorial & help"),
+            h("div", { style: "font-size:12.5px;margin-top:2px;color:" + MUTED },
+              "How the pipeline fits together, and what to do at each stage.")),
+          h("button", { class: "btn btn-secondary", style: "padding:4px 10px;font-size:12.5px",
+            onClick: () => { S.help = false; render(); } }, "Close")),
+        h("div", { style: "display:flex;gap:10px;margin-top:14px" }, search,
+          h("button", { class: "btn btn-primary", style: "flex:0 0 auto",
+            onClick: () => { S.help = false; S.wizard = 1; render(); } }, "Run setup"))),
+      h("div", { style: "flex:1;overflow-y:auto;padding:6px 24px 30px" },
+        topics.length ? topics.map(t => {
+          const open = S.helpTopic === t.id;
+          return h("div", { style: "border-bottom:1px solid color-mix(in srgb,var(--color-text) 9%,transparent)" },
+            h("button", { onClick: () => { S.helpTopic = open ? null : t.id; render(); },
+              style: "width:100%;display:flex;gap:10px;align-items:baseline;text-align:left;" +
+                "background:transparent;border:0;padding:14px 0;cursor:pointer;font:inherit;color:inherit" },
+              h("span", { style: "flex:1;font-size:13.5px;font-weight:500;text-wrap:pretty" }, t.title),
+              h("span", { class: "tag tag-neutral", style: "flex:0 0 auto" }, t.group),
+              h("span", { style: "font-size:13px;color:var(--color-accent-400);width:10px;text-align:center" },
+                open ? "\u2013" : "+")),
+            open ? h("div", { style: "padding:0 0 16px" },
+              h("div", { style: "font-size:13px;line-height:1.6;max-width:60ch;text-wrap:pretty;" +
+                "color:color-mix(in srgb,var(--color-text) 72%,transparent)" }, t.body),
+              t.flow ? h("div", { style: "display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:12px;" +
+                  "padding:12px;border-radius:var(--radius-md);background:var(--color-bg);" +
+                  "box-shadow:inset 0 0 0 1px var(--color-divider)" },
+                t.flow.map((f, i) => h("span", { style: "display:inline-flex;align-items:center;gap:6px" },
+                  h("span", { style: "font-size:11.5px;padding:4px 9px;border-radius:var(--radius-sm);" +
+                    (i === t.flow.length - 1
+                      ? "color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)"
+                      : "background:var(--color-neutral-800)") }, f),
+                  i < t.flow.length - 1 ? h("span", { style: "font-size:10px;color:" + FAINT }, "\u25b6") : null))) : null) : null);
+        }) : h("div", { style: "padding:34px 4px;text-align:center" },
+          h("div", { style: "font-size:14px;font-weight:500" }, "Nothing matches that"),
+          h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+            "Try a stage name \u2014 catalogue, documents, answers.")))));
+}
+
+/* ================= setup wizard ================= */
+const WIZ = [
+  { t:"Create a product", hint:"A range and one product inside it" },
+  { t:"Add a document", hint:"The manual answers come from" },
+  { t:"Draft answers", hint:"Read them before trusting them" },
+  { t:"Ask a test question", hint:"See what a customer would see" },
+  { t:"Done", hint:"What upkeep looks like" },
+];
+const KICK = ["Step 1 of 4 \u00b7 Catalogue", "Step 2 of 4 \u00b7 Documents",
+  "Step 3 of 4 \u00b7 Reviewed answers", "Step 4 of 4 \u00b7 The widget", "Setup complete"];
+const BLURB = [
+  "A range groups products; a product is what a visitor picks in the widget. Everything after this hangs off it.",
+  "The manual or datasheet this product's answers will be drawn from. Reading it takes a minute or two.",
+  "The console reads the document and suggests question-and-answer pairs. Nothing is published until you have read it.",
+  "The same pipeline the widget uses. If the answer reads well here, it reads well to a customer.",
+  "Everything below is live and in use by the widget.",
+];
+
+function wizard() {
+  const step = S.wizard;
+  const body = h("div", {});
+
+  if (step === 1) {
+    const r = h("input", { class: "input", placeholder: "Coin hoppers", value: S.wizRange });
+    const p = h("input", { class: "input", placeholder: "SMART Hopper", value: S.wizProduct });
+    body.append(h("div", { class: "card elev-sm", style: "padding:20px;gap:0" },
+      h("div", { style: "display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap" },
+        h("div", { class: "field", style: "flex:1;min-width:180px" }, h("label", {}, "Range"), r),
+        h("div", { class: "field", style: "flex:1;min-width:180px" }, h("label", {}, "Product"), p)),
+      h("div", { style: "margin-top:14px;display:flex;gap:10px;align-items:center" },
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          S.wizRange = r.value; S.wizProduct = p.value;
+          if (!r.value.trim() || !p.value.trim()) return toast("Both names are needed", true);
+          const ck = slug(r.value), pk = slug(p.value);
+          try {
+            // The range may already exist; that is not an error here.
+            await api("/admin/category", { method: "POST",
+              body: JSON.stringify({ key: ck, name: r.value.trim() }) }).catch(() => {});
+            await api("/admin/product", { method: "POST", body: JSON.stringify(
+              { category_key: ck, key: pk, name: p.value.trim(), sources: [] }) }).catch(() => {});
+            S.wizCatKey = ck; S.wizProductKey = pk;
+            await refresh(); toast("Created " + p.value.trim()); render();
+          } catch (e) { toast(e.message, true); }
+        } }, "Create it"),
+        h("span", { style: "font-size:12px;color:" + MUTED },
+          S.wizProductKey ? "Created \u2014 continue below" : ""))));
+  }
+
+  if (step === 2) {
+    const file = h("input", { type: "file", accept: ".pdf,.docx,.txt", style: "display:none" });
+    const pct = h("span", { class: "mono", style: "color:var(--color-accent-400)" }, "");
+    const bar = h("div", { style: "height:3px;background:var(--color-accent);width:0%" });
+    const progress = h("div", { style: "margin-top:14px;display:none" },
+      h("div", { style: "display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px" },
+        h("span", {}, "Reading the document"), pct),
+      h("div", { style: "height:3px;border-radius:2px;background:var(--color-neutral-800);overflow:hidden" }, bar));
+    file.addEventListener("change", async () => {
+      const f = file.files[0]; if (!f) return;
+      progress.style.display = "block";
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await fetch(API + "/upload", { method: "POST", body: fd, headers: {
+          "x-admin-password": pw, "category-key": S.wizCatKey, "product-key": S.wizProductKey } });
+        const { job_id } = await r.json();
+        for (let i = 0; i < 900; i++) {
+          await new Promise(x => setTimeout(x, 1000));
+          const st = await api("/upload/status/" + job_id).catch(() => null);
+          if (!st) break;
+          if (st.status === "done") { S.wizSource = f.name; await refresh();
+            toast("Added " + f.name); render(); return; }
+          if (st.status === "error") { pct.textContent = "failed"; return; }
+          pct.textContent = (st.pct || 0) + "%"; bar.style.width = (st.pct || 0) + "%";
+        }
+      } catch (e) { toast(e.message, true); }
+    });
+    body.append(h("div", { class: "card elev-sm", style: "padding:20px;gap:0" },
+      h("div", { style: "font-size:12px;margin-bottom:10px;color:" + MUTED }, "Filing under ",
+        h("b", { style: "color:var(--color-text);font-weight:500" }, S.wizProduct || "your product")),
+      h("div", { onClick: () => file.click(),
+        style: "border:1.5px dashed var(--color-divider);border-radius:var(--radius-md);padding:30px;" +
+          "text-align:center;cursor:pointer;background:color-mix(in srgb,var(--color-text) 3%,transparent)" },
+        h("div", { style: "font-size:14px;font-weight:500" }, S.wizSource || "Choose a document"),
+        h("div", { style: "font-size:12.5px;margin-top:3px;color:" + MUTED },
+          S.wizSource ? "Added \u2014 continue below" : "PDF, Word or text")),
+      file, progress));
+  }
+
+  if (step === 3) {
+    const btn = h("button", { class: "btn btn-primary" }, S.wizDrafts.length ? "Draft more" : "Draft answers");
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Drafting\u2026";
+      try {
+        const r = await api("/admin/faq/autogenerate", { method: "POST", body: JSON.stringify(
+          { source: S.wizSource, product: S.wizProductKey, category: S.wizCatKey }) });
+        await refresh();
+        S.wizDrafts = S.faq.filter(f => (f.products || "") === S.wizProductKey).slice(0, 5);
+        toast("Added " + r.added + " answers"); render();
+      } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = "Draft answers"; }
+    });
+    body.append(h("div", { class: "card elev-sm", style: "padding:20px;gap:0" }, btn,
+      S.wizDrafts.length ? h("div", { style: "margin-top:16px" },
+        S.wizDrafts.map(d => h("div", { class: "rule", style: "padding:12px 0" },
+          h("div", { style: "font-size:13px;font-weight:500;text-wrap:pretty" }, d.question),
+          h("div", { style: "font-size:12.5px;margin-top:4px;line-height:1.55;text-wrap:pretty;" +
+            "color:color-mix(in srgb,var(--color-text) 65%,transparent)" }, d.answer))),
+        h("div", { style: "margin-top:14px;padding:12px 14px;border-radius:var(--radius-md);background:var(--color-bg);" +
+          "box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 40%,transparent);" +
+          "font-size:12.5px;line-height:1.55;text-wrap:pretty" },
+          "Read every one before trusting it. Each is shown to customers exactly as written, sometimes after a question phrased differently \u2014 so \u201cNo, instant results\u201d reads badly where \u201cNo internet connection is required\u201d reads well.")) : null));
+  }
+
+  if (step === 4) {
+    const chat = h("div", { style: "border-radius:var(--radius-md);padding:14px;background:var(--color-bg);" +
+      "box-shadow:inset 0 0 0 1px var(--color-divider);min-height:150px" });
+    S.wizChat.forEach(m => chat.append(h("div", { style: "max-width:80%;padding:9px 13px;" +
+      "border-radius:var(--radius-md);margin-bottom:9px;font-size:13px;line-height:1.5;margin-left:" +
+      (m.mine ? "auto" : "0") + ";background:" + (m.mine ? "var(--color-accent-800)" : "var(--color-surface)") +
+      ";box-shadow:" + (m.mine ? "none" : "0 0 0 1px var(--color-divider)") }, m.text)));
+    if (!S.wizChat.length) chat.append(h("div", { style: "font-size:12.5px;color:" + MUTED },
+      "Ask the sample question below and the console will answer it from what you just set up."));
+    const q = "What is " + (S.wizProduct || "this product") + " and what does it do?";
+    body.append(h("div", { class: "card elev-sm", style: "padding:20px;gap:0" }, chat,
+      h("div", { style: "margin-top:12px" },
+        h("button", { class: "btn btn-primary", onClick: async () => {
+          S.wizChat.push({ mine: true, text: q }); render();
+          try {
+            const r = await api("/query", { method: "POST", body: JSON.stringify(
+              { q, session_id: "wizard", product: S.wizProductKey || null }) });
+            S.wizChat.push({ mine: false, text: r.answer || "No answer" });
+          } catch (e) { S.wizChat.push({ mine: false, text: "Failed: " + e.message }); }
+          render();
+        } }, S.wizChat.length ? "Ask again" : "Ask it"))));
+  }
+
+  if (step === 5) {
+    body.append(h("div", { class: "card elev-sm", style: "padding:20px;gap:0" },
+      h("div", { style: "font-size:13px;line-height:1.65;max-width:58ch;text-wrap:pretty;" +
+        "color:color-mix(in srgb,var(--color-text) 72%,transparent)" },
+        "The pipeline is running. From here the job is upkeep: Unanswered collects the questions the widget could not handle, ordered by how often each came up. Working down that list is the only routine maintenance this needs."),
+      h("div", { style: "display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:16px;padding:14px;" +
+        "border-radius:var(--radius-md);background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" },
+        ["Catalogue", "Documents", "Reviewed answers", "The widget"].map((l, i, arr) =>
+          h("span", { style: "display:inline-flex;align-items:center;gap:6px" },
+            h("span", { style: "font-size:11.5px;padding:4px 9px;border-radius:var(--radius-sm);" +
+              (i === arr.length - 1 ? "color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent)"
+                                    : "background:var(--color-neutral-800)") }, l),
+            i < arr.length - 1 ? h("span", { style: "font-size:10px;color:" + FAINT }, "\u25b6") : null)))));
+  }
+
+  const gate = step === 1 ? (S.wizProductKey ? "" : "Create the product to continue")
+             : step === 2 ? (S.wizSource ? "" : "Add a document to continue")
+             : step === 3 ? (S.wizDrafts.length ? "" : "Draft at least one answer")
+             : "";
+
+  const rail = h("div", { style: "width:300px;flex:0 0 auto;border-right:1px solid var(--color-divider);" +
+      "padding:30px 26px;display:flex;flex-direction:column" },
+    h("div", { style: "font-size:16px;font-weight:500" }, "Setting up"),
+    h("div", { style: "font-size:12.5px;margin-top:2px;margin-bottom:22px;text-wrap:pretty;color:" + FAINT },
+      "Each step builds the thing the next one needs."),
+    WIZ.map((w, i) => {
+      const n = i + 1, done = n < step, now = n === step;
+      return h("div", { style: "display:flex;gap:12px;padding:0 0 4px" },
+        h("div", { style: "display:flex;flex-direction:column;align-items:center;flex:0 0 auto" },
+          h("span", { class: "mono", style: "width:22px;height:22px;border-radius:50%;display:grid;" +
+            "place-items:center;font-size:10.5px;background:" +
+            (done ? "var(--color-accent-800)" : now ? "var(--color-accent)" : "transparent") + ";color:" +
+            (now ? "var(--color-bg)" : done ? "var(--color-accent-100)" : "var(--color-neutral-500)") +
+            (!done && !now ? ";box-shadow:inset 0 0 0 1px var(--color-neutral-700)" : "") },
+            done ? "\u2713" : String(n)),
+          i < WIZ.length - 1 ? h("span", { style: "width:1px;flex:1;min-height:26px;background:" +
+            (done ? "var(--color-accent-800)" : "var(--color-divider)") }) : null),
+        h("div", { style: "padding-bottom:14px" },
+          h("div", { style: "font-size:13px;font-weight:500;color:" +
+            (now ? "var(--color-text)" : "color-mix(in srgb,var(--color-text) 55%,transparent)") }, w.t),
+          h("div", { style: "font-size:11.5px;margin-top:1px;text-wrap:pretty;color:" + FAINT }, w.hint)));
+    }),
+    h("div", { style: "flex:1" }),
+    h("button", { class: "btn btn-secondary", style: "font-size:12.5px",
+      onClick: async () => { S.wizard = 0; await refresh(); render(); } }, "Leave setup"));
+
+  return h("div", { style: "position:fixed;inset:0;z-index:80;background:var(--color-bg);display:flex" }, rail,
+    h("div", { style: "flex:1;overflow-y:auto;display:flex;justify-content:center;padding:52px 40px" },
+      h("div", { style: "width:100%;max-width:620px" },
+        h("div", { style: "font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;" +
+          "color:var(--color-accent-400);margin-bottom:8px" }, KICK[step - 1]),
+        h("h2", { style: "font-size:28px;letter-spacing:-.025em;margin:0 0 8px" }, WIZ[step - 1].t),
+        h("p", { style: "font-size:14px;line-height:1.6;max-width:58ch;text-wrap:pretty;margin:0 0 24px;" +
+          "color:color-mix(in srgb,var(--color-text) 62%,transparent)" }, BLURB[step - 1]),
+        body,
+        h("div", { style: "display:flex;gap:10px;margin-top:22px;align-items:center" },
+          h("button", { class: "btn btn-secondary", disabled: step === 1,
+            onClick: () => { S.wizard = step - 1; render(); } }, "Back"),
+          h("button", { class: "btn btn-primary", disabled: !!gate, onClick: async () => {
+            if (step === 5) { S.wizard = 0; S.view = "overview"; await refresh(); render(); return; }
+            S.wizard = step + 1; render();
+          } }, step === 5 ? "Finish" : "Next"),
+          gate ? h("span", { style: "font-size:12px;margin-left:4px;color:" + FAINT }, gate) : null))));
+}
+
+/* ================= gates ================= */
+function gateView() {
+  const input = h("input", { class: "input", type: "password", placeholder: "Admin password", autofocus: true });
+  const go = async () => {
+    pw = input.value;
+    try { await api("/admin/login", { method: "POST" });
+          sessionStorage.setItem("go_admin_pw", pw); await refresh(); render(); }
+    catch (e) { pw = ""; toast("That password was not accepted", true); }
+  };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  return h("div", { style: "height:100vh;display:grid;place-items:center;padding:20px" },
+    h("div", { class: "card elev-lg", style: "width:min(400px,100%);padding:26px;gap:0" },
+      h("div", { style: "font-size:19px;font-weight:500;letter-spacing:-.015em" }, "GroundedOps console"),
+      h("div", { style: "font-size:12.5px;margin:2px 0 16px;color:" + MUTED },
+        "Manage the documents and answers behind the support widget."),
+      input,
+      h("button", { class: "btn btn-primary btn-block", style: "margin-top:14px", onClick: go }, "Open console")));
+}
+
+function notServed() {
+  return h("div", { style: "height:100vh;display:grid;place-items:center;padding:20px" },
+    h("div", { class: "card elev-lg", style: "width:min(520px,100%);padding:26px;gap:0" },
+      h("div", { style: "font-size:19px;font-weight:500" }, "Open this through the app"),
+      h("div", { style: "font-size:13px;margin:6px 0 14px;color:" + MUTED },
+        "This page is being viewed as a file, so it cannot reach the backend. Put admin.html in the same folder as main.py, then open the address below."),
+      h("div", { style: "background:var(--color-bg);border-radius:var(--radius-md);padding:12px;" +
+        "box-shadow:inset 0 0 0 1px var(--color-divider);margin-bottom:14px" },
+        h("div", { class: "mono", style: "font-size:15px" }, "http://127.0.0.1:8000/admin")),
+      h("button", { class: "btn btn-primary",
+        onClick: () => location.href = "http://127.0.0.1:8000/admin" }, "Open the console")));
+}
+
+/* ================= boot ================= */
+(async () => {
+  if (!API) return render();
+  if (pw) { try { await api("/admin/login", { method: "POST" }); await refresh(); } catch (e) { pw = ""; } }
+  render();
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && S.help) { S.help = false; render(); }
+  });
+})();
+</script>
+</body>
+</html>

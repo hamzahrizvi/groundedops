@@ -5,7 +5,6 @@ import Message from "./components/Message.jsx";
 import DetailsPanel from "./components/DetailsPanel.jsx";
 import ChatsPage from "./components/ChatsPage.jsx";
 import { SettingsDialog, ModeDialog, StartupKeysDialog } from "./components/Dialogs.jsx";
-import AdminPanel from "./components/AdminPanel.jsx";
 import FaqPage from "./components/FaqPage.jsx";
 import ChatFaqDrawer from "./components/ChatFaqDrawer.jsx";
 import { SendIcon, RocketIcon, RunnerIcon } from "./icons.jsx";
@@ -42,7 +41,6 @@ export default function App() {
   const [catalog, setCatalog] = useState({ categories: [] });
   const [pickStep, setPickStep] = useState(null);   // null | "category" | "product"
   const [pickCat, setPickCat] = useState(null);     // category chosen in step 1
-  const [showAdmin, setShowAdmin] = useState(false);
   const [suggestions, setSuggestions] = useState([]);  // v10.6 FAQ starter chips
   const [faqPanelOpen, setFaqPanelOpen] = useState(false);  // v10.10 chat-side FAQ
   const [reingest, setReingest] = useState(false);
@@ -370,7 +368,7 @@ export default function App() {
         onToggle={() => setRailExpanded((v) => !v)}
         dark={dark}
         onSettings={() => setDialog("settings")}
-        onDocuments={() => setShowAdmin(true)}
+        onDocuments={() => window.open("/admin", "_blank")}
         onNewChat={() => setView("chats")}
         onFaq={() => setView("faq")}
         onReset={resetKB}
@@ -440,7 +438,7 @@ export default function App() {
                 <div className="reingest-banner">
                   Ingestion logic changed since these documents were indexed —
                   re-ingest is recommended for best results.{" "}
-                  <button className="btn small" onClick={() => setShowAdmin(true)}>Open admin</button>
+                  <button className="btn small" onClick={() => window.open("/admin", "_blank")}>Open admin</button>
                 </div>
               )}
               {(categoryName || productName) && view === "chat" && (
@@ -569,7 +567,7 @@ export default function App() {
               ))}
             </div>
             <div className="dialog-actions">
-              <button className="btn" onClick={() => setShowAdmin(true)}>Admin</button>
+              <button className="btn" onClick={() => window.open("/admin", "_blank")}>Admin</button>
             </div>
           </div>
         </div>
@@ -606,14 +604,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {showAdmin && (
-        <AdminPanel
-          onClose={() => setShowAdmin(false)}
-          onCatalogChanged={() => api.catalog().then(setCatalog).catch(() => {})}
-        />
-      )}
-
 
       {startupKeys && (
         <StartupKeysDialog

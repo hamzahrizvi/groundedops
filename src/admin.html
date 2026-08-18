@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GroundedOps Console</title>
+<link rel="stylesheet" href="nocturne/styles.css" />
+<style>
+  /* ------------------------------------------------------------------
+     Thin layer on top of the Nocturne design-system stylesheet: shell
+     layout, the nav rail, and a handful of list/chat/dropzone patterns
+     the system doesn't itself define. Every color, radius and spacing
+     value here still comes from Nocturne's tokens.
+     ------------------------------------------------------------------ */
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font:inherit;color:inherit}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--color-neutral-800);border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums}
+  /* uppercase micro-label, used for stat readouts */
+  .lbl{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+       color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  /* plain-case label above a form field */
+  .flabel{display:block;font-size:12px;margin-bottom:5px;
+          color:color-mix(in srgb, var(--color-text) 70%, transparent)}
+
+  /* ---------- shell ---------- */
+  .shell{display:flex;height:100vh;overflow:hidden;background:var(--color-bg);color:var(--color-text);
+         font-family:var(--font-body)}
+  .rail{width:246px;flex:0 0 auto;display:flex;flex-direction:column;padding:18px 0 14px;
+        border-right:1px solid var(--color-divider)}
+  .brand{padding:0 18px 18px}
+  .brand b{display:block;font-size:16px;font-weight:500;letter-spacing:-.01em;font-family:var(--font-heading)}
+  .brand span{font-size:11.5px;color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .nav{flex:1;padding:0 10px;display:flex;flex-direction:column;gap:2px}
+  .nav button{position:relative;display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+              background:transparent;border:0;color:color-mix(in srgb, var(--color-text) 80%, transparent);
+              padding:8px 10px 8px 9px;border-radius:var(--radius-md);cursor:pointer;font-size:13.5px}
+  .nav button:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent);color:var(--color-text)}
+  .nav button .mark{width:3px;height:15px;border-radius:2px;flex:0 0 auto;background:transparent}
+  .nav button[aria-current="page"]{background:color-mix(in srgb, var(--color-accent) 14%, transparent);
+                                    color:var(--color-text);font-weight:500}
+  .nav button[aria-current="page"] .mark{background:var(--color-accent)}
+  .nav button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+  .nav .badge{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;
+              background:color-mix(in srgb, var(--color-text) 12%, transparent);
+              padding:1px 7px;border-radius:99px}
+  .nav button[aria-current="page"] .badge{background:var(--color-accent-800);color:var(--color-accent-100)}
+  .rail-foot{padding:12px 14px 0;margin-top:12px;border-top:1px solid var(--color-divider)}
+
+  .main{flex:1;overflow-y:auto;padding:30px 34px 90px;position:relative}
+  .wrap{max-width:1000px;animation:rise .18s ease both}
+  h1{font-size:26px;letter-spacing:-.025em;margin:0 0 4px;font-family:var(--font-heading);font-weight:500}
+  .lede{margin:0 0 22px;max-width:66ch;font-size:14px;
+        color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+
+  /* section-header pattern used inside cards, matching the design's
+     15px/500 title + 12.5px muted hint pairing */
+  .sec-title{font-size:15px;font-weight:500;margin:0 0 2px;font-family:var(--font-heading)}
+  .sec-hint{font-size:12.5px;margin:0 0 14px;max-width:60ch;
+            color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+
+  /* ---------- readout: overview stat band ---------- */
+  .readout{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+  .readout>div{background:var(--color-surface);border-radius:var(--radius-md);padding:15px 16px 13px;
+               box-shadow:var(--shadow-sm)}
+  .readout b{display:block;font-family:ui-monospace,monospace;font-size:29px;font-weight:500;
+             letter-spacing:-.03em;line-height:1.15;margin-top:6px}
+  .readout .warn b{color:var(--color-accent-300)}
+
+  /* ---------- form rows ---------- */
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .row>div{flex:1;min-width:170px}
+
+  /* ---------- checklist (overview "what to do next") ---------- */
+  .step{display:flex;gap:12px;padding:13px 0;border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
+  .step:first-of-type{border-top:0}
+  .mark-dot{width:21px;height:21px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;
+        justify-content:center;font-size:11px;font-weight:700}
+  .mark-dot.done{background:var(--color-accent-800);color:var(--color-accent-100)}
+  .mark-dot.todo{background:transparent;color:var(--color-accent);box-shadow:inset 0 0 0 1.5px var(--color-accent)}
+  .mark-dot.idle{background:var(--color-neutral-800);color:var(--color-neutral-400)}
+  .step-b{flex:1;min-width:0}
+  .step-b b{display:block;font-size:13.5px;font-weight:500}
+  .step-b p{margin:2px 0 0;font-size:12.5px;line-height:1.5;
+            color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .step-b .acts{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ---------- list rows (documents / answers / products) ---------- */
+  .item{display:flex;gap:12px;align-items:center;padding:10px 0;
+        border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
+  .item:first-child{border-top:0}
+  .item .grow{flex:1;min-width:0}
+  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .grow span{font-size:12px;color:color-mix(in srgb, var(--color-text) 50%, transparent)}
+  .item.flagged{box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+                border-radius:var(--radius-md);padding:10px 12px;border-top:0;margin-bottom:2px}
+
+  .empty{text-align:center;padding:30px 20px;color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .empty b{display:block;color:var(--color-text);margin-bottom:4px;font-weight:500}
+
+  /* ---------- drop zone ---------- */
+  .drop{border:1.5px dashed var(--color-divider);border-radius:var(--radius-md);padding:26px;text-align:center;
+        background:color-mix(in srgb, var(--color-text) 3%, transparent);
+        color:color-mix(in srgb, var(--color-text) 55%, transparent);
+        transition:border-color .12s,background .12s;cursor:pointer}
+  .drop b{display:block;color:var(--color-text);font-weight:500}
+  .drop.on{border-color:var(--color-accent);background:color-mix(in srgb, var(--color-accent) 10%, transparent)}
+  .drop.off{opacity:.55;cursor:default}
+
+  /* ---------- test chat ---------- */
+  .chat{border-radius:var(--radius-md);height:340px;overflow-y:auto;padding:14px;
+        background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)}
+  .bub{max-width:80%;padding:9px 13px;border-radius:var(--radius-md);margin-bottom:9px;font-size:13.5px;
+       line-height:1.5;white-space:pre-wrap}
+  .bub.u{margin-left:auto;background:var(--color-accent-800);color:var(--color-accent-100)}
+  .bub.a{background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-divider)}
+
+  /* ---------- toast ---------- */
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+         background:var(--color-surface);box-shadow:var(--shadow-md);color:var(--color-text);
+         padding:11px 18px;border-radius:var(--radius-md);font-size:13.5px;z-index:80;max-width:90vw}
+  .toast.bad{box-shadow:var(--shadow-md), inset 0 0 0 1px var(--color-accent);color:var(--color-accent-200)}
+
+  /* ---------- login gate ---------- */
+  .gate{height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+        background:var(--color-bg);color:var(--color-text)}
+  .gate .card{max-width:380px;width:100%}
+
+  /* ---------- guide dialog ---------- */
+  .guide-step{border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent);padding:15px 0}
+  .guide-step:first-of-type{border-top:0}
+  .guide-step .n{font-size:11px;color:var(--color-accent);font-weight:700}
+  .guide-step b{display:block;margin:3px 0 4px;font-weight:500}
+  .guide-step p{margin:0;font-size:13.5px;color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+
+  @media (max-width:820px){
+    .shell{flex-direction:column;height:auto;min-height:100vh}
+    .rail{width:100%;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
+    .brand{border:0;padding:0 14px 0 6px;margin:0}
+    .nav{flex-direction:row;flex:1}
+    .rail-foot{border:0;margin:0;padding:0 6px}
+    .readout{grid-template-columns:repeat(2,1fr)}
+    .main{padding:18px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * GroundedOps Console (v13.0 — Nocturne)
+ *
+ * One self-contained file, served by the backend at /admin. No build
+ * step: replace the file, reload the page. Ship the sibling
+ * nocturne/styles.css alongside it.
+ *
+ * The organising idea is that the console should answer "what do I do
+ * next?" without anyone reading a manual. The Overview reads live state
+ * and turns it into a short list of actions, so an unassigned document
+ * or an empty FAQ announces itself instead of waiting to be discovered.
+ * ------------------------------------------------------------------ */
+
+const API = location.origin;
+let pw = sessionStorage.getItem("go_admin_pw") || "";
+let view = "overview";
+// Set by the Unanswered page's "Answer this" so the Answers page opens
+// with the question prefilled and scrolled into view.
+let pendingAnswer = null;
+let cache = { catalog: null, sources: [], faq: [], gaps: [],
+              widget: null, leads: [], leadStats: {} };
+
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
+  }
+  // flat(Infinity), not flat(): a view returning [h1, lede, rows] where
+  // `rows` is itself an array of cards nests two deep, and a single-level
+  // flatten leaves that inner array to be passed to createTextNode —
+  // which renders the literal string "[object HTMLDivElement]" instead of
+  // the list. Depth-1 happened to work only while every view returned a
+  // flat list of elements.
+  kids.flat(Infinity).forEach(c => c && n.append(c.nodeType ? c : document.createTextNode(c)));
+  return n;
+};
+
+function toast(msg, bad) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const t = el("div", { class: "toast" + (bad ? " bad" : "") }, msg);
+  document.body.append(t);
+  setTimeout(() => t.remove(), bad ? 6000 : 3200);
+}
+
+async function api(path, opts = {}) {
+  const o = Object.assign({ headers: {} }, opts);
+  o.headers["x-admin-password"] = pw;
+  if (o.body && !(o.body instanceof FormData)) o.headers["Content-Type"] = "application/json";
+  const r = await fetch(API + path, o);
+  if (r.status === 401) { pw = ""; sessionStorage.removeItem("go_admin_pw"); render(); throw new Error("Password rejected"); }
+  if (!r.ok) {
+    let d; try { d = (await r.json()).detail; } catch (e) { d = r.statusText; }
+    throw new Error(typeof d === "string" ? d : JSON.stringify(d));
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+/* ---------------- data ---------------- */
+async function refresh() {
+  // All independent reads — run them together rather than in series, so
+  // opening the console is one round trip's worth of latency, not six.
+  const [cat, src, faq, gaps, widget, leads] = await Promise.all([
+    api("/catalog").catch(() => ({ categories: [] })),
+    api("/admin/sources").catch(() => ({ sources: [] })),
+    api("/faq").catch(() => ({ faq: [] })),
+    api("/faq/gaps").catch(() => ({ gaps: [], stats: {} })),
+    api("/admin/widget/config").catch(() => null),
+    api("/admin/leads").catch(() => ({ leads: [], stats: {} })),
+  ]);
+  cache.catalog = cat.categories || [];
+  cache.sources = src.sources || src || [];
+  cache.faq = faq.faq || [];
+  cache.gaps = gaps.gaps || [];
+  cache.gapStats = gaps.stats || {};
+  // Kept as null on failure rather than defaulted: the Widget page needs
+  // to tell the difference between "not loaded" and "loaded and empty",
+  // or a failed read would render as a blank config the admin could
+  // accidentally save over their real one.
+  cache.widget = widget;
+  cache.leads = leads.leads || [];
+  cache.leadStats = leads.stats || {};
+}
+
+// Deep copy, so edits in the Widget editor are staged locally and only
+// committed on Save — closing the page without saving discards them.
+const clone = o => JSON.parse(JSON.stringify(o));
+
+const products = () => cache.catalog.flatMap(c =>
+  (c.products || []).map(p => ({ ...p, category: c.key, categoryName: c.name })));
+const unassigned = () => cache.sources.filter(s => !(s.product || s.products));
+const answered = () => cache.faq.filter(f => (f.answer || "").trim());
+
+/* ---------------- shell ---------------- */
+function render() {
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  if (!pw) return app.append(gate());
+
+  const nav = (id, label, count) =>
+    el("button", {
+      onclick: () => { view = id; render(); },
+      "aria-current": view === id ? "page" : null,
+    }, el("span", { class: "mark" }), el("span", { style: "flex:1" }, label),
+       count !== undefined ? el("span", { class: "badge mono" }, String(count)) : null);
+
+  app.append(el("div", { class: "shell" },
+    el("aside", { class: "rail" },
+      el("div", { class: "brand" }, el("b", {}, "GroundedOps"), el("span", {}, "Support console")),
+      el("nav", { class: "nav" },
+        nav("overview", "Overview"),
+        nav("documents", "Documents", cache.sources.length),
+        nav("faq", "Answers", answered().length),
+        nav("gaps", "Unanswered", cache.gaps.length),
+        nav("catalog", "Products", products().length),
+        nav("widget", "Widget design"),
+        nav("leads", "Enquiries", cache.leadStats.unhandled || 0),
+        nav("test", "Test chat"),
+      ),
+      el("div", { class: "rail-foot" },
+        el("button", { class: "btn btn-secondary btn-block", onclick: openGuide }, "How do I\u2026?")),
+    ),
+    el("main", { class: "main" }, el("div", { class: "wrap" }, body()))
+  ));
+}
+
+function body() {
+  if (view === "overview") return viewOverview();
+  if (view === "documents") return viewDocuments();
+  if (view === "faq") return viewFaq();
+  if (view === "gaps") return viewGaps();
+  if (view === "catalog") return viewCatalog();
+  if (view === "widget") return viewWidget();
+  if (view === "leads") return viewLeads();
+  if (view === "test") return viewTest();
+}
+
+/* ---------------- gate ---------------- */
+function gate() {
+  const input = el("input", { class: "input", type: "password", placeholder: "Admin password", autofocus: "true" });
+  const go = async () => {
+    pw = input.value;
+    try {
+      await api("/admin/login", { method: "POST" });
+      sessionStorage.setItem("go_admin_pw", pw);
+      await refresh(); render();
+    } catch (e) { pw = ""; toast("That password was not accepted", true); }
+  };
+  input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  return el("div", { class: "gate" },
+    el("div", { class: "card elev-md", style: "padding:22px" },
+      el("h2", {}, "GroundedOps console"),
+      el("p", { class: "sec-hint", style: "margin-bottom:16px" }, "Manage the documents and answers behind the support widget."),
+      el("div", { class: "field" }, input),
+      el("div", { style: "margin-top:14px" },
+        el("button", { class: "btn btn-primary", onclick: go }, "Open console"))));
+}
+
+/* ---------------- overview ---------------- */
+function viewOverview() {
+  const prods = products(), un = unassigned(), ans = answered();
+
+  const stat = (label, value, tone) =>
+    el("div", { class: tone || "" }, el("div", { class: "lbl" }, label), el("b", {}, String(value)));
+
+  const step = (state, title, desc, actions) =>
+    el("div", { class: "step" },
+      el("div", { class: "mark-dot " + state }, state === "done" ? "\u2713" : state === "todo" ? "!" : "\u00b7"),
+      el("div", { class: "step-b" },
+        el("b", {}, title), el("p", {}, desc),
+        actions && actions.length ? el("div", { class: "acts" }, actions) : null));
+
+  const goTo = (id, label, primary) =>
+    el("button", { class: "btn " + (primary ? "btn-primary" : "btn-secondary"), style: "font-size:12.5px;padding:4px 10px",
+                   onclick: () => { view = id; render(); } }, label);
+
+  const steps = [];
+
+  steps.push(prods.length
+    ? step("done", "Products are set up",
+        prods.length + " product" + (prods.length === 1 ? "" : "s") +
+        " across " + cache.catalog.length + " range" + (cache.catalog.length === 1 ? "" : "s") + ".",
+        [goTo("catalog", "Manage products")])
+    : step("todo", "Set up your products first",
+        "Documents are filed against a product, and the widget asks visitors to pick one. Nothing else works until at least one exists.",
+        [goTo("catalog", "Add a product", true)]));
+
+  steps.push(cache.sources.length
+    ? step(un.length ? "todo" : "done",
+        un.length ? un.length + " document" + (un.length === 1 ? "" : "s") + " need a product"
+                  : cache.sources.length + " documents, all filed",
+        un.length ? "Unfiled documents are searchable but never offered in the widget, because it can only show products it can answer about."
+                  : "Every document belongs to a product and can be found by the widget.",
+        [goTo("documents", un.length ? "File them now" : "View documents", !!un.length)])
+    : step("todo", "Add your first document",
+        "PDF, Word or text. This is what answers are drawn from.",
+        [goTo("documents", "Add documents", true)]));
+
+  steps.push(ans.length
+    ? step("done", ans.length + " reviewed answers",
+        "Signed-out visitors only ever see these, so they are the public face of the widget.",
+        [goTo("faq", "Review answers")])
+    : step(cache.sources.length ? "todo" : "idle", "Write the reviewed answers",
+        "Visitors who are not signed in can only be shown answers you have approved. Draft them from a document, then edit.",
+        cache.sources.length ? [goTo("faq", "Start writing", true)] : []));
+
+  steps.push(cache.gaps.length
+    ? step("todo", cache.gaps.length + " unanswered questions logged",
+        "Real questions the reviewed answers did not cover. This is your to-do list, ordered by how often each was asked.",
+        [goTo("gaps", "See what people asked", true)])
+    : step("idle", "Questions people could not get answered",
+        "Anything the widget could not answer shows up here once visitors start using it.", []));
+
+  const unhandled = (cache.leadStats || {}).unhandled || 0;
+  if (unhandled) {
+    steps.push(step("todo", unhandled + " enquir" + (unhandled === 1 ? "y" : "ies") + " waiting",
+      "Someone filled in the sales or support form. These are not emailed anywhere, so they sit here until you reply.",
+      [goTo("leads", "Read them", true)]));
+  }
+
+  return [
+    el("h1", {}, "Overview"),
+    el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked."),
+    el("div", { class: "readout" },
+      stat("Documents", cache.sources.length),
+      stat("Need filing", un.length, un.length ? "warn" : ""),
+      stat("Reviewed answers", ans.length),
+      stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "")),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0" },
+      el("div", { class: "sec-title" }, "What to do next"),
+      el("div", { class: "sec-hint" }, "Read from live state. Anything needing attention is marked in the accent."),
+      steps),
+  ];
+}
+
+/* ---------------- documents ---------------- */
+function viewDocuments() {
+  const prods = products();
+  let chosen = prods.length === 1 ? prods[0].key : "";
+
+  const sel = el("select", { class: "input", onchange: e => { chosen = e.target.value; sync(); } },
+    el("option", { value: "" }, prods.length ? "Choose a product\u2026" : "No products yet"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  if (chosen) sel.value = chosen;
+
+  const drop = el("div", { class: "drop off" },
+    el("b", {}, "Choose a product first"),
+    "Then drop files here, or click to browse");
+  const file = el("input", { type: "file", multiple: "true", accept: ".pdf,.docx,.txt", style: "display:none" });
+  const progress = el("div", {});
+
+  function sync() {
+    const ok = !!chosen;
+    drop.className = "drop" + (ok ? "" : " off");
+    drop.innerHTML = "";
+    drop.append(el("b", {}, ok ? "Drop files here" : "Choose a product first"),
+      ok ? "PDF, Word or text \u2014 or click to browse"
+         : "Documents must belong to a product so the widget can offer them");
+  }
+  sync();
+
+  async function upload(files) {
+    if (!chosen) return toast("Choose a product first", true);
+    const p = prods.find(x => x.key === chosen);
+    for (const f of files) {
+      const line = el("div", { class: "item" },
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading\u2026")));
+      progress.append(line);
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await fetch(API + "/upload", {
+          method: "POST", body: fd,
+          headers: { "x-admin-password": pw, "category-key": p.category, "product-key": p.key },
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const { job_id } = await r.json();
+        await track(job_id, line, f.name);
+      } catch (e) {
+        line.querySelector("span").textContent = "Failed: " + e.message;
+      }
+    }
+    await refresh(); render();
+  }
+
+  async function track(job, line, name) {
+    for (let i = 0; i < 600; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      let s; try { s = await api("/upload/status/" + job); } catch (e) { break; }
+      const span = line.querySelector("span");
+      if (s.status === "done") { span.textContent = "Added \u2014 " + (s.chunks || 0) + " sections"; return; }
+      if (s.status === "error") { span.textContent = "Failed: " + (s.error || "unknown"); return; }
+      span.textContent = (s.stage || "working") + " " + (s.pct || 0) + "%";
+    }
+  }
+
+  drop.addEventListener("click", () => chosen && file.click());
+  drop.addEventListener("dragover", e => { e.preventDefault(); if (chosen) drop.classList.add("on"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("on"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("on");
+    if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
+  });
+  file.addEventListener("change", () => file.files.length && upload(file.files));
+
+  const list = cache.sources.length ? cache.sources.map(s => {
+    const cur = s.product || s.products || "";
+    const move = el("select", { class: "input", style: "width:auto", onchange: async e => {
+      const p = prods.find(x => x.key === e.target.value);
+      if (!p) return;
+      try {
+        await api("/admin/reassign_source", { method: "POST",
+          body: JSON.stringify({ source: s.source, category_key: p.category, product_key: p.key }) });
+        toast("Filed under " + p.name);
+        await refresh(); render();
+      } catch (err) { toast(err.message, true); }
+    } }, el("option", { value: "" }, cur ? "Move to\u2026" : "File under\u2026"),
+       prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+
+    return el("div", { class: "item" + (cur ? "" : " flagged") },
+      el("div", { class: "grow" },
+        el("b", {}, s.source),
+        el("span", {}, (s.chunks || 0) + " sections")),
+      cur ? el("span", { class: "tag tag-neutral" }, cur) : el("span", { class: "tag tag-accent" }, "no product"),
+      move,
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+        if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
+        try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });
+              toast("Removed"); await refresh(); render(); }
+        catch (e) { toast(e.message, true); }
+      } }, "Remove"));
+  }) : [el("div", { class: "empty" }, el("b", {}, "No documents yet"),
+        "Add a manual or datasheet above and the widget can start answering from it.")];
+
+  return [
+    el("h1", {}, "Documents"),
+    el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      el("div", { class: "sec-title" }, "Add documents"),
+      el("div", { class: "sec-hint" }, "Pick the product the document describes, then drop the files in."),
+      el("div", { class: "row" }, el("div", {}, el("label", { class: "flabel" }, "Product"), sel)),
+      el("div", { style: "margin-top:14px" }, drop, file),
+      progress),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+      el("div", { class: "sec-title" }, "All documents"),
+      el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget."),
+      list),
+  ];
+}
+
+/* ---------------- answers (FAQ) ---------------- */
+function viewFaq() {
+  const prods = products();
+  let scope = "";
+  const shown = () => cache.faq.filter(f => !scope ||
+    (f.products || "").split(",").includes(scope) || f.category === scope);
+
+  const scopeSel = el("select", { class: "input", style: "width:auto", onchange: e => { scope = e.target.value; render2(); } },
+    el("option", { value: "" }, "All products"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+
+  const listBox = el("div", {});
+  function render2() {
+    scopeSel.value = scope;
+    listBox.innerHTML = "";
+    const items = shown();
+    if (!items.length) {
+      listBox.append(el("div", { class: "empty" }, el("b", {}, "No answers yet"),
+        "Draft some from a document below, or write one by hand."));
+      return;
+    }
+    items.forEach(f => {
+      const q = el("input", { class: "input", type: "text", value: f.question });
+      const a = el("textarea", { class: "input" }, f.answer || "");
+      const box = el("div", { class: "item", style: "display:block" },
+        el("div", { class: "row", style: "margin-bottom:8px" },
+          el("div", { style: "flex:3" }, el("label", { class: "flabel" }, "Question"), q)),
+        el("label", { class: "flabel" }, "Answer"), a,
+        el("p", { class: "sec-hint", style: "margin:7px 0 0" },
+          "Write it so it reads correctly on its own \u2014 it may be shown to someone whose wording was slightly different."),
+        el("div", { style: "margin-top:9px;display:flex;gap:8px" },
+          el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+            try { await api("/faq/" + f.id, { method: "PATCH",
+                    body: JSON.stringify({ question: q.value, answer: a.value }) });
+                  toast("Saved"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Save"),
+          el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+            if (!confirm("Delete this answer?")) return;
+            try { await api("/faq/" + f.id, { method: "DELETE" }); toast("Deleted");
+                  await refresh(); render(); } catch (e) { toast(e.message, true); }
+          } }, "Delete")));
+      listBox.append(box);
+    });
+  }
+  render2();
+
+  // draft from a document, server-side
+  const srcSel = el("select", { class: "input" }, el("option", { value: "" }, "Choose a document\u2026"),
+    cache.sources.map(s => el("option", { value: s.source }, s.source)));
+  const draftBtn = el("button", { class: "btn btn-primary", onclick: async () => {
+    const src = srcSel.value;
+    if (!src) return toast("Choose a document first", true);
+    const s = cache.sources.find(x => x.source === src) || {};
+    draftBtn.disabled = true; draftBtn.textContent = "Drafting\u2026";
+    try {
+      const r = await api("/admin/faq/autogenerate", { method: "POST",
+        body: JSON.stringify({ source: src, product: s.product || s.products || "", category: s.category || "" }) });
+      toast("Added " + r.added + " new, skipped " + r.skipped_duplicates + " already there");
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+    finally { draftBtn.disabled = false; draftBtn.textContent = "Draft answers"; }
+  } }, "Draft answers");
+
+  // add by hand
+  const nq = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
+  const na = el("textarea", { class: "input", placeholder: "No. Everything is processed on the device; no connection is required." });
+  const appliesSel = scopeSel.cloneNode(true);
+
+  if (pendingAnswer) {
+    nq.value = pendingAnswer.question;
+    if (pendingAnswer.product) appliesSel.value = pendingAnswer.product;
+    // Consumed on read: a later re-render (e.g. after saving) must not
+    // resurrect a question the admin has already dealt with.
+    pendingAnswer = null;
+    setTimeout(() => { na.focus(); na.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
+  }
+
+  // A short preview only — the full list, grouped by product, lives on
+  // the Unanswered page. Two full copies of the same list drift apart and
+  // give the admin two places to check the same thing.
+  const gapPreview = cache.gaps.length
+    ? cache.gaps.slice(0, 5).map(g => el("div", { class: "item" },
+        el("div", { class: "grow" }, el("b", {}, g.question),
+          el("span", {}, "asked " + (g.times_asked || 1) + "\u00d7")),
+        el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: () => {
+          nq.value = g.question;
+          if (g.product || g.category) appliesSel.value = g.product || g.category;
+          na.focus();
+          na.scrollIntoView({ behavior: "smooth", block: "center" });
+        } }, "Answer this")))
+    : [el("div", { class: "empty" }, el("b", {}, "Nothing unanswered"),
+        "Questions the widget could not answer will collect here.")];
+
+  return [
+    el("h1", {}, "Answers"),
+    el("p", { class: "lede" }, "Reviewed answers are shown exactly as written and cost nothing to serve. Visitors who are not signed in see only these."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      el("div", { class: "sec-title" }, "Draft from a document"),
+      el("div", { class: "sec-hint" }, "Suggests questions and answers from a document you have added. Nothing is published until you have read it \u2014 and drafting again never overwrites answers you have edited."),
+      el("div", { class: "row" },
+        el("div", { style: "flex:2" }, el("label", { class: "flabel" }, "Document"), srcSel),
+        el("div", { style: "flex:0 0 auto" }, draftBtn))),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      el("div", { class: "sec-title" }, "Write one yourself"),
+      el("div", { class: "sec-hint" }, "Hand-written answers are protected \u2014 drafting will never replace them."),
+      el("label", { class: "flabel" }, "Question"), nq,
+      el("label", { class: "flabel", style: "margin-top:10px" }, "Answer"), na,
+      el("div", { class: "row", style: "margin-top:10px" },
+        el("div", {}, el("label", { class: "flabel" }, "Applies to"), appliesSel),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn btn-primary", onclick: async () => {
+            if (!nq.value.trim()) return toast("Add a question first", true);
+            try {
+              await api("/faq", { method: "POST", body: JSON.stringify({
+                question: nq.value, answer: na.value, product: appliesSel.value }) });
+              nq.value = ""; na.value = ""; toast("Added");
+              await refresh(); render();
+            } catch (e) { toast(e.message, true); }
+          } }, "Add answer")))),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:2px" },
+        el("div", { class: "sec-title", style: "flex:1;margin:0" }, "People asked, we could not answer"),
+        cache.gaps.length > 5 ? el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+          onclick: () => { view = "gaps"; render(); } }, "See all " + cache.gaps.length) : null),
+      el("div", { class: "sec-hint" }, "The most asked, most recent first. The full list, grouped by product, is on the Unanswered page."),
+      gapPreview),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:2px" },
+        el("div", { class: "sec-title", style: "flex:1;margin:0" }, "All answers"), scopeSel),
+      el("div", { class: "sec-hint" }, "Edit the wording, or delete anything out of date."),
+      listBox,
+      el("div", { style: "margin-top:14px" },
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+          const label = scope || "ALL products";
+          if (!confirm("Delete every answer for " + label + "?\n\nHand-written answers cannot be recovered.")) return;
+          if (prompt('Type DELETE to confirm') !== "DELETE") return toast("Cancelled");
+          try {
+            await api("/faq?confirm=true" + (scope ? "&product=" + encodeURIComponent(scope) : ""),
+                      { method: "DELETE" });
+            toast("Deleted"); await refresh(); render();
+          } catch (e) { toast(e.message, true); }
+        } }, "Delete all shown"))),
+  ];
+}
+
+/* ---------------- unanswered (gaps) ---------------- */
+function viewGaps() {
+  const prods = products();
+  const nameFor = key => {
+    const p = prods.find(x => x.key === key);
+    if (p) return p.categoryName + " \u203a " + p.name;
+    const c = cache.catalog.find(x => x.key === key);
+    return c ? c.name : null;
+  };
+
+  // Group by scope so the list reads as "which product is underserved",
+  // which is the decision this page exists to support. Questions asked
+  // with no product selected are their own group rather than being
+  // hidden or forced under an arbitrary product.
+  const groups = new Map();
+  cache.gaps.forEach(g => {
+    const key = g.scope || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(g);
+  });
+  const ordered = [...groups.entries()].sort((a, b) =>
+    b[1].reduce((n, g) => n + (g.times_asked || 1), 0) -
+    a[1].reduce((n, g) => n + (g.times_asked || 1), 0));
+
+  const answerHere = g => {
+    // Prefill the Answers page's hand-written form with this question and
+    // jump there, rather than opening a second editor here. One place to
+    // write an answer means one set of wording rules to learn, and saving
+    // it resolves this gap automatically server-side.
+    pendingAnswer = { question: g.question, product: g.scope || "" };
+    view = "faq"; render();
+  };
+
+  const rows = ordered.map(([key, list]) => {
+    const label = key ? (nameFor(key) || key) : "No product selected";
+    const asks = list.reduce((n, g) => n + (g.times_asked || 1), 0);
+    return el("div", { class: "card elev-sm", style: "padding:14px 20px 8px;gap:0;margin-bottom:12px" +
+                        (key ? "" : ";box-shadow:var(--shadow-sm),inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent)") },
+      el("div", { style: "display:flex;align-items:baseline;gap:10px;padding-bottom:4px" },
+        el("span", { class: "sec-title", style: "flex:1;margin:0" }, label),
+        el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
+          list.length + (list.length === 1 ? " question" : " questions") + " \u00b7 " + asks + " asks")),
+      list.map(g => el("div", { class: "step" },
+        el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;color:var(--color-accent-400);flex:0 0 42px" },
+          (g.times_asked || 1) + "\u00d7"),
+        el("div", { class: "step-b" },
+          el("div", { style: "font-size:13.5px" }, g.question),
+          el("p", {}, (g.reason === "ungrounded_answer_suppressed"
+              ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
+              : "Nothing in the documents matched.")
+            + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : ""))),
+        el("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px",
+                       onclick: () => answerHere(g) }, "Answer this"),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+          if (!confirm("Dismiss this question?\n\nUse this for spam or noise \u2014 it will not come back.")) return;
+          try { await api("/faq/gaps/" + encodeURIComponent(g.id), { method: "DELETE" });
+                toast("Dismissed"); await refresh(); render(); }
+          catch (e) { toast(e.message, true); }
+        } }, "Dismiss"))));
+  });
+
+  return [
+    el("h1", {}, "Unanswered"),
+    el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover, most asked first. Working down this list is the single most useful piece of upkeep."),
+    cache.gaps.length ? rows
+      : el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+          el("b", {}, "Nothing unanswered"),
+          "Questions the widget could not answer will collect here once visitors start using it.")),
+  ];
+}
+
+function shortDate(iso) {
+  try {
+    const d = new Date(iso), now = new Date();
+    const days = Math.floor((now - d) / 86400000);
+    if (days <= 0) return "today";
+    if (days === 1) return "yesterday";
+    if (days < 30) return days + " days ago";
+    return d.toLocaleDateString();
+  } catch (e) { return ""; }
+}
+
+/* ---------------- widget design ---------------- */
+function viewWidget() {
+  if (!cache.widget) {
+    return [
+      el("h1", {}, "Widget design"),
+      el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+        el("b", {}, "Coming soon"),
+        "The embeddable widget currently reads its branding from data-* " +
+        "attributes on its embed script tag, not from a config this console " +
+        "publishes. This page is disabled until the widget is updated to " +
+        "fetch its settings at load.")),
+    ];
+  }
+
+  // Staged locally; nothing is sent until Save. The preview reads from
+  // this draft, so what is on screen is what Save will publish.
+  const d = clone(cache.widget);
+  const preview = el("div", {});
+  const uid = () => "id_" + Math.random().toString(36).slice(2, 9);
+
+  const ACTIONS = [["product", "Select a product"], ["general", "Ask in general"],
+                   ["sales", "Talk to sales"], ["support", "Talk to support"]];
+  const TYPES = [["text", "Short answer"], ["email", "Email"],
+                 ["textarea", "Long answer"], ["tel", "Phone"]];
+
+  const drawPreview = () => {
+    preview.innerHTML = "";
+    preview.append(
+      el("div", { style: "font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 45%,transparent);margin-bottom:8px" }, "Live preview"),
+      el("div", { style: "border-radius:14px;overflow:hidden;box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);background:var(--color-surface)" },
+        el("div", { style: "display:flex;align-items:center;gap:10px;padding:14px 16px;background:" + d.color },
+          el("div", { style: "width:30px;height:30px;border-radius:50%;flex:0 0 auto;background:rgba(255,255,255,.25);" +
+              (d.icon_url ? "background-image:url('" + d.icon_url.replace(/'/g, "%27") + "');background-size:cover;background-position:center" : "") }),
+          el("span", { style: "font-size:14px;font-weight:600;color:#fff" }, d.name || "Support")),
+        el("div", { style: "padding:14px;min-height:200px;background:var(--color-bg)" },
+          el("div", { style: "max-width:88%;padding:9px 12px;border-radius:10px;background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-divider);font-size:12.5px;line-height:1.5;margin-bottom:10px" },
+            d.welcome || ""),
+          el("div", { style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" },
+            d.intro_options.map(o => el("span", {
+              style: "font-size:12px;padding:6px 12px;border-radius:99px;color:#fff;white-space:nowrap;background:" + d.color
+            }, o.label || "\u2026")))),
+        el("div", { style: "padding:10px 12px;border-top:1px solid var(--color-divider);display:flex;gap:8px" },
+          el("div", { style: "flex:1;height:30px;border-radius:8px;background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" }),
+          el("div", { style: "width:30px;height:30px;border-radius:8px;background:" + d.color }))));
+  };
+
+  // ---- branding ----
+  const nameIn = el("input", { class: "input", type: "text", value: d.name });
+  nameIn.addEventListener("input", () => { d.name = nameIn.value; drawPreview(); });
+  const welcomeIn = el("textarea", { class: "input", rows: "2" }, d.welcome);
+  welcomeIn.addEventListener("input", () => { d.welcome = welcomeIn.value; drawPreview(); });
+  const iconIn = el("input", { class: "input", type: "text", value: d.icon_url || "",
+                               placeholder: "https://example.com/icon.png" });
+  iconIn.addEventListener("input", () => { d.icon_url = iconIn.value.trim(); drawPreview(); });
+  const colorIn = el("input", { type: "color", value: d.color,
+      style: "width:34px;height:34px;padding:0;border:0;border-radius:8px;cursor:pointer;background:transparent" });
+  const swatchRow = el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" });
+  const setColor = hex => { d.color = hex; colorIn.value = hex; drawPreview(); };
+  ["#9184d9", "#2f7de1", "#0e7a54", "#b26a00", "#e4002b", "#12161c"].forEach(hex =>
+    swatchRow.append(el("button", { title: hex, onclick: () => setColor(hex),
+      style: "width:28px;height:28px;border-radius:50%;border:0;cursor:pointer;background:" + hex })));
+  swatchRow.append(colorIn);
+  colorIn.addEventListener("input", () => setColor(colorIn.value));
+
+  // ---- opening options ----
+  const optBox = el("div", {});
+  function drawOpts() {
+    optBox.innerHTML = "";
+    d.intro_options.forEach(o => {
+      const lab = el("input", { class: "input", type: "text", value: o.label });
+      lab.addEventListener("input", () => { o.label = lab.value; drawPreview(); });
+      const act = el("select", { class: "input" },
+        ACTIONS.map(([v, t]) => el("option", { value: v }, t)));
+      act.value = o.action;
+      act.addEventListener("change", () => { o.action = act.value; });
+      optBox.append(el("div", { style: "display:flex;gap:8px;align-items:flex-end;margin-bottom:8px" },
+        el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Label"), lab),
+        el("div", { style: "flex:0 0 190px" }, el("label", { class: "flabel" }, "Action"), act),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => {
+          if (d.intro_options.length <= 1)
+            return toast("Keep at least one opening option \u2014 the widget needs somewhere to start", true);
+          d.intro_options = d.intro_options.filter(x => x !== o);
+          drawOpts(); drawPreview();
+        } }, "Remove")));
+    });
+  }
+  drawOpts(); drawPreview();
+
+  // ---- contact forms ----
+  function formCard(key, title, hint) {
+    const f = d[key];
+    const box = el("div", {});
+    function draw() {
+      box.innerHTML = "";
+      f.fields.forEach(fl => {
+        const lab = el("input", { class: "input", type: "text", value: fl.label });
+        lab.addEventListener("input", () => { fl.label = lab.value; });
+        const ty = el("select", { class: "input" }, TYPES.map(([v, t]) => el("option", { value: v }, t)));
+        ty.value = fl.type;
+        ty.addEventListener("change", () => { fl.type = ty.value; });
+        const req = el("input", { type: "checkbox" });
+        req.checked = !!fl.required;
+        req.addEventListener("change", () => { fl.required = req.checked; });
+        box.append(el("div", { style: "padding:10px 0;border-top:1px solid color-mix(in srgb,var(--color-text) 9%,transparent)" },
+          el("label", { class: "flabel" }, "Field label"), lab,
+          el("div", { style: "display:flex;gap:8px;align-items:flex-end;margin-top:8px" },
+            el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Type"), ty),
+            el("label", { style: "display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;padding-bottom:8px" },
+              req, "Required"),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => {
+              if (f.fields.length <= 1) return toast("A form needs at least one field", true);
+              f.fields = f.fields.filter(x => x !== fl); draw();
+            } }, "Remove"))));
+      });
+    }
+    draw();
+
+    const notify = el("input", { class: "input", type: "text", value: f.notify_email || "",
+                                 placeholder: "support@yourcompany.com" });
+    notify.addEventListener("input", () => { f.notify_email = notify.value.trim(); });
+    const summ = el("input", { type: "checkbox" });
+    summ.checked = !!f.allow_summary;
+    summ.addEventListener("change", () => { f.allow_summary = summ.checked; });
+    const titleIn = el("input", { class: "input", type: "text", value: f.title });
+    titleIn.addEventListener("input", () => { f.title = titleIn.value; });
+
+    return el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+      el("div", { class: "sec-title" }, title),
+      el("div", { class: "sec-hint" }, hint),
+      el("label", { class: "flabel" }, "Form heading"), titleIn,
+      box,
+      el("button", { class: "btn btn-secondary", style: "margin-top:10px", onclick: () => {
+        if (f.fields.length >= 8) return toast("Eight fields is the maximum \u2014 long forms get abandoned", true);
+        f.fields.push({ id: uid(), label: "New field", type: "text", required: false });
+        draw();
+      } }, "Add field"),
+      el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:14px;cursor:pointer" },
+        summ, "Let the visitor attach a summary of their chat"),
+      el("div", { style: "margin-top:12px" },
+        el("label", { class: "flabel" }, "Notify"), notify,
+        el("p", { class: "sec-hint", style: "margin:6px 0 0" },
+          "Not yet sent automatically \u2014 enquiries are collected under Enquiries in this console. This address is stored ready for when email sending is added, and is never sent to visitors.")));
+  }
+
+  const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
+    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    try {
+      const saved = await api("/admin/widget/config", { method: "PUT", body: JSON.stringify(d) });
+      cache.widget = saved;
+      toast("Saved \u2014 the widget picks this up on its next load");
+    } catch (e) { toast(e.message, true); }
+    finally { saveBtn.disabled = false; saveBtn.textContent = "Save changes"; }
+  } }, "Save changes");
+
+  return [
+    el("h1", {}, "Widget design"),
+    el("p", { class: "lede" }, "How the widget looks and opens for a visitor. The preview updates as you type; nothing is published until you save."),
+    el("div", { style: "display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start" },
+      el("div", { style: "min-width:0" },
+        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+          el("div", { class: "sec-title" }, "Branding"),
+          el("div", { class: "sec-hint" }, "The name, greeting and accent colour used throughout the widget."),
+          el("div", { class: "row" },
+            el("div", {}, el("label", { class: "flabel" }, "Assistant name"), nameIn)),
+          el("div", { style: "margin-top:10px" },
+            el("label", { class: "flabel" }, "Welcome message"), welcomeIn),
+          el("div", { style: "margin-top:10px" },
+            el("label", { class: "flabel" }, "Icon URL (optional)"), iconIn),
+          el("div", { style: "margin-top:12px" },
+            el("label", { class: "flabel" }, "Accent colour"), swatchRow)),
+        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+          el("div", { class: "sec-title" }, "Opening options"),
+          el("div", { class: "sec-hint" }, "Shown as buttons on the first message. Each starts a different path."),
+          optBox,
+          el("button", { class: "btn btn-secondary", style: "margin-top:6px", onclick: () => {
+            if (d.intro_options.length >= 6) return toast("Six options is the maximum", true);
+            d.intro_options.push({ id: uid(), label: "New option", action: "general" });
+            drawOpts(); drawPreview();
+          } }, "Add option")),
+        el("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:16px" },
+          formCard("sales_form", "Talk to sales form",
+                   "Appears in chat when a visitor picks \u201cTalk to sales\u201d."),
+          formCard("support_form", "Talk to support form",
+                   "Appears when a visitor picks \u201cTalk to support\u201d, or escalates an unanswered question.")),
+        el("div", { style: "margin-top:18px;display:flex;gap:10px;align-items:center" },
+          saveBtn,
+          el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+            if (!confirm("Reset the widget design back to its defaults?")) return;
+            try { await api("/admin/widget/config/reset", { method: "POST" });
+                  toast("Reset to defaults"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Reset to defaults"))),
+      el("div", { style: "position:sticky;top:0" }, preview)),
+  ];
+}
+
+/* ---------------- enquiries (leads) ---------------- */
+function viewLeads() {
+  const rows = cache.leads.length ? cache.leads.map(l => {
+    const vals = Object.values(l.values || {});
+    return el("div", { class: "card elev-sm", style: "padding:14px 18px;gap:0;margin-bottom:10px" +
+                (l.handled ? ";opacity:.6" : "") },
+      el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" },
+        el("span", { class: "tag " + (l.kind === "sales" ? "tag-accent" : "tag-neutral") }, l.kind),
+        l.product ? el("span", { class: "tag tag-neutral mono" }, l.product) : null,
+        el("span", { style: "flex:1" }),
+        el("span", { style: "font-size:11.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
+          shortDate(l.created_at))),
+      vals.map(v => el("div", { class: "item" },
+        el("div", { style: "flex:0 0 150px;font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, v.label),
+        el("div", { class: "grow", style: "white-space:pre-wrap;font-size:13.5px" }, v.value))),
+      (l.transcript || []).length
+        ? el("details", { style: "margin-top:10px" },
+            el("summary", { style: "cursor:pointer;font-size:12.5px;color:var(--color-accent-300)" },
+              "Chat summary (" + l.transcript.length + " messages)"),
+            el("div", { style: "margin-top:8px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:color-mix(in srgb,var(--color-text) 70%,transparent)" },
+              l.transcript.map(t => (t.role === "user" || t.q ? "Visitor: " : "Assistant: ") +
+                                    (t.text || t.q || t.a || "")).join("\n")))
+        : null,
+      el("div", { style: "margin-top:12px;display:flex;gap:8px" },
+        el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+          try { await api("/admin/leads/" + l.id + "/handled?handled=" + (!l.handled),
+                          { method: "POST" });
+                await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, l.handled ? "Mark unhandled" : "Mark handled"),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+          if (!confirm("Delete this enquiry? It cannot be recovered.")) return;
+          try { await api("/admin/leads/" + l.id, { method: "DELETE" });
+                toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Delete")));
+  }) : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+        el("b", {}, "Coming soon"),
+        "The embeddable widget doesn't have a sales/support form yet \u2014 " +
+        "once it does, submissions will collect here."))];
+
+  const s = cache.leadStats || {};
+  return [
+    el("h1", {}, "Enquiries"),
+    el("p", { class: "lede" }, "Sales and support forms submitted through the widget. These are not emailed to anyone \u2014 this console is where they arrive, so check it regularly."),
+    el("div", { class: "readout" },
+      el("div", { class: s.unhandled ? "warn" : "" },
+        el("div", { class: "lbl" }, "Needs a reply"), el("b", {}, String(s.unhandled || 0))),
+      el("div", {}, el("div", { class: "lbl" }, "Sales"), el("b", {}, String(s.sales || 0))),
+      el("div", {}, el("div", { class: "lbl" }, "Support"), el("b", {}, String(s.support || 0))),
+      el("div", {}, el("div", { class: "lbl" }, "Total"), el("b", {}, String(s.total || 0)))),
+    rows,
+  ];
+}
+
+/* ---------------- catalog ---------------- */
+function viewCatalog() {
+  const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const cName = el("input", { class: "input", type: "text", placeholder: "Coin hoppers" });
+  const pCat = el("select", { class: "input" }, cache.catalog.map(c => el("option", { value: c.key }, c.name)));
+  const pName = el("input", { class: "input", type: "text", placeholder: "SMART Hopper" });
+
+  const rows = cache.catalog.length ? cache.catalog.map(c =>
+    el("div", { class: "card elev-sm", style: "margin-bottom:12px;padding:16px 20px 8px;gap:0" },
+      el("div", { style: "display:flex;align-items:center;gap:10px" },
+        el("div", { class: "sec-title", style: "flex:1;margin:0" }, c.name),
+        el("span", { class: "tag tag-neutral mono" }, c.key),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+          if (!confirm("Delete the " + c.name + " range and its products?")) return;
+          try { await api("/admin/category/" + encodeURIComponent(c.key), { method: "DELETE" });
+                toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Delete")),
+      (c.products || []).length
+        ? (c.products || []).map(p => el("div", { class: "item" },
+            el("div", { class: "grow" }, el("b", {}, p.name),
+              el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents")),
+            el("span", { class: "tag tag-neutral mono" }, p.key),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+              if (!confirm("Delete " + p.name + "?")) return;
+              try { await api("/admin/product/" + encodeURIComponent(c.key) + "/" + encodeURIComponent(p.key),
+                              { method: "DELETE" });
+                    toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Delete")))
+        : el("p", { class: "sec-hint", style: "margin:10px 0 10px" }, "No products in this range yet.")))
+    : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+        el("b", {}, "No ranges yet"),
+        "A range groups related products \u2014 Coin hoppers, Note validators, Biometrics."))];
+
+  return [
+    el("h1", {}, "Products"),
+    el("p", { class: "lede" }, "Ranges group products; documents are filed against a product. This is what the widget asks visitors to choose from."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      el("div", { class: "sec-title" }, "Add a range"),
+      el("div", { class: "sec-hint" }, "A family of products, such as Coin hoppers."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "flabel" }, "Name"), cName),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn btn-secondary", onclick: async () => {
+            if (!cName.value.trim()) return toast("Give the range a name", true);
+            try { await api("/admin/category", { method: "POST",
+                    body: JSON.stringify({ key: slug(cName.value), name: cName.value.trim() }) });
+                  cName.value = ""; toast("Range added"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Add range")))),
+    cache.catalog.length ? el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+      el("div", { class: "sec-title" }, "Add a product"),
+      el("div", { class: "sec-hint" }, "Documents and widget conversations are scoped to a product."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "flabel" }, "Range"), pCat),
+        el("div", {}, el("label", { class: "flabel" }, "Name"), pName),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn btn-primary", onclick: async () => {
+            if (!pName.value.trim()) return toast("Give the product a name", true);
+            try { await api("/admin/product", { method: "POST", body: JSON.stringify({
+                    category_key: pCat.value, key: slug(pName.value), name: pName.value.trim(), sources: [] }) });
+                  pName.value = ""; toast("Product added"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Add product")))) : null,
+    rows,
+  ];
+}
+
+/* ---------------- test ---------------- */
+function viewTest() {
+  const prods = products();
+  const sel = el("select", { class: "input" }, el("option", { value: "" }, "Whole knowledge base"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  const log = el("div", { class: "chat" },
+    el("div", { class: "bub a" }, "Ask something a customer might ask. This uses the same pipeline as the widget, so what you see here is what they would get."));
+  const input = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
+  const sid = "console-" + Math.random().toString(36).slice(2);
+
+  async function send() {
+    const q = input.value.trim(); if (!q) return;
+    input.value = "";
+    log.append(el("div", { class: "bub u" }, q));
+    const wait = el("div", { class: "bub a" }, "Checking the documentation\u2026");
+    log.append(wait); log.scrollTop = log.scrollHeight;
+    try {
+      const r = await api("/query", { method: "POST", body: JSON.stringify({
+        q, session_id: sid, product: sel.value || null }) });
+      wait.remove();
+      const bub = el("div", { class: "bub a" }, r.answer || "No answer");
+      if (r.sources && r.sources.length) {
+        bub.append(el("div", { class: "lbl", style: "margin-top:9px" }, "Sources"));
+        r.sources.forEach(s => bub.append(el("div", { style: "font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)" },
+          s.source + (s.page_label ? " \u00b7 " + s.page_label : ""))));
+      }
+      if (r.from_faq) bub.append(el("div", { class: "tag tag-outline", style: "margin-top:8px" }, "reviewed answer"));
+      log.append(bub);
+    } catch (e) { wait.textContent = "Failed: " + e.message; }
+    log.scrollTop = log.scrollHeight;
+  }
+  input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+  return [
+    el("h1", {}, "Test chat"),
+    el("p", { class: "lede" }, "Check what the widget would say before customers do. Nothing here is shown to visitors."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+      el("div", { class: "row", style: "margin-bottom:12px" },
+        el("div", {}, el("label", { class: "flabel" }, "Ask about"), sel)),
+      log,
+      el("div", { class: "row", style: "margin-top:12px" },
+        el("div", { style: "flex:1" }, input),
+        el("div", { style: "flex:0 0 auto" }, el("button", { class: "btn btn-primary", onclick: send }, "Ask")))),
+  ];
+}
+
+/* ---------------- guide ---------------- */
+function openGuide() {
+  const steps = [
+    ["01", "Set up a product",
+     "Products \u203a Add a range (say, Coin hoppers), then add a product inside it. Documents are filed against a product, and the widget asks visitors to pick one before they can ask anything."],
+    ["02", "Add a document",
+     "Documents \u203a choose the product, then drop in a PDF, Word or text file. Reading it takes a minute or two; the progress line tells you when it is ready."],
+    ["03", "Draft the reviewed answers",
+     "Answers \u203a Draft from a document. It suggests questions and answers taken from that document. Read every one before trusting it \u2014 they are shown to customers word for word."],
+    ["04", "Fix the wording",
+     "Edit any answer so it reads correctly on its own. Someone may be shown it after asking a slightly different question, so \u201cNo, instant results\u201d reads badly where \u201cNo internet connection is required\u201d reads well."],
+    ["05", "Design the widget",
+     "Widget design \u203a set the name, greeting, colour and the buttons a visitor sees first. If you offer \u201cTalk to sales\u201d or \u201cTalk to support\u201d, set up what that form asks for. The preview shows exactly what a visitor gets."],
+    ["06", "Try it",
+     "Test chat \u203a ask what a customer would ask. Same pipeline as the widget, so if it looks wrong here, it is wrong there."],
+    ["07", "Keep it current",
+     "Unanswered collects the real questions the widget could not handle, most asked first. Working down that list is the single most useful upkeep \u2014 answering one there removes it automatically."],
+    ["08", "Check your enquiries",
+     "Enquiries holds the sales and support forms visitors submit. Nothing is emailed out, so this console is the only place they arrive \u2014 build a habit of checking it."],
+  ];
+  const veil = el("div", { class: "dialog-backdrop", onclick: e => { if (e.target === veil) veil.remove(); } },
+    el("div", { class: "dialog elev-lg", style: "max-width:620px;max-height:86vh;overflow-y:auto" },
+      el("div", { class: "dialog-title" }, "How do I\u2026?"),
+      el("p", { class: "sec-hint" }, "The whole job, in order. Each step takes a minute."),
+      steps.map(([n, t, d]) => el("div", { class: "guide-step" },
+        el("div", { class: "n mono" }, n), el("b", {}, t), el("p", {}, d))),
+      el("div", { class: "dialog-actions", style: "justify-content:flex-start" },
+        el("button", { class: "btn btn-primary", onclick: () => { veil.remove(); view = "overview"; render(); } }, "Start at the overview"),
+        el("button", { class: "btn btn-ghost", onclick: () => veil.remove() }, "Close"))));
+  document.body.append(veil);
+  document.addEventListener("keydown", function esc(e) {
+    if (e.key === "Escape") { veil.remove(); document.removeEventListener("keydown", esc); }
+  });
+}
+
+/* ---------------- boot ---------------- */
+(async () => {
+  if (pw) { try { await api("/admin/login", { method: "POST" }); await refresh(); }
+            catch (e) { pw = ""; } }
+  render();
+})();
+</script>
+</body>
+</html>

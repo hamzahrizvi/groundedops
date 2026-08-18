@@ -152,7 +152,7 @@ Say ""
 Say "  Install complete" Green
 Say "  ================" Green
 Say ""
-Say "Start it:            double-click start.cmd"
-Say "Share on your LAN:   double-click start-lan.cmd"
+Say "Start it:            double-click run.cmd"
+Say "Share on your LAN:   double-click run.cmd, or run.cmd -NoTunnel"
 Say ""
 Read-Host "Press Enter to close"

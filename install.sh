@@ -121,5 +121,6 @@ echo
 echo "  Install complete"
 echo "  ================"
 echo
-echo "Start GroundedOps with:  ./start.sh"
+echo "Start GroundedOps with:"
+echo "  cd src && ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000"
 echo

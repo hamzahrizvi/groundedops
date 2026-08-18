@@ -13,8 +13,12 @@ contain the answer, GroundedOps says so instead of guessing.
 
 ## Starting the app
 
-Run `start.ps1` (Windows) or `./start.sh` (macOS/Linux), then open
-http://localhost:8080 in your browser.
+Double-click `run.cmd` (Windows), then open http://127.0.0.1:8000 in your
+browser — it opens automatically once the backend is ready. macOS/Linux:
+see the README's "Native install" section.
+
+The admin console for managing documents, FAQ and categories is at
+http://127.0.0.1:8000/admin.
 
 ## First launch — pick a mode
 
@@ -82,7 +86,7 @@ you left off. Chats are stored in your browser on this machine.
 
 | Symptom | Likely cause / fix |
 |---|---|
-| "Something went wrong: Failed to fetch" | The backend isn't running — run start.ps1 / start.sh again. |
+| "Something went wrong: Failed to fetch" | The backend isn't running — run run.cmd again. |
 | Online answers fail | Key missing/invalid for the selected provider — Settings → Online API keys. |
 | Free mode won't load models | Ollama isn't installed or running — https://ollama.com/download, then retry. |
 | First Free-mode answer is very slow | Models were cold — load them via the Free-mode dialog or Settings first. |

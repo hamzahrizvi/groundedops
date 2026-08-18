@@ -91,7 +91,18 @@ api.on("exit", (code) => {
 });
 
 // ── Frontend (Vite) ──────────────────────────────────────────────────────
-const web = spawn("npm run web", { cwd: __dirname, shell: true });
+// Pass the proxy target explicitly. This script decides the backend port
+// (BACKEND_PORT), so vite.config.js's default cannot know it: with
+// BACKEND_PORT=8001 the backend started on 8001 while Vite still proxied to
+// 8000, and every API call failed with the backend plainly running.
+const web = spawn("npm run web", {
+  cwd: __dirname,
+  shell: true,
+  env: {
+    ...process.env,
+    API_TARGET: process.env.API_TARGET || `http://127.0.0.1:${BACKEND_PORT}`,
+  },
+});
 children.push(web);
 pipe(web, "web", "web");
 web.on("exit", (code) => {
