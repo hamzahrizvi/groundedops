@@ -31,6 +31,12 @@
   if (window.__groundedOpsWidgetLoaded) return;
   window.__groundedOpsWidgetLoaded = true;
 
+  // Build stamp. A browser-cached old build behaves like a broken new one,
+  // and this is the fastest way to tell them apart - check the console.
+  var BUILD = "v12.0";
+  window.__groundedOpsBuild = BUILD;
+  console.info("GroundedOps widget build " + BUILD + " (endpoints: /widget/*)");
+
   var script =
     document.currentScript ||
     (function () {
@@ -50,6 +56,10 @@
     accent: attr("data-accent", "#E4002B"),
     launcherLabel: attr("data-launcher-label", "Ask a question"),
     salesEmail: attr("data-sales-email", ""),
+    // Signed by the website server-side for logged-in users. Absent for
+    // anonymous visitors, who get curated FAQ answers only.
+    token: attr("data-token", ""),
+    signInUrl: attr("data-sign-in-url", ""),
     supportEmail: attr("data-support-email", ""),
     welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
     prompt: attr("data-prompt", "How can I help today?"),
@@ -66,6 +76,13 @@
   // matters because the backend keys conversational memory on it. Losing
   // it would silently break follow-up questions after a refresh.
   var STORE_KEY = "groundedops_widget_v2";
+  // Visitor id is stored SEPARATELY from conversation state and is never
+  // cleared by "Start over" or by clearSaved(). It used to be the session
+  // id, which startFresh() regenerates - so restarting the chat minted a
+  // fresh anonymous identity and reset the daily FAQ allowance. The IP
+  // ceiling still applied, but the per-visitor limit was one click away
+  // from being meaningless.
+  var VISITOR_KEY = "groundedops_visitor_id";
   var MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // resume offer expires after a week
 
   var state = {
@@ -84,6 +101,22 @@
       var r = (Math.random() * 16) | 0;
       return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
     });
+  }
+
+  function visitorId() {
+    try {
+      var v = localStorage.getItem(VISITOR_KEY);
+      if (!v) {
+        v = uuid();
+        localStorage.setItem(VISITOR_KEY, v);
+      }
+      return v;
+    } catch (e) {
+      // Storage blocked (private mode): fall back to a per-page id. The
+      // server-side IP ceiling is what actually bounds these callers.
+      if (!window.__goVisitorFallback) window.__goVisitorFallback = uuid();
+      return window.__goVisitorFallback;
+    }
   }
 
   function save() {
@@ -193,6 +226,13 @@
     ".go-send{border:0;background:var(--a);color:#fff;border-radius:10px;width:42px;cursor:pointer;flex:0 0 auto;" +
     "display:flex;align-items:center;justify-content:center}" +
     ".go-send:disabled{opacity:.4;cursor:not-allowed}.go-send svg{width:18px;height:18px}" +
+    ".go-settings{padding:12px 14px;border-bottom:1px solid var(--line);background:var(--pane);flex:0 0 auto}" +
+    ".go-set-t{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:7px}" +
+    ".go-set-row{font-size:13px;margin-top:6px}" +
+    ".go-set-note{font-size:12.5px;color:var(--mut);margin-top:7px;line-height:1.45}" +
+    ".go-set-note a{color:var(--a);font-weight:600}" +
+    ".go-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}" +
+    ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
     "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}";
 
@@ -203,6 +243,7 @@
   // ── icons ─────────────────────────────────────────────────────────────
   var I_CHAT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   var I_MIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>';
+  var I_GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
   var I_RESET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 3v6h-6"/></svg>';
   var I_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>';
   var I_SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
@@ -226,6 +267,7 @@
     '<section class="go-panel" role="dialog" aria-label="' + esc(cfg.title) + '">' +
       '<div class="go-head"><div class="go-av">' + avatarHtml + "</div>" +
         '<div class="go-hname">' + esc(cfg.agent) + "</div>" +
+        '<button class="go-hbtn go-settings-btn" type="button" aria-label="Usage and settings" title="Usage and settings">' + I_GEAR + "</button>" +
         '<button class="go-hbtn go-restart" type="button" aria-label="Start over" title="Start over">' + I_RESET + "</button>" +
         '<button class="go-hbtn go-min" type="button" aria-label="Minimise">' + I_MIN + "</button>" +
       "</div>" +
@@ -247,6 +289,7 @@
   var $send = root.querySelector(".go-send");
 
   var catalogCache = null;
+  var quotaState = null;
   var busy = false;
   var opened = false;
 
@@ -277,19 +320,39 @@
       msg.sources.slice(0, 4).forEach(function (x) {
         var i = document.createElement("div");
         i.className = "go-srci";
-        // v3.3.0: name + page reference + download link for the original.
+        // v12.0: name + page reference + download link for the original.
         // The page label is built server-side so every client renders it
         // identically ("page 12" / "pages 12, 14").
         var head = '<div class="go-srcn">' + esc(pretty(x.source)) +
           (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "") +
           "</div>";
+        // Fetched with the bearer token rather than a plain link: external
+        // /source_file access now requires a valid member token, and an
+        // <a href> cannot carry an Authorization header.
         var dl = x.download_url
-          ? '<a class="go-dl" href="' + esc(cfg.api + x.download_url) +
-            '" target="_blank" rel="noopener">Download source</a>'
+          ? '<a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download source</a>'
           : "";
         i.innerHTML = head +
           (x.snippet ? '<div class="go-srcs">' + esc(x.snippet) + "</div>" : "") + dl;
         s.appendChild(i);
+      });
+      s.querySelectorAll("[data-dl]").forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          var headers = {};
+          if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+          fetch(cfg.api + a.getAttribute("data-dl"), { headers: headers })
+            .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+            .then(function (blob) {
+              var url = URL.createObjectURL(blob);
+              var tmp = document.createElement("a");
+              tmp.href = url;
+              tmp.download = a.getAttribute("data-dl").split("/").pop();
+              tmp.click();
+              setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+            })
+            .catch(function () { a.textContent = "Download unavailable"; });
+        });
       });
       b.appendChild(s);
     }
@@ -301,6 +364,59 @@
     }
     row.appendChild(b);
     return row;
+  }
+
+  /** Fetch the caller's tier and remaining allowance. Shown in the
+   *  settings panel and used to decide whether to offer AI answers. */
+  function refreshQuota() {
+    var headers = {};
+    if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+    return fetch(cfg.api + "/widget/quota?visitor_id=" + encodeURIComponent(visitorId()),
+                 { headers: headers })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d) quotaState = d; return d; })
+      .catch(function () { return null; });
+  }
+
+  function fmtReset(ts) {
+    if (!ts) return "";
+    var mins = Math.max(0, Math.round((ts * 1000 - Date.now()) / 60000));
+    if (mins < 60) return "resets in " + mins + " min";
+    return "resets in " + Math.round(mins / 60) + " h";
+  }
+
+  function toggleSettings() {
+    var existing = root.querySelector("[data-go-settings]");
+    if (existing) { existing.remove(); return; }
+    var box = document.createElement("div");
+    box.className = "go-settings";
+    box.setAttribute("data-go-settings", "");
+    box.innerHTML = '<div class="go-set-t">Your usage</div><div class="go-set-b">Loading...</div>';
+    root.querySelector(".go-panel").insertBefore(box, $log);
+    refreshQuota().then(function (d) {
+      var body = box.querySelector(".go-set-b");
+      if (!d) { body.textContent = "Usage information is unavailable."; return; }
+      var pct = d.limit ? Math.min(100, Math.round((d.used / d.limit) * 100)) : 0;
+      var rows =
+        '<div class="go-bar"><span style="width:' + pct + '%"></span></div>' +
+        '<div class="go-set-row"><b>' + d.remaining + '</b> of ' + d.limit +
+          " " + (d.unit || "credits") + " left &middot; " + fmtReset(d.reset_at) + "</div>";
+      if (d.tier === "anonymous") {
+        rows +=
+          '<div class="go-set-note">You are browsing as a guest, so I can answer ' +
+          "from our reviewed FAQs only." +
+          (cfg.signInUrl
+            ? ' <a href="' + esc(cfg.signInUrl) + '">Sign in</a> to search the full ' +
+              "product documentation."
+            : " Sign in to search the full product documentation.") +
+          "</div>";
+      } else {
+        rows += '<div class="go-set-note">Standard answer: ' +
+          (d.standard_cost || 1) + " credit. Detailed answer: " +
+          (d.deep_cost || 4) + " credits.</div>";
+      }
+      body.innerHTML = rows;
+    });
   }
 
   function pretty(n) {
@@ -494,7 +610,7 @@
 
   function fetchCatalog() {
     if (catalogCache) return Promise.resolve(catalogCache);
-    return fetch(cfg.api + "/catalog")
+    return fetch(cfg.api + "/widget/catalog")
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
@@ -617,7 +733,7 @@
    *  Picking one usually resolves against the curated answer with no LLM
    *  call at all. Failure here is non-fatal — the visitor can still type. */
   function suggestQuestions() {
-    fetch(cfg.api + "/faq?product=" + encodeURIComponent(state.product.key))
+    fetch(cfg.api + "/widget/faq?product=" + encodeURIComponent(state.product.key))
       .then(function (r) {
         return r.ok ? r.json() : { faq: [] };
       })
@@ -715,12 +831,17 @@
     heard(q);
     var s = status("Checking the documentation");
 
-    fetch(cfg.api + "/query", {
+    var headers = { "Content-Type": "application/json" };
+    if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+
+    fetch(cfg.api + "/widget/ask", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: headers,
       body: JSON.stringify({
         q: q,
         session_id: state.sessionId,
+        visitor_id: visitorId(),
+        effort: opts.effort || (quotaState && quotaState.ai_available ? "standard" : "faq_only"),
         product: state.product.key,
         category: state.category ? state.category.key : null,
         skip_faq: !!opts.skipFaq,
@@ -733,14 +854,28 @@
       })
       .then(function (d) {
         s.remove();
-        // v2.1: FAQ near-miss comes back as a clarify with suggestions
+        // v12.0: FAQ near-miss comes back as a clarify with suggestions
         // rather than a served answer. Offer it as a chip so one tap asks
         // the exact curated question.
-        // v3.2.0: the backend no longer guesses whether a curated FAQ
+        // v12.0: the backend no longer guesses whether a curated FAQ
         // matches — it offers candidates and we let the user decide.
         // Selecting one sends its faq_id, so the exact chosen answer is
         // served with no re-matching. "Something else" logs a FAQ gap and
         // answers from the documents instead.
+        if (d.quota) quotaState = d.quota;
+
+        // Backend says a full answer needs an account.
+        if (d.needs_sign_in) {
+          say(d.answer, { flagged: false });
+          if (d.sign_in_url || cfg.signInUrl) {
+            chips([{
+              label: "Sign in for a full answer",
+              onClick: function () { window.open(d.sign_in_url || cfg.signInUrl, "_blank"); },
+            }], null);
+          }
+          return;
+        }
+
         if (!opts.skipFaq && d.faq_candidates && d.faq_candidates.length) {
           say(d.answer || "Is one of these what you meant?");
           chips(
@@ -800,6 +935,8 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && root.classList.contains("go-open")) close();
   });
+
+  root.querySelector(".go-settings-btn").addEventListener("click", toggleSettings);
 
   $restart.addEventListener("click", function () {
     if (state.messages.length > 2 && !window.confirm("Start a new conversation? This will clear the current chat.")) return;

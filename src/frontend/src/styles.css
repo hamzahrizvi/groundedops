@@ -473,7 +473,6 @@ details.meta pre { background: var(--surface-2); border-radius: 8px; padding: 10
 /* v10.11: FAQ left drawer (mirrors the right Details drawer) */
 
 
- to { transform: translateX(0); } }
 .panel-head-left { justify-content: flex-start; }
 
 
