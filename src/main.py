@@ -7,8 +7,50 @@ import uuid
 
 from urllib.parse import quote
 
+
+# ── Load .env (v12.0) ────────────────────────────────────────────────
+# MUST run before any project import: several modules read os.getenv at
+# import time (CHROMA_DIR, FAQ_ENABLED, WIDGET_TOKEN_SECRET), so loading
+# after them would have no effect.
+#
+# Nothing read .env before this. Under Docker that was fine - Compose
+# injects the variables - but running natively every setting in the file
+# was silently ignored. The visible symptom was that signed-in users were
+# treated as guests: WIDGET_TOKEN_SECRET was empty, so every token failed
+# verification. ADMIN_PASSWORD and the provider API keys were being
+# ignored the same way.
+#
+# Hand-parsed rather than adding python-dotenv, so no new dependency and
+# no reinstall for anyone who has already run the installer.
+def _load_env_file(path: str) -> int:
+    if not os.path.isfile(path):
+        return 0
+    loaded = 0
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                # Real environment variables win, so a shell export or a
+                # Docker -e flag can still override the file.
+                if key and key not in os.environ:
+                    os.environ[key] = value
+                    loaded += 1
+    except Exception as exc:  # pragma: no cover
+        print(f"WARNING: could not read {path}: {exc}")
+    return loaded
+
+
+_ENV_COUNT = _load_env_file(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from db import get_collection, reset_collection, get_stats, delete_source, get_chunks_by_ids
@@ -23,6 +65,7 @@ from runtime_config import get_settings, set_generation_mode, set_local_models_l
 import catalog as catalog_mod
 
 import faq_store
+import widget_config
 import hashlib, glob
 import conversations as convo_store
 from memory import add_to_memory, clear_memory, get_history, get_last_query
@@ -61,7 +104,158 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── /api prefix compatibility (v3.4.2) ───────────────────────────────
+# ── Security headers (v12.0) ─────────────────────────────────────────
+# Added for the staging vulnerability assessment. These are the headers a
+# scanner checks for first, and their absence is the most common finding
+# on an otherwise sound service.
+#
+# No CSP on API responses: they are JSON, not documents, so a CSP would be
+# decorative. The frontend build gets one below.
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # Only meaningful over HTTPS; harmless otherwise, and the scanner wants
+    # to see it. Enable via env once TLS terminates in front of this.
+    if os.getenv("ENABLE_HSTS", "").strip().lower() in ("1", "true", "yes"):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+# Reject oversized request bodies before they are parsed. Without this a
+# single large POST ties up a worker and memory; the widget's own question
+# limit is 500 characters, so anything approaching this ceiling is abuse.
+MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", str(2 * 1024 * 1024)))
+
+
+@app.middleware("http")
+async def _limit_body_size(request, call_next):
+    if request.method in ("POST", "PUT", "PATCH"):
+        cl = request.headers.get("content-length")
+        # Uploads are admin-only and LAN-only, so they are exempt.
+        if cl and not request.scope.get("path", "").startswith("/upload"):
+            try:
+                if int(cl) > MAX_BODY_BYTES:
+                    return JSONResponse(status_code=413,
+                                        content={"detail": "Request too large"})
+            except ValueError:
+                return JSONResponse(status_code=400,
+                                    content={"detail": "Bad Content-Length"})
+    return await call_next(request)
+
+
+# ── Public surface guard (v12.0) ────────────────────────────────────
+# Only /widget/* is meant to be reachable from the internet. Everything
+# else - upload, FAQ curation, catalog, delete, reset - is for the support
+# department on the LAN, and is protected by a single shared password that
+# would not survive public exposure.
+#
+# The reverse proxy should forward only /widget/* from the public
+# interface. This middleware is the second line of defence for the day
+# somebody misconfigures it, which is exactly when you need one.
+#
+# PUBLIC_ONLY=1 refuses every non-widget path outright. Otherwise, requests
+# arriving from outside PRIVATE_NETWORKS are restricted to the public
+# allowlist.
+PUBLIC_ONLY = os.getenv("PUBLIC_ONLY", "").strip().lower() in ("1", "true", "yes")
+PRIVATE_NETWORKS = [n.strip() for n in os.getenv(
+    "PRIVATE_NETWORKS", "127.,10.,192.168.,172.16.,172.17.,172.18.,172.19.,"
+    "172.20.,172.21.,172.22.,172.23.,172.24.,172.25.,172.26.,172.27.,"
+    "172.28.,172.29.,172.30.,172.31.,::1").split(",") if n.strip()]
+
+_PUBLIC_PREFIXES = ("/widget", "/health")
+
+# /source_file is reachable externally only WITH a valid member token.
+# It was on the open allowlist, which meant every ingested document could
+# be downloaded through the tunnel by anyone who knew or guessed a
+# filename - and filenames appear in answers. Anonymous callers get FAQ
+# answers with no sources, so they never need it.
+_TOKEN_GATED_PREFIXES = ("/source_file",)
+
+
+def _deny(request) -> JSONResponse:
+    """404 that still carries CORS headers.
+
+    Middleware added with @app.middleware runs OUTSIDE CORSMiddleware, so a
+    response returned from here never passes through it. The browser then
+    reports "No Access-Control-Allow-Origin header" instead of the actual
+    404 - which hides the real problem behind a misleading CORS error.
+    """
+    origin = request.headers.get("origin")
+    headers = {}
+    if origin:
+        allowed = _cors_origins == ["*"] or origin in _cors_origins
+        if allowed:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Vary"] = "Origin"
+    return JSONResponse(status_code=404, content={"detail": "Not Found"},
+                        headers=headers)
+
+
+def _is_private(host: str) -> bool:
+    return any(host.startswith(p) for p in PRIVATE_NETWORKS)
+
+
+# Headers that only a reverse proxy / tunnel sets. Their PRESENCE is the
+# signal that a request did not originate on the LAN, which matters because
+# cloudflared runs ON this machine and forwards to localhost - so every
+# tunnelled request arrives from 127.0.0.1 and would otherwise look like
+# trusted local traffic, exposing the admin surface through the tunnel.
+_PROXY_HEADERS = ("cf-connecting-ip", "x-forwarded-for", "x-real-ip")
+
+
+def _external_ip(request) -> str | None:
+    """Real client IP if the request came via a proxy/tunnel, else None.
+    CF-Connecting-IP is preferred: Cloudflare sets it and a client cannot
+    forge it, whereas X-Forwarded-For is client-appendable."""
+    ip = request.headers.get("cf-connecting-ip")
+    if ip:
+        return ip.strip()
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.headers.get("x-real-ip")
+
+
+@app.middleware("http")
+async def _restrict_private_surface(request, call_next):
+    path = request.scope.get("path", "")
+    if path.startswith(_PUBLIC_PREFIXES):
+        return await call_next(request)
+
+    proxied_early = any(h in request.headers for h in _PROXY_HEADERS)
+    if path.startswith(_TOKEN_GATED_PREFIXES):
+        if not proxied_early:
+            return await call_next(request)          # local/LAN: allowed
+        try:
+            import quota as _q
+            auth = request.headers.get("authorization", "")
+            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else None
+            if _q.verify_token(tok):
+                return await call_next(request)
+        except Exception:
+            pass
+        logger.warning(f"blocked unauthenticated external {path}")
+        return _deny(request)
+
+    if PUBLIC_ONLY:
+        return _deny(request)
+
+    # Any proxy header means the request reached us from outside, however
+    # local the socket looks. Treat it as external, full stop.
+    proxied = any(h in request.headers for h in _PROXY_HEADERS)
+    host = request.client.host if request.client else ""
+    if proxied or (host and not _is_private(host)):
+        logger.warning(f"blocked non-local access to {path} "
+                       f"(socket={host}, forwarded={_external_ip(request)})")
+        return _deny(request)
+    return await call_next(request)
+
+
+# ── /api prefix compatibility (v12.0) ───────────────────────────────
 # The React app calls "/api/status", "/api/query", etc. In development
 # Vite proxied "/api" to the backend on :8000 and stripped the prefix. When
 # the built app is served BY this process there is no proxy, so those calls
@@ -81,6 +275,13 @@ async def _strip_api_prefix(request, call_next):
         request.scope["_is_api_call"] = True
     return await call_next(request)
 
+
+if _ENV_COUNT:
+    logger.info(f".env loaded: {_ENV_COUNT} setting(s)")
+else:
+    logger.warning(
+        "No .env settings loaded. If you expect signed-in users, an admin "
+        "password or an API key, they are NOT active.")
 
 convo_store.init_db()
 
@@ -154,7 +355,7 @@ def _strip_preamble(answer: str) -> str:
     return answer
 
 
-# v3.3.0: the prompt forbids referring to the retrieval context, but small
+# v12.0: the prompt forbids referring to the retrieval context, but small
 # models still emit trailing evidence-pointing:
 #   "...supporting 100Base-T, as indicated by the WiFi Config section."
 #   "...RJ45. The context does not specify the number of ports."
@@ -276,10 +477,10 @@ class QueryRequest(BaseModel):
     source_filter: str | None = None
     product: str | None = None   # product OR category key (scope)
     category: str | None = None  # v10.3 category context (for product disambiguation)
-    # v3.2: the user picked a specific curated FAQ from the suggestions.
+    # v12.0: the user picked a specific curated FAQ from the suggestions.
     # Served by id — no matching, so no possibility of a mismatch.
     faq_id: str | None = None
-    # v3.2: the user said "I'm asking something else". Skip the FAQ and
+    # v12.0: the user said "I'm asking something else". Skip the FAQ and
     # answer from the documents.
     skip_faq: bool = False
 
@@ -446,7 +647,7 @@ async def upload(request: Request,
     v10.3: optional category/product scope headers (admin uploads) attach
     the ingested source to that product.
 
-    v3.4.0: those scope headers are now read off the RAW request so both
+    v12.0: those scope headers are now read off the RAW request so both
     "category-key" and "category_key" work. They were Header() params,
     which FastAPI maps to the HYPHENATED name only — so a frontend sending
     the underscored form produced None, the attach_source call in
@@ -496,12 +697,12 @@ def _build_sources(results: list[dict]) -> list[dict]:
     Build clickable source objects: one entry per unique source filename,
     with the chunk ids belonging to it (for /source_chunks lookup), a short
     snippet from its best-scoring chunk, the PAGE NUMBERS those chunks came
-    from, and a download URL for the original file (v3.3.0).
+    from, and a download URL for the original file (v12.0).
 
     Pages are collected as a sorted set because one source usually
     contributes several chunks — the reader wants "pages 12, 14", not one
     arbitrary page. Requires a re-ingest: page metadata is written at
-    ingest time, so chunks indexed before v3.3.0 have none and simply
+    ingest time, so chunks indexed before v12.0 have none and simply
     report no page.
     """
     by_source: dict[str, dict] = {}
@@ -735,7 +936,7 @@ def conversations_delete(convo_id: str, x_user_id: str | None = Header(default=N
 # vectors are stale. We fingerprint the ingest-affecting code; the UI
 # compares it to what the current DB was built with and prompts a
 # re-ingest if they differ. Bump INGEST_VERSION when you change ingest.
-INGEST_VERSION = "10.4"
+INGEST_VERSION = "12.0"
 
 
 def _ingest_fingerprint() -> str:
@@ -858,7 +1059,7 @@ def faq_generate(payload: FaqGenerateReq, x_admin_password: str | None = Header(
     if not qa:
         raise HTTPException(status_code=400, detail="No questions provided")
 
-    # v3.4.0: MERGE by default. record_questions() replaces every entry for
+    # v12.0: MERGE by default. record_questions() replaces every entry for
     # a source, so regenerating destroyed manually-added questions and reset
     # curated answers. merge_questions() adds only questions not already
     # present in the same product scope (compared case- and punctuation-
@@ -875,7 +1076,7 @@ def faq_generate(payload: FaqGenerateReq, x_admin_password: str | None = Header(
 
 
 class FaqEdit(BaseModel):
-    # v3.4.0: the QUESTION is editable too. Previously only the answer could
+    # v12.0: the QUESTION is editable too. Previously only the answer could
     # be changed, so a badly-worded generated question could only be deleted
     # and retyped.
     question: str | None = None
@@ -891,16 +1092,20 @@ class FaqCreate(BaseModel):
 
 @app.post("/faq")
 def faq_create(payload: FaqCreate, x_admin_password: str | None = Header(default=None)):
-    """Add a FAQ question by hand (v3.4.0). Stored with origin="manual" and
+    """Add a FAQ question by hand (v12.0). Stored with origin="manual" and
     edited=True so a later Generate can neither overwrite nor duplicate it."""
     _require_admin(x_admin_password)
     try:
-        return faq_store.add_entry(payload.question, payload.answer,
-                                   products=payload.product,
-                                   category=payload.category)
+        entry = faq_store.add_entry(payload.question, payload.answer,
+                                    products=payload.product,
+                                    category=payload.category)
     except ValueError as e:
         # 409 so the UI can show "that question already exists".
         raise HTTPException(status_code=409, detail=str(e))
+    # A hand-written answer may be closing a question that's sitting in the
+    # gaps backlog — auto-resolve it rather than making the admin do it twice.
+    faq_store.resolve_gap_matching(payload.question, faq_id=entry.get("id"))
+    return entry
 
 
 @app.patch("/faq/{faq_id}")
@@ -917,7 +1122,7 @@ def faq_delete_all(product: str | None = None,
                    source: str | None = None,
                    confirm: bool = False,
                    x_admin_password: str | None = Header(default=None)):
-    """Bulk-delete FAQ entries (v3.4.0).
+    """Bulk-delete FAQ entries (v12.0).
 
     Requires ?confirm=true — a second lock behind the UI's warning dialog.
     With no scope this wipes the entire curated FAQ, which is hand-written
@@ -937,7 +1142,7 @@ SOURCE_FILE_DIR = os.getenv("SOURCE_FILE_DIR", "/data/source_files")
 @app.get("/source_file/{filename}")
 def source_file(filename: str):
     """Serve the original ingested document so an answer can link back to it
-    (v3.3.0). Requires a re-ingest: originals are retained at ingest time,
+    (v12.0). Requires a re-ingest: originals are retained at ingest time,
     and documents indexed earlier were never kept.
 
     SECURITY: the filename comes from the URL, so it is reduced to a bare
@@ -965,11 +1170,21 @@ def source_file(filename: str):
 def faq_gaps(product: str | None = None,
              x_admin_password: str | None = Header(default=None)):
     """Questions the FAQ could not answer — either nothing was close enough
-    to suggest, or the user rejected the suggestions (v3.4.0). Ranked by how
+    to suggest, or the user rejected the suggestions (v12.0). Ranked by how
     often each was asked: this is the FAQ backlog, prioritised by real
     demand rather than guesswork."""
     _require_admin(x_admin_password)
-    return {"gaps": faq_store.list_gaps(product)}
+    return {"gaps": faq_store.list_gaps(product), "stats": faq_store.gap_stats()}
+
+
+@app.delete("/faq/gaps/{gap_id}")
+def faq_gap_dismiss(gap_id: str, x_admin_password: str | None = Header(default=None)):
+    """Dismiss a gap outright — for spam and noise, which a public widget
+    will accumulate, or a question addressed some other way."""
+    _require_admin(x_admin_password)
+    if not faq_store.dismiss_gap(gap_id):
+        raise HTTPException(status_code=404, detail="Gap not found")
+    return {"deleted": True}
 
 
 @app.delete("/faq/{faq_id}")
@@ -980,10 +1195,286 @@ def faq_delete(faq_id: str, x_admin_password: str | None = Header(default=None))
     return {"deleted": True}
 
 
+# ── Widget design + lead capture (v13.0) ─────────────────────────────
+# widget_config.py shipped with the v13.0 drop but was never imported, so the
+# console's "Widget design" page and both contact forms called routes that did
+# not exist. The module's TWO AUDIENCES split is enforced here: the public
+# widget reads a stripped config and can POST a lead; only the console reads
+# the full config, writes it, or sees the leads it produced.
+
+@app.get("/widget/config")
+def widget_get_config(request: Request, visitor_id: str | None = None):
+    """PUBLIC — read by the embedded widget on load. public_config() drops the
+    admin-only fields (notification addresses), so this is safe unauthenticated
+    and stays on the _PUBLIC_PREFIXES allowlist with the rest of /widget/*.
+
+    Carries the two fields widget_api.py's older version of this route supplied
+    before v13.0 moved config into the console: `sign_in_url` (the "sign in for
+    more questions" upsell target) and the caller's `quota`, so the widget can
+    show its remaining allowance before spending anything. Quota is resolved
+    defensively — a missing or broken quota module must degrade the upsell, not
+    break the config fetch the whole widget waits on.
+    """
+    out = widget_config.public_config()
+    out["sign_in_url"] = os.getenv("WIDGET_SIGN_IN_URL", "")
+    try:
+        import quota as _q
+
+        auth = request.headers.get("authorization", "")
+        _tok = auth[7:].strip() if auth.lower().startswith("bearer ") else None
+        _fwd = request.headers.get("x-forwarded-for", "")
+        _ip = (_fwd.split(",")[0].strip() if _fwd
+               else (request.client.host if request.client else ""))
+        out["quota"] = _q.status(_q.identify(_tok, visitor_id, _ip))
+    except Exception as e:
+        logger.warning(f"/widget/config: quota unavailable ({e})")
+        out["quota"] = None
+    return out
+
+
+@app.get("/admin/widget/config")
+def widget_admin_get_config(x_admin_password: str | None = Header(default=None)):
+    """Full config, including the admin-only fields, for the console editor."""
+    _require_admin(x_admin_password)
+    return widget_config.get()
+
+
+@app.put("/admin/widget/config")
+def widget_save_config(payload: dict,
+                       x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    try:
+        return widget_config.save(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/widget/config/reset")
+def widget_reset_config(x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    return widget_config.reset()
+
+
+class LeadReq(BaseModel):
+    kind: str                      # "sales" | "support"
+    values: dict = {}
+    product: str | None = None
+    transcript: list | None = None
+
+
+@app.post("/widget/lead")
+def widget_submit_lead(payload: LeadReq):
+    """PUBLIC — a visitor submitting the sales or support form.
+
+    Unauthenticated by necessity: the widget is embedded on a customer-facing
+    page. Unknown keys in `values` are dropped against the configured fields and
+    the transcript is kept only if that form allows it — see
+    widget_config.add_lead.
+
+    NOT RATE LIMITED HERE. This is a public write endpoint and bots will find
+    it; MAX_LEADS caps the file size but does nothing about the noise. Put it
+    behind the same rate limiting / captcha as any other public form at the edge
+    (reverse proxy, WAF) before exposing it — which is why this is called out
+    rather than half-implemented in application code.
+    """
+    try:
+        lead = widget_config.add_lead(
+            payload.kind, payload.values or {},
+            product=payload.product, transcript=payload.transcript)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Deliberately does not echo the stored lead back to a public caller.
+    return {"received": True, "id": lead["id"]}
+
+
+@app.get("/admin/leads")
+def admin_list_leads(kind: str | None = None, unhandled_only: bool = False,
+                     x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    return {"leads": widget_config.list_leads(kind, not unhandled_only),
+            "stats": widget_config.lead_stats()}
+
+
+@app.post("/admin/leads/{lead_id}/handled")
+def admin_mark_lead(lead_id: str, handled: bool = True,
+                    x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    if not widget_config.mark_lead(lead_id, handled):
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"ok": True, "handled": handled}
+
+
+@app.delete("/admin/leads/{lead_id}")
+def admin_delete_lead(lead_id: str,
+                      x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    if not widget_config.delete_lead(lead_id):
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"deleted": True}
+
+
 class ReassignReq(BaseModel):
     source: str
     category_key: str
     product_key: str
+
+
+@app.get("/admin", include_in_schema=False)
+def admin_console():
+    """Serve the admin console (v12.0).
+
+    A single self-contained file next to main.py, so it needs no build step
+    and updates by replacing one file. It is NOT in _PUBLIC_PREFIXES, so the
+    surface guard blocks it from the internet exactly like every other admin
+    route - the console is for the support department's LAN only.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404,
+                            detail="admin.html not found next to main.py")
+    return FileResponse(path, media_type="text/html")
+
+
+# admin.html's first <link> is `nocturne/styles.css`, resolved by the browser
+# against /admin — i.e. /nocturne/styles.css. Nothing served that path, so the
+# console rendered completely unstyled: the stylesheet request fell through to
+# the SPA mount at the bottom of this file, which re-raises for anything with a
+# dot in it, giving a 404. Mounted here rather than added to the SPA's directory
+# because the console is not part of the React build.
+#
+# Registered BEFORE the "/" mount (Starlette matches in registration order) and
+# deliberately NOT in _PUBLIC_PREFIXES, so the surface guard keeps it on the LAN
+# with the console it belongs to.
+_NOCTURNE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nocturne")
+
+if os.path.isdir(_NOCTURNE_DIR):
+    from fastapi.staticfiles import StaticFiles as _StaticFiles
+
+    app.mount("/nocturne", _StaticFiles(directory=_NOCTURNE_DIR), name="nocturne")
+else:
+    logger.warning(
+        f"No {_NOCTURNE_DIR} — the admin console at /admin will render unstyled.")
+
+
+class FaqAutoReq(BaseModel):
+    source: str
+    product: str = ""
+    category: str = ""
+    count: int = 8
+
+
+def _source_text(source: str, max_chunks: int = 12, cap: int = 8000) -> str:
+    """Pull real chunk text for a source, breadcrumbs and synthetic
+    doc2query chunks stripped — autogenerate drafts from what the document
+    actually says, not from questions already generated about it."""
+    from db import get_collection
+    col = get_collection()
+    got = col.get(where={"source": source}, include=["documents", "metadatas"])
+    docs = got.get("documents", []) or []
+    metas = got.get("metadatas", []) or []
+    texts = []
+    for d, m in zip(docs, metas):
+        if m.get("kind") == "query":
+            continue
+        t = d
+        if t.startswith("["):
+            nl = t.find("\n")
+            if nl != -1:
+                t = t[nl + 1:]
+        texts.append(t)
+    return "\n\n".join(texts[:max_chunks])[:cap]
+
+
+def _parse_qa_json(raw: str) -> list[dict]:
+    """Extract [{question, answer}] from a model response.
+
+    Small local models wrap JSON in prose or markdown fences routinely, so
+    the array is located within the response rather than the whole response
+    being handed to json.loads. Malformed output returns [] and the caller
+    reports the failure — it is never partially stored.
+    """
+    import json as _json
+    text = (raw or "").strip()
+    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+    start, end = text.find("["), text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        data = _json.loads(text[start:end + 1])
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        q = (item.get("question") or "").strip()
+        a = (item.get("answer") or "").strip()
+        if q:
+            out.append({"question": q, "answer": a})
+    return out
+
+
+@app.post("/admin/faq/autogenerate")
+def admin_faq_autogenerate(payload: FaqAutoReq,
+                           x_admin_password: str | None = Header(default=None)):
+    """Generate FAQ question/answer pairs from a document, SERVER-SIDE.
+
+    /faq/generate expects the browser to have called an LLM itself and to
+    post the results, which is why the old admin UI needed an API key in
+    the browser. This does the generation here using the server's
+    configured provider, so no key ever reaches a browser, and merges the
+    result (existing questions and curated answers are never overwritten).
+    """
+    _require_admin(x_admin_password)
+
+    sample = _source_text(payload.source)
+    if not sample.strip():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No indexed text found for '{payload.source}'. If it was "
+                   f"just uploaded, wait for processing to finish.")
+
+    n = max(1, min(int(payload.count or 8), 20))
+    prompt = (
+        "You write support FAQ entries from product documentation.\n\n"
+        f"<document>\n{sample}\n</document>\n\n"
+        f"Write {n} question-and-answer pairs a customer might ask that this "
+        "document answers. Rules:\n"
+        "- Use ONLY facts stated in the document. Invent nothing.\n"
+        "- Each answer must read correctly on its own, without the question — "
+        "write \"No internet connection is required\", not \"No\".\n"
+        "- Keep answers to one or two sentences.\n"
+        "- Skip anything the document does not actually state.\n\n"
+        "Return ONLY a JSON array, no other text, in this exact form:\n"
+        '[{"question": "...", "answer": "..."}]'
+    )
+
+    try:
+        from llm import generate_with_fallback
+        out = generate_with_fallback("accurate", prompt)
+    except Exception as e:
+        logger.warning(f"FAQ autogeneration call failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Drafting failed: {e}")
+
+    raw = (out or {}).get("text", "") or ""
+    pairs = _parse_qa_json(raw)
+    if not pairs:
+        # A local model that returns unparseable text is a normal, common
+        # outcome, not an exception — say so plainly rather than storing
+        # garbage or reporting a false success.
+        raise HTTPException(
+            status_code=422,
+            detail="The model did not return usable question/answer pairs. "
+                   "Try again, or switch to Online mode for drafting.")
+
+    merged = faq_store.merge_questions(payload.source,
+                                       payload.product or payload.category,
+                                       pairs[:n], category=payload.category)
+    merged["source"] = payload.source
+    merged["model"] = (out or {}).get("model")
+    return merged
 
 
 @app.post("/admin/reassign_source")
@@ -1224,7 +1715,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     elif payload.category:
         _scope = {"category": payload.category}
 
-    # ── Curated FAQ (v3.2: ask, don't guess) ─────────────────────────
+    # ── Curated FAQ (v12.0: ask, don't guess) ─────────────────────────
     # Earlier versions DECIDED whether the user's question was equivalent to
     # a curated one and served the answer if so. That failed in production:
     # "does the MyCheckr have WiFi or Ethernet ports?" was served the
@@ -1412,6 +1903,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             reason = "low_retrieval_confidence"
             needs_clarification = False
             clarification_options = []
+            # This is a genuine miss — the visitor asked something the
+            # corpus does not cover and got the flat rejection. Record it
+            # so the console's "People asked, we could not answer" list
+            # reflects reality. The clarify branches above are deliberately
+            # NOT recorded: asking which product was meant is a working
+            # conversation, not a gap.
+            faq_store.record_gap(q, payload.product or payload.category,
+                                 reason=reason)
 
         log_interaction(q, answer, role_out, "none", [], grounding_score=None, flagged=False)
         return {
@@ -1603,7 +2102,7 @@ Answer:"""
             f"template_leak={template_leak}, failed={generation_failed}) — "
             f"escalating to DeepSeek for: {resolved_query[:60]}"
         )
-        # v3.4.1: model name comes from env. "deepseek-chat" was hardcoded
+        # v12.0: model name comes from env. "deepseek-chat" was hardcoded
         # here, and DeepSeek RETIRED that alias on 24 July 2026 — calls to it
         # are no longer routed anywhere, so this escalation path was silently
         # dead. Keep it aligned with ONLINE_DEEPSEEK_MODEL.
@@ -1642,6 +2141,17 @@ Answer:"""
         if template_leak or generation_failed:
             grounding_score = None
         flagged = True
+        # Retrieval found something but we could not stand behind an
+        # answer, so the visitor got the same flat rejection as a total
+        # miss. From their side that IS an unanswered question, and it is
+        # arguably the more useful kind to surface: the documents nearly
+        # cover it, so a short curated answer would close it. Recorded with
+        # a distinct reason so the two causes stay separable.
+        faq_store.record_gap(
+            q, payload.product or payload.category,
+            reason="generation_failed" if generation_failed
+                   else "template_leak" if template_leak
+                   else "ungrounded_answer_suppressed")
 
     # ── Memory + logging ──────────────────────
     add_to_memory(session_id, q, answer)
@@ -1652,7 +2162,7 @@ Answer:"""
 
     total_time = time.time() - start_total
 
-    # v2.1: persist for registered users (anonymous -> uid None -> skip;
+    # v12.0: persist for registered users (anonymous -> uid None -> skip;
     # their history stays browser-local). convo_id echoed back so the
     # client can continue the same server-side conversation.
     _uid = convo_store.resolve_user_id(x_user_id)
@@ -1687,7 +2197,61 @@ Answer:"""
     }
 
 
-# ── Serve the built frontend (v3.4.1) ────────────────────────────────
+# ── Public widget API (v12.0) ────────────────────────────────────────
+# Registered before the static mount below, or the catch-all would swallow
+# /widget/* and serve the SPA shell instead - which is exactly what
+# happened during tunnel testing: /widget/quota returned a blank page
+# because the router was missing and the fallback served index.html.
+try:
+    import quota as quota_mod
+    import widget_api
+
+    quota_mod.init_db()
+
+    async def _widget_answer(q, session_id=None, product=None, category=None,
+                             faq_id=None, skip_faq=False, role=None, top_k=5,
+                             model_env=None, user_id=None):
+        """Adapter between the public widget endpoint and the existing query
+        pipeline.
+
+        The effort level chosen server-side arrives as `role`/`top_k`/
+        `model_env`. Higher effort is expressed by forcing a specific model
+        via force_provider/force_model - the same mechanism the admin UI's
+        "Rethink" control already uses - so no change to the pipeline is
+        needed. The MODEL NAME comes from the environment, never from the
+        request, so a browser cannot select an expensive model.
+        """
+        req = QueryRequest(
+            q=q,
+            session_id=session_id,
+            product=product,
+            category=category,
+            faq_id=faq_id,
+            skip_faq=skip_faq,
+        )
+        if model_env:
+            forced = os.getenv(model_env, "").strip()
+            if forced:
+                req.force_provider = os.getenv("ONLINE_PROVIDER", "deepseek")
+                req.force_model = forced
+
+        # query() is a sync def, so run it in the threadpool. Without this
+        # a single question would block the event loop for its whole
+        # duration - stalling every other request, including other
+        # visitors' widget calls. run_in_threadpool ships with Starlette,
+        # so no new dependency.
+        from starlette.concurrency import run_in_threadpool
+        return await run_in_threadpool(
+            query, req, str(user_id) if user_id else None
+        )
+
+    widget_api.register(app, _widget_answer)
+except Exception as _e:  # pragma: no cover
+    # Never let the public widget failing to load take down the admin app.
+    logger.error(f"Public widget API not registered: {_e}")
+
+
+# ── Serve the built frontend (v12.0) ────────────────────────────────
 # Native installs previously needed Node running a second dev server on
 # :5173 alongside the API on :8000 — two terminal windows and two URLs,
 # which is a lot to ask of a non-technical tester. When a production build

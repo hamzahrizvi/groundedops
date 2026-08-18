@@ -40,7 +40,7 @@ def _get_bm25_index(collection):
                 "id": i,
                 "text": d,
                 "source": m.get("source", "unknown"),
-                # v3.3.0: carried through so answers can cite a page.
+                # v12.0: carried through so answers can cite a page.
                 "page": m.get("page"),
                 "product": m.get("product", ""),
                 "category": m.get("category", ""),

@@ -186,6 +186,13 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
             prods = [_norm_key(p) for p in (it.get("products") or "").split(",")]
             if want in prods or want == _norm_key(it.get("category")):
                 existing.add(_norm_q(it.get("question")))
+                # Also match the wording an edited entry was originally
+                # GENERATED with (see update_entry) — re-drafting reproduces
+                # something close to the model's own original phrasing, not
+                # an admin's rewrite, so without this an edited question
+                # comes back as a "new" near-duplicate every time.
+                if it.get("original_question"):
+                    existing.add(_norm_q(it["original_question"]))
 
         added = 0
         skipped = 0
@@ -257,7 +264,13 @@ def update_entry(faq_id: str, question: str | None = None,
         for it in items:
             if it["id"] == faq_id:
                 if question is not None and question.strip():
-                    it["question"] = question.strip()
+                    new_q = question.strip()
+                    # Remember the wording this entry was GENERATED with,
+                    # once, before the first edit overwrites it — see the
+                    # dedup note in merge_questions.
+                    if new_q != it["question"] and "original_question" not in it:
+                        it["original_question"] = it["question"]
+                    it["question"] = new_q
                 if answer is not None:
                     it["answer"] = answer
                 it["edited"] = True
@@ -344,17 +357,41 @@ def delete_entry(faq_id: str) -> bool:
 
 # ── FAQ gap log ───────────────────────────────────────────────────────
 
-def record_gap(question: str, scope_key: str | None,
-               shown: list[str] | None = None) -> None:
-    """Record a question the FAQ could not answer — either nothing was
-    close enough to suggest, or the user said "I'm asking something
-    else".
+def _gap_key(question: str) -> str:
+    """Normalized dedup/lookup key for a gap — same question text asked
+    with different casing/punctuation groups under one entry, and this key
+    doubles as the entry's addressable id (see dismiss_gap). Lowercased,
+    punctuation stripped, whitespace collapsed: "Does it need WiFi?" and
+    "does it need wifi" must land on the same key, or times_asked stops
+    meaning what the admin page implies it means."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (question or "").lower())).strip()
 
-    This is the most valuable by-product of asking instead of guessing:
-    an explicit, user-confirmed list of questions your documentation is
-    being asked but your curated FAQ doesn't cover. Surface it to the
-    admin and it becomes the FAQ backlog, prioritised by real demand.
+
+def record_gap(question: str, scope_key: str | None,
+               shown: list[str] | None = None, reason: str = "") -> None:
+    """Record a question the FAQ could not answer.
+
+    Two distinct causes land here, kept separable via `reason`:
+      - the FAQ suggestion flow found nothing close enough, or the user
+        said "I'm asking something else" (reason left blank, matching the
+        original call site — this predates the `reason` field)
+      - the main /query path itself came up with a genuine miss: low
+        retrieval confidence, or an answer that failed grounding and was
+        suppressed (reason e.g. "low_retrieval_confidence",
+        "ungrounded_answer_suppressed")
+
+    Either way, this is the most valuable by-product of asking instead of
+    guessing: an explicit list of questions your documentation is being
+    asked but doesn't (yet) answer. Surface it to the admin and it becomes
+    the FAQ backlog, prioritised by real demand.
     """
+    q = (question or "").strip()
+    if not q:
+        return
+    key = _gap_key(q)
+    if not key:
+        return
+    now = __import__("time").time()
     try:
         with _lock:
             gaps = []
@@ -364,19 +401,60 @@ def record_gap(question: str, scope_key: str | None,
                         gaps = json.load(f)
                 except Exception:
                     gaps = []
+            for g in gaps:
+                if g.get("id") == key:
+                    # Visitors ask the same thing a dozen ways in casing and
+                    # punctuation, which _gap_key already collapses — merge
+                    # into the existing entry instead of piling up one row
+                    # per ask, so times_asked means what the admin page
+                    # implies it means.
+                    g["times_asked"] = int(g.get("times_asked", 1)) + 1
+                    g["ts"] = now
+                    if scope_key and not g.get("scope"):
+                        # Keep the most specific scope seen — a gap first
+                        # asked with no product and later inside one belongs
+                        # to that product.
+                        g["scope"] = scope_key
+                    if reason and not g.get("reason"):
+                        g["reason"] = reason
+                    if shown:
+                        g["suggestions_shown"] = shown
+                    with open(_GAP_PATH, "w") as f:
+                        json.dump(gaps, f, indent=2)
+                    return
             gaps.append({
-                "question": question,
+                "id": key,
+                "question": q,               # first-seen spelling, as asked
                 "scope": scope_key,
+                "reason": reason,
                 "suggestions_shown": shown or [],
-                "ts": __import__("time").time(),
+                "times_asked": 1,
+                "ts": now,
+                "resolved": False,
+                "resolved_faq_id": None,
             })
+            if len(gaps) > 500:
+                gaps = gaps[-500:]            # keep it bounded
             with open(_GAP_PATH, "w") as f:
-                json.dump(gaps[-500:], f, indent=2)   # keep it bounded
+                json.dump(gaps, f, indent=2)
     except Exception as e:
         logger.warning(f"could not record FAQ gap (non-fatal): {e}")
 
 
-def list_gaps(scope_key: str | None = None) -> list[dict]:
+def _normalize_gap(g: dict) -> dict:
+    """Backfill fields on gaps recorded before `id`/`times_asked`/`resolved`
+    existed (the gap log predates them), so every caller can rely on the
+    full shape without special-casing older entries."""
+    g.setdefault("id", _gap_key(g.get("question")))
+    g.setdefault("times_asked", 1)
+    g.setdefault("resolved", False)
+    g.setdefault("resolved_faq_id", None)
+    g.setdefault("reason", "")
+    return g
+
+
+def list_gaps(scope_key: str | None = None, include_resolved: bool = False) -> list[dict]:
+    """Most-asked first — the order the console presents as a to-do list."""
     if not os.path.exists(_GAP_PATH):
         return []
     try:
@@ -384,16 +462,83 @@ def list_gaps(scope_key: str | None = None) -> list[dict]:
             gaps = json.load(f)
     except Exception:
         return []
+    gaps = [_normalize_gap(g) for g in gaps]
+    if not include_resolved:
+        gaps = [g for g in gaps if not g.get("resolved")]
     if scope_key:
         gaps = [g for g in gaps if g.get("scope") == scope_key]
-    # Most-asked first — that's the curation priority.
-    counts: dict[str, int] = {}
-    for g in gaps:
-        k = (g.get("question") or "").strip().lower()
-        counts[k] = counts.get(k, 0) + 1
-    for g in gaps:
-        g["times_asked"] = counts.get((g.get("question") or "").strip().lower(), 1)
-    return sorted(gaps, key=lambda g: (-g["times_asked"], -g.get("ts", 0)))
+    return sorted(gaps, key=lambda g: (-int(g.get("times_asked", 1)), -g.get("ts", 0)))
+
+
+def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:
+    """Mark any open gap matching `question` as resolved.
+
+    Called when an admin saves a curated answer, so answering a question
+    from the gaps list clears it without a second explicit action. A gap is
+    marked resolved rather than deleted — deleting would lose the "asked
+    Nx" evidence that justified writing the answer, and would let the same
+    question silently re-accumulate as if it were new. Returns how many
+    entries were resolved (0 or 1 in practice, since gaps are deduped by
+    normalized question on write).
+    """
+    key = _gap_key(question)
+    if not key or not os.path.exists(_GAP_PATH):
+        return 0
+    try:
+        with _lock:
+            with open(_GAP_PATH) as f:
+                gaps = json.load(f)
+            n = 0
+            for g in gaps:
+                if (g.get("id") or _gap_key(g.get("question"))) == key and not g.get("resolved"):
+                    g["resolved"] = True
+                    g["resolved_faq_id"] = faq_id
+                    g["resolved_at"] = __import__("time").time()
+                    n += 1
+            if n:
+                with open(_GAP_PATH, "w") as f:
+                    json.dump(gaps, f, indent=2)
+            return n
+    except Exception as e:
+        logger.warning(f"could not resolve FAQ gap (non-fatal): {e}")
+        return 0
+
+
+def gap_stats() -> dict:
+    if not os.path.exists(_GAP_PATH):
+        return {"open": 0, "resolved": 0, "total_asks": 0}
+    try:
+        with open(_GAP_PATH) as f:
+            gaps = json.load(f)
+    except Exception:
+        return {"open": 0, "resolved": 0, "total_asks": 0}
+    open_gaps = [g for g in gaps if not g.get("resolved")]
+    return {
+        "open": len(open_gaps),
+        "resolved": len(gaps) - len(open_gaps),
+        "total_asks": sum(int(g.get("times_asked", 1)) for g in open_gaps),
+    }
+
+
+def dismiss_gap(gap_id: str) -> bool:
+    """Hard-delete every recorded entry for one normalized question — for
+    spam/noise, or a gap that's been addressed outside the FAQ. Returns
+    whether anything was actually removed."""
+    if not os.path.exists(_GAP_PATH):
+        return False
+    try:
+        with _lock:
+            with open(_GAP_PATH) as f:
+                gaps = json.load(f)
+            n = len(gaps)
+            gaps = [g for g in gaps
+                    if (g.get("id") or _gap_key(g.get("question"))) != gap_id]
+            with open(_GAP_PATH, "w") as f:
+                json.dump(gaps, f, indent=2)
+            return len(gaps) < n
+    except Exception as e:
+        logger.warning(f"could not dismiss FAQ gap (non-fatal): {e}")
+        return False
 
 
 # ── lexical scoring ───────────────────────────────────────────────────

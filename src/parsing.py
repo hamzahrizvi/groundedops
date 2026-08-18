@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 def extract_pages(path: str) -> list[tuple[int, str]]:
     """Extract text as [(page_number, text), ...], 1-indexed.
 
-    v3.3.0. extract_text() below joined every page into one string, which
+    v12.0. extract_text() below joined every page into one string, which
     destroyed page boundaries before chunking ever ran — so a chunk could
     never say which page it came from, and citations couldn't reference
     one. This preserves the boundary so ingest can tag each chunk with its

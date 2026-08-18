@@ -125,7 +125,7 @@ def ingest_file(content: bytes, filename: str,
     """
     collection = get_collection()
 
-    # v3.3.0: keep the ORIGINAL file so answers can offer a download link
+    # v12.0: keep the ORIGINAL file so answers can offer a download link
     # back to the source document. Previously the upload lived only in a
     # temp file that was deleted after parsing, so there was nothing to
     # link to. Stored under SOURCE_FILE_DIR (on the persistent volume in
@@ -148,7 +148,7 @@ def ingest_file(content: bytes, filename: str,
             tmp.write(content)
             tmp_path = tmp.name
 
-        # ── Extract (page-aware, v3.3.0) ──────────────────────────────────────
+        # ── Extract (page-aware, v12.0) ──────────────────────────────────────
         # Chunk PER PAGE rather than over one concatenated string, so every
         # chunk knows which page it came from and answers can cite it. The
         # cost is that a passage spanning a page break is split at the
@@ -192,7 +192,7 @@ def ingest_file(content: bytes, filename: str,
         vectors = embed_texts(texts)
 
         # ── Store ─────────────────────────────────────────────────────────────
-        # v2.1: product key(s) this file belongs to, comma-joined for
+        # v12.0: product key(s) this file belongs to, comma-joined for
         # metadata (many-to-many). Empty string if unmapped — still
         # searchable via whole-corpus / "all".
         # v10.5: DIRECT tagging. The category/product come from where the
@@ -208,7 +208,7 @@ def ingest_file(content: bytes, filename: str,
             metadatas=[{"source": filename, "kind": "chunk",
                         "products": _prod_tag,
                         "category": _cat_tag,
-                        # v3.3.0: page number for citation + deep-linking.
+                        # v12.0: page number for citation + deep-linking.
                         "page": pageno[i]} for i in range(len(texts))],
             ids=ids,
         )
