@@ -237,12 +237,18 @@ export default function App() {
     });
   }, [messages, sessionId]);
 
-  const runQuery = async (q, forceProvider, forceModel) => {
+  const runQuery = async (q, forceProvider, forceModel, opts = {}) => {
     if (!q.trim() || thinking) return;
-    setMessages((m) => [...m, { role: "user", content: q }]);
+    // Picking/rejecting a FAQ suggestion re-asks the same question the
+    // assistant already showed, not a fresh one — don't echo it as if the
+    // visitor retyped it.
+    if (!opts.silent) setMessages((m) => [...m, { role: "user", content: q }]);
     setThinking(true);
     try {
-      const data = await api.query({ q, sessionId, forceProvider, forceModel, product, category });
+      const data = await api.query({
+        q, sessionId, forceProvider, forceModel, product, category,
+        faqId: opts.faqId, skipFaq: opts.skipFaq,
+      });
       setMessages((m) => [...m, { role: "assistant", content: data.answer, meta: data, query: q }]);
     } catch (e) {
       setMessages((m) => [
@@ -477,6 +483,8 @@ export default function App() {
                     index={i}
                     selected={selected === i}
                     onSelect={setSelected}
+                    onFaqPick={(c) => runQuery(c.question, null, null, { faqId: c.id, silent: true })}
+                    onFaqReject={(q) => runQuery(q, null, null, { skipFaq: true, silent: true })}
                   />
                 ))}
 

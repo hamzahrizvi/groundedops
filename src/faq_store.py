@@ -432,6 +432,7 @@ def record_gap(question: str, scope_key: str | None,
                 "ts": now,
                 "resolved": False,
                 "resolved_faq_id": None,
+                "spam": False,
             })
             if len(gaps) > 500:
                 gaps = gaps[-500:]            # keep it bounded
@@ -450,11 +451,18 @@ def _normalize_gap(g: dict) -> dict:
     g.setdefault("resolved", False)
     g.setdefault("resolved_faq_id", None)
     g.setdefault("reason", "")
+    g.setdefault("spam", False)
     return g
 
 
-def list_gaps(scope_key: str | None = None, include_resolved: bool = False) -> list[dict]:
-    """Most-asked first — the order the console presents as a to-do list."""
+def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
+              include_spam: bool = False) -> list[dict]:
+    """Most-asked first — the order the console presents as a to-do list.
+
+    spam is excluded by default same as resolved — it's still being
+    tracked (record_gap keeps incrementing times_asked on it), just kept
+    off the working list, unlike resolved which is a one-time hide.
+    """
     if not os.path.exists(_GAP_PATH):
         return []
     try:
@@ -465,6 +473,8 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False) -> l
     gaps = [_normalize_gap(g) for g in gaps]
     if not include_resolved:
         gaps = [g for g in gaps if not g.get("resolved")]
+    if not include_spam:
+        gaps = [g for g in gaps if not g.get("spam")]
     if scope_key:
         gaps = [g for g in gaps if g.get("scope") == scope_key]
     return sorted(gaps, key=lambda g: (-int(g.get("times_asked", 1)), -g.get("ts", 0)))
@@ -521,9 +531,10 @@ def gap_stats() -> dict:
 
 
 def dismiss_gap(gap_id: str) -> bool:
-    """Hard-delete every recorded entry for one normalized question — for
-    spam/noise, or a gap that's been addressed outside the FAQ. Returns
-    whether anything was actually removed."""
+    """Hard-delete every recorded entry for one normalized question — a
+    one-off clear. Unlike mark_spam, a dismissed question that gets asked
+    again starts a fresh entry, since record_gap only checks IDs still in
+    the file. Returns whether anything was actually removed."""
     if not os.path.exists(_GAP_PATH):
         return False
     try:
@@ -539,6 +550,74 @@ def dismiss_gap(gap_id: str) -> bool:
     except Exception as e:
         logger.warning(f"could not dismiss FAQ gap (non-fatal): {e}")
         return False
+
+
+def dismiss_gap_bulk(gap_ids: list[str]) -> int:
+    """dismiss_gap for many at once. Returns how many were removed."""
+    if not gap_ids or not os.path.exists(_GAP_PATH):
+        return 0
+    ids = set(gap_ids)
+    try:
+        with _lock:
+            with open(_GAP_PATH) as f:
+                gaps = json.load(f)
+            n = len(gaps)
+            gaps = [g for g in gaps
+                    if (g.get("id") or _gap_key(g.get("question"))) not in ids]
+            with open(_GAP_PATH, "w") as f:
+                json.dump(gaps, f, indent=2)
+            return n - len(gaps)
+    except Exception as e:
+        logger.warning(f"could not bulk-dismiss FAQ gaps (non-fatal): {e}")
+        return 0
+
+
+def mark_spam(gap_id: str) -> bool:
+    """Flag a gap as spam rather than deleting it — unlike dismiss_gap,
+    record_gap's merge-by-id keeps finding this entry on a repeat ask, so
+    it never resurfaces on the working list even if asked again. Returns
+    whether a matching entry was found."""
+    if not os.path.exists(_GAP_PATH):
+        return False
+    try:
+        with _lock:
+            with open(_GAP_PATH) as f:
+                gaps = json.load(f)
+            found = False
+            for g in gaps:
+                if (g.get("id") or _gap_key(g.get("question"))) == gap_id:
+                    g["spam"] = True
+                    found = True
+            if found:
+                with open(_GAP_PATH, "w") as f:
+                    json.dump(gaps, f, indent=2)
+            return found
+    except Exception as e:
+        logger.warning(f"could not mark FAQ gap as spam (non-fatal): {e}")
+        return False
+
+
+def mark_spam_bulk(gap_ids: list[str]) -> int:
+    """mark_spam for many at once. Returns how many were flagged."""
+    if not gap_ids or not os.path.exists(_GAP_PATH):
+        return 0
+    ids = set(gap_ids)
+    try:
+        with _lock:
+            with open(_GAP_PATH) as f:
+                gaps = json.load(f)
+            n = 0
+            for g in gaps:
+                if (g.get("id") or _gap_key(g.get("question"))) in ids:
+                    g["spam"] = True
+                    n += 1
+            if n:
+                with open(_GAP_PATH, "w") as f:
+                    json.dump(gaps, f, indent=2)
+            return n
+    except Exception as e:
+        logger.warning(f"could not bulk-mark FAQ gaps as spam (non-fatal): {e}")
+        return 0
 
 
 # ── lexical scoring ───────────────────────────────────────────────────

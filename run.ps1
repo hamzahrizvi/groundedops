@@ -1,4 +1,4 @@
-﻿# GroundedOps - one-command launcher. The only way to start this app -
+# GroundedOps - one-command launcher. The only way to start this app -
 # there is no separate start.cmd/start-lan.cmd, this replaces both:
 #
 #   run.cmd                 everything: build, LAN, tunnel, token, test page
@@ -33,6 +33,9 @@ Set-Location $root
 $SIGN_IN_URL = "https://www.innovative-technology.com/my-account/"
 $PORT = 8000
 $TESTPORT = 5500
+$FW_NAME = "GroundedOps $PORT"
+$FW_CMD  = "New-NetFirewallRule -DisplayName '$FW_NAME' -Direction Inbound " +
+           "-Protocol TCP -LocalPort $PORT -Action Allow -Profile Any"
 
 function Say($m, $c = "White") { Write-Host $m -ForegroundColor $c }
 function Head($m) { Write-Host ""; Say "  $m" Cyan; Say ("  " + ("-" * $m.Length)) DarkGray }
@@ -168,26 +171,80 @@ if (-not $ready) {
 Say "  ready" Green
 
 # --------------------------------------------------------------- LAN address
-function Get-LanIP {
-    try {
-        $route = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction Stop |
-                 Sort-Object RouteMetric | Select-Object -First 1
-        if ($route) {
-            $a = Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex -ErrorAction Stop |
-                 Where-Object { $_.IPAddress -ne "127.0.0.1" } | Select-Object -First 1
-            if ($a) { return $a.IPAddress }
-        }
-    } catch {}
-    return $null
-}
-$lanIp = if ($Local) { $null } else { Get-LanIP }
+# Returns every address a colleague could actually reach, best first.
+#
+# The old version sorted the default routes by metric and took the first. On
+# this machine Ethernet and Wi-Fi both hold a default route at metric 0, so the
+# winner was a coin flip -- and it never checked whether the adapter was still
+# connected. A disconnected Wi-Fi keeps both its route and its IP in the stack,
+# so the launcher would cheerfully hand out an address that answers locally and
+# is unreachable from anywhere else.
+function Get-LanAddresses {
+    # Virtual switches (WSL, Hyper-V) carry their own default routes and are
+    # not reachable from the LAN either.
+    $skip = 'Loopback|vEthernet|VMware|VirtualBox|Bluetooth|Local Area Connection\*'
+    $out = @()
+    try { $routes = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction Stop }
+    catch { return @() }
 
-if ($lanIp -and -not (Get-NetFirewallRule -DisplayName "GroundedOps 8000" -ErrorAction SilentlyContinue)) {
+    foreach ($r in $routes) {
+        $if = Get-NetAdapter -InterfaceIndex $r.InterfaceIndex -ErrorAction SilentlyContinue
+        if (-not $if -or $if.Status -ne 'Up') { continue }
+        if ($if.InterfaceAlias -match $skip) { continue }
+
+        $prof = Get-NetConnectionProfile -InterfaceIndex $r.InterfaceIndex -ErrorAction SilentlyContinue
+        Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $r.InterfaceIndex -ErrorAction SilentlyContinue |
+          Where-Object { $_.IPAddress -ne "127.0.0.1" -and $_.IPAddress -notlike "169.254.*" } |
+          ForEach-Object {
+            $out += [pscustomobject]@{
+                IP     = $_.IPAddress
+                Alias  = $if.InterfaceAlias
+                Metric = $r.RouteMetric
+                Online = if ($prof -and $prof.IPv4Connectivity -eq 'Internet') { 0 } else { 1 }
+                Wired  = if ($if.InterfaceAlias -match 'Wi-?Fi|Wireless') { 1 } else { 0 }
+            }
+          }
+    }
+    $out | Sort-Object Online, Wired, Metric, IP
+}
+
+$lanAll = if ($Local) { @() } else { @(Get-LanAddresses) }
+$lanIp  = if ($lanAll.Count) { $lanAll[0].IP } else { $null }
+
+# Three states, not two. Get-NetFirewallRule returns an empty set both when
+# no rule exists and when it cannot enumerate rules at all (no elevation, or
+# domain policy) -- and inbound 8000 may well already be allowed by a policy
+# or program rule under a different name. Treating "cannot tell" as "missing"
+# means a red warning on every run of a setup that works, and a UAC prompt
+# every run to re-add a rule that is already there.
+#
+# So: only act when the answer is known. Returns 'yes', 'no' or 'unknown'.
+function Get-FwRuleState {
+    try {
+        $all = @(Get-NetFirewallRule -Direction Inbound -ErrorAction Stop)
+        if (-not $all.Count) { return 'unknown' }    # enumeration gave us nothing
+    } catch { return 'unknown' }
+
+    $ours = @($all | Where-Object { $_.DisplayName -eq $FW_NAME })
+    if ($ours | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' }) { return 'yes' }
+    if ($ours.Count) { return 'blocked' }            # exists, but disabled or Block
+    return 'no'
+}
+
+$fwState = if ($lanIp) { Get-FwRuleState } else { 'skip' }
+if ($fwState -eq 'no' -or $fwState -eq 'blocked') {
+    if ($fwState -eq 'blocked') { Say "  firewall rule exists but is disabled or blocking" Yellow }
     Say "  adding firewall rule (approve the prompt)..." Yellow
     try {
-        Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile", "-Command", `
-            "New-NetFirewallRule -DisplayName 'GroundedOps 8000' -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow -Profile Any"
-    } catch { Say "  declined - colleagues on the LAN may not connect" Yellow }
+        Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile", "-Command", $FW_CMD
+    } catch {}
+    $fwState = Get-FwRuleState
+}
+switch ($fwState) {
+    'yes'     { Say "  firewall rule in place" Green }
+    'unknown' { Say "  could not read firewall rules - assuming port $PORT is open" DarkGray }
+    'skip'    { }
+    default   { Say "  no firewall rule for port $PORT (see summary)" Yellow }
 }
 
 # ------------------------------------------------------------------ tunnel
@@ -257,7 +314,12 @@ $summary += "  GroundedOps is running"
 $summary += "  ======================"
 $summary += ""
 $summary += "  This PC          http://127.0.0.1:$PORT"
-if ($lanIp)     { $summary += "  On the LAN       http://${lanIp}:$PORT" }
+if ($lanIp) {
+    $summary += "  On the LAN       http://${lanIp}:$PORT   ($($lanAll[0].Alias))"
+    foreach ($alt in ($lanAll | Select-Object -Skip 1)) {
+        $summary += "    or             http://$($alt.IP):$PORT   ($($alt.Alias))"
+    }
+}
 if ($tunnelUrl) { $summary += "  Public (tunnel)  $tunnelUrl" }
 if ($testUrl)   { $summary += "  Test harness     $testUrl" }
 $summary += "  Admin console    http://127.0.0.1:$PORT/admin"
@@ -269,6 +331,13 @@ if ($token) {
     $summary += "  $token"
 }
 $summary += ""
+if ($lanIp -and $fwState -ne 'yes' -and $fwState -ne 'skip') {
+    $summary += "  If a colleague cannot reach the LAN address, open the port once"
+    $summary += "  in an ADMIN PowerShell:"
+    $summary += ""
+    $summary += "    $FW_CMD"
+    $summary += ""
+}
 if ($tunnelUrl) {
     $summary += "  Hand to the website team:"
     $summary += "    GROUNDEDOPS_API    $tunnelUrl"
@@ -280,7 +349,10 @@ if ($tunnelUrl) {
 }
 
 $summary | ForEach-Object {
-    if ($_ -match "http") { Say $_ Green } elseif ($_ -match "NOTE|Hand to") { Say $_ Yellow } else { Say $_ }
+    if ($_ -match "WARNING") { Say $_ Red }
+    elseif ($_ -match "http") { Say $_ Green }
+    elseif ($_ -match "NOTE|Hand to|ADMIN") { Say $_ Yellow }
+    else { Say $_ }
 }
 
 $handover = Join-Path $root "handover.txt"

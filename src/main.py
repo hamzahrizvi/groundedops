@@ -1187,6 +1187,72 @@ def faq_gap_dismiss(gap_id: str, x_admin_password: str | None = Header(default=N
     return {"deleted": True}
 
 
+class GapIds(BaseModel):
+    ids: list[str]
+
+
+@app.delete("/faq/gaps")
+def faq_gaps_dismiss_bulk(payload: GapIds, x_admin_password: str | None = Header(default=None)):
+    """Bulk dismiss_gap — the console's "Dismiss selected"."""
+    _require_admin(x_admin_password)
+    n = faq_store.dismiss_gap_bulk(payload.ids)
+    return {"deleted": n}
+
+
+@app.post("/faq/gaps/spam")
+def faq_gaps_mark_spam(payload: GapIds, x_admin_password: str | None = Header(default=None)):
+    """Flag gaps as spam (kept, never resurfaces) rather than deleting —
+    see faq_store.mark_spam for why this is distinct from dismiss."""
+    _require_admin(x_admin_password)
+    n = faq_store.mark_spam_bulk(payload.ids)
+    return {"marked": n}
+
+
+class AnswerGapReq(BaseModel):
+    gap_id: str
+    provider: str | None = None
+    model: str | None = None
+
+
+@app.post("/admin/faq/answer_gap")
+async def admin_answer_gap(payload: AnswerGapReq, x_admin_password: str | None = Header(default=None)):
+    """Draft an answer for one unanswered gap using the same retrieval +
+    generation pipeline /query already runs — NOT auto-saved to the FAQ.
+
+    Every other generation path in this app (autogenerate, the old
+    doc2query features) treats model output as reviewable-before-publish,
+    never auto-published straight to visitors; this stays consistent with
+    that rather than silently publishing an unverified answer. The admin
+    reviews/edits the draft in the normal "Write one yourself" form.
+    """
+    _require_admin(x_admin_password)
+    gaps = faq_store.list_gaps(include_resolved=True, include_spam=True)
+    gap = next((g for g in gaps if g.get("id") == payload.gap_id), None)
+    if not gap:
+        raise HTTPException(status_code=404, detail="Gap not found")
+
+    req = QueryRequest(q=gap["question"], product=gap.get("scope"), skip_faq=True)
+    if payload.provider:
+        req.force_provider = payload.provider
+        req.force_model = payload.model or _PROVIDER_DEFAULT_MODEL.get(payload.provider, "")
+
+    # query() is sync — run in the threadpool so this doesn't block the
+    # event loop, same reasoning as _widget_answer below.
+    from starlette.concurrency import run_in_threadpool
+    result = run_in_threadpool(query, req, None)
+    result = await result
+    return {
+        "question": gap["question"],
+        "answer": result.get("answer", ""),
+        "scope": gap.get("scope"),
+        "sources": result.get("sources", []),
+        "role": result.get("role"),
+        "flagged": result.get("flagged", False),
+        "model": result.get("model"),
+        "provider": result.get("provider"),
+    }
+
+
 @app.delete("/faq/{faq_id}")
 def faq_delete(faq_id: str, x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
@@ -1361,6 +1427,21 @@ class FaqAutoReq(BaseModel):
     product: str = ""
     category: str = ""
     count: int = 8
+    # Admin-chosen override (console's model picker). Blank/omitted keeps
+    # the existing default chain (generate_with_fallback("accurate", ...)).
+    provider: str | None = None
+    model: str | None = None
+
+
+# Sensible default per provider when an override provider is chosen but
+# no specific model is typed — mirrors the retired AdminPanel.jsx's
+# curated model lists.
+_PROVIDER_DEFAULT_MODEL = {
+    "local": "mistral",
+    "deepseek": "deepseek-chat",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-6",
+}
 
 
 def _source_text(source: str, max_chunks: int = 12, cap: int = 8000) -> str:
@@ -1452,8 +1533,19 @@ def admin_faq_autogenerate(payload: FaqAutoReq,
     )
 
     try:
-        from llm import generate_with_fallback
-        out = generate_with_fallback("accurate", prompt)
+        if payload.provider:
+            from llm import generate
+            model = payload.model or _PROVIDER_DEFAULT_MODEL.get(payload.provider, "")
+            out = generate(payload.provider, prompt, model)
+            if not out or not out.get("text"):
+                raise HTTPException(status_code=502,
+                    detail=f"{payload.provider}/{model} returned nothing — "
+                           f"check the key is set and the model name is correct.")
+        else:
+            from llm import generate_with_fallback
+            out = generate_with_fallback("accurate", prompt)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"FAQ autogeneration call failed: {e}")
         raise HTTPException(status_code=502, detail=f"Drafting failed: {e}")

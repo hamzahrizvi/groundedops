@@ -139,6 +139,48 @@ check(r.json()["added"] == 0, f"re-draft after an EDIT still dedupes ({r.json()}
 after = [e for e in client.get("/faq").json()["faq"] if e["id"] == target][0]
 check(after["answer"] == "No. Reviewed and corrected.", "reviewed answer survived re-drafting")
 
+print("\n== gap bulk actions: dismiss, spam, answer-with-AI ==")
+client.delete("/faq?confirm=true", headers=ADMIN)  # clean slate
+
+for q in ["Does the gadget support satellite uplink?",
+          "Does the gadget support satellite uplink??",
+          "Is there a spam question here"]:
+    client.post("/query", json={"q": q, "session_id": "s2"})
+
+g = client.get("/faq/gaps", headers=ADMIN).json()["gaps"]
+check(len(g) == 2, f"2 distinct gaps recorded before bulk actions ({len(g)})")
+dismiss_id = next(x["id"] for x in g if "satellite" in x["question"])
+spam_id = next(x["id"] for x in g if "spam" in x["question"])
+spam_q = next(x["question"] for x in g if x["id"] == spam_id)
+dismiss_q = next(x["question"] for x in g if x["id"] == dismiss_id)
+
+r = client.request("DELETE", "/faq/gaps", headers=ADMIN, json={"ids": [dismiss_id]})
+check(r.status_code == 200 and r.json()["deleted"] == 1,
+      f"bulk dismiss removed 1 ({r.json() if r.status_code == 200 else r.status_code})")
+
+r = client.post("/faq/gaps/spam", headers=ADMIN, json={"ids": [spam_id]})
+check(r.status_code == 200 and r.json()["marked"] == 1,
+      f"bulk mark-spam flagged 1 ({r.json() if r.status_code == 200 else r.status_code})")
+
+check(client.get("/faq/gaps", headers=ADMIN).json()["gaps"] == [], "both gone from the default list")
+
+client.post("/query", json={"q": spam_q, "session_id": "s3"})
+check(client.get("/faq/gaps", headers=ADMIN).json()["gaps"] == [],
+      "spam-flagged question does not resurface on a repeat ask")
+
+client.post("/query", json={"q": dismiss_q, "session_id": "s4"})
+check(len(client.get("/faq/gaps", headers=ADMIN).json()["gaps"]) == 1,
+      "dismissed question starts a fresh gap on a repeat ask (unlike spam)")
+
+remaining = client.get("/faq/gaps", headers=ADMIN).json()["gaps"][0]
+r = client.post("/admin/faq/answer_gap", headers=ADMIN, json={"gap_id": remaining["id"]})
+check(r.status_code == 200 and "answer" in r.json(),
+      f"answer_gap returns a draft ({r.status_code})")
+check(client.get("/faq").json()["faq"] == [], "draft is NOT auto-saved to the FAQ")
+
+r = client.post("/admin/faq/answer_gap", headers=ADMIN, json={"gap_id": "does-not-exist"})
+check(r.status_code == 404, f"answer_gap on an unknown id -> 404 ({r.status_code})")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} FAILURE(S):")
