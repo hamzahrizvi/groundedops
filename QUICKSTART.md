@@ -89,20 +89,29 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/ingest/reload_folder"
 
 ## 5. Build the FAQ (optional but recommended)
 
-In the **admin console → FAQ**:
+In the **admin console → Reviewed answers**:
 
-- **Draft answers** proposes questions from the ingested documents,
-  generated server-side (no key needed in the browser). It *merges* —
-  running it again adds only genuinely new questions and never overwrites
-  answers you've written.
+- **Draft from a document** proposes questions from the ingested
+  documents, generated server-side (no key needed in the browser). It
+  *merges* — running it again adds only genuinely new questions and never
+  overwrites answers you've written.
 - **Write one yourself** adds a question by hand. These are protected
   from being overwritten by future drafting.
+- **Answers by product** lists what you already have. Pick a product
+  first — the page does not list every answer at once, because the full
+  list runs to hundreds of rows and the wording is edited product by
+  product anyway. Answers tagged with a product that is not in the
+  catalogue are still offered in the picker, marked as such, so they can
+  be found and retagged.
 - Review every drafted answer before it goes live. Curated answers skip
   retrieval entirely, so they're served exactly as written.
-- **Unanswered** lists questions people asked that the FAQ couldn't
-  answer, ranked by frequency — your curation backlog. Answering one from
-  here (or writing a FAQ entry with matching wording) resolves it
+- **Unanswered** lists questions people asked that the reviewed answers
+  couldn't cover, ranked by frequency — your curation backlog. Answering
+  one from here (or writing an entry with matching wording) resolves it
   automatically.
+
+Not sure what a page is for? The **?** button at the top right walks you
+through whichever page you are on, highlighting one thing at a time.
 
 Write answers as complete, self-contained statements. "No, it doesn't
 require internet — processing is local and results are instant" reads
