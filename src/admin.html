@@ -51,7 +51,6 @@
               background:color-mix(in srgb, var(--color-text) 12%, transparent);
               padding:1px 7px;border-radius:99px}
   .nav button[aria-current="page"] .badge{background:var(--color-accent-800);color:var(--color-accent-100)}
-  .rail-foot{padding:12px 14px 0;margin-top:12px;border-top:1px solid var(--color-divider)}
 
   .main{flex:1;overflow-y:auto;padding:30px 34px 90px;position:relative}
   .wrap{max-width:1000px;animation:rise .18s ease both}
@@ -132,19 +131,61 @@
         background:var(--color-bg);color:var(--color-text)}
   .gate .card{max-width:380px;width:100%}
 
-  /* ---------- guide dialog ---------- */
-  .guide-step{border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent);padding:15px 0}
-  .guide-step:first-of-type{border-top:0}
-  .guide-step .n{font-size:11px;color:var(--color-accent);font-weight:700}
-  .guide-step b{display:block;margin:3px 0 4px;font-weight:500}
-  .guide-step p{margin:0;font-size:13.5px;color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+  /* ---------- in-page sub-navigation ---------- */
+  /* Sections of the active page, listed under its nav row so they can be
+     reached without scrolling for them. Built from the rendered DOM in
+     buildSubnav(), so a view gets one for free by tagging cards data-sec. */
+  .subnav{display:flex;flex-direction:column;gap:1px;margin:2px 0 4px 22px;
+          border-left:1px solid var(--color-divider);padding-left:9px}
+  .subnav button{display:block;width:100%;text-align:left;border:0;background:transparent;
+                 cursor:pointer;font:inherit;font-size:12px;padding:4px 7px;border-radius:6px;
+                 color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .subnav button:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent);
+                       color:var(--color-text)}
+  .subnav button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+
+  /* ---------- walkthrough ---------- */
+  /* The help icon sits over .main rather than in the rail, so it stays put
+     while the page scrolls. */
+  .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:34px;height:34px;
+            border-radius:50%;border:0;cursor:pointer;background:var(--color-surface);
+            box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-divider);
+            color:var(--color-accent-400);font-size:15px;font-weight:600;
+            display:grid;place-items:center;font-family:inherit}
+  .help-btn:hover{color:var(--color-accent-300)}
+  .help-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+
+  @keyframes tourPulse{
+    0%,100%{box-shadow:0 0 0 1px var(--color-accent),
+                       0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent)}
+    50%    {box-shadow:0 0 0 1px var(--color-accent),
+                       0 0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent)}
+  }
+  /* position/z-index so the ring is not clipped by a neighbouring card. */
+  .tour-hi{position:relative;z-index:41;border-radius:var(--radius-md);
+           animation:tourPulse 1.9s ease-in-out infinite}
+  .tour-pop{position:fixed;z-index:95;width:300px;background:var(--color-surface);
+            border-radius:var(--radius-md);padding:16px 18px;
+            box-shadow:var(--shadow-lg),0 0 0 1px var(--color-divider);
+            animation:rise .18s ease both}
+  .tour-pop .step{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+                  color:var(--color-accent-400);margin-bottom:6px}
+  .tour-pop .tt{font-size:14px;font-weight:500;margin-bottom:6px}
+  .tour-pop .tx{font-size:13px;line-height:1.55;
+                color:color-mix(in srgb, var(--color-text) 85%, transparent)}
+  .tour-pop .acts{margin-top:14px;display:flex;justify-content:space-between;align-items:center}
+  .tour-pop .acts .btn{font-size:12px;padding:4px 10px}
+  @media (prefers-reduced-motion:reduce){
+    .tour-hi{animation:none;box-shadow:0 0 0 2px var(--color-accent)}
+    .tour-pop{animation:none}
+  }
 
   @media (max-width:820px){
     .shell{flex-direction:column;height:auto;min-height:100vh}
     .rail{width:100%;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
     .brand{border:0;padding:0 14px 0 6px;margin:0}
     .nav{flex-direction:row;flex:1}
-    .rail-foot{border:0;margin:0;padding:0 6px}
+    .subnav{display:none}
     .readout{grid-template-columns:repeat(2,1fr)}
     .main{padding:18px}
   }
@@ -176,6 +217,12 @@ let view = "overview";
 let pendingAnswer = null;
 let cache = { catalog: null, sources: [], faq: [], gaps: [],
               widget: null, leads: [], leadStats: {} };
+
+// Sentinel for "answers carrying no product tag at all" in the answers-page
+// picker, kept distinct from "" which means nothing chosen yet.
+const NO_SCOPE = "__none__";
+// One button metric for the console, so rows of mixed .btn variants line up.
+const BTN = "font-size:12.5px;padding:5px 11px";
 
 const el = (t, a = {}, ...kids) => {
   const n = document.createElement(t);
@@ -253,15 +300,21 @@ const answered = () => cache.faq.filter(f => (f.answer || "").trim());
 /* ---------------- shell ---------------- */
 function render() {
   const app = document.getElementById("app");
+  endTour();                 // the popover lives on <body>, so it outlives app.innerHTML
   app.innerHTML = "";
   if (!pw) return app.append(gate());
 
-  const nav = (id, label, count) =>
-    el("button", {
+  // Collected so buildSubnav() can hang the active page's sections off its row.
+  const navBtns = [];
+  const nav = (id, label, count) => {
+    const b = el("button", {
       onclick: () => { view = id; render(); },
       "aria-current": view === id ? "page" : null,
     }, el("span", { class: "mark" }), el("span", { style: "flex:1" }, label),
        count !== undefined ? el("span", { class: "badge mono" }, String(count)) : null);
+    navBtns.push([id, b]);
+    return b;
+  };
 
   app.append(el("div", { class: "shell" },
     el("aside", { class: "rail" },
@@ -269,18 +322,35 @@ function render() {
       el("nav", { class: "nav" },
         nav("overview", "Overview"),
         nav("documents", "Documents", cache.sources.length),
-        nav("faq", "Answers", answered().length),
+        nav("faq", "Reviewed answers", answered().length),
         nav("gaps", "Unanswered", cache.gaps.length),
         nav("catalog", "Products", products().length),
         nav("widget", "Widget design"),
         nav("leads", "Enquiries", cache.leadStats.unhandled || 0),
         nav("test", "Test chat"),
       ),
-      el("div", { class: "rail-foot" },
-        el("button", { class: "btn btn-secondary btn-block", onclick: openGuide }, "How do I\u2026?")),
     ),
-    el("main", { class: "main" }, el("div", { class: "wrap" }, body()))
+    el("main", { class: "main" },
+      el("button", { class: "help-btn", onclick: startTour,
+                     title: "How to use this page", "aria-label": "How to use this page" }, "?"),
+      el("div", { class: "wrap" }, body()))
   ));
+
+  buildSubnav(navBtns);
+}
+
+// Lists the active page's sections under its nav row. Reads the rendered DOM
+// rather than a per-view table, so tagging a card data-sec is all a view has to
+// do to appear here. Fewer than two sections is not worth the extra chrome.
+function buildSubnav(navBtns) {
+  const active = navBtns.find(([id]) => id === view);
+  if (!active) return;
+  const secs = [...document.querySelectorAll(".main [data-sec]")];
+  if (secs.length < 2) return;
+  active[1].after(el("div", { class: "subnav" },
+    secs.map(sec => el("button", {
+      onclick: () => sec.scrollIntoView({ behavior: "smooth", block: "start" }),
+    }, sec.getAttribute("data-sec")))));
 }
 
 function body() {
@@ -297,13 +367,39 @@ function body() {
 /* ---------------- gate ---------------- */
 function gate() {
   const input = el("input", { class: "input", type: "password", placeholder: "Admin password", autofocus: "true" });
+  // Every failure here used to surface as "that password was not accepted" --
+  // a wrong password, a server that was not running, a proxy swallowing the
+  // request and a 404 from the private-surface middleware all looked
+  // identical. Only a 401 is actually about the password; say what the others
+  // were, because from another PC on the LAN the difference is the whole
+  // diagnosis.
   const go = async () => {
     pw = input.value;
     try {
       await api("/admin/login", { method: "POST" });
-      sessionStorage.setItem("go_admin_pw", pw);
-      await refresh(); render();
-    } catch (e) { pw = ""; toast("That password was not accepted", true); }
+    } catch (e) {
+      pw = "";
+      // api() throws this exact message on a 401, and nothing else does.
+      if (e.message === "Password rejected") {
+        toast("That password was not accepted", true);
+      } else if (e instanceof TypeError) {
+        // fetch() rejects with a TypeError when the request never got a
+        // response at all: server down, wrong host, blocked in transit.
+        toast("Could not reach the server at " + API + " \u2014 " + e.message, true);
+      } else {
+        toast("Sign-in failed: " + e.message, true);
+      }
+      return;
+    }
+
+    sessionStorage.setItem("go_admin_pw", pw);
+    // A 401 on any of refresh()'s reads clears pw and re-renders the gate from
+    // inside api(), and refresh() swallows the error -- which lands you back at
+    // the login box with nothing said. Check for it rather than let it look
+    // like the password failed.
+    try { await refresh(); } catch (e) { toast("Loaded with errors: " + e.message, true); }
+    if (!pw) return toast("Signed in, but a follow-up request was rejected", true);
+    render();
   };
   input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
   return el("div", { class: "gate" },
@@ -380,12 +476,13 @@ function viewOverview() {
   return [
     el("h1", {}, "Overview"),
     el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked."),
-    el("div", { class: "readout" },
+    el("div", { class: "readout", "data-tour": "ov-readout", "data-sec": "At a glance" },
       stat("Documents", cache.sources.length),
       stat("Need filing", un.length, un.length ? "warn" : ""),
       stat("Reviewed answers", ans.length),
       stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "")),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0" },
+    el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0",
+                "data-tour": "ov-next", "data-sec": "What to do next" },
       el("div", { class: "sec-title" }, "What to do next"),
       el("div", { class: "sec-hint" }, "Read from live state. Anything needing attention is marked in the accent."),
       steps),
@@ -395,12 +492,28 @@ function viewOverview() {
 /* ---------------- documents ---------------- */
 function viewDocuments() {
   const prods = products();
+  let chosenCat = cache.catalog.length === 1 ? cache.catalog[0].key : "";
   let chosen = prods.length === 1 ? prods[0].key : "";
 
-  const sel = el("select", { class: "input", onchange: e => { chosen = e.target.value; sync(); } },
-    el("option", { value: "" }, prods.length ? "Choose a product\u2026" : "No products yet"),
-    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
-  if (chosen) sel.value = chosen;
+  // Category first, then a product list filtered to it \u2014 separate steps
+  // instead of one long "Category > Product" dropdown.
+  const catSel = el("select", { class: "input", onchange: e => {
+    chosenCat = e.target.value; chosen = ""; syncProductOptions(); sync();
+  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category\u2026" : "No categories yet"),
+     cache.catalog.map(c => el("option", { value: c.key }, c.name)));
+  if (chosenCat) catSel.value = chosenCat;
+
+  const prodSel = el("select", { class: "input", onchange: e => { chosen = e.target.value; sync(); } });
+  function syncProductOptions() {
+    prodSel.innerHTML = "";
+    const inCat = prods.filter(p => p.category === chosenCat);
+    prodSel.disabled = !chosenCat;
+    prodSel.append(el("option", { value: "" },
+      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product\u2026" : "No products in this category"));
+    inCat.forEach(p => prodSel.append(el("option", { value: p.key }, p.name)));
+    if (chosen) prodSel.value = chosen;
+  }
+  syncProductOptions();
 
   const drop = el("div", { class: "drop off" },
     el("b", {}, "Choose a product first"),
@@ -461,7 +574,10 @@ function viewDocuments() {
   });
   file.addEventListener("change", () => file.files.length && upload(file.files));
 
-  const list = cache.sources.length ? cache.sources.map(s => {
+  // Grouped by category > product instead of one flat list \u2014 unassigned
+  // docs are their own pinned-first group, same idea as viewGaps' scope
+  // grouping.
+  const docRow = s => {
     const cur = s.product || s.products || "";
     const move = el("select", { class: "input", style: "width:auto", onchange: async e => {
       const p = prods.find(x => x.key === e.target.value);
@@ -487,19 +603,44 @@ function viewDocuments() {
               toast("Removed"); await refresh(); render(); }
         catch (e) { toast(e.message, true); }
       } }, "Remove"));
-  }) : [el("div", { class: "empty" }, el("b", {}, "No documents yet"),
+  };
+
+  const groups = new Map();
+  cache.sources.forEach(s => {
+    const key = s.product || s.products || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  });
+  const label = key => {
+    if (!key) return "Unassigned";
+    const p = prods.find(x => x.key === key);
+    return p ? p.categoryName + " \u203a " + p.name : key;
+  };
+  const ordered = [...groups.entries()].sort((a, b) =>
+    a[0] === "" ? -1 : b[0] === "" ? 1 : label(a[0]).localeCompare(label(b[0])));
+
+  const list = ordered.length ? ordered.map(([key, docs]) =>
+    el("div", { style: "margin-bottom:16px" },
+      el("div", { class: "sec-title", style: key ? "" : "color:var(--color-accent-400)" },
+        label(key) + " \u00b7 " + docs.length + (docs.length === 1 ? " document" : " documents")),
+      docs.map(docRow)))
+    : [el("div", { class: "empty" }, el("b", {}, "No documents yet"),
         "Add a manual or datasheet above and the widget can start answering from it.")];
 
   return [
     el("h1", {}, "Documents"),
     el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "doc-add", "data-sec": "Add documents" },
       el("div", { class: "sec-title" }, "Add documents"),
-      el("div", { class: "sec-hint" }, "Pick the product the document describes, then drop the files in."),
-      el("div", { class: "row" }, el("div", {}, el("label", { class: "flabel" }, "Product"), sel)),
+      el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
+        el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel)),
       el("div", { style: "margin-top:14px" }, drop, file),
       progress),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
+                "data-tour": "doc-list", "data-sec": "All documents" },
       el("div", { class: "sec-title" }, "All documents"),
       el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget."),
       list),
@@ -509,46 +650,125 @@ function viewDocuments() {
 /* ---------------- answers (FAQ) ---------------- */
 function viewFaq() {
   const prods = products();
-  let scope = "";
-  const shown = () => cache.faq.filter(f => !scope ||
-    (f.products || "").split(",").includes(scope) || f.category === scope);
 
-  const scopeSel = el("select", { class: "input", style: "width:auto", onchange: e => { scope = e.target.value; render2(); } },
-    el("option", { value: "" }, "All products"),
-    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  const scopeOf = f => (f.products || "").split(",")[0] || f.category || "";
+
+  // scope -> "Category \u203a Product" label.
+  const scopeLabel = key => {
+    if (!key || key === NO_SCOPE) return "Not tagged to a product";
+    const p = prods.find(x => x.key === key);
+    return p ? p.categoryName + " \u203a " + p.name : key;
+  };
+
+  // The list is gated on a product (below), so the picker has to offer every
+  // scope that actually holds answers -- otherwise entries tagged with a key
+  // the catalogue does not know about become unreachable rather than merely
+  // unsurfaced, and those are exactly the ones needing to be retagged.
+  const known = new Set(prods.map(p => p.key));
+  const usedScopes = [...new Set(cache.faq.map(scopeOf))];
+  const orphanScopes = usedScopes.filter(k => k && !known.has(k)).sort();
+  const hasUnscoped = usedScopes.includes("");
+  const countFor = key => (key === NO_SCOPE
+    ? cache.faq.filter(f => !scopeOf(f)).length
+    : cache.faq.filter(f => (f.products || "").split(",").includes(key) || f.category === key).length);
+
+  let scope = "";
+  const shown = () => {
+    if (!scope) return [];
+    if (scope === NO_SCOPE) return cache.faq.filter(f => !scopeOf(f));
+    return cache.faq.filter(f =>
+      (f.products || "").split(",").includes(scope) || f.category === scope);
+  };
+
+  const scopeSel = el("select", { class: "input", style: "width:auto",
+                                  onchange: e => { scope = e.target.value; render2(); } },
+    el("option", { value: "" }, "Choose a product\u2026"),
+    prods.map(p => el("option", { value: p.key },
+      p.categoryName + " \u203a " + p.name + " (" + countFor(p.key) + ")")),
+    orphanScopes.map(k => el("option", { value: k },
+      k + " \u2014 not in the catalogue (" + countFor(k) + ")")),
+    hasUnscoped ? el("option", { value: NO_SCOPE },
+      "Not tagged to a product (" + countFor(NO_SCOPE) + ")") : null);
+
+  let expandedId = null;      // one row open for editing at a time
+  const dirty = new Map();    // id -> {question, answer} not yet saved
 
   const listBox = el("div", {});
   function render2() {
     scopeSel.value = scope;
     listBox.innerHTML = "";
-    const items = shown();
-    if (!items.length) {
-      listBox.append(el("div", { class: "empty" }, el("b", {}, "No answers yet"),
-        "Draft some from a document below, or write one by hand."));
+
+    // Nothing is listed until a product is chosen. The full list ran to
+    // hundreds of rows across every product at once, which is not a thing
+    // anyone reads -- and the wording is edited product by product anyway.
+    if (!scope) {
+      listBox.append(el("div", { class: "empty" },
+        el("b", {}, "Choose a product to see its answers"),
+        cache.faq.length
+          ? cache.faq.length + " reviewed answers in total, across " +
+            (usedScopes.filter(Boolean).length || 1) + " product tag" +
+            (usedScopes.filter(Boolean).length === 1 ? "" : "s") + "."
+          : "No answers yet. Draft some from a document above, or write one by hand."));
       return;
     }
+
+    const items = shown();
+    if (!items.length) {
+      listBox.append(el("div", { class: "empty" },
+        el("b", {}, "No answers for " + scopeLabel(scope)),
+        "Draft some from a document above, or write one by hand."));
+      return;
+    }
+
+    listBox.append(el("div", { style: "display:flex;align-items:center;gap:10px;margin:4px 0 6px" },
+      el("b", { style: "font-size:13.5px" }, scopeLabel(scope)),
+      el("span", { class: "tag tag-neutral" }, String(items.length)),
+      el("button", { class: "btn btn-ghost", style: "font-size:11.5px;margin-left:auto", onclick: () => {
+        appliesSel.value = scope === NO_SCOPE ? "" : scope; nq.value = ""; na.value = "";
+        na.closest(".card").scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => nq.focus(), 300);
+      } }, "+ Add answer")));
+
     items.forEach(f => {
-      const q = el("input", { class: "input", type: "text", value: f.question });
-      const a = el("textarea", { class: "input" }, f.answer || "");
-      const box = el("div", { class: "item", style: "display:block" },
-        el("div", { class: "row", style: "margin-bottom:8px" },
-          el("div", { style: "flex:3" }, el("label", { class: "flabel" }, "Question"), q)),
-        el("label", { class: "flabel" }, "Answer"), a,
-        el("p", { class: "sec-hint", style: "margin:7px 0 0" },
-          "Write it so it reads correctly on its own \u2014 it may be shown to someone whose wording was slightly different."),
-        el("div", { style: "margin-top:9px;display:flex;gap:8px" },
-          el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
-            try { await api("/faq/" + f.id, { method: "PATCH",
-                    body: JSON.stringify({ question: q.value, answer: a.value }) });
-                  toast("Saved"); await refresh(); render(); }
-            catch (e) { toast(e.message, true); }
-          } }, "Save"),
-          el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
-            if (!confirm("Delete this answer?")) return;
-            try { await api("/faq/" + f.id, { method: "DELETE" }); toast("Deleted");
-                  await refresh(); render(); } catch (e) { toast(e.message, true); }
-          } }, "Delete")));
-      listBox.append(box);
+      const open = expandedId === f.id;
+      const row = el("div", { class: "item", style: open ? "display:block" : "cursor:pointer" });
+
+      if (!open) {
+        row.addEventListener("click", () => { expandedId = f.id; render2(); });
+        row.append(
+          el("div", { class: "grow" }, el("b", {}, f.question),
+            el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
+          dirty.has(f.id) ? el("span", { class: "tag tag-neutral mono" }, "unsaved") : null);
+      } else {
+        const draft = dirty.get(f.id) || {};
+        const q = el("input", { class: "input", type: "text", value: draft.question ?? f.question });
+        const a = el("textarea", { class: "input" }, draft.answer ?? (f.answer || ""));
+        const markDirty = () => dirty.set(f.id, { question: q.value, answer: a.value });
+        q.addEventListener("input", markDirty);
+        a.addEventListener("input", markDirty);
+        row.append(
+          el("div", { class: "row", style: "margin-bottom:8px" },
+            el("div", { style: "flex:3" }, el("label", { class: "flabel" }, "Question"), q)),
+          el("label", { class: "flabel" }, "Answer"), a,
+          el("p", { class: "sec-hint", style: "margin:7px 0 0" },
+            "Write it so it reads correctly on its own \u2014 it may be shown to someone whose wording was slightly different."),
+          el("div", { style: "margin-top:9px;display:flex;gap:8px" },
+            el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+              try { await api("/faq/" + f.id, { method: "PATCH",
+                      body: JSON.stringify({ question: q.value, answer: a.value }) });
+                    dirty.delete(f.id); toast("Saved"); await refresh(); render(); }
+              catch (e) { toast(e.message, true); }
+            } }, "Save"),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px", onclick: () => {
+              expandedId = null; render2();
+            } }, "Close"),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px;margin-left:auto", onclick: async () => {
+              if (!confirm("Delete this answer?")) return;
+              try { await api("/faq/" + f.id, { method: "DELETE" }); dirty.delete(f.id); toast("Deleted");
+                    await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Delete")));
+      }
+      listBox.append(row);
     });
   }
   render2();
@@ -556,68 +776,122 @@ function viewFaq() {
   // draft from a document, server-side
   const srcSel = el("select", { class: "input" }, el("option", { value: "" }, "Choose a document\u2026"),
     cache.sources.map(s => el("option", { value: s.source }, s.source)));
-  const draftBtn = el("button", { class: "btn btn-primary", onclick: async () => {
+  const providerSel = el("select", { class: "input" },
+    el("option", { value: "" }, "Default model"),
+    el("option", { value: "local" }, "Local (Ollama)"),
+    el("option", { value: "deepseek" }, "DeepSeek"),
+    el("option", { value: "openai" }, "OpenAI"),
+    el("option", { value: "anthropic" }, "Claude"));
+  const modelIn = el("input", { class: "input", type: "text", placeholder: "model (optional)" });
+  const draftBtn = el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
     const src = srcSel.value;
     if (!src) return toast("Choose a document first", true);
     const s = cache.sources.find(x => x.source === src) || {};
     draftBtn.disabled = true; draftBtn.textContent = "Drafting\u2026";
     try {
       const r = await api("/admin/faq/autogenerate", { method: "POST",
-        body: JSON.stringify({ source: src, product: s.product || s.products || "", category: s.category || "" }) });
+        body: JSON.stringify({ source: src, product: s.product || s.products || "", category: s.category || "",
+          provider: providerSel.value || null, model: modelIn.value.trim() || null }) });
       toast("Added " + r.added + " new, skipped " + r.skipped_duplicates + " already there");
       await refresh(); render();
     } catch (e) { toast(e.message, true); }
     finally { draftBtn.disabled = false; draftBtn.textContent = "Draft answers"; }
   } }, "Draft answers");
 
+  // #7: draft every document that has no FAQ entries at all yet.
+  const draftAllBtn = el("button", { class: "btn btn-secondary", style: BTN, onclick: async () => {
+    const undrafted = cache.sources.filter(s => {
+      const key = s.product || s.products || "";
+      return !cache.faq.some(f => scopeOf(f) === key && f.source === s.source);
+    });
+    if (!undrafted.length) return toast("Every document already has drafted answers");
+    if (!confirm("Draft answers for " + undrafted.length + " document(s)? This calls the model once per document.")) return;
+    draftAllBtn.disabled = true;
+    let done = 0, added = 0;
+    for (const s of undrafted) {
+      draftAllBtn.textContent = "Drafting " + (++done) + "/" + undrafted.length + "\u2026";
+      try {
+        const r = await api("/admin/faq/autogenerate", { method: "POST",
+          body: JSON.stringify({ source: s.source, product: s.product || s.products || "", category: s.category || "",
+            provider: providerSel.value || null, model: modelIn.value.trim() || null }) });
+        added += r.added || 0;
+      } catch (e) { toast(s.source + ": " + e.message, true); }
+    }
+    draftAllBtn.disabled = false; draftAllBtn.textContent = "Draft all";
+    toast("Drafted " + added + " new answer(s) across " + done + " document(s)");
+    await refresh(); render();
+  } }, "Draft all");
+
+  // #7: PATCH every row edited but not yet saved.
+  const saveAllBtn = el("button", { class: "btn btn-secondary", style: BTN, onclick: async () => {
+    if (!dirty.size) return toast("Nothing unsaved");
+    const n = dirty.size;
+    for (const [id, d] of [...dirty]) {
+      try { await api("/faq/" + id, { method: "PATCH", body: JSON.stringify(d) }); dirty.delete(id); }
+      catch (e) { toast(id + ": " + e.message, true); }
+    }
+    toast("Saved " + n + " answer(s)");
+    await refresh(); render();
+  } }, "Save all");
+
   // add by hand
   const nq = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
   const na = el("textarea", { class: "input", placeholder: "No. Everything is processed on the device; no connection is required." });
-  const appliesSel = scopeSel.cloneNode(true);
+  // Its own picker rather than a clone of scopeSel: an empty value means "all
+  // products" when writing an answer, but "nothing chosen yet" when filtering.
+  const appliesSel = el("select", { class: "input" },
+    el("option", { value: "" }, "All products"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)),
+    orphanScopes.map(k => el("option", { value: k }, k + " \u2014 not in the catalogue")));
 
   if (pendingAnswer) {
     nq.value = pendingAnswer.question;
-    if (pendingAnswer.product) appliesSel.value = pendingAnswer.product;
+    if (pendingAnswer.answer) na.value = pendingAnswer.answer;   // AI draft, from Unanswered
+    if (pendingAnswer.product) {
+      appliesSel.value = pendingAnswer.product;
+      // Only when the picker actually offers it: a gap carries
+      // `product || category`, and a category key has no option here.
+      if ([...scopeSel.options].some(o => o.value === pendingAnswer.product)) {
+        scope = pendingAnswer.product;          // open the list on that product
+        render2();
+      }
+    }
     // Consumed on read: a later re-render (e.g. after saving) must not
     // resurrect a question the admin has already dealt with.
     pendingAnswer = null;
     setTimeout(() => { na.focus(); na.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
   }
 
-  // A short preview only — the full list, grouped by product, lives on
-  // the Unanswered page. Two full copies of the same list drift apart and
-  // give the admin two places to check the same thing.
-  const gapPreview = cache.gaps.length
-    ? cache.gaps.slice(0, 5).map(g => el("div", { class: "item" },
-        el("div", { class: "grow" }, el("b", {}, g.question),
-          el("span", {}, "asked " + (g.times_asked || 1) + "\u00d7")),
-        el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: () => {
-          nq.value = g.question;
-          if (g.product || g.category) appliesSel.value = g.product || g.category;
-          na.focus();
-          na.scrollIntoView({ behavior: "smooth", block: "center" });
-        } }, "Answer this")))
-    : [el("div", { class: "empty" }, el("b", {}, "Nothing unanswered"),
-        "Questions the widget could not answer will collect here.")];
-
   return [
-    el("h1", {}, "Answers"),
+    el("h1", {}, "Reviewed answers"),
     el("p", { class: "lede" }, "Reviewed answers are shown exactly as written and cost nothing to serve. Visitors who are not signed in see only these."),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "ans-draft", "data-sec": "Draft from a document" },
       el("div", { class: "sec-title" }, "Draft from a document"),
       el("div", { class: "sec-hint" }, "Suggests questions and answers from a document you have added. Nothing is published until you have read it \u2014 and drafting again never overwrites answers you have edited."),
+      // Explicit flex bases: the default .row>div{flex:1;min-width:170px} gave
+      // five equal columns whose minimums overflowed the card, which is what
+      // pushed the model field under the buttons.
       el("div", { class: "row" },
-        el("div", { style: "flex:2" }, el("label", { class: "flabel" }, "Document"), srcSel),
-        el("div", { style: "flex:0 0 auto" }, draftBtn))),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+        el("div", { style: "flex:1 1 240px" },
+          el("label", { class: "flabel" }, "Document"), srcSel),
+        el("div", { style: "flex:0 1 180px" },
+          el("label", { class: "flabel" }, "Provider"), providerSel),
+        el("div", { style: "flex:0 1 180px" },
+          el("label", { class: "flabel" }, "Model"), modelIn),
+        el("div", { style: "flex:0 0 auto;min-width:0;display:flex;gap:8px" },
+          draftBtn, draftAllBtn))),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "ans-hand", "data-sec": "Write one yourself" },
       el("div", { class: "sec-title" }, "Write one yourself"),
       el("div", { class: "sec-hint" }, "Hand-written answers are protected \u2014 drafting will never replace them."),
       el("label", { class: "flabel" }, "Question"), nq,
       el("label", { class: "flabel", style: "margin-top:10px" }, "Answer"), na,
       el("div", { class: "row", style: "margin-top:10px" },
-        el("div", {}, el("label", { class: "flabel" }, "Applies to"), appliesSel),
-        el("div", { style: "flex:0 0 auto" },
-          el("button", { class: "btn btn-primary", onclick: async () => {
+        el("div", { style: "flex:0 1 260px" },
+          el("label", { class: "flabel" }, "Applies to"), appliesSel),
+        el("div", { style: "flex:0 0 auto;min-width:0" },
+          el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
             if (!nq.value.trim()) return toast("Add a question first", true);
             try {
               await api("/faq", { method: "POST", body: JSON.stringify({
@@ -626,26 +900,22 @@ function viewFaq() {
               await refresh(); render();
             } catch (e) { toast(e.message, true); }
           } }, "Add answer")))),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
-      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:2px" },
-        el("div", { class: "sec-title", style: "flex:1;margin:0" }, "People asked, we could not answer"),
-        cache.gaps.length > 5 ? el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-          onclick: () => { view = "gaps"; render(); } }, "See all " + cache.gaps.length) : null),
-      el("div", { class: "sec-hint" }, "The most asked, most recent first. The full list, grouped by product, is on the Unanswered page."),
-      gapPreview),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
-      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:2px" },
-        el("div", { class: "sec-title", style: "flex:1;margin:0" }, "All answers"), scopeSel),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
+                "data-tour": "ans-list", "data-sec": "Answers by product" },
+      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:2px;flex-wrap:wrap" },
+        el("div", { class: "sec-title", style: "flex:1;margin:0;min-width:160px" }, "Answers by product"), scopeSel),
       el("div", { class: "sec-hint" }, "Edit the wording, or delete anything out of date."),
       listBox,
-      el("div", { style: "margin-top:14px" },
-        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
-          const label = scope || "ALL products";
+      el("div", { style: "margin-top:14px;display:flex;gap:8px;flex-wrap:wrap" },
+        saveAllBtn,
+        el("button", { class: "btn btn-ghost", style: BTN, onclick: async () => {
+          if (!scope) return toast("Choose a product first", true);
+          if (scope === NO_SCOPE) return toast("Retag these to a product before deleting in bulk", true);
+          const label = scopeLabel(scope);
           if (!confirm("Delete every answer for " + label + "?\n\nHand-written answers cannot be recovered.")) return;
           if (prompt('Type DELETE to confirm') !== "DELETE") return toast("Cancelled");
           try {
-            await api("/faq?confirm=true" + (scope ? "&product=" + encodeURIComponent(scope) : ""),
-                      { method: "DELETE" });
+            await api("/faq?confirm=true&product=" + encodeURIComponent(scope), { method: "DELETE" });
             toast("Deleted"); await refresh(); render();
           } catch (e) { toast(e.message, true); }
         } }, "Delete all shown"))),
@@ -662,6 +932,33 @@ function viewGaps() {
     return c ? c.name : null;
   };
 
+  const selected = new Set();
+  const providerSel = el("select", { class: "input", style: "width:auto" },
+    el("option", { value: "" }, "Default model"),
+    el("option", { value: "local" }, "Local (Ollama)"),
+    el("option", { value: "deepseek" }, "DeepSeek"),
+    el("option", { value: "openai" }, "OpenAI"),
+    el("option", { value: "anthropic" }, "Claude"));
+  const modelIn = el("input", { class: "input", style: "width:auto", type: "text", placeholder: "model (optional)" });
+
+  const answerHere = (g, answer) => {
+    // Prefill the Answers page's hand-written form with this question (and
+    // an AI draft, if there is one) and jump there, rather than opening a
+    // second editor here. One place to write an answer means one set of
+    // wording rules to learn, and saving it resolves this gap automatically.
+    pendingAnswer = { question: g.question, product: g.scope || "", answer: answer || "" };
+    view = "faq"; render();
+  };
+
+  const bulkAction = async (path, method, verb) => {
+    if (!selected.size) return toast("Select at least one question first", true);
+    try {
+      await api(path, { method, body: JSON.stringify({ ids: [...selected] }) });
+      toast(verb + " " + selected.size + " question(s)");
+      selected.clear(); await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+  };
+
   // Group by scope so the list reads as "which product is underserved",
   // which is the decision this page exists to support. Questions asked
   // with no product selected are their own group rather than being
@@ -676,15 +973,6 @@ function viewGaps() {
     b[1].reduce((n, g) => n + (g.times_asked || 1), 0) -
     a[1].reduce((n, g) => n + (g.times_asked || 1), 0));
 
-  const answerHere = g => {
-    // Prefill the Answers page's hand-written form with this question and
-    // jump there, rather than opening a second editor here. One place to
-    // write an answer means one set of wording rules to learn, and saving
-    // it resolves this gap automatically server-side.
-    pendingAnswer = { question: g.question, product: g.scope || "" };
-    view = "faq"; render();
-  };
-
   const rows = ordered.map(([key, list]) => {
     const label = key ? (nameFor(key) || key) : "No product selected";
     const asks = list.reduce((n, g) => n + (g.times_asked || 1), 0);
@@ -694,29 +982,61 @@ function viewGaps() {
         el("span", { class: "sec-title", style: "flex:1;margin:0" }, label),
         el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
           list.length + (list.length === 1 ? " question" : " questions") + " \u00b7 " + asks + " asks")),
-      list.map(g => el("div", { class: "step" },
-        el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;color:var(--color-accent-400);flex:0 0 42px" },
-          (g.times_asked || 1) + "\u00d7"),
-        el("div", { class: "step-b" },
-          el("div", { style: "font-size:13.5px" }, g.question),
-          el("p", {}, (g.reason === "ungrounded_answer_suppressed"
-              ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
-              : "Nothing in the documents matched.")
-            + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : ""))),
-        el("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px",
-                       onclick: () => answerHere(g) }, "Answer this"),
-        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
-          if (!confirm("Dismiss this question?\n\nUse this for spam or noise \u2014 it will not come back.")) return;
-          try { await api("/faq/gaps/" + encodeURIComponent(g.id), { method: "DELETE" });
-                toast("Dismissed"); await refresh(); render(); }
-          catch (e) { toast(e.message, true); }
-        } }, "Dismiss"))));
+      list.map(g => {
+        const draftBox = el("div", {});
+        const cb = el("input", { type: "checkbox", style: "margin-top:3px", onchange: e => {
+          if (e.target.checked) selected.add(g.id); else selected.delete(g.id);
+        } });
+        const row = el("div", { class: "step" },
+          cb,
+          el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;color:var(--color-accent-400);flex:0 0 42px" },
+            (g.times_asked || 1) + "\u00d7"),
+          el("div", { class: "step-b" },
+            el("div", { style: "font-size:13.5px" }, g.question),
+            el("p", {}, (g.reason === "ungrounded_answer_suppressed"
+                ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
+                : "Nothing in the documents matched.")
+              + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : "")),
+            draftBox),
+          el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:4px 12px", onclick: async e => {
+            const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
+            try {
+              const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
+                gap_id: g.id, provider: providerSel.value || null, model: modelIn.value.trim() || null }) });
+              draftBox.innerHTML = "";
+              draftBox.append(
+                el("p", { class: "sec-hint", style: "margin:8px 0 4px" }, "AI draft \u2014 not saved yet:"),
+                el("p", { style: "font-size:13px;white-space:pre-wrap" }, r.answer || "(no answer)"),
+                el("div", { style: "display:flex;gap:8px" },
+                  el("button", { class: "btn btn-primary", style: "font-size:12px;padding:3px 10px",
+                    onclick: () => answerHere(g, r.answer) }, "Use this \u2014 review & save"),
+                  el("button", { class: "btn btn-ghost", style: "font-size:12px;padding:3px 10px",
+                    onclick: () => { draftBox.innerHTML = ""; } }, "Discard")));
+            } catch (e2) { toast(e2.message, true); }
+            finally { btn.disabled = false; btn.textContent = "Answer with AI"; }
+          } }, "Answer with AI"),
+          el("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px",
+                         onclick: () => answerHere(g) }, "Answer this"),
+          el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+            if (!confirm("Dismiss this question?\n\nAsking it again starts a fresh entry. Use \"Mark spam\" instead if it should never come back.")) return;
+            try { await api("/faq/gaps/" + encodeURIComponent(g.id), { method: "DELETE" });
+                  toast("Dismissed"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Dismiss"));
+        return row;
+      }));
   });
 
   return [
     el("h1", {}, "Unanswered"),
     el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover, most asked first. Working down this list is the single most useful piece of upkeep."),
-    cache.gaps.length ? rows
+    cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+      el("span", { class: "sec-hint", style: "margin:0" }, "Select questions above, then:"),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps", "DELETE", "Dismissed") }, "Dismiss selected"),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps/spam", "POST", "Marked spam:") }, "Mark spam"),
+      el("span", { style: "flex:1" }),
+      el("label", { class: "flabel", style: "margin:0" }, "AI model:"), providerSel, modelIn) : null,
+    cache.gaps.length ? el("div", { "data-tour": "gaps-list" }, rows)
       : el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
           el("b", {}, "Nothing unanswered"),
           "Questions the widget could not answer will collect here once visitors start using it.")),
@@ -860,7 +1180,7 @@ function viewWidget() {
     const titleIn = el("input", { class: "input", type: "text", value: f.title });
     titleIn.addEventListener("input", () => { f.title = titleIn.value; });
 
-    return el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+    return el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0", "data-sec": title },
       el("div", { class: "sec-title" }, title),
       el("div", { class: "sec-hint" }, hint),
       el("label", { class: "flabel" }, "Form heading"), titleIn,
@@ -893,7 +1213,8 @@ function viewWidget() {
     el("p", { class: "lede" }, "How the widget looks and opens for a visitor. The preview updates as you type; nothing is published until you save."),
     el("div", { style: "display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start" },
       el("div", { style: "min-width:0" },
-        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                    "data-tour": "wd-branding", "data-sec": "Branding" },
           el("div", { class: "sec-title" }, "Branding"),
           el("div", { class: "sec-hint" }, "The name, greeting and accent colour used throughout the widget."),
           el("div", { class: "row" },
@@ -904,7 +1225,8 @@ function viewWidget() {
             el("label", { class: "flabel" }, "Icon URL (optional)"), iconIn),
           el("div", { style: "margin-top:12px" },
             el("label", { class: "flabel" }, "Accent colour"), swatchRow)),
-        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                    "data-tour": "wd-options", "data-sec": "Opening options" },
           el("div", { class: "sec-title" }, "Opening options"),
           el("div", { class: "sec-hint" }, "Shown as buttons on the first message. Each starts a different path."),
           optBox,
@@ -926,7 +1248,7 @@ function viewWidget() {
                   toast("Reset to defaults"); await refresh(); render(); }
             catch (e) { toast(e.message, true); }
           } }, "Reset to defaults"))),
-      el("div", { style: "position:sticky;top:0" }, preview)),
+      el("div", { style: "position:sticky;top:0", "data-tour": "wd-preview" }, preview)),
   ];
 }
 
@@ -979,7 +1301,7 @@ function viewLeads() {
       el("div", {}, el("div", { class: "lbl" }, "Sales"), el("b", {}, String(s.sales || 0))),
       el("div", {}, el("div", { class: "lbl" }, "Support"), el("b", {}, String(s.support || 0))),
       el("div", {}, el("div", { class: "lbl" }, "Total"), el("b", {}, String(s.total || 0)))),
-    rows,
+    el("div", { "data-tour": "leads-list" }, rows),
   ];
 }
 
@@ -1019,7 +1341,8 @@ function viewCatalog() {
   return [
     el("h1", {}, "Products"),
     el("p", { class: "lede" }, "Ranges group products; documents are filed against a product. This is what the widget asks visitors to choose from."),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "cat-range", "data-sec": "Add a range" },
       el("div", { class: "sec-title" }, "Add a range"),
       el("div", { class: "sec-hint" }, "A family of products, such as Coin hoppers."),
       el("div", { class: "row" },
@@ -1032,7 +1355,8 @@ function viewCatalog() {
                   cName.value = ""; toast("Range added"); await refresh(); render(); }
             catch (e) { toast(e.message, true); }
           } }, "Add range")))),
-    cache.catalog.length ? el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px" },
+    cache.catalog.length ? el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                                      "data-tour": "cat-product", "data-sec": "Add a product" },
       el("div", { class: "sec-title" }, "Add a product"),
       el("div", { class: "sec-hint" }, "Documents and widget conversations are scoped to a product."),
       el("div", { class: "row" },
@@ -1046,7 +1370,7 @@ function viewCatalog() {
                   pName.value = ""; toast("Product added"); await refresh(); render(); }
             catch (e) { toast(e.message, true); }
           } }, "Add product")))) : null,
-    rows,
+    el("div", { "data-tour": "cat-list", "data-sec": "Your catalogue" }, rows),
   ];
 }
 
@@ -1055,10 +1379,22 @@ function viewTest() {
   const prods = products();
   const sel = el("select", { class: "input" }, el("option", { value: "" }, "Whole knowledge base"),
     prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  const providerSel = el("select", { class: "input" },
+    el("option", { value: "" }, "Default model"),
+    el("option", { value: "local" }, "Local (Ollama)"),
+    el("option", { value: "deepseek" }, "DeepSeek"),
+    el("option", { value: "openai" }, "OpenAI"),
+    el("option", { value: "anthropic" }, "Claude"));
+  const modelIn = el("input", { class: "input", type: "text", placeholder: "model (optional)" });
   const log = el("div", { class: "chat" },
     el("div", { class: "bub a" }, "Ask something a customer might ask. This uses the same pipeline as the widget, so what you see here is what they would get."));
   const input = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
   const sid = "console-" + Math.random().toString(36).slice(2);
+  // /query only honors force_provider when force_model is ALSO set \u2014 pick
+  // a sensible default rather than silently falling back to the default
+  // chain when the admin chose a provider but left the model blank.
+  const DEFAULT_MODEL = { local: "mistral", deepseek: "deepseek-chat",
+    openai: "gpt-4o-mini", anthropic: "claude-sonnet-4-6" };
 
   async function send() {
     const q = input.value.trim(); if (!q) return;
@@ -1066,9 +1402,12 @@ function viewTest() {
     log.append(el("div", { class: "bub u" }, q));
     const wait = el("div", { class: "bub a" }, "Checking the documentation\u2026");
     log.append(wait); log.scrollTop = log.scrollHeight;
+    const provider = providerSel.value || null;
+    const model = provider ? (modelIn.value.trim() || DEFAULT_MODEL[provider] || null) : null;
     try {
       const r = await api("/query", { method: "POST", body: JSON.stringify({
-        q, session_id: sid, product: sel.value || null }) });
+        q, session_id: sid, product: sel.value || null,
+        force_provider: provider, force_model: model }) });
       wait.remove();
       const bub = el("div", { class: "bub a" }, r.answer || "No answer");
       if (r.sources && r.sources.length) {
@@ -1086,9 +1425,11 @@ function viewTest() {
   return [
     el("h1", {}, "Test chat"),
     el("p", { class: "lede" }, "Check what the widget would say before customers do. Nothing here is shown to visitors."),
-    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0" },
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0", "data-tour": "test-chat" },
       el("div", { class: "row", style: "margin-bottom:12px" },
-        el("div", {}, el("label", { class: "flabel" }, "Ask about"), sel)),
+        el("div", {}, el("label", { class: "flabel" }, "Ask about"), sel),
+        el("div", {}, el("label", { class: "flabel" }, "Provider"), providerSel),
+        el("div", {}, el("label", { class: "flabel" }, "Model"), modelIn)),
       log,
       el("div", { class: "row", style: "margin-top:12px" },
         el("div", { style: "flex:1" }, input),
@@ -1096,40 +1437,163 @@ function viewTest() {
   ];
 }
 
-/* ---------------- guide ---------------- */
-function openGuide() {
-  const steps = [
-    ["01", "Set up a product",
-     "Products \u203a Add a range (say, Coin hoppers), then add a product inside it. Documents are filed against a product, and the widget asks visitors to pick one before they can ask anything."],
-    ["02", "Add a document",
-     "Documents \u203a choose the product, then drop in a PDF, Word or text file. Reading it takes a minute or two; the progress line tells you when it is ready."],
-    ["03", "Draft the reviewed answers",
-     "Answers \u203a Draft from a document. It suggests questions and answers taken from that document. Read every one before trusting it \u2014 they are shown to customers word for word."],
-    ["04", "Fix the wording",
-     "Edit any answer so it reads correctly on its own. Someone may be shown it after asking a slightly different question, so \u201cNo, instant results\u201d reads badly where \u201cNo internet connection is required\u201d reads well."],
-    ["05", "Design the widget",
-     "Widget design \u203a set the name, greeting, colour and the buttons a visitor sees first. If you offer \u201cTalk to sales\u201d or \u201cTalk to support\u201d, set up what that form asks for. The preview shows exactly what a visitor gets."],
-    ["06", "Try it",
-     "Test chat \u203a ask what a customer would ask. Same pipeline as the widget, so if it looks wrong here, it is wrong there."],
-    ["07", "Keep it current",
-     "Unanswered collects the real questions the widget could not handle, most asked first. Working down that list is the single most useful upkeep \u2014 answering one there removes it automatically."],
-    ["08", "Check your enquiries",
-     "Enquiries holds the sales and support forms visitors submit. Nothing is emailed out, so this console is the only place they arrive \u2014 build a habit of checking it."],
-  ];
-  const veil = el("div", { class: "dialog-backdrop", onclick: e => { if (e.target === veil) veil.remove(); } },
-    el("div", { class: "dialog elev-lg", style: "max-width:620px;max-height:86vh;overflow-y:auto" },
-      el("div", { class: "dialog-title" }, "How do I\u2026?"),
-      el("p", { class: "sec-hint" }, "The whole job, in order. Each step takes a minute."),
-      steps.map(([n, t, d]) => el("div", { class: "guide-step" },
-        el("div", { class: "n mono" }, n), el("b", {}, t), el("p", {}, d))),
-      el("div", { class: "dialog-actions", style: "justify-content:flex-start" },
-        el("button", { class: "btn btn-primary", onclick: () => { veil.remove(); view = "overview"; render(); } }, "Start at the overview"),
-        el("button", { class: "btn btn-ghost", onclick: () => veil.remove() }, "Close"))));
-  document.body.append(veil);
-  document.addEventListener("keydown", function esc(e) {
-    if (e.key === "Escape") { veil.remove(); document.removeEventListener("keydown", esc); }
-  });
+/* ---------------- walkthrough ---------------- */
+/* Replaces the old modal guide. Rather than describing the console in prose,
+   this points at one real element at a time, on the page you are already on.
+   Steps are per view: the tour is a tour of *this* page, and render() ends it
+   on navigation (endTour() at the top) instead of trying to drive the user
+   across pages mid-step.
+
+   A step targets [data-tour="<ref>"]. Steps whose target is absent get dropped
+   when the tour starts, so an empty-state page that renders fewer cards gets a
+   correctly-numbered shorter tour rather than a step pointing at nothing. */
+const tourStepsByView = {
+  overview: [
+    { ref: "ov-readout", title: "Where things stand",
+      text: "The four numbers that matter, read live. \u201cNeed filing\u201d and \u201cUnanswered\u201d turn amber when they want attention." },
+    { ref: "ov-next", title: "What to do next",
+      text: "Reads that same state and names the next useful thing, with a button straight to it. If you read one part of this console, read this one." },
+  ],
+  documents: [
+    { ref: "doc-add", title: "Add documents",
+      text: "Pick the product the document describes, then drop the file in. That link is what lets the widget find it \u2014 an unfiled document is searchable but never offered to a visitor." },
+    { ref: "doc-list", title: "Everything you have added",
+      text: "Grouped by product, the same way the widget sees them. Anything with no product is called out separately." },
+  ],
+  faq: [
+    { ref: "ans-draft", title: "Draft from a document",
+      text: "Suggests questions and answers from a document you have already added. Nothing is published until you have read it, and drafting again never overwrites an answer you edited by hand." },
+    { ref: "ans-hand", title: "Write one yourself",
+      text: "For anything the documents do not cover. Hand-written answers are protected \u2014 drafting will never replace them." },
+    { ref: "ans-list", title: "Read and fix the wording",
+      text: "Pick a product to see its answers. Edit each one so it reads correctly on its own \u2014 someone may be shown it after asking a slightly different question." },
+  ],
+  gaps: [
+    { ref: "gaps-list", title: "What people asked and did not get",
+      text: "Real visitor questions the reviewed answers missed, grouped by product, most asked first. Working down this list is the most useful upkeep there is, and answering one here removes it automatically." },
+  ],
+  catalog: [
+    { ref: "cat-range", title: "Start with a range",
+      text: "A range is a family of products \u2014 Coin hoppers, Note validators. It is the first thing a visitor picks in the widget." },
+    { ref: "cat-product", title: "Then add products",
+      text: "Every product added here becomes something the widget can be asked about, and something a document can be filed against." },
+    { ref: "cat-list", title: "Your catalogue",
+      text: "Each range with its products, and how many documents back each one. A product with no documents cannot be answered about." },
+  ],
+  widget: [
+    { ref: "wd-preview", title: "Live preview",
+      text: "Exactly what a visitor sees. Every change on this page updates it as you type." },
+    { ref: "wd-branding", title: "Branding",
+      text: "Name the assistant, write its greeting, and pick the accent colour used through the widget." },
+    { ref: "wd-options", title: "Opening options",
+      text: "The buttons a visitor is offered first. If you offer \u201cTalk to sales\u201d or \u201cTalk to support\u201d, set up what that form asks for." },
+  ],
+  leads: [
+    { ref: "leads-list", title: "Enquiries arrive here and nowhere else",
+      text: "The sales and support forms visitors submit. Nothing is emailed out, so this console is the only place they land \u2014 worth building a habit of checking." },
+  ],
+  test: [
+    { ref: "test-chat", title: "Ask it what a customer would ask",
+      text: "Runs the same pipeline the real widget runs. If an answer looks wrong here, it is wrong there too." },
+  ],
+};
+
+let tourOn = false, tourStep = 0, tourSteps = [];
+let tourPop = null, tourHi = null, tourKeys = null, tourReflow = null;
+
+const tourTarget = ref => document.querySelector('[data-tour="' + ref + '"]');
+
+function startTour() {
+  const live = (tourStepsByView[view] || []).filter(s => tourTarget(s.ref));
+  if (!live.length) return toast("No walkthrough for this page yet");
+  endTour();
+  tourSteps = live; tourOn = true; tourStep = 0;
+
+  tourKeys = e => {
+    if (!tourOn) return;
+    if (e.key === "Escape") endTour();
+    else if (e.key === "ArrowRight") tourGo(1);
+    else if (e.key === "ArrowLeft") tourGo(-1);
+  };
+  document.addEventListener("keydown", tourKeys);
+
+  // .main is the scroll container, not the window, so the popover has to
+  // follow its scroll to stay beside the element it points at.
+  tourReflow = () => { if (tourOn) placeTour(); };
+  window.addEventListener("resize", tourReflow);
+  const main = document.querySelector(".main");
+  if (main) main.addEventListener("scroll", tourReflow);
+
+  drawTour();
 }
+
+function endTour() {
+  tourOn = false; tourStep = 0; tourSteps = [];
+  if (tourPop) { tourPop.remove(); tourPop = null; }
+  if (tourHi) { tourHi.classList.remove("tour-hi"); tourHi = null; }
+  if (tourKeys) { document.removeEventListener("keydown", tourKeys); tourKeys = null; }
+  if (tourReflow) {
+    window.removeEventListener("resize", tourReflow);
+    const main = document.querySelector(".main");
+    if (main) main.removeEventListener("scroll", tourReflow);
+    tourReflow = null;
+  }
+}
+
+function tourGo(delta) {
+  if (!tourOn) return;
+  const n = tourStep + delta;
+  if (n < 0) return;
+  if (n >= tourSteps.length) return endTour();
+  tourStep = n; drawTour();
+}
+
+function drawTour() {
+  const s = tourSteps[tourStep];
+  if (!s) return endTour();
+
+  if (tourHi) tourHi.classList.remove("tour-hi");
+  tourHi = tourTarget(s.ref);
+  if (!tourHi) return endTour();
+  tourHi.classList.add("tour-hi");
+  tourHi.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  const last = tourStep === tourSteps.length - 1;
+  if (tourPop) tourPop.remove();
+  tourPop = el("div", { class: "tour-pop", role: "dialog", "aria-label": "Walkthrough" },
+    el("div", { class: "step mono" }, "Step " + (tourStep + 1) + " of " + tourSteps.length),
+    el("div", { class: "tt" }, s.title),
+    el("div", { class: "tx" }, s.text),
+    el("div", { class: "acts" },
+      el("button", { class: "btn btn-ghost", onclick: endTour }, "Skip"),
+      el("div", { style: "display:flex;gap:8px" },
+        el("button", { class: "btn btn-secondary", disabled: tourStep === 0 ? "true" : null,
+                       onclick: () => tourGo(-1) }, "Back"),
+        el("button", { class: "btn btn-primary", onclick: () => tourGo(1) }, last ? "Done" : "Next"))));
+  document.body.append(tourPop);
+  placeTour();
+}
+
+// Beside the highlighted element, per the design, flipped to its other side
+// when there is no room -- so the popover never lands on top of the thing it
+// is describing.
+function placeTour() {
+  if (!tourPop || !tourHi) return;
+  const r = tourHi.getBoundingClientRect();
+  const w = tourPop.offsetWidth || 300, h = tourPop.offsetHeight || 190;
+  const gap = 16, pad = 12;
+
+  let left = r.right + gap;
+  if (left + w + pad > window.innerWidth) {
+    left = r.left - gap - w;
+    if (left < pad) left = Math.max(pad, window.innerWidth - w - pad);
+  }
+  const top = Math.max(pad, Math.min(r.top, window.innerHeight - h - pad));
+
+  tourPop.style.left = Math.round(left) + "px";
+  tourPop.style.top = Math.round(top) + "px";
+}
+
 
 /* ---------------- boot ---------------- */
 (async () => {
