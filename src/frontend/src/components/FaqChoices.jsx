@@ -50,6 +50,10 @@ import React, { useState } from "react";
  *      })
  */
 
+// Uses this app's actual theme tokens (see styles.css :root / [data-theme
+// "dark"]) rather than hardcoded colors, so these adapt to both themes the
+// same way .suggestion-chip does — hardcoded dark-theme hex values here
+// used to render as near-invisible light-gray-on-cream in light mode.
 const styles = {
   wrap: {
     display: "flex",
@@ -61,9 +65,9 @@ const styles = {
     textAlign: "left",
     padding: "10px 14px",
     borderRadius: 10,
-    border: "1px solid rgba(224,158,106,0.35)",
-    background: "rgba(224,158,106,0.08)",
-    color: "#e8dcd2",
+    border: "1px solid var(--hairline)",
+    background: "var(--accent-soft)",
+    color: "var(--ink)",
     font: "inherit",
     fontSize: 14,
     lineHeight: 1.45,
@@ -71,22 +75,22 @@ const styles = {
     transition: "background .12s, border-color .12s",
   },
   choiceHover: {
-    background: "rgba(224,158,106,0.16)",
-    borderColor: "rgba(224,158,106,0.7)",
+    background: "var(--surface-2)",
+    borderColor: "var(--accent)",
   },
   alt: {
     background: "transparent",
     borderStyle: "dashed",
-    borderColor: "rgba(169,162,156,0.4)",
-    color: "#a9a29c",
+    borderColor: "var(--hairline)",
+    color: "var(--muted)",
   },
   altHover: {
-    background: "rgba(169,162,156,0.08)",
-    borderColor: "rgba(169,162,156,0.7)",
+    background: "var(--surface-2)",
+    borderColor: "var(--muted)",
   },
   chosen: {
     fontSize: 13,
-    color: "#a9a29c",
+    color: "var(--muted)",
     marginTop: 10,
     fontStyle: "italic",
   },

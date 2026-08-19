@@ -83,7 +83,7 @@ export const api = {
   pullModels: (models) => jsonPost("/models/pull", { models }),
   pullStatus: () => jsonGet("/models/pull_status"),
 
-  query: ({ q, sessionId, forceProvider, forceModel, sourceFilter, product, category }) =>
+  query: ({ q, sessionId, forceProvider, forceModel, sourceFilter, product, category, faqId, skipFaq }) =>
     jsonPost("/query", {
       q,
       session_id: sessionId,
@@ -95,6 +95,11 @@ export const api = {
       source_filter: sourceFilter || null,
       product: product || null,
       category: category || null,
+      // Picking a suggested FAQ serves it by id (no re-matching, no chance
+      // of a mismatch); rejecting it skips the FAQ path and answers from
+      // the documents instead. See FaqChoices.
+      faq_id: faqId || null,
+      skip_faq: !!skipFaq,
     }),
 
   catalog: () => jsonGet("/catalog"),
