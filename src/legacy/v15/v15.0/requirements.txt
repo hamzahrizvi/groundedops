@@ -1,0 +1,20 @@
+fastapi
+uvicorn[standard]
+pydantic
+
+chromadb
+sentence-transformers
+rank-bm25
+torch
+
+pypdf
+# Layout-aware PDF reading (parsing.py). pypdf alone flattens tables
+# into space-joined cells, which made spec tables unusable. MIT, unlike
+# PyMuPDF which is AGPL-3.0 without a commercial licence.
+pdfplumber
+python-docx
+
+cryptography
+
+streamlit
+requests
