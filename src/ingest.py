@@ -4,7 +4,20 @@ import logging
 import tempfile
 
 from parsing import extract_pages
+import docstore
 from chunking import chunk_text
+
+# Chunk geometry, env-tunable so it can be swept against eval.py without code
+# edits. 500/50 (chunking.py's own defaults) was too small to hold a spec table
+# or a protocol list: observed splitting one mid-item, so the chunk began "and
+# SI2" with the start of the list in a different chunk, and the model refused a
+# question whose answer had in fact been retrieved.
+#
+# CHANGING THESE ONLY AFFECTS DOCUMENTS INGESTED AFTERWARDS. Existing chunks
+# keep the geometry they were created with; a full re-ingest is the only way to
+# apply it retroactively.
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1200"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 from embeddings import embed_texts
 from db import get_collection
 
@@ -130,7 +143,11 @@ def ingest_file(content: bytes, filename: str,
     # temp file that was deleted after parsing, so there was nothing to
     # link to. Stored under SOURCE_FILE_DIR (on the persistent volume in
     # Docker) keyed by filename, matching the chunk metadata "source".
-    _src_dir = os.getenv("SOURCE_FILE_DIR", "/data/source_files")
+    # v15: resolved by docstore, which defaults to <repo>/documents rather
+    # than the Docker path "/data/source_files" -- that default silently
+    # resolved to C:\data\source_files on Windows, outside the repo and any
+    # backup, and was mistaken for data loss.
+    _src_dir = docstore.store_dir()
 
     # ── Duplicate check ───────────────────────────────────────────────────────
     existing = collection.get(where={"source": filename})
@@ -170,7 +187,9 @@ def ingest_file(content: bytes, filename: str,
         for pno, ptext in pages:
             if not ptext or not ptext.strip():
                 continue
-            for c in _enrich_chunks(chunk_text(ptext), filename):
+            for c in _enrich_chunks(
+                    chunk_text(ptext, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP),
+                    filename):
                 if c.strip():
                     texts.append(c)
                     pageno.append(pno)
@@ -205,7 +224,17 @@ def ingest_file(content: bytes, filename: str,
         collection.add(
             documents=texts,
             embeddings=[v.tolist() for v in vectors],
+            # BOTH spellings, deliberately. ingest wrote "products" (plural)
+            # while retrieval_db._matches_scope and the Chroma `where` filter
+            # read "product" (singular), so a freshly ingested document was
+            # invisible to every product-scoped query — it answered only
+            # unscoped, which reads as "the document I just added doesn't
+            # work". diag_scope.py --fix existed to repair this by hand after
+            # the fact; writing both keys here means a rebuild comes out
+            # correct with no repair step, which matters now that reindex.py
+            # makes rebuilding routine. They always hold the same value.
             metadatas=[{"source": filename, "kind": "chunk",
+                        "product": _prod_tag,
                         "products": _prod_tag,
                         "category": _cat_tag,
                         # v12.0: page number for citation + deep-linking.
@@ -220,6 +249,16 @@ def ingest_file(content: bytes, filename: str,
         # LLM call and ~4x vector-count inflation were no longer earning
         # their keep. The FAQ store is unaffected — it has been admin-
         # curated (not doc2query-fed) since v10.15.
+
+        # v15: record HOW this document was ingested. Chunk geometry only
+        # applies to documents ingested afterwards, so without this the index
+        # quietly holds a mix of geometries and "did the chunking change help?"
+        # cannot be answered. Bookkeeping never fails the ingest.
+        try:
+            docstore.record(filename, content=content, chunks=len(texts),
+                            pages=len(pages), settings=docstore.current_settings())
+        except Exception as _exc:
+            logger.warning(f"Could not record manifest entry: {_exc}")
 
         logger.info(f"Ingested '{filename}': {len(texts)} chunks")
         return len(texts)

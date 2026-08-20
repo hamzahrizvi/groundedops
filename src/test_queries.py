@@ -231,7 +231,8 @@ def run_tests():
                     "session_id": str(uuid.uuid4()),  # isolate from convo history
                     "deepseek_api_key": DEEPSEEK_API_KEY,
                     "force_provider": "deepseek",
-                    "force_model": "deepseek-chat",
+                    "force_model": os.getenv("ONLINE_DEEPSEEK_MODEL",
+                                              "deepseek-v4-flash"),
                 },
                 timeout=180,
             )

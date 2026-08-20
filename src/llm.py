@@ -42,11 +42,15 @@ def _online_provider_model() -> tuple[str, str]:
     (_chain_for) and query condensation so both honour the same choice."""
     from runtime_config import get_online_provider
     provider = get_online_provider()
+    # The FALLBACK defaults matter as much as the env vars: "deepseek-chat"
+    # was the default here, so any deployment that had not set
+    # ONLINE_DEEPSEEK_MODEL silently used an alias DeepSeek retired on
+    # 24 July 2026. src/.env sets it, which is the only reason this worked.
     model = {
-        "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-chat"),
+        "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"),
         "openai": os.getenv("ONLINE_OPENAI_MODEL", "gpt-4o-mini"),
         "anthropic": os.getenv("ONLINE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-    }.get(provider, "deepseek-chat")
+    }.get(provider, os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
     return provider, model
 
 
@@ -63,11 +67,19 @@ def _chain_for(role: str) -> list[tuple[str, str]]:
     return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
 
 # Models offered for the manual "rethink with a different model" feature.
-RETHINK_OPTIONS: list[tuple[str, str]] = [
-    ("local", "phi"),
-    ("local", "mistral"),
-    ("deepseek", "deepseek-chat"),
-]
+# The manual "Re-answer with another model" menu. deepseek was pinned to
+# "deepseek-chat" here, retired by DeepSeek on 24 July 2026 -- the FOURTH copy
+# of that alias in the codebase, and the reason every option in that menu was
+# dead. Read it from env like every other deepseek call site.
+def _rethink_options() -> list[tuple[str, str]]:
+    return [
+        ("local", "phi"),
+        ("local", "mistral"),
+        ("deepseek", os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")),
+    ]
+
+
+RETHINK_OPTIONS: list[tuple[str, str]] = _rethink_options()
 
 # Model used for query condensation — phi, since this is a short,
 # latency-sensitive auxiliary call on every turn beyond the first.
@@ -93,7 +105,16 @@ def _call_ollama(
         # phi stays snappy: it only does condensation (short prompts).
         timeout = 40 if model == "phi" else 240
     if num_predict is None:
-        num_predict = 120 if model == "phi" else 160
+        # 160 tokens is roughly 120 words, which truncated local answers
+        # mid-sentence -- a hard ceiling on answer quality that no amount of
+        # retrieval or prompting could lift. Callers that want a short answer
+        # already pass num_predict explicitly (condensation uses 64 and 8).
+        # phi stays lower: it is the small auxiliary model.
+        _default = 256 if model == "phi" else 512
+        try:
+            num_predict = int(os.getenv("LOCAL_MAX_TOKENS", "") or _default)
+        except ValueError:
+            num_predict = _default
 
     lock = MODEL_LOCKS.get(model)
 
@@ -160,7 +181,7 @@ def _call_ollama(
 
 def _call_deepseek(
     prompt: str,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     timeout: int = 60,
     api_key: str | None = None,
 ) -> dict | None:
@@ -236,7 +257,7 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
-            json={"model": model, "max_tokens": 1024,
+            json={"model": model, "max_tokens": 2048,
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )

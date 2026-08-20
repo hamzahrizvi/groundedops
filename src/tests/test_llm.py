@@ -17,6 +17,19 @@ client's request timeout.
 from unittest.mock import patch
 
 import llm
+import runtime_config
+
+
+# The chain shape depends on the generation mode, and these tests used to read
+# whatever mode the ambient environment happened to have -- passing under the
+# pre-v9.1.2 local-first default and failing once "api" became the default.
+# Pin it, so the chain under test is the one the assertions describe.
+def setup_function(func):
+    runtime_config.set_generation_mode("api")
+
+
+def teardown_function(func):
+    runtime_config.set_generation_mode("api")
 
 
 def test_fallback_chain_tries_each_entry_exactly_once_on_failure():
@@ -27,18 +40,28 @@ def test_fallback_chain_tries_each_entry_exactly_once_on_failure():
     """
     calls = []
 
-    def fake_generate(provider, prompt, model, deepseek_api_key=None):
+    # Mirrors llm.generate's real signature. `api_keys` was added there and
+    # these fakes were not updated, so every call raised TypeError and all
+    # four tests failed on the mock, not on the code under test. **kw keeps
+    # the next parameter from doing the same thing again.
+    def fake_generate(provider, prompt, model, deepseek_api_key=None,
+                      api_keys=None, **kw):
         calls.append((provider, model))
         return None  # simulate every attempt failing
 
     with patch.object(llm, "generate", side_effect=fake_generate):
         result = llm.generate_with_fallback("reasoning", "some prompt")
 
-    # mistral (chain), deepseek-chat (chain) — each exactly once.
-    # mistral may appear a second time only via the final "forced"
-    # safety net for chains that DON'T already include local/mistral —
-    # "reasoning"'s chain already includes it, so it must NOT repeat.
-    assert calls == [("local", "mistral"), ("deepseek", "deepseek-chat")]
+    # In api mode the online provider leads and local/mistral follows as the
+    # forced final attempt. What this guards is unchanged: each model is tried
+    # EXACTLY once, never twice (the old safe_generate behaviour that let one
+    # model burn the whole time budget).
+    #
+    # The expected pair is derived, not literal -- the online model comes from
+    # ONLINE_DEEPSEEK_MODEL, and a hardcoded "deepseek-chat" here broke the
+    # moment that retired alias was replaced.
+    assert calls == [llm._online_provider_model(), ("local", "mistral")]
+    assert len(calls) == len(set(calls)), "a model was attempted twice"
     assert result["model"] == "none"
 
 
@@ -50,7 +73,12 @@ def test_fallback_chain_advances_to_deepseek_immediately_on_mistral_failure():
     """
     calls = []
 
-    def fake_generate(provider, prompt, model, deepseek_api_key=None):
+    # Mirrors llm.generate's real signature. `api_keys` was added there and
+    # these fakes were not updated, so every call raised TypeError and all
+    # four tests failed on the mock, not on the code under test. **kw keeps
+    # the next parameter from doing the same thing again.
+    def fake_generate(provider, prompt, model, deepseek_api_key=None,
+                      api_keys=None, **kw):
         calls.append((provider, model))
         if provider == "local" and model == "mistral":
             return None  # mistral fails (e.g. timeout)
@@ -59,23 +87,32 @@ def test_fallback_chain_advances_to_deepseek_immediately_on_mistral_failure():
     with patch.object(llm, "generate", side_effect=fake_generate):
         result = llm.generate_with_fallback("reasoning", "some prompt")
 
-    # Exactly one mistral attempt before deepseek — not two.
-    assert calls == [("local", "mistral"), ("deepseek", "deepseek-chat")]
+    # This test was written when the chain was mistral-then-deepseek, so it
+    # asserted "one mistral attempt before deepseek". Since v9.1.2 api mode
+    # puts the online provider FIRST, which this fake answers successfully --
+    # so the surviving guarantee is that a first-entry success stops the chain
+    # dead, with no second attempt of anything.
+    assert calls == [llm._online_provider_model()]
     assert result["provider"] == "deepseek"
-    assert result["fallback_used"] is True
+    assert result["fallback_used"] is False
 
 
 def test_fallback_chain_returns_immediately_on_first_success_no_retry_calls():
     calls = []
 
-    def fake_generate(provider, prompt, model, deepseek_api_key=None):
+    # Mirrors llm.generate's real signature. `api_keys` was added there and
+    # these fakes were not updated, so every call raised TypeError and all
+    # four tests failed on the mock, not on the code under test. **kw keeps
+    # the next parameter from doing the same thing again.
+    def fake_generate(provider, prompt, model, deepseek_api_key=None,
+                      api_keys=None, **kw):
         calls.append((provider, model))
         return {"text": "first try works", "model": model, "provider": provider}
 
     with patch.object(llm, "generate", side_effect=fake_generate):
         result = llm.generate_with_fallback("reasoning", "some prompt")
 
-    assert calls == [("local", "mistral")]
+    assert calls == [llm._online_provider_model()]
     assert result["fallback_used"] is False
 
 
@@ -88,16 +125,35 @@ def test_fallback_chain_without_mistral_forces_single_final_mistral_attempt():
     """
     calls = []
 
-    def fake_generate(provider, prompt, model, deepseek_api_key=None):
+    # Mirrors llm.generate's real signature. `api_keys` was added there and
+    # these fakes were not updated, so every call raised TypeError and all
+    # four tests failed on the mock, not on the code under test. **kw keeps
+    # the next parameter from doing the same thing again.
+    def fake_generate(provider, prompt, model, deepseek_api_key=None,
+                      api_keys=None, **kw):
         calls.append((provider, model))
         if (provider, model) == ("local", "mistral"):
             return {"text": "forced mistral works", "model": model, "provider": provider}
         return None
 
-    fake_chain = {"weird_role": [("deepseek", "deepseek-chat")]}
+    # local mode, not the module default of api: in api mode the online
+    # provider is prepended regardless of FALLBACK_CHAIN, so a patched chain
+    # never gets a look in and this test could not exercise what it is named
+    # for -- a chain that does NOT contain local/mistral.
+    runtime_config.set_generation_mode("local")
+
+    # "accurate" must be present: _chain_for does
+    # FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"]), and Python
+    # evaluates that default eagerly -- so a fake chain without it raises
+    # KeyError before the lookup this test cares about even happens.
+    fake_chain = {"weird_role": [("deepseek", "deepseek-chat")],
+                  "accurate": [("local", "mistral")]}
     with patch.object(llm, "FALLBACK_CHAIN", fake_chain):
         with patch.object(llm, "generate", side_effect=fake_generate):
             result = llm.generate_with_fallback("weird_role", "some prompt")
 
+    # The chain's own entry, then exactly one forced mistral attempt appended
+    # because the chain lacked it. "deepseek-chat" here is this test's own
+    # fixture, not a real model name, so it does not go stale.
     assert calls == [("deepseek", "deepseek-chat"), ("local", "mistral")]
     assert result["fallback_used"] is True

@@ -241,7 +241,10 @@ def main():
     # system currently clarifies or rejects. Needs a DeepSeek key by default.
     force_answers = "--force-answers" in sys.argv
     force_prov = os.getenv("EVAL_FORCE_PROVIDER", "deepseek")
-    force_mdl = os.getenv("EVAL_FORCE_MODEL", "deepseek-chat")
+    # Seventh copy of the retired "deepseek-chat" alias lived here. Default to
+    # the same env var every other deepseek call site reads.
+    force_mdl = os.getenv("EVAL_FORCE_MODEL",
+                          os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
     if report:
         do_grade = False
 

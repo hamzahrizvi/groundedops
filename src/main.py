@@ -175,6 +175,15 @@ _PUBLIC_PREFIXES = ("/widget", "/health")
 # answers with no sources, so they never need it.
 _TOKEN_GATED_PREFIXES = ("/source_file",)
 
+# ── retrieval / context geometry ──────────────────────────────────────────
+# Env-tunable so eval.py can sweep them without code edits. Raising CONTEXT_K
+# and CHUNK_CHAR_CAP costs prompt tokens and can dilute the NLI grounding
+# check, which compares the answer against these chunks -- so measure with
+# eval.py rather than assuming bigger is better.
+RETRIEVE_K = int(os.getenv("RETRIEVE_K", "16"))
+CONTEXT_K = int(os.getenv("CONTEXT_K", "8"))
+CHUNK_CHAR_CAP = int(os.getenv("CHUNK_CHAR_CAP", "1600"))
+
 
 def _deny(request) -> JSONResponse:
     """404 that still carries CORS headers.
@@ -562,8 +571,18 @@ def stats():
 
 @app.get("/rethink_options")
 def rethink_options():
-    """Models available for the 'rethink with a different model' feature."""
-    return {"options": [{"provider": p, "model": m} for p, m in RETHINK_OPTIONS]}
+    """Models available for the 'rethink with a different model' feature.
+
+    Filtered by what is actually reachable. Unfiltered, this offered two
+    Ollama models with no Ollama running and a retired DeepSeek alias -- three
+    options, none of which could answer, presented as the remedy for an answer
+    the user was already unhappy with.
+    """
+    from llm import _rethink_options
+    reachable = {p["key"] for p in _available_providers()}
+    opts = [{"provider": p, "model": m} for p, m in _rethink_options()
+            if p in reachable]
+    return {"options": opts}
 
 
 @app.post("/reset")
@@ -1234,7 +1253,7 @@ async def admin_answer_gap(payload: AnswerGapReq, x_admin_password: str | None =
     req = QueryRequest(q=gap["question"], product=gap.get("scope"), skip_faq=True)
     if payload.provider:
         req.force_provider = payload.provider
-        req.force_model = payload.model or _PROVIDER_DEFAULT_MODEL.get(payload.provider, "")
+        req.force_model = payload.model or _default_model_for(payload.provider)
 
     # query() is sync — run in the threadpool so this doesn't block the
     # event loop, same reasoning as _widget_answer below.
@@ -1436,12 +1455,54 @@ class FaqAutoReq(BaseModel):
 # Sensible default per provider when an override provider is chosen but
 # no specific model is typed — mirrors the retired AdminPanel.jsx's
 # curated model lists.
-_PROVIDER_DEFAULT_MODEL = {
+# Default model when an override provider is chosen but no model is typed.
+#
+# deepseek was pinned to "deepseek-chat" here, which DeepSeek RETIRED on
+# 24 July 2026 — so every console-initiated generation with the DeepSeek
+# provider selected failed with "returned nothing", including "generate
+# questions". The escalation path in query() already learned this and reads
+# ONLINE_DEEPSEEK_MODEL; read it here too rather than keeping a second copy
+# of a value that goes stale.
+_PROVIDER_STATIC_MODEL = {
     "local": "mistral",
-    "deepseek": "deepseek-chat",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-4-6",
 }
+
+
+def _default_model_for(provider: str) -> str:
+    if provider == "deepseek":
+        return os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
+    return _PROVIDER_STATIC_MODEL.get(provider, "")
+
+
+# Which providers this install can actually reach. An online provider needs
+# its key in the environment; local needs Ollama warmed. The console builds
+# its provider pickers from this so it cannot offer a provider that is
+# guaranteed to fail — the old hardcoded list offered all four regardless.
+_PROVIDER_KEY_ENV = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+_PROVIDER_LABEL = {
+    "local": "Local (Ollama)",
+    "deepseek": "DeepSeek",
+    "openai": "OpenAI",
+    "anthropic": "Claude",
+}
+
+
+def _available_providers() -> list[dict]:
+    out = []
+    if get_settings().get("local_models_loaded"):
+        out.append({"key": "local", "label": _PROVIDER_LABEL["local"],
+                    "default_model": _default_model_for("local")})
+    for key, env in _PROVIDER_KEY_ENV.items():
+        if (os.getenv(env) or "").strip():
+            out.append({"key": key, "label": _PROVIDER_LABEL[key],
+                        "default_model": _default_model_for(key)})
+    return out
 
 
 def _source_text(source: str, max_chunks: int = 12, cap: int = 8000) -> str:
@@ -1535,7 +1596,7 @@ def admin_faq_autogenerate(payload: FaqAutoReq,
     try:
         if payload.provider:
             from llm import generate
-            model = payload.model or _PROVIDER_DEFAULT_MODEL.get(payload.provider, "")
+            model = payload.model or _default_model_for(payload.provider)
             out = generate(payload.provider, prompt, model)
             if not out or not out.get("text"):
                 raise HTTPException(status_code=502,
@@ -1551,8 +1612,27 @@ def admin_faq_autogenerate(payload: FaqAutoReq,
         raise HTTPException(status_code=502, detail=f"Drafting failed: {e}")
 
     raw = (out or {}).get("text", "") or ""
+
+    # generate_with_fallback returns provider "none" when EVERY provider in the
+    # chain failed -- a rejected key, an Ollama that is not running. Its
+    # placeholder text ("I was unable to generate a response.") of course does
+    # not parse, and the parse failure below then reported it as "the model did
+    # not return usable pairs, try again" -- advice for a situation that cannot
+    # succeed no matter how many times it is retried. Name the actual fault.
+    if (out or {}).get("provider") == "none":
+        raise HTTPException(
+            status_code=502,
+            detail="No model could be reached, so nothing was generated. Every "
+                   "configured provider failed: check the provider API key in "
+                   "src/.env is still valid, or start Ollama to draft locally.")
+
     pairs = _parse_qa_json(raw)
     if not pairs:
+        # Logged because the endpoint used to discard the response entirely,
+        # which made a parse failure impossible to diagnose from the server.
+        logger.warning(
+            "FAQ autogeneration parsed 0 pairs from %s/%s; raw head: %r",
+            (out or {}).get("provider"), (out or {}).get("model"), raw[:300])
         # A local model that returns unparseable text is a normal, common
         # outcome, not an exception — say so plainly rather than storing
         # garbage or reporting a false success.
@@ -1682,6 +1762,18 @@ def admin_login(x_admin_password: str | None = Header(default=None)):
     return {"ok": True}
 
 
+@app.get("/admin/providers")
+def admin_providers(x_admin_password: str | None = Header(default=None)):
+    """Providers the console may offer: key present, or local warmed.
+
+    An empty list is meaningful, not an error — it means nothing is
+    configured and the caller should fall back to the server's own default
+    chain rather than naming a provider.
+    """
+    _require_admin(x_admin_password)
+    return {"providers": _available_providers()}
+
+
 @app.post("/admin/category")
 def admin_add_category(payload: CategoryReq, x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
@@ -1743,6 +1835,29 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     api_keys = {"deepseek": payload.deepseek_api_key,
                 "openai": payload.openai_api_key,
                 "anthropic": payload.anthropic_api_key}
+
+    # A browser-supplied key WINS over the server's, because llm.generate does
+    # `api_key or os.getenv(...)`. The frontend keeps one in localStorage per
+    # machine, so two copies exist and can drift -- and when they did, the
+    # symptom was "only the PC I uploaded from can ask questions", with nothing
+    # anywhere to say why. Log which key is in play so the next divergence is
+    # one grep, not an afternoon. Never log the key itself, only its origin and
+    # a short fingerprint good enough to tell two keys apart.
+    for _prov, _sent in api_keys.items():
+        if not (_sent or "").strip():
+            continue
+        _env = (os.getenv(f"{_prov.upper()}_API_KEY") or "").strip()
+        if _env and _env != _sent.strip():
+            logger.warning(
+                "%s key from the request differs from the server's "
+                "(request %s vs server %s) - the request's wins, so this "
+                "client is not using the configured key",
+                _prov,
+                hashlib.sha256(_sent.strip().encode()).hexdigest()[:8],
+                hashlib.sha256(_env.encode()).hexdigest()[:8])
+        elif not _env:
+            logger.info("%s key supplied by the client; server has none set",
+                        _prov)
     start_total = time.time()
 
     # ── Conversational query resolution (Rewrite-Retrieve-Read) ──
@@ -1911,7 +2026,11 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             }
         # mode == "none" -> fall through to retrieval.
 
-    results = retrieve_from_db(resolved_query, top_k=10,
+    # RETRIEVE_K feeds the reranker, CONTEXT_K is what reaches the prompt.
+    # 10 -> 5 -> 5 chunks of <=500 chars gave the model ~2.5KB to answer from,
+    # which is the dominant limit on answer completeness. Both env-tunable so
+    # they can be swept against eval.py.
+    results = retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
                                source_filter=payload.source_filter,
                                scope=_scope)
     # CORPUS SCOPING (v8.4): internal-only documents are excluded from
@@ -1929,7 +2048,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             r for r in results
             if not any(ex in (r.get("source") or "").lower() for ex in EXCLUDED_SOURCES)
         ]
-    results = rerank(resolved_query, results, top_k=5)
+    results = rerank(resolved_query, results, top_k=CONTEXT_K)
     retrieval_time = time.time() - t1
 
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
@@ -2104,7 +2223,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         _strip_breadcrumb(r) for r in results[:3]
         if r.get("rerank_score", 0.0) >= _top * CONTEXT_FLOOR_RATIO
     ]
-    context = "\n\n".join(r["text"][:1200] for r in top_chunks)
+    # Was a flat 1200, which silently clipped anything larger. Tied to the
+    # chunk size now so a whole chunk always survives into the prompt.
+    context = "\n\n".join(r["text"][:CHUNK_CHAR_CAP] for r in top_chunks)
 
     prompt = f"""<context>
 {context}
@@ -2229,21 +2350,44 @@ Answer:"""
     # After the escalation attempt above, if the best answer we have is
     # still ungrounded, refuse rather than serve it.
     if template_leak or generation_failed or flagged:
-        answer = "I could not find that in the knowledge base."
+        # "No model was reachable" is not "the documents do not cover this",
+        # but both produced the same refusal -- so an outage was indistinguish-
+        # able from a knowledge gap, while the details panel showed
+        # retrieval_score 0.99 and the right manual under Sources. That is the
+        # combination that sends someone re-uploading documents that were never
+        # the problem, or hunting a per-machine issue that does not exist.
+        no_model = generation_failed and output.get("provider") == "none"
+
+        if no_model:
+            answer = ("I could not answer that just now \u2014 no language model is "
+                      "reachable. Your documents were searched fine; this is a "
+                      "configuration problem, not a missing answer.")
+        else:
+            answer = "I could not find that in the knowledge base."
+
         if template_leak or generation_failed:
             grounding_score = None
         flagged = True
+
         # Retrieval found something but we could not stand behind an
         # answer, so the visitor got the same flat rejection as a total
         # miss. From their side that IS an unanswered question, and it is
         # arguably the more useful kind to surface: the documents nearly
         # cover it, so a short curated answer would close it. Recorded with
         # a distinct reason so the two causes stay separable.
-        faq_store.record_gap(
-            q, payload.product or payload.category,
-            reason="generation_failed" if generation_failed
-                   else "template_leak" if template_leak
-                   else "ungrounded_answer_suppressed")
+        #
+        # An outage is NOT recorded: nobody failed to answer it, the service
+        # was down. Logging those fills the customer-questions list with
+        # entries no amount of curation can resolve.
+        if not no_model:
+            faq_store.record_gap(
+                q, payload.product or payload.category,
+                reason="generation_failed" if generation_failed
+                       else "template_leak" if template_leak
+                       else "ungrounded_answer_suppressed")
+        else:
+            logger.error("No provider reachable; refused %r without recording "
+                         "a gap (retrieval was fine)", q[:80])
 
     # ── Memory + logging ──────────────────────
     add_to_memory(session_id, q, answer)

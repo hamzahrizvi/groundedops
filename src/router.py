@@ -186,6 +186,9 @@ def route_model(query: str) -> tuple[str, tuple[str, str]]:
     # extraction and rethink behavior downstream), but ALL answering goes
     # to DeepSeek. Single switch, no per-role config drift.
     if get_generation_mode() == "api":
-        return role, ("deepseek", "deepseek-chat")
+        # Eighth copy of the retired "deepseek-chat" alias. Read the env var
+        # every other deepseek call site reads instead of pinning a name.
+        return role, ("deepseek",
+                      os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
 
     return role, MODEL_MAP[role]

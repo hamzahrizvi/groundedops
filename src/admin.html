@@ -135,13 +135,17 @@
   /* Sections of the active page, listed under its nav row so they can be
      reached without scrolling for them. Built from the rendered DOM in
      buildSubnav(), so a view gets one for free by tagging cards data-sec. */
-  .subnav{display:flex;flex-direction:column;gap:1px;margin:2px 0 4px 22px;
-          border-left:1px solid var(--color-divider);padding-left:9px}
+  /* Text aligns under the parent item's label (10px rail padding + 9px button
+     padding + 3px mark + 9px gap = 31px), so the list reads as that item's
+     contents. An earlier version indented off a vertical rule, which sat
+     awkwardly against both the rail border and the active item's block. */
+  .subnav{display:flex;flex-direction:column;padding:1px 10px 6px}
   .subnav button{display:block;width:100%;text-align:left;border:0;background:transparent;
-                 cursor:pointer;font:inherit;font-size:12px;padding:4px 7px;border-radius:6px;
-                 color:color-mix(in srgb, var(--color-text) 45%, transparent)}
-  .subnav button:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent);
-                       color:var(--color-text)}
+                 cursor:pointer;font:inherit;font-size:12.5px;
+                 padding:5px 10px 5px 21px;border-radius:var(--radius-md);
+                 color:color-mix(in srgb, var(--color-text) 42%, transparent)}
+  .subnav button:hover{background:color-mix(in srgb, var(--color-text) 6%, transparent);
+                       color:color-mix(in srgb, var(--color-text) 85%, transparent)}
   .subnav button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 
   /* ---------- walkthrough ---------- */
@@ -215,7 +219,7 @@ let view = "overview";
 // Set by the Unanswered page's "Answer this" so the Answers page opens
 // with the question prefilled and scrolled into view.
 let pendingAnswer = null;
-let cache = { catalog: null, sources: [], faq: [], gaps: [],
+let cache = { catalog: null, sources: [], faq: [], gaps: [], providers: [],
               widget: null, leads: [], leadStats: {} };
 
 // Sentinel for "answers carrying no product tag at all" in the answers-page
@@ -249,6 +253,35 @@ function toast(msg, bad) {
   setTimeout(() => t.remove(), bad ? 6000 : 3200);
 }
 
+// Provider pickers are built from what the server says it can actually reach
+// (/admin/providers: key present in the environment, or Ollama warmed) rather
+// than a hardcoded list of all four. Offering DeepSeek with no key set failed
+// with "returned nothing", which reads as a broken model rather than as
+// missing configuration.
+function providerBox(extra) {
+  return el("select", Object.assign({ class: "input" }, extra || {}),
+    el("option", { value: "" },
+      cache.providers.length ? "Server default" : "Server default (none configured)"),
+    cache.providers.map(p => el("option", { value: p.key }, p.label)));
+}
+
+const defaultModelFor = key =>
+  (cache.providers.find(p => p.key === key) || {}).default_model || "";
+
+// The model box means nothing until a provider is chosen, and showing that
+// provider's current default as the placeholder saves guessing a model name
+// -- which is how a retired one went unnoticed.
+function linkModelBox(sel, box) {
+  const sync = () => {
+    const d = defaultModelFor(sel.value);
+    box.placeholder = d ? d + "  (default)" : "model (optional)";
+    box.disabled = !sel.value;
+  };
+  sel.addEventListener("change", sync);
+  sync();
+  return box;
+}
+
 async function api(path, opts = {}) {
   const o = Object.assign({ headers: {} }, opts);
   o.headers["x-admin-password"] = pw;
@@ -266,13 +299,14 @@ async function api(path, opts = {}) {
 async function refresh() {
   // All independent reads — run them together rather than in series, so
   // opening the console is one round trip's worth of latency, not six.
-  const [cat, src, faq, gaps, widget, leads] = await Promise.all([
+  const [cat, src, faq, gaps, widget, leads, prov] = await Promise.all([
     api("/catalog").catch(() => ({ categories: [] })),
     api("/admin/sources").catch(() => ({ sources: [] })),
     api("/faq").catch(() => ({ faq: [] })),
     api("/faq/gaps").catch(() => ({ gaps: [], stats: {} })),
     api("/admin/widget/config").catch(() => null),
     api("/admin/leads").catch(() => ({ leads: [], stats: {} })),
+    api("/admin/providers").catch(() => ({ providers: [] })),
   ]);
   cache.catalog = cat.categories || [];
   cache.sources = src.sources || src || [];
@@ -284,6 +318,7 @@ async function refresh() {
   // or a failed read would render as a blank config the admin could
   // accidentally save over their real one.
   cache.widget = widget;
+  cache.providers = prov.providers || [];
   cache.leads = leads.leads || [];
   cache.leadStats = leads.stats || {};
 }
@@ -322,8 +357,8 @@ function render() {
       el("nav", { class: "nav" },
         nav("overview", "Overview"),
         nav("documents", "Documents", cache.sources.length),
-        nav("faq", "Reviewed answers", answered().length),
-        nav("gaps", "Unanswered", cache.gaps.length),
+        nav("faq", "Generate/Edit FAQs", answered().length),
+        nav("gaps", "FAQs from customers", cache.gaps.length),
         nav("catalog", "Products", products().length),
         nav("widget", "Widget design"),
         nav("leads", "Enquiries", cache.leadStats.unhandled || 0),
@@ -773,54 +808,59 @@ function viewFaq() {
   }
   render2();
 
-  // draft from a document, server-side
-  const srcSel = el("select", { class: "input" }, el("option", { value: "" }, "Choose a document\u2026"),
-    cache.sources.map(s => el("option", { value: s.source }, s.source)));
-  const providerSel = el("select", { class: "input" },
-    el("option", { value: "" }, "Default model"),
-    el("option", { value: "local" }, "Local (Ollama)"),
-    el("option", { value: "deepseek" }, "DeepSeek"),
-    el("option", { value: "openai" }, "OpenAI"),
-    el("option", { value: "anthropic" }, "Claude"));
-  const modelIn = el("input", { class: "input", type: "text", placeholder: "model (optional)" });
-  const draftBtn = el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
-    const src = srcSel.value;
-    if (!src) return toast("Choose a document first", true);
-    const s = cache.sources.find(x => x.source === src) || {};
-    draftBtn.disabled = true; draftBtn.textContent = "Drafting\u2026";
-    try {
-      const r = await api("/admin/faq/autogenerate", { method: "POST",
-        body: JSON.stringify({ source: src, product: s.product || s.products || "", category: s.category || "",
-          provider: providerSel.value || null, model: modelIn.value.trim() || null }) });
-      toast("Added " + r.added + " new, skipped " + r.skipped_duplicates + " already there");
-      await refresh(); render();
-    } catch (e) { toast(e.message, true); }
-    finally { draftBtn.disabled = false; draftBtn.textContent = "Draft answers"; }
-  } }, "Draft answers");
+  // Generating FAQs from a document, server-side.
+  //
+  // This was two buttons, "Draft answers" and "Draft all", which differed only
+  // in WHICH documents they covered -- and that is a property of the picker,
+  // not a separate action. One button now, with the scope chosen above it.
+  const ALL_DOCS = "__all__";
+  const undraftedDocs = () => cache.sources.filter(s => {
+    const key = s.product || s.products || "";
+    return !cache.faq.some(f => scopeOf(f) === key && f.source === s.source);
+  });
 
-  // #7: draft every document that has no FAQ entries at all yet.
-  const draftAllBtn = el("button", { class: "btn btn-secondary", style: BTN, onclick: async () => {
-    const undrafted = cache.sources.filter(s => {
-      const key = s.product || s.products || "";
-      return !cache.faq.some(f => scopeOf(f) === key && f.source === s.source);
-    });
-    if (!undrafted.length) return toast("Every document already has drafted answers");
-    if (!confirm("Draft answers for " + undrafted.length + " document(s)? This calls the model once per document.")) return;
-    draftAllBtn.disabled = true;
-    let done = 0, added = 0;
-    for (const s of undrafted) {
-      draftAllBtn.textContent = "Drafting " + (++done) + "/" + undrafted.length + "\u2026";
-      try {
-        const r = await api("/admin/faq/autogenerate", { method: "POST",
-          body: JSON.stringify({ source: s.source, product: s.product || s.products || "", category: s.category || "",
-            provider: providerSel.value || null, model: modelIn.value.trim() || null }) });
-        added += r.added || 0;
-      } catch (e) { toast(s.source + ": " + e.message, true); }
+  const srcSel = el("select", { class: "input" },
+    el("option", { value: "" }, "Choose a document\u2026"),
+    el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"),
+    cache.sources.map(s => el("option", { value: s.source }, s.source)));
+  const provSel = providerBox();
+  const modelIn = linkModelBox(provSel,
+    el("input", { class: "input", type: "text", placeholder: "model (optional)" }));
+
+  const genOne = s => api("/admin/faq/autogenerate", { method: "POST",
+    body: JSON.stringify({ source: s.source, product: s.product || s.products || "",
+      category: s.category || "",
+      provider: provSel.value || null, model: modelIn.value.trim() || null }) });
+
+  const genBtn = el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
+    const pick = srcSel.value;
+    if (!pick) return toast("Choose a document first", true);
+
+    const docs = pick === ALL_DOCS ? undraftedDocs()
+                                   : cache.sources.filter(s => s.source === pick);
+    if (!docs.length) {
+      return toast(pick === ALL_DOCS ? "Every document already has FAQs"
+                                     : "That document is no longer listed", true);
     }
-    draftAllBtn.disabled = false; draftAllBtn.textContent = "Draft all";
-    toast("Drafted " + added + " new answer(s) across " + done + " document(s)");
-    await refresh(); render();
-  } }, "Draft all");
+    if (docs.length > 1 && !confirm("Generate FAQs from " + docs.length +
+        " documents? This calls the model once per document.")) return;
+
+    genBtn.disabled = true;
+    let done = 0, added = 0, dupes = 0;
+    try {
+      for (const s of docs) {
+        genBtn.textContent = docs.length > 1
+          ? "Generating " + (++done) + "/" + docs.length + "\u2026" : "Generating\u2026";
+        try {
+          const r = await genOne(s);
+          added += r.added || 0; dupes += r.skipped_duplicates || 0;
+        } catch (e) { toast(s.source + ": " + e.message, true); }
+      }
+      toast("Added " + added + " new FAQ" + (added === 1 ? "" : "s") +
+            (dupes ? ", skipped " + dupes + " already there" : ""));
+      await refresh(); render();
+    } finally { genBtn.disabled = false; genBtn.textContent = "Generate FAQs"; }
+  } }, "Generate FAQs");
 
   // #7: PATCH every row edited but not yet saved.
   const saveAllBtn = el("button", { class: "btn btn-secondary", style: BTN, onclick: async () => {
@@ -863,24 +903,23 @@ function viewFaq() {
   }
 
   return [
-    el("h1", {}, "Reviewed answers"),
-    el("p", { class: "lede" }, "Reviewed answers are shown exactly as written and cost nothing to serve. Visitors who are not signed in see only these."),
+    el("h1", {}, "Generate/Edit FAQs"),
+    el("p", { class: "lede" }, "FAQs are shown to visitors exactly as written and cost nothing to serve. Anyone not signed in sees only these, so treat the wording as published copy."),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
-                "data-tour": "ans-draft", "data-sec": "Draft from a document" },
-      el("div", { class: "sec-title" }, "Draft from a document"),
-      el("div", { class: "sec-hint" }, "Suggests questions and answers from a document you have added. Nothing is published until you have read it \u2014 and drafting again never overwrites answers you have edited."),
+                "data-tour": "ans-draft", "data-sec": "Generate from a document" },
+      el("div", { class: "sec-title" }, "Generate FAQs from a document"),
+      el("div", { class: "sec-hint" }, "Reads a document you have already added and writes FAQs from it \u2014 the questions a customer would ask, answered from that document alone. Nothing goes live until you have read it, and running it again adds only genuinely new questions: it never overwrites an answer you edited."),
       // Explicit flex bases: the default .row>div{flex:1;min-width:170px} gave
       // five equal columns whose minimums overflowed the card, which is what
-      // pushed the model field under the buttons.
+      // pushed the model field under the button.
       el("div", { class: "row" },
         el("div", { style: "flex:1 1 240px" },
           el("label", { class: "flabel" }, "Document"), srcSel),
         el("div", { style: "flex:0 1 180px" },
-          el("label", { class: "flabel" }, "Provider"), providerSel),
+          el("label", { class: "flabel" }, "Provider"), provSel),
         el("div", { style: "flex:0 1 180px" },
           el("label", { class: "flabel" }, "Model"), modelIn),
-        el("div", { style: "flex:0 0 auto;min-width:0;display:flex;gap:8px" },
-          draftBtn, draftAllBtn))),
+        el("div", { style: "flex:0 0 auto;min-width:0" }, genBtn))),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "ans-hand", "data-sec": "Write one yourself" },
       el("div", { class: "sec-title" }, "Write one yourself"),
@@ -933,13 +972,9 @@ function viewGaps() {
   };
 
   const selected = new Set();
-  const providerSel = el("select", { class: "input", style: "width:auto" },
-    el("option", { value: "" }, "Default model"),
-    el("option", { value: "local" }, "Local (Ollama)"),
-    el("option", { value: "deepseek" }, "DeepSeek"),
-    el("option", { value: "openai" }, "OpenAI"),
-    el("option", { value: "anthropic" }, "Claude"));
-  const modelIn = el("input", { class: "input", style: "width:auto", type: "text", placeholder: "model (optional)" });
+  const provSel = providerBox({ style: "width:auto" });
+  const modelIn = linkModelBox(provSel,
+    el("input", { class: "input", style: "width:auto", type: "text", placeholder: "model (optional)" }));
 
   const answerHere = (g, answer) => {
     // Prefill the Answers page's hand-written form with this question (and
@@ -1002,7 +1037,7 @@ function viewGaps() {
             const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
             try {
               const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
-                gap_id: g.id, provider: providerSel.value || null, model: modelIn.value.trim() || null }) });
+                gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
               draftBox.innerHTML = "";
               draftBox.append(
                 el("p", { class: "sec-hint", style: "margin:8px 0 4px" }, "AI draft \u2014 not saved yet:"),
@@ -1028,14 +1063,14 @@ function viewGaps() {
   });
 
   return [
-    el("h1", {}, "Unanswered"),
+    el("h1", {}, "FAQs from customers"),
     el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover, most asked first. Working down this list is the single most useful piece of upkeep."),
     cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
       el("span", { class: "sec-hint", style: "margin:0" }, "Select questions above, then:"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps", "DELETE", "Dismissed") }, "Dismiss selected"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps/spam", "POST", "Marked spam:") }, "Mark spam"),
       el("span", { style: "flex:1" }),
-      el("label", { class: "flabel", style: "margin:0" }, "AI model:"), providerSel, modelIn) : null,
+      el("label", { class: "flabel", style: "margin:0" }, "AI model:"), provSel, modelIn) : null,
     cache.gaps.length ? el("div", { "data-tour": "gaps-list" }, rows)
       : el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
           el("b", {}, "Nothing unanswered"),
@@ -1379,35 +1414,37 @@ function viewTest() {
   const prods = products();
   const sel = el("select", { class: "input" }, el("option", { value: "" }, "Whole knowledge base"),
     prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
-  const providerSel = el("select", { class: "input" },
-    el("option", { value: "" }, "Default model"),
-    el("option", { value: "local" }, "Local (Ollama)"),
-    el("option", { value: "deepseek" }, "DeepSeek"),
-    el("option", { value: "openai" }, "OpenAI"),
-    el("option", { value: "anthropic" }, "Claude"));
-  const modelIn = el("input", { class: "input", type: "text", placeholder: "model (optional)" });
+  const provSel = providerBox();
+  const modelIn = linkModelBox(provSel,
+    el("input", { class: "input", type: "text", placeholder: "model (optional)" }));
   const log = el("div", { class: "chat" },
     el("div", { class: "bub a" }, "Ask something a customer might ask. This uses the same pipeline as the widget, so what you see here is what they would get."));
   const input = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
   const sid = "console-" + Math.random().toString(36).slice(2);
-  // /query only honors force_provider when force_model is ALSO set \u2014 pick
-  // a sensible default rather than silently falling back to the default
-  // chain when the admin chose a provider but left the model blank.
-  const DEFAULT_MODEL = { local: "mistral", deepseek: "deepseek-chat",
-    openai: "gpt-4o-mini", anthropic: "claude-sonnet-4-6" };
 
-  async function send() {
-    const q = input.value.trim(); if (!q) return;
-    input.value = "";
-    log.append(el("div", { class: "bub u" }, q));
+  // /query only honors force_provider when force_model is ALSO set, so fall
+  // back to the provider's current default rather than silently dropping to
+  // the default chain. That default now comes from the server (see
+  // providerBox) -- it was a hardcoded map here, holding a DeepSeek alias
+  // that had been retired, so every forced DeepSeek call failed.
+  async function send(q, opts = {}) {
+    q = (q === undefined ? input.value : q).trim();
+    if (!q) return;
+    if (q === input.value.trim()) input.value = "";
+
+    // Choosing or rejecting a suggestion re-asks a question the assistant
+    // itself put on screen, so it is not a new turn from the visitor.
+    if (!opts.silent) log.append(el("div", { class: "bub u" }, q));
     const wait = el("div", { class: "bub a" }, "Checking the documentation\u2026");
     log.append(wait); log.scrollTop = log.scrollHeight;
-    const provider = providerSel.value || null;
-    const model = provider ? (modelIn.value.trim() || DEFAULT_MODEL[provider] || null) : null;
+
+    const provider = provSel.value || null;
+    const model = provider ? (modelIn.value.trim() || defaultModelFor(provider) || null) : null;
     try {
       const r = await api("/query", { method: "POST", body: JSON.stringify({
         q, session_id: sid, product: sel.value || null,
-        force_provider: provider, force_model: model }) });
+        force_provider: provider, force_model: model,
+        faq_id: opts.faqId || null, skip_faq: !!opts.skipFaq }) });
       wait.remove();
       const bub = el("div", { class: "bub a" }, r.answer || "No answer");
       if (r.sources && r.sources.length) {
@@ -1417,6 +1454,23 @@ function viewTest() {
       }
       if (r.from_faq) bub.append(el("div", { class: "tag tag-outline", style: "margin-top:8px" }, "reviewed answer"));
       log.append(bub);
+
+      // The widget shows these; this page did not, so a clarify turn arrived
+      // as a bare "is this what you meant?" with nothing to answer it -- the
+      // one place the test chat did NOT match what a customer sees.
+      const cands = r.faq_candidates || [];
+      if (cands.length) {
+        const box = el("div", { class: "bub a", style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" });
+        cands.forEach(c => box.append(el("button", {
+          class: "btn btn-secondary", style: "font-size:12.5px;padding:6px 11px;text-align:left;white-space:normal",
+          onclick: () => { box.remove(); send(c.question, { faqId: c.id, silent: true }); },
+        }, c.question)));
+        box.append(el("button", {
+          class: "btn btn-ghost", style: "font-size:12px;padding:4px 9px",
+          onclick: () => { box.remove(); send(q, { skipFaq: true, silent: true }); },
+        }, "None of these \u2014 answer from the documents"));
+        log.append(box);
+      }
     } catch (e) { wait.textContent = "Failed: " + e.message; }
     log.scrollTop = log.scrollHeight;
   }
@@ -1428,12 +1482,12 @@ function viewTest() {
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0", "data-tour": "test-chat" },
       el("div", { class: "row", style: "margin-bottom:12px" },
         el("div", {}, el("label", { class: "flabel" }, "Ask about"), sel),
-        el("div", {}, el("label", { class: "flabel" }, "Provider"), providerSel),
+        el("div", {}, el("label", { class: "flabel" }, "Provider"), provSel),
         el("div", {}, el("label", { class: "flabel" }, "Model"), modelIn)),
       log,
       el("div", { class: "row", style: "margin-top:12px" },
         el("div", { style: "flex:1" }, input),
-        el("div", { style: "flex:0 0 auto" }, el("button", { class: "btn btn-primary", onclick: send }, "Ask")))),
+        el("div", { style: "flex:0 0 auto" }, el("button", { class: "btn btn-primary", onclick: () => send() }, "Ask")))),
   ];
 }
 
@@ -1461,8 +1515,8 @@ const tourStepsByView = {
       text: "Grouped by product, the same way the widget sees them. Anything with no product is called out separately." },
   ],
   faq: [
-    { ref: "ans-draft", title: "Draft from a document",
-      text: "Suggests questions and answers from a document you have already added. Nothing is published until you have read it, and drafting again never overwrites an answer you edited by hand." },
+    { ref: "ans-draft", title: "Generate FAQs from a document",
+      text: "Reads a document and writes FAQs from it. Pick one document, or every document that has none yet. Nothing goes live until you have read it, and running it again never overwrites an answer you edited by hand." },
     { ref: "ans-hand", title: "Write one yourself",
       text: "For anything the documents do not cover. Hand-written answers are protected \u2014 drafting will never replace them." },
     { ref: "ans-list", title: "Read and fix the wording",
