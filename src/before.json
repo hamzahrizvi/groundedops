@@ -1,0 +1,309 @@
+{
+  "settings": {
+    "retrieve_k": 16,
+    "context_k": 8,
+    "chunk_char_cap": 1600
+  },
+  "cases_scored": 16,
+  "cases_skipped": 18,
+  "retrieved": {
+    "recall@1": 0.5,
+    "recall@3": 0.75,
+    "recall@5": 0.75,
+    "recall@8": 0.812,
+    "mrr": 0.627,
+    "misses": 2
+  },
+  "reranked": {
+    "recall@1": 0.562,
+    "recall@3": 0.812,
+    "recall@5": 0.812,
+    "recall@8": 0.875,
+    "mrr": 0.688,
+    "misses": 2
+  },
+  "detail": [
+    {
+      "q": "What is MyCheckr?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "age"
+      ],
+      "rank_retrieved": 3,
+      "rank_reranked": 6,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Does MyCheckr need an internet connection?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "no"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Does MyCheckr store personal data?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "no data stored"
+      ],
+      "rank_retrieved": 8,
+      "rank_reranked": 2,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Who certified MyCheckr for GDPR?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "Age Check Certification Scheme"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Are there recurring fees for MyCheckr?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "one-off"
+      ],
+      "rank_retrieved": 15,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Which retailing strategy does MyCheckr automate?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "Challenge 25"
+      ],
+      "rank_retrieved": null,
+      "rank_reranked": null,
+      "n_retrieved": 16
+    },
+    {
+      "q": "How can MyCheckr be mounted?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "VESA"
+      ],
+      "rank_retrieved": null,
+      "rank_reranked": null,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Does MyCheckr require integration with other systems?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "no"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "What hardware does MyCheckr include?",
+      "product": "mycheckr_mini",
+      "expected": [
+        "MyCheckr Mini User Manual-v5.pdf"
+      ],
+      "keywords": [
+        "camera"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 3,
+      "n_retrieved": 16
+    },
+    {
+      "q": "What voltage is supported on the NV9ST?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "12"
+      ],
+      "rank_retrieved": 2,
+      "rank_reranked": 2,
+      "n_retrieved": 16
+    },
+    {
+      "q": "How does the NV9USB+ communicate with a host?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "USB"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Can the NV9 USB+ be mounted vertically?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "vertical"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "What is the note capacity of the NV11+ Note Float recycler?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "30"
+      ],
+      "rank_retrieved": 2,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Can national currency differences affect cashbox capacity on the NV9USB+?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "10-15"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    },
+    {
+      "q": "What are typical applications for the NV9USB+ range?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "vending"
+      ],
+      "rank_retrieved": 2,
+      "rank_reranked": 2,
+      "n_retrieved": 16
+    },
+    {
+      "q": "Can the NV9USB+ recycle notes?",
+      "product": "nv9st",
+      "expected": [
+        "NV9USB+ Range User Manual-v1.pdf"
+      ],
+      "keywords": [
+        "note float"
+      ],
+      "rank_retrieved": 1,
+      "rank_reranked": 1,
+      "n_retrieved": 16
+    }
+  ],
+  "skipped": [
+    {
+      "q": "What is the SMART Coin System?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "How many coins per second does the SMART Coin System handle?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "What problem does the SMART Coin System eliminate?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "What is the standard lid assembly for the SMART Hopper?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "What is the standard lid assembly for the Twin SMART Coin System?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "What is the standard nozzle option for the SMART Hopper?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "What is the standard pay in chute option for the SMART Coin System Range?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "Which chute option collects debris?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "What are the three key components of the MyConnect Environment?",
+      "why": "no product scope"
+    },
+    {
+      "q": "How does the MyConnect App talk to the MyConnect Hub?",
+      "why": "no product scope"
+    },
+    {
+      "q": "how fast is it?",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "what voltage does it need",
+      "why": "no product scope"
+    },
+    {
+      "q": "how do I mount it",
+      "why": "no product scope"
+    },
+    {
+      "q": "what is the capital of france",
+      "why": "no product scope"
+    },
+    {
+      "q": "how do I reset the password on my Cisco router",
+      "why": "no product scope"
+    },
+    {
+      "q": "what is the bitcoin price today",
+      "why": "no product scope"
+    },
+    {
+      "q": "does the SMART Coin System support facial recognition",
+      "why": "no document filed under 'sku_scs'"
+    },
+    {
+      "q": "what is the maximum coin capacity in litres of the SMART Coin System",
+      "why": "no document filed under 'sku_scs'"
+    }
+  ]
+}
