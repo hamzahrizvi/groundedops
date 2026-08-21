@@ -188,6 +188,20 @@
     ".go-mav img{width:100%;height:100%;object-fit:cover}" +
     ".go-b{max-width:78%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}" +
     ".go-b.bot{background:var(--pane);border-bottom-left-radius:5px}" +
+    // Markdown blocks. The bubble sets white-space:pre-wrap for plain text,
+    // which would add phantom blank lines around real block elements, so
+    // rendered markdown resets it to normal.
+    ".go-b .go-md-p,.go-b .go-md-list,.go-b .go-md-tw{white-space:normal}" +
+    ".go-md-p{margin:0 0 7px}" +
+    ".go-md-p:last-child{margin-bottom:0}" +
+    ".go-md-list{margin:4px 0 7px;padding-left:19px}" +
+    ".go-md-list li{margin:2px 0}" +
+    // Wide pinout tables scroll inside the bubble rather than stretching it.
+    ".go-md-tw{overflow-x:auto;margin:6px 0 8px;max-width:100%}" +
+    ".go-md-table{border-collapse:collapse;font-size:12.5px;min-width:100%}" +
+    ".go-md-table th,.go-md-table td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top;font-variant-numeric:tabular-nums}" +
+    ".go-md-table th{font-weight:600;background:rgba(0,0,0,.05)}" +
+    ".go-b code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:rgba(0,0,0,.06);padding:.1em .32em;border-radius:3px}" +
     ".go-b.usr{background:#2f3a45;color:#fff;border-bottom-right-radius:5px}" +
     ".go-b.warn{background:#fdf6e7;border:1px solid #e8d9b0}" +
     ".go-status{font-size:12.5px;color:var(--mut);display:flex;align-items:center;gap:7px;padding:2px 0}" +
@@ -298,6 +312,105 @@
     $log.scrollTop = $log.scrollHeight;
   }
 
+  /* ── markdown rendering ────────────────────────────────────────────────
+   * Answers come back as markdown: pipe tables for pinouts and spec rows,
+   * "- item" lists, **bold**. This used to be assigned with textContent, so a
+   * pinout arrived as one unreadable run of "| 1 | Vend 1 | Output | ..." on
+   * the customer-facing surface, while the admin console rendered it properly.
+   *
+   * Deliberately small and dependency-free, matching the admin console's
+   * renderer: escape everything first, then re-introduce ONLY bullets,
+   * numbered lists, pipe tables, bold and code. Nothing in a model answer can
+   * inject markup. Written in ES5 style because the widget is plain browser
+   * JS with no build step and may run on old customer sites.
+   */
+  function mdEsc(t) {
+    return String(t == null ? "" : t)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function mdInline(t) {
+    return mdEsc(t)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  }
+
+  var MD_BULLET = /^\s*[-*•]\s+(.*)$/;
+  var MD_NUM = /^\s*\d+[.)]\s+(.*)$/;
+  var MD_ROW = /^\s*\|.*\|\s*$/;
+  var MD_SEP = /^[\s|:\-]+$/;
+
+  function renderMd(text, into) {
+    // A model sometimes runs a table onto the same line as its heading
+    // ("**Pulse:** | Pin | Name |"), so split pipe runs onto their own lines
+    // before parsing or the whole thing reads as one paragraph.
+    var normalized = String(text == null ? "" : text).replace(/\s\|\s*\n?/g, function (m) {
+      return m.indexOf("\n") >= 0 ? m : " | ";
+    });
+    var lines = normalized.split(/\r?\n/);
+    var i = 0;
+
+    function flushList(ordered) {
+      var list = document.createElement(ordered ? "ol" : "ul");
+      list.className = "go-md-list";
+      while (i < lines.length) {
+        var m = lines[i].match(ordered ? MD_NUM : MD_BULLET);
+        if (!m) break;
+        var li = document.createElement("li");
+        li.innerHTML = mdInline(m[1]);
+        list.appendChild(li);
+        i++;
+      }
+      into.appendChild(list);
+    }
+
+    while (i < lines.length) {
+      var line = lines[i];
+      if (!line.replace(/\s/g, "")) { i++; continue; }
+
+      if (MD_ROW.test(line)) {
+        var wrap = document.createElement("div");
+        wrap.className = "go-md-tw";
+        var tbl = document.createElement("table");
+        tbl.className = "go-md-table";
+        var first = true;
+        while (i < lines.length && MD_ROW.test(lines[i])) {
+          if (!MD_SEP.test(lines[i])) {
+            var cells = lines[i].replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|");
+            var tr = document.createElement("tr");
+            for (var c = 0; c < cells.length; c++) {
+              // First non-separator row is the header, which is what makes a
+              // pinout readable at a glance.
+              var cell = document.createElement(first ? "th" : "td");
+              cell.innerHTML = mdInline(cells[c].replace(/^\s+|\s+$/g, ""));
+              tr.appendChild(cell);
+            }
+            tbl.appendChild(tr);
+            first = false;
+          }
+          i++;
+        }
+        wrap.appendChild(tbl);
+        into.appendChild(wrap);
+        continue;
+      }
+
+      if (MD_BULLET.test(line)) { flushList(false); continue; }
+      if (MD_NUM.test(line)) { flushList(true); continue; }
+
+      var para = [];
+      while (i < lines.length && lines[i].replace(/\s/g, "")
+             && !MD_BULLET.test(lines[i]) && !MD_NUM.test(lines[i])
+             && !MD_ROW.test(lines[i])) {
+        para.push(lines[i]); i++;
+      }
+      var p = document.createElement("p");
+      p.className = "go-md-p";
+      p.innerHTML = mdInline(para.join(" "));
+      into.appendChild(p);
+    }
+  }
+
   function bubble(msg) {
     var row = document.createElement("div");
     row.className = "go-row" + (msg.role === "user" ? " u" : "");
@@ -310,7 +423,13 @@
     var b = document.createElement("div");
     b.className = "go-b " + (msg.role === "user" ? "usr" : msg.flagged ? "bot warn" : "bot");
     var txt = document.createElement("div");
-    txt.textContent = msg.text;
+    // Assistant answers carry markdown (tables, lists, bold); a user's own
+    // message is literal text and must never be parsed as markup.
+    if (msg.role === "user") {
+      txt.textContent = msg.text;
+    } else {
+      renderMd(msg.text, txt);
+    }
     b.appendChild(txt);
 
     if (msg.sources && msg.sources.length) {
@@ -901,6 +1020,32 @@
           flagged: !!d.flagged,
           badge: d.from_faq ? "Reviewed answer" : null,
         });
+
+        // A refusal with no next step leaves the visitor stuck: the
+        // documentation genuinely does not cover it, and the widget just says
+        // so and stops. Offer a person. The backend sets offer_support on any
+        // refusal branch, so this covers a low-confidence miss, a suppressed
+        // ungrounded answer, and the model declining on its own.
+        if (d.offer_support) {
+          var supportChips = [];
+          if (cfg.salesEmail) {
+            supportChips.push({
+              label: "Email our team",
+              onClick: function () {
+                window.open("mailto:" + cfg.salesEmail +
+                  "?subject=" + encodeURIComponent("Question about " +
+                    (state.product ? state.product.name : "your products")) +
+                  "&body=" + encodeURIComponent(q), "_blank");
+              },
+            });
+          }
+          supportChips.push({
+            label: "Try rewording my question",
+            style: "alt",
+            onClick: function () { $in.focus(); },
+          });
+          chips(supportChips, "Not what you needed?");
+        }
       })
       .catch(function (e) {
         s.remove();
