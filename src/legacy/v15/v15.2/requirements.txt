@@ -7,6 +7,9 @@ pydantic
 # that went unnoticed because run_tests.py used to swallow load failures
 # without affecting its exit code.
 python-multipart
+# starlette's TestClient (tests/test_new_routes.py) is built on httpx. It was
+# only present locally as a transitive install.
+httpx
 
 chromadb
 sentence-transformers

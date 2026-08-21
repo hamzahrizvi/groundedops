@@ -28,11 +28,13 @@ jobs:
   # as SKIP rather than disguising as a pass. This keeps the gate
   # meaningful and the run fast (seconds, not minutes).
   #
-  # CAVEAT: run_tests.py silently excludes any test_*.py file that fails
-  # to IMPORT (a bad import doesn't fail the run — see run_tests.py's
-  # "COULD NOT LOAD" handling) rather than counting it as a failure. Check
-  # this job's log for "COULD NOT LOAD" lines; a green run does not
-  # guarantee every test file executed.
+  # Since v15.0 run_tests.py COUNTS a file that fails to import as a failure
+  # and exits non-zero, and it isolates sys.modules per file so one test's
+  # stubs cannot break the next one's imports. Before that, a bad import was
+  # printed as "COULD NOT LOAD" and silently skipped, so a green run did not
+  # mean every test file had executed -- five files were being skipped that
+  # way, and the missing python-multipart below hid behind the same gap.
+  # A genuinely optional dependency (playwright) is reported as a SKIP.
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -40,7 +42,18 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - name: Install lightweight web deps (needed for tests/test_new_routes.py)
-        run: pip install fastapi "uvicorn[standard]" pydantic
+        # python-multipart is what FastAPI needs to parse the UploadFile
+        # document-upload endpoint. It was missing here, so test_new_routes.py
+        # could not import at all -- and that went unnoticed for as long as
+        # run_tests.py swallowed load failures (see the note above, now fixed).
+        # Kept as an explicit list rather than -r requirements.txt on purpose:
+        # this job is meant to prove the routes import WITHOUT torch,
+        # chromadb or sentence-transformers, which is what makes it fast.
+        # httpx: starlette's TestClient is built on it, so without it
+        # test_new_routes.py cannot import either. Verified by reproducing
+        # this exact dependency set in a clean venv rather than by pushing
+        # and waiting for CI -- python-multipart alone was not enough.
+        run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx
       - name: Run unit + route test suite
         run: |
           cd src
