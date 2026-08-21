@@ -1280,7 +1280,15 @@ def source_file(filename: str):
     downloads, which means ANY retained document is publicly retrievable by
     name. Gate this per tenant/product before real customer traffic.
     """
-    safe = os.path.basename(filename)
+    import docstore
+    # docstore._safe_basename, not os.path.basename: basename() is
+    # platform-dependent (a backslash is a legal POSIX filename character, so
+    # a backslash-separated traversal survives it) and this name comes
+    # straight off the URL. One sanitiser, shared with the store that
+    # resolves it, rather than two that can drift apart.
+    safe = docstore._safe_basename(filename)
+    if not safe:
+        raise HTTPException(status_code=404, detail="Not found")
     _lower = safe.lower()
     for _ex in EXCLUDED_SOURCES:
         if _ex and _ex in _lower:
@@ -1288,9 +1296,11 @@ def source_file(filename: str):
     # v15: resolved via docstore, which checks <repo>/documents AND the legacy
     # /data/source_files. SOURCE_FILE_DIR alone 404'd any document retained in
     # the newer location -- the answer cited a page, then the link was dead.
-    import docstore
-    path = docstore.find(safe) or os.path.join(SOURCE_FILE_DIR, safe)
-    if not os.path.isfile(path):
+    # Only what docstore resolves: it confirms the path stays inside a known
+    # store directory. The previous `or os.path.join(SOURCE_FILE_DIR, safe)`
+    # fallback re-introduced an unchecked join, defeating the point.
+    path = docstore.find(safe)
+    if not path or not os.path.isfile(path):
         raise HTTPException(
             status_code=404,
             detail="Source file not retained. Re-ingest to enable downloads.")

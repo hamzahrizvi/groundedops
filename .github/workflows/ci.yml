@@ -17,6 +17,14 @@ on:
   pull_request:
     branches: [ main ]
 
+# Least privilege, set once at the top so every job inherits it. Without an
+# explicit block a job gets the token's default permissions, which on some
+# repo settings is write access to contents -- far more than a test-and-build
+# workflow needs. Flagged by CodeQL (actions/missing-workflow-permissions) on
+# all three jobs; a single top-level declaration covers them.
+permissions:
+  contents: read
+
 jobs:
   # ── Gate 1: unit + route tests ─────────────────────────────────────────
   # Deliberately installs only the lightweight web deps (fastapi/uvicorn/
