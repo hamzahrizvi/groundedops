@@ -8,6 +8,8 @@ Usage: python3 run_tests.py
 """
 
 import importlib.util
+import os
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -42,6 +44,39 @@ def discover_and_run():
         # accident, and silently: the COULD NOT LOAD path below left the exit
         # code at 0, so CI reported green. Snapshot the registry per file and
         # restore it afterwards.
+        # Some files are integration tests, not unit tests: tests/_harness.py
+        # replaces whole modules in sys.modules (db, llm, embeddings, ...) so
+        # the API can be exercised without the ML stack. Restoring a dict
+        # snapshot afterwards is not enough to undo that -- framework modules
+        # get imported, deleted and re-imported around it, and on Python 3.11
+        # that left starlette's TestClient returning "No response returned."
+        # for test_new_routes.py, but ONLY when something else had run first.
+        # It passed standalone and on 3.14, which is exactly the kind of
+        # order- and version-dependent flake that wastes an afternoon.
+        #
+        # A process is the honest isolation boundary for a test that rewrites
+        # the module registry. These files exit non-zero on failure, so the
+        # return code is the result.
+        if "import _harness" in path.read_text(encoding="utf-8", errors="ignore"):
+            total += 1
+            # PYTHONPATH, because a subprocess puts sys.path[0] at the
+            # SCRIPT's directory (tests/), not this one -- _harness.py lives
+            # beside run_tests.py and would not be importable otherwise.
+            _env = dict(os.environ)
+            _here = str(Path(__file__).parent)
+            _env["PYTHONPATH"] = _here + os.pathsep + _env.get("PYTHONPATH", "")
+            proc = subprocess.run([sys.executable, str(path)],
+                                  cwd=_here, env=_env,
+                                  capture_output=True, text=True)
+            out = (proc.stdout or "") + (proc.stderr or "")
+            if proc.returncode == 0:
+                passed += 1
+                print(f"  PASS  {path.stem}  (own process)")
+            else:
+                failed.append((path.stem, "(own process)", out.strip()))
+                print(f"  FAIL  {path.stem}  (own process)")
+            continue
+
         saved_modules = sys.modules.copy()
         saved_path = list(sys.path)
         try:

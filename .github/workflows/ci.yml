@@ -49,10 +49,9 @@ jobs:
         # Kept as an explicit list rather than -r requirements.txt on purpose:
         # this job is meant to prove the routes import WITHOUT torch,
         # chromadb or sentence-transformers, which is what makes it fast.
-        # httpx: starlette's TestClient is built on it, so without it
-        # test_new_routes.py cannot import either. Verified by reproducing
-        # this exact dependency set in a clean venv rather than by pushing
-        # and waiting for CI -- python-multipart alone was not enough.
+        # httpx: starlette's TestClient is built on it. Verified against this
+        # exact dependency set in a clean Python 3.11 venv, which is what CI
+        # uses -- the local venv is 3.14 and behaves differently here.
         run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx
       - name: Run unit + route test suite
         run: |
