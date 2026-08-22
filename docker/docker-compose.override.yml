@@ -16,21 +16,4 @@ services:
       # any local port. Never carry this into production.
       WIDGET_ALLOWED_ORIGINS: "*"
 
-  frontend:
-    # Vite dev server (hot module reload) instead of the built nginx image.
-    image: node:20
-    working_dir: /app
-    command: sh -c "npm install && npm run web -- --host --port 80"
-    volumes:
-      - ../src/frontend:/app
-    ports:
-      - "8080:80"
-    environment:
-      # Inside the Compose network the backend is reachable by service name.
-      # vite.config.js defaults to 127.0.0.1:8000 for native runs, which in a
-      # container would point at the container itself, so Docker states its own
-      # target here rather than relying on that default.
-      API_TARGET: "http://backend:8000"
-    # Vite serves public/ at the web root, so in dev the widget is at
-    #   http://localhost:8080/widget/groundedops-widget.js
-    # — same path as production, so embed snippets don't change.
+  # frontend service removed in v15.2 (React SPA retired).

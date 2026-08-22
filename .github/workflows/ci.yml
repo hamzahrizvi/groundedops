@@ -74,8 +74,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build backend image
         run: docker build -f docker/Dockerfile.backend -t groundedops-backend ./src
-      - name: Build frontend image
-        run: docker build -f docker/Dockerfile.frontend -t groundedops-frontend ./src
+      # The frontend image was removed in v15.2 with the React SPA. The admin
+      # console is served by the backend image; the widget is plain static
+      # files with no build step, so there is nothing left to compile here.
 
   # ── Advisory: eval suite schema ──────────────────────────────────────
   # continue-on-error surfaces a visible warning instead of silently

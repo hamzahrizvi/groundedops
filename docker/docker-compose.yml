@@ -42,43 +42,18 @@ services:
       - ../corpus:/app/corpus:ro     # OPTIONAL: drop PDFs here to ingest
     restart: unless-stopped
 
-  frontend:
-    build:
-      context: ../src
-      dockerfile: ../docker/Dockerfile.frontend
-    ports:
-      - "8080:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
-    # The widget also ships inside this image (it lives in
-    # src/frontend/public/widget/, which Vite copies verbatim into dist/),
-    # so it is reachable at
-    #   http://localhost:8080/widget/groundedops-widget.js
-    # That copy is convenient for local testing and for the bundled demo
-    # pages. For customer embeds prefer the dedicated `widget` service
-    # below — same file, but versioned and deployed independently of this
-    # React build.
-
-  # v3.0.0: standalone widget origin. Serves ONLY the embeddable bundle,
-  # from the SAME file the frontend image ships — one source of truth on
-  # disk (src/frontend/public/widget/), two servers.
-  #
-  # Why its own container: customer sites embed this script, so its cache
-  # policy, version and uptime should not be coupled to the app frontend's
-  # React build. Point a CDN at this origin in production.
-  #
-  # NOTE: hosting the script here does NOT remove the need for CORS. The
-  # script executes in the CUSTOMER page's origin regardless of where it
-  # was downloaded from, so its fetch to POST /query is still cross-origin
-  # — see WIDGET_ALLOWED_ORIGINS on the backend.
+  # The `frontend` service was removed in v15.2 along with the React SPA it
+  # served. It was a third chat surface duplicating the admin console's test
+  # chat and the widget, so every fix had to be made three times. The admin
+  # console is served by the backend at /admin, and the widget has its own
+  # service below -- which no longer depends on a React build to exist.
   widget:
     image: nginx:alpine
     ports:
       - "${WIDGET_PORT:-8081}:80"
     volumes:
-      - ../src/frontend/public/widget:/usr/share/nginx/html:ro
-      - ../src/frontend/widget-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../src/widget:/usr/share/nginx/html:ro
+      - ../src/widget/widget-nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
     healthcheck:
       # 127.0.0.1, NOT localhost: nginx `listen 80` binds IPv4 only
