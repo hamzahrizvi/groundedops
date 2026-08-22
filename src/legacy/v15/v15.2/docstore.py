@@ -87,13 +87,18 @@ def find(filename: str) -> str | None:
     if not base:
         return None
     for d in read_dirs():
-        root = os.path.abspath(d)
-        p = os.path.abspath(os.path.join(root, base))
-        # Belt and braces: the resolved path must still be inside the store.
-        if os.path.commonpath([root, p]) != root:
+        if not os.path.isdir(d):
             continue
-        if os.path.isfile(p):
-            return p
+        # Match against what is actually IN the directory, and build the path
+        # from that entry rather than from the caller's string. The previous
+        # version joined the sanitised name onto the root and then checked
+        # commonpath, which is safe but still constructs a path out of user
+        # input -- CodeQL flagged it (py/path-injection) and the objection is
+        # reasonable. Comparing names and returning a listdir entry means no
+        # caller-supplied text ever reaches the filesystem path at all.
+        for entry in os.listdir(d):
+            if entry == base and os.path.isfile(os.path.join(d, entry)):
+                return os.path.join(d, entry)
     return None
 
 
