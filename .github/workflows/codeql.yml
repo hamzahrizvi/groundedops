@@ -1,0 +1,54 @@
+name: CodeQL
+
+# Advanced setup, replacing GitHub's default CodeQL setup.
+#
+# The only reason to run our own workflow rather than the default is the
+# config file: default setup does not read .github/codeql/codeql-config.yml,
+# so there is no way to stop it scanning src/legacy/ — the release archives.
+# See that config for why excluding them matters.
+#
+# Language list mirrors what default setup was analysing (actions,
+# javascript-typescript, python) so nothing stops being covered by the switch.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly-published CVE against unchanged code is still found.
+    # Monday 03:17 UTC — off the hour, since scheduled jobs bunch there.
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload results to the code-scanning dashboard.
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript, python]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # No build step: this project is Python plus plain browser JS, and the
+      # React app that needed one was retired in v15.2.
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
