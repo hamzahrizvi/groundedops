@@ -19,7 +19,18 @@ os.environ.setdefault("FAQ_GAP_PATH", "/tmp/apitest/data/faq_gaps.json")
 os.environ.setdefault("WIDGET_CONFIG_PATH", "/tmp/apitest/data/widget_config.json")
 os.environ.setdefault("WIDGET_LEADS_PATH", "/tmp/apitest/data/widget_leads.json")
 os.environ.setdefault("CATALOG_CONFIG", "/tmp/apitest/data/catalog.json")
-os.environ.setdefault("ADMIN_PASSWORD", "testpw")
+os.environ.setdefault("ACCOUNTS_PATH", "/tmp/apitest/data/accounts.json")
+os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
+# keystore.set_key/clear_key write to a real file — point that at a scratch
+# path so a key-management test can never touch the real src/.env.
+os.environ.setdefault("ENV_FILE_PATH", "/tmp/apitest/data/test.env")
+# policy.py persists limit changes; point it at the scratch dir so a test
+# that raises an allowance cannot leak into the real install.
+os.environ.setdefault("POLICY_PATH", "/tmp/apitest/data/policy.json")
+# quota.py resolves its sqlite path at import. Without this, tests write
+# usage rows into the REAL src/quota.db -- which both pollutes live counters
+# and makes session-cap tests depend on what previous runs left behind.
+os.environ.setdefault("QUOTA_DB_PATH", "/tmp/apitest/data/quota.db")
 # main.py's LAN-only gate checks request.client.host against this prefix
 # list and 404s anything that doesn't match (see PRIVATE_NETWORKS in
 # main.py) — a real, intended security control, not something to weaken.
@@ -33,6 +44,28 @@ os.environ.setdefault("PRIVATE_NETWORKS",
 import shutil  # noqa: E402
 shutil.rmtree("/tmp/apitest/data", ignore_errors=True)  # clean slate every run
 os.makedirs("/tmp/apitest/data", exist_ok=True)
+
+# ---- test accounts -----------------------------------------------------
+# Admin routes want a session token now, not a shared password, so the
+# harness creates one account per level and exports a ready token for each.
+# Tests import these rather than signing in themselves — signing in is
+# tested explicitly in test_accounts.py, and every other test only needs a
+# credential that works.
+import accounts as _accounts  # noqa: E402
+
+_accounts.ALLOWED_EMAIL_DOMAIN = ""   # test emails are not company addresses
+
+_ROOT = _accounts.bootstrap_root("root@test.local", "test-password-root")
+_SUPPORT = _accounts.create_user("support@test.local", "test-password-supp",
+                                 "support", created_by="harness",
+                                 must_change_password=False)
+_BASIC = _accounts.create_user("basic@test.local", "test-password-basic",
+                               "basic", created_by="harness",
+                               must_change_password=False)
+
+ROOT_TOKEN = _accounts.issue_session(_accounts.find_by_id(_ROOT["id"]))
+SUPPORT_TOKEN = _accounts.issue_session(_accounts.find_by_id(_SUPPORT["id"]))
+BASIC_TOKEN = _accounts.issue_session(_accounts.find_by_id(_BASIC["id"]))
 
 
 def stub(name, **attrs):

@@ -60,8 +60,13 @@ README.md's "Native install" section for the direct command).
 
 ## 4. Add your documents
 
-1. Open the **Admin console** (`/admin`, your `ADMIN_PASSWORD` from
-   `src/.env` — defaults to `admin`, change it before sharing this).
+1. Open the **Admin console** (`/admin`). On a fresh install it asks you to
+   create the **root account** — that is the only level that can add other
+   people. Needs `SESSION_SECRET` set in `src/.env` first, or sign-in refuses
+   every attempt; generate one with
+   `python -c "import secrets;print(secrets.token_hex(32))"`.
+   Add colleagues later under **Accounts**: `support` for anyone doing this
+   work, `basic` for someone who only needs the test chat.
 2. Under **Documents**, pick a **Category** and **Product** — create them
    in the Categories/Products tabs first if the lists are empty.
 3. Drop in `.pdf`, `.docx`, or `.txt` files.

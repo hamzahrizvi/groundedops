@@ -48,6 +48,23 @@
     return script.getAttribute(name) || fallback;
   }
 
+  // ── configuration: server first, attributes as fallback ───────────────
+  // The console's Widget-design page is the source of truth for branding,
+  // the opening options and the contact forms. It used to have no effect at
+  // all here: this file read data-* attributes only and never fetched
+  // /widget/config, so saving in the console changed nothing a visitor saw.
+  //
+  // data-* attributes are kept, and still win when explicitly present on the
+  // script tag — an existing embed that hard-codes its own accent or title
+  // must not change appearance because this file learned to fetch config.
+  // Anything NOT set as an attribute now comes from the server, so the
+  // console governs it. data-api and data-token stay attribute-only: one is
+  // how the widget finds the server, the other is the visitor's identity,
+  // and neither can come from the thing it is used to reach.
+  function hasAttr(name) {
+    return script.getAttribute(name) !== null;
+  }
+
   var cfg = {
     api: attr("data-api", "").replace(/\/+$/, ""),
     title: attr("data-title", "Support"),
@@ -64,6 +81,59 @@
     welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
     prompt: attr("data-prompt", "How can I help today?"),
   };
+
+  // Filled by /widget/config before the panel first opens. Defaults keep the
+  // widget fully usable if that fetch fails — a support widget that renders
+  // nothing because a config request timed out would be a worse outcome than
+  // one showing its built-in wording.
+  var serverCfg = {
+    intro_options: null,
+    sales_form: null,
+    support_form: null,
+  };
+
+  function applyServerConfig(d) {
+    if (!d) return;
+    if (d.name && !hasAttr("data-agent-name")) cfg.agent = d.name;
+    if (d.name && !hasAttr("data-title")) cfg.title = d.name;
+    if (d.welcome && !hasAttr("data-welcome")) cfg.welcome = d.welcome;
+    if (d.color && !hasAttr("data-accent")) {
+      cfg.accent = d.color;
+      // The stylesheet bakes the accent in as `.go-w{--a:...}`; an inline
+      // custom property on the same element overrides it, which is how the
+      // colour can change after the <style> block has already been written.
+      root.style.setProperty("--a", cfg.accent);
+    }
+    if (d.icon_url && !hasAttr("data-avatar-url")) {
+      cfg.avatar = d.icon_url;
+      avatarHtml = '<img src="' + esc(cfg.avatar) + '" alt="">';
+      Array.prototype.forEach.call(root.querySelectorAll(".go-mav"), function (n) {
+        n.innerHTML = avatarHtml;
+      });
+    }
+    if (d.intro_options && d.intro_options.length)
+      serverCfg.intro_options = d.intro_options;
+    if (d.sales_form) serverCfg.sales_form = d.sales_form;
+    if (d.support_form) serverCfg.support_form = d.support_form;
+    if (d.sign_in_url && !hasAttr("data-sign-in-url")) cfg.signInUrl = d.sign_in_url;
+  }
+
+  var configLoaded = null;   // a promise, so the panel can await it once
+  function loadConfig() {
+    if (configLoaded) return configLoaded;
+    configLoaded = fetch(cfg.api + "/widget/config?visitor_id=" +
+                         encodeURIComponent(visitorId()))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { applyServerConfig(d); return d; })
+      .catch(function (e) {
+        // Deliberately not surfaced to the visitor: the widget still works
+        // on its built-in wording, and "could not load configuration" is
+        // not their problem to read.
+        if (window.console) console.warn("[GroundedOps] config unavailable", e);
+        return null;
+      });
+    return configLoaded;
+  }
 
   if (!cfg.api) {
     console.error("[GroundedOps] Missing data-api on the widget script tag.");
@@ -220,6 +290,19 @@
     ".go-chip.q:hover{border-color:var(--a);background:var(--pane)}" +
     ".go-chiplabel{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);" +
     "align-self:flex-end;margin-top:6px}" +
+    // contact forms (sales / support), built from the console's config
+    ".go-fwrap{background:var(--bg);border:1.5px solid var(--line);border-radius:14px;" +
+    "padding:14px 15px;margin-top:8px;display:flex;flex-direction:column;gap:0;align-self:stretch}" +
+    ".go-fhead{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:10px}" +
+    ".go-flab{display:block;font-size:12px;color:var(--mut);margin:9px 0 4px}" +
+    ".go-fin{width:100%;box-sizing:border-box;font:inherit;font-size:14px;color:var(--ink);" +
+    "background:var(--bg);border:1.5px solid var(--line);border-radius:9px;padding:9px 10px;resize:vertical}" +
+    ".go-fin:focus{outline:none;border-color:var(--a)}" +
+    ".go-fbtn{margin-top:12px;border:0;background:var(--a);color:#fff;font:inherit;font-size:14px;" +
+    "font-weight:600;padding:11px 16px;border-radius:999px;cursor:pointer}" +
+    ".go-fbtn:disabled{opacity:.6;cursor:default}" +
+    ".go-ferr{font-size:12.5px;color:#b3261e;margin-top:7px;min-height:0}" +
+    ".go-fnote{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.45}" +
     // sources
     ".go-src{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}" +
     ".go-srch{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);" +
@@ -520,15 +603,20 @@
         '<div class="go-bar"><span style="width:' + pct + '%"></span></div>' +
         '<div class="go-set-row"><b>' + d.remaining + '</b> of ' + d.limit +
           " " + (d.unit || "credits") + " left &middot; " + fmtReset(d.reset_at) + "</div>";
-      if (d.tier === "anonymous") {
+      if (d.tier === "anonymous" && !d.ai_available) {
+        // account_notice is set in the console (policy.anon_notice), so the
+        // operator decides how guests are told, not this file.
         rows +=
-          '<div class="go-set-note">You are browsing as a guest, so I can answer ' +
-          "from our reviewed FAQs only." +
+          '<div class="go-set-note">' +
+          esc(d.account_notice || "You are browsing as a guest, so I can answer " +
+              "from our reviewed FAQs only.") +
           (cfg.signInUrl
-            ? ' <a href="' + esc(cfg.signInUrl) + '">Sign in</a> to search the full ' +
-              "product documentation."
-            : " Sign in to search the full product documentation.") +
+            ? ' <a href="' + esc(cfg.signInUrl) + '">Sign in</a> for full AI support.'
+            : "") +
           "</div>";
+      } else if (d.tier === "anonymous") {
+        rows += '<div class="go-set-note">Guest access includes AI answers, ' +
+          "with a smaller daily allowance than an account.</div>";
       } else {
         rows += '<div class="go-set-note">Standard answer: ' +
           (d.standard_cost || 1) + " credit. Detailed answer: " +
@@ -660,9 +748,34 @@
     renderScopeBar();
     lockComposer();
     say(cfg.welcome);
+    announceGuestLimits();
     say(cfg.prompt);
     askIntent();
     save();
+  }
+
+  /** Tell a signed-out visitor what they are and are not getting, at the
+   *  start rather than when they hit the wall. Someone who reads "reviewed
+   *  FAQs only" up front can decide to sign in; someone who finds out after
+   *  typing a real question has wasted their time.
+   *
+   *  Quota may not have loaded yet on a cold open, so this resolves against
+   *  the fetch rather than whatever happens to be cached. */
+  function announceGuestLimits() {
+    var show = function (d) {
+      if (!d || d.tier !== "anonymous" || d.ai_available) return;
+      say(d.account_notice ||
+          "Full AI support is for account holders. I can still answer from " +
+          "our reviewed FAQs, or put you in touch with our team.");
+      if (cfg.signInUrl) {
+        chips([{
+          label: "Sign in for full AI support",
+          onClick: function () { window.open(cfg.signInUrl, "_blank"); },
+        }], null);
+      }
+    };
+    if (quotaState) show(quotaState);
+    else refreshQuota().then(show);
   }
 
   function askIntent() {
@@ -701,30 +814,360 @@
         style: "alt",
         onClick: function () {
           heard("Speak to sales");
-          state.intent = "sales";
-          say(
-            cfg.salesEmail
-              ? "Happy to put you in touch. You can reach our sales team at " +
-                  cfg.salesEmail +
-                  ". If you'd like, I can also answer technical questions in the meantime."
-              : "Happy to help with that — our sales team will follow up. In the meantime, I can answer technical questions from the documentation."
-          );
-          chips(
-            [
-              {
-                label: "Ask a technical question",
-                onClick: function () {
-                  heard("Ask a technical question");
-                  askCategory();
-                },
-              },
-            ],
-            null
-          );
+          openContactForm("sales");
         },
       },
     ];
+
+    // The console's configured opening options replace the built-in list
+    // when there are any. The built-ins stay as the fallback for a widget
+    // whose config fetch failed, so the opening screen is never empty.
+    if (serverCfg.intro_options && serverCfg.intro_options.length) {
+      items = serverCfg.intro_options.map(function (o) {
+        return {
+          label: o.label,
+          style: o.action === "sales" || o.action === "support" ? "alt" : null,
+          onClick: function () {
+            heard(o.label);
+            runIntroAction(o.action, o.label);
+          },
+        };
+      });
+    }
+
     chips(items, "Choose one");
+  }
+
+  /** One of the four actions the console can attach to an opening option:
+   *  product (pick a range, then a product), general (ask straight away),
+   *  sales / support (open that contact form). */
+  function runIntroAction(action, label) {
+    if (action === "sales" || action === "support") {
+      state.intent = action;
+      openContactForm(action);
+      return;
+    }
+    if (action === "general") {
+      state.intent = "general";
+      say("Go ahead — ask me anything covered by our product documentation.");
+      unlockComposer();
+      return;
+    }
+    // "product" and anything unrecognised: the safe path is the one that
+    // asks which product, since every answer is scoped to one.
+    state.intent = "product";
+    say("Which product range is this about?");
+    askCategory();
+  }
+
+  // ── contact forms (sales / support) ───────────────────────────────────
+  // Built entirely from the console's configuration: the title, the fields
+  // and whether a chat summary may be attached are all decided there, so
+  // adding a field to the "Talk to sales" form in the console adds it here
+  // with no change to this file.
+
+  var FALLBACK_FORM = {
+    sales: {
+      title: "Talk to sales",
+      allow_summary: true,
+      routed: false,
+      fields: [
+        { id: "f_name", label: "Your name", type: "text", required: true },
+        { id: "f_email", label: "Email", type: "email", required: true },
+        { id: "f_msg", label: "What are you looking for?", type: "textarea", required: false },
+      ],
+    },
+    support: {
+      title: "Talk to support",
+      allow_summary: true,
+      routed: false,
+      fields: [
+        { id: "s_name", label: "Your name", type: "text", required: true },
+        { id: "s_email", label: "Email", type: "email", required: true },
+        { id: "s_msg", label: "What has gone wrong?", type: "textarea", required: false },
+      ],
+    },
+  };
+
+  function formFor(kind) {
+    var f = kind === "sales" ? serverCfg.sales_form : serverCfg.support_form;
+    return f && f.fields && f.fields.length ? f : FALLBACK_FORM[kind];
+  }
+
+  /** True when there is a real conversation worth summarising. Offering to
+   *  "use our chat" before anything has been said would be nonsense. */
+  function hasConversation() {
+    var real = state.messages.filter(function (m) { return m.role === "user"; });
+    return real.length > 0;
+  }
+
+  function openContactForm(kind) {
+    var form = formFor(kind);
+    state.intent = kind;
+    state.stage = "form";
+    lockComposer("Fill in the form above");
+    save();
+
+    say(form.routed
+      ? "I can pass this to our " + (kind === "sales" ? "sales" : "support") +
+        " team. A few details first."
+      : "I can take your details and our " + (kind === "sales" ? "sales" : "support") +
+        " team will pick it up. A few details first.");
+
+    if (form.allow_summary && hasConversation()) {
+      askSummaryChoice(kind, form);
+    } else {
+      renderForm(kind, form, "", "none");
+    }
+  }
+
+  /** The option the request asked for: attach what was already discussed,
+   *  or describe it themselves. Nobody is made to re-type a conversation
+   *  they have just had, and nobody is forced to send one they would rather
+   *  summarise in their own words. */
+  function askSummaryChoice(kind, form) {
+    chips([
+      {
+        label: "Use our chat so far",
+        onClick: function () {
+          heard("Use our chat so far");
+          draftThen(kind, form, "chat", "");
+        },
+      },
+      {
+        label: "I'll describe it myself",
+        style: "alt",
+        onClick: function () {
+          heard("I'll describe it myself");
+          askOwnWords(kind, form);
+        },
+      },
+      {
+        label: "Skip — just my details",
+        style: "alt",
+        onClick: function () {
+          heard("Skip — just my details");
+          renderForm(kind, form, "", "none");
+        },
+      },
+    ], "What should they see?");
+  }
+
+  function askOwnWords(kind, form) {
+    var wrap = document.createElement("div");
+    wrap.className = "go-fwrap";
+    wrap.setAttribute("data-chips", "");
+    var lab = document.createElement("label");
+    lab.className = "go-flab";
+    lab.textContent = "In your own words";
+    var ta = document.createElement("textarea");
+    ta.className = "go-fin";
+    ta.rows = 4;
+    ta.placeholder = "What do you need help with?";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "go-fbtn";
+    btn.textContent = "Continue";
+    btn.addEventListener("click", function () {
+      var v = ta.value.trim();
+      if (!v) { ta.focus(); return; }
+      clearChips();
+      heard(v);
+      draftThen(kind, form, "written", v);
+    });
+    wrap.appendChild(lab);
+    wrap.appendChild(ta);
+    wrap.appendChild(btn);
+    $log.appendChild(wrap);
+    scrollDown();
+    ta.focus();
+  }
+
+  /** Ask the server to write the enquiry up, then show it for editing.
+   *  A failure here is not fatal: the endpoint always returns something
+   *  usable, and the visitor can rewrite it anyway. */
+  function draftThen(kind, form, source, notes) {
+    var st = status("Writing this up…");
+    fetch(cfg.api + "/widget/draft_enquiry", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        kind: kind,
+        visitor_id: visitorId(),
+        product: state.product ? state.product.key : null,
+        notes: notes,
+        source: source,
+        transcript: source === "chat" ? transcriptForServer() : [],
+      }),
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        st.remove();
+        renderForm(kind, form, (d && d.draft) || notes, source,
+                   d && d.written_by === "model");
+      })
+      .catch(function () {
+        st.remove();
+        // Straight to the form with whatever they typed. Losing the
+        // write-up is a downgrade; losing the enquiry would not be.
+        renderForm(kind, form, notes, source, false);
+      });
+  }
+
+  function transcriptForServer() {
+    return state.messages.slice(-12).map(function (m) {
+      return { role: m.role, text: m.text };
+    });
+  }
+
+  function authHeaders() {
+    var h = { "Content-Type": "application/json" };
+    if (cfg.token) h["Authorization"] = "Bearer " + cfg.token;
+    return h;
+  }
+
+  function renderForm(kind, form, enquiry, source, byModel) {
+    var wrap = document.createElement("div");
+    wrap.className = "go-fwrap";
+    wrap.setAttribute("data-chips", "");
+
+    var h = document.createElement("div");
+    h.className = "go-fhead";
+    h.textContent = form.title || (kind === "sales" ? "Talk to sales" : "Talk to support");
+    wrap.appendChild(h);
+
+    // The alternative to waiting for a reply. Shown above the fields, so
+    // someone who would rather just phone does not fill a form first.
+    if (form.phone) {
+      var ph = document.createElement("div");
+      ph.className = "go-fnote";
+      ph.textContent = "Prefer to call? " + form.phone;
+      wrap.appendChild(ph);
+    }
+
+    var inputs = {};
+    form.fields.forEach(function (f) {
+      var lab = document.createElement("label");
+      lab.className = "go-flab";
+      lab.textContent = f.label + (f.required ? " *" : "");
+      var node;
+      if (f.type === "textarea") {
+        node = document.createElement("textarea");
+        node.rows = 3;
+      } else {
+        node = document.createElement("input");
+        // text / email / tel — the browser's own keyboard and validation
+        // for each, which matters most on a phone.
+        node.type = f.type === "email" ? "email" : f.type === "tel" ? "tel" : "text";
+      }
+      node.className = "go-fin";
+      if (f.required) node.required = true;
+      inputs[f.id] = node;
+      wrap.appendChild(lab);
+      wrap.appendChild(node);
+    });
+
+    var enqBox = null;
+    if (form.allow_summary && (enquiry || source !== "none")) {
+      var elab = document.createElement("label");
+      elab.className = "go-flab";
+      elab.textContent = byModel ? "Summary (written for you — edit it if it's wrong)"
+                                 : "Summary";
+      enqBox = document.createElement("textarea");
+      enqBox.className = "go-fin";
+      enqBox.rows = 5;
+      enqBox.value = enquiry || "";
+      wrap.appendChild(elab);
+      wrap.appendChild(enqBox);
+    }
+
+    if (form.cc_visitor) {
+      var ccNote = document.createElement("div");
+      ccNote.className = "go-fnote";
+      ccNote.textContent = "We will copy you in on the reply, so you have the "
+        + "thread and can chase it directly.";
+      wrap.appendChild(ccNote);
+    }
+
+    var err = document.createElement("div");
+    err.className = "go-ferr";
+    wrap.appendChild(err);
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "go-fbtn";
+    btn.textContent = "Send";
+    btn.addEventListener("click", function () {
+      var values = {};
+      var missing = null;
+      var badEmail = null;
+      form.fields.forEach(function (f) {
+        var v = (inputs[f.id].value || "").trim();
+        if (f.required && !v && !missing) missing = f.label;
+        // A reply goes to this address, so a typo here loses the enquiry
+        // silently. Checked in the browser as well as on the server.
+        if (v && f.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)
+            && !badEmail) badEmail = f.label;
+        if (v) values[f.id] = v;
+      });
+      if (missing) {
+        err.textContent = missing + " is required — we cannot reply without it.";
+        return;
+      }
+      if (badEmail) {
+        err.textContent = "That " + badEmail.toLowerCase() +
+          " does not look right. We need a working address to reply to.";
+        return;
+      }
+      err.textContent = "";
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+
+      fetch(cfg.api + "/widget/lead", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          kind: kind,
+          values: values,
+          product: state.product ? state.product.key : null,
+          transcript: form.allow_summary ? transcriptForServer() : [],
+          enquiry: enqBox ? enqBox.value.trim() : "",
+          summary_source: enqBox && enqBox.value.trim() ? source : "none",
+        }),
+      })
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (d) {
+            throw new Error((d && d.detail) || "HTTP " + r.status);
+          });
+          return r.json();
+        })
+        .then(function () {
+          wrap.remove();
+          say("Thanks — that's been recorded and our " +
+              (kind === "sales" ? "sales" : "support") +
+              " team will be in touch. Anything else I can help with?");
+          chips([
+            {
+              label: "Ask a question",
+              onClick: function () {
+                heard("Ask a question");
+                askCategory();
+              },
+            },
+          ], null);
+        })
+        .catch(function (e) {
+          btn.disabled = false;
+          btn.textContent = "Send";
+          err.textContent = e.message || "That didn't send. Please try again.";
+        });
+    });
+    wrap.appendChild(btn);
+
+    $log.appendChild(wrap);
+    scrollDown();
+    var first = form.fields.length ? inputs[form.fields[0].id] : null;
+    if (first) first.focus();
   }
 
   function fetchCatalog() {
@@ -934,9 +1377,72 @@
     ask(q, { skipFaq: true });
   }
 
+  // ── "let me talk to a person" ─────────────────────────────────────────
+  // Recognised on the client, before the question is sent anywhere. Three
+  // reasons for doing it here rather than in the backend: it costs nothing,
+  // it works for anonymous visitors who cannot reach the model at all, and
+  // it does not consume one of their questions to be told "sure, here is a
+  // form". Deliberately conservative -- a false positive interrupts someone
+  // who was asking a real question, which is worse than missing one.
+  var HUMAN_RE = /(speak|talk|chat|connect|put me (?:in touch|through))[^.?!]{0,30}(human|person|someone|somebody|agent|advisor|adviser|rep|representative|team|staff|engineer)/i;
+  var SUPPORT_RE = /(?:contact|call|email|reach|raise (?:a )?(?:ticket|case)|log (?:a )?(?:ticket|case))[^.?!]{0,20}(support|service|help ?desk|technical)|(?:customer|tech(?:nical)?) support|support (?:team|number|line|desk|email)/i;
+  var SALES_RE = /(?:contact|call|email|reach|speak to|talk to)[^.?!]{0,20}sales|sales (?:team|rep|number|line|enquiry|enquiries|inquiry)|(?:get|request) a (?:quote|price|pricing)|buy|purchase order/i;
+
+  /** Which contact route a typed message is asking for, or null.
+   *  Sales is tested first: "talk to someone in sales" matches both, and
+   *  the more specific intent is the one they said out loud. */
+  function contactIntent(text) {
+    var t = (text || "").trim();
+    if (!t || t.length > 200) return null;
+    if (SALES_RE.test(t)) return "sales";
+    if (SUPPORT_RE.test(t)) return "support";
+    if (HUMAN_RE.test(t)) return "support";
+    return null;
+  }
+
+  /** Offer the route rather than jumping straight into the form: they may
+   *  have meant something adjacent, and a form that opens unbidden over a
+   *  half-typed question is worse than a button. */
+  function offerContact(kind, typed) {
+    heard(typed);
+    var form = formFor(kind);
+    var line = kind === "sales"
+      ? "Of course — I can put you in touch with our sales team."
+      : "Of course — I can put you through to our support team.";
+    if (form.phone) line += " You can also call us on " + form.phone + ".";
+    say(line);
+    var items = [{
+      label: form.title || (kind === "sales" ? "Talk to sales" : "Talk to support"),
+      onClick: function () { openContactForm(kind); },
+    }];
+    // Not a dead end: they might have been mid-question.
+    items.push({
+      label: "No, carry on here",
+      style: "alt",
+      onClick: function () {
+        say("No problem — what would you like to know?");
+        if (state.product) unlockComposer();
+      },
+    });
+    chips(items, "Contact us");
+  }
+
   function ask(q, opts) {
     opts = opts || {};
     if (busy) return;
+
+    // Asking for a human is answered here, not by the pipeline. Skipped for
+    // a question the assistant itself put on screen (opts.silent), which is
+    // a re-ask rather than something the visitor typed.
+    if (!opts.silent && !opts.faqId) {
+      var want = contactIntent(q);
+      if (want) {
+        clearChips();
+        offerContact(want, q);
+        return;
+      }
+    }
+
     // Belt-and-braces: the composer is disabled without a scope, but a
     // chip callback or a future code path could still get here.
     if (!state.product) {
@@ -1027,24 +1533,36 @@
         // refusal branch, so this covers a low-confidence miss, a suppressed
         // ungrounded answer, and the model declining on its own.
         if (d.offer_support) {
-          var supportChips = [];
-          if (cfg.salesEmail) {
-            supportChips.push({
-              label: "Email our team",
-              onClick: function () {
-                window.open("mailto:" + cfg.salesEmail +
-                  "?subject=" + encodeURIComponent("Question about " +
-                    (state.product ? state.product.name : "your products")) +
-                  "&body=" + encodeURIComponent(q), "_blank");
-              },
-            });
+          // Say what actually happened, in the terms a person would use:
+          // this is not in what I can read, here is how to reach someone who
+          // knows. The backend's refusal text is accurate but bare, and
+          // "I cannot answer that" with no route onward reads as a brush-off.
+          var sForm = formFor("support");
+          var offer = "That is not something I have in my knowledge base, so I "
+            + "would rather point you at someone than guess.";
+          if (sForm.phone) {
+            offer += " You can email our support team, or call them on "
+                   + sForm.phone + ".";
+          } else {
+            offer += " I can pass it to our support team by email.";
           }
+          say(offer);
+
+          var supportChips = [{
+            // The support form, not a mailto: — it collects the configured
+            // fields, can carry a write-up of this very conversation, and
+            // lands in the console where it will actually be seen. The old
+            // mailto: threw the visitor into their mail client with the
+            // question pasted in and no record kept anywhere.
+            label: "Email support",
+            onClick: function () { openContactForm("support"); },
+          }];
           supportChips.push({
             label: "Try rewording my question",
             style: "alt",
             onClick: function () { $in.focus(); },
           });
-          chips(supportChips, "Not what you needed?");
+          chips(supportChips, "What would you like to do?");
         }
       })
       .catch(function (e) {
@@ -1065,11 +1583,22 @@
     $launch.setAttribute("aria-expanded", "true");
     if (!opened) {
       opened = true;
-      var saved = loadSaved();
-      if (saved) offerResume(saved);
-      else startFresh();
+      // Config must be applied before the first screen is drawn: the welcome
+      // line and the opening options both come from it, and drawing the
+      // built-in ones first would show a flash of the wrong wording. The
+      // fetch resolves even on failure, so this cannot leave the panel blank.
+      loadConfig().then(function () {
+        var saved = loadSaved();
+        if (saved) offerResume(saved);
+        else startFresh();
+      });
     }
   });
+
+  // Warm the config as soon as the script runs rather than on first open, so
+  // the panel is usually ready instantly. Harmless if never opened: one
+  // small GET.
+  loadConfig();
 
   function close() {
     root.classList.remove("go-open");

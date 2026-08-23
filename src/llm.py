@@ -86,6 +86,27 @@ RETHINK_OPTIONS: list[tuple[str, str]] = _rethink_options()
 CONDENSE_MODEL = "phi"
 
 
+def _usage_tokens(body: dict, provider: str) -> int:
+    """Total tokens a call actually cost, from the provider's own usage
+    block. Every provider here reports it and this module used to throw it
+    away, which meant nothing downstream could bound spend by tokens --
+    a per-session token cap would have been a setting that silently did
+    nothing. Returns 0 when a provider does not report usage; callers treat
+    0 as "unknown", never as "free".
+    """
+    try:
+        u = body.get("usage") or {}
+        if provider == "anthropic":
+            return int(u.get("input_tokens", 0)) + int(u.get("output_tokens", 0))
+        if provider == "local":
+            # Ollama reports these at the top level, not under "usage".
+            return int(body.get("prompt_eval_count", 0)) + int(body.get("eval_count", 0))
+        # OpenAI and DeepSeek both use the OpenAI shape.
+        return int(u.get("total_tokens", 0))
+    except Exception:
+        return 0
+
+
 def _call_ollama(
     model: str,
     prompt: str,
@@ -160,7 +181,8 @@ def _call_ollama(
         )
 
         res.raise_for_status()
-        text = res.json().get("response", "").strip()
+        body = res.json()
+        text = body.get("response", "").strip()
 
         if not text:
             logger.warning(f"Ollama empty response ({model})")
@@ -168,7 +190,8 @@ def _call_ollama(
 
         text = truncate_after_refusal(text)
 
-        return {"text": text, "model": model, "provider": "local"}
+        return {"text": text, "model": model, "provider": "local",
+                "tokens": _usage_tokens(body, "local")}
 
     except Exception as e:
         logger.warning(f"Ollama failed ({model}): {e}")
@@ -209,13 +232,15 @@ def _call_deepseek(
             logger.warning(f"DeepSeek HTTP {res.status_code}")
             return None
 
-        text = res.json()["choices"][0]["message"]["content"].strip()
+        body = res.json()
+        text = body["choices"][0]["message"]["content"].strip()
         if not text:
             logger.warning("DeepSeek empty response")
             return None
 
         text = truncate_after_refusal(text)
-        return {"text": text, "model": model, "provider": "deepseek"}
+        return {"text": text, "model": model, "provider": "deepseek",
+                "tokens": _usage_tokens(body, "deepseek")}
 
     except Exception as e:
         logger.warning(f"DeepSeek failed ({model}): {e}")
@@ -238,8 +263,9 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
             timeout=timeout,
         )
         res.raise_for_status()
-        text = res.json()["choices"][0]["message"]["content"]
-        return {"text": text} if text else None
+        body = res.json()
+        text = body["choices"][0]["message"]["content"]
+        return {"text": text, "tokens": _usage_tokens(body, "openai")} if text else None
     except Exception as e:
         logger.warning(f"OpenAI failed ({model}): {e}")
         return None
@@ -262,9 +288,10 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
             timeout=timeout,
         )
         res.raise_for_status()
-        blocks = res.json().get("content", [])
+        body = res.json()
+        blocks = body.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        return {"text": text} if text else None
+        return {"text": text, "tokens": _usage_tokens(body, "anthropic")} if text else None
     except Exception as e:
         logger.warning(f"Anthropic failed ({model}): {e}")
         return None

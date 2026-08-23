@@ -381,7 +381,16 @@ See [.env.example](.env.example) for the annotated full list.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ADMIN_PASSWORD` | `admin` | Gates every admin endpoint. **Change it.** |
+| `POLICY_PATH` | `policy.json` | Access limits changed from the defaults. Editable in the console under **Access & limits** — these env vars are only the *initial* value. |
+| `QUOTA_MEMBER` | `25` | Starting daily credits for a signed-in customer. |
+| `QUOTA_STAFF` | `500` | Starting daily credits for your own team. |
+| `QUOTA_ANON_LLM` | `3` | Guest allowance, used only if guest AI is switched on. |
+| `WIDGET_QUESTIONS_PER_SESSION` | `0` | Questions per conversation, 0 = unlimited. |
+| `WIDGET_TOKENS_PER_SESSION` | `0` | Tokens per conversation, 0 = unlimited. |
+| `SESSION_SECRET` | *(none)* | **Required.** Signs admin session tokens; sign-in refuses everything until it is set. `python -c "import secrets;print(secrets.token_hex(32))"` |
+| `ALLOWED_EMAIL_DOMAIN` | `innovative-technology.com` | Accounts may only be created for this domain. Blank allows any. |
+| `SESSION_TTL_SECONDS` | `43200` | How long a signed-in session lasts (12h). |
+| `ACCOUNTS_PATH` | `accounts.json` | Account store. Gitignored, **not regenerable** — back it up. |
 | `GENERATION_MODE` | `api` | `api` (Online) or `local` (Free) at boot |
 | `ONLINE_PROVIDER` | `deepseek` | `deepseek` / `openai` / `anthropic` |
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |

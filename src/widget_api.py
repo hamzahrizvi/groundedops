@@ -211,13 +211,121 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
     }
 
 
-def register(app, answer_query):
+class DraftRequest(BaseModel):
+    kind: str                                   # "sales" | "support"
+    visitor_id: str | None = None
+    product: str | None = None
+    # What the visitor typed themselves, when they chose to write their own
+    # description rather than have the chat summarised.
+    notes: str | None = Field(default=None, max_length=2000)
+    # Whether to draft from the conversation or from `notes`.
+    source: str = "chat"                        # "chat" | "written"
+    # The conversation so far, sent by the widget — the same shape and the
+    # same trust level as the transcript /widget/lead already accepts.
+    # Bounded here because prompt cost scales with it, and because there is
+    # no legitimate 200-turn support chat.
+    transcript: list | None = None
+
+
+def _assemble_enquiry(kind: str, product: str, notes: str,
+                      transcript: list) -> str:
+    """The no-LLM enquiry body: the visitor's own words, or a plain
+    transcript, with a one-line header. Used for anonymous callers, and as
+    the fallback whenever generation is unavailable — a form that cannot be
+    submitted because the model is down would be a worse failure than an
+    unpolished enquiry."""
+    head = f"{'Sales' if kind == 'sales' else 'Support'} enquiry"
+    if product:
+        head += f" — {product}"
+    parts = [head, ""]
+    if notes.strip():
+        parts.append(notes.strip())
+    elif transcript:
+        parts.append("From the visitor's conversation with the assistant:")
+        parts.append("")
+        for m in transcript[-12:]:
+            role = "Visitor" if (m.get("role") == "user" or m.get("q")) else "Assistant"
+            text = (m.get("text") or m.get("q") or m.get("a") or "").strip()
+            if text:
+                parts.append(f"{role}: {text}")
+    else:
+        parts.append("(no description given)")
+    return "\n".join(parts)[:4000]
+
+
+def register(app, answer_query, draft_enquiry=None):
     """Attach the router.
 
     `answer_query` is injected rather than imported so this module has no
     dependency on main.py - it stays unit-testable, and the pipeline can be
-    stubbed in tests without loading three ML models.
+    stubbed in tests without loading three ML models. `draft_enquiry` is
+    injected the same way and for the same reason; if it is None the draft
+    endpoint still works, it just returns the assembled body instead of a
+    written one.
     """
+
+    @router.post("/draft_enquiry")
+    async def widget_draft_enquiry(payload: DraftRequest, request: Request):
+        """Write up a sales/support enquiry, either from the conversation or
+        from what the visitor typed. Returns a DRAFT — the widget shows it and
+        lets them edit before it is submitted, so a bad draft is a nuisance
+        rather than a misrepresentation of what they wanted.
+
+        ── Why anonymous callers get no model here ──
+        /ask above keeps a hard invariant: no LLM call is reachable without
+        an account, which is what removes public cost exposure and the public
+        prompt-injection path. Drafting is the same shape of risk (untrusted
+        text into a prompt, on a public endpoint) so it honours the same rule
+        by default: anonymous gets the assembled body, signed-in gets a
+        written one, charged against the same allowance as a question.
+        Set WIDGET_AI_DRAFT_ANONYMOUS=1 to lift that deliberately.
+        """
+        if payload.kind not in ("sales", "support"):
+            raise HTTPException(status_code=400,
+                                detail="kind must be 'sales' or 'support'")
+
+        caller = _caller(request, payload.visitor_id)
+        tier = caller["tier"]
+        notes = (payload.notes or "").strip()
+        # Everything below is untrusted visitor text — the transcript no less
+        # than the notes, since a visitor can type whatever they like into
+        # either. Bounding it is the only mitigation that matters here; the
+        # draft is shown back to them and never executed, and the tier gate
+        # below is what keeps this off a fully public prompt.
+        transcript = (payload.transcript or [])[-12:] if payload.source == "chat" else []
+
+        assembled = _assemble_enquiry(payload.kind, payload.product or "",
+                                      notes, transcript)
+
+        anon_ok = os.getenv("WIDGET_AI_DRAFT_ANONYMOUS", "").strip().lower() \
+            in ("1", "true", "yes")
+        if draft_enquiry is None or (tier == "anonymous" and not anon_ok):
+            return {"draft": assembled, "written_by": "assembled",
+                    "quota": quota.status(caller)}
+
+        gate = quota.check(caller, 1)
+        if not gate["allowed"]:
+            # Not a 429: the visitor can still submit the assembled version,
+            # and blocking a support request because a drafting allowance ran
+            # out would be an absurd place to stop someone.
+            return {"draft": assembled, "written_by": "assembled",
+                    "quota": quota.status(caller)}
+
+        try:
+            written = await draft_enquiry(
+                kind=payload.kind, product=payload.product or "",
+                notes=notes, transcript=transcript)
+        except Exception as e:
+            logger.warning(f"/widget/draft_enquiry: generation failed ({e})")
+            written = ""
+
+        if not (written or "").strip():
+            return {"draft": assembled, "written_by": "assembled",
+                    "quota": quota.status(caller)}
+
+        state = quota.consume(caller, 1)
+        return {"draft": written.strip()[:4000], "written_by": "model",
+                "quota": state}
 
     @router.post("/ask")
     async def widget_ask(payload: AskRequest, request: Request):
@@ -226,11 +334,31 @@ def register(app, answer_query):
         level, spec = quota.resolve_effort(payload.effort, tier)
         sign_in = os.getenv("WIDGET_SIGN_IN_URL", "")
 
-        # ── Anonymous: curated FAQ only ───────────────────────────────
-        # No LLM call is reachable without an account. That removes the
-        # public cost exposure entirely and means untrusted input never
-        # reaches a prompt, so there is no public prompt-injection path.
-        if tier == "anonymous":
+        # ── Per-session caps ─────────────────────────────────────────
+        # Checked before anything else: if this conversation has used up its
+        # allowance there is no point resolving effort or touching the FAQ.
+        # A 429 with a distinct reason, so the widget can say "this chat has
+        # reached its limit, start a new one" rather than the daily wording.
+        sess = quota.session_check(payload.session_id)
+        if not sess["allowed"]:
+            raise HTTPException(status_code=429, detail={
+                "error": "quota_exceeded",
+                "reason": sess["reason"],
+                "tier": tier,
+                "limit": (sess["questions_limit"] if sess["reason"] == "session_questions"
+                          else sess["tokens_limit"]),
+                "message": ("This conversation has reached its limit. "
+                            "Start a new chat to carry on."),
+            })
+
+        # ── Anonymous: curated FAQ only, unless opened up ─────────────
+        # By default no LLM call is reachable without an account. That
+        # removes the public cost exposure entirely and means untrusted input
+        # never reaches a prompt, so there is no public prompt-injection
+        # path. An operator can lift it from the console (policy.py's
+        # anon_llm_enabled) — a deliberate choice with a bill attached, which
+        # is why it is off until someone turns it on.
+        if tier == "anonymous" and not quota.anon_llm_enabled():
             gate = quota.check_faq_lookup(caller)
             if not gate["allowed"]:
                 raise HTTPException(status_code=429, detail={
@@ -316,6 +444,13 @@ def register(app, answer_query):
                   else spec["credits"]
         state = quota.consume(caller, charged) if charged else quota.status(caller)
 
+        # Count this turn against the conversation's own caps. Only when it
+        # actually cost something: a curated FAQ answer involves no model and
+        # should not use up a session that is limited to bound model spend.
+        if charged:
+            quota.session_record(payload.session_id,
+                                 tokens_used=int(result.get("total_tokens") or 0))
+
         logger.info(f"widget ask tier={tier} effort={level} charged={charged} "
                     f"remaining={state['remaining']} "
                     f"ms={round((time.time() - started) * 1000)}")
@@ -340,6 +475,7 @@ def register(app, answer_query):
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
             "quota": quota.status(caller),
+            "session": quota.session_check(payload.session_id),
         }
 
     app.include_router(router)

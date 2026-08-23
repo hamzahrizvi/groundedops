@@ -2,12 +2,9 @@
 FastAPI's TestClient with retrieval/generation stubbed. Focus: auth
 boundaries, validation, persistence, and the public/admin split.
 
-Widget config and lead capture are NOT covered here: the real embeddable
-widget (groundedops-widget.js) reads its branding from data-* attributes
-and has no sales/support form, so widget_config.py is intentionally left
-unwired in main.py pending that frontend work (see PROJECT_MAP.md). Those
-routes don't exist in this app and testing them here would just assert
-against a feature that hasn't shipped.
+Widget config and lead capture are covered in tests/test_widget_forms.py,
+not here — the widget now reads /widget/config and renders the configured
+sales/support forms, so those routes are live and worth their own file.
 """
 import _harness
 from fastapi.testclient import TestClient
@@ -15,7 +12,13 @@ from fastapi.testclient import TestClient
 app = _harness.app
 main = _harness.main
 client = TestClient(app)
-ADMIN = {"x-admin-password": "testpw"}
+# The header carries a session token now (see the auth block in main.py).
+# `support` is the level the admin routes actually require, so that is what
+# the general-purpose credential here should be — using a root token would
+# hide any accidental root-only gating.
+ADMIN = {"x-admin-password": _harness.SUPPORT_TOKEN}
+ROOT = {"x-admin-password": _harness.ROOT_TOKEN}
+BASIC = {"x-admin-password": _harness.BASIC_TOKEN}
 BAD = {"x-admin-password": "wrong"}
 
 ok = lambda label: print(f"  PASS  {label}")

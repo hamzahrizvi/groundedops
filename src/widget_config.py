@@ -164,10 +164,33 @@ def _clean_form(form: dict, default: dict, prefix: str) -> dict:
     if not cleaned:
         cleaned = [_clean_field(f, prefix) for f in default["fields"]]
     email = (str(form.get("notify_email") or "")).strip()[:200]
+
+    # A reply has to go somewhere, so the visitor's email address is not
+    # optional: without it a submission is a dead end that looks like it
+    # worked. Rather than trusting the admin to remember, the form is
+    # repaired here -- if no email field survived cleaning, one is added,
+    # and whatever email field exists is forced to required.
+    if not any(f["type"] == "email" for f in cleaned):
+        if len(cleaned) >= MAX_FORM_FIELDS:
+            cleaned = cleaned[:MAX_FORM_FIELDS - 1]
+        cleaned.insert(min(1, len(cleaned)),
+                       {"id": f"{prefix}_email", "label": "Email",
+                        "type": "email", "required": True})
+    for f in cleaned:
+        if f["type"] == "email":
+            f["required"] = True
+
     return {
         "title": _clean_label(form.get("title"), default["title"]),
         "allow_summary": bool(form.get("allow_summary", True)),
         "notify_email": email,
+        # Shown to the visitor as an alternative to waiting for a reply.
+        # Free text, not validated as a number: extensions, country codes and
+        # "0800 xxx (Mon-Fri 9-5)" are all legitimate here.
+        "phone": (str(form.get("phone") or "")).strip()[:60],
+        # CC the visitor on the eventual reply, so they hold the thread and
+        # can chase it without going through the widget again.
+        "cc_visitor": bool(form.get("cc_visitor", True)),
         "fields": cleaned,
     }
 
@@ -246,6 +269,15 @@ def public_config() -> dict:
         return {
             "title": f.get("title", ""),
             "allow_summary": bool(f.get("allow_summary", True)),
+            # Whether a destination is configured, never the address itself.
+            # The widget needs to know if a submission will actually reach
+            # anyone; publishing the address would hand every scraper on
+            # every embedding page a support inbox to spam.
+            "routed": bool((f.get("notify_email") or "").strip()),
+            # Published deliberately: a phone number for customers to call is
+            # meant to be seen, unlike the internal notify address above.
+            "phone": f.get("phone", ""),
+            "cc_visitor": bool(f.get("cc_visitor", True)),
             "fields": [
                 {"id": x.get("id"), "label": x.get("label"),
                  "type": x.get("type"), "required": bool(x.get("required"))}
@@ -283,8 +315,18 @@ def _save_leads(items: list[dict]) -> None:
         json.dump(items, f, indent=2)
 
 
+MAX_ENQUIRY_CHARS = 4000
+
+# What produced the enquiry body attached to a lead. Stored so the console
+# can say whether a human wrote it or a model drafted it — a staff member
+# replying to a model-drafted enquiry should know that is what they are
+# reading.
+SUMMARY_SOURCES = ("chat", "written", "none")
+
+
 def add_lead(kind: str, values: dict, product: str | None = None,
-             transcript: list | None = None) -> dict:
+             transcript: list | None = None, enquiry: str = "",
+             summary_source: str = "none") -> dict:
     """Record a form submission from the widget.
 
     `values` is matched against the CONFIGURED fields for this form —
@@ -292,6 +334,11 @@ def add_lead(kind: str, values: dict, product: str | None = None,
     A public endpoint that writes arbitrary caller-supplied keys into a
     file the admin console renders is an obvious abuse path, and dropping
     unknown keys closes it without needing to guess at intent.
+
+    `enquiry` is the written-up version of what the visitor wants — either
+    drafted from the chat, or typed by them. `summary_source` records which,
+    because "a model wrote this" is something the person replying needs to
+    know. Neither is trusted: both are stored as text and rendered escaped.
     """
     if kind not in ("sales", "support"):
         raise ValueError("kind must be 'sales' or 'support'")
@@ -312,11 +359,36 @@ def add_lead(kind: str, values: dict, product: str | None = None,
     if not clean_values:
         raise ValueError("form was empty")
 
+    if summary_source not in SUMMARY_SOURCES:
+        summary_source = "none"
+    enquiry_text = (str(enquiry or "")).strip()[:MAX_ENQUIRY_CHARS]
+    # A form with the summary option turned off must not carry one anyway,
+    # whatever the caller sent — the setting is the admin's decision about
+    # what this form collects, and a public caller does not get to override it.
+    if not form.get("allow_summary"):
+        enquiry_text = ""
+        summary_source = "none"
+    if not enquiry_text:
+        summary_source = "none"
+
+    # The address to CC the visitor on, pulled from whichever field is the
+    # email one rather than asked for twice. Stored separately from `values`
+    # so the send path does not have to re-discover which field held it.
+    cc_email = ""
+    if form.get("cc_visitor", True):
+        for fid, field in allowed.items():
+            if field.get("type") == "email" and fid in clean_values:
+                cc_email = clean_values[fid]["value"]
+                break
+
     lead = {
         "id": str(uuid.uuid4()),
         "kind": kind,
         "product": product or "",
         "values": clean_values,
+        "cc_email": cc_email,
+        "enquiry": enquiry_text,
+        "summary_source": summary_source,
         "transcript": (transcript or [])[-20:] if form.get("allow_summary") else [],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "handled": False,

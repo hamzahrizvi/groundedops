@@ -61,8 +61,22 @@ gaps_store.json
 catalog_config.json
 ingest_stamp.txt
 conversations.db
-# widget_config.py is currently unwired (see PROJECT_MAP.md's BROKEN
-# STATE note), but widget_leads.json in particular would hold customer
-# contact details the moment it is — ignored ahead of that landing.
+# sqlite runtime DBs and their write-ahead/shared-memory siblings. The -wal
+# and -shm files were untracked-but-not-ignored, so they showed up as noise
+# in every status.
+quota.db
+*.db-wal
+*.db-shm
+# widget_leads.json holds real customer contact details — the widget's
+# sales/support forms are live and write to it.
 widget_config.json
 widget_leads.json
+# Admin accounts: password hashes and staff email addresses. Never commit
+# this, and note that it is NOT regenerated — losing it means losing every
+# account, so it needs a real backup (see accounts.py).
+accounts.json
+accounts.json.tmp
+# Access limits an operator has changed from the defaults (policy.py).
+# Safe to lose -- it falls back to the env/installed defaults.
+policy.json
+policy.json.tmp

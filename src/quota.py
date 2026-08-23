@@ -70,6 +70,50 @@ LIMITS = {
     "staff": int(os.getenv("QUOTA_STAFF", "500")),
 }
 
+
+# ── policy-backed limits ────────────────────────────────────────────────
+# The values above are the env-derived FALLBACK. An operator can change any
+# of them from the console (see policy.py), and a change has to take effect
+# on the next request rather than at the next restart, so every read goes
+# through these helpers instead of the constants directly.
+#
+# policy.py is imported lazily and every failure falls back to the constant:
+# a broken or missing policy file must degrade to the deployment default, not
+# take quota enforcement offline (which would fail open).
+def _policy(key, fallback):
+    try:
+        import policy
+        v = policy.value(key)
+        return fallback if v is None else v
+    except Exception:
+        return fallback
+
+
+def limit_for(tier: str) -> int:
+    """Daily credit allowance. Anonymous is 0 unless the operator has
+    deliberately enabled LLM access for signed-out visitors."""
+    if tier == "anonymous":
+        if not _policy("anon_llm_enabled", False):
+            return 0
+        return int(_policy("anon_llm_credits", 0))
+    if tier == "member":
+        return int(_policy("member_daily_credits", LIMITS["member"]))
+    if tier == "staff":
+        return int(_policy("staff_daily_credits", LIMITS["staff"]))
+    return 0
+
+
+def anon_faq_limit() -> int:
+    return int(_policy("anon_faq_daily", ANON_FAQ_LIMIT))
+
+
+def anon_ip_limit() -> int:
+    return int(_policy("anon_ip_daily", ANON_IP_LIMIT))
+
+
+def anon_llm_enabled() -> bool:
+    return bool(_policy("anon_llm_enabled", False))
+
 # FAQ lookups are cheap (no LLM, no external call), so anonymous visitors
 # get a generous allowance - enough that a real person never hits it, low
 # enough that nobody scrapes the whole FAQ in a loop.
@@ -231,12 +275,20 @@ def resolve_effort(requested: str | None, tier: str) -> tuple[str, dict]:
     standard rather than erroring: the widget shows the upsell, and the
     visitor still gets an answer.
     """
-    default = "faq_only" if tier == "anonymous" else "standard"
+    # An anonymous visitor normally tops out at faq_only. When the operator
+    # has deliberately opened AI to signed-out visitors, they are treated as
+    # a member for the purpose of choosing an effort level -- their much
+    # smaller credit allowance is what bounds them, not the tier gate.
+    effective = tier
+    if tier == "anonymous" and anon_llm_enabled():
+        effective = "member"
+
+    default = "faq_only" if effective == "anonymous" else "standard"
     level = (requested or default).strip().lower()
     spec = EFFORT.get(level)
     if not spec:
         return default, EFFORT[default]
-    if _TIER_RANK[tier] < _TIER_RANK[spec["min_tier"]]:
+    if _TIER_RANK[effective] < _TIER_RANK[spec["min_tier"]]:
         # Anonymous asking for a generated answer falls back to FAQ-only;
         # a member asking for "deep" falls back to standard. Both get an
         # answer plus an upsell rather than an error.
@@ -256,11 +308,12 @@ def check_faq_lookup(caller: dict) -> dict:
     key = caller["identity"] + ":faq"
     with _lock, _conn() as c:
         used = _used(c, key, win)
-    if used >= ANON_FAQ_LIMIT:
-        return {"allowed": False, "remaining": 0, "limit": ANON_FAQ_LIMIT,
+    faq_cap = anon_faq_limit()
+    if used >= faq_cap:
+        return {"allowed": False, "remaining": 0, "limit": faq_cap,
                 "reset_at": win + WINDOW_SECONDS, "reason": "faq_quota"}
-    return {"allowed": True, "remaining": ANON_FAQ_LIMIT - used,
-            "limit": ANON_FAQ_LIMIT, "reset_at": win + WINDOW_SECONDS,
+    return {"allowed": True, "remaining": faq_cap - used,
+            "limit": faq_cap, "reset_at": win + WINDOW_SECONDS,
             "reason": None}
 
 
@@ -279,7 +332,7 @@ def check(caller: dict, cost: int) -> dict:
 
     Returns {allowed, remaining, limit, reset_at, reason}.
     """
-    limit = LIMITS.get(caller["tier"], LIMITS["anonymous"])
+    limit = limit_for(caller["tier"])
     win = _window_start()
     with _lock, _conn() as c:
         used = _used(c, caller["identity"], win)
@@ -291,7 +344,7 @@ def check(caller: dict, cost: int) -> dict:
         # browser storage cannot mint a fresh allowance.
         if caller.get("ip_identity"):
             ip_used = _used(c, caller["ip_identity"], win)
-            if ip_used + cost > ANON_IP_LIMIT:
+            if ip_used + cost > anon_ip_limit():
                 return {"allowed": False, "remaining": 0, "limit": limit,
                         "reset_at": win + WINDOW_SECONDS, "reason": "ip_quota"}
     return {"allowed": True, "remaining": remaining, "limit": limit,
@@ -309,7 +362,7 @@ def consume(caller: dict, cost: int) -> dict:
             _add(c, caller["ip_identity"], win, cost)
         _purge_old(c)
         used = _used(c, caller["identity"], win)
-    limit = LIMITS.get(caller["tier"], LIMITS["anonymous"])
+    limit = limit_for(caller["tier"])
     return {"remaining": max(0, limit - used), "limit": limit,
             "reset_at": win + WINDOW_SECONDS}
 
@@ -323,20 +376,43 @@ def status(caller: dict) -> dict:
         faq_used = _used(c, caller["identity"] + ":faq", win)
 
     if tier == "anonymous":
+        # Two shapes of anonymous, decided by the operator in the console.
+        # Default: curated FAQ only, and the widget says why. With AI opened
+        # up: a small credit allowance, reported in the same units a member
+        # sees so the widget needs no special case.
+        if anon_llm_enabled():
+            ai_limit = limit_for("anonymous")
+            return {
+                "tier": "anonymous",
+                "mode": "full",
+                "limit": ai_limit,
+                "used": used,
+                "remaining": max(0, ai_limit - used),
+                "unit": "credits",
+                "reset_at": win + WINDOW_SECONDS,
+                "ai_available": True,
+                "deep_available": False,
+                "standard_cost": EFFORT["standard"]["credits"],
+                "deep_cost": EFFORT["deep"]["credits"],
+                "account_notice": "",
+            }
+        faq_cap = anon_faq_limit()
         return {
             "tier": "anonymous",
             "mode": "faq_only",
-            "limit": ANON_FAQ_LIMIT,
+            "limit": faq_cap,
             "used": faq_used,
-            "remaining": max(0, ANON_FAQ_LIMIT - faq_used),
+            "remaining": max(0, faq_cap - faq_used),
             "unit": "FAQ lookups",
             "reset_at": win + WINDOW_SECONDS,
             "ai_available": False,
             "deep_available": False,
             "deep_cost": EFFORT["deep"]["credits"],
+            # Shown by the widget instead of it inventing its own wording.
+            "account_notice": _policy("anon_notice", ""),
         }
 
-    limit = LIMITS.get(tier, 0)
+    limit = limit_for(tier)
     return {
         "tier": tier,
         "mode": "full",
@@ -363,3 +439,68 @@ def _add(c, identity: str, win: int, cost: int) -> None:
         INSERT INTO usage (identity, window_start, credits) VALUES (?, ?, ?)
         ON CONFLICT(identity, window_start) DO UPDATE SET credits = credits + ?
     """, (identity, win, cost, cost))
+
+
+# ── per-session caps ───────────────────────────────────────────────────
+# Distinct from the daily allowance. The daily figure stops someone using a
+# month of budget in a day; these stop one runaway conversation using a
+# whole day's budget in ten minutes. Both are wanted: a visitor who leaves a
+# tab open with a script in it hits these long before the daily one.
+#
+# Counted in the same usage table, under a session-scoped identity, so there
+# is one place that knows how to count and one place that gets purged. A
+# session id is client-supplied, so these are a cost guard and NOT a security
+# boundary — a caller who wants a fresh session can ask for one, and the
+# daily per-visitor and per-IP ceilings are what actually bound that.
+
+def _session_key(session_id: str, what: str) -> str:
+    return f"sess:{session_id}:{what}"
+
+
+def session_check(session_id: str | None, tokens_wanted: int = 0) -> dict:
+    """Would one more question (and optionally `tokens_wanted` tokens) fit in
+    this session's caps? A cap of 0 means unlimited, so the common
+    configuration costs one policy read and no database work."""
+    q_cap = int(_policy("questions_per_session", 0))
+    t_cap = int(_policy("tokens_per_session", 0))
+    if not session_id or (q_cap <= 0 and t_cap <= 0):
+        return {"allowed": True, "reason": None,
+                "questions_limit": q_cap, "questions_used": 0,
+                "tokens_limit": t_cap, "tokens_used": 0}
+
+    win = _window_start()
+    with _lock, _conn() as c:
+        q_used = _used(c, _session_key(session_id, "q"), win)
+        t_used = _used(c, _session_key(session_id, "t"), win)
+
+    if q_cap > 0 and q_used >= q_cap:
+        return {"allowed": False, "reason": "session_questions",
+                "questions_limit": q_cap, "questions_used": q_used,
+                "tokens_limit": t_cap, "tokens_used": t_used}
+    if t_cap > 0 and t_used + max(0, tokens_wanted) > t_cap:
+        return {"allowed": False, "reason": "session_tokens",
+                "questions_limit": q_cap, "questions_used": q_used,
+                "tokens_limit": t_cap, "tokens_used": t_used}
+    return {"allowed": True, "reason": None,
+            "questions_limit": q_cap, "questions_used": q_used,
+            "tokens_limit": t_cap, "tokens_used": t_used}
+
+
+def session_record(session_id: str | None, tokens_used: int = 0) -> None:
+    """Count one question, and whatever tokens it cost, against the session.
+
+    Recorded AFTER the answer, because the token cost is not known before it
+    and charging an estimate would either overcharge every short answer or
+    let a long one through free.
+    """
+    if not session_id:
+        return
+    q_cap = int(_policy("questions_per_session", 0))
+    t_cap = int(_policy("tokens_per_session", 0))
+    if q_cap <= 0 and t_cap <= 0:
+        return
+    win = _window_start()
+    with _lock, _conn() as c:
+        _add(c, _session_key(session_id, "q"), win, 1)
+        if tokens_used > 0:
+            _add(c, _session_key(session_id, "t"), win, int(tokens_used))

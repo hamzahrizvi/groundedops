@@ -211,8 +211,133 @@ python test_queries.py           e2e against a running server
 python eval.py                   regression gate; --update-baseline to relock
 ```
 
-Admin endpoints are gated by the `X-Admin-Password` header against `ADMIN_PASSWORD`
-in `src/.env`. Full env var table is in `README.md`.
+Admin endpoints are gated by real accounts with levels (`accounts.py`), not a
+shared password. The `X-Admin-Password` header now carries a **session
+token**; the header name is kept only because 31 endpoints declare it.
+
+| Level | Reaches |
+|---|---|
+| `root` | Everything, including creating accounts and changing levels. |
+| `support` | Everything except account management. The day-to-day level. |
+| `basic` | Sign in and use the test chat. No admin surface (403 everywhere). |
+
+Three guards in `main.py`: `_require_session` (any level), `_require_admin`
+(`support`+, what all pre-existing admin endpoints use), `_require_root`
+(account management only). Sessions are HMAC tokens signed with
+`SESSION_SECRET`; each carries the account's `token_epoch`, so disabling an
+account or changing its password kills its live sessions immediately.
+
+Accounts live in `accounts.json` (gitignored — scrypt hashes and staff
+emails, and **not regenerable**). First run: the console offers to create the
+root account, and `bootstrap_root` refuses once any account exists. Locked
+out? `python manage_accounts.py list|create|passwd|level|enable|disable`.
+
+Passwords use `hashlib.scrypt` — a real KDF, and stdlib, so no new dependency
+(the `unit` CI job installs an explicit package list, not requirements.txt).
+
+**SSO seam:** company Entra/OIDC sign-in would replace exactly one function,
+`accounts.verify_password`. An OIDC callback validates the ID token itself,
+resolves the email claim with `find_by_email`, and calls `issue_session(user)`
+directly. Levels, guards and the console are unchanged. Full env var table is
+in `README.md`.
+
+**Password reset via email is deliberately not built** — banked pending SMTP
+credentials. The only root-lockout rule is "the last active root cannot be
+disabled/deleted/demoted"; there is no separate permanently-protected
+account — root moves between people by promoting someone else before the
+old one leaves.
+
+**The widget and the console's Test chat are one implementation.** Test chat
+iframes `/widget/preview` — a stand-in customer page that loads the real
+`groundedops-widget.js`. There is no second chat UI to drift, which is the
+same problem that got the React SPA retired. The iframe is what keeps the
+widget's fixed positioning and stylesheet out of the console document, and
+it is also how a customer page loads it, so the preview is honest rather
+than approximate. The provider/model override lives on beside it as a
+separate, clearly-labelled "Pipeline check" — the widget never lets a client
+choose a model, so that path is a bench test, not the customer path.
+
+`groundedops-widget.js` reads `/widget/config` on load: name, welcome,
+colour, icon, opening options (`product` / `general` / `sales` / `support`)
+and both contact forms all come from the console. `data-*` attributes still
+override when explicitly present, so existing embeds do not change
+appearance; `data-api` and `data-token` are attribute-only by necessity.
+
+**Contact forms** are built from config, so adding a field in the console
+adds it to the widget. A form may offer the visitor a choice: attach a
+write-up of the chat so far, describe it themselves, or neither.
+`POST /widget/draft_enquiry` produces that write-up — and honours
+`widget_api.py`'s invariant that no LLM call is reachable without an
+account, so anonymous callers get an assembled body and signed-in callers a
+generated one (`WIDGET_AI_DRAFT_ANONYMOUS=1` lifts that deliberately).
+Submissions carry `enquiry` + `summary_source` so the console can say
+whether a human or a model wrote what staff are reading. Each form has a
+fixed destination (`notify_email`), stored on every lead with
+`notified: false` — **nothing is emailed yet**; that address is the seam
+SMTP plugs into. The address is never published to a public caller, only a
+`routed` boolean.
+
+**Access policy is runtime-editable** (`policy.py`, persisted to
+`policy.json`, root-only page "Access & limits"). Daily allowances, guest
+limits and per-conversation caps were env vars read once at import in
+`quota.py`; they now read through `policy.py` per-request, so a change
+applies on the next request with no restart. Env vars are still the initial
+value, so existing deployment configs keep working.
+
+**Guest (signed-out) AI access is OFF by default and is a switch, not a
+default.** `quota.py` documents why: with it off, no LLM call is reachable
+without an account, which removes public cost exposure and the public
+prompt-injection surface in one decision. Turning it on gives guests a small
+separate allowance (`anon_llm_credits`). When it is off the widget shows a
+configurable notice (`anon_notice`) up front rather than letting someone
+discover the limit after typing a real question.
+
+**Per-conversation caps** (`questions_per_session`, `tokens_per_session`, 0 =
+unlimited) bound a single sitting so one runaway thread cannot spend a whole
+day's allowance. Counted in quota's existing usage table under a
+session-scoped key. A session id comes from the browser, so these are a cost
+guard, not a security boundary — the daily per-visitor and per-IP ceilings
+are what bound a determined caller.
+
+**Token accounting is real.** `llm.py` previously discarded every provider's
+usage block, which would have made `tokens_per_session` a setting that
+silently did nothing. `_usage_tokens` now reads it for all four providers
+(OpenAI/DeepSeek `total_tokens`, Anthropic input+output, Ollama's own
+counters) and `query()` returns `total_tokens`. 0 means "not reported" and is
+treated as unknown, never as free.
+
+**Asking for a human is handled in the widget, not the pipeline.**
+`contactIntent()` matches "speak to someone", "contact support", "sales
+enquiry" and similar against the typed message before it is sent anywhere.
+Three reasons: it costs nothing, it works for guests who cannot reach a model
+at all, and it does not spend one of their questions to be handed a form. It
+offers a button rather than opening the form unbidden, and includes a "no,
+carry on here" out for a false positive.
+
+**A refusal names a route onward.** When the backend sets `offer_support`,
+the widget says the question is not in its knowledge base and offers the
+support form plus the configured phone number, instead of the bare refusal
+text it used to end on.
+
+**Contact forms always keep a required email field** — `_clean_form` adds one
+back if removed and forces it required, because a submission with no reply
+address is a dead end that looks like it worked. `cc_visitor` (default on)
+records the visitor's own address on the lead as `cc_email` so the eventual
+reply can copy them in. `phone` is published to the widget deliberately;
+`notify_email` still is not.
+
+**Previewing as a signed-in customer:** Test chat's toggle calls
+`POST /admin/widget/preview_token`, which mints a short-lived (30 min)
+`member` widget token; `preview.html` passes it as `data-token`. Guest is the
+default because that is what most real visitors are. That endpoint mints a
+real credential, so it is support-level gated and deliberately short-lived.
+
+**Provider API keys have a root-only console page** (`/admin/keys`,
+`keystore.set_key`/`clear_key`/`masked_key`). Saving a key updates
+`os.environ` and rewrites its `.env` line atomically in the same call — no
+restart — and a saved key is never echoed back, only a masked
+first-4/last-4 form. `support` sees *which* providers are available
+(`/admin/providers`) but never the keys or their status.
 
 ---
 
