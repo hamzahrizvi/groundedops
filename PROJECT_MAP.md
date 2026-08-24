@@ -39,6 +39,9 @@ groundedops/
 │                                 ran — GitHub Actions only reads .github/workflows/.
 ├── .gitignore  LICENSE  Makefile
 ├── README.md                     architecture, components table, env vars, limitations
+├── STAGING.md                    deploying to an internet-reachable host:
+│                                 exposure model, secrets, persistence,
+│                                 documents, and the WordPress plugin
 ├── QUICKSTART.md                 double-click install path, no Docker
 ├── USER_GUIDE.md                 end-user guide to the running app
 ├── handover.txt                  live URLs + member token from the last run.cmd
@@ -276,6 +279,26 @@ fixed destination (`notify_email`), stored on every lead with
 `notified: false` — **nothing is emailed yet**; that address is the seam
 SMTP plugs into. The address is never published to a public caller, only a
 `routed` boolean.
+
+**The admin surface is LAN-only by default and that is load-bearing.**
+`main.py`'s `_restrict_private_surface` treats the presence of
+`X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` as proof a request came
+from outside and 404s everything except `/widget/*` and `/health`. Behind any
+reverse proxy that means the console is unreachable unless
+`ADMIN_ALLOWED_IPS` lists the caller's IP prefix. That default was written
+when the admin surface had one shared password; it now has real accounts, so
+opening it is reasonable but stays deliberate. The allowlist sits in FRONT of
+authentication — an allowlisted caller still signs in and still gets level
+checks. `STAGING.md` is the runbook.
+
+**First-run root creation is protected in two layers.**
+`POST /admin/auth/bootstrap` cannot require authentication (there is no
+account yet), so: while `ADMIN_ALLOWED_IPS` is empty the surface guard makes
+it unreachable from outside at all; once it is opened, an external caller
+additionally needs `BOOTSTRAP_TOKEN` in an `X-Bootstrap-Token` header. An
+allowlist is usually a whole office range, not one person, which is what that
+inner gate is for. Unproxied setup on the box needs no token. `bootstrap_root`
+refuses permanently once any account exists.
 
 **Access policy is runtime-editable** (`policy.py`, persisted to
 `policy.json`, root-only page "Access & limits"). Daily allowances, guest

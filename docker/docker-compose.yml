@@ -24,10 +24,63 @@ services:
       # exposing this publicly, e.g.
       #   WIDGET_ALLOWED_ORIGINS=https://acme.com,https://docs.acme.com
       WIDGET_ALLOWED_ORIGINS: ${WIDGET_ALLOWED_ORIGINS:-*}
-      # Gates every admin endpoint. CHANGE THIS — it defaults to "admin".
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+
+      # ── Admin accounts (replaced ADMIN_PASSWORD) ────────────────────
+      # Signs admin session tokens. NO DEFAULT ON PURPOSE: if this is unset
+      # the console refuses every sign-in, which is a loud, obvious failure.
+      # A default would silently make every deployment share one signing
+      # key, so any token minted anywhere would be valid here.
+      #   openssl rand -hex 32
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in docker/.env}
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      # Empty = the admin console is LAN-only, as it has always been. Set to
+      # a comma-separated list of IP prefixes to reach it from outside, e.g.
+      #   ADMIN_ALLOWED_IPS=203.0.113.,198.51.100.42
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-}
+      # Needed ONCE to create the first root account over the network. Leave
+      # empty and create it on the box instead:
+      #   docker compose exec backend python manage_accounts.py create \
+      #       you@company.com --level root
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
+
+      # ── Behind a reverse proxy ──────────────────────────────────────
+      # Honour X-Forwarded-For so per-IP quotas and ADMIN_ALLOWED_IPS see
+      # the real caller. Only set this when a proxy you control is in front
+      # — otherwise a client can forge the header and mint unlimited
+      # anonymous identities.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      # TLS terminates at the proxy, so ask browsers to stay on HTTPS.
+      ENABLE_HSTS: ${ENABLE_HSTS:-1}
+
+      # ── Widget token shared with the WordPress plugin ───────────────
+      # Must match GROUNDEDOPS_SECRET in wp-config.php. Use a DIFFERENT
+      # value on staging than production.
+      WIDGET_TOKEN_SECRET: ${WIDGET_TOKEN_SECRET:-}
+      WIDGET_SIGN_IN_URL: ${WIDGET_SIGN_IN_URL:-}
+
+      # ── Runtime state, all on the persistent volume ─────────────────
+      # These default to the working directory, i.e. /app INSIDE the image,
+      # so without these lines every rebuild silently discarded them. Same
+      # bug the CONVO_DB_PATH comment above describes. accounts.json is the
+      # one that really matters: it is NOT regenerable, and losing it loses
+      # every account. widget_leads.json holds customer enquiries.
+      ACCOUNTS_PATH: /data/accounts.json
+      POLICY_PATH: /data/policy.json
+      QUOTA_DB_PATH: /data/quota.db
+      FAQ_STORE_PATH: /data/faq_store.json
+      FAQ_GAP_PATH: /data/faq_gaps.json
+      CATALOG_CONFIG: /data/catalog_config.json
+      WIDGET_CONFIG_PATH: /data/widget_config.json
+      WIDGET_LEADS_PATH: /data/widget_leads.json
+      INGEST_STAMP_PATH: /data/ingest_stamp.txt
+      # The document store (docstore.py). Bind-mounted below so the
+      # originals live on the host and survive the container entirely.
+      SOURCE_FILE_DIR: /data/documents
+
       # Widget traffic can't supply a key from the browser, so an env key
-      # is required for Online mode when serving the widget.
+      # is required for Online mode when serving the widget. These can also
+      # be pasted in at runtime from the console's API keys page (root only).
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -38,8 +91,15 @@ services:
       # network the way the bundled frontend can.
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - grounded-data:/data          # chroma_db + conversations.db persist here
+      # Everything stateful: chroma_db, conversations.db, accounts.json,
+      # policy.json, quota.db, the FAQ/catalog/widget stores and leads.
+      - grounded-data:/data
       - ../corpus:/app/corpus:ro     # OPTIONAL: drop PDFs here to ingest
+      # The document store. Read-write: the console writes uploads here, and
+      # this is the ONLY copy of some source PDFs — see PENDING.md. Bind-
+      # mounted rather than left in the named volume so it is visible on the
+      # host and can be backed up with ordinary tools.
+      - ../documents:/data/documents
     restart: unless-stopped
 
   # The `frontend` service was removed in v15.2 along with the React SPA it

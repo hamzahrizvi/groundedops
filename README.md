@@ -381,6 +381,10 @@ See [.env.example](.env.example) for the annotated full list.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
+| `BOOTSTRAP_TOKEN` | *(empty)* | Required in an `X-Bootstrap-Token` header for first-run root creation **over the network**. Unproxied/LAN setup needs no token. Clear it once the root account exists. |
+| `TRUST_PROXY` | *(unset)* | Honour `X-Forwarded-For`. Set only with a proxy you control in front — otherwise the header is forgeable and anonymous quotas can be bypassed. |
+| `ENABLE_HSTS` | *(unset)* | Ask browsers to stay on HTTPS. TLS terminates at the proxy; this app does not serve TLS. |
 | `POLICY_PATH` | `policy.json` | Access limits changed from the defaults. Editable in the console under **Access & limits** — these env vars are only the *initial* value. |
 | `QUOTA_MEMBER` | `25` | Starting daily credits for a signed-in customer. |
 | `QUOTA_STAFF` | `500` | Starting daily credits for your own team. |

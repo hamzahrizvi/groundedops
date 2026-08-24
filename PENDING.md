@@ -44,6 +44,16 @@ Last hand-updated: 2026-08-20, after v15.1.
 
 ## In progress / known gaps
 
+- **Staging deploy is prepared but has never been run.** `STAGING.md` is the
+  runbook; `docker/.env.example` is the template. What is done: the admin
+  surface can be opened deliberately (`ADMIN_ALLOWED_IPS`), first-run root
+  creation is protected in two layers, every runtime store is on the
+  persistent volume, `documents/` is bind-mounted, and the WordPress plugin
+  no longer overrides the console's branding. What is NOT done: **none of it
+  has been exercised on a real host.** In particular `docker compose up` has
+  not been run since the compose file changed, and the WordPress plugin edit
+  was not PHP-linted (no php binary available here).
+
 - **SMTP is the one thing standing between enquiries and a person.** Each
   form now also carries a phone number to offer, and every lead records
   `cc_email` (the visitor's own address) so the reply can copy them in the

@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       GroundedOps Support Widget
  * Plugin URI:        https://github.com/hamzahrizvi/groundedops
- * Description:       Adds the GroundedOps support widget to the site. Signed-in users get AI answers from the product documentation; guests get curated FAQ answers only.
- * Version:           12.0
+ * Description:       Adds the GroundedOps support widget to the site. Branding and the contact forms are configured in the GroundedOps console, not here. Signed-in users get AI answers from the product documentation; guests get curated FAQ answers unless guest AI is enabled in the console.
+ * Version:           15.3
  * Requires at least: 5.6
  * Requires PHP:      7.4
  * Author:            Innovative Technology
@@ -31,6 +31,28 @@
  *
  * The SAME secret must be set as WIDGET_TOKEN_SECRET in the GroundedOps
  * .env. Use a DIFFERENT secret on staging than production.
+ *
+ * STAGING
+ *   Point GROUNDEDOPS_API at the staging backend and give staging its own
+ *   GROUNDEDOPS_SECRET. Two things to check on the GroundedOps side:
+ *
+ *     WIDGET_ALLOWED_ORIGINS must list this site's origin, or the browser
+ *     blocks every call with a CORS error.
+ *
+ *     WIDGET_TOKEN_SECRET must equal GROUNDEDOPS_SECRET here, or every
+ *     signed-in visitor is silently treated as a guest — which looks like
+ *     "the AI does not work" rather than an auth mismatch.
+ *
+ *   To prove the backend half independently of WordPress, mint a token on
+ *   the server with `python mint_token.py` and paste it as data-token on a
+ *   plain HTML page. If that works and this does not, the fault is here or
+ *   in the secret, not in the backend.
+ *
+ * WHAT IS CONFIGURED WHERE
+ *   Here (wp-config.php):  backend URL, shared secret, token TTL.
+ *   GroundedOps console:   the assistant's name, colour, icon, welcome
+ *                          text, opening buttons, and the sales/support
+ *                          forms including their destination addresses.
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -128,11 +150,23 @@ function groundedops_embed_widget() {
     $api   = esc_url(GROUNDEDOPS_API);
     $token = groundedops_make_token();
 
+    // Only what WordPress is the authority on.
+    //
+    // data-agent-name and data-accent were set here as 'Support' and
+    // '#E4002B'. They have been REMOVED on purpose: the widget now reads its
+    // branding from GET /widget/config, i.e. from the console's Widget
+    // design page, and a data-* attribute that is explicitly present
+    // OVERRIDES the server. Leaving them here meant editing the branding in
+    // the console had no effect on the live WordPress site — the exact bug
+    // that page was fixed to stop having.
+    //
+    // What stays is what only WordPress can know: where the backend is, who
+    // this visitor is, and where to send them to sign in. To brand the
+    // widget, use the console. To override it for one site anyway, add the
+    // attribute back here deliberately.
     $attrs = array(
         'src'              => $api . '/widget/groundedops-widget.js',
         'data-api'         => $api,
-        'data-agent-name'  => 'Support',
-        'data-accent'      => '#E4002B',
         // Return the visitor to the page they were reading, if the SP
         // plugin honours redirect_to (WooCommerce and most SAML plugins do).
         'data-sign-in-url' => esc_url(add_query_arg(

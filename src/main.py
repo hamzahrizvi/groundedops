@@ -171,6 +171,37 @@ PRIVATE_NETWORKS = [n.strip() for n in os.getenv(
 
 _PUBLIC_PREFIXES = ("/widget", "/health")
 
+# ── Reaching the admin surface from outside the LAN ────────────────────
+# Until now this was simply impossible: any proxy header meant "external"
+# and everything outside _PUBLIC_PREFIXES got a 404, with no way to open it.
+# That was the right default when the admin surface had one shared password
+# and no accounts. It now has real accounts with levels (accounts.py), so
+# exposing it for internal testing is a reasonable thing to want — but it
+# must stay a DELIBERATE act, not a side effect of putting a proxy in front.
+#
+# ADMIN_ALLOWED_IPS is that deliberate act: a comma-separated list of IP
+# prefixes permitted to reach the admin surface from outside. Empty (the
+# default) keeps the old behaviour exactly — nothing external gets in.
+# Prefix matching, not CIDR, to match PRIVATE_NETWORKS above and to avoid
+# pulling in ipaddress parsing for a list an operator hand-writes.
+#
+# This is an allowlist in front of authentication, not instead of it: a
+# request from an allowed address still has to sign in.
+ADMIN_ALLOWED_IPS = [n.strip() for n in
+                     os.getenv("ADMIN_ALLOWED_IPS", "").split(",") if n.strip()]
+if ADMIN_ALLOWED_IPS:
+    logger.warning(
+        "ADMIN_ALLOWED_IPS is set: the admin console is reachable from "
+        f"{len(ADMIN_ALLOWED_IPS)} external prefix(es). Sign-in is still "
+        "required, but this surface is no longer LAN-only."
+    )
+
+
+def _admin_ip_allowed(ip: str | None) -> bool:
+    if not ADMIN_ALLOWED_IPS or not ip:
+        return False
+    return any(ip.startswith(p) for p in ADMIN_ALLOWED_IPS)
+
 # /source_file is reachable externally only WITH a valid member token.
 # It was on the open allowlist, which meant every ingested document could
 # be downloaded through the tunnel by anyone who knew or guessed a
@@ -263,6 +294,12 @@ async def _restrict_private_surface(request, call_next):
     proxied = any(h in request.headers for h in _PROXY_HEADERS)
     host = request.client.host if request.client else ""
     if proxied or (host and not _is_private(host)):
+        # An operator can allowlist specific external addresses for the
+        # admin surface. Resolved from the proxy headers, so it is the real
+        # client being matched and not the proxy's own address.
+        caller_ip = _external_ip(request) or host
+        if _admin_ip_allowed(caller_ip):
+            return await call_next(request)
         logger.warning(f"blocked non-local access to {path} "
                        f"(socket={host}, forwarded={_external_ip(request)})")
         return _deny(request)
@@ -2026,14 +2063,50 @@ def admin_auth_state():
     been set up, which an installer already knows."""
     return {"initialised": not accounts.is_uninitialised(),
             "sso": False,
-            "email_domain": accounts.ALLOWED_EMAIL_DOMAIN}
+            "email_domain": accounts.ALLOWED_EMAIL_DOMAIN,
+            # Whether first-run setup will be accepted from where the caller
+            # is, so the gate can say "set this up on the server" instead of
+            # offering a form that is going to 403.
+            "bootstrap_token_required": bool(
+                (os.getenv("BOOTSTRAP_TOKEN") or "").strip())}
 
 
 @app.post("/admin/auth/bootstrap")
-def admin_auth_bootstrap(payload: BootstrapReq):
+def admin_auth_bootstrap(payload: BootstrapReq, request: Request,
+                         x_bootstrap_token: str | None = Header(default=None)):
     """First-run only: creates the single root account. `bootstrap_root`
     refuses once any account exists, so this cannot be used later to add a
-    second way in."""
+    second way in.
+
+    THE LAND-GRAB: this endpoint has to be unauthenticated — there is no
+    account to authenticate against yet. While the admin surface was
+    LAN-only that was fine. The moment ADMIN_ALLOWED_IPS opens it up, an
+    unauthenticated "create the root account" endpoint on a reachable URL
+    means whoever reaches it first owns the install. On a staging box that
+    is a bot, not a colleague.
+
+    So an EXTERNAL caller must additionally present BOOTSTRAP_TOKEN. A
+    request that did not arrive through a proxy (a real LAN or console-on-
+    the-box request) is unaffected, which keeps first-run setup simple in
+    the normal case. Once the root account exists this whole path is closed
+    by bootstrap_root regardless, so the token is only needed once.
+    """
+    external = any(h in request.headers for h in _PROXY_HEADERS)
+    if external:
+        expected = (os.getenv("BOOTSTRAP_TOKEN") or "").strip()
+        if not expected:
+            raise HTTPException(
+                status_code=403,
+                detail="First-run setup is not available over the network. "
+                       "Create the first account on the server itself "
+                       "(python manage_accounts.py create you@example.com "
+                       "--level root), or set BOOTSTRAP_TOKEN.")
+        import hmac as _hmac
+        if not _hmac.compare_digest((x_bootstrap_token or "").strip(), expected):
+            logger.warning("bootstrap refused: bad or missing BOOTSTRAP_TOKEN "
+                           f"from {_external_ip(request)}")
+            raise HTTPException(status_code=403,
+                               detail="A valid setup token is required.")
     try:
         user = accounts.bootstrap_root(payload.email, payload.password,
                                        payload.name or "")
