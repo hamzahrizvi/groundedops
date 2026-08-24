@@ -381,6 +381,8 @@ See [.env.example](.env.example) for the annotated full list.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `BACKUP_PASSPHRASE` | *(none)* | Passphrase for unattended (cron) backups. Prompted for interactively otherwise; never taken as a CLI argument, which would land in shell history. |
+| `BACKUP_ALLOW_PLAINTEXT` | *(unset)* | Permit an unencrypted export. Off: an archive holds password hashes and customer contact details. |
 | `BACKUP_MAX_BYTES` | `4294967296` | Ceiling on what an uploaded archive may expand to. |
 | `BACKUP_SNAPSHOT_DIR` | `backup_snapshots` | Where the automatic pre-restore snapshot is written. |
 | `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |

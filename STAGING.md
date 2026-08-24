@@ -171,8 +171,13 @@ secret, not the backend.
 Once the documents are indexed and the console is configured, take one:
 
 ```bash
-docker compose exec backend python manage_backup.py export --out /data/first-good-state.zip
+docker compose exec backend python manage_backup.py export --out /data/first-good-state.gobk
 ```
+
+It prompts for a passphrase and encrypts the archive. Put that passphrase in
+your password manager **now** — not in `docker/.env` next to the backup, and
+not in the same folder. There is no recovery path if it is lost, by design.
+For an unattended cron backup, set `BACKUP_PASSPHRASE` in the environment.
 
 Or from the console: **Backup → Download backup**. Support and above can
 export; only root can restore.
@@ -183,9 +188,10 @@ accounts — so restoring it does **not** re-ingest anything, which is the
 slow part. Restoring the index needs a server restart, because Chroma holds
 those files open.
 
-It contains password hashes and customer contact details. Put it somewhere
-access-controlled, and schedule it — a backup feature nobody runs is not a
-backup.
+It contains password hashes and customer contact details, which is why it is
+encrypted. Still put it somewhere access-controlled — encryption is a second
+line, not a reason to be casual — and schedule it, because a backup feature
+nobody runs is not a backup.
 
 ---
 

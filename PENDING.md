@@ -18,10 +18,16 @@ Last hand-updated: 2026-08-20, after v15.1.
   the search index, the FAQ, the catalogue, the widget config and the
   enquiries, so a restore needs no re-ingesting. **Still open: nobody has
   taken one yet, and nothing schedules it.** A backup feature that is never
-  run is not a backup. Decide where archives go (they hold password hashes
-  and customer contact details, so somewhere access-controlled) and what
-  runs it — cron on the host is the obvious answer, calling
-  `manage_backup.py export --out /path/dated.zip`.
+  run is not a backup. Decide where archives go and what runs it — cron on
+  the host is the obvious answer, calling
+  `manage_backup.py export --out /path/dated.gobk` with `BACKUP_PASSPHRASE`
+  in its environment.
+
+  Archives are AES-256-GCM encrypted with a scrypt-derived passphrase.
+  **Where the passphrase lives is now a decision someone has to make and
+  record.** Losing it loses every backup taken with it, with no recovery
+  path. It must not sit in `docker/.env` beside the archives, or the
+  encryption buys nothing against whoever reaches the server.
 
 - **Password reset via email is banked, not built.** The user will supply
   SMTP credentials later. Until then the only reset path is a root using the

@@ -301,9 +301,25 @@ inner gate is for. Unproxied setup on the box needs no token. `bootstrap_root`
 refuses permanently once any account exists.
 
 **Backup and restore** (`backup.py`, `manage_backup.py`, console page
-"Backup"). A plain zip with a `manifest.json` at the root — plain on purpose,
-so an operator can open it and pull one file out without this code. Contains
-the stores, `conversations.db`, the Chroma index and the retained documents.
+"Backup"). A zip holding the stores, `conversations.db`, the Chroma index and
+the retained documents, sealed in an encrypted envelope (`.gobk`):
+
+    b"GOBK1\n" | 4-byte header length | plaintext JSON header | AES-256-GCM
+
+The key is scrypt-derived (n=2^16) from a passphrase. The header stays
+readable so a file can be identified without the passphrase — when it was
+made, what it holds, whether it carries accounts — and is bound in as GCM
+associated data, so editing it to lie about the contents breaks decryption
+rather than passing quietly. It deliberately carries no email addresses.
+
+**There is no way to make a file only this application can open.** Any key
+baked into the code would sit in a public repository. Encryption protects
+the file at rest; the passphrase is what does the protecting, and it has to
+live somewhere other than beside the backup. Losing it loses the archive,
+with no recovery path — a recovery path is another way in. Plain archives
+still read, so backups taken before this existed still restore, and
+`BACKUP_ALLOW_PLAINTEXT` / `--plain` exist for someone who wants to pipe
+into their own encryption.
 
 The index is included even though it is derived: rebuilding it works
 (`reindex.py --from-store`) but costs a full parse and embed of every

@@ -5,12 +5,16 @@ The console can do both, except on the day it will not start — a bad
 restore, a corrupt store, a half-finished upgrade. That is exactly when a
 backup matters, so it must not be the console's exclusive property.
 
-    python manage_backup.py export                     # full archive, here
+    python manage_backup.py export                     # prompts for a passphrase
     python manage_backup.py export --out /mnt/nas/go.zip
     python manage_backup.py export --no-documents      # settings + index only
-    python manage_backup.py inspect go.zip             # what is in it
-    python manage_backup.py restore go.zip             # accounts left alone
-    python manage_backup.py restore go.zip --accounts  # and accounts too
+    python manage_backup.py inspect go.gobk            # what is in it
+    python manage_backup.py restore go.gobk            # accounts left alone
+    python manage_backup.py restore go.gobk --accounts # and accounts too
+
+Archives are encrypted. BACKUP_PASSPHRASE is honoured for unattended runs
+(cron); otherwise the passphrase is prompted for, never taken as an argument
+— an argument lands in shell history and in the process list.
 
 A CLI export is always a FULL one (accounts included), because whoever can
 run this already has the files on disk — the level split in the console
@@ -21,6 +25,7 @@ Run from the `src` directory, or with the same store paths in the
 environment, so it reads the same install the server does.
 """
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -48,27 +53,67 @@ def _human(n: float) -> str:
     return f"{n:.1f}GB"
 
 
+def _ask_passphrase(confirm: bool) -> str:
+    """Prompted, never a command-line argument: an argument lands in shell
+    history and in the process list. BACKUP_PASSPHRASE is honoured for
+    unattended runs (cron), which is the one case where prompting cannot
+    work."""
+    env = (os.getenv("BACKUP_PASSPHRASE") or "").strip()
+    if env:
+        return env
+    first = getpass.getpass("Backup passphrase: ")
+    if confirm and getpass.getpass("Passphrase again: ") != first:
+        sys.exit("Those did not match.")
+    try:
+        backup.check_passphrase(first)
+    except backup.BackupError as e:
+        sys.exit(str(e))
+    return first
+
+
 def cmd_export(args):
+    passphrase = None
+    if args.plain:
+        print("WARNING: --plain writes an UNENCRYPTED archive containing "
+              "password hashes\n         and customer contact details.")
+    else:
+        passphrase = _ask_passphrase(confirm=True)
     data, manifest = backup.create_archive(
         created_by=f"cli ({os.getenv('USER') or os.getenv('USERNAME') or 'unknown'})",
         level="root",
         include_documents=not args.no_documents,
-        include_index=not args.no_index)
+        include_index=not args.no_index,
+        passphrase=passphrase)
     out = args.out or backup.suggested_filename(manifest)
     with open(out, "wb") as fh:
         fh.write(data)
     print(f"Wrote {out} ({_human(len(data))})")
     for k, v in manifest["counts"].items():
         print(f"  {k}: {v}")
-    print("\nThis file contains password hashes and customer contact details.")
-    print("Store it somewhere access-controlled.")
+    if manifest.get("encrypted"):
+        print("\nEncrypted. Without the passphrase this file is unreadable, "
+              "including\nby this tool — there is no recovery path. Store the "
+              "passphrase with your\nother secrets, not beside the backup.")
+    else:
+        print("\nNOT encrypted. Contains password hashes and customer contact "
+              "details.\nStore it somewhere access-controlled.")
 
 
 def cmd_inspect(args):
     with open(args.archive, "rb") as fh:
         data = fh.read()
     try:
-        m = backup.read_manifest(data)
+        if backup.is_encrypted(data):
+            # The header alone identifies a file, which is what you want when
+            # working out which of six backups to restore.
+            print(json.dumps(backup.read_envelope(data), indent=2))
+            if not args.full:
+                print("\n(header only — pass --full and the passphrase to read "
+                      "the manifest inside)")
+                return
+            m = backup.read_manifest(data, _ask_passphrase(confirm=False))
+        else:
+            m = backup.read_manifest(data)
     except backup.BackupError as e:
         sys.exit(str(e))
     print(json.dumps(m, indent=2))
@@ -77,8 +122,9 @@ def cmd_inspect(args):
 def cmd_restore(args):
     with open(args.archive, "rb") as fh:
         data = fh.read()
+    passphrase = _ask_passphrase(confirm=False) if backup.is_encrypted(data) else None
     try:
-        m = backup.read_manifest(data)
+        m = backup.read_manifest(data, passphrase)
     except backup.BackupError as e:
         sys.exit(str(e))
 
@@ -100,9 +146,11 @@ def cmd_restore(args):
         restore_documents=not args.no_documents,
         restore_index=not args.no_index,
         restore_conversations=not args.no_conversations,
-        actor="cli")
+        actor="cli",
+        passphrase=passphrase)
 
-    snap = args.snapshot_out or "before-restore.zip"
+    snap = args.snapshot_out or (
+        "before-restore.gobk" if passphrase else "before-restore.zip")
     with open(snap, "wb") as fh:
         fh.write(result["safety_snapshot"])
     print(f"\nPrevious state saved to {snap} — restore that to undo this.")
@@ -126,10 +174,16 @@ def main():
                    help="settings and index only, no source files")
     p.add_argument("--no-index", action="store_true",
                    help="skip the search index (a restore then needs reindex.py)")
+    p.add_argument("--plain", action="store_true",
+                   help="write an UNENCRYPTED archive (you already have the "
+                        "files on disk; this is for piping into your own "
+                        "encryption, not for casual use)")
     p.set_defaults(fn=cmd_export)
 
     p = sub.add_parser("inspect", help="print an archive's manifest")
     p.add_argument("archive")
+    p.add_argument("--full", action="store_true",
+                   help="decrypt and print the inner manifest too")
     p.set_defaults(fn=cmd_inspect)
 
     p = sub.add_parser("restore", help="overwrite this install from an archive")

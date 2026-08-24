@@ -60,7 +60,7 @@ jobs:
         # httpx: starlette's TestClient is built on it. Verified against this
         # exact dependency set in a clean Python 3.11 venv, which is what CI
         # uses -- the local venv is 3.14 and behaves differently here.
-        run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx
+        run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx cryptography
       - name: Run unit + route test suite
         run: |
           cd src

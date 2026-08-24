@@ -50,7 +50,7 @@ _ENV_COUNT = _load_env_file(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -2303,14 +2303,45 @@ def admin_keys_set(provider: str, payload: ApiKeyReq,
 # export" would hand every staff password hash to a level that deliberately
 # cannot manage accounts.
 
-@app.get("/admin/backup/export")
-def admin_backup_export(documents: bool = True, index: bool = True,
+class ExportReq(BaseModel):
+    documents: bool = True
+    index: bool = True
+    # Required unless BACKUP_ALLOW_PLAINTEXT is set. In the body, never a
+    # query parameter: query strings end up in proxy and server access logs,
+    # and a passphrase in a log is a passphrase that has leaked.
+    passphrase: str | None = None
+
+
+@app.post("/admin/backup/export")
+def admin_backup_export(payload: ExportReq | None = None,
                         x_admin_password: str | None = Header(default=None)):
+    """POST, not GET, so the passphrase travels in a body rather than a URL.
+
+    The archive is encrypted unless BACKUP_ALLOW_PLAINTEXT is deliberately
+    set — it carries password hashes and customer contact details, and a
+    backup is precisely the file that ends up on a NAS or in an email.
+    """
     me = _require_admin(x_admin_password)
+    payload = payload or ExportReq()
+    passphrase = (payload.passphrase or os.getenv("BACKUP_PASSPHRASE") or "").strip()
+    allow_plain = os.getenv("BACKUP_ALLOW_PLAINTEXT", "").strip().lower() in (
+        "1", "true", "yes")
+
+    if not passphrase and not allow_plain:
+        raise HTTPException(
+            status_code=400,
+            detail="A passphrase is required to export a backup. It cannot be "
+                   "recovered if lost, so store it with your other secrets — "
+                   "not alongside the backup.")
     try:
+        if passphrase:
+            backup.check_passphrase(passphrase)
         data, manifest = backup.create_archive(
             created_by=me["email"], level=me["level"],
-            include_documents=documents, include_index=index)
+            include_documents=payload.documents, include_index=payload.index,
+            passphrase=passphrase or None)
+    except backup.BackupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("backup export failed")
         raise HTTPException(status_code=500, detail=f"Export failed: {e}")
@@ -2318,26 +2349,42 @@ def admin_backup_export(documents: bool = True, index: bool = True,
     from fastapi.responses import Response
     return Response(
         content=data,
-        media_type="application/zip",
+        media_type=("application/octet-stream" if manifest.get("encrypted")
+                    else "application/zip"),
         headers={
             "Content-Disposition":
                 f'attachment; filename="{backup.suggested_filename(manifest)}"',
             # So the console can show what it just downloaded without
             # reopening the zip in the browser.
             "X-Backup-Sensitive": "1" if manifest["sensitive"] else "0",
+            "X-Backup-Encrypted": "1" if manifest.get("encrypted") else "0",
             "X-Backup-Counts": json.dumps(manifest["counts"]),
         })
 
 
 @app.post("/admin/backup/inspect")
 async def admin_backup_inspect(file: UploadFile = File(...),
+                               passphrase: str = Form(default=""),
                                x_admin_password: str | None = Header(default=None)):
     """Read an archive's manifest without writing anything, so nobody has to
-    agree to a restore before seeing what is in the file."""
+    agree to a restore before seeing what is in the file.
+
+    An encrypted archive still identifies itself without its passphrase —
+    when it was made, what it holds, whether it carries accounts — because
+    otherwise picking the right file out of a folder of backups would mean
+    typing a passphrase into each one in turn.
+    """
     _require_root(x_admin_password)
     data = await file.read()
     try:
-        return {"manifest": backup.read_manifest(data), "size_bytes": len(data)}
+        if backup.is_encrypted(data) and not passphrase.strip():
+            return {"manifest": backup.read_envelope(data),
+                    "encrypted": True, "passphrase_required": True,
+                    "size_bytes": len(data)}
+        return {"manifest": backup.read_manifest(data, passphrase.strip() or None),
+                "encrypted": backup.is_encrypted(data),
+                "passphrase_required": False,
+                "size_bytes": len(data)}
     except backup.BackupError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2345,6 +2392,7 @@ async def admin_backup_inspect(file: UploadFile = File(...),
 @app.post("/admin/backup/import")
 async def admin_backup_import(
         file: UploadFile = File(...),
+        passphrase: str = Form(default=""),
         restore_accounts: bool = False,
         restore_documents: bool = True,
         restore_index: bool = True,
@@ -2365,7 +2413,8 @@ async def admin_backup_import(
             restore_documents=restore_documents,
             restore_index=restore_index,
             restore_conversations=restore_conversations,
-            actor=me["email"])
+            actor=me["email"],
+            passphrase=passphrase.strip() or os.getenv("BACKUP_PASSPHRASE") or None)
     except backup.BackupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

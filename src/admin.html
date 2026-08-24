@@ -874,12 +874,28 @@ function viewBackup() {
   // Downloaded via fetch rather than a plain link: the credential travels in
   // a header, and an <a href> cannot carry one.
   const doExport = async () => {
+    const pw = pwIn.value;
+    const again = pwAgain.value;
+    if (pw.length < 12)
+      return toast("Use a passphrase of at least 12 characters", true);
+    if (pw !== again) return toast("Those passphrases do not match", true);
+    if (!confirm("The passphrase cannot be recovered.\n\nIf you lose it, this "
+      + "backup is unreadable \u2014 there is no way back in, by design. Store it "
+      + "with your other secrets, NOT next to the backup file.\n\nContinue?"))
+      return;
     exportBtn.disabled = true; exportBtn.textContent = "Preparing\u2026";
     try {
-      const r = await fetch(API + "/admin/backup/export?documents="
-        + inclDocs.checked + "&index=" + inclIndex.checked,
-        { headers: { "x-admin-password": tok } });
-      if (!r.ok) throw new Error("Export failed (" + r.status + ")");
+      // POST, not GET: a passphrase in a query string ends up in proxy and
+      // server access logs.
+      const r = await fetch(API + "/admin/backup/export", {
+        method: "POST",
+        headers: { "x-admin-password": tok, "Content-Type": "application/json" },
+        body: JSON.stringify({ documents: inclDocs.checked,
+                               index: inclIndex.checked, passphrase: pw }) });
+      if (!r.ok) {
+        let d; try { d = (await r.json()).detail; } catch (e) { d = r.statusText; }
+        throw new Error(typeof d === "string" ? d : "Export failed (" + r.status + ")");
+      }
       const blob = await r.blob();
       const cd = r.headers.get("content-disposition") || "";
       const m = cd.match(/filename="([^"]+)"/);
@@ -887,17 +903,28 @@ function viewBackup() {
       const a = el("a", { href: url, download: m ? m[1] : "groundedops-backup.zip" });
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      toast("Backup downloaded \u2014 store it somewhere access-controlled");
+      toast("Backup downloaded and encrypted \u2014 keep the passphrase safe");
+      pwIn.value = ""; pwAgain.value = "";
     } catch (e) { toast(e.message, true); }
     finally { exportBtn.disabled = false; exportBtn.textContent = "Download backup"; }
   };
   const exportBtn = el("button", { class: "btn btn-primary", onclick: doExport },
                        "Download backup");
+  const pwIn = el("input", { class: "input", type: "password",
+                             placeholder: "Passphrase (12+ characters)",
+                             autocomplete: "new-password" });
+  const pwAgain = el("input", { class: "input", type: "password",
+                                placeholder: "Passphrase again",
+                                autocomplete: "new-password" });
 
   const exportCard = el("div", { class: "card elev-sm",
       style: "padding:18px 20px;gap:0;margin-bottom:14px",
       "data-sec": "Export", "data-tour": "backup-export" },
     el("h3", {}, "Download a backup"),
+    el("p", { class: "sec-hint" },
+      "Encrypted with a passphrase you choose. The file cannot be opened "
+      + "without it \u2014 not by a spreadsheet, not by an unzip tool, and not "
+      + "by this console."),
     el("p", { class: "sec-hint" },
       isRoot()
         ? "Everything: documents, the search index, FAQs, catalogue, widget "
@@ -908,6 +935,14 @@ function viewBackup() {
       inclDocs, "Include the documents (the bulk of the file, ~100MB)"),
     el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;cursor:pointer" },
       inclIndex, "Include the search index (so a restore needs no re-ingesting)"),
+    el("label", { class: "flabel", style: "margin-top:14px" },
+      "Passphrase to encrypt the file"),
+    pwIn,
+    el("div", { style: "margin-top:8px" }, pwAgain),
+    el("p", { class: "sec-hint", style: "margin:6px 0 0" },
+      "The archive is encrypted with this. It cannot be recovered \u2014 lose it "
+      + "and the backup is unreadable, which is the point. Store it with your "
+      + "other secrets, not beside the file."),
     el("div", { style: "margin-top:14px" }, exportBtn),
     isRoot()
       ? el("div", { style: "margin-top:12px;padding:10px 12px;border-radius:var(--radius-md);"
@@ -929,7 +964,10 @@ function viewBackup() {
   }
 
   // ---- restore, root only ----
-  const fileIn = el("input", { type: "file", accept: ".zip", class: "input" });
+  const fileIn = el("input", { type: "file", accept: ".gobk,.zip", class: "input" });
+  const rPw = el("input", { class: "input", type: "password",
+                            placeholder: "Passphrase for this backup",
+                            autocomplete: "off" });
   const info = el("div", { style: "margin-top:12px" });
   const rAccounts = el("input", { type: "checkbox" });
   const rDocs = el("input", { type: "checkbox" }); rDocs.checked = true;
@@ -945,9 +983,12 @@ function viewBackup() {
     const f = fileIn.files && fileIn.files[0];
     if (!f) return;
     const fd = new FormData(); fd.append("file", f);
+    if (rPw.value) fd.append("passphrase", rPw.value);
     try {
       // Inspected before anything is offered: nobody should agree to a
-      // restore without seeing what the file actually holds.
+      // restore without seeing what the file actually holds. A sealed file
+      // still identifies itself without its passphrase, so this works
+      // before one has been typed.
       const r = await api("/admin/backup/inspect", { method: "POST", body: fd });
       picked = f;
       const m = r.manifest, inc = m.includes || {}, c = m.counts || {};
@@ -963,6 +1004,10 @@ function viewBackup() {
         m.sensitive
           ? el("div", { class: "sec-hint", style: "margin-top:6px;color:var(--color-warn,#c98a00)" },
               "Contains password hashes and customer details.")
+          : null,
+        r.passphrase_required
+          ? el("div", { class: "sec-hint", style: "margin-top:6px" },
+              "Encrypted \u2014 enter its passphrase below to restore.")
           : null));
       rAccounts.disabled = !inc.accounts;
       restoreBtn.disabled = false;
@@ -983,6 +1028,7 @@ function viewBackup() {
       return;
     restoreBtn.disabled = true; restoreBtn.textContent = "Restoring\u2026";
     const fd = new FormData(); fd.append("file", picked);
+    if (rPw.value) fd.append("passphrase", rPw.value);
     const qs = "?restore_accounts=" + rAccounts.checked
              + "&restore_documents=" + rDocs.checked
              + "&restore_index=" + rIndex.checked
@@ -1014,6 +1060,9 @@ function viewBackup() {
       + "first, automatically, so a bad restore can be undone."),
     el("div", { style: "margin-top:12px" }, fileIn),
     info,
+    el("label", { class: "flabel", style: "margin-top:12px" },
+      "Passphrase (for an encrypted backup)"),
+    rPw,
     opt(rDocs, "Restore the documents"),
     opt(rIndex, "Restore the search index (avoids re-ingesting)"),
     opt(rConvo, "Restore saved conversations"),
