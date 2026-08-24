@@ -300,6 +300,38 @@ allowlist is usually a whole office range, not one person, which is what that
 inner gate is for. Unproxied setup on the box needs no token. `bootstrap_root`
 refuses permanently once any account exists.
 
+**Backup and restore** (`backup.py`, `manage_backup.py`, console page
+"Backup"). A plain zip with a `manifest.json` at the root — plain on purpose,
+so an operator can open it and pull one file out without this code. Contains
+the stores, `conversations.db`, the Chroma index and the retained documents.
+
+The index is included even though it is derived: rebuilding it works
+(`reindex.py --from-store`) but costs a full parse and embed of every
+document, which is the "have to re-ingest" this exists to avoid. It is under
+10MB against ~100MB of PDFs, so carrying it is close to free.
+
+Export is gated at `support`; import is **root only**, because it overwrites.
+The archive's CONTENTS SCALE WITH LEVEL: only a root export carries
+`accounts.json` and `policy.json`. Without that split, "anyone may export"
+would hand every staff password hash to a level that deliberately cannot
+manage accounts.
+
+Three things restore does on purpose:
+- takes a safety snapshot of the current state first, so a bad restore is
+  recoverable (written to `BACKUP_SNAPSHOT_DIR`);
+- leaves accounts alone unless explicitly asked — restoring an accounts file
+  that lacks your own account locks you out of the console you are using;
+- writes the index to disk but reports `restart_required`, because Chroma
+  holds an open sqlite connection and swapping those files under a live
+  client risks corrupting the thing being restored.
+
+An uploaded zip is untrusted input, so `_safe_members` rejects absolute
+paths, `..` segments, drive letters and symlink members, and bounds total
+expansion (`BACKUP_MAX_BYTES`). There is deliberately no per-member
+compression-ratio check: Chroma's zero-padded index files compress past any
+ratio worth setting, and a 200:1 ceiling made the module refuse its own
+exports.
+
 **Access policy is runtime-editable** (`policy.py`, persisted to
 `policy.json`, root-only page "Access & limits"). Daily allowances, guest
 limits and per-conversation caps were env vars read once at import in

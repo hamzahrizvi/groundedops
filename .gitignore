@@ -80,3 +80,8 @@ accounts.json.tmp
 # Safe to lose -- it falls back to the env/installed defaults.
 policy.json
 policy.json.tmp
+
+# Pre-restore safety snapshots written by backup.py, and any backup
+# archive left in the tree. Both contain password hashes and customer data.
+backup_snapshots/
+*-backup-*.zip

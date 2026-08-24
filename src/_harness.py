@@ -31,6 +31,14 @@ os.environ.setdefault("POLICY_PATH", "/tmp/apitest/data/policy.json")
 # usage rows into the REAL src/quota.db -- which both pollutes live counters
 # and makes session-cap tests depend on what previous runs left behind.
 os.environ.setdefault("QUOTA_DB_PATH", "/tmp/apitest/data/quota.db")
+# backup.py reads the document store, the Chroma directory and the
+# conversation DB. Without these a backup test would archive the REAL
+# documents/ (~100MB of customer PDFs) and the real index -- slow, and it
+# reaches outside the scratch directory every other path is confined to.
+os.environ.setdefault("SOURCE_FILE_DIR", "/tmp/apitest/data/documents")
+os.environ.setdefault("CHROMA_DIR", "/tmp/apitest/data/chroma_db")
+os.environ.setdefault("CONVO_DB_PATH", "/tmp/apitest/data/conversations.db")
+os.environ.setdefault("BACKUP_SNAPSHOT_DIR", "/tmp/apitest/data/snapshots")
 # main.py's LAN-only gate checks request.client.host against this prefix
 # list and 404s anything that doesn't match (see PRIVATE_NETWORKS in
 # main.py) — a real, intended security control, not something to weaken.

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -54,6 +55,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 import accounts
+import backup
 import keystore
 import policy
 from db import get_collection, reset_collection, get_stats, delete_source, get_chunks_by_ids
@@ -133,13 +135,23 @@ async def _security_headers(request, call_next):
 # limit is 500 characters, so anything approaching this ceiling is abuse.
 MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", str(2 * 1024 * 1024)))
 
+# Paths that legitimately carry a large body: document uploads, and backup
+# archives. Exempt from MAX_BODY_BYTES, not from authentication -- both are
+# admin-gated, and backup import is root-only. backup.py applies its own
+# ceiling (BACKUP_MAX_BYTES) to what an archive may expand to.
+_LARGE_BODY_PATHS = ("/upload", "/admin/backup/import", "/admin/backup/inspect")
+
 
 @app.middleware("http")
 async def _limit_body_size(request, call_next):
     if request.method in ("POST", "PUT", "PATCH"):
         cl = request.headers.get("content-length")
-        # Uploads are admin-only and LAN-only, so they are exempt.
-        if cl and not request.scope.get("path", "").startswith("/upload"):
+        # Uploads are admin-only and LAN-only, so they are exempt. So is
+        # restoring a backup: an archive is ~100MB of documents by design,
+        # and it is root-gated. Both are held to _LARGE_BODY_PATHS rather
+        # than being unbounded.
+        path_ = request.scope.get("path", "")
+        if cl and not path_.startswith(_LARGE_BODY_PATHS):
             try:
                 if int(cl) > MAX_BODY_BYTES:
                     return JSONResponse(status_code=413,
@@ -2279,6 +2291,108 @@ def admin_keys_set(provider: str, payload: ApiKeyReq,
         raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"provider key for '{provider}' saved by {me['email']}")
     return {"ok": True, "masked": keystore.masked_key(provider)}
+
+
+# ── backup / restore ────────────────────────────────────────────────────
+# Export is support-and-above; import is root only, because it overwrites.
+#
+# The archive's CONTENTS SCALE WITH LEVEL: a support export carries what
+# support can already reach through the console (documents, index, FAQ,
+# catalogue, widget config, enquiries). Only a root export additionally
+# carries accounts.json and policy.json. Without that split, "anyone may
+# export" would hand every staff password hash to a level that deliberately
+# cannot manage accounts.
+
+@app.get("/admin/backup/export")
+def admin_backup_export(documents: bool = True, index: bool = True,
+                        x_admin_password: str | None = Header(default=None)):
+    me = _require_admin(x_admin_password)
+    try:
+        data, manifest = backup.create_archive(
+            created_by=me["email"], level=me["level"],
+            include_documents=documents, include_index=index)
+    except Exception as e:
+        logger.exception("backup export failed")
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
+
+    from fastapi.responses import Response
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{backup.suggested_filename(manifest)}"',
+            # So the console can show what it just downloaded without
+            # reopening the zip in the browser.
+            "X-Backup-Sensitive": "1" if manifest["sensitive"] else "0",
+            "X-Backup-Counts": json.dumps(manifest["counts"]),
+        })
+
+
+@app.post("/admin/backup/inspect")
+async def admin_backup_inspect(file: UploadFile = File(...),
+                               x_admin_password: str | None = Header(default=None)):
+    """Read an archive's manifest without writing anything, so nobody has to
+    agree to a restore before seeing what is in the file."""
+    _require_root(x_admin_password)
+    data = await file.read()
+    try:
+        return {"manifest": backup.read_manifest(data), "size_bytes": len(data)}
+    except backup.BackupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/backup/import")
+async def admin_backup_import(
+        file: UploadFile = File(...),
+        restore_accounts: bool = False,
+        restore_documents: bool = True,
+        restore_index: bool = True,
+        restore_conversations: bool = True,
+        x_admin_password: str | None = Header(default=None)):
+    """Overwrite this install from an archive. Root only, and destructive.
+
+    A safety snapshot of the current state is taken before anything is
+    written, and handed back so it can be downloaded. `restore_accounts`
+    defaults to FALSE: restoring an accounts file that does not contain your
+    own account locks you out of the console you are standing in.
+    """
+    me = _require_root(x_admin_password)
+    data = await file.read()
+    try:
+        result = backup.restore_archive(
+            data, restore_accounts=restore_accounts,
+            restore_documents=restore_documents,
+            restore_index=restore_index,
+            restore_conversations=restore_conversations,
+            actor=me["email"])
+    except backup.BackupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("backup restore failed")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {e}")
+
+    # The pre-restore snapshot is kept on disk rather than returned inline:
+    # a multi-hundred-MB base64 blob in a JSON response helps nobody.
+    snap_dir = os.getenv("BACKUP_SNAPSHOT_DIR", "backup_snapshots")
+    snap_name = None
+    try:
+        os.makedirs(snap_dir, exist_ok=True)
+        snap_name = f"before-restore-{uuid.uuid4().hex[:8]}.zip"
+        with open(os.path.join(snap_dir, snap_name), "wb") as fh:
+            fh.write(result["safety_snapshot"])
+    except Exception as e:
+        logger.warning(f"could not write the pre-restore snapshot: {e}")
+
+    return {
+        "ok": True,
+        "manifest": result["manifest"],
+        "restored": result["restored"],
+        "skipped": result["skipped"],
+        "restart_required": result["restart_required"],
+        "safety_snapshot": snap_name,
+        "safety_snapshot_dir": snap_dir,
+    }
 
 
 # ── access policy (root only) ───────────────────────────────────────────

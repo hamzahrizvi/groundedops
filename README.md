@@ -381,6 +381,8 @@ See [.env.example](.env.example) for the annotated full list.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `BACKUP_MAX_BYTES` | `4294967296` | Ceiling on what an uploaded archive may expand to. |
+| `BACKUP_SNAPSHOT_DIR` | `backup_snapshots` | Where the automatic pre-restore snapshot is written. |
 | `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
 | `BOOTSTRAP_TOKEN` | *(empty)* | Required in an `X-Bootstrap-Token` header for first-run root creation **over the network**. Unproxied/LAN setup needs no token. Clear it once the root account exists. |
 | `TRUST_PROXY` | *(unset)* | Honour `X-Forwarded-For`. Set only with a proxy you control in front — otherwise the header is forgeable and anonymous quotas can be bypassed. |

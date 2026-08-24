@@ -508,6 +508,7 @@ function render() {
         isRoot() ? nav("accounts", "Accounts") : null,
         isRoot() ? nav("keys", "API keys") : null,
         isRoot() ? nav("policy", "Access & limits") : null,
+        nav("backup", "Backup"),
       ),
       whoBox(),
     ),
@@ -601,6 +602,7 @@ function body() {
   if (view === "accounts") return viewAccounts();
   if (view === "keys") return viewKeys();
   if (view === "policy") return viewPolicy();
+  if (view === "backup") return viewBackup();
   if (view === "overview") return viewOverview();
   if (view === "documents") return viewDocuments();
   if (view === "faq") return viewFaq();
@@ -861,6 +863,170 @@ function viewAccounts() {
         el("b", {}, String(acctCache.users.filter(u => u.disabled).length)))),
     newCard,
     el("div", { "data-sec": "Everyone", "data-tour": "accounts-list" }, rows),
+  ];
+}
+
+/* ---------------- backup (export: support+, import: root) ---------------- */
+function viewBackup() {
+  const inclDocs = el("input", { type: "checkbox" }); inclDocs.checked = true;
+  const inclIndex = el("input", { type: "checkbox" }); inclIndex.checked = true;
+
+  // Downloaded via fetch rather than a plain link: the credential travels in
+  // a header, and an <a href> cannot carry one.
+  const doExport = async () => {
+    exportBtn.disabled = true; exportBtn.textContent = "Preparing\u2026";
+    try {
+      const r = await fetch(API + "/admin/backup/export?documents="
+        + inclDocs.checked + "&index=" + inclIndex.checked,
+        { headers: { "x-admin-password": tok } });
+      if (!r.ok) throw new Error("Export failed (" + r.status + ")");
+      const blob = await r.blob();
+      const cd = r.headers.get("content-disposition") || "";
+      const m = cd.match(/filename="([^"]+)"/);
+      const url = URL.createObjectURL(blob);
+      const a = el("a", { href: url, download: m ? m[1] : "groundedops-backup.zip" });
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast("Backup downloaded \u2014 store it somewhere access-controlled");
+    } catch (e) { toast(e.message, true); }
+    finally { exportBtn.disabled = false; exportBtn.textContent = "Download backup"; }
+  };
+  const exportBtn = el("button", { class: "btn btn-primary", onclick: doExport },
+                       "Download backup");
+
+  const exportCard = el("div", { class: "card elev-sm",
+      style: "padding:18px 20px;gap:0;margin-bottom:14px",
+      "data-sec": "Export", "data-tour": "backup-export" },
+    el("h3", {}, "Download a backup"),
+    el("p", { class: "sec-hint" },
+      isRoot()
+        ? "Everything: documents, the search index, FAQs, catalogue, widget "
+          + "design, enquiries, accounts and limits."
+        : "Documents, the search index, FAQs, catalogue, widget design and "
+          + "enquiries. Accounts and limits are in a root backup only."),
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:12px;cursor:pointer" },
+      inclDocs, "Include the documents (the bulk of the file, ~100MB)"),
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;cursor:pointer" },
+      inclIndex, "Include the search index (so a restore needs no re-ingesting)"),
+    el("div", { style: "margin-top:14px" }, exportBtn),
+    isRoot()
+      ? el("div", { style: "margin-top:12px;padding:10px 12px;border-radius:var(--radius-md);"
+                  + "font-size:12.5px;line-height:1.5;"
+                  + "background:color-mix(in srgb,var(--color-warn,#c98a00) 14%,transparent)" },
+          "A root backup contains staff password hashes and customer contact "
+          + "details. Treat the file like a password database \u2014 anyone holding "
+          + "it can attempt to crack account passwords offline.")
+      : null);
+
+  if (!isRoot()) {
+    return [
+      el("h1", {}, "Backup"),
+      el("p", { class: "lede" },
+        "Take a copy of everything, so nothing has to be rebuilt or "
+        + "re-ingested. Restoring is a root-only action."),
+      exportCard,
+    ];
+  }
+
+  // ---- restore, root only ----
+  const fileIn = el("input", { type: "file", accept: ".zip", class: "input" });
+  const info = el("div", { style: "margin-top:12px" });
+  const rAccounts = el("input", { type: "checkbox" });
+  const rDocs = el("input", { type: "checkbox" }); rDocs.checked = true;
+  const rIndex = el("input", { type: "checkbox" }); rIndex.checked = true;
+  const rConvo = el("input", { type: "checkbox" }); rConvo.checked = true;
+  let picked = null;
+
+  const restoreBtn = el("button", { class: "btn btn-primary", disabled: "true" },
+                        "Restore from this file");
+
+  fileIn.addEventListener("change", async () => {
+    info.innerHTML = ""; picked = null; restoreBtn.disabled = true;
+    const f = fileIn.files && fileIn.files[0];
+    if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    try {
+      // Inspected before anything is offered: nobody should agree to a
+      // restore without seeing what the file actually holds.
+      const r = await api("/admin/backup/inspect", { method: "POST", body: fd });
+      picked = f;
+      const m = r.manifest, inc = m.includes || {}, c = m.counts || {};
+      info.append(el("div", { class: "card elev-sm", style: "padding:12px 14px;gap:0" },
+        el("div", { style: "font-size:13px" },
+          el("b", {}, "Made " + shortDate(m.created_at)),
+          m.created_by ? el("span", { class: "sec-hint" }, " by " + m.created_by) : null),
+        el("div", { class: "sec-hint", style: "margin-top:6px" },
+          [inc.accounts ? "accounts + limits" : null,
+           (c.documents || 0) + " documents",
+           (c.index_files || 0) + " index files",
+           (c.stores || 0) + " settings files"].filter(Boolean).join(" \u00b7 ")),
+        m.sensitive
+          ? el("div", { class: "sec-hint", style: "margin-top:6px;color:var(--color-warn,#c98a00)" },
+              "Contains password hashes and customer details.")
+          : null));
+      rAccounts.disabled = !inc.accounts;
+      restoreBtn.disabled = false;
+    } catch (e) {
+      info.append(el("div", { class: "sec-hint", style: "color:#b3261e" }, e.message));
+    }
+  });
+
+  restoreBtn.onclick = async () => {
+    if (!picked) return;
+    if (!confirm("Restore from this file? It overwrites what is here now.\n\n"
+      + "A snapshot of the current state is saved first, so this can be undone."))
+      return;
+    if (rAccounts.checked && !confirm(
+      "You also chose to restore ACCOUNTS.\n\nIf your own account is not in "
+      + "that backup you will be signed out and unable to sign back in, and "
+      + "would have to use manage_accounts.py on the server. Continue?"))
+      return;
+    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring\u2026";
+    const fd = new FormData(); fd.append("file", picked);
+    const qs = "?restore_accounts=" + rAccounts.checked
+             + "&restore_documents=" + rDocs.checked
+             + "&restore_index=" + rIndex.checked
+             + "&restore_conversations=" + rConvo.checked;
+    try {
+      const r = await api("/admin/backup/import" + qs, { method: "POST", body: fd });
+      let msg = "Restored. ";
+      if (r.restart_required) msg += "Restart the server for the search index to load. ";
+      if ((r.skipped || []).length) msg += "Skipped: " + r.skipped.join(", ") + ".";
+      toast(msg);
+      info.append(el("div", { class: "sec-hint", style: "margin-top:8px" },
+        "Snapshot of the previous state: " + (r.safety_snapshot || "not written")
+        + " in " + r.safety_snapshot_dir));
+      if (rAccounts.checked) signOut("Accounts were restored \u2014 sign in again");
+    } catch (e) { toast(e.message, true); }
+    finally { restoreBtn.disabled = false; restoreBtn.textContent = "Restore from this file"; }
+  };
+
+  const opt = (box, label) =>
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;cursor:pointer" },
+      box, label);
+
+  const importCard = el("div", { class: "card elev-sm",
+      style: "padding:18px 20px;gap:0", "data-sec": "Restore",
+      "data-tour": "backup-import" },
+    el("h3", {}, "Restore from a backup"),
+    el("p", { class: "sec-hint" },
+      "Overwrites what is here now. A snapshot of the current state is taken "
+      + "first, automatically, so a bad restore can be undone."),
+    el("div", { style: "margin-top:12px" }, fileIn),
+    info,
+    opt(rDocs, "Restore the documents"),
+    opt(rIndex, "Restore the search index (avoids re-ingesting)"),
+    opt(rConvo, "Restore saved conversations"),
+    opt(rAccounts, "Restore accounts and limits \u2014 signs you out"),
+    el("div", { style: "margin-top:14px" }, restoreBtn));
+
+  return [
+    el("h1", {}, "Backup"),
+    el("p", { class: "lede" },
+      "Take a copy of everything, so nothing has to be rebuilt or re-ingested. "
+      + "Anyone from support up can download one; only root can restore."),
+    exportCard,
+    importCard,
   ];
 }
 
@@ -2340,6 +2506,12 @@ function viewTest() {
    when the tour starts, so an empty-state page that renders fewer cards gets a
    correctly-numbered shorter tour rather than a step pointing at nothing. */
 const tourStepsByView = {
+  backup: [
+    { ref: "backup-export", title: "Take a copy of everything",
+      text: "Documents, the search index, FAQs, catalogue, widget design and enquiries \u2014 plus accounts and limits if you are root. Keeping the index means a restore does not have to re-ingest every document, which is the slow part. The file is a plain zip: you can open it and pull one thing out without this console." },
+    { ref: "backup-import", title: "Putting one back",
+      text: "Root only, and it overwrites. The file is inspected first so you can see what is in it before agreeing, and a snapshot of the current state is saved automatically before anything is written. Accounts are left alone unless you tick them \u2014 restoring an accounts file that does not contain your own account would sign you out with no way back in." },
+  ],
   keys: [
     { ref: "keys-list", title: "Provider API keys",
       text: "Paste a key and save it — it works on the very next request, no restart. Once saved, a key is never shown again, only a masked form so you can tell which one is loaded. Only root accounts can see this page at all." },

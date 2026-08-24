@@ -12,11 +12,16 @@ Last hand-updated: 2026-08-20, after v15.1.
 
 ## Blocking
 
-- **`accounts.json` has no backup and is not regenerable.** Unlike every
-  other runtime JSON in `src/`, losing this one loses every account. It is
-  gitignored (it holds scrypt password hashes and staff emails), so it needs
-  a deliberate backup, the same open decision as `documents/` below.
-  Recovery if it goes: `manage_accounts.py create you@… --level root`.
+- ~~`accounts.json` has no backup and is not regenerable~~ — **there is now
+  a way to back it up**: the console's Backup page, or
+  `manage_backup.py export`. An archive carries the accounts, the documents,
+  the search index, the FAQ, the catalogue, the widget config and the
+  enquiries, so a restore needs no re-ingesting. **Still open: nobody has
+  taken one yet, and nothing schedules it.** A backup feature that is never
+  run is not a backup. Decide where archives go (they hold password hashes
+  and customer contact details, so somewhere access-controlled) and what
+  runs it — cron on the host is the obvious answer, calling
+  `manage_backup.py export --out /path/dated.zip`.
 
 - **Password reset via email is banked, not built.** The user will supply
   SMTP credentials later. Until then the only reset path is a root using the
@@ -127,9 +132,10 @@ Last hand-updated: 2026-08-20, after v15.1.
 - **`documents/` is untracked in git** and is the working document store
   (`docstore.py`). It is the only copy of some source PDFs — three exist
   solely under the legacy `C:\data\source_files` on the user's machine and
-  have not been consolidated. Decide: commit `documents/` (repo becomes the
-  backup) or back it up elsewhere, deliberately — don't leave it as the only
-  copy with no backup of either kind.
+  have not been consolidated. The backup feature now covers it (an archive
+  carries every document), which answers "how", but not "has anyone". The
+  three legacy files still need consolidating with
+  `reindex.py --migrate` before a backup can include them.
 
 - **PR for branch `fix/wire-faq-choices` → `main` not yet opened.** `gh` CLI
   is installed (`winget install --id GitHub.cli`) but not authenticated as of

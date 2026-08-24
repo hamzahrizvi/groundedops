@@ -166,6 +166,29 @@ secret, not the backend.
 
 ---
 
+## 6. Take a backup before you start changing things
+
+Once the documents are indexed and the console is configured, take one:
+
+```bash
+docker compose exec backend python manage_backup.py export --out /data/first-good-state.zip
+```
+
+Or from the console: **Backup → Download backup**. Support and above can
+export; only root can restore.
+
+That archive carries the documents, the search index, the FAQ, the
+catalogue, the widget config, the enquiries and (for a root export) the
+accounts — so restoring it does **not** re-ingest anything, which is the
+slow part. Restoring the index needs a server restart, because Chroma holds
+those files open.
+
+It contains password hashes and customer contact details. Put it somewhere
+access-controlled, and schedule it — a backup feature nobody runs is not a
+backup.
+
+---
+
 ## Still open, going in
 
 Known and deliberate, so nobody discovers them as surprises:
@@ -184,5 +207,5 @@ Known and deliberate, so nobody discovers them as surprises:
 - **The grounding threshold (0.55) has never been swept**, so the
   false-refusal rate is unknown. Worth measuring with `eval.py` once a
   provider key is live.
-- **Back up `/data`.** `accounts.json` is not regenerable — losing it loses
-  every account, and the recovery path is `manage_accounts.py` on the box.
+- **Nothing schedules a backup yet.** Step 6 is a manual command. Put it on
+  cron on the host before this carries anything you would miss.
