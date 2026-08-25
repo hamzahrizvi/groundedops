@@ -31,6 +31,12 @@ os.environ.setdefault("POLICY_PATH", "/tmp/apitest/data/policy.json")
 # usage rows into the REAL src/quota.db -- which both pollutes live counters
 # and makes session-cap tests depend on what previous runs left behind.
 os.environ.setdefault("QUOTA_DB_PATH", "/tmp/apitest/data/quota.db")
+# quota.py reads WIDGET_TOKEN_SECRET at IMPORT time, so this must be set before
+# main is imported below. Without it issue_token raises and
+# /admin/widget/preview_token answers 503 -- which is how test_policy.py failed
+# in CI while passing locally, where src/.env supplies the real secret. A test
+# secret, deliberately obvious: it signs nothing outside these tests.
+os.environ.setdefault("WIDGET_TOKEN_SECRET", "test-widget-token-secret-not-a-real-one")
 # backup.py reads the document store, the Chroma directory and the
 # conversation DB. Without these a backup test would archive the REAL
 # documents/ (~100MB of customer PDFs) and the real index -- slow, and it
