@@ -273,6 +273,17 @@ if (-not $NoTestPage) {
     }
 }
 
+# --------------------------------------------------------------- accounts
+# The admin console has no shared password any more (accounts.py) - a
+# colleague handed the LAN URL below hits a real sign-in page, and if no
+# account exists yet they would be stuck with no way to make one over the
+# network (bootstrap is LAN-only by default too - see main.py). Check here
+# so the summary can say which state this install is in, instead of a
+# colleague reporting "the admin page won't let me in" as a bug.
+$accountsPath = Join-Path $app "accounts.json"
+$hasAccounts = (Test-Path $accountsPath) -and
+    ((Get-Content $accountsPath -Raw -ErrorAction SilentlyContinue) -match '"users"\s*:\s*\[\s*\{')
+
 # ----------------------------------------------------------------- summary
 $summary = @()
 $summary += ""
@@ -288,8 +299,22 @@ if ($lanIp) {
 }
 if ($tunnelUrl) { $summary += "  Public (tunnel)  $tunnelUrl" }
 if ($testUrl)   { $summary += "  Test harness     $testUrl" }
-$summary += "  Admin console    http://127.0.0.1:$PORT/admin"
+# The LAN address, not 127.0.0.1 - that is what makes the admin console
+# reachable to someone else on the network at all. 127.0.0.1 only works on
+# THIS machine, which is not what "share an IP so people can test" means.
+$adminHost = if ($lanIp) { $lanIp } else { "127.0.0.1" }
+$summary += "  Admin console    http://${adminHost}:$PORT/admin"
+if ($lanIp) {
+    $summary += "                   (127.0.0.1:$PORT/admin also works, but only on this PC)"
+}
 $summary += ""
+if (-not $hasAccounts) {
+    $summary += "  WARNING: no admin account exists yet. The console will offer to"
+    $summary += "  create the first (root) account on first visit - do that from"
+    $summary += "  THIS PC before sending the link to anyone else. Whoever opens"
+    $summary += "  /admin first on a reachable install becomes root."
+    $summary += ""
+}
 $summary += "  Sign-in URL      $SIGN_IN_URL"
 if ($token) {
     $summary += ""
@@ -312,6 +337,18 @@ if ($tunnelUrl) {
     $summary += "  NOTE: a quick tunnel URL changes every restart. Set up a named"
     $summary += "  tunnel on a real subdomain before anyone wires this into WordPress."
     $summary += ""
+    # /widget/* is public by design and works fine through the tunnel. /admin
+    # does not: main.py treats any request carrying a proxy header as
+    # external and refuses everything outside /widget and /health unless
+    # ADMIN_ALLOWED_IPS names the caller. Worth saying here, because
+    # "$tunnelUrl/admin" is exactly what someone will try next.
+    if (-not ($envText -match "(?m)^\s*ADMIN_ALLOWED_IPS\s*=\s*\S")) {
+        $summary += "  NOTE: $tunnelUrl/admin will 404 - the admin console stays"
+        $summary += "  LAN-only through the tunnel unless ADMIN_ALLOWED_IPS is set"
+        $summary += "  in .env (see STAGING.md). For someone off this network to"
+        $summary += "  test the admin console, use ADMIN_ALLOWED_IPS, not the tunnel."
+        $summary += ""
+    }
 }
 
 $summary | ForEach-Object {
