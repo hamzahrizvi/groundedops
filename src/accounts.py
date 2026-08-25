@@ -394,7 +394,11 @@ def issue_session(user: dict, ttl_seconds: int | None = None) -> str:
     # that requirement is for unsalted password storage, which is what this
     # rule is actually meant to catch. The real password hashing is
     # hashlib.scrypt in _hash_password/_check_password above, unaffected.
-    sig = hmac.new(secret.encode(), raw, hashlib.sha256).digest()  # lgtm[py/weak-sensitive-data-hashing]
+    # Dismissed on GitHub via the code-scanning API (dismissed_reason: false
+    # positive), not an inline `lgtm[...]` comment -- confirmed those are
+    # not honoured here. Editing this line mints a new alert number needing
+    # the same dismissal again.
+    sig = hmac.new(secret.encode(), raw, hashlib.sha256).digest()
     return raw.decode() + "." + _b64e(sig)
 
 
