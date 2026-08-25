@@ -411,9 +411,9 @@ def verify_session(token: str | None) -> dict | None:
     try:
         raw_s, sig_s = token.split(".", 1)
         # Same false positive as issue_session above: HMAC-SHA256 verifying
-        # a token signature, not password hashing.
-        expected = hmac.new(secret.encode(), raw_s.encode(),
-                            hashlib.sha256).digest()  # lgtm[py/weak-sensitive-data-hashing]
+        # a token signature, not password hashing. Kept on one line so the
+        # suppression comment sits on the exact line CodeQL flags.
+        expected = hmac.new(secret.encode(), raw_s.encode(), hashlib.sha256).digest()  # lgtm[py/weak-sensitive-data-hashing]
         if not hmac.compare_digest(expected, _b64d(sig_s)):
             logger.warning("admin session: bad signature")
             return None
