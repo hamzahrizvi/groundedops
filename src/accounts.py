@@ -386,7 +386,15 @@ def issue_session(user: dict, ttl_seconds: int | None = None) -> str:
         "exp": int(time.time()) + (ttl_seconds or SESSION_TTL_SECONDS),
     }
     raw = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=")
-    sig = hmac.new(secret.encode(), raw, hashlib.sha256).digest()
+    # CodeQL (py/weak-sensitive-data-hashing) flags this as hashing a
+    # password with SHA256. It isn't: this is HMAC-SHA256 signing a session
+    # TOKEN PAYLOAD (uid/level/exp — no password anywhere in `payload` or
+    # `raw`), not storing or comparing a password. HMAC's security comes
+    # from the secret key, not from the underlying hash being "expensive" —
+    # that requirement is for unsalted password storage, which is what this
+    # rule is actually meant to catch. The real password hashing is
+    # hashlib.scrypt in _hash_password/_check_password above, unaffected.
+    sig = hmac.new(secret.encode(), raw, hashlib.sha256).digest()  # lgtm[py/weak-sensitive-data-hashing]
     return raw.decode() + "." + _b64e(sig)
 
 
@@ -402,8 +410,10 @@ def verify_session(token: str | None) -> dict | None:
         return None
     try:
         raw_s, sig_s = token.split(".", 1)
+        # Same false positive as issue_session above: HMAC-SHA256 verifying
+        # a token signature, not password hashing.
         expected = hmac.new(secret.encode(), raw_s.encode(),
-                            hashlib.sha256).digest()
+                            hashlib.sha256).digest()  # lgtm[py/weak-sensitive-data-hashing]
         if not hmac.compare_digest(expected, _b64d(sig_s)):
             logger.warning("admin session: bad signature")
             return None
