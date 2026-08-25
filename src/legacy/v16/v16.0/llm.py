@@ -1,0 +1,459 @@
+import logging
+import os
+import threading
+import requests
+
+from text_utils import truncate_after_refusal, build_condense_prompt, parse_condense_output, has_reference_markers
+
+logger = logging.getLogger(__name__)
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+MODEL_LOCKS = {
+    "phi": threading.Lock(),
+    "mistral": threading.Lock(),
+}
+
+FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
+    "extract":   [("local", "mistral")],
+    # v8.6.1: phi REMOVED from answering. The v8.4.2 fix patched
+    # router.MODEL_MAP, but main.py's generation path calls
+    # generate_with_fallback(role) which reads THIS table — so short
+    # "fast"-classified queries ("what is a MyCheckr?") were still being
+    # answered by phi. Phi condenses queries; it does not answer them.
+    "fast":      [("local", "mistral")],
+    # v10.17: DeepSeek removed from the fallback chains. In local
+    # ("free") mode the answering path now stays fully local — if mistral
+    # fails, it fails rather than silently escalating query + context to a
+    # third-party API. DeepSeek is still available as a DELIBERATE choice:
+    # as the selected Online provider (api mode, see _chain_for) and in the
+    # manual "Rethink" menu (RETHINK_OPTIONS) — neither of which is a
+    # fallback.
+    "accurate":  [("local", "mistral")],
+    "reasoning": [("local", "mistral")],
+}
+
+
+def _online_provider_model() -> tuple[str, str]:
+    """The single (provider, model) used in Online (api) mode. The provider
+    is user-selectable in Settings (deepseek default / openai / anthropic);
+    default models are env-overridable. Shared by the answering path
+    (_chain_for) and query condensation so both honour the same choice."""
+    from runtime_config import get_online_provider
+    provider = get_online_provider()
+    # The FALLBACK defaults matter as much as the env vars: "deepseek-chat"
+    # was the default here, so any deployment that had not set
+    # ONLINE_DEEPSEEK_MODEL silently used an alias DeepSeek retired on
+    # 24 July 2026. src/.env sets it, which is the only reason this worked.
+    model = {
+        "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"),
+        "openai": os.getenv("ONLINE_OPENAI_MODEL", "gpt-4o-mini"),
+        "anthropic": os.getenv("ONLINE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+    }.get(provider, os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
+    return provider, model
+
+
+def _chain_for(role: str) -> list[tuple[str, str]]:
+    """v8.6.1: API-mode enforcement moved HERE — the single choke point
+    the answering path actually goes through. The v8.6 override lived in
+    router.route_model(), whose output generate_with_fallback ignores;
+    observed result: mode=api still logged 'Attempt 1: local/phi' and
+    cold-loaded Ollama. In api mode every role answers via DeepSeek and
+    Ollama is never touched."""
+    from runtime_config import get_generation_mode
+    if get_generation_mode() == "api":
+        return [_online_provider_model()]
+    return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
+
+# Models offered for the manual "rethink with a different model" feature.
+# The manual "Re-answer with another model" menu. deepseek was pinned to
+# "deepseek-chat" here, retired by DeepSeek on 24 July 2026 -- the FOURTH copy
+# of that alias in the codebase, and the reason every option in that menu was
+# dead. Read it from env like every other deepseek call site.
+def _rethink_options() -> list[tuple[str, str]]:
+    return [
+        ("local", "phi"),
+        ("local", "mistral"),
+        ("deepseek", os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")),
+    ]
+
+
+RETHINK_OPTIONS: list[tuple[str, str]] = _rethink_options()
+
+# Model used for query condensation — phi, since this is a short,
+# latency-sensitive auxiliary call on every turn beyond the first.
+CONDENSE_MODEL = "phi"
+
+
+def _usage_tokens(body: dict, provider: str) -> int:
+    """Total tokens a call actually cost, from the provider's own usage
+    block. Every provider here reports it and this module used to throw it
+    away, which meant nothing downstream could bound spend by tokens --
+    a per-session token cap would have been a setting that silently did
+    nothing. Returns 0 when a provider does not report usage; callers treat
+    0 as "unknown", never as "free".
+    """
+    try:
+        u = body.get("usage") or {}
+        if provider == "anthropic":
+            return int(u.get("input_tokens", 0)) + int(u.get("output_tokens", 0))
+        if provider == "local":
+            # Ollama reports these at the top level, not under "usage".
+            return int(body.get("prompt_eval_count", 0)) + int(body.get("eval_count", 0))
+        # OpenAI and DeepSeek both use the OpenAI shape.
+        return int(u.get("total_tokens", 0))
+    except Exception:
+        return 0
+
+
+def _call_ollama(
+    model: str,
+    prompt: str,
+    timeout: int | None = None,
+    num_predict: int | None = None,
+    keep_alive: str = "2h",
+) -> dict | None:
+    if timeout is None:
+        # TUNING (stability, round 2): 90s -> 240s for the main model.
+        # The context window lift (250 -> 1200 chars/chunk in main.py)
+        # made prompts ~3x larger; on CPU-bound Windows hosts, sustained
+        # eval runs (40+ back-to-back cases, each with condense + generate
+        # + grade calls) pushed generation past 90s and produced cascading
+        # timeouts: local fails -> DeepSeek gets hammered -> rate-limited
+        # empties -> answers suppressed to "could not find" -> eval logs
+        # poisoned. A longer per-call budget is cheaper than the cascade.
+        # phi stays snappy: it only does condensation (short prompts).
+        timeout = 40 if model == "phi" else 240
+    if num_predict is None:
+        # 160 tokens is roughly 120 words, which truncated local answers
+        # mid-sentence -- a hard ceiling on answer quality that no amount of
+        # retrieval or prompting could lift. Callers that want a short answer
+        # already pass num_predict explicitly (condensation uses 64 and 8).
+        # phi stays lower: it is the small auxiliary model.
+        _default = 256 if model == "phi" else 512
+        try:
+            num_predict = int(os.getenv("LOCAL_MAX_TOKENS", "") or _default)
+        except ValueError:
+            num_predict = _default
+
+    lock = MODEL_LOCKS.get(model)
+
+    try:
+        if lock:
+            lock.acquire()
+
+        res = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0,
+                    "num_predict": num_predict,
+                    # Speed levers for CPU inference. These are MARGINAL —
+                    # the dominant cost is tokens/sec on the local CPU, which
+                    # only faster hardware, a smaller model, or a GPU truly
+                    # fixes. What we can do here:
+                    #   num_thread: use all logical cores (Ollama usually
+                    #     auto-detects, but pinning it helps on some setups).
+                    #   num_ctx: sized to the REAL prompt. Was 2048 when
+                    #     context chunks were 250 chars; after the 1200-char
+                    #     lift the prompt alone approaches ~1200+ tokens, and
+                    #     a window that tight forces truncation/thrash and
+                    #     balloons latency. 4096 fits the current prompt
+                    #     shape with headroom. If you ever lift chunk size or
+                    #     top_k again, revisit THIS NUMBER FIRST.
+                    "num_thread": os.cpu_count() or 4,
+                    "num_ctx": 4096,
+                    "stop": ["\n\nQuestion:", "\n\nContext:", "<context>"],
+                },
+                # Keep models resident between queries. 30m was enough for
+                # interactive use; long eval runs swap phi<->mistral every
+                # case, and on hosts where both fit in memory a longer
+                # keep_alive avoids repeated cold loads. (If both DON'T fit,
+                # set OLLAMA_MAX_LOADED_MODELS=2 and add RAM, or accept the
+                # swap cost — keep_alive can't fix an eviction.)
+                "keep_alive": keep_alive,
+            },
+            timeout=timeout,
+        )
+
+        res.raise_for_status()
+        body = res.json()
+        text = body.get("response", "").strip()
+
+        if not text:
+            logger.warning(f"Ollama empty response ({model})")
+            return None
+
+        text = truncate_after_refusal(text)
+
+        return {"text": text, "model": model, "provider": "local",
+                "tokens": _usage_tokens(body, "local")}
+
+    except Exception as e:
+        logger.warning(f"Ollama failed ({model}): {e}")
+        return None
+
+    finally:
+        if lock:
+            lock.release()
+
+
+def _call_deepseek(
+    prompt: str,
+    model: str = "deepseek-v4-flash",
+    timeout: int = 60,
+    api_key: str | None = None,
+) -> dict | None:
+    key = api_key or os.getenv("DEEPSEEK_API_KEY")
+    if not key:
+        logger.info("No DeepSeek key — skipping")
+        return None
+
+    try:
+        res = requests.post(
+            DEEPSEEK_URL,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+            },
+            timeout=timeout,
+        )
+
+        if res.status_code != 200:
+            logger.warning(f"DeepSeek HTTP {res.status_code}")
+            return None
+
+        body = res.json()
+        text = body["choices"][0]["message"]["content"].strip()
+        if not text:
+            logger.warning("DeepSeek empty response")
+            return None
+
+        text = truncate_after_refusal(text)
+        return {"text": text, "model": model, "provider": "deepseek",
+                "tokens": _usage_tokens(body, "deepseek")}
+
+    except Exception as e:
+        logger.warning(f"DeepSeek failed ({model}): {e}")
+        return None
+
+
+def _call_openai(prompt: str, model: str = "gpt-4o-mini",
+                 api_key: str | None = None, timeout: int = 60) -> dict | None:
+    """OpenAI chat completions (v9.1.1 — multi-provider Online mode)."""
+    key = api_key or os.getenv("OPENAI_API_KEY")
+    if not key:
+        logger.warning("OpenAI call attempted without an API key")
+        return None
+    try:
+        res = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json={"model": model, "temperature": 0,
+                  "messages": [{"role": "user", "content": prompt}]},
+            timeout=timeout,
+        )
+        res.raise_for_status()
+        body = res.json()
+        text = body["choices"][0]["message"]["content"]
+        return {"text": text, "tokens": _usage_tokens(body, "openai")} if text else None
+    except Exception as e:
+        logger.warning(f"OpenAI failed ({model}): {e}")
+        return None
+
+
+def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
+                    api_key: str | None = None, timeout: int = 60) -> dict | None:
+    """Anthropic messages API (v9.1.1 — multi-provider Online mode)."""
+    key = api_key or os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        logger.warning("Anthropic call attempted without an API key")
+        return None
+    try:
+        res = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": model, "max_tokens": 2048,
+                  "messages": [{"role": "user", "content": prompt}]},
+            timeout=timeout,
+        )
+        res.raise_for_status()
+        body = res.json()
+        blocks = body.get("content", [])
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        return {"text": text, "tokens": _usage_tokens(body, "anthropic")} if text else None
+    except Exception as e:
+        logger.warning(f"Anthropic failed ({model}): {e}")
+        return None
+
+
+def generate(
+    provider: str,
+    prompt: str,
+    model: str,
+    deepseek_api_key: str | None = None,
+    api_keys: dict | None = None,
+) -> dict | None:
+    keys = api_keys or {}
+    if provider == "local":
+        return _call_ollama(model, prompt)
+    if provider == "deepseek":
+        return _call_deepseek(prompt, model=model,
+                              api_key=keys.get("deepseek") or deepseek_api_key)
+    if provider == "openai":
+        return _call_openai(prompt, model=model, api_key=keys.get("openai"))
+    if provider == "anthropic":
+        return _call_anthropic(prompt, model=model, api_key=keys.get("anthropic"))
+
+    logger.warning(f"Unknown provider: {provider}")
+    return None
+
+
+def safe_generate(
+    provider: str,
+    prompt: str,
+    model: str,
+    deepseek_api_key: str | None = None,
+) -> dict | None:
+    for attempt in range(2):
+        result = generate(provider, prompt, model, deepseek_api_key, api_keys=api_keys)
+        if result and result.get("text"):
+            return result
+        logger.warning(f"Retry {attempt + 1} failed for {provider}/{model}")
+    return None
+
+
+def generate_with_fallback(
+    role: str,
+    prompt: str,
+    deepseek_api_key: str | None = None,
+    api_keys: dict | None = None,
+) -> dict:
+    """
+    Try each (provider, model) in FALLBACK_CHAIN[role] in order, ONE
+    attempt per entry, returning the first success.
+
+    Each chain entry gets exactly one attempt via generate() (no internal
+    retry), so the chain advances to the next entry as soon as the current
+    one fails. (Historically the local chains also had a DeepSeek entry;
+    that was removed in v10.17 — local mode now stays local.) The extra
+    "forced mistral" safety net at the end, for a chain that somehow
+    doesn't already include local/mistral, is unchanged.
+    """
+    chain = _chain_for(role)  # v8.6.1: honors GENERATION_MODE=api
+    tried = set()
+
+    for i, (provider, model) in enumerate(chain):
+        tried.add((provider, model))
+        logger.info(f"Attempt {i+1}: {provider}/{model}")
+
+        result = generate(provider, prompt, model, deepseek_api_key, api_keys=api_keys)
+
+        if result and result.get("text"):
+            result["fallback_used"] = i > 0
+            return result
+
+        logger.warning(f"[{role}] {provider}/{model} failed")
+
+    if ("local", "mistral") not in tried:
+        logger.warning("Forcing mistral final attempt")
+        forced = generate("local", prompt, "mistral", deepseek_api_key)
+        if forced and forced.get("text"):
+            forced["fallback_used"] = True
+            return forced
+
+    logger.error(f"All fallbacks failed for role {role}")
+    return {
+        "text": "I was unable to generate a response.",
+        "model": "none",
+        "provider": "none",
+        "fallback_used": True,
+    }
+
+
+def condense_query(current_query: str, history: list[dict], model: str = CONDENSE_MODEL) -> str:
+    """
+    Rewrite-Retrieve-Read style query condensation. If `current_query`
+    depends on prior conversation turns, this resolves it into a
+    standalone query using a fast local model. If the query is already
+    self-contained, it is returned unchanged with no model call.
+
+    TWO GUARDS before calling the model:
+      1. No history — nothing to resolve against, skip immediately.
+      2. No reference markers — the query is clearly self-contained
+         (checked via text_utils.has_reference_markers). This prevents
+         phi from incorrectly rewriting standalone queries like "post
+         installation verification installer sign off" into whatever
+         topic happened to appear in the previous turn.
+
+    Falls back to `current_query` unchanged on any model failure.
+    """
+    if not history:
+        return current_query
+
+    if not has_reference_markers(current_query):
+        return current_query
+
+    prompt = build_condense_prompt(current_query, history)
+    # GENERATION_MODE=api: condensation runs on the SELECTED Online
+    # provider so the whole answering path is Ollama-free (website/
+    # production config). v10.17: was hardcoded to DeepSeek — a leftover
+    # from before Online mode became multi-provider, which meant an
+    # openai/anthropic deployment still silently sent condensation prompts
+    # to DeepSeek. Now it follows the same provider _chain_for uses.
+    from runtime_config import get_generation_mode
+    if get_generation_mode() == "api":
+        provider, model = _online_provider_model()
+        result = generate(provider, prompt, model)
+        if not result or not result.get("text"):
+            logger.warning("API-mode condensation failed — using original query")
+            return current_query
+        return parse_condense_output(result["text"], fallback_query=current_query)
+    # v8.4.3: was timeout=20 — half phi's normal 40s budget. A cold or
+    # busy phi silently timed out, the warning went unseen, and the raw
+    # fragment ("how is it powered") hit retrieval at ~0.005 → rejected.
+    # This was a primary cause of conversational follow-ups failing in
+    # production. main.py now also has a deterministic combined-query
+    # fallback for when condensation still fails or under-resolves.
+    result = _call_ollama(model, prompt, timeout=40, num_predict=64)
+
+    if not result or not result.get("text"):
+        logger.warning("Query condensation failed — using original query unchanged")
+        return current_query
+
+    return parse_condense_output(result["text"], fallback_query=current_query)
+
+
+def warmup_local_models(models: list[str] | None = None) -> dict[str, bool]:
+    models = models or ["phi", "mistral"]
+    results: dict[str, bool] = {}
+
+    for model in models:
+        logger.info(f"Warming model: {model}")
+        result = _call_ollama(
+            model=model,
+            prompt="ping",
+            timeout=120,
+            num_predict=8,
+            keep_alive="10m",
+        )
+
+        ok = bool(result and result.get("text"))
+        results[model] = ok
+
+        if ok:
+            logger.info(f"Warmup ok: {model}")
+        else:
+            logger.warning(f"Warmup failed: {model}")
+
+    return results

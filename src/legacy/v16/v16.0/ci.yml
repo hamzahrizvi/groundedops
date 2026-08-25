@@ -1,0 +1,121 @@
+name: CI — test & build
+
+# Runs on every push and PR to main. Real gates (a failure fails the run):
+#   1. unit  — the pure-logic test suite (no ML deps, no corpus needed)
+#   2. build — both Docker images must build
+#
+# Advisory (visible warning, does not fail the run):
+#   3. eval-selfcheck — validates the eval suite schema. The locked
+#      baseline is gitignored, so it can't be fully checked in CI; the
+#      full eval runs locally where the corpus exists.
+#
+# Deployment is STAGE 2 below — commented out until a target exists.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Least privilege, set once at the top so every job inherits it. Without an
+# explicit block a job gets the token's default permissions, which on some
+# repo settings is write access to contents -- far more than a test-and-build
+# workflow needs. Flagged by CodeQL (actions/missing-workflow-permissions) on
+# all three jobs; a single top-level declaration covers them.
+permissions:
+  contents: read
+
+jobs:
+  # ── Gate 1: unit + route tests ─────────────────────────────────────────
+  # Deliberately installs only the lightweight web deps (fastapi/uvicorn/
+  # pydantic), not the heavy ML stack (torch/chromadb/sentence-transformers)
+  # — the pure-logic modules (chunking, structure, text_utils, memory) and
+  # the FastAPI route tests (tests/test_new_routes.py, via _harness.py's
+  # ML stubs) are both fully testable without it. Tests that genuinely
+  # need sentence-transformers raise SkipTest, which run_tests.py reports
+  # as SKIP rather than disguising as a pass. This keeps the gate
+  # meaningful and the run fast (seconds, not minutes).
+  #
+  # Since v15.0 run_tests.py COUNTS a file that fails to import as a failure
+  # and exits non-zero, and it isolates sys.modules per file so one test's
+  # stubs cannot break the next one's imports. Before that, a bad import was
+  # printed as "COULD NOT LOAD" and silently skipped, so a green run did not
+  # mean every test file had executed -- five files were being skipped that
+  # way, and the missing python-multipart below hid behind the same gap.
+  # A genuinely optional dependency (playwright) is reported as a SKIP.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install lightweight web deps (needed for tests/test_new_routes.py)
+        # python-multipart is what FastAPI needs to parse the UploadFile
+        # document-upload endpoint. It was missing here, so test_new_routes.py
+        # could not import at all -- and that went unnoticed for as long as
+        # run_tests.py swallowed load failures (see the note above, now fixed).
+        # Kept as an explicit list rather than -r requirements.txt on purpose:
+        # this job is meant to prove the routes import WITHOUT torch,
+        # chromadb or sentence-transformers, which is what makes it fast.
+        # httpx: starlette's TestClient is built on it. Verified against this
+        # exact dependency set in a clean Python 3.11 venv, which is what CI
+        # uses -- the local venv is 3.14 and behaves differently here.
+        run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx cryptography
+      - name: Run unit + route test suite
+        run: |
+          cd src
+          python run_tests.py
+
+  # ── Gate 2: images build ─────────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -f docker/Dockerfile.backend -t groundedops-backend ./src
+      # The frontend image was removed in v15.2 with the React SPA. The admin
+      # console is served by the backend image; the widget is plain static
+      # files with no build step, so there is nothing left to compile here.
+
+  # ── Advisory: eval suite schema ──────────────────────────────────────
+  # continue-on-error surfaces a visible warning instead of silently
+  # swallowing the result with `|| echo`, which made the old workflow
+  # green regardless of outcome.
+  eval-selfcheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/requirements.txt
+      - name: Install deps
+        run: |
+          cd src
+          pip install -r requirements.txt
+      - name: Validate eval suite schema
+        env:
+          GENERATION_MODE: local
+        run: |
+          cd src
+          python eval.py --selfcheck
+
+  # ── STAGE 2: DEPLOY (uncomment once a target exists) ─────────────────
+  # deploy:
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   if: github.ref == 'refs/heads/main'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Push images to registry
+  #       run: |
+  #         echo "${{ secrets.REGISTRY_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+  #         docker tag groundedops-backend ghcr.io/${{ github.repository }}-backend:latest
+  #         docker push ghcr.io/${{ github.repository }}-backend:latest
+  #     - name: Trigger server pull+restart
+  #       run: |
+  #         # e.g. ssh into the VPS and `docker compose pull && docker compose up -d`
+  #         echo "configure per DEPLOY_SETUP.md"
