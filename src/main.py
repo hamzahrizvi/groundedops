@@ -348,7 +348,14 @@ else:
 
 convo_store.init_db()
 
-GROUNDING_THRESHOLD = 0.55
+# The NLI entailment score below which a generated answer is discarded as
+# ungrounded. Env-tunable so it can be changed without a code edit, and so
+# sweep_grounding.py's finding can be acted on by editing .env.
+#
+# The score check_grounding returns is INDEPENDENT of this value - the
+# threshold is only the final comparison - so sweeping it does not mean
+# re-running generation once per candidate value. See sweep_grounding.py.
+GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.55"))
 
 # Sigmoid-calibrated reranker score (0.5 = the model's own relevance
 # boundary). Below this, the top chunk is judged irrelevant — refuse

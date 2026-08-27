@@ -6,28 +6,33 @@ what "done" looks like. Move an item to **Resolved** with the commit/PR that
 closed it — don't delete history, since the Monday report reads this file to
 know what changed since last week.
 
-Last hand-updated: 2026-08-20, after v15.1.
+Last hand-updated: 2026-08-27, after v16.0.
 
 ---
 
 ## Blocking
 
-- ~~`accounts.json` has no backup and is not regenerable~~ — **there is now
-  a way to back it up**: the console's Backup page, or
-  `manage_backup.py export`. An archive carries the accounts, the documents,
-  the search index, the FAQ, the catalogue, the widget config and the
-  enquiries, so a restore needs no re-ingesting. **Still open: nobody has
-  taken one yet, and nothing schedules it.** A backup feature that is never
-  run is not a backup. Decide where archives go and what runs it — cron on
-  the host is the obvious answer, calling
-  `manage_backup.py export --out /path/dated.gobk` with `BACKUP_PASSPHRASE`
-  in its environment.
+- ~~`accounts.json` has no backup and is not regenerable~~ — **RESOLVED as
+  far as it can be pre-staging.** A first real archive was taken 2026-08-27
+  (`manage_backup.py export --plain`, 107.7MB: 12 documents, 38 index files,
+  all 6 stores, accounts included) and verified readable with
+  `manage_backup.py inspect`. The mechanism is proven end to end, not just
+  built.
 
-  Archives are AES-256-GCM encrypted with a scrypt-derived passphrase.
-  **Where the passphrase lives is now a decision someone has to make and
-  record.** Losing it loses every backup taken with it, with no recovery
-  path. It must not sit in `docker/.env` beside the archives, or the
-  encryption buys nothing against whoever reaches the server.
+  **Two decisions taken 2026-08-27, both deliberate, both with a condition:**
+
+  1. **Encryption is OFF** (`BACKUP_ALLOW_PLAINTEXT=1` in `src/.env`). The
+     lose-the-passphrase risk was judged worse than the at-rest risk while
+     this is pre-staging and holds no real customer data. The encryption
+     path is built, tested and unchanged — this is a config switch, not a
+     removal. **REVISIT BEFORE STAGING CARRIES REAL DATA:** an archive holds
+     staff password hashes and customer contact details in the clear, so
+     until then archives are protected only by where they are put and by
+     filesystem permissions.
+  2. **No schedule yet** — backups stay manual until the staging host
+     exists. Automating against this dev machine would be throwaway work;
+     the cron job belongs in the staging deploy, next to a real destination.
+     Tracked under the staging item below so it is not forgotten.
 
 - **Password reset via email is banked, not built.** The user will supply
   SMTP credentials later. Until then the only reset path is a root using the
@@ -38,25 +43,70 @@ Last hand-updated: 2026-08-20, after v15.1.
   sufficient, because promoting a second person to root before someone
   leaves is how root moves between people. Nothing to build there.
 
-- **No working provider key on the server.** `DEEPSEEK_API_KEY` in `src/.env`
-  returns HTTP 401. Blocks: `eval.py --update-baseline` (end-to-end
-  evaluation), and sweeping the grounding threshold below. Owner: user — can
-  now be pasted in via the console's **API keys** page (root only,
-  `main.py`'s `/admin/keys` routes + `keystore.set_key`) and takes effect
-  immediately, no restart needed. `eval.py` still runs as its own process,
-  though, so it picks the key up from `.env` on its own next run regardless.
+- ~~No working provider key on the server~~ — **STALE, verified working
+  2026-08-27.** The `DEEPSEEK_API_KEY` in `src/.env` returns HTTP 200 on
+  both `GET /models` and `POST /chat/completions`, and
+  `ONLINE_DEEPSEEK_MODEL=deepseek-v4-flash` is present in the live model
+  list. The 401 in this item predated the `deepseek-chat` alias retirement
+  and was never re-checked after the key was replaced; it sat here blocking
+  the grounding sweep below for no reason.
 
-- **Grounding threshold (0.55) has never been swept.** The system discards a
-  correct generated answer if NLI grounding scores it below this — an
-  uncalibrated gate, same family as the three threshold bugs fixed in v15.1.
-  The false-refusal rate is completely unknown. This is the single biggest
-  unmeasured risk in the pipeline. Needs the provider key above, then
-  `eval.py` run across a range of thresholds against the 34-case suite.
+  Lesson worth keeping: this item blocked another item for weeks, and
+  clearing it took one API call. **Re-verify a "blocked on credentials"
+  item before planning around it.**
+
+- ~~Grounding threshold (0.55) has never been swept~~ — **MEASURED
+  2026-08-27, and it is not a risk.** `sweep_grounding.py` ran the 27
+  answerable eval cases; 17 reached the grounding gate and scored between
+  **0.9418 and 0.9994** (median 0.9970). At the live 0.55, **zero correct
+  answers are discarded.** The gate would have to rise to 0.95 before it
+  cost anything (1 case, 5.9%). It has ~0.39 of headroom — it is nowhere
+  near the scores it is judging.
+
+  Method worth keeping: `check_grounding` computes its score independently
+  of the threshold it is passed (the threshold is only the final `>=`), so
+  a sweep needs ONE generation pass, not one per candidate value.
+  `sweep_grounding.py --report-only` re-reports from the saved run with no
+  provider calls. `GROUNDING_THRESHOLD` is now env-tunable so acting on this
+  needs no code edit.
+
+  **Do not lower it on this evidence.** Every score sits above 0.94, so the
+  measurement says the gate is loose, not that it is well-calibrated —
+  nothing in the suite currently probes the 0.4–0.9 band where the
+  threshold would actually bite. What it rules out is the thing that was
+  feared: 0.55 is not silently eating correct answers.
+
+- **7 eval cases test a product key that does not exist.** Found by the
+  sweep above: cases tagged `product: "nv9st"` retrieve nothing and are
+  refused BEFORE generation, so they never reach any of the pipeline they
+  are meant to exercise. The index holds `nv9usb` (82 chunks) and
+  `nv9_spectral` (82 chunks); the catalogue lists both. **There is no
+  `nv9st` anywhere.**
+
+  This is the "catalogue drift / duplicate product keys" item below, now
+  with evidence. It means **26% of the answerable eval suite has been
+  measuring nothing**, and it was hidden behind the stale "no working
+  provider key" item that stopped anyone running the suite.
+
+  Needs a domain call before fixing, which is why it is not already done:
+  most of those cases ask about the NV9USB+ (→ `nv9usb`), but case 10 asks
+  about "the NV9ST" and case 13 about the NV11+ Note Float recycler, and
+  which key those belong to is a product question, not a code question.
+  Retag them in `eval_cases.json` and the suite goes from 17 to 24 cases
+  that actually exercise the pipeline.
+
+  Three further cases never reach the gate for a different and legitimate
+  reason: they carry no product scope at all (two MyConnect, one bare
+  "how fast is it?"), and the pipeline requires a scope before answering.
 
 ## In progress / known gaps
 
 - **Staging deploy is prepared but has never been run.** `STAGING.md` is the
-  runbook; `docker/.env.example` is the template. What is done: the admin
+  runbook; `docker/.env.example` is the template. **Carries two deferred
+  decisions from 2026-08-27:** the nightly backup cron belongs here (see the
+  backup item above), and backup encryption should be switched back on
+  (`BACKUP_ALLOW_PLAINTEXT` removed, a passphrase chosen and stored) before
+  the host holds real customer data. What is done: the admin
   surface can be opened deliberately (`ADMIN_ALLOWED_IPS`), first-run root
   creation is protected in two layers, every runtime store is on the
   persistent volume, `documents/` is bind-mounted, and the WordPress plugin
@@ -128,7 +178,9 @@ Last hand-updated: 2026-08-20, after v15.1.
   - Saved chat history (was browser localStorage in the React app) is gone.
   - Node/npm is no longer needed at all: no build step anywhere.
 
-- **Catalogue drift / duplicate product keys.** `nv9usb` vs `nv9_spectral`,
+- **Catalogue drift / duplicate product keys.** **Now evidenced** — see the
+  `nv9st` finding under Blocking: 7 eval cases point at a key that exists
+  nowhere. `nv9usb` vs `nv9_spectral`,
   `mini` vs `mycheckr_mini` existed as separate, inconsistently-filed product
   keys at points in this project; verify current `catalog_config.json` still
   matches what the FAQ answers are actually tagged to before trusting

@@ -85,3 +85,8 @@ policy.json.tmp
 # archive left in the tree. Both contain password hashes and customer data.
 backup_snapshots/
 *-backup-*.zip
+
+# sweep_grounding.py's saved run. Real questions + timings, no secrets,
+# but it is a measurement artifact, not source.
+sweep_grounding.json
+sweep_run.log

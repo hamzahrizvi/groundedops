@@ -45,6 +45,13 @@ os.environ.setdefault("SOURCE_FILE_DIR", "/tmp/apitest/data/documents")
 os.environ.setdefault("CHROMA_DIR", "/tmp/apitest/data/chroma_db")
 os.environ.setdefault("CONVO_DB_PATH", "/tmp/apitest/data/conversations.db")
 os.environ.setdefault("BACKUP_SNAPSHOT_DIR", "/tmp/apitest/data/snapshots")
+# Forced empty, NOT setdefault: main.py loads the developer's real src/.env
+# at import and would otherwise leak their local BACKUP_ALLOW_PLAINTEXT in,
+# breaking the "a passphrase is required" assertions on whichever machine
+# has it switched on. _load_env_file skips keys already in os.environ, so
+# setting it empty here wins. Tests that want the plaintext path set it
+# themselves, explicitly.
+os.environ["BACKUP_ALLOW_PLAINTEXT"] = ""
 # main.py's LAN-only gate checks request.client.host against this prefix
 # list and 404s anything that doesn't match (see PRIVATE_NETWORKS in
 # main.py) — a real, intended security control, not something to weaken.
