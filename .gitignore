@@ -85,6 +85,12 @@ policy.json.tmp
 # archive left in the tree. Both contain password hashes and customer data.
 backup_snapshots/
 *-backup-*.zip
+# Ad-hoc snapshots taken before a data migration. Same contents, same
+# sensitivity -- the naming is whatever the operator chose at the time,
+# so match the shapes rather than one exact name.
+before-*.zip
+before-*.gobk
+*.gobk
 
 # sweep_grounding.py's saved run. Real questions + timings, no secrets,
 # but it is a measurement artifact, not source.

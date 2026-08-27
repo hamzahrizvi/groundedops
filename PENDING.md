@@ -76,28 +76,44 @@ Last hand-updated: 2026-08-27, after v16.0.
   threshold would actually bite. What it rules out is the thing that was
   feared: 0.55 is not silently eating correct answers.
 
-- **7 eval cases test a product key that does not exist.** Found by the
-  sweep above: cases tagged `product: "nv9st"` retrieve nothing and are
-  refused BEFORE generation, so they never reach any of the pipeline they
-  are meant to exercise. The index holds `nv9usb` (82 chunks) and
-  `nv9_spectral` (82 chunks); the catalogue lists both. **There is no
-  `nv9st` anywhere.**
+- ~~7 eval cases test a product key that does not exist~~ — **RESOLVED
+  2026-08-27.** `nv9st` was a phantom: it appears in no document, no
+  catalogue entry, nothing. 18 customer questions and 7 eval cases were
+  filed under it. All retagged to `nv9usb` (the NV9USB+ Range manual, which
+  also covers the NV11+), decided by the user after the evidence was laid
+  out.
 
-  This is the "catalogue drift / duplicate product keys" item below, now
-  with evidence. It means **26% of the answerable eval suite has been
-  measuring nothing**, and it was hidden behind the stale "no working
-  provider key" item that stopped anyone running the suite.
+  Measured effect: the answerable eval suite went from **17 cases reaching
+  the pipeline to 22**, and the five recovered NV9 cases now score
+  0.997–0.999 on grounding — they had been refused before generation ever
+  ran.
 
-  Needs a domain call before fixing, which is why it is not already done:
-  most of those cases ask about the NV9USB+ (→ `nv9usb`), but case 10 asks
-  about "the NV9ST" and case 13 about the NV11+ Note Float recycler, and
-  which key those belong to is a product question, not a code question.
-  Retag them in `eval_cases.json` and the suite goes from 17 to 24 cases
-  that actually exercise the pipeline.
+  **The root cause is fixed too**, which matters more than the cleanup:
+  `catalog.delete_product` used to remove only the catalogue row and orphan
+  everything tagged to it. That is where `nv9st` and `coin_hoppers` came
+  from. Deletion now requires the caller to say whether content is
+  reassigned or deleted, and refuses to default.
 
-  Three further cases never reach the gate for a different and legitimate
-  reason: they carry no product scope at all (two MyConnect, one bare
-  "how fast is it?"), and the pipeline requires a scope before answering.
+- **One eval case asks about a product name that is in no document.**
+  "What voltage is supported on the NV9ST?" still fails after the retag —
+  correctly, because the string "NV9ST" appears nowhere in the corpus. The
+  question itself is wrong, not its tag. Either reword it to name a real
+  product, or drop it. Until then the suite has one permanently-failing
+  case, which is worse than 26 cases because it trains people to ignore a
+  red result.
+
+- **One answer is genuinely ungrounded, and the gate is catching it.**
+  "Does MyCheckr require integration with other systems?" scores **0.0051**
+  — near-zero entailment against its retrieved context — while every other
+  answered case scores above 0.99. The eval suite expects this one to be
+  answered, so the sweep reports it as a false refusal, but a 0.005 is not
+  a threshold problem: it would be refused at any threshold above zero.
+  Either the documents do not actually answer it, retrieval is pulling the
+  wrong chunks, or the model invented something. Worth one look; it is the
+  only case in the suite behaving like this.
+
+  This does not change the threshold conclusion above. 0.55 still discards
+  nothing that scores well, and the one refusal is the gate doing its job.
 
 ## In progress / known gaps
 
@@ -178,9 +194,12 @@ Last hand-updated: 2026-08-27, after v16.0.
   - Saved chat history (was browser localStorage in the React app) is gone.
   - Node/npm is no longer needed at all: no build step anywhere.
 
-- **Catalogue drift / duplicate product keys.** **Now evidenced** — see the
-  `nv9st` finding under Blocking: 7 eval cases point at a key that exists
-  nowhere. `nv9usb` vs `nv9_spectral`,
+- **Catalogue drift / duplicate product keys.** **Cause found and fixed**
+  (2026-08-27): products could be deleted without dealing with their
+  content, orphaning it under a key with no product in front of it. `nv9st`
+  is cleaned up; **`coin_hoppers` (1 question) is the same shape and has
+  not been touched** — decide where it belongs and use
+  `POST /admin/product/retag`. `nv9usb` vs `nv9_spectral`,
   `mini` vs `mycheckr_mini` existed as separate, inconsistently-filed product
   keys at points in this project; verify current `catalog_config.json` still
   matches what the FAQ answers are actually tagged to before trusting
@@ -201,6 +220,13 @@ Last hand-updated: 2026-08-27, after v16.0.
   started at least twice; confirm which attempt (if any) completed. Once
   authenticated, `gh pr create` against `main` with the body already drafted
   in this session's scratchpad.
+
+- ~~"talk to sales" and one-word replies on the customer-questions list~~ —
+  fixed 2026-08-27. `record_gap` now filters anything that is not a
+  curatable question (button text, "no", bare product names) at the single
+  choke point all six callers go through. Existing noise entries are still
+  in the log and will need dismissing by hand, or ignoring — the filter is
+  not retroactive.
 
 ## Lower priority
 

@@ -6,7 +6,9 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["age"],
+      "keywords_all": [
+        "age"
+      ],
       "reference": "MyCheckr is an all-in-one device solution that performs anonymous age estimation, to assist with the sale of age-restricted goods.",
       "grade": true
     },
@@ -15,8 +17,12 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["no"],
-      "keywords_absent": ["cloud-based processing is required"],
+      "keywords_all": [
+        "no"
+      ],
+      "keywords_absent": [
+        "cloud-based processing is required"
+      ],
       "reference": "No. MyCheckr provides instant results with no requirement for internet, and features local processing requiring no cloud base access.",
       "grade": true
     },
@@ -25,7 +31,9 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["no data stored"],
+      "keywords_all": [
+        "no data stored"
+      ],
       "reference": "No data is stored. MyCheckr is GDPR certified by the Age Check Certification Scheme (ACCS).",
       "grade": true
     },
@@ -34,7 +42,9 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["Age Check Certification Scheme"],
+      "keywords_all": [
+        "Age Check Certification Scheme"
+      ],
       "reference": "MyCheckr is GDPR certified by the Age Check Certification Scheme (ACCS).",
       "grade": true
     },
@@ -43,8 +53,12 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["one-off"],
-      "keywords_absent": ["monthly subscription"],
+      "keywords_all": [
+        "one-off"
+      ],
+      "keywords_absent": [
+        "monthly subscription"
+      ],
       "reference": "No. It is a one-off payment for the device with no recurring fees.",
       "grade": true
     },
@@ -53,7 +67,9 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["Challenge 25"],
+      "keywords_all": [
+        "Challenge 25"
+      ],
       "reference": "The checking process automates the Challenge 25 retailing strategy, to restrict illegal sales of age-restricted items to underage customers.",
       "grade": true
     },
@@ -62,7 +78,9 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["VESA"],
+      "keywords_all": [
+        "VESA"
+      ],
       "reference": "MyCheckr can be mounted using a VESA Mount and 1/4 inch screws, on a pole or a wall.",
       "grade": true
     },
@@ -71,7 +89,9 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["no"],
+      "keywords_all": [
+        "no"
+      ],
       "reference": "No. It is an all-in-one device; integration is optional but not required. It is however compatible with host machines for integration via API.",
       "grade": true
     },
@@ -80,81 +100,97 @@
       "new_session": true,
       "product": "mycheckr_mini",
       "outcome": "answered",
-      "keywords_all": ["camera"],
+      "keywords_all": [
+        "camera"
+      ],
       "reference": "It comes equipped with an inbuilt camera and a display screen.",
       "grade": true
     },
-
     {
       "q": "What voltage is supported on the NV9ST?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["12"],
+      "keywords_all": [
+        "12"
+      ],
       "reference": "The NV9ST supports 12VDC.",
       "grade": true
     },
     {
       "q": "How does the NV9USB+ communicate with a host?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["USB"],
+      "keywords_all": [
+        "USB"
+      ],
       "reference": "Host communication is via USB or TTL.",
       "grade": true
     },
     {
       "q": "Can the NV9 USB+ be mounted vertically?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["vertical"],
+      "keywords_all": [
+        "vertical"
+      ],
       "reference": "The NV9 USB+ can be mounted horizontally or vertically.",
       "grade": true
     },
     {
       "q": "What is the note capacity of the NV11+ Note Float recycler?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["30"],
+      "keywords_all": [
+        "30"
+      ],
       "reference": "The add-on Note Float recycler for the NV11+ has a capacity of 30 notes.",
       "grade": true
     },
     {
       "q": "Can national currency differences affect cashbox capacity on the NV9USB+?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["10-15"],
+      "keywords_all": [
+        "10-15"
+      ],
       "reference": "Some national currencies differ in thickness and circulation practices; depending on usage this can impact cashbox capacities by 10-15%. Consult an ITL representative for details.",
       "grade": true
     },
     {
       "q": "What are typical applications for the NV9USB+ range?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["vending"],
+      "keywords_all": [
+        "vending"
+      ],
       "reference": "Typical applications include amusement, vending, gaming, and low-volume retail.",
       "grade": true
     },
     {
       "q": "Can the NV9USB+ recycle notes?",
       "new_session": true,
-      "product": "nv9st",
+      "product": "nv9usb",
       "outcome": "answered",
-      "keywords_all": ["note float"],
+      "keywords_all": [
+        "note float"
+      ],
       "reference": "A Note Float module can be added to provide note recycling capability. The add-on recycler for the NV11+ holds 30 notes.",
       "grade": true
     },
-
     {
       "q": "What is the SMART Coin System?",
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["coin"],
+      "keywords_all": [
+        "coin"
+      ],
       "reference": "The SMART Coin System is a bulk coin validator, mixed coin hopper and recycler in one. It validates, discriminates and stores mixed coins, eliminating coin starvation and the need for multiple hoppers.",
       "grade": true
     },
@@ -163,7 +199,9 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["12"],
+      "keywords_all": [
+        "12"
+      ],
       "reference": "The SMART Coin System operates at a market leading 12 coins per second.",
       "grade": true
     },
@@ -172,18 +210,23 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["starvation"],
+      "keywords_all": [
+        "starvation"
+      ],
       "reference": "It eliminates coin starvation and the need for multiple hoppers.",
       "grade": true
     },
-
     {
       "q": "What is the standard lid assembly for the SMART Hopper?",
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["PA02051"],
-      "keywords_absent": ["PA02698"],
+      "keywords_all": [
+        "PA02051"
+      ],
+      "keywords_absent": [
+        "PA02698"
+      ],
       "reference": "The standard lid assembly for the SMART Hopper is PA02051 - Lid Assembly. PA02698 is a DIFFERENT part: the Twin SMART Coin System Secondary Hopper Lid Assembly. The two must not be confused.",
       "grade": true
     },
@@ -192,8 +235,12 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["PA02698"],
-      "keywords_absent": ["PA02051"],
+      "keywords_all": [
+        "PA02698"
+      ],
+      "keywords_absent": [
+        "PA02051"
+      ],
       "reference": "The standard lid assembly for the Twin SMART Coin System is PA02698 - Twin SMART Coin System Secondary Hopper Lid Assembly. PA02051 is the plain SMART Hopper lid and is a different part.",
       "grade": true
     },
@@ -202,8 +249,12 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["PM00488"],
-      "keywords_absent": ["PM01106"],
+      "keywords_all": [
+        "PM00488"
+      ],
+      "keywords_absent": [
+        "PM01106"
+      ],
       "reference": "The standard nozzle option for the SMART Hopper is PM00488 - Top Pay Nozzle. PM01106 is the pay-in chute Funnel, a different part.",
       "grade": true
     },
@@ -212,8 +263,12 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["PM01106"],
-      "keywords_absent": ["PM00488"],
+      "keywords_all": [
+        "PM01106"
+      ],
+      "keywords_absent": [
+        "PM00488"
+      ],
       "reference": "The standard pay in chute option is PM01106 - Funnel. PM00488 is the Top Pay Nozzle, a different part.",
       "grade": true
     },
@@ -222,16 +277,19 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["PA04138"],
+      "keywords_all": [
+        "PA04138"
+      ],
       "reference": "The chute option for debris collection is PA04138 - Chute with Debris Collection.",
       "grade": true
     },
-
     {
       "q": "What are the three key components of the MyConnect Environment?",
       "new_session": true,
       "outcome": "answered",
-      "keywords_all": ["Hub"],
+      "keywords_all": [
+        "Hub"
+      ],
       "reference": "The three key components are the MyConnect Hub, the MyConnect App (Android), and MyCheckr Devices.",
       "grade": true
     },
@@ -239,20 +297,22 @@
       "q": "How does the MyConnect App talk to the MyConnect Hub?",
       "new_session": true,
       "outcome": "answered",
-      "keywords_all": ["REST"],
+      "keywords_all": [
+        "REST"
+      ],
       "reference": "The MyConnect App communicates with the MyConnect Hub using REST API and multicast discovery.",
       "grade": true
     },
-
     {
       "q": "how fast is it?",
       "product": "sku_scs",
       "outcome": "answered",
-      "keywords_all": ["12"],
+      "keywords_all": [
+        "12"
+      ],
       "reference": "Follow-up test, no new_session: 'it' must resolve to the SMART Coin System from the previous case, giving 12 coins per second.",
       "grade": true
     },
-
     {
       "q": "what voltage does it need",
       "new_session": true,
@@ -265,7 +325,6 @@
       "outcome": "clarify",
       "reference": "Unscoped: MyCheckr mounts via VESA, the NV9 USB+ mounts horizontally or vertically. Two different answers, so ask which product."
     },
-
     {
       "q": "what is the capital of france",
       "new_session": true,
