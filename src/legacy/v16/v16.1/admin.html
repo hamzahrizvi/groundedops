@@ -1,0 +1,2900 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GroundedOps Console</title>
+<link rel="stylesheet" href="nocturne/styles.css" />
+<style>
+  /* ------------------------------------------------------------------
+     Thin layer on top of the Nocturne design-system stylesheet: shell
+     layout, the nav rail, and a handful of list/chat/dropzone patterns
+     the system doesn't itself define. Every color, radius and spacing
+     value here still comes from Nocturne's tokens.
+     ------------------------------------------------------------------ */
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font:inherit;color:inherit}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--color-neutral-800);border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums}
+  /* uppercase micro-label, used for stat readouts */
+  .lbl{font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+       color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  /* plain-case label above a form field */
+  .flabel{display:block;font-size:12px;margin-bottom:5px;
+          color:color-mix(in srgb, var(--color-text) 70%, transparent)}
+
+  /* ---------- shell ---------- */
+  .shell{display:flex;height:100vh;overflow:hidden;background:var(--color-bg);color:var(--color-text);
+         font-family:var(--font-body)}
+  .rail{width:246px;flex:0 0 auto;display:flex;flex-direction:column;padding:18px 0 14px;
+        border-right:1px solid var(--color-divider)}
+  .brand{padding:0 18px 18px}
+  .brand b{display:block;font-size:16px;font-weight:500;letter-spacing:-.01em;font-family:var(--font-heading)}
+  .brand span{font-size:11.5px;color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .nav{flex:1;padding:0 10px;display:flex;flex-direction:column;gap:2px}
+  /* signed-in account, at the foot of the rail */
+  .who{padding:12px 16px 2px;margin:8px 10px 0;border-top:1px solid var(--color-divider)}
+  .who-id{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .who-id b{font-size:12.5px;font-weight:500}
+  .who-lvl{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;
+           padding:1px 6px;border-radius:var(--radius-sm);
+           background:color-mix(in srgb, var(--color-accent-300) 22%, transparent);
+           color:var(--color-accent-300)}
+  .who-mail{font-size:11px;margin-top:2px;
+            color:color-mix(in srgb, var(--color-text) 45%, transparent);
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .who-acts{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+  .who-acts .btn{font-size:11.5px;padding:3px 7px}
+  /* a basic account gets no rail, so the main column carries the page */
+  .shell-plain .main{width:100%}
+  .row-between{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .nav button{position:relative;display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+              background:transparent;border:0;color:color-mix(in srgb, var(--color-text) 80%, transparent);
+              padding:8px 10px 8px 9px;border-radius:var(--radius-md);cursor:pointer;font-size:13.5px}
+  .nav button:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent);color:var(--color-text)}
+  .nav button .mark{width:3px;height:15px;border-radius:2px;flex:0 0 auto;background:transparent}
+  .nav button[aria-current="page"]{background:color-mix(in srgb, var(--color-accent) 14%, transparent);
+                                    color:var(--color-text);font-weight:500}
+  .nav button[aria-current="page"] .mark{background:var(--color-accent)}
+  .nav button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+  .nav .badge{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;
+              background:color-mix(in srgb, var(--color-text) 12%, transparent);
+              padding:1px 7px;border-radius:99px}
+  .nav button[aria-current="page"] .badge{background:var(--color-accent-800);color:var(--color-accent-100)}
+
+  .main{flex:1;overflow-y:auto;padding:30px 34px 90px;position:relative}
+  .wrap{max-width:1000px;animation:rise .18s ease both}
+  h1{font-size:26px;letter-spacing:-.025em;margin:0 0 4px;font-family:var(--font-heading);font-weight:500}
+  .lede{margin:0 0 22px;max-width:66ch;font-size:14px;
+        color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+
+  /* section-header pattern used inside cards, matching the design's
+     15px/500 title + 12.5px muted hint pairing */
+  .sec-title{font-size:15px;font-weight:500;margin:0 0 2px;font-family:var(--font-heading)}
+  .sec-hint{font-size:12.5px;margin:0 0 14px;max-width:60ch;
+            color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+
+  /* ---------- readout: overview stat band ---------- */
+  .readout{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+  .readout>div{background:var(--color-surface);border-radius:var(--radius-md);padding:15px 16px 13px;
+               box-shadow:var(--shadow-sm)}
+  .readout b{display:block;font-family:ui-monospace,monospace;font-size:29px;font-weight:500;
+             letter-spacing:-.03em;line-height:1.15;margin-top:6px}
+  .readout .warn b{color:var(--color-accent-300)}
+
+  /* ---------- form rows ---------- */
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .row>div{flex:1;min-width:170px}
+
+  /* ---------- checklist (overview "what to do next") ---------- */
+  .step{display:flex;gap:12px;padding:13px 0;border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
+  .step:first-of-type{border-top:0}
+  .mark-dot{width:21px;height:21px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;
+        justify-content:center;font-size:11px;font-weight:700}
+  .mark-dot.done{background:var(--color-accent-800);color:var(--color-accent-100)}
+  .mark-dot.todo{background:transparent;color:var(--color-accent);box-shadow:inset 0 0 0 1.5px var(--color-accent)}
+  .mark-dot.idle{background:var(--color-neutral-800);color:var(--color-neutral-400)}
+  .step-b{flex:1;min-width:0}
+  .step-b b{display:block;font-size:13.5px;font-weight:500}
+  .step-b p{margin:2px 0 0;font-size:12.5px;line-height:1.5;
+            color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .step-b .acts{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ---------- list rows (documents / answers / products) ---------- */
+  .item{display:flex;gap:12px;align-items:center;padding:10px 0;
+        border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
+  .item:first-child{border-top:0}
+  .item .grow{flex:1;min-width:0}
+  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .grow span{font-size:12px;color:color-mix(in srgb, var(--color-text) 50%, transparent)}
+  .item.flagged{box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+                border-radius:var(--radius-md);padding:10px 12px;border-top:0;margin-bottom:2px}
+
+  .empty{text-align:center;padding:30px 20px;color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .empty b{display:block;color:var(--color-text);margin-bottom:4px;font-weight:500}
+
+  /* ---------- drop zone ---------- */
+  .drop{border:1.5px dashed var(--color-divider);border-radius:var(--radius-md);padding:26px;text-align:center;
+        background:color-mix(in srgb, var(--color-text) 3%, transparent);
+        color:color-mix(in srgb, var(--color-text) 55%, transparent);
+        transition:border-color .12s,background .12s;cursor:pointer}
+  .drop b{display:block;color:var(--color-text);font-weight:500}
+  .drop.on{border-color:var(--color-accent);background:color-mix(in srgb, var(--color-accent) 10%, transparent)}
+  .drop.off{opacity:.55;cursor:default}
+
+  /* ---------- test chat ---------- */
+  .chat{border-radius:var(--radius-md);height:340px;overflow-y:auto;padding:14px;
+        background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)}
+  .bub{max-width:80%;padding:9px 13px;border-radius:var(--radius-md);margin-bottom:9px;font-size:13.5px;
+       line-height:1.5;white-space:pre-wrap}
+  .bub.u{margin-left:auto;background:var(--color-accent-800);color:var(--color-accent-100)}
+  .bub.a{background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-divider)}
+
+  /* ---------- toast ---------- */
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+         background:var(--color-surface);box-shadow:var(--shadow-md);color:var(--color-text);
+         padding:11px 18px;border-radius:var(--radius-md);font-size:13.5px;z-index:80;max-width:90vw}
+  .toast.bad{box-shadow:var(--shadow-md), inset 0 0 0 1px var(--color-accent);color:var(--color-accent-200)}
+
+  /* ---------- login gate ---------- */
+  .gate{height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+        background:var(--color-bg);color:var(--color-text)}
+  .gate .card{max-width:380px;width:100%}
+
+  .md p{margin:0 0 7px}
+  .md p:last-child{margin-bottom:0}
+  .md ul,.md ol{margin:4px 0 7px;padding-left:20px;display:flex;flex-direction:column;gap:3px}
+  .md li{font-size:13.5px}
+  .md code{font-family:ui-monospace,monospace;font-size:.88em;
+           background:color-mix(in srgb, var(--color-text) 9%, transparent);
+           padding:.1em .32em;border-radius:3px}
+  .md-table{border-collapse:collapse;margin:5px 0 8px;font-size:12.5px;
+            display:block;overflow-x:auto;max-width:100%}
+  .md-table td{border:1px solid var(--color-divider);padding:4px 8px;
+               vertical-align:top;font-variant-numeric:tabular-nums}
+  /* ---------- in-page sub-navigation ---------- */
+  /* Sections of the active page, listed under its nav row so they can be
+     reached without scrolling for them. Built from the rendered DOM in
+     buildSubnav(), so a view gets one for free by tagging cards data-sec. */
+  /* Text aligns under the parent item's label (10px rail padding + 9px button
+     padding + 3px mark + 9px gap = 31px), so the list reads as that item's
+     contents. An earlier version indented off a vertical rule, which sat
+     awkwardly against both the rail border and the active item's block. */
+  .subnav{display:flex;flex-direction:column;padding:1px 10px 6px}
+  .subnav button{display:block;width:100%;text-align:left;border:0;background:transparent;
+                 cursor:pointer;font:inherit;font-size:12.5px;
+                 padding:5px 10px 5px 21px;border-radius:var(--radius-md);
+                 color:color-mix(in srgb, var(--color-text) 42%, transparent)}
+  .subnav button:hover{background:color-mix(in srgb, var(--color-text) 6%, transparent);
+                       color:color-mix(in srgb, var(--color-text) 85%, transparent)}
+  .subnav button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+
+  /* ---------- walkthrough ---------- */
+  /* The help icon sits over .main rather than in the rail, so it stays put
+     while the page scrolls. */
+  .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:34px;height:34px;
+            border-radius:50%;border:0;cursor:pointer;background:var(--color-surface);
+            box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-divider);
+            color:var(--color-accent-400);font-size:15px;font-weight:600;
+            display:grid;place-items:center;font-family:inherit}
+  .help-btn:hover{color:var(--color-accent-300)}
+  .help-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+
+  @keyframes tourPulse{
+    0%,100%{box-shadow:0 0 0 1px var(--color-accent),
+                       0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent)}
+    50%    {box-shadow:0 0 0 1px var(--color-accent),
+                       0 0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent)}
+  }
+  /* position/z-index so the ring is not clipped by a neighbouring card. */
+  .tour-hi{position:relative;z-index:41;border-radius:var(--radius-md);
+           animation:tourPulse 1.9s ease-in-out infinite}
+  .tour-pop{position:fixed;z-index:95;width:300px;background:var(--color-surface);
+            border-radius:var(--radius-md);padding:16px 18px;
+            box-shadow:var(--shadow-lg),0 0 0 1px var(--color-divider);
+            animation:rise .18s ease both}
+  .tour-pop .step{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+                  color:var(--color-accent-400);margin-bottom:6px}
+  .tour-pop .tt{font-size:14px;font-weight:500;margin-bottom:6px}
+  .tour-pop .tx{font-size:13px;line-height:1.55;
+                color:color-mix(in srgb, var(--color-text) 85%, transparent)}
+  .tour-pop .acts{margin-top:14px;display:flex;justify-content:space-between;align-items:center}
+  .tour-pop .acts .btn{font-size:12px;padding:4px 10px}
+  @media (prefers-reduced-motion:reduce){
+    .tour-hi{animation:none;box-shadow:0 0 0 2px var(--color-accent)}
+    .tour-pop{animation:none}
+  }
+
+  @media (max-width:820px){
+    .shell{flex-direction:column;height:auto;min-height:100vh}
+    .rail{width:100%;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
+    .brand{border:0;padding:0 14px 0 6px;margin:0}
+    .nav{flex-direction:row;flex:1}
+    .subnav{display:none}
+    .readout{grid-template-columns:repeat(2,1fr)}
+    .main{padding:18px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * GroundedOps Console (v13.0 — Nocturne)
+ *
+ * One self-contained file, served by the backend at /admin. No build
+ * step: replace the file, reload the page. Ship the sibling
+ * nocturne/styles.css alongside it.
+ *
+ * The organising idea is that the console should answer "what do I do
+ * next?" without anyone reading a manual. The Overview reads live state
+ * and turns it into a short list of actions, so an unassigned document
+ * or an empty FAQ announces itself instead of waiting to be discovered.
+ * ------------------------------------------------------------------ */
+
+const API = location.origin;
+// A session token, not a password — the header it travels in is still
+// called x-admin-password for wire compatibility (see main.py's auth block).
+let tok = sessionStorage.getItem("go_admin_token") || "";
+// The signed-in account: {id, email, name, level, must_change_password}.
+// `level` decides which nav rows exist, so it is held rather than re-fetched.
+let me = JSON.parse(sessionStorage.getItem("go_admin_me") || "null");
+
+const LEVEL_LABEL = { root: "Root", support: "Support", basic: "Basic" };
+const isRoot = () => me && me.level === "root";
+const isStaff = () => me && (me.level === "root" || me.level === "support");
+
+function signOut(msg) {
+  tok = ""; me = null;
+  sessionStorage.removeItem("go_admin_token");
+  sessionStorage.removeItem("go_admin_me");
+  if (msg) toast(msg, true);
+  render();
+}
+let view = "overview";
+// Set by the Unanswered page's "Answer this" so the Answers page opens
+// with the question prefilled and scrolled into view.
+let pendingAnswer = null;
+let cache = { catalog: null, sources: [], faq: [], gaps: [], providers: [],
+              widget: null, leads: [], leadStats: {} };
+
+// Sentinel for "answers carrying no product tag at all" in the answers-page
+// picker, kept distinct from "" which means nothing chosen yet.
+const NO_SCOPE = "__none__";
+// One button metric for the console, so rows of mixed .btn variants line up.
+const BTN = "font-size:12.5px;padding:5px 11px";
+
+const randId = (prefix) => {
+  // crypto.getRandomValues, not Math.random: these are identifiers, and one of
+  // them (the chat session id) is sent to the backend. Math.random is
+  // predictable, and a scanner cannot tell a "harmless" id from a security
+  // token -- neither can the next person to reuse this helper.
+  const b = new Uint8Array(9);
+  (self.crypto || window.crypto).getRandomValues(b);
+  return prefix + Array.from(b, x => x.toString(36).padStart(2, "0")).join("").slice(0, 14);
+};
+
+const el = (t, a = {}, ...kids) => {
+  const n = document.createElement(t);
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "class") n.className = v;
+    else if (k === "html") n.innerHTML = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
+  }
+  // flat(Infinity), not flat(): a view returning [h1, lede, rows] where
+  // `rows` is itself an array of cards nests two deep, and a single-level
+  // flatten leaves that inner array to be passed to createTextNode —
+  // which renders the literal string "[object HTMLDivElement]" instead of
+  // the list. Depth-1 happened to work only while every view returned a
+  // flat list of elements.
+  kids.flat(Infinity).forEach(c => c && n.append(c.nodeType ? c : document.createTextNode(c)));
+  return n;
+};
+
+function toast(msg, bad) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const t = el("div", { class: "toast" + (bad ? " bad" : "") }, msg);
+  document.body.append(t);
+  setTimeout(() => t.remove(), bad ? 6000 : 3200);
+}
+
+// Provider pickers are built from what the server says it can actually reach
+// (/admin/providers: key present in the environment, or Ollama warmed) rather
+// than a hardcoded list of all four. Offering DeepSeek with no key set failed
+// with "returned nothing", which reads as a broken model rather than as
+// missing configuration.
+function providerBox(extra) {
+  return el("select", Object.assign({ class: "input" }, extra || {}),
+    el("option", { value: "" },
+      cache.providers.length ? "Server default" : "Server default (none configured)"),
+    cache.providers.map(p => el("option", { value: p.key }, p.label)));
+}
+
+const defaultModelFor = key =>
+  (cache.providers.find(p => p.key === key) || {}).default_model || "";
+
+// The model box means nothing until a provider is chosen, and showing that
+// provider's current default as the placeholder saves guessing a model name
+// -- which is how a retired one went unnoticed.
+function linkModelBox(sel, box) {
+  const sync = () => {
+    const d = defaultModelFor(sel.value);
+    box.placeholder = d ? d + "  (default)" : "model (optional)";
+    box.disabled = !sel.value;
+  };
+  sel.addEventListener("change", sync);
+  sync();
+  return box;
+}
+
+// Answers come back as markdown-ish text: "- 13: USB power (+5V)" lines, the
+// occasional **bold**, sometimes a pipe table. Rendered as a single text node
+// they were a wall of characters -- a pinout list being the worst case. This
+// is a deliberately small renderer: escape everything first, then allow only
+// bullets, ordered lists, tables, bold, code and paragraphs. No library, and
+// nothing that can inject markup.
+function mdEscape(t) {
+  return (t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function mdInline(t) {
+  return mdEscape(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+}
+
+const MD_BULLET = /^\s*[-*•]\s+(.*)$/;
+const MD_NUM = /^\s*\d+[.)]\s+(.*)$/;
+const MD_ROW = /^\s*\|.*\|\s*$/;
+const MD_SEP = /^[\s|:-]+$/;
+
+function renderMarkdown(text) {
+  const box = el("div", { class: "md" });
+  const lines = String(text || "").split(/\r?\n/);
+  let i = 0;
+
+  const flushList = (ordered) => {
+    const list = el(ordered ? "ol" : "ul", {});
+    while (i < lines.length) {
+      const m = lines[i].match(ordered ? MD_NUM : MD_BULLET);
+      if (!m) break;
+      list.append(el("li", { html: mdInline(m[1]) }));
+      i++;
+    }
+    box.append(list);
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+
+    // A pipe table, which is how spec rows arrive now parsing keeps them.
+    if (MD_ROW.test(line)) {
+      const tbl = el("table", { class: "md-table" });
+      while (i < lines.length && MD_ROW.test(lines[i])) {
+        if (!MD_SEP.test(lines[i])) {          // the |---|---| row carries no data
+          const tr = el("tr", {});
+          lines[i].trim().replace(/^\||\|$/g, "").split("|")
+            .forEach(c => tr.append(el("td", { html: mdInline(c.trim()) })));
+          tbl.append(tr);
+        }
+        i++;
+      }
+      box.append(tbl);
+      continue;
+    }
+
+    if (MD_BULLET.test(line)) { flushList(false); continue; }
+    if (MD_NUM.test(line)) { flushList(true); continue; }
+
+    const para = [];
+    while (i < lines.length && lines[i].trim()
+           && !MD_BULLET.test(lines[i]) && !MD_NUM.test(lines[i])
+           && !MD_ROW.test(lines[i])) {
+      para.push(lines[i]); i++;
+    }
+    box.append(el("p", { html: mdInline(para.join(" ")) }));
+  }
+  return box;
+}
+
+async function api(path, opts = {}) {
+  const o = Object.assign({ headers: {} }, opts);
+  o.headers["x-admin-password"] = tok;
+  if (o.body && !(o.body instanceof FormData)) o.headers["Content-Type"] = "application/json";
+  const r = await fetch(API + path, o);
+  // 401 and 403 mean different things and must not be collapsed: 401 is
+  // "your session is gone" (sign in again), 403 is "your account is fine
+  // but this level may not do that" (signing in again changes nothing, and
+  // bouncing to the gate would look like a broken login).
+  if (r.status === 401) { signOut(); throw new Error("Session expired"); }
+  if (r.status === 403) {
+    let d; try { d = (await r.json()).detail; } catch (e) { d = "Not permitted"; }
+    throw new Error(typeof d === "string" ? d : "Not permitted");
+  }
+  if (!r.ok) {
+    let d; try { d = (await r.json()).detail; } catch (e) { d = r.statusText; }
+    throw new Error(typeof d === "string" ? d : JSON.stringify(d));
+  }
+  return r.status === 204 ? null : r.json();
+}
+
+/* ---------------- data ---------------- */
+async function refresh() {
+  // All independent reads — run them together rather than in series, so
+  // opening the console is one round trip's worth of latency, not six.
+  const [cat, src, faq, gaps, widget, leads, prov] = await Promise.all([
+    api("/catalog").catch(() => ({ categories: [] })),
+    api("/admin/sources").catch(() => ({ sources: [] })),
+    api("/faq").catch(() => ({ faq: [] })),
+    api("/faq/gaps").catch(() => ({ gaps: [], stats: {} })),
+    api("/admin/widget/config").catch(() => null),
+    api("/admin/leads").catch(() => ({ leads: [], stats: {} })),
+    api("/admin/providers").catch(() => ({ providers: [] })),
+  ]);
+  cache.catalog = cat.categories || [];
+  cache.sources = src.sources || src || [];
+  cache.faq = faq.faq || [];
+  cache.gaps = gaps.gaps || [];
+  cache.gapStats = gaps.stats || {};
+  // Kept as null on failure rather than defaulted: the Widget page needs
+  // to tell the difference between "not loaded" and "loaded and empty",
+  // or a failed read would render as a blank config the admin could
+  // accidentally save over their real one.
+  cache.widget = widget;
+  cache.providers = prov.providers || [];
+  cache.leads = leads.leads || [];
+  cache.leadStats = leads.stats || {};
+}
+
+// Deep copy, so edits in the Widget editor are staged locally and only
+// committed on Save — closing the page without saving discards them.
+const clone = o => JSON.parse(JSON.stringify(o));
+
+const products = () => cache.catalog.flatMap(c =>
+  (c.products || []).map(p => ({ ...p, category: c.key, categoryName: c.name })));
+const unassigned = () => cache.sources.filter(s => !(s.product || s.products));
+const answered = () => cache.faq.filter(f => (f.answer || "").trim());
+
+/* ---------------- shell ---------------- */
+function render() {
+  const app = document.getElementById("app");
+  endTour();                 // the popover lives on <body>, so it outlives app.innerHTML
+  app.innerHTML = "";
+  if (!tok) return app.append(gate());
+
+  // A basic account has no admin surface at all — every admin endpoint
+  // refuses it with a 403 — so it gets the test chat and nothing else
+  // rather than a rail full of rows that error when clicked.
+  if (!isStaff()) { view = "test"; return app.append(basicShell()); }
+
+
+  // Collected so buildSubnav() can hang the active page's sections off its row.
+  const navBtns = [];
+  const nav = (id, label, count) => {
+    const b = el("button", {
+      onclick: () => { view = id; render(); },
+      "aria-current": view === id ? "page" : null,
+    }, el("span", { class: "mark" }), el("span", { style: "flex:1" }, label),
+       count !== undefined ? el("span", { class: "badge mono" }, String(count)) : null);
+    navBtns.push([id, b]);
+    return b;
+  };
+
+  app.append(el("div", { class: "shell" },
+    el("aside", { class: "rail" },
+      el("div", { class: "brand" }, el("b", {}, "GroundedOps"), el("span", {}, "Support console")),
+      el("nav", { class: "nav" },
+        nav("overview", "Overview"),
+        nav("documents", "Documents", cache.sources.length),
+        nav("faq", "Generate/Edit FAQs", answered().length),
+        nav("gaps", "FAQs from customers", cache.gaps.length),
+        nav("catalog", "Products", products().length),
+        nav("widget", "Widget design"),
+        nav("leads", "Enquiries", cache.leadStats.unhandled || 0),
+        nav("test", "Test chat"),
+        // Root only. Support deliberately cannot see this: being able to
+        // grant yourself or anyone else access is the one thing that level
+        // does not get.
+        isRoot() ? nav("accounts", "Accounts") : null,
+        isRoot() ? nav("keys", "API keys") : null,
+        isRoot() ? nav("policy", "Access & limits") : null,
+        nav("backup", "Backup"),
+      ),
+      whoBox(),
+    ),
+    el("main", { class: "main" },
+      el("button", { class: "help-btn", onclick: startTour,
+                     title: "How to use this page", "aria-label": "How to use this page" }, "?"),
+      el("div", { class: "wrap" }, body()))
+  ));
+
+  buildSubnav(navBtns);
+}
+
+// Lists the active page's sections under its nav row. Reads the rendered DOM
+// rather than a per-view table, so tagging a card data-sec is all a view has to
+// do to appear here. Fewer than two sections is not worth the extra chrome.
+function buildSubnav(navBtns) {
+  const active = navBtns.find(([id]) => id === view);
+  if (!active) return;
+  const secs = [...document.querySelectorAll(".main [data-sec]")];
+  if (secs.length < 2) return;
+  active[1].after(el("div", { class: "subnav" },
+    secs.map(sec => el("button", {
+      onclick: () => sec.scrollIntoView({ behavior: "smooth", block: "start" }),
+    }, sec.getAttribute("data-sec")))));
+}
+
+// Who you are signed in as, and the way out. Worth showing permanently:
+// with levels, "why can't I see that page" is answered by reading this.
+function whoBox() {
+  return el("div", { class: "who" },
+    el("div", { class: "who-id" },
+      el("b", {}, me.name || me.email),
+      el("span", { class: "who-lvl" }, LEVEL_LABEL[me.level] || me.level)),
+    me.name ? el("div", { class: "who-mail mono" }, me.email) : null,
+    el("div", { class: "who-acts" },
+      el("button", { class: "btn btn-ghost", onclick: changeOwnPassword },
+        "Change password"),
+      el("button", { class: "btn btn-ghost",
+                     onclick: () => signOut("Signed out") }, "Sign out")));
+}
+
+// The whole console for a basic account: the test chat, and no rail. There
+// is nothing else it is allowed to do, so a rail would be all dead ends.
+function basicShell() {
+  return el("div", { class: "shell shell-plain" },
+    el("main", { class: "main" },
+      el("div", { class: "wrap" },
+        el("div", { class: "row-between", style: "margin-bottom:14px" },
+          el("div", {},
+            el("h1", {}, "Test chat"),
+            el("p", { class: "sec-hint" },
+              "The assistant, exactly as a customer sees it.")),
+          el("div", { style: "text-align:right" },
+            el("div", { class: "mono", style: "font-size:12px;opacity:.75" }, me.email),
+            el("div", { class: "who-acts" },
+              el("button", { class: "btn btn-ghost", onclick: changeOwnPassword },
+                "Change password"),
+              el("button", { class: "btn btn-ghost",
+                             onclick: () => signOut("Signed out") }, "Sign out")))),
+        // The widget itself, not the pipeline tester: a basic account has no
+        // business forcing a provider or model, and cannot load the provider
+        // list to populate that control anyway.
+        widgetPreviewCard(false).card)));
+}
+
+async function changeOwnPassword() {
+  const cur = prompt("Your current password:");
+  if (!cur) return;
+  const next = prompt("New password (at least 12 characters):");
+  if (!next) return;
+  if (next !== prompt("Type the new password again:"))
+    return toast("Those did not match", true);
+  try {
+    // The server bumps this account's token epoch, killing every session it
+    // had — including this one. It hands back a replacement so the person
+    // who just changed their own password is not signed out for doing it.
+    const r = await api("/admin/auth/password", { method: "POST",
+      body: JSON.stringify({ current_password: cur, new_password: next }) });
+    tok = r.token;
+    sessionStorage.setItem("go_admin_token", tok);
+    if (me.must_change_password) {
+      me.must_change_password = false;
+      sessionStorage.setItem("go_admin_me", JSON.stringify(me));
+      render();
+    }
+    toast("Password changed");
+  } catch (e) { toast(e.message, true); }
+}
+
+function body() {
+  if (view === "accounts") return viewAccounts();
+  if (view === "keys") return viewKeys();
+  if (view === "policy") return viewPolicy();
+  if (view === "backup") return viewBackup();
+  if (view === "overview") return viewOverview();
+  if (view === "documents") return viewDocuments();
+  if (view === "faq") return viewFaq();
+  if (view === "gaps") return viewGaps();
+  if (view === "catalog") return viewCatalog();
+  if (view === "widget") return viewWidget();
+  if (view === "leads") return viewLeads();
+  if (view === "test") return viewTest();
+}
+
+/* ---------------- gate ---------------- */
+// `firstRun` is null until /admin/auth/state answers, so the card can say
+// "checking" rather than flashing a sign-in form at someone who has no
+// account to sign in with yet.
+let firstRun = null;
+let gateDomain = "";
+
+function gate() {
+  const emailIn = el("input", { class: "input", type: "email",
+                                placeholder: "you@company.com", autofocus: "true" });
+  const pwIn = el("input", { class: "input", type: "password", placeholder: "Password" });
+  const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
+                    "Checking this install\u2026");
+  const btn = el("button", { class: "btn btn-primary", disabled: "true" }, "Sign in");
+  const nameIn = el("input", { class: "input", placeholder: "Your name (optional)" });
+  const nameField = el("div", { class: "field", style: "display:none" }, nameIn);
+
+  // Every failure here used to surface as "that password was not accepted" --
+  // a wrong password, a server that was not running, a proxy swallowing the
+  // request and a 404 from the private-surface middleware all looked
+  // identical. Only a 401 is actually about the credentials; say what the
+  // others were, because from another PC on the LAN the difference is the
+  // whole diagnosis.
+  const fail = (e, verb) => {
+    if (e instanceof TypeError) {
+      // fetch() rejects with a TypeError when the request never got a
+      // response at all: server down, wrong host, blocked in transit.
+      toast("Could not reach the server at " + API + " \u2014 " + e.message, true);
+    } else {
+      toast(verb + " failed: " + e.message, true);
+    }
+  };
+
+  const enter = async (r) => {
+    tok = r.token;
+    me = r.user;
+    sessionStorage.setItem("go_admin_token", tok);
+    sessionStorage.setItem("go_admin_me", JSON.stringify(me));
+    // A basic account cannot call any of refresh()'s reads \u2014 they are all
+    // admin endpoints \u2014 so skip it rather than firing six 403s and
+    // reporting them as errors. It needs no console data at all: its whole
+    // page is the widget in an iframe, which fetches its own config and
+    // catalog from the public /widget/* routes.
+    if (isStaff()) {
+      // A 401 during refresh() signs out from inside api(), which would
+      // land you back at the gate with nothing said. Check for it instead
+      // of letting it look like the credentials failed.
+      try { await refresh(); } catch (e) { toast("Loaded with errors: " + e.message, true); }
+      if (!tok) return toast("Signed in, but a follow-up request was rejected", true);
+    }
+    render();
+    if (me.must_change_password)
+      toast("This password was set for you \u2014 please change it", true);
+  };
+
+  const signIn = async () => {
+    if (!emailIn.value.trim() || !pwIn.value) return toast("Email and password, please", true);
+    btn.disabled = true;
+    try {
+      await enter(await api("/admin/login", { method: "POST",
+        body: JSON.stringify({ email: emailIn.value.trim(), password: pwIn.value }) }));
+    } catch (e) { fail(e, "Sign-in"); btn.disabled = false; }
+  };
+
+  const createRoot = async () => {
+    if (!emailIn.value.trim() || !pwIn.value) return toast("Email and password, please", true);
+    if (pwIn.value.length < 12)
+      return toast("Use at least 12 characters for the first account", true);
+    btn.disabled = true;
+    try {
+      await enter(await api("/admin/auth/bootstrap", { method: "POST",
+        body: JSON.stringify({ email: emailIn.value.trim(), password: pwIn.value,
+                               name: nameIn.value.trim() }) }));
+      toast("Root account created \u2014 you can now add others under Accounts");
+    } catch (e) { fail(e, "Setup"); btn.disabled = false; }
+  };
+
+  // Asked unauthenticated, because deciding which form to show is exactly
+  // the thing that cannot require being signed in.
+  (async () => {
+    try {
+      const s = await (await fetch(API + "/admin/auth/state")).json();
+      firstRun = !s.initialised;
+      gateDomain = s.email_domain || "";
+    } catch (e) {
+      status.textContent = "Could not reach the server at " + API + ".";
+      return;
+    }
+    btn.disabled = false;
+    if (firstRun) {
+      status.textContent = "No accounts exist yet. Create the first one \u2014 it "
+        + "will be the root account, the only level that can add others.";
+      btn.textContent = "Create root account";
+      btn.onclick = createRoot;
+      nameField.style.display = "";
+      pwIn.placeholder = "Password (at least 12 characters)";
+    } else {
+      status.textContent = gateDomain
+        ? "Sign in with your @" + gateDomain + " account."
+        : "Sign in to manage the documents and answers behind the support widget.";
+      btn.onclick = signIn;
+    }
+  })();
+
+  const onEnter = e => { if (e.key === "Enter" && !btn.disabled) btn.onclick(); };
+  emailIn.addEventListener("keydown", onEnter);
+  pwIn.addEventListener("keydown", onEnter);
+
+  return el("div", { class: "gate" },
+    el("div", { class: "card elev-md", style: "padding:22px" },
+      el("h2", {}, "GroundedOps console"),
+      status,
+      el("div", { class: "field" }, emailIn),
+      nameField,
+      el("div", { class: "field" }, pwIn),
+      el("div", { style: "margin-top:14px" }, btn)));
+}
+
+/* ---------------- accounts (root only) ---------------- */
+// Not held in `cache`: refresh() runs on every render for every staff
+// account, and the account list is root-only, so fetching it there would
+// 403 for support on every single page load.
+let acctCache = null;
+
+const LEVEL_BLURB = {
+  root: "Everything, including adding accounts and changing levels.",
+  support: "Everything except accounts — documents, answers, products, enquiries.",
+  basic: "Test chat only. No access to documents or answers.",
+};
+
+async function loadAccounts() {
+  try {
+    acctCache = await api("/admin/users");
+  } catch (e) {
+    acctCache = { users: [], error: e.message };
+  }
+  render();
+}
+
+function viewAccounts() {
+  if (!acctCache) { loadAccounts(); return [el("h1", {}, "Accounts"),
+    el("p", { class: "lede" }, "Loading…")]; }
+  if (acctCache.error) return [el("h1", {}, "Accounts"),
+    el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+      el("b", {}, "Could not load accounts"), acctCache.error))];
+
+  const after = async (fn, okMsg) => {
+    try { await fn(); acctCache = null; toast(okMsg); await loadAccounts(); }
+    catch (e) { toast(e.message, true); }
+  };
+
+  // ── new account form ──
+  const nEmail = el("input", { class: "input", type: "email", placeholder: "person@company.com" });
+  const nName = el("input", { class: "input", placeholder: "Name (optional)" });
+  const nPw = el("input", { class: "input", type: "password", placeholder: "Temporary password (12+ chars)" });
+  const nLevel = el("select", { class: "input" },
+    el("option", { value: "basic" }, "Basic — test chat only"),
+    el("option", { value: "support", selected: "true" }, "Support — everything except accounts"),
+    el("option", { value: "root" }, "Root — everything, including accounts"));
+
+  const create = () => after(async () => {
+    if (!nEmail.value.trim() || !nPw.value) throw new Error("Email and a password, please");
+    await api("/admin/users", { method: "POST", body: JSON.stringify({
+      email: nEmail.value.trim(), password: nPw.value,
+      level: nLevel.value, name: nName.value.trim() }) });
+  }, "Account created");
+
+  const newCard = el("div", { class: "card elev-sm", "data-sec": "Add someone",
+                              "data-tour": "accounts-new",
+                              style: "margin-bottom:14px" },
+    el("h3", {}, "Add someone"),
+    el("p", { class: "sec-hint" },
+      "They will be asked to change this password the first time they sign in."),
+    el("div", { class: "row", style: "margin-top:10px" },
+      el("div", { style: "flex:1 1 220px" }, nEmail),
+      el("div", { style: "flex:1 1 160px" }, nName)),
+    el("div", { class: "row", style: "margin-top:8px" },
+      el("div", { style: "flex:1 1 220px" }, nPw),
+      el("div", { style: "flex:1 1 200px" }, nLevel),
+      el("div", { style: "flex:0 0 auto;min-width:0" },
+        el("button", { class: "btn btn-primary", onclick: create }, "Create account"))));
+
+  // ── existing accounts ──
+  const rows = acctCache.users.map(u => {
+    const isMe = me && u.id === me.id;
+    const sel = el("select", { class: "input", style: "font-size:12.5px;padding:4px 8px",
+      onchange: () => after(() => api("/admin/users/" + u.id + "/level",
+        { method: "POST", body: JSON.stringify({ level: sel.value }) }),
+        "Level changed to " + sel.value) },
+      ["basic", "support", "root"].map(l =>
+        el("option", { value: l, selected: u.level === l ? "true" : null },
+           LEVEL_LABEL[l])));
+
+    return el("div", { class: "card elev-sm",
+                       style: "padding:14px 18px;gap:0;margin-bottom:10px" +
+                              (u.disabled ? ";opacity:.55" : "") },
+      el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+        el("b", {}, u.name || u.email),
+        isMe ? el("span", { class: "tag tag-accent" }, "you") : null,
+        u.disabled ? el("span", { class: "tag tag-neutral" }, "disabled") : null,
+        u.must_change_password
+          ? el("span", { class: "tag tag-neutral" }, "must change password") : null,
+        el("span", { style: "flex:1" }),
+        el("span", { style: "font-size:11.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
+          u.last_login ? "last in " + shortDate(u.last_login) : "never signed in")),
+      u.name ? el("div", { class: "mono", style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, u.email) : null,
+      el("div", { class: "item", style: "margin-top:10px" },
+        el("div", { style: "flex:0 0 90px;font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, "Level"),
+        el("div", { style: "flex:0 0 150px" }, sel),
+        el("div", { class: "grow", style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+          LEVEL_BLURB[u.level] || "")),
+      el("div", { style: "margin-top:12px;display:flex;gap:8px;flex-wrap:wrap" },
+        el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px",
+          onclick: () => {
+            const p = prompt("New password for " + u.email + " (12+ characters).\n"
+              + "They will have to change it when they next sign in.");
+            if (!p) return;
+            after(() => api("/admin/users/" + u.id + "/password",
+              { method: "POST", body: JSON.stringify({ password: p }) }),
+              "Password reset");
+          } }, "Reset password"),
+        el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px",
+          onclick: () => after(() => api("/admin/users/" + u.id + "/disabled",
+            { method: "POST", body: JSON.stringify({ disabled: !u.disabled }) }),
+            u.disabled ? "Account enabled" : "Account disabled") },
+          u.disabled ? "Enable" : "Disable"),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+          onclick: () => {
+            if (!confirm("Delete " + u.email + "? Disabling keeps the record and "
+              + "is usually what you want; deleting cannot be undone.")) return;
+            after(() => api("/admin/users/" + u.id, { method: "DELETE" }), "Account deleted");
+          } }, "Delete")));
+  });
+
+  const byLevel = l => acctCache.users.filter(u => u.level === l && !u.disabled).length;
+
+  return [
+    el("h1", {}, "Accounts"),
+    el("p", { class: "lede" },
+      "Who can sign in to this console, and how much they can do. Only root "
+      + "accounts see this page."),
+    el("div", { class: "readout" },
+      el("div", {}, el("div", { class: "lbl" }, "Root"), el("b", {}, String(byLevel("root")))),
+      el("div", {}, el("div", { class: "lbl" }, "Support"), el("b", {}, String(byLevel("support")))),
+      el("div", {}, el("div", { class: "lbl" }, "Basic"), el("b", {}, String(byLevel("basic")))),
+      el("div", { class: acctCache.users.some(u => u.disabled) ? "warn" : "" },
+        el("div", { class: "lbl" }, "Disabled"),
+        el("b", {}, String(acctCache.users.filter(u => u.disabled).length)))),
+    newCard,
+    el("div", { "data-sec": "Everyone", "data-tour": "accounts-list" }, rows),
+  ];
+}
+
+/* ---------------- backup (export: support+, import: root) ---------------- */
+function viewBackup() {
+  const inclDocs = el("input", { type: "checkbox" }); inclDocs.checked = true;
+  const inclIndex = el("input", { type: "checkbox" }); inclIndex.checked = true;
+
+  // Downloaded via fetch rather than a plain link: the credential travels in
+  // a header, and an <a href> cannot carry one.
+  const doExport = async () => {
+    const pw = pwIn.value;
+    const again = pwAgain.value;
+    if (pw.length < 12)
+      return toast("Use a passphrase of at least 12 characters", true);
+    if (pw !== again) return toast("Those passphrases do not match", true);
+    if (!confirm("The passphrase cannot be recovered.\n\nIf you lose it, this "
+      + "backup is unreadable \u2014 there is no way back in, by design. Store it "
+      + "with your other secrets, NOT next to the backup file.\n\nContinue?"))
+      return;
+    exportBtn.disabled = true; exportBtn.textContent = "Preparing\u2026";
+    try {
+      // POST, not GET: a passphrase in a query string ends up in proxy and
+      // server access logs.
+      const r = await fetch(API + "/admin/backup/export", {
+        method: "POST",
+        headers: { "x-admin-password": tok, "Content-Type": "application/json" },
+        body: JSON.stringify({ documents: inclDocs.checked,
+                               index: inclIndex.checked, passphrase: pw }) });
+      if (!r.ok) {
+        let d; try { d = (await r.json()).detail; } catch (e) { d = r.statusText; }
+        throw new Error(typeof d === "string" ? d : "Export failed (" + r.status + ")");
+      }
+      const blob = await r.blob();
+      const cd = r.headers.get("content-disposition") || "";
+      const m = cd.match(/filename="([^"]+)"/);
+      const url = URL.createObjectURL(blob);
+      const a = el("a", { href: url, download: m ? m[1] : "groundedops-backup.zip" });
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast("Backup downloaded and encrypted \u2014 keep the passphrase safe");
+      pwIn.value = ""; pwAgain.value = "";
+    } catch (e) { toast(e.message, true); }
+    finally { exportBtn.disabled = false; exportBtn.textContent = "Download backup"; }
+  };
+  const exportBtn = el("button", { class: "btn btn-primary", onclick: doExport },
+                       "Download backup");
+  const pwIn = el("input", { class: "input", type: "password",
+                             placeholder: "Passphrase (12+ characters)",
+                             autocomplete: "new-password" });
+  const pwAgain = el("input", { class: "input", type: "password",
+                                placeholder: "Passphrase again",
+                                autocomplete: "new-password" });
+
+  const exportCard = el("div", { class: "card elev-sm",
+      style: "padding:18px 20px;gap:0;margin-bottom:14px",
+      "data-sec": "Export", "data-tour": "backup-export" },
+    el("h3", {}, "Download a backup"),
+    el("p", { class: "sec-hint" },
+      "Encrypted with a passphrase you choose. The file cannot be opened "
+      + "without it \u2014 not by a spreadsheet, not by an unzip tool, and not "
+      + "by this console."),
+    el("p", { class: "sec-hint" },
+      isRoot()
+        ? "Everything: documents, the search index, FAQs, catalogue, widget "
+          + "design, enquiries, accounts and limits."
+        : "Documents, the search index, FAQs, catalogue, widget design and "
+          + "enquiries. Accounts and limits are in a root backup only."),
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:12px;cursor:pointer" },
+      inclDocs, "Include the documents (the bulk of the file, ~100MB)"),
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;cursor:pointer" },
+      inclIndex, "Include the search index (so a restore needs no re-ingesting)"),
+    el("label", { class: "flabel", style: "margin-top:14px" },
+      "Passphrase to encrypt the file"),
+    pwIn,
+    el("div", { style: "margin-top:8px" }, pwAgain),
+    el("p", { class: "sec-hint", style: "margin:6px 0 0" },
+      "The archive is encrypted with this. It cannot be recovered \u2014 lose it "
+      + "and the backup is unreadable, which is the point. Store it with your "
+      + "other secrets, not beside the file."),
+    el("div", { style: "margin-top:14px" }, exportBtn),
+    isRoot()
+      ? el("div", { style: "margin-top:12px;padding:10px 12px;border-radius:var(--radius-md);"
+                  + "font-size:12.5px;line-height:1.5;"
+                  + "background:color-mix(in srgb,var(--color-warn,#c98a00) 14%,transparent)" },
+          "A root backup contains staff password hashes and customer contact "
+          + "details. Treat the file like a password database \u2014 anyone holding "
+          + "it can attempt to crack account passwords offline.")
+      : null);
+
+  if (!isRoot()) {
+    return [
+      el("h1", {}, "Backup"),
+      el("p", { class: "lede" },
+        "Take a copy of everything, so nothing has to be rebuilt or "
+        + "re-ingested. Restoring is a root-only action."),
+      exportCard,
+    ];
+  }
+
+  // ---- restore, root only ----
+  const fileIn = el("input", { type: "file", accept: ".gobk,.zip", class: "input" });
+  const rPw = el("input", { class: "input", type: "password",
+                            placeholder: "Passphrase for this backup",
+                            autocomplete: "off" });
+  const info = el("div", { style: "margin-top:12px" });
+  const rAccounts = el("input", { type: "checkbox" });
+  const rDocs = el("input", { type: "checkbox" }); rDocs.checked = true;
+  const rIndex = el("input", { type: "checkbox" }); rIndex.checked = true;
+  const rConvo = el("input", { type: "checkbox" }); rConvo.checked = true;
+  let picked = null;
+
+  const restoreBtn = el("button", { class: "btn btn-primary", disabled: "true" },
+                        "Restore from this file");
+
+  fileIn.addEventListener("change", async () => {
+    info.innerHTML = ""; picked = null; restoreBtn.disabled = true;
+    const f = fileIn.files && fileIn.files[0];
+    if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    if (rPw.value) fd.append("passphrase", rPw.value);
+    try {
+      // Inspected before anything is offered: nobody should agree to a
+      // restore without seeing what the file actually holds. A sealed file
+      // still identifies itself without its passphrase, so this works
+      // before one has been typed.
+      const r = await api("/admin/backup/inspect", { method: "POST", body: fd });
+      picked = f;
+      const m = r.manifest, inc = m.includes || {}, c = m.counts || {};
+      info.append(el("div", { class: "card elev-sm", style: "padding:12px 14px;gap:0" },
+        el("div", { style: "font-size:13px" },
+          el("b", {}, "Made " + shortDate(m.created_at)),
+          m.created_by ? el("span", { class: "sec-hint" }, " by " + m.created_by) : null),
+        el("div", { class: "sec-hint", style: "margin-top:6px" },
+          [inc.accounts ? "accounts + limits" : null,
+           (c.documents || 0) + " documents",
+           (c.index_files || 0) + " index files",
+           (c.stores || 0) + " settings files"].filter(Boolean).join(" \u00b7 ")),
+        m.sensitive
+          ? el("div", { class: "sec-hint", style: "margin-top:6px;color:var(--color-warn,#c98a00)" },
+              "Contains password hashes and customer details.")
+          : null,
+        r.passphrase_required
+          ? el("div", { class: "sec-hint", style: "margin-top:6px" },
+              "Encrypted \u2014 enter its passphrase below to restore.")
+          : null));
+      rAccounts.disabled = !inc.accounts;
+      restoreBtn.disabled = false;
+    } catch (e) {
+      info.append(el("div", { class: "sec-hint", style: "color:#b3261e" }, e.message));
+    }
+  });
+
+  restoreBtn.onclick = async () => {
+    if (!picked) return;
+    if (!confirm("Restore from this file? It overwrites what is here now.\n\n"
+      + "A snapshot of the current state is saved first, so this can be undone."))
+      return;
+    if (rAccounts.checked && !confirm(
+      "You also chose to restore ACCOUNTS.\n\nIf your own account is not in "
+      + "that backup you will be signed out and unable to sign back in, and "
+      + "would have to use manage_accounts.py on the server. Continue?"))
+      return;
+    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring\u2026";
+    const fd = new FormData(); fd.append("file", picked);
+    if (rPw.value) fd.append("passphrase", rPw.value);
+    const qs = "?restore_accounts=" + rAccounts.checked
+             + "&restore_documents=" + rDocs.checked
+             + "&restore_index=" + rIndex.checked
+             + "&restore_conversations=" + rConvo.checked;
+    try {
+      const r = await api("/admin/backup/import" + qs, { method: "POST", body: fd });
+      let msg = "Restored. ";
+      if (r.restart_required) msg += "Restart the server for the search index to load. ";
+      if ((r.skipped || []).length) msg += "Skipped: " + r.skipped.join(", ") + ".";
+      toast(msg);
+      info.append(el("div", { class: "sec-hint", style: "margin-top:8px" },
+        "Snapshot of the previous state: " + (r.safety_snapshot || "not written")
+        + " in " + r.safety_snapshot_dir));
+      if (rAccounts.checked) signOut("Accounts were restored \u2014 sign in again");
+    } catch (e) { toast(e.message, true); }
+    finally { restoreBtn.disabled = false; restoreBtn.textContent = "Restore from this file"; }
+  };
+
+  const opt = (box, label) =>
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;cursor:pointer" },
+      box, label);
+
+  const importCard = el("div", { class: "card elev-sm",
+      style: "padding:18px 20px;gap:0", "data-sec": "Restore",
+      "data-tour": "backup-import" },
+    el("h3", {}, "Restore from a backup"),
+    el("p", { class: "sec-hint" },
+      "Overwrites what is here now. A snapshot of the current state is taken "
+      + "first, automatically, so a bad restore can be undone."),
+    el("div", { style: "margin-top:12px" }, fileIn),
+    info,
+    el("label", { class: "flabel", style: "margin-top:12px" },
+      "Passphrase (for an encrypted backup)"),
+    rPw,
+    opt(rDocs, "Restore the documents"),
+    opt(rIndex, "Restore the search index (avoids re-ingesting)"),
+    opt(rConvo, "Restore saved conversations"),
+    opt(rAccounts, "Restore accounts and limits \u2014 signs you out"),
+    el("div", { style: "margin-top:14px" }, restoreBtn));
+
+  return [
+    el("h1", {}, "Backup"),
+    el("p", { class: "lede" },
+      "Take a copy of everything, so nothing has to be rebuilt or re-ingested. "
+      + "Anyone from support up can download one; only root can restore."),
+    exportCard,
+    importCard,
+  ];
+}
+
+/* ---------------- access & limits (root only) ---------------- */
+let polCache = null;
+
+async function loadPolicy() {
+  try { polCache = await api("/admin/policy"); }
+  catch (e) { polCache = { policy: {}, error: e.message }; }
+  render();
+}
+
+function viewPolicy() {
+  if (!polCache) { loadPolicy(); return [el("h1", {}, "Access & limits"),
+    el("p", { class: "lede" }, "Loading\u2026")]; }
+  if (polCache.error) return [el("h1", {}, "Access & limits"),
+    el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+      el("b", {}, "Could not load settings"), polCache.error))];
+
+  // Staged locally; nothing is applied until Save, so a half-typed number
+  // never becomes a live limit.
+  const p = Object.assign({}, polCache.policy);
+
+  const mk = [];
+  const numRow = (key, label, hint, unit) => {
+    const inp = el("input", { class: "input", type: "number", min: "0",
+                              value: String(p[key] === undefined ? 0 : p[key]),
+                              style: "max-width:140px" });
+    inp.addEventListener("input", () => { p[key] = inp.value; });
+    mk.push(el("div", { class: "item", style: "align-items:flex-start" },
+      el("div", { style: "flex:1 1 260px" },
+        el("div", { style: "font-size:13.5px" }, label),
+        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, hint)),
+      el("div", { style: "flex:0 0 auto;display:flex;align-items:center;gap:8px" },
+        inp,
+        el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 50%,transparent)" }, unit || ""))));
+  };
+
+  const anonWarn = el("div", {
+    style: "margin-top:10px;padding:10px 12px;border-radius:var(--radius-md);"
+         + "font-size:12.5px;line-height:1.5;"
+         + "background:color-mix(in srgb,var(--color-warn,#c98a00) 14%,transparent);"
+         + "display:" + (p.anon_llm_enabled ? "" : "none") },
+    "With this on, anyone on the internet can spend model credits without an "
+    + "account. That is a real bill and a real prompt-injection surface \u2014 the "
+    + "guest allowance below is the only thing bounding it. Keep it small.");
+
+  const anonToggle = el("input", { type: "checkbox" });
+  anonToggle.checked = !!p.anon_llm_enabled;
+  anonToggle.addEventListener("change", () => {
+    p.anon_llm_enabled = anonToggle.checked;
+    anonWarn.style.display = anonToggle.checked ? "" : "none";
+  });
+
+  const notice = el("textarea", { class: "input", rows: "2" }, p.anon_notice || "");
+  notice.addEventListener("input", () => { p.anon_notice = notice.value; });
+
+  const guestCard = el("div", { class: "card elev-sm",
+                                style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                                "data-sec": "Guest access", "data-tour": "pol-guest" },
+    el("h3", {}, "Visitors without an account"),
+    el("p", { class: "sec-hint" },
+      "By default guests get the reviewed FAQs only, and no model call is "
+      + "reachable without an account. That is what keeps public cost and "
+      + "prompt-injection exposure at zero."),
+    el("label", { style: "display:flex;align-items:center;gap:8px;font-size:13px;margin-top:12px;cursor:pointer" },
+      anonToggle, "Let guests use AI answers"),
+    anonWarn,
+    el("label", { class: "flabel", style: "margin-top:14px" },
+      "What guests are told when AI is account-only"),
+    notice);
+
+  numRow("anon_llm_credits", "Guest daily allowance",
+         "Only used when guest AI is switched on above. Small on purpose.", "credits/day");
+  numRow("anon_faq_daily", "Guest FAQ lookups",
+         "Ceiling on reviewed-answer lookups. No model involved, so this can be generous.", "per day");
+  numRow("anon_ip_daily", "Guest ceiling per IP",
+         "Counted per address as well as per browser, so clearing cookies does not mint a fresh allowance.", "per day");
+  const guestLimits = el("div", { class: "card elev-sm",
+                                  style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                                  "data-sec": "Guest limits" },
+    el("h3", {}, "Guest limits"), mk.splice(0, 3));
+
+  numRow("member_daily_credits", "Customer allowance",
+         "Credits a signed-in customer may spend each day. A standard answer costs 1, a detailed one 4.", "credits/day");
+  numRow("staff_daily_credits", "Staff allowance",
+         "For tokens issued to your own team.", "credits/day");
+  const acctCard = el("div", { class: "card elev-sm",
+                               style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                               "data-sec": "Account holders" },
+    el("h3", {}, "Account holders"), mk.splice(0, 2));
+
+  numRow("questions_per_session", "Questions per conversation",
+         "0 means no limit. Bounds one sitting, so a single runaway thread cannot spend a whole day of allowance.", "questions");
+  numRow("tokens_per_session", "Tokens per conversation",
+         "0 means no limit. Counted from what the provider actually reports.", "tokens");
+  const sessCard = el("div", { class: "card elev-sm",
+                               style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                               "data-sec": "Per conversation", "data-tour": "pol-session" },
+    el("h3", {}, "Per conversation"),
+    el("p", { class: "sec-hint" },
+      "Separate from the daily allowances above: these bound a single chat. "
+      + "A session id comes from the visitor's browser, so treat these as a "
+      + "cost guard rather than a hard boundary \u2014 the daily and per-IP "
+      + "ceilings are what really bound a determined caller."),
+    mk.splice(0, 2));
+
+  const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
+    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    try {
+      await api("/admin/policy", { method: "PUT",
+        body: JSON.stringify({ changes: p }) });
+      toast("Saved \u2014 applies to the next request, no restart");
+      polCache = null;
+      await loadPolicy();
+    } catch (e) { toast(e.message, true); }
+    finally { saveBtn.disabled = false; saveBtn.textContent = "Save changes"; }
+  } }, "Save changes");
+
+  return [
+    el("h1", {}, "Access & limits"),
+    el("p", { class: "lede" },
+      "Who may use the assistant and how much of it. Changes apply on the "
+      + "next request \u2014 no restart. Only root accounts see this page."),
+    guestCard, guestLimits, acctCard, sessCard,
+    el("div", { style: "display:flex;gap:8px;align-items:center" },
+      saveBtn,
+      el("button", { class: "btn btn-ghost", onclick: async () => {
+        if (!confirm("Put every limit back to its installed default?")) return;
+        try {
+          await api("/admin/policy/reset", { method: "POST" });
+          toast("Reset to defaults");
+          polCache = null; await loadPolicy();
+        } catch (e) { toast(e.message, true); }
+      } }, "Reset to defaults")),
+  ];
+}
+
+/* ---------------- API keys (root only) ---------------- */
+// Not held in `cache` for the same reason acctCache isn't: refresh() runs
+// for every staff account on every render, and this is root-only.
+let keysCache = null;
+
+async function loadKeys() {
+  try { keysCache = await api("/admin/keys"); }
+  catch (e) { keysCache = { providers: [], error: e.message }; }
+  render();
+}
+
+function viewKeys() {
+  if (!keysCache) { loadKeys(); return [el("h1", {}, "API keys"),
+    el("p", { class: "lede" }, "Loading…")]; }
+  if (keysCache.error) return [el("h1", {}, "API keys"),
+    el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+      el("b", {}, "Could not load key status"), keysCache.error))];
+
+  const rows = keysCache.providers.map(p => {
+    const input = el("input", { class: "input", type: "password",
+      placeholder: p.configured ? "Enter a new key to replace it" : "Paste the key",
+      autocomplete: "new-password" });
+
+    const save = async () => {
+      const v = input.value.trim();
+      if (!v) return toast("Paste a key first", true);
+      try {
+        await api("/admin/keys/" + p.key, { method: "POST",
+          body: JSON.stringify({ value: v }) });
+        toast(p.label + " key saved — usable immediately, no restart needed");
+        keysCache = null;
+        await loadKeys();
+      } catch (e) { toast(e.message, true); }
+    };
+
+    const clear = async () => {
+      if (!confirm("Remove the " + p.label + " key? Anything set to use "
+        + p.label + " will fall back to whatever else is configured.")) return;
+      try {
+        await api("/admin/keys/" + p.key, { method: "DELETE" });
+        toast(p.label + " key removed");
+        keysCache = null;
+        await loadKeys();
+      } catch (e) { toast(e.message, true); }
+    };
+
+    input.addEventListener("keydown", e => { if (e.key === "Enter") save(); });
+
+    return el("div", { class: "card elev-sm",
+                       style: "padding:14px 18px;gap:0;margin-bottom:10px" },
+      el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+        el("b", {}, p.label),
+        p.configured
+          ? el("span", { class: "tag tag-accent" }, "configured")
+          : el("span", { class: "tag tag-neutral" }, "not set"),
+        p.masked ? el("span", { class: "mono", style: "font-size:12px;"
+          + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, p.masked) : null),
+      el("div", { class: "row", style: "margin-top:10px" },
+        el("div", { class: "grow" }, input),
+        el("div", { style: "flex:0 0 auto;display:flex;gap:6px" },
+          el("button", { class: "btn btn-primary", onclick: save }, "Save"),
+          p.configured
+            ? el("button", { class: "btn btn-ghost", onclick: clear }, "Remove")
+            : null)));
+  });
+
+  return [
+    el("h1", {}, "API keys"),
+    el("p", { class: "lede" },
+      "Keys for the online answer providers. Saved keys take effect "
+      + "immediately — no restart — and only root accounts can see this "
+      + "page or the keys' status. A key is never shown again once saved, "
+      + "only a masked form for recognising it."),
+    el("div", { "data-sec": "Providers", "data-tour": "keys-list" }, rows),
+  ];
+}
+
+/* ---------------- overview ---------------- */
+function viewOverview() {
+  const prods = products(), un = unassigned(), ans = answered();
+
+  const stat = (label, value, tone) =>
+    el("div", { class: tone || "" }, el("div", { class: "lbl" }, label), el("b", {}, String(value)));
+
+  const step = (state, title, desc, actions) =>
+    el("div", { class: "step" },
+      el("div", { class: "mark-dot " + state }, state === "done" ? "\u2713" : state === "todo" ? "!" : "\u00b7"),
+      el("div", { class: "step-b" },
+        el("b", {}, title), el("p", {}, desc),
+        actions && actions.length ? el("div", { class: "acts" }, actions) : null));
+
+  const goTo = (id, label, primary) =>
+    el("button", { class: "btn " + (primary ? "btn-primary" : "btn-secondary"), style: "font-size:12.5px;padding:4px 10px",
+                   onclick: () => { view = id; render(); } }, label);
+
+  const steps = [];
+
+  steps.push(prods.length
+    ? step("done", "Products are set up",
+        prods.length + " product" + (prods.length === 1 ? "" : "s") +
+        " across " + cache.catalog.length + " range" + (cache.catalog.length === 1 ? "" : "s") + ".",
+        [goTo("catalog", "Manage products")])
+    : step("todo", "Set up your products first",
+        "Documents are filed against a product, and the widget asks visitors to pick one. Nothing else works until at least one exists.",
+        [goTo("catalog", "Add a product", true)]));
+
+  steps.push(cache.sources.length
+    ? step(un.length ? "todo" : "done",
+        un.length ? un.length + " document" + (un.length === 1 ? "" : "s") + " need a product"
+                  : cache.sources.length + " documents, all filed",
+        un.length ? "Unfiled documents are searchable but never offered in the widget, because it can only show products it can answer about."
+                  : "Every document belongs to a product and can be found by the widget.",
+        [goTo("documents", un.length ? "File them now" : "View documents", !!un.length)])
+    : step("todo", "Add your first document",
+        "PDF, Word or text. This is what answers are drawn from.",
+        [goTo("documents", "Add documents", true)]));
+
+  steps.push(ans.length
+    ? step("done", ans.length + " reviewed answers",
+        "Signed-out visitors only ever see these, so they are the public face of the widget.",
+        [goTo("faq", "Review answers")])
+    : step(cache.sources.length ? "todo" : "idle", "Write the reviewed answers",
+        "Visitors who are not signed in can only be shown answers you have approved. Draft them from a document, then edit.",
+        cache.sources.length ? [goTo("faq", "Start writing", true)] : []));
+
+  steps.push(cache.gaps.length
+    ? step("todo", cache.gaps.length + " unanswered questions logged",
+        "Real questions the reviewed answers did not cover. This is your to-do list, ordered by how often each was asked.",
+        [goTo("gaps", "See what people asked", true)])
+    : step("idle", "Questions people could not get answered",
+        "Anything the widget could not answer shows up here once visitors start using it.", []));
+
+  const unhandled = (cache.leadStats || {}).unhandled || 0;
+  if (unhandled) {
+    steps.push(step("todo", unhandled + " enquir" + (unhandled === 1 ? "y" : "ies") + " waiting",
+      "Someone filled in the sales or support form. These are not emailed anywhere, so they sit here until you reply.",
+      [goTo("leads", "Read them", true)]));
+  }
+
+  return [
+    el("h1", {}, "Overview"),
+    el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked."),
+    el("div", { class: "readout", "data-tour": "ov-readout", "data-sec": "At a glance" },
+      stat("Documents", cache.sources.length),
+      stat("Need filing", un.length, un.length ? "warn" : ""),
+      stat("Reviewed answers", ans.length),
+      stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "")),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0",
+                "data-tour": "ov-next", "data-sec": "What to do next" },
+      el("div", { class: "sec-title" }, "What to do next"),
+      el("div", { class: "sec-hint" }, "Read from live state. Anything needing attention is marked in the accent."),
+      steps),
+  ];
+}
+
+/* ---------------- documents ---------------- */
+function viewDocuments() {
+  const prods = products();
+  let chosenCat = cache.catalog.length === 1 ? cache.catalog[0].key : "";
+  let chosen = prods.length === 1 ? prods[0].key : "";
+
+  // Category first, then a product list filtered to it \u2014 separate steps
+  // instead of one long "Category > Product" dropdown.
+  const catSel = el("select", { class: "input", onchange: e => {
+    chosenCat = e.target.value; chosen = ""; syncProductOptions(); sync();
+  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category\u2026" : "No categories yet"),
+     cache.catalog.map(c => el("option", { value: c.key }, c.name)));
+  if (chosenCat) catSel.value = chosenCat;
+
+  const prodSel = el("select", { class: "input", onchange: e => { chosen = e.target.value; sync(); } });
+  function syncProductOptions() {
+    prodSel.innerHTML = "";
+    const inCat = prods.filter(p => p.category === chosenCat);
+    prodSel.disabled = !chosenCat;
+    prodSel.append(el("option", { value: "" },
+      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product\u2026" : "No products in this category"));
+    inCat.forEach(p => prodSel.append(el("option", { value: p.key }, p.name)));
+    if (chosen) prodSel.value = chosen;
+  }
+  syncProductOptions();
+
+  const drop = el("div", { class: "drop off" },
+    el("b", {}, "Choose a product first"),
+    "Then drop files here, or click to browse");
+  const file = el("input", { type: "file", multiple: "true", accept: ".pdf,.docx,.txt", style: "display:none" });
+  const progress = el("div", {});
+
+  function sync() {
+    const ok = !!chosen;
+    drop.className = "drop" + (ok ? "" : " off");
+    drop.innerHTML = "";
+    drop.append(el("b", {}, ok ? "Drop files here" : "Choose a product first"),
+      ok ? "PDF, Word or text \u2014 or click to browse"
+         : "Documents must belong to a product so the widget can offer them");
+  }
+  sync();
+
+  async function upload(files) {
+    if (!chosen) return toast("Choose a product first", true);
+    const p = prods.find(x => x.key === chosen);
+    for (const f of files) {
+      const line = el("div", { class: "item" },
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading\u2026")));
+      progress.append(line);
+      try {
+        const fd = new FormData(); fd.append("file", f);
+        const r = await fetch(API + "/upload", {
+          method: "POST", body: fd,
+          headers: { "x-admin-password": tok, "category-key": p.category, "product-key": p.key },
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const { job_id } = await r.json();
+        await track(job_id, line, f.name);
+      } catch (e) {
+        line.querySelector("span").textContent = "Failed: " + e.message;
+      }
+    }
+    await refresh(); render();
+  }
+
+  async function track(job, line, name) {
+    for (let i = 0; i < 600; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      let s; try { s = await api("/upload/status/" + job); } catch (e) { break; }
+      const span = line.querySelector("span");
+      if (s.status === "done") { span.textContent = "Added \u2014 " + (s.chunks || 0) + " sections"; return; }
+      if (s.status === "error") { span.textContent = "Failed: " + (s.error || "unknown"); return; }
+      span.textContent = (s.stage || "working") + " " + (s.pct || 0) + "%";
+    }
+  }
+
+  drop.addEventListener("click", () => chosen && file.click());
+  drop.addEventListener("dragover", e => { e.preventDefault(); if (chosen) drop.classList.add("on"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("on"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("on");
+    if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
+  });
+  file.addEventListener("change", () => file.files.length && upload(file.files));
+
+  // Grouped by category > product instead of one flat list \u2014 unassigned
+  // docs are their own pinned-first group, same idea as viewGaps' scope
+  // grouping.
+  const docRow = s => {
+    const cur = s.product || s.products || "";
+    const move = el("select", { class: "input", style: "width:auto", onchange: async e => {
+      const p = prods.find(x => x.key === e.target.value);
+      if (!p) return;
+      try {
+        await api("/admin/reassign_source", { method: "POST",
+          body: JSON.stringify({ source: s.source, category_key: p.category, product_key: p.key }) });
+        toast("Filed under " + p.name);
+        await refresh(); render();
+      } catch (err) { toast(err.message, true); }
+    } }, el("option", { value: "" }, cur ? "Move to\u2026" : "File under\u2026"),
+       prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+
+    return el("div", { class: "item" + (cur ? "" : " flagged") },
+      el("div", { class: "grow" },
+        el("b", {}, s.source),
+        el("span", {}, (s.chunks || 0) + " sections")),
+      cur ? el("span", { class: "tag tag-neutral" }, cur) : el("span", { class: "tag tag-accent" }, "no product"),
+      move,
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+        if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
+        try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });
+              toast("Removed"); await refresh(); render(); }
+        catch (e) { toast(e.message, true); }
+      } }, "Remove"));
+  };
+
+  const groups = new Map();
+  cache.sources.forEach(s => {
+    const key = s.product || s.products || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  });
+  const label = key => {
+    if (!key) return "Unassigned";
+    const p = prods.find(x => x.key === key);
+    return p ? p.categoryName + " \u203a " + p.name : key;
+  };
+  const ordered = [...groups.entries()].sort((a, b) =>
+    a[0] === "" ? -1 : b[0] === "" ? 1 : label(a[0]).localeCompare(label(b[0])));
+
+  const list = ordered.length ? ordered.map(([key, docs]) =>
+    el("div", { style: "margin-bottom:16px" },
+      el("div", { class: "sec-title", style: key ? "" : "color:var(--color-accent-400)" },
+        label(key) + " \u00b7 " + docs.length + (docs.length === 1 ? " document" : " documents")),
+      docs.map(docRow)))
+    : [el("div", { class: "empty" }, el("b", {}, "No documents yet"),
+        "Add a manual or datasheet above and the widget can start answering from it.")];
+
+  return [
+    el("h1", {}, "Documents"),
+    el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "doc-add", "data-sec": "Add documents" },
+      el("div", { class: "sec-title" }, "Add documents"),
+      el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
+        el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel)),
+      el("div", { style: "margin-top:14px" }, drop, file),
+      progress),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
+                "data-tour": "doc-list", "data-sec": "All documents" },
+      el("div", { class: "sec-title" }, "All documents"),
+      el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget."),
+      list),
+  ];
+}
+
+/* ---------------- answers (FAQ) ---------------- */
+function viewFaq() {
+  const prods = products();
+
+  const scopeOf = f => (f.products || "").split(",")[0] || f.category || "";
+
+  // scope -> "Category \u203a Product" label.
+  const scopeLabel = key => {
+    if (!key || key === NO_SCOPE) return "Not tagged to a product";
+    const p = prods.find(x => x.key === key);
+    return p ? p.categoryName + " \u203a " + p.name : key;
+  };
+
+  // The list is gated on a product (below), so the picker has to offer every
+  // scope that actually holds answers -- otherwise entries tagged with a key
+  // the catalogue does not know about become unreachable rather than merely
+  // unsurfaced, and those are exactly the ones needing to be retagged.
+  const known = new Set(prods.map(p => p.key));
+  const usedScopes = [...new Set(cache.faq.map(scopeOf))];
+  const orphanScopes = usedScopes.filter(k => k && !known.has(k)).sort();
+  const hasUnscoped = usedScopes.includes("");
+  const countFor = key => (key === NO_SCOPE
+    ? cache.faq.filter(f => !scopeOf(f)).length
+    : cache.faq.filter(f => (f.products || "").split(",").includes(key) || f.category === key).length);
+
+  let scope = "";
+  const shown = () => {
+    if (!scope) return [];
+    if (scope === NO_SCOPE) return cache.faq.filter(f => !scopeOf(f));
+    return cache.faq.filter(f =>
+      (f.products || "").split(",").includes(scope) || f.category === scope);
+  };
+
+  // On the first render the page has whatever refresh() loaded, which does
+  // not carry the scope list. Derive it from the gaps in hand so the filter
+  // is populated immediately rather than empty until something reloads.
+  if (!cache.gapScopes) {
+    cache.gapScopes = [...new Set(cache.gaps.map(g => g.scope || ""))].sort();
+  }
+
+  const scopeSel = el("select", { class: "input", style: "width:auto",
+                                  onchange: e => { scope = e.target.value; render2(); } },
+    el("option", { value: "" }, "Choose a product\u2026"),
+    prods.map(p => el("option", { value: p.key },
+      p.categoryName + " \u203a " + p.name + " (" + countFor(p.key) + ")")),
+    orphanScopes.map(k => el("option", { value: k },
+      k + " \u2014 not in the catalogue (" + countFor(k) + ")")),
+    hasUnscoped ? el("option", { value: NO_SCOPE },
+      "Not tagged to a product (" + countFor(NO_SCOPE) + ")") : null);
+
+  let expandedId = null;      // one row open for editing at a time
+  const dirty = new Map();    // id -> {question, answer} not yet saved
+
+  const listBox = el("div", {});
+  function render2() {
+    scopeSel.value = scope;
+    listBox.innerHTML = "";
+
+    // Nothing is listed until a product is chosen. The full list ran to
+    // hundreds of rows across every product at once, which is not a thing
+    // anyone reads -- and the wording is edited product by product anyway.
+    if (!scope) {
+      listBox.append(el("div", { class: "empty" },
+        el("b", {}, "Choose a product to see its answers"),
+        cache.faq.length
+          ? cache.faq.length + " reviewed answers in total, across " +
+            (usedScopes.filter(Boolean).length || 1) + " product tag" +
+            (usedScopes.filter(Boolean).length === 1 ? "" : "s") + "."
+          : "No answers yet. Draft some from a document above, or write one by hand."));
+      return;
+    }
+
+    const items = shown();
+    if (!items.length) {
+      listBox.append(el("div", { class: "empty" },
+        el("b", {}, "No answers for " + scopeLabel(scope)),
+        "Draft some from a document above, or write one by hand."));
+      return;
+    }
+
+    listBox.append(el("div", { style: "display:flex;align-items:center;gap:10px;margin:4px 0 6px" },
+      el("b", { style: "font-size:13.5px" }, scopeLabel(scope)),
+      el("span", { class: "tag tag-neutral" }, String(items.length)),
+      el("button", { class: "btn btn-ghost", style: "font-size:11.5px;margin-left:auto", onclick: () => {
+        appliesSel.value = scope === NO_SCOPE ? "" : scope; nq.value = ""; na.value = "";
+        na.closest(".card").scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => nq.focus(), 300);
+      } }, "+ Add answer")));
+
+    items.forEach(f => {
+      const open = expandedId === f.id;
+      const row = el("div", { class: "item", style: open ? "display:block" : "cursor:pointer" });
+
+      if (!open) {
+        row.addEventListener("click", () => { expandedId = f.id; render2(); });
+        row.append(
+          el("div", { class: "grow" }, el("b", {}, f.question),
+            el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
+          dirty.has(f.id) ? el("span", { class: "tag tag-neutral mono" }, "unsaved") : null);
+      } else {
+        const draft = dirty.get(f.id) || {};
+        const q = el("input", { class: "input", type: "text", value: draft.question ?? f.question });
+        const a = el("textarea", { class: "input" }, draft.answer ?? (f.answer || ""));
+        const markDirty = () => dirty.set(f.id, { question: q.value, answer: a.value });
+        q.addEventListener("input", markDirty);
+        a.addEventListener("input", markDirty);
+        row.append(
+          el("div", { class: "row", style: "margin-bottom:8px" },
+            el("div", { style: "flex:3" }, el("label", { class: "flabel" }, "Question"), q)),
+          el("label", { class: "flabel" }, "Answer"), a,
+          el("p", { class: "sec-hint", style: "margin:7px 0 0" },
+            "Write it so it reads correctly on its own \u2014 it may be shown to someone whose wording was slightly different."),
+          el("div", { style: "margin-top:9px;display:flex;gap:8px" },
+            el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+              try { await api("/faq/" + f.id, { method: "PATCH",
+                      body: JSON.stringify({ question: q.value, answer: a.value }) });
+                    dirty.delete(f.id); toast("Saved"); await refresh(); render(); }
+              catch (e) { toast(e.message, true); }
+            } }, "Save"),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px", onclick: () => {
+              expandedId = null; render2();
+            } }, "Close"),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px;margin-left:auto", onclick: async () => {
+              if (!confirm("Delete this answer?")) return;
+              try { await api("/faq/" + f.id, { method: "DELETE" }); dirty.delete(f.id); toast("Deleted");
+                    await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Delete")));
+      }
+      listBox.append(row);
+    });
+  }
+  render2();
+
+  // Generating FAQs from a document, server-side.
+  //
+  // This was two buttons, "Draft answers" and "Draft all", which differed only
+  // in WHICH documents they covered -- and that is a property of the picker,
+  // not a separate action. One button now, with the scope chosen above it.
+  const ALL_DOCS = "__all__";
+  const undraftedDocs = () => cache.sources.filter(s => {
+    const key = s.product || s.products || "";
+    return !cache.faq.some(f => scopeOf(f) === key && f.source === s.source);
+  });
+
+  const srcSel = el("select", { class: "input" },
+    el("option", { value: "" }, "Choose a document\u2026"),
+    el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"),
+    cache.sources.map(s => el("option", { value: s.source }, s.source)));
+  const provSel = providerBox();
+  const modelIn = linkModelBox(provSel,
+    el("input", { class: "input", type: "text", placeholder: "model (optional)" }));
+
+  const genOne = s => api("/admin/faq/autogenerate", { method: "POST",
+    body: JSON.stringify({ source: s.source, product: s.product || s.products || "",
+      category: s.category || "",
+      provider: provSel.value || null, model: modelIn.value.trim() || null }) });
+
+  const genBtn = el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
+    const pick = srcSel.value;
+    if (!pick) return toast("Choose a document first", true);
+
+    const docs = pick === ALL_DOCS ? undraftedDocs()
+                                   : cache.sources.filter(s => s.source === pick);
+    if (!docs.length) {
+      return toast(pick === ALL_DOCS ? "Every document already has FAQs"
+                                     : "That document is no longer listed", true);
+    }
+    if (docs.length > 1 && !confirm("Generate FAQs from " + docs.length +
+        " documents? This calls the model once per document.")) return;
+
+    genBtn.disabled = true;
+    let done = 0, added = 0, dupes = 0;
+    try {
+      for (const s of docs) {
+        genBtn.textContent = docs.length > 1
+          ? "Generating " + (++done) + "/" + docs.length + "\u2026" : "Generating\u2026";
+        try {
+          const r = await genOne(s);
+          added += r.added || 0; dupes += r.skipped_duplicates || 0;
+        } catch (e) { toast(s.source + ": " + e.message, true); }
+      }
+      toast("Added " + added + " new FAQ" + (added === 1 ? "" : "s") +
+            (dupes ? ", skipped " + dupes + " already there" : ""));
+      await refresh(); render();
+    } finally { genBtn.disabled = false; genBtn.textContent = "Generate FAQs"; }
+  } }, "Generate FAQs");
+
+  // #7: PATCH every row edited but not yet saved.
+  const saveAllBtn = el("button", { class: "btn btn-secondary", style: BTN, onclick: async () => {
+    if (!dirty.size) return toast("Nothing unsaved");
+    const n = dirty.size;
+    for (const [id, d] of [...dirty]) {
+      try { await api("/faq/" + id, { method: "PATCH", body: JSON.stringify(d) }); dirty.delete(id); }
+      catch (e) { toast(id + ": " + e.message, true); }
+    }
+    toast("Saved " + n + " answer(s)");
+    await refresh(); render();
+  } }, "Save all");
+
+  // add by hand
+  const nq = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
+  const na = el("textarea", { class: "input", placeholder: "No. Everything is processed on the device; no connection is required." });
+  // Its own picker rather than a clone of scopeSel: an empty value means "all
+  // products" when writing an answer, but "nothing chosen yet" when filtering.
+  const appliesSel = el("select", { class: "input" },
+    el("option", { value: "" }, "All products"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)),
+    orphanScopes.map(k => el("option", { value: k }, k + " \u2014 not in the catalogue")));
+
+  if (pendingAnswer) {
+    nq.value = pendingAnswer.question;
+    if (pendingAnswer.answer) na.value = pendingAnswer.answer;   // AI draft, from Unanswered
+    if (pendingAnswer.product) {
+      appliesSel.value = pendingAnswer.product;
+      // Only when the picker actually offers it: a gap carries
+      // `product || category`, and a category key has no option here.
+      if ([...scopeSel.options].some(o => o.value === pendingAnswer.product)) {
+        scope = pendingAnswer.product;          // open the list on that product
+        render2();
+      }
+    }
+    // Consumed on read: a later re-render (e.g. after saving) must not
+    // resurrect a question the admin has already dealt with.
+    pendingAnswer = null;
+    setTimeout(() => { na.focus(); na.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
+  }
+
+  return [
+    el("h1", {}, "Generate/Edit FAQs"),
+    el("p", { class: "lede" }, "FAQs are shown to visitors exactly as written and cost nothing to serve. Anyone not signed in sees only these, so treat the wording as published copy."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "ans-draft", "data-sec": "Generate from a document" },
+      el("div", { class: "sec-title" }, "Generate FAQs from a document"),
+      el("div", { class: "sec-hint" }, "Reads a document you have already added and writes FAQs from it \u2014 the questions a customer would ask, answered from that document alone. Nothing goes live until you have read it, and running it again adds only genuinely new questions: it never overwrites an answer you edited."),
+      // Explicit flex bases: the default .row>div{flex:1;min-width:170px} gave
+      // five equal columns whose minimums overflowed the card, which is what
+      // pushed the model field under the button.
+      el("div", { class: "row" },
+        el("div", { style: "flex:1 1 240px" },
+          el("label", { class: "flabel" }, "Document"), srcSel),
+        el("div", { style: "flex:0 1 180px" },
+          el("label", { class: "flabel" }, "Provider"), provSel),
+        el("div", { style: "flex:0 1 180px" },
+          el("label", { class: "flabel" }, "Model"), modelIn),
+        el("div", { style: "flex:0 0 auto;min-width:0" }, genBtn))),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "ans-hand", "data-sec": "Write one yourself" },
+      el("div", { class: "sec-title" }, "Write one yourself"),
+      el("div", { class: "sec-hint" }, "Hand-written answers are protected \u2014 drafting will never replace them."),
+      el("label", { class: "flabel" }, "Question"), nq,
+      el("label", { class: "flabel", style: "margin-top:10px" }, "Answer"), na,
+      el("div", { class: "row", style: "margin-top:10px" },
+        el("div", { style: "flex:0 1 260px" },
+          el("label", { class: "flabel" }, "Applies to"), appliesSel),
+        el("div", { style: "flex:0 0 auto;min-width:0" },
+          el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
+            if (!nq.value.trim()) return toast("Add a question first", true);
+            try {
+              await api("/faq", { method: "POST", body: JSON.stringify({
+                question: nq.value, answer: na.value, product: appliesSel.value }) });
+              nq.value = ""; na.value = ""; toast("Added");
+              await refresh(); render();
+            } catch (e) { toast(e.message, true); }
+          } }, "Add answer")))),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
+                "data-tour": "ans-list", "data-sec": "Answers by product" },
+      el("div", { style: "display:flex;align-items:center;gap:12px;margin-bottom:2px;flex-wrap:wrap" },
+        el("div", { class: "sec-title", style: "flex:1;margin:0;min-width:160px" }, "Answers by product"), scopeSel),
+      el("div", { class: "sec-hint" }, "Edit the wording, or delete anything out of date."),
+      listBox,
+      el("div", { style: "margin-top:14px;display:flex;gap:8px;flex-wrap:wrap" },
+        saveAllBtn,
+        el("button", { class: "btn btn-ghost", style: BTN, onclick: async () => {
+          if (!scope) return toast("Choose a product first", true);
+          if (scope === NO_SCOPE) return toast("Retag these to a product before deleting in bulk", true);
+          const label = scopeLabel(scope);
+          if (!confirm("Delete every answer for " + label + "?\n\nHand-written answers cannot be recovered.")) return;
+          if (prompt('Type DELETE to confirm') !== "DELETE") return toast("Cancelled");
+          try {
+            await api("/faq?confirm=true&product=" + encodeURIComponent(scope), { method: "DELETE" });
+            toast("Deleted"); await refresh(); render();
+          } catch (e) { toast(e.message, true); }
+        } }, "Delete all shown"))),
+  ];
+}
+
+/* ---------------- unanswered (gaps) ---------------- */
+// Filter/sort state for the customer-questions page. Module-level so it
+// survives render(), which rebuilds the whole view on every change.
+let gapFilter = { scope: "", sort: "demand", grouped: true };
+
+function viewGaps() {
+  const prods = products();
+  const nameFor = key => {
+    const p = prods.find(x => x.key === key);
+    if (p) return p.categoryName + " \u203a " + p.name;
+    const c = cache.catalog.find(x => x.key === key);
+    return c ? c.name : null;
+  };
+
+  const selected = new Set();
+  const provSel = providerBox({ style: "width:auto" });
+  const modelIn = linkModelBox(provSel,
+    el("input", { class: "input", style: "width:auto", type: "text", placeholder: "model (optional)" }));
+
+  const answerHere = (g, answer) => {
+    // Prefill the Answers page's hand-written form with this question (and
+    // an AI draft, if there is one) and jump there, rather than opening a
+    // second editor here. One place to write an answer means one set of
+    // wording rules to learn, and saving it resolves this gap automatically.
+    pendingAnswer = { question: g.question, product: g.scope || "", answer: answer || "" };
+    view = "faq"; render();
+  };
+
+  // A cluster stands for several stored gaps, so selecting it has to act on
+  // all of them -- dismissing the headline phrasing and silently leaving its
+  // five rewordings behind would put the item straight back on the list.
+  const idsFor = g => (g.member_ids && g.member_ids.length) ? g.member_ids : [g.id];
+
+  const bulkAction = async (path, method, verb) => {
+    if (!selected.size) return toast("Select at least one question first", true);
+    try {
+      await api(path, { method, body: JSON.stringify({ ids: [...selected] }) });
+      toast(verb + " " + selected.size + " question(s)");
+      selected.clear(); await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  // Group by scope so the list reads as "which product is underserved",
+  // which is the decision this page exists to support. Questions asked
+  // with no product selected are their own group rather than being
+  // hidden or forced under an arbitrary product.
+  const groups = new Map();
+  cache.gaps.forEach(g => {
+    const key = g.scope || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(g);
+  });
+  const ordered = [...groups.entries()].sort((a, b) =>
+    b[1].reduce((n, g) => n + (g.times_asked || 1), 0) -
+    a[1].reduce((n, g) => n + (g.times_asked || 1), 0));
+
+  const rows = ordered.map(([key, list]) => {
+    const label = key ? (nameFor(key) || key) : "No product selected";
+    const asks = list.reduce((n, g) => n + (g.times_asked || 1), 0);
+    return el("div", { class: "card elev-sm", style: "padding:14px 20px 8px;gap:0;margin-bottom:12px" +
+                        (key ? "" : ";box-shadow:var(--shadow-sm),inset 0 0 0 1px color-mix(in srgb,var(--color-accent) 30%,transparent)") },
+      el("div", { style: "display:flex;align-items:baseline;gap:10px;padding-bottom:4px" },
+        el("span", { class: "sec-title", style: "flex:1;margin:0" }, label),
+        el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
+          list.length + (list.length === 1 ? " question" : " questions") + " \u00b7 " + asks + " asks")),
+      list.map(g => {
+        const draftBox = el("div", {});
+        const cb = el("input", { type: "checkbox", style: "margin-top:3px", onchange: e => {
+          idsFor(g).forEach(id => {
+            if (e.target.checked) selected.add(id); else selected.delete(id);
+          });
+        } });
+        const row = el("div", { class: "step" },
+          cb,
+          el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;color:var(--color-accent-400);flex:0 0 42px" },
+            (g.times_asked || 1) + "\u00d7"),
+          el("div", { class: "step-b" },
+            el("div", { style: "font-size:13.5px" }, g.question),
+            // The other phrasings this entry stands for. Shown, not hidden:
+            // the count only makes sense if you can see what was counted,
+            // and a wrong merge has to be visible to be reported.
+            (g.variants && g.variants.length)
+              ? el("details", { style: "margin-top:4px" },
+                  el("summary", { style: "cursor:pointer;font-size:12px;color:var(--color-accent-300)" },
+                    "also asked as " + g.variants.length + " other "
+                    + (g.variants.length === 1 ? "wording" : "wordings")),
+                  el("div", { style: "margin-top:4px" },
+                    g.variants.map(v => el("div", {
+                      style: "font-size:12.5px;padding:2px 0;color:color-mix(in srgb,var(--color-text) 65%,transparent)" },
+                      "\u2022 " + v.question
+                      + (v.times_asked > 1 ? "  (" + v.times_asked + "\u00d7)" : "")))))
+              : null,
+            el("p", {}, (g.reason === "ungrounded_answer_suppressed"
+                ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
+                : "Nothing in the documents matched.")
+              + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : "")),
+            draftBox),
+          el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:4px 12px", onclick: async e => {
+            const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
+            try {
+              const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
+                gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
+              draftBox.innerHTML = "";
+              draftBox.append(
+                el("p", { class: "sec-hint", style: "margin:8px 0 4px" }, "AI draft \u2014 not saved yet:"),
+                el("p", { style: "font-size:13px;white-space:pre-wrap" }, r.answer || "(no answer)"),
+                el("div", { style: "display:flex;gap:8px" },
+                  el("button", { class: "btn btn-primary", style: "font-size:12px;padding:3px 10px",
+                    onclick: () => answerHere(g, r.answer) }, "Use this \u2014 review & save"),
+                  el("button", { class: "btn btn-ghost", style: "font-size:12px;padding:3px 10px",
+                    onclick: () => { draftBox.innerHTML = ""; } }, "Discard")));
+            } catch (e2) { toast(e2.message, true); }
+            finally { btn.disabled = false; btn.textContent = "Answer with AI"; }
+          } }, "Answer with AI"),
+          el("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px",
+                         onclick: () => answerHere(g) }, "Answer this"),
+          el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+            if (!confirm("Dismiss this question?\n\nAsking it again starts a fresh entry. Use \"Mark spam\" instead if it should never come back.")) return;
+            try { await api("/faq/gaps/" + encodeURIComponent(g.id), { method: "DELETE" });
+                  toast("Dismissed"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Dismiss"));
+        return row;
+      }));
+  });
+
+  // Reloads from the server rather than filtering in the browser: grouping
+  // needs the embedding model, and the scope list has to include keys that
+  // are no longer catalogue products but still have questions filed under
+  // them (nv9st, coin_hoppers) -- the browser cannot know those.
+  const reload = async () => {
+    try {
+      const qs = "?sort=" + encodeURIComponent(gapFilter.sort)
+               + "&group_similar=" + gapFilter.grouped
+               + (gapFilter.scope ? "&product=" + encodeURIComponent(gapFilter.scope) : "");
+      const r = await api("/faq/gaps" + qs);
+      cache.gaps = r.gaps || [];
+      cache.gapScopes = r.scopes || [];
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const scopeSel = el("select", { class: "input", style: "width:auto",
+    onchange: () => { gapFilter.scope = scopeSel.value; reload(); } },
+    el("option", { value: "" }, "All products"),
+    (cache.gapScopes || []).filter(Boolean).map(k =>
+      el("option", { value: k, selected: gapFilter.scope === k ? "true" : null },
+         nameFor(k) || (k + "  (not in the catalogue)"))),
+    (cache.gapScopes || []).indexOf("") >= 0
+      ? el("option", { value: "__none__",
+                       selected: gapFilter.scope === "__none__" ? "true" : null },
+          "No product selected")
+      : null);
+
+  const sortSel = el("select", { class: "input", style: "width:auto",
+    onchange: () => { gapFilter.sort = sortSel.value; reload(); } },
+    [["demand", "Most asked"], ["latest", "Most recent"], ["product", "By product"]]
+      .map(([v, t]) => el("option", { value: v,
+        selected: gapFilter.sort === v ? "true" : null }, t)));
+
+  const groupCb = el("input", { type: "checkbox",
+    onchange: () => { gapFilter.grouped = groupCb.checked; reload(); } });
+  groupCb.checked = gapFilter.grouped;
+
+  const controls = el("div", { class: "card elev-sm",
+      style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;"
+           + "align-items:center;gap:12px;flex-wrap:wrap",
+      "data-tour": "gaps-filter" },
+    el("label", { class: "flabel", style: "margin:0" }, "Product"), scopeSel,
+    el("label", { class: "flabel", style: "margin:0" }, "Sort"), sortSel,
+    el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
+      groupCb, "Group similar wordings"),
+    el("span", { style: "flex:1" }),
+    el("span", { class: "sec-hint", style: "margin:0" },
+      cache.gaps.length + (cache.gaps.length === 1 ? " entry" : " entries")));
+
+  return [
+    el("h1", {}, "FAQs from customers"),
+    el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover. Rewordings of the same question are counted together, so the number beside each one is how many people asked it \u2014 not how many ways they phrased it."),
+    controls,
+    cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+      el("span", { class: "sec-hint", style: "margin:0" }, "Select questions above, then:"),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps", "DELETE", "Dismissed") }, "Dismiss selected"),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps/spam", "POST", "Marked spam:") }, "Mark spam"),
+      el("span", { style: "flex:1" }),
+      el("label", { class: "flabel", style: "margin:0" }, "AI model:"), provSel, modelIn) : null,
+    cache.gaps.length ? el("div", { "data-tour": "gaps-list" }, rows)
+      : el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+          el("b", {}, "Nothing unanswered"),
+          "Questions the widget could not answer will collect here once visitors start using it.")),
+  ];
+}
+
+function shortDate(iso) {
+  try {
+    const d = new Date(iso), now = new Date();
+    const days = Math.floor((now - d) / 86400000);
+    if (days <= 0) return "today";
+    if (days === 1) return "yesterday";
+    if (days < 30) return days + " days ago";
+    return d.toLocaleDateString();
+  } catch (e) { return ""; }
+}
+
+/** Deleting a product, with its documents, answers and questions dealt
+ *  with explicitly.
+ *
+ *  Deleting only the catalogue row is what produced the orphaned `nv9st`
+ *  and `coin_hoppers` keys: real content behind a product that no longer
+ *  exists, which this console cannot show because it builds every list
+ *  FROM the catalogue. So the choice is put to the operator, with the
+ *  actual counts in front of them rather than an abstract warning. */
+async function deleteProductFlow(cat, prod) {
+  let counts;
+  try {
+    const r = await api("/admin/product/" + encodeURIComponent(prod.key) + "/contents");
+    counts = r.contents;
+  } catch (e) { return toast(e.message, true); }
+
+  const total = (counts.chunks || 0) + (counts.answers || 0) + (counts.questions || 0);
+  if (!total) {
+    if (!confirm("Delete " + prod.name + "?\n\nNothing is filed under it.")) return;
+    return runDelete(cat, prod, "?delete_content=true");
+  }
+
+  const bits = [];
+  if (counts.chunks) bits.push(counts.chunks + " document chunk" + (counts.chunks === 1 ? "" : "s"));
+  if (counts.answers) bits.push(counts.answers + " reviewed answer" + (counts.answers === 1 ? "" : "s"));
+  if (counts.questions) bits.push(counts.questions + " customer question" + (counts.questions === 1 ? "" : "s"));
+
+  // Somewhere for the content to go. The product being deleted is not an
+  // option, and neither is a key that is not a real product.
+  const others = products().filter(x => x.key !== prod.key);
+
+  const sel = el("select", { class: "input" },
+    others.map(x => el("option", { value: x.key }, x.categoryName + " \u203a " + x.name)));
+
+  const box = el("div", { class: "card elev-md",
+      style: "position:fixed;z-index:60;left:50%;top:50%;transform:translate(-50%,-50%);"
+           + "width:min(520px,92vw);padding:22px" },
+    el("h3", {}, "Delete " + prod.name + "?"),
+    el("p", { class: "sec-hint", style: "margin-top:6px" },
+      "This product holds " + bits.join(", ") + ". Choose what happens to it "
+      + "\u2014 it cannot be left without a product, or it disappears from this "
+      + "console while still taking up space."),
+    others.length
+      ? el("div", { style: "margin-top:14px" },
+          el("label", { class: "flabel" }, "Move it to"), sel)
+      : el("p", { class: "sec-hint", style: "color:var(--color-warn,#c98a00);margin-top:12px" },
+          "There is no other product to move it to. Create one first, or "
+          + "delete the content along with the product."),
+    el("div", { style: "display:flex;gap:8px;margin-top:18px;flex-wrap:wrap" },
+      others.length
+        ? el("button", { class: "btn btn-primary", onclick: () => {
+            close_();
+            runDelete(cat, prod, "?reassign_to=" + encodeURIComponent(sel.value));
+          } }, "Move it, then delete the product")
+        : null,
+      el("button", { class: "btn btn-secondary", onclick: () => {
+          if (!confirm("Permanently delete " + bits.join(", ") + "?\n\n"
+              + "The documents themselves stay on disk, but they will no longer "
+              + "be searchable until re-ingested.")) return;
+          close_();
+          runDelete(cat, prod, "?delete_content=true");
+        } }, "Delete it all"),
+      el("button", { class: "btn btn-ghost", onclick: () => close_() }, "Cancel")));
+
+  const veil = el("div", { style: "position:fixed;inset:0;z-index:59;"
+                                + "background:rgba(0,0,0,.42)", onclick: () => close_() });
+  function close_() { veil.remove(); box.remove(); }
+  document.body.append(veil, box);
+}
+
+async function runDelete(cat, prod, qs) {
+  try {
+    const r = await api("/admin/product/" + encodeURIComponent(cat.key)
+                        + "/" + encodeURIComponent(prod.key) + qs, { method: "DELETE" });
+    const a = r.affected || {};
+    toast(r.reassigned_to
+      ? "Moved " + ((a.chunks || 0) + (a.answers || 0) + (a.questions || 0))
+        + " item(s), then deleted " + prod.name
+      : "Deleted " + prod.name + " and its content");
+    await refresh(); render();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------------- widget design ---------------- */
+function viewWidget() {
+  if (!cache.widget) {
+    return [
+      el("h1", {}, "Widget design"),
+      el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+        el("b", {}, "Coming soon"),
+        "The embeddable widget currently reads its branding from data-* " +
+        "attributes on its embed script tag, not from a config this console " +
+        "publishes. This page is disabled until the widget is updated to " +
+        "fetch its settings at load.")),
+    ];
+  }
+
+  // Staged locally; nothing is sent until Save. The preview reads from
+  // this draft, so what is on screen is what Save will publish.
+  const d = clone(cache.widget);
+  const preview = el("div", {});
+  const uid = () => randId("id_");
+
+  const ACTIONS = [["product", "Select a product"], ["general", "Ask in general"],
+                   ["sales", "Talk to sales"], ["support", "Talk to support"]];
+  const TYPES = [["text", "Short answer"], ["email", "Email"],
+                 ["textarea", "Long answer"], ["tel", "Phone"]];
+
+  const drawPreview = () => {
+    preview.innerHTML = "";
+    preview.append(
+      el("div", { style: "font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:color-mix(in srgb,var(--color-text) 45%,transparent);margin-bottom:8px" }, "Live preview"),
+      el("div", { style: "border-radius:14px;overflow:hidden;box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);background:var(--color-surface)" },
+        el("div", { style: "display:flex;align-items:center;gap:10px;padding:14px 16px;background:" + d.color },
+          el("div", { style: "width:30px;height:30px;border-radius:50%;flex:0 0 auto;background:rgba(255,255,255,.25);" +
+              (d.icon_url ? "background-image:url('" + d.icon_url.replace(/'/g, "%27") + "');background-size:cover;background-position:center" : "") }),
+          el("span", { style: "font-size:14px;font-weight:600;color:#fff" }, d.name || "Support")),
+        el("div", { style: "padding:14px;min-height:200px;background:var(--color-bg)" },
+          el("div", { style: "max-width:88%;padding:9px 12px;border-radius:10px;background:var(--color-surface);box-shadow:inset 0 0 0 1px var(--color-divider);font-size:12.5px;line-height:1.5;margin-bottom:10px" },
+            d.welcome || ""),
+          el("div", { style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" },
+            d.intro_options.map(o => el("span", {
+              style: "font-size:12px;padding:6px 12px;border-radius:99px;color:#fff;white-space:nowrap;background:" + d.color
+            }, o.label || "\u2026")))),
+        el("div", { style: "padding:10px 12px;border-top:1px solid var(--color-divider);display:flex;gap:8px" },
+          el("div", { style: "flex:1;height:30px;border-radius:8px;background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" }),
+          el("div", { style: "width:30px;height:30px;border-radius:8px;background:" + d.color }))));
+  };
+
+  // ---- branding ----
+  const nameIn = el("input", { class: "input", type: "text", value: d.name });
+  nameIn.addEventListener("input", () => { d.name = nameIn.value; drawPreview(); });
+  const welcomeIn = el("textarea", { class: "input", rows: "2" }, d.welcome);
+  welcomeIn.addEventListener("input", () => { d.welcome = welcomeIn.value; drawPreview(); });
+  const iconIn = el("input", { class: "input", type: "text", value: d.icon_url || "",
+                               placeholder: "https://example.com/icon.png" });
+  iconIn.addEventListener("input", () => { d.icon_url = iconIn.value.trim(); drawPreview(); });
+  const colorIn = el("input", { type: "color", value: d.color,
+      style: "width:34px;height:34px;padding:0;border:0;border-radius:8px;cursor:pointer;background:transparent" });
+  const swatchRow = el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" });
+  const setColor = hex => { d.color = hex; colorIn.value = hex; drawPreview(); };
+  ["#9184d9", "#2f7de1", "#0e7a54", "#b26a00", "#e4002b", "#12161c"].forEach(hex =>
+    swatchRow.append(el("button", { title: hex, onclick: () => setColor(hex),
+      style: "width:28px;height:28px;border-radius:50%;border:0;cursor:pointer;background:" + hex })));
+  swatchRow.append(colorIn);
+  colorIn.addEventListener("input", () => setColor(colorIn.value));
+
+  // ---- opening options ----
+  const optBox = el("div", {});
+  function drawOpts() {
+    optBox.innerHTML = "";
+    d.intro_options.forEach(o => {
+      const lab = el("input", { class: "input", type: "text", value: o.label });
+      lab.addEventListener("input", () => { o.label = lab.value; drawPreview(); });
+      const act = el("select", { class: "input" },
+        ACTIONS.map(([v, t]) => el("option", { value: v }, t)));
+      act.value = o.action;
+      act.addEventListener("change", () => { o.action = act.value; });
+      optBox.append(el("div", { style: "display:flex;gap:8px;align-items:flex-end;margin-bottom:8px" },
+        el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Label"), lab),
+        el("div", { style: "flex:0 0 190px" }, el("label", { class: "flabel" }, "Action"), act),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => {
+          if (d.intro_options.length <= 1)
+            return toast("Keep at least one opening option \u2014 the widget needs somewhere to start", true);
+          d.intro_options = d.intro_options.filter(x => x !== o);
+          drawOpts(); drawPreview();
+        } }, "Remove")));
+    });
+  }
+  drawOpts(); drawPreview();
+
+  // ---- contact forms ----
+  function formCard(key, title, hint) {
+    const f = d[key];
+    const box = el("div", {});
+    function draw() {
+      box.innerHTML = "";
+      f.fields.forEach(fl => {
+        const lab = el("input", { class: "input", type: "text", value: fl.label });
+        lab.addEventListener("input", () => { fl.label = lab.value; });
+        const ty = el("select", { class: "input" }, TYPES.map(([v, t]) => el("option", { value: v }, t)));
+        ty.value = fl.type;
+        ty.addEventListener("change", () => { fl.type = ty.value; });
+        const req = el("input", { type: "checkbox" });
+        req.checked = !!fl.required;
+        req.addEventListener("change", () => { fl.required = req.checked; });
+        box.append(el("div", { style: "padding:10px 0;border-top:1px solid color-mix(in srgb,var(--color-text) 9%,transparent)" },
+          el("label", { class: "flabel" }, "Field label"), lab,
+          el("div", { style: "display:flex;gap:8px;align-items:flex-end;margin-top:8px" },
+            el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Type"), ty),
+            el("label", { style: "display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;padding-bottom:8px" },
+              req, "Required"),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => {
+              if (f.fields.length <= 1) return toast("A form needs at least one field", true);
+              f.fields = f.fields.filter(x => x !== fl); draw();
+            } }, "Remove"))));
+      });
+    }
+    draw();
+
+    // The fixed destination for this form. Asked for here, when the form is
+    // being built, because that is when you know who should receive it — and
+    // a form with nowhere to go is the failure mode worth catching early.
+    const notify = el("input", { class: "input", type: "email",
+                                 value: f.notify_email || "",
+                                 placeholder: key === "sales_form"
+                                   ? "sales@yourcompany.com"
+                                   : "support@yourcompany.com" });
+    const notifyWarn = el("p", { class: "sec-hint",
+      style: "margin:6px 0 0;color:var(--color-warn,#c98a00)" });
+    const drawNotifyWarn = () => {
+      const v = (f.notify_email || "").trim();
+      notifyWarn.textContent = !v
+        ? "No destination set — submissions will still be collected, but nobody is named as the owner."
+        : v.indexOf("@") === -1
+          ? "That does not look like an email address."
+          : "";
+    };
+    notify.addEventListener("input", () => {
+      f.notify_email = notify.value.trim();
+      drawNotifyWarn();
+    });
+    drawNotifyWarn();
+    const summ = el("input", { type: "checkbox" });
+    summ.checked = !!f.allow_summary;
+    summ.addEventListener("change", () => { f.allow_summary = summ.checked; });
+
+    // Shown to the visitor as an alternative to waiting for a reply, and
+    // named in the assistant's wording when it cannot answer something.
+    const phoneIn = el("input", { class: "input", type: "text",
+                                  value: f.phone || "",
+                                  placeholder: "+44 1256 490290 (Mon-Fri, 9-5)" });
+    phoneIn.addEventListener("input", () => { f.phone = phoneIn.value.trim(); });
+
+    const ccIn = el("input", { type: "checkbox" });
+    ccIn.checked = f.cc_visitor !== false;
+    ccIn.addEventListener("change", () => { f.cc_visitor = ccIn.checked; });
+    const titleIn = el("input", { class: "input", type: "text", value: f.title });
+    titleIn.addEventListener("input", () => { f.title = titleIn.value; });
+
+    return el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0", "data-sec": title },
+      el("div", { class: "sec-title" }, title),
+      el("div", { class: "sec-hint" }, hint),
+      el("label", { class: "flabel" }, "Form heading"), titleIn,
+      box,
+      el("p", { class: "sec-hint", style: "margin:8px 0 0" },
+        "Every form keeps a required email field: a reply has to go "
+        + "somewhere, and a submission with no address is a dead end that "
+        + "looks like it worked. It is added back automatically if removed."),
+      el("button", { class: "btn btn-secondary", style: "margin-top:10px", onclick: () => {
+        if (f.fields.length >= 8) return toast("Eight fields is the maximum \u2014 long forms get abandoned", true);
+        f.fields.push({ id: uid(), label: "New field", type: "text", required: false });
+        draw();
+      } }, "Add field"),
+      el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:14px;cursor:pointer" },
+        summ, "Let the visitor attach a summary of their chat"),
+      el("label", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:8px;cursor:pointer" },
+        ccIn, "Copy the visitor in on the reply"),
+      el("div", { style: "margin-top:12px" },
+        el("label", { class: "flabel" }, "Phone number to offer"),
+        phoneIn,
+        el("p", { class: "sec-hint", style: "margin:6px 0 0" },
+          "Optional, and shown to visitors \u2014 unlike the address below. The "
+          + "assistant offers it by name when it cannot answer something, so "
+          + "someone who would rather call is not left filling in a form.")),
+      el("div", { style: "margin-top:12px" },
+        el("label", { class: "flabel" }, "Send to"), notify,
+        notifyWarn,
+        el("p", { class: "sec-hint", style: "margin:6px 0 0" },
+          "Where this form's submissions belong. \u26a0 Not emailed yet \u2014 there is no mail server configured, so enquiries are collected under Enquiries in this console and this address is stored ready for when sending is wired up. It is never shown to visitors.")));
+  }
+
+  const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
+    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    try {
+      const saved = await api("/admin/widget/config", { method: "PUT", body: JSON.stringify(d) });
+      cache.widget = saved;
+      toast("Saved \u2014 the widget picks this up on its next load");
+    } catch (e) { toast(e.message, true); }
+    finally { saveBtn.disabled = false; saveBtn.textContent = "Save changes"; }
+  } }, "Save changes");
+
+  return [
+    el("h1", {}, "Widget design"),
+    el("p", { class: "lede" }, "How the widget looks and opens for a visitor. The preview updates as you type; nothing is published until you save."),
+    el("div", { style: "display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start" },
+      el("div", { style: "min-width:0" },
+        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                    "data-tour": "wd-branding", "data-sec": "Branding" },
+          el("div", { class: "sec-title" }, "Branding"),
+          el("div", { class: "sec-hint" }, "The name, greeting and accent colour used throughout the widget."),
+          el("div", { class: "row" },
+            el("div", {}, el("label", { class: "flabel" }, "Assistant name"), nameIn)),
+          el("div", { style: "margin-top:10px" },
+            el("label", { class: "flabel" }, "Welcome message"), welcomeIn),
+          el("div", { style: "margin-top:10px" },
+            el("label", { class: "flabel" }, "Icon URL (optional)"), iconIn),
+          el("div", { style: "margin-top:12px" },
+            el("label", { class: "flabel" }, "Accent colour"), swatchRow)),
+        el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                    "data-tour": "wd-options", "data-sec": "Opening options" },
+          el("div", { class: "sec-title" }, "Opening options"),
+          el("div", { class: "sec-hint" }, "Shown as buttons on the first message. Each starts a different path."),
+          optBox,
+          el("button", { class: "btn btn-secondary", style: "margin-top:6px", onclick: () => {
+            if (d.intro_options.length >= 6) return toast("Six options is the maximum", true);
+            d.intro_options.push({ id: uid(), label: "New option", action: "general" });
+            drawOpts(); drawPreview();
+          } }, "Add option")),
+        el("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:16px" },
+          formCard("sales_form", "Talk to sales form",
+                   "Appears in chat when a visitor picks \u201cTalk to sales\u201d."),
+          formCard("support_form", "Talk to support form",
+                   "Appears when a visitor picks \u201cTalk to support\u201d, or escalates an unanswered question.")),
+        el("div", { style: "margin-top:18px;display:flex;gap:10px;align-items:center" },
+          saveBtn,
+          el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+            if (!confirm("Reset the widget design back to its defaults?")) return;
+            try { await api("/admin/widget/config/reset", { method: "POST" });
+                  toast("Reset to defaults"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Reset to defaults"))),
+      el("div", { style: "position:sticky;top:0", "data-tour": "wd-preview" }, preview)),
+  ];
+}
+
+/* ---------------- enquiries (leads) ---------------- */
+function viewLeads() {
+  const rows = cache.leads.length ? cache.leads.map(l => {
+    const vals = Object.values(l.values || {});
+    return el("div", { class: "card elev-sm", style: "padding:14px 18px;gap:0;margin-bottom:10px" +
+                (l.handled ? ";opacity:.6" : "") },
+      el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" },
+        el("span", { class: "tag " + (l.kind === "sales" ? "tag-accent" : "tag-neutral") }, l.kind),
+        l.product ? el("span", { class: "tag tag-neutral mono" }, l.product) : null,
+        el("span", { style: "flex:1" }),
+        el("span", { style: "font-size:11.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
+          shortDate(l.created_at))),
+      vals.map(v => el("div", { class: "item" },
+        el("div", { style: "flex:0 0 150px;font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, v.label),
+        el("div", { class: "grow", style: "white-space:pre-wrap;font-size:13.5px" }, v.value))),
+      // The written-up enquiry. Flagged when a model drafted it, because
+      // someone about to reply needs to know they are reading a summary
+      // rather than the visitor's own words.
+      (l.enquiry || "").trim()
+        ? el("div", { style: "margin-top:10px;padding:10px 12px;border-radius:var(--radius-md);"
+                           + "background:color-mix(in srgb,var(--color-text) 5%,transparent)" },
+            el("div", { style: "font-size:11px;text-transform:uppercase;letter-spacing:.05em;"
+                             + "margin-bottom:5px;color:color-mix(in srgb,var(--color-text) 50%,transparent)" },
+              l.summary_source === "chat" ? "Summary of their chat"
+                : l.summary_source === "written" ? "In their own words" : "Summary"),
+            el("div", { style: "white-space:pre-wrap;font-size:13.5px;line-height:1.5" }, l.enquiry))
+        : null,
+      // Recorded by widget_config.add_lead so the console can be honest that
+      // nothing was emailed. Says so plainly rather than letting someone
+      // assume the destination address means it was delivered.
+      l.notify_email
+        ? el("div", { style: "margin-top:8px;font-size:11.5px;color:color-mix(in srgb,var(--color-text) 50%,transparent)" },
+            l.notified ? "Emailed to " + l.notify_email
+                       : "For " + l.notify_email + " — not emailed (no mail server configured yet)")
+        : el("div", { style: "margin-top:8px;font-size:11.5px;color:var(--color-warn,#c98a00)" },
+            "No destination set for this form — add one under Widget design"),
+      (l.transcript || []).length
+        ? el("details", { style: "margin-top:10px" },
+            el("summary", { style: "cursor:pointer;font-size:12.5px;color:var(--color-accent-300)" },
+              "Chat summary (" + l.transcript.length + " messages)"),
+            el("div", { style: "margin-top:8px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:color-mix(in srgb,var(--color-text) 70%,transparent)" },
+              l.transcript.map(t => (t.role === "user" || t.q ? "Visitor: " : "Assistant: ") +
+                                    (t.text || t.q || t.a || "")).join("\n")))
+        : null,
+      el("div", { style: "margin-top:12px;display:flex;gap:8px" },
+        el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+          try { await api("/admin/leads/" + l.id + "/handled?handled=" + (!l.handled),
+                          { method: "POST" });
+                await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, l.handled ? "Mark unhandled" : "Mark handled"),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+          if (!confirm("Delete this enquiry? It cannot be recovered.")) return;
+          try { await api("/admin/leads/" + l.id, { method: "DELETE" });
+                toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Delete")));
+  }) : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+        el("b", {}, "Nothing yet"),
+        "Sales and support forms submitted through the widget arrive here. " +
+        "Set the fields and the destination address under Widget design, and " +
+        "try it yourself from Test chat."))];
+
+  const s = cache.leadStats || {};
+  return [
+    el("h1", {}, "Enquiries"),
+    el("p", { class: "lede" }, "Sales and support forms submitted through the widget. These are not emailed to anyone \u2014 this console is where they arrive, so check it regularly."),
+    el("div", { class: "readout" },
+      el("div", { class: s.unhandled ? "warn" : "" },
+        el("div", { class: "lbl" }, "Needs a reply"), el("b", {}, String(s.unhandled || 0))),
+      el("div", {}, el("div", { class: "lbl" }, "Sales"), el("b", {}, String(s.sales || 0))),
+      el("div", {}, el("div", { class: "lbl" }, "Support"), el("b", {}, String(s.support || 0))),
+      el("div", {}, el("div", { class: "lbl" }, "Total"), el("b", {}, String(s.total || 0)))),
+    el("div", { "data-tour": "leads-list" }, rows),
+  ];
+}
+
+/* ---------------- catalog ---------------- */
+function viewCatalog() {
+  const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const cName = el("input", { class: "input", type: "text", placeholder: "Coin hoppers" });
+  const pCat = el("select", { class: "input" }, cache.catalog.map(c => el("option", { value: c.key }, c.name)));
+  const pName = el("input", { class: "input", type: "text", placeholder: "SMART Hopper" });
+
+  const rows = cache.catalog.length ? cache.catalog.map(c =>
+    el("div", { class: "card elev-sm", style: "margin-bottom:12px;padding:16px 20px 8px;gap:0" },
+      el("div", { style: "display:flex;align-items:center;gap:10px" },
+        el("div", { class: "sec-title", style: "flex:1;margin:0" }, c.name),
+        el("span", { class: "tag tag-neutral mono" }, c.key),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
+          if (!confirm("Delete the " + c.name + " range and its products?")) return;
+          try { await api("/admin/category/" + encodeURIComponent(c.key), { method: "DELETE" });
+                toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+        } }, "Delete")),
+      (c.products || []).length
+        ? (c.products || []).map(p => el("div", { class: "item" },
+            el("div", { class: "grow" }, el("b", {}, p.name),
+              el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents")),
+            el("span", { class: "tag tag-neutral mono" }, p.key),
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+                           onclick: () => deleteProductFlow(c, p) }, "Delete")))
+        : el("p", { class: "sec-hint", style: "margin:10px 0 10px" }, "No products in this range yet.")))
+    : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+        el("b", {}, "No ranges yet"),
+        "A range groups related products \u2014 Coin hoppers, Note validators, Biometrics."))];
+
+  return [
+    el("h1", {}, "Products"),
+    el("p", { class: "lede" }, "Ranges group products; documents are filed against a product. This is what the widget asks visitors to choose from."),
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                "data-tour": "cat-range", "data-sec": "Add a range" },
+      el("div", { class: "sec-title" }, "Add a range"),
+      el("div", { class: "sec-hint" }, "A family of products, such as Coin hoppers."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "flabel" }, "Name"), cName),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn btn-secondary", onclick: async () => {
+            if (!cName.value.trim()) return toast("Give the range a name", true);
+            try { await api("/admin/category", { method: "POST",
+                    body: JSON.stringify({ key: slug(cName.value), name: cName.value.trim() }) });
+                  cName.value = ""; toast("Range added"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Add range")))),
+    cache.catalog.length ? el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
+                                      "data-tour": "cat-product", "data-sec": "Add a product" },
+      el("div", { class: "sec-title" }, "Add a product"),
+      el("div", { class: "sec-hint" }, "Documents and widget conversations are scoped to a product."),
+      el("div", { class: "row" },
+        el("div", {}, el("label", { class: "flabel" }, "Range"), pCat),
+        el("div", {}, el("label", { class: "flabel" }, "Name"), pName),
+        el("div", { style: "flex:0 0 auto" },
+          el("button", { class: "btn btn-primary", onclick: async () => {
+            if (!pName.value.trim()) return toast("Give the product a name", true);
+            try { await api("/admin/product", { method: "POST", body: JSON.stringify({
+                    category_key: pCat.value, key: slug(pName.value), name: pName.value.trim(), sources: [] }) });
+                  pName.value = ""; toast("Product added"); await refresh(); render(); }
+            catch (e) { toast(e.message, true); }
+          } }, "Add product")))) : null,
+    el("div", { "data-tour": "cat-list", "data-sec": "Your catalogue" }, rows),
+  ];
+}
+
+/* ---------------- test ---------------- */
+/** The real widget on a stand-in customer page, in an iframe.
+ *  Shared by the Test chat page and the basic-account shell so there is one
+ *  definition of "show them the actual widget". `withEdit` adds the jump to
+ *  Widget design, which a basic account cannot reach. */
+function widgetPreviewCard(withEdit) {
+  const frame = el("iframe", {
+    // Cache-busted so Reload genuinely re-fetches the config and the script.
+    src: "/widget/preview?t=" + Date.now(),
+    style: "width:100%;height:560px;border:0;border-radius:var(--radius-md);"
+         + "background:var(--color-bg-alt,#f6f7f9);display:block",
+    title: "Widget preview",
+  });
+
+  // Guest is the default because that is what most real visitors are, and
+  // it is the mode where the account-required wording and the FAQ-only
+  // limits actually show up. "Signed in" needs a real widget token, minted
+  // server-side and short-lived — see /admin/widget/preview_token.
+  let asMember = false;
+  const load = async () => {
+    let qs = "?t=" + Date.now();
+    if (asMember) {
+      try {
+        const r = await api("/admin/widget/preview_token", { method: "POST" });
+        qs += "&token=" + encodeURIComponent(r.token);
+      } catch (e) {
+        toast("Could not start a signed-in preview: " + e.message, true);
+        asMember = false;
+        modeBtn.textContent = MODE_GUEST;
+      }
+    }
+    frame.src = "/widget/preview" + qs;
+  };
+
+  const MODE_GUEST = "Viewing as guest";
+  const MODE_MEMBER = "Viewing as signed-in";
+  const modeBtn = el("button", { class: "btn btn-secondary", onclick: () => {
+    asMember = !asMember;
+    modeBtn.textContent = asMember ? MODE_MEMBER : MODE_GUEST;
+    load();
+  } }, MODE_GUEST);
+
+  const card = el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
+                           "data-sec": "As a customer sees it",
+                           "data-tour": "test-widget" },
+    el("div", { class: "row-between", style: "margin-bottom:12px" },
+      el("div", {},
+        el("h3", {}, "As a customer sees it"),
+        el("p", { class: "sec-hint" },
+          withEdit
+            ? "Branding, opening options and the sales/support forms all come "
+              + "from Widget design. Reload after saving changes there."
+            : "The assistant exactly as a customer sees it.")),
+      el("div", { style: "flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap" },
+        // Minting a preview token needs support or above, so a basic
+        // account gets the guest view only rather than a button that 403s.
+        isStaff() ? modeBtn : null,
+        el("button", { class: "btn btn-secondary", onclick: load }, "Reload"),
+        withEdit
+          ? el("button", { class: "btn btn-ghost",
+              onclick: () => { view = "widget"; render(); } },
+              "Edit widget design")
+          : null)),
+    frame);
+  return { card, frame };
+}
+
+function viewTest() {
+  const prods = products();
+  const sel = el("select", { class: "input" }, el("option", { value: "" }, "Whole knowledge base"),
+    prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+  const provSel = providerBox();
+  const modelIn = linkModelBox(provSel,
+    el("input", { class: "input", type: "text", placeholder: "model (optional)" }));
+  const log = el("div", { class: "chat" },
+    el("div", { class: "bub a" }, "Ask something a customer might ask. This uses the same pipeline as the widget, so what you see here is what they would get."));
+  const input = el("input", { class: "input", type: "text", placeholder: "Does it need an internet connection?" });
+  const sid = randId("console-");
+
+  // /query only honors force_provider when force_model is ALSO set, so fall
+  // back to the provider's current default rather than silently dropping to
+  // the default chain. That default now comes from the server (see
+  // providerBox) -- it was a hardcoded map here, holding a DeepSeek alias
+  // that had been retired, so every forced DeepSeek call failed.
+  async function send(q, opts = {}) {
+    q = (q === undefined ? input.value : q).trim();
+    if (!q) return;
+    if (q === input.value.trim()) input.value = "";
+
+    // Choosing or rejecting a suggestion re-asks a question the assistant
+    // itself put on screen, so it is not a new turn from the visitor.
+    if (!opts.silent) log.append(el("div", { class: "bub u" }, q));
+    const wait = el("div", { class: "bub a" }, "Checking the documentation\u2026");
+    log.append(wait); log.scrollTop = log.scrollHeight;
+
+    const provider = provSel.value || null;
+    const model = provider ? (modelIn.value.trim() || defaultModelFor(provider) || null) : null;
+    try {
+      const r = await api("/query", { method: "POST", body: JSON.stringify({
+        q, session_id: sid, product: sel.value || null,
+        force_provider: provider, force_model: model,
+        faq_id: opts.faqId || null, skip_faq: !!opts.skipFaq }) });
+      wait.remove();
+      const bub = el("div", { class: "bub a" });
+      bub.append(renderMarkdown(r.answer || "No answer"));
+      if (r.sources && r.sources.length) {
+        bub.append(el("div", { class: "lbl", style: "margin-top:9px" }, "Sources"));
+        // The document is a link, and the pages are named, so the reader can
+        // go and check. download_url and page_label already come from the
+        // server -- they were being flattened into plain text here.
+        r.sources.forEach(s => {
+          const row = el("div", { style: "font-size:12px;margin-top:3px" });
+          row.append(s.download_url
+            ? el("a", { href: s.download_url, target: "_blank", rel: "noopener" }, s.source)
+            : el("span", {}, s.source));
+          if (s.page_label) {
+            row.append(el("span", { style: "color:color-mix(in srgb, var(--color-text) 55%, transparent)" },
+              "  \u2014 see " + s.page_label));
+          }
+          bub.append(row);
+        });
+      }
+
+      // The conversation window holds a fixed number of turns, after which the
+      // oldest is dropped silently -- the assistant appears to forget with
+      // nothing on screen to explain it. Warn as the window fills, and once at
+      // it, so a fresh chat is an obvious choice rather than a discovery.
+      const _turns = r.turns || 0, _limit = r.turn_limit || 20;
+      if (_turns >= _limit - 3 && !log.dataset.warnedAt) {
+        log.dataset.warnedAt = String(_turns);
+        const note = el("div", { class: "bub a", style: "font-size:12.5px" });
+        note.append(el("div", {}, r.context_full
+          ? "This chat has reached its " + _limit + "-question memory. The oldest "
+            + "questions are now being dropped, so earlier answers can no longer "
+            + "be referred back to."
+          : "Approaching this chat's " + _limit + "-question memory ("
+            + _turns + " of " + _limit + "). After that, the earliest questions "
+            + "start dropping out."));
+        note.append(el("div", { style: "margin-top:8px" },
+          el("button", { class: "btn btn-secondary", style: BTN, onclick: () => {
+            view = "test"; render();
+          } }, "Start a new chat")));
+        log.append(note);
+      }
+      // A refusal with no next step is a dead end. Offer the human.
+      if (r.offer_support) {
+        bub.append(el("div", { style: "margin-top:10px" },
+          el("button", { class: "btn btn-secondary", style: BTN, onclick: () => {
+            view = "leads"; render();
+          } }, "Contact support about this")));
+      }
+
+      // Unscoped question spanning several products: let them pick, then
+      // re-ask scoped rather than retyping.
+      (r.product_options || []).forEach(o => {
+        bub.append(el("div", { style: "margin-top:6px" },
+          el("button", { class: "btn btn-secondary", style: BTN, onclick: () => {
+            sel.value = o.key; send(q, { silent: true });
+          } }, o.label)));
+      });
+      if (r.from_faq) bub.append(el("div", { class: "tag tag-outline", style: "margin-top:8px" }, "reviewed answer"));
+      log.append(bub);
+
+      // The widget shows these; this page did not, so a clarify turn arrived
+      // as a bare "is this what you meant?" with nothing to answer it -- the
+      // one place the test chat did NOT match what a customer sees.
+      const cands = r.faq_candidates || [];
+      if (cands.length) {
+        const box = el("div", { class: "bub a", style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" });
+        cands.forEach(c => box.append(el("button", {
+          class: "btn btn-secondary", style: "font-size:12.5px;padding:6px 11px;text-align:left;white-space:normal",
+          onclick: () => { box.remove(); send(c.question, { faqId: c.id, silent: true }); },
+        }, c.question)));
+        box.append(el("button", {
+          class: "btn btn-ghost", style: "font-size:12px;padding:4px 9px",
+          onclick: () => { box.remove(); send(q, { skipFaq: true, silent: true }); },
+        }, "None of these \u2014 answer from the documents"));
+        log.append(box);
+      }
+    } catch (e) { wait.textContent = "Failed: " + e.message; }
+    log.scrollTop = log.scrollHeight;
+  }
+  input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+  // The real widget, in an iframe. Not a second chat UI that imitates it:
+  // this is the same groundedops-widget.js a customer loads, reading the
+  // same /widget/config, so anything changed under Widget design shows up
+  // here without this page knowing the setting exists. `key` is bumped on
+  // reload so the iframe actually re-fetches rather than serving cache.
+  const { card: previewCard, frame } = widgetPreviewCard(true);
+
+  return [
+    el("h1", {}, "Test chat"),
+    el("p", { class: "lede" },
+      "The real widget, on a stand-in customer page. This is the same file "
+      + "customers load and it reads the same Widget design settings, so what "
+      + "you see here is what they get — there is no second chat UI to drift."),
+
+    previewCard,
+
+    // Kept as a separate tool, and labelled as one. It is NOT "what the
+    // customer sees" — it forces a specific provider/model, which the widget
+    // never does (the model is chosen server-side precisely so a browser
+    // cannot pick an expensive one). Useful for comparing models against the
+    // same question; misleading if read as the customer path.
+    el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-top:14px",
+                "data-sec": "Pipeline check", "data-tour": "test-chat" },
+      el("h3", {}, "Pipeline check"),
+      el("p", { class: "sec-hint" },
+        "Ask the pipeline directly and force a specific provider or model. "
+        + "For comparing answers between models — the widget always lets the "
+        + "server choose, so this path is not what a visitor gets."),
+      el("div", { class: "row", style: "margin:12px 0" },
+        el("div", {}, el("label", { class: "flabel" }, "Ask about"), sel),
+        el("div", {}, el("label", { class: "flabel" }, "Provider"), provSel),
+        el("div", {}, el("label", { class: "flabel" }, "Model"), modelIn)),
+      log,
+      el("div", { class: "row", style: "margin-top:12px" },
+        el("div", { style: "flex:1" }, input),
+        el("div", { style: "flex:0 0 auto" }, el("button", { class: "btn btn-primary", onclick: () => send() }, "Ask")))),
+  ];
+}
+
+/* ---------------- walkthrough ---------------- */
+/* Replaces the old modal guide. Rather than describing the console in prose,
+   this points at one real element at a time, on the page you are already on.
+   Steps are per view: the tour is a tour of *this* page, and render() ends it
+   on navigation (endTour() at the top) instead of trying to drive the user
+   across pages mid-step.
+
+   A step targets [data-tour="<ref>"]. Steps whose target is absent get dropped
+   when the tour starts, so an empty-state page that renders fewer cards gets a
+   correctly-numbered shorter tour rather than a step pointing at nothing. */
+const tourStepsByView = {
+  backup: [
+    { ref: "backup-export", title: "Take a copy of everything",
+      text: "Documents, the search index, FAQs, catalogue, widget design and enquiries \u2014 plus accounts and limits if you are root. Keeping the index means a restore does not have to re-ingest every document, which is the slow part. The file is a plain zip: you can open it and pull one thing out without this console." },
+    { ref: "backup-import", title: "Putting one back",
+      text: "Root only, and it overwrites. The file is inspected first so you can see what is in it before agreeing, and a snapshot of the current state is saved automatically before anything is written. Accounts are left alone unless you tick them \u2014 restoring an accounts file that does not contain your own account would sign you out with no way back in." },
+  ],
+  keys: [
+    { ref: "keys-list", title: "Provider API keys",
+      text: "Paste a key and save it — it works on the very next request, no restart. Once saved, a key is never shown again, only a masked form so you can tell which one is loaded. Only root accounts can see this page at all." },
+  ],
+  accounts: [
+    { ref: "accounts-new", title: "Add someone",
+      text: "Pick the level by what they actually need. “Support” is the working level — documents, answers, products, enquiries. “Basic” is the test chat and nothing else, for someone who wants to try the assistant without being trusted with what customers get shown." },
+    { ref: "accounts-list", title: "Everyone who can sign in",
+      text: "Changing a level takes effect on their next request, not whenever they next sign in. Disabling cuts their live sessions immediately and keeps the record — prefer it to deleting, which cannot be undone. The last root account is protected: it cannot be demoted, disabled or deleted, because nothing in this console could undo that." },
+  ],
+  overview: [
+    { ref: "ov-readout", title: "Where things stand",
+      text: "The four numbers that matter, read live. \u201cNeed filing\u201d and \u201cUnanswered\u201d turn amber when they want attention." },
+    { ref: "ov-next", title: "What to do next",
+      text: "Reads that same state and names the next useful thing, with a button straight to it. If you read one part of this console, read this one." },
+  ],
+  documents: [
+    { ref: "doc-add", title: "Add documents",
+      text: "Pick the product the document describes, then drop the file in. That link is what lets the widget find it \u2014 an unfiled document is searchable but never offered to a visitor." },
+    { ref: "doc-list", title: "Everything you have added",
+      text: "Grouped by product, the same way the widget sees them. Anything with no product is called out separately." },
+  ],
+  faq: [
+    { ref: "ans-draft", title: "Generate FAQs from a document",
+      text: "Reads a document and writes FAQs from it. Pick one document, or every document that has none yet. Nothing goes live until you have read it, and running it again never overwrites an answer you edited by hand." },
+    { ref: "ans-hand", title: "Write one yourself",
+      text: "For anything the documents do not cover. Hand-written answers are protected \u2014 drafting will never replace them." },
+    { ref: "ans-list", title: "Read and fix the wording",
+      text: "Pick a product to see its answers. Edit each one so it reads correctly on its own \u2014 someone may be shown it after asking a slightly different question." },
+  ],
+  gaps: [
+    { ref: "gaps-list", title: "What people asked and did not get",
+      text: "Real visitor questions the reviewed answers missed, grouped by product, most asked first. Working down this list is the most useful upkeep there is, and answering one here removes it automatically." },
+  ],
+  catalog: [
+    { ref: "cat-range", title: "Start with a range",
+      text: "A range is a family of products \u2014 Coin hoppers, Note validators. It is the first thing a visitor picks in the widget." },
+    { ref: "cat-product", title: "Then add products",
+      text: "Every product added here becomes something the widget can be asked about, and something a document can be filed against." },
+    { ref: "cat-list", title: "Your catalogue",
+      text: "Each range with its products, and how many documents back each one. A product with no documents cannot be answered about." },
+  ],
+  widget: [
+    { ref: "wd-preview", title: "Live preview",
+      text: "Exactly what a visitor sees. Every change on this page updates it as you type." },
+    { ref: "wd-branding", title: "Branding",
+      text: "Name the assistant, write its greeting, and pick the accent colour used through the widget." },
+    { ref: "wd-options", title: "Opening options",
+      text: "The buttons a visitor is offered first. If you offer \u201cTalk to sales\u201d or \u201cTalk to support\u201d, set up what that form asks for." },
+  ],
+  leads: [
+    { ref: "leads-list", title: "Enquiries arrive here and nowhere else",
+      text: "The sales and support forms visitors submit. Nothing is emailed out, so this console is the only place they land \u2014 worth building a habit of checking." },
+  ],
+  test: [
+    { ref: "test-widget", title: "The actual widget, not a copy of it",
+      text: "This is the same file customers load, on a stand-in page, reading the same Widget design settings. Change the branding, opening options or the sales/support forms and they change here too — hit Reload after saving. Submitting a form here creates a real enquiry, so you can check the whole path end to end." },
+    { ref: "test-chat", title: "Comparing models",
+      text: "A separate tool: asks the pipeline directly and lets you force a provider or model. The widget never does that — the server picks the model so a browser cannot choose an expensive one — so treat this as a bench test, not as what a visitor gets." },
+  ],
+};
+
+let tourOn = false, tourStep = 0, tourSteps = [];
+let tourPop = null, tourHi = null, tourKeys = null, tourReflow = null;
+
+const tourTarget = ref => document.querySelector('[data-tour="' + ref + '"]');
+
+function startTour() {
+  const live = (tourStepsByView[view] || []).filter(s => tourTarget(s.ref));
+  if (!live.length) return toast("No walkthrough for this page yet");
+  endTour();
+  tourSteps = live; tourOn = true; tourStep = 0;
+
+  tourKeys = e => {
+    if (!tourOn) return;
+    if (e.key === "Escape") endTour();
+    else if (e.key === "ArrowRight") tourGo(1);
+    else if (e.key === "ArrowLeft") tourGo(-1);
+  };
+  document.addEventListener("keydown", tourKeys);
+
+  // .main is the scroll container, not the window, so the popover has to
+  // follow its scroll to stay beside the element it points at.
+  tourReflow = () => { if (tourOn) placeTour(); };
+  window.addEventListener("resize", tourReflow);
+  const main = document.querySelector(".main");
+  if (main) main.addEventListener("scroll", tourReflow);
+
+  drawTour();
+}
+
+function endTour() {
+  tourOn = false; tourStep = 0; tourSteps = [];
+  if (tourPop) { tourPop.remove(); tourPop = null; }
+  if (tourHi) { tourHi.classList.remove("tour-hi"); tourHi = null; }
+  if (tourKeys) { document.removeEventListener("keydown", tourKeys); tourKeys = null; }
+  if (tourReflow) {
+    window.removeEventListener("resize", tourReflow);
+    const main = document.querySelector(".main");
+    if (main) main.removeEventListener("scroll", tourReflow);
+    tourReflow = null;
+  }
+}
+
+function tourGo(delta) {
+  if (!tourOn) return;
+  const n = tourStep + delta;
+  if (n < 0) return;
+  if (n >= tourSteps.length) return endTour();
+  tourStep = n; drawTour();
+}
+
+function drawTour() {
+  const s = tourSteps[tourStep];
+  if (!s) return endTour();
+
+  if (tourHi) tourHi.classList.remove("tour-hi");
+  tourHi = tourTarget(s.ref);
+  if (!tourHi) return endTour();
+  tourHi.classList.add("tour-hi");
+  tourHi.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  const last = tourStep === tourSteps.length - 1;
+  if (tourPop) tourPop.remove();
+  tourPop = el("div", { class: "tour-pop", role: "dialog", "aria-label": "Walkthrough" },
+    el("div", { class: "step mono" }, "Step " + (tourStep + 1) + " of " + tourSteps.length),
+    el("div", { class: "tt" }, s.title),
+    el("div", { class: "tx" }, s.text),
+    el("div", { class: "acts" },
+      el("button", { class: "btn btn-ghost", onclick: endTour }, "Skip"),
+      el("div", { style: "display:flex;gap:8px" },
+        el("button", { class: "btn btn-secondary", disabled: tourStep === 0 ? "true" : null,
+                       onclick: () => tourGo(-1) }, "Back"),
+        el("button", { class: "btn btn-primary", onclick: () => tourGo(1) }, last ? "Done" : "Next"))));
+  document.body.append(tourPop);
+  placeTour();
+}
+
+// Beside the highlighted element, per the design, flipped to its other side
+// when there is no room -- so the popover never lands on top of the thing it
+// is describing.
+function placeTour() {
+  if (!tourPop || !tourHi) return;
+  const r = tourHi.getBoundingClientRect();
+  const w = tourPop.offsetWidth || 300, h = tourPop.offsetHeight || 190;
+  const gap = 16, pad = 12;
+
+  let left = r.right + gap;
+  if (left + w + pad > window.innerWidth) {
+    left = r.left - gap - w;
+    if (left < pad) left = Math.max(pad, window.innerWidth - w - pad);
+  }
+  const top = Math.max(pad, Math.min(r.top, window.innerHeight - h - pad));
+
+  tourPop.style.left = Math.round(left) + "px";
+  tourPop.style.top = Math.round(top) + "px";
+}
+
+
+/* ---------------- boot ---------------- */
+(async () => {
+  // Re-establish who the held token belongs to rather than trusting the
+  // cached copy: a level change made by root while this tab sat open must
+  // take effect on reload, not whenever the token expires.
+  if (tok) {
+    try {
+      me = (await api("/admin/auth/me")).user;
+      sessionStorage.setItem("go_admin_me", JSON.stringify(me));
+      if (isStaff()) await refresh();
+    } catch (e) { tok = ""; me = null; }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
