@@ -480,6 +480,162 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
     return sorted(gaps, key=lambda g: (-int(g.get("times_asked", 1)), -g.get("ts", 0)))
 
 
+# ── grouping near-duplicate gaps ──────────────────────────────────────
+# _gap_key already folds together questions that differ only by case or
+# punctuation, so "Does it need WiFi?" and "does it need wifi" are one
+# entry. It cannot fold "does it need wifi" and "is an internet connection
+# required" — different words, same question — so the console showed those
+# as two unrelated items each asked once, understating real demand and
+# splitting the backlog.
+#
+# This groups at READ time and never rewrites the stored gaps. That matters:
+# clustering is a judgement call with a threshold, and a wrong merge that
+# has been written to disk cannot be undone. Grouped for display, the
+# underlying questions stay separate and a threshold change re-groups them.
+
+# Cosine similarity above which two questions are treated as the same ask.
+#
+# 0.90, chosen by sweeping the real gap log (82 questions) rather than by
+# intuition -- and intuition was wrong. 0.82 looked conservative but merged
+# five DIFFERENT MyCheckr questions ("what hardware does it include",
+# "how can it be mounted", "does it need an internet connection") into one
+# cluster at 0.84-0.90, because on a short question the product name
+# dominates the embedding and any two questions about the same product look
+# alike. At 0.92 the opposite starts: "list all protocols supported by nv9"
+# splits away from the protocol cluster it belongs to.
+#
+# At 0.90 every merge in the real log is correct -- six phrasings of "what
+# is the nv9 pinout", four of "what protocols does it support", two of
+# "what voltage", three of "does it have an ethernet port".
+#
+# Re-sweep this if the corpus changes character; questions from a different
+# product family may sit at different similarities.
+GAP_CLUSTER_THRESHOLD = float(os.getenv("GAP_CLUSTER_THRESHOLD", "0.90"))
+
+_gap_cache_lock = threading.Lock()
+_gap_cache_mtime = None
+_gap_cache_vecs = None
+_gap_cache_texts: list[str] = []
+
+
+def _gap_store_mtime() -> float:
+    try:
+        return os.path.getmtime(_GAP_PATH)
+    except OSError:
+        return 0.0
+
+
+def _gap_vectors(questions: list[str]):
+    """Embeddings for the gap questions, cached on the gap file's mtime -
+    same pattern as _build_cache above. Returns None if embeddings are
+    unavailable, and the caller falls back to lexical grouping."""
+    global _gap_cache_mtime, _gap_cache_vecs, _gap_cache_texts
+    if _semantic_available is False:
+        return None
+    try:
+        from embeddings import embed_texts
+        with _gap_cache_lock:
+            mt = _gap_store_mtime()
+            if (_gap_cache_vecs is None or _gap_cache_mtime != mt
+                    or _gap_cache_texts != questions):
+                _gap_cache_vecs = embed_texts(questions)
+                _gap_cache_texts = list(questions)
+                _gap_cache_mtime = mt
+            return _gap_cache_vecs
+    except Exception as e:
+        logger.warning(f"gap clustering: embeddings unavailable, "
+                       f"falling back to lexical ({e})")
+        return None
+
+
+def _lexical_similarity(a: str, b: str) -> float:
+    """Jaccard over content words. The fallback when embeddings are not
+    importable -- weaker than the semantic path (it cannot see that
+    "internet" and "wifi" are related) but it still catches rewordings that
+    share most of their words, which is better than exact-match only."""
+    stop = {"a", "an", "the", "is", "are", "do", "does", "did", "can", "could",
+            "will", "would", "it", "its", "to", "of", "for", "on", "in", "and",
+            "or", "with", "i", "my", "you", "your", "we", "have", "has", "be"}
+    wa = {w for w in _gap_key(a).split() if w not in stop}
+    wb = {w for w in _gap_key(b).split() if w not in stop}
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+def cluster_gaps(gaps: list[dict],
+                 threshold: float | None = None) -> list[dict]:
+    """Group near-duplicate questions into one entry each.
+
+    Returns a list of CLUSTERS in the same shape as a gap, plus:
+        variants     - the other questions folded in, most-asked first
+        times_asked  - the sum across the cluster, i.e. real demand
+        cluster_size - how many distinct questions it represents
+
+    Clustering is greedy and single-pass: gaps are taken most-asked first,
+    and each becomes a new cluster or joins the first existing one it is
+    close enough to. Greedy is the right shape here -- the alternative
+    (proper agglomerative clustering) buys accuracy that a 0.82 threshold
+    on short questions does not justify, and makes the result depend on
+    ordering in ways that are harder to explain to whoever reads the list.
+
+    Only gaps sharing a scope are ever compared. Two products can
+    legitimately be asked the same question and they are separate backlog
+    items -- merging them across products would hide which product is
+    underserved, which is what the page exists to show.
+    """
+    if not gaps:
+        return []
+    thr = GAP_CLUSTER_THRESHOLD if threshold is None else threshold
+
+    ordered = sorted(gaps, key=lambda g: (-int(g.get("times_asked", 1)),
+                                          -g.get("ts", 0)))
+    questions = [g.get("question", "") for g in ordered]
+    vecs = _gap_vectors(questions)
+
+    clusters: list[dict] = []
+    heads: list[int] = []          # index into `ordered` of each cluster head
+
+    for i, g in enumerate(ordered):
+        placed = False
+        for ci, hi in enumerate(heads):
+            if (g.get("scope") or "") != (ordered[hi].get("scope") or ""):
+                continue
+            if vecs is not None:
+                sim = float(vecs[i] @ vecs[hi])
+            else:
+                sim = _lexical_similarity(questions[i], questions[hi])
+            if sim >= thr:
+                c = clusters[ci]
+                c["variants"].append({
+                    "id": g.get("id"),
+                    "question": g.get("question"),
+                    "times_asked": int(g.get("times_asked", 1)),
+                    "ts": g.get("ts", 0),
+                    "similarity": round(sim, 3),
+                })
+                c["times_asked"] += int(g.get("times_asked", 1))
+                c["cluster_size"] += 1
+                # The cluster's timestamp is the most RECENT ask in it, so
+                # "sort by latest" means what a reader expects.
+                c["ts"] = max(c.get("ts", 0), g.get("ts", 0))
+                c["member_ids"].append(g.get("id"))
+                placed = True
+                break
+        if not placed:
+            head = dict(g)
+            head["variants"] = []
+            head["cluster_size"] = 1
+            head["member_ids"] = [g.get("id")]
+            head["times_asked"] = int(g.get("times_asked", 1))
+            clusters.append(head)
+            heads.append(i)
+
+    for c in clusters:
+        c["variants"].sort(key=lambda v: -v["times_asked"])
+    return sorted(clusters, key=lambda c: (-c["times_asked"], -c.get("ts", 0)))
+
+
 def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:
     """Mark any open gap matching `question` as resolved.
 

@@ -914,11 +914,49 @@
       : "I can take your details and our " + (kind === "sales" ? "sales" : "support") +
         " team will pick it up. A few details first.");
 
-    if (form.allow_summary && hasConversation()) {
+    // The chat-summary route is offered ONLY when the server will actually
+    // rewrite the conversation into a summary -- which needs an account
+    // (see /widget/draft_enquiry: guests get an assembled transcript, not a
+    // written one). Offering "use our chat so far" to a guest and then
+    // pasting the raw back-and-forth into the enquiry is worse than not
+    // offering it: it reads as a summary, and it is not one.
+    if (form.allow_summary && hasConversation() && canSummarise()) {
       askSummaryChoice(kind, form);
+    } else if (form.allow_summary && hasConversation()) {
+      askOwnWordsOrSkip(kind, form);
     } else {
       renderForm(kind, form, "", "none");
     }
+  }
+
+  /** Whether the server can turn this conversation into a real summary.
+   *  quotaState.ai_available is the same flag that governs whether a guest
+   *  reaches the model at all, so this tracks the operator's Access &
+   *  limits setting without the widget needing to know about it. */
+  function canSummarise() {
+    return !!(quotaState && quotaState.ai_available);
+  }
+
+  /** No AI summary available, but they still have a conversation behind
+   *  them. Offer to describe it or skip -- never to "attach the chat". */
+  function askOwnWordsOrSkip(kind, form) {
+    chips([
+      {
+        label: "Describe what you need",
+        onClick: function () {
+          heard("Describe what you need");
+          askOwnWords(kind, form);
+        },
+      },
+      {
+        label: "Skip \u2014 just my details",
+        style: "alt",
+        onClick: function () {
+          heard("Skip \u2014 just my details");
+          renderForm(kind, form, "", "none");
+        },
+      },
+    ], "In your own words?");
   }
 
   /** The option the request asked for: attach what was already discussed,
@@ -928,9 +966,9 @@
   function askSummaryChoice(kind, form) {
     chips([
       {
-        label: "Use our chat so far",
+        label: "Summarise our chat for them",
         onClick: function () {
-          heard("Use our chat so far");
+          heard("Summarise our chat for them");
           draftThen(kind, form, "chat", "");
         },
       },
@@ -1071,8 +1109,9 @@
     if (form.allow_summary && (enquiry || source !== "none")) {
       var elab = document.createElement("label");
       elab.className = "go-flab";
-      elab.textContent = byModel ? "Summary (written for you — edit it if it's wrong)"
-                                 : "Summary";
+      elab.textContent = byModel
+        ? "Summary (written for you \u2014 edit it if it's wrong)"
+        : source === "written" ? "What you told us" : "Your conversation";
       enqBox = document.createElement("textarea");
       enqBox.className = "go-fin";
       enqBox.rows = 5;

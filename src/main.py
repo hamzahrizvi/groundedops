@@ -1368,13 +1368,56 @@ def source_file(filename: str):
 
 @app.get("/faq/gaps")
 def faq_gaps(product: str | None = None,
+             sort: str = "demand",
+             group_similar: bool = True,
              x_admin_password: str | None = Header(default=None)):
     """Questions the FAQ could not answer — either nothing was close enough
-    to suggest, or the user rejected the suggestions (v12.0). Ranked by how
-    often each was asked: this is the FAQ backlog, prioritised by real
-    demand rather than guesswork."""
+    to suggest, or the user rejected the suggestions (v12.0). This is the
+    FAQ backlog, prioritised by real demand rather than guesswork.
+
+    `group_similar` folds rewordings of the same question into one entry
+    (faq_store.cluster_gaps) so `times_asked` reflects how many people
+    actually asked a thing, not how many distinct phrasings they used. Six
+    ways of asking "what is the nv9 pinout" is one backlog item, not six.
+    Grouping happens at read time and never rewrites the stored gaps, so
+    turning it off returns the raw list unchanged.
+
+    `sort` is what the console's control drives:
+        demand  - most-asked first (the default; this is a work queue)
+        latest  - most recently asked first, for "what is happening now"
+        product - grouped by scope, then by demand within each
+    """
     _require_admin(x_admin_password)
-    return {"gaps": faq_store.list_gaps(product), "stats": faq_store.gap_stats()}
+    # "__none__" is the console's way of asking for questions recorded with
+    # no product at all. list_gaps' scope_key filter cannot express that
+    # (an empty string means "no filter"), so it is handled here.
+    if product == "__none__":
+        gaps = [g for g in faq_store.list_gaps(None) if not g.get("scope")]
+    else:
+        gaps = faq_store.list_gaps(product)
+
+    if group_similar:
+        gaps = faq_store.cluster_gaps(gaps)
+
+    if sort == "latest":
+        gaps = sorted(gaps, key=lambda g: -(g.get("ts") or 0))
+    elif sort == "product":
+        gaps = sorted(gaps, key=lambda g: ((g.get("scope") or "\uffff"),
+                                           -int(g.get("times_asked", 1))))
+    # "demand" is the order list_gaps/cluster_gaps already return.
+
+    return {
+        "gaps": gaps,
+        "stats": faq_store.gap_stats(),
+        # What the filter control offers, derived from the gaps themselves
+        # rather than the catalogue: a scope that no longer exists as a
+        # product (nv9st, coin_hoppers) still has real questions filed under
+        # it, and hiding it from the filter would hide those questions.
+        "scopes": sorted({(g.get("scope") or "") for g in
+                          faq_store.list_gaps(None)}),
+        "grouped": bool(group_similar),
+        "sort": sort,
+    }
 
 
 @app.delete("/faq/gaps/{gap_id}")

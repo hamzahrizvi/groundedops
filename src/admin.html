@@ -1560,6 +1560,13 @@ function viewFaq() {
       (f.products || "").split(",").includes(scope) || f.category === scope);
   };
 
+  // On the first render the page has whatever refresh() loaded, which does
+  // not carry the scope list. Derive it from the gaps in hand so the filter
+  // is populated immediately rather than empty until something reloads.
+  if (!cache.gapScopes) {
+    cache.gapScopes = [...new Set(cache.gaps.map(g => g.scope || ""))].sort();
+  }
+
   const scopeSel = el("select", { class: "input", style: "width:auto",
                                   onchange: e => { scope = e.target.value; render2(); } },
     el("option", { value: "" }, "Choose a product\u2026"),
@@ -1807,6 +1814,10 @@ function viewFaq() {
 }
 
 /* ---------------- unanswered (gaps) ---------------- */
+// Filter/sort state for the customer-questions page. Module-level so it
+// survives render(), which rebuilds the whole view on every change.
+let gapFilter = { scope: "", sort: "demand", grouped: true };
+
 function viewGaps() {
   const prods = products();
   const nameFor = key => {
@@ -1829,6 +1840,11 @@ function viewGaps() {
     pendingAnswer = { question: g.question, product: g.scope || "", answer: answer || "" };
     view = "faq"; render();
   };
+
+  // A cluster stands for several stored gaps, so selecting it has to act on
+  // all of them -- dismissing the headline phrasing and silently leaving its
+  // five rewordings behind would put the item straight back on the list.
+  const idsFor = g => (g.member_ids && g.member_ids.length) ? g.member_ids : [g.id];
 
   const bulkAction = async (path, method, verb) => {
     if (!selected.size) return toast("Select at least one question first", true);
@@ -1865,7 +1881,9 @@ function viewGaps() {
       list.map(g => {
         const draftBox = el("div", {});
         const cb = el("input", { type: "checkbox", style: "margin-top:3px", onchange: e => {
-          if (e.target.checked) selected.add(g.id); else selected.delete(g.id);
+          idsFor(g).forEach(id => {
+            if (e.target.checked) selected.add(id); else selected.delete(id);
+          });
         } });
         const row = el("div", { class: "step" },
           cb,
@@ -1873,6 +1891,20 @@ function viewGaps() {
             (g.times_asked || 1) + "\u00d7"),
           el("div", { class: "step-b" },
             el("div", { style: "font-size:13.5px" }, g.question),
+            // The other phrasings this entry stands for. Shown, not hidden:
+            // the count only makes sense if you can see what was counted,
+            // and a wrong merge has to be visible to be reported.
+            (g.variants && g.variants.length)
+              ? el("details", { style: "margin-top:4px" },
+                  el("summary", { style: "cursor:pointer;font-size:12px;color:var(--color-accent-300)" },
+                    "also asked as " + g.variants.length + " other "
+                    + (g.variants.length === 1 ? "wording" : "wordings")),
+                  el("div", { style: "margin-top:4px" },
+                    g.variants.map(v => el("div", {
+                      style: "font-size:12.5px;padding:2px 0;color:color-mix(in srgb,var(--color-text) 65%,transparent)" },
+                      "\u2022 " + v.question
+                      + (v.times_asked > 1 ? "  (" + v.times_asked + "\u00d7)" : "")))))
+              : null,
             el("p", {}, (g.reason === "ungrounded_answer_suppressed"
                 ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
                 : "Nothing in the documents matched.")
@@ -1907,9 +1939,60 @@ function viewGaps() {
       }));
   });
 
+  // Reloads from the server rather than filtering in the browser: grouping
+  // needs the embedding model, and the scope list has to include keys that
+  // are no longer catalogue products but still have questions filed under
+  // them (nv9st, coin_hoppers) -- the browser cannot know those.
+  const reload = async () => {
+    try {
+      const qs = "?sort=" + encodeURIComponent(gapFilter.sort)
+               + "&group_similar=" + gapFilter.grouped
+               + (gapFilter.scope ? "&product=" + encodeURIComponent(gapFilter.scope) : "");
+      const r = await api("/faq/gaps" + qs);
+      cache.gaps = r.gaps || [];
+      cache.gapScopes = r.scopes || [];
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const scopeSel = el("select", { class: "input", style: "width:auto",
+    onchange: () => { gapFilter.scope = scopeSel.value; reload(); } },
+    el("option", { value: "" }, "All products"),
+    (cache.gapScopes || []).filter(Boolean).map(k =>
+      el("option", { value: k, selected: gapFilter.scope === k ? "true" : null },
+         nameFor(k) || (k + "  (not in the catalogue)"))),
+    (cache.gapScopes || []).indexOf("") >= 0
+      ? el("option", { value: "__none__",
+                       selected: gapFilter.scope === "__none__" ? "true" : null },
+          "No product selected")
+      : null);
+
+  const sortSel = el("select", { class: "input", style: "width:auto",
+    onchange: () => { gapFilter.sort = sortSel.value; reload(); } },
+    [["demand", "Most asked"], ["latest", "Most recent"], ["product", "By product"]]
+      .map(([v, t]) => el("option", { value: v,
+        selected: gapFilter.sort === v ? "true" : null }, t)));
+
+  const groupCb = el("input", { type: "checkbox",
+    onchange: () => { gapFilter.grouped = groupCb.checked; reload(); } });
+  groupCb.checked = gapFilter.grouped;
+
+  const controls = el("div", { class: "card elev-sm",
+      style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;"
+           + "align-items:center;gap:12px;flex-wrap:wrap",
+      "data-tour": "gaps-filter" },
+    el("label", { class: "flabel", style: "margin:0" }, "Product"), scopeSel,
+    el("label", { class: "flabel", style: "margin:0" }, "Sort"), sortSel,
+    el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
+      groupCb, "Group similar wordings"),
+    el("span", { style: "flex:1" }),
+    el("span", { class: "sec-hint", style: "margin:0" },
+      cache.gaps.length + (cache.gaps.length === 1 ? " entry" : " entries")));
+
   return [
     el("h1", {}, "FAQs from customers"),
-    el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover, most asked first. Working down this list is the single most useful piece of upkeep."),
+    el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover. Rewordings of the same question are counted together, so the number beside each one is how many people asked it \u2014 not how many ways they phrased it."),
+    controls,
     cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
       el("span", { class: "sec-hint", style: "margin:0" }, "Select questions above, then:"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps", "DELETE", "Dismissed") }, "Dismiss selected"),
