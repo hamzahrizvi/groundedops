@@ -92,6 +92,15 @@ before-*.zip
 before-*.gobk
 *.gobk
 
+# Session handoff notes. Untracked on purpose: they aggregate this
+# install's current weaknesses in one place -- what is unverified, what is
+# switched off, what has never been deployed -- and this repo is PUBLIC.
+# Useful to the next session, useful to nobody else. The convention already
+# applied to HANDOFF_console_ux.md; making it explicit so a handoff does
+# not get committed by accident.
+HANDOFF.md
+HANDOFF_*.md
+
 # sweep_grounding.py's saved run. Real questions + timings, no secrets,
 # but it is a measurement artifact, not source.
 sweep_grounding.json
