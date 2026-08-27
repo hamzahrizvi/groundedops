@@ -134,9 +134,15 @@ def _generate_with_fallback(role, prompt, **kw):
 
 
 # ---- stub the project modules main.py pulls in -------------------------
+# retag_product/delete_by_product/count_by_product return 0 here: the fake
+# collection has no product metadata to rewrite. The product-deletion tests
+# assert on the FAQ and catalogue halves, which are the REAL modules -- the
+# vector-store half is covered by db.py's own logic, not by this stub.
 stub("db", get_collection=lambda: _Collection(), reset_collection=lambda: None,
      get_stats=lambda: {"count": 0}, delete_source=lambda s: {"deleted": 0},
-     get_chunks_by_ids=lambda ids: [])
+     get_chunks_by_ids=lambda ids: [],
+     retag_product=lambda old, new: 0, delete_by_product=lambda k: 0,
+     count_by_product=lambda k: 0)
 stub("embeddings", _get_model=lambda: None)
 stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
 stub("structure", extract_structured_block=lambda r, query=None: None)

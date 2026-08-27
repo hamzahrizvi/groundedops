@@ -2017,6 +2017,88 @@ function shortDate(iso) {
   } catch (e) { return ""; }
 }
 
+/** Deleting a product, with its documents, answers and questions dealt
+ *  with explicitly.
+ *
+ *  Deleting only the catalogue row is what produced the orphaned `nv9st`
+ *  and `coin_hoppers` keys: real content behind a product that no longer
+ *  exists, which this console cannot show because it builds every list
+ *  FROM the catalogue. So the choice is put to the operator, with the
+ *  actual counts in front of them rather than an abstract warning. */
+async function deleteProductFlow(cat, prod) {
+  let counts;
+  try {
+    const r = await api("/admin/product/" + encodeURIComponent(prod.key) + "/contents");
+    counts = r.contents;
+  } catch (e) { return toast(e.message, true); }
+
+  const total = (counts.chunks || 0) + (counts.answers || 0) + (counts.questions || 0);
+  if (!total) {
+    if (!confirm("Delete " + prod.name + "?\n\nNothing is filed under it.")) return;
+    return runDelete(cat, prod, "?delete_content=true");
+  }
+
+  const bits = [];
+  if (counts.chunks) bits.push(counts.chunks + " document chunk" + (counts.chunks === 1 ? "" : "s"));
+  if (counts.answers) bits.push(counts.answers + " reviewed answer" + (counts.answers === 1 ? "" : "s"));
+  if (counts.questions) bits.push(counts.questions + " customer question" + (counts.questions === 1 ? "" : "s"));
+
+  // Somewhere for the content to go. The product being deleted is not an
+  // option, and neither is a key that is not a real product.
+  const others = products().filter(x => x.key !== prod.key);
+
+  const sel = el("select", { class: "input" },
+    others.map(x => el("option", { value: x.key }, x.categoryName + " \u203a " + x.name)));
+
+  const box = el("div", { class: "card elev-md",
+      style: "position:fixed;z-index:60;left:50%;top:50%;transform:translate(-50%,-50%);"
+           + "width:min(520px,92vw);padding:22px" },
+    el("h3", {}, "Delete " + prod.name + "?"),
+    el("p", { class: "sec-hint", style: "margin-top:6px" },
+      "This product holds " + bits.join(", ") + ". Choose what happens to it "
+      + "\u2014 it cannot be left without a product, or it disappears from this "
+      + "console while still taking up space."),
+    others.length
+      ? el("div", { style: "margin-top:14px" },
+          el("label", { class: "flabel" }, "Move it to"), sel)
+      : el("p", { class: "sec-hint", style: "color:var(--color-warn,#c98a00);margin-top:12px" },
+          "There is no other product to move it to. Create one first, or "
+          + "delete the content along with the product."),
+    el("div", { style: "display:flex;gap:8px;margin-top:18px;flex-wrap:wrap" },
+      others.length
+        ? el("button", { class: "btn btn-primary", onclick: () => {
+            close_();
+            runDelete(cat, prod, "?reassign_to=" + encodeURIComponent(sel.value));
+          } }, "Move it, then delete the product")
+        : null,
+      el("button", { class: "btn btn-secondary", onclick: () => {
+          if (!confirm("Permanently delete " + bits.join(", ") + "?\n\n"
+              + "The documents themselves stay on disk, but they will no longer "
+              + "be searchable until re-ingested.")) return;
+          close_();
+          runDelete(cat, prod, "?delete_content=true");
+        } }, "Delete it all"),
+      el("button", { class: "btn btn-ghost", onclick: () => close_() }, "Cancel")));
+
+  const veil = el("div", { style: "position:fixed;inset:0;z-index:59;"
+                                + "background:rgba(0,0,0,.42)", onclick: () => close_() });
+  function close_() { veil.remove(); box.remove(); }
+  document.body.append(veil, box);
+}
+
+async function runDelete(cat, prod, qs) {
+  try {
+    const r = await api("/admin/product/" + encodeURIComponent(cat.key)
+                        + "/" + encodeURIComponent(prod.key) + qs, { method: "DELETE" });
+    const a = r.affected || {};
+    toast(r.reassigned_to
+      ? "Moved " + ((a.chunks || 0) + (a.answers || 0) + (a.questions || 0))
+        + " item(s), then deleted " + prod.name
+      : "Deleted " + prod.name + " and its content");
+    await refresh(); render();
+  } catch (e) { toast(e.message, true); }
+}
+
 /* ---------------- widget design ---------------- */
 function viewWidget() {
   if (!cache.widget) {
@@ -2357,12 +2439,8 @@ function viewCatalog() {
             el("div", { class: "grow" }, el("b", {}, p.name),
               el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents")),
             el("span", { class: "tag tag-neutral mono" }, p.key),
-            el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
-              if (!confirm("Delete " + p.name + "?")) return;
-              try { await api("/admin/product/" + encodeURIComponent(c.key) + "/" + encodeURIComponent(p.key),
-                              { method: "DELETE" });
-                    toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
-            } }, "Delete")))
+            el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+                           onclick: () => deleteProductFlow(c, p) }, "Delete")))
         : el("p", { class: "sec-hint", style: "margin:10px 0 10px" }, "No products in this range yet.")))
     : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
         el("b", {}, "No ranges yet"),

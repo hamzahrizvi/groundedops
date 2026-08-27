@@ -367,6 +367,77 @@ def _gap_key(question: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (question or "").lower())).strip()
 
 
+def _read_gaps() -> list[dict]:
+    """The gap log, or an empty list. Six places opened this file by hand
+    with slightly different error handling; this is that, once."""
+    if not os.path.exists(_GAP_PATH):
+        return []
+    try:
+        with open(_GAP_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.warning(f"gap log read failed: {e}")
+        return []
+
+
+def _write_gaps(gaps: list[dict]) -> None:
+    with open(_GAP_PATH, "w", encoding="utf-8") as f:
+        json.dump(gaps, f, indent=2)
+
+
+# ── what is worth putting on the backlog ──────────────────────────────
+# The gap log is a work queue, so an entry has to be something someone
+# could actually write an answer to. It was recording everything a visitor
+# typed, which put "talk to sales", "no" and bare product names like
+# "nv9usb" on the list beside real questions -- noise that cannot be
+# curated away because it is not a question.
+#
+# Filtered here rather than at the call sites: record_gap has six callers
+# and a rule enforced in one place cannot be forgotten in a seventh.
+
+# Things a visitor says that are not questions. Intent phrases are matched
+# as a whole string, not a substring: "talk to sales" is noise, but "who do
+# I talk to about sales pricing" is a real question.
+_GAP_STOPWORDS = {
+    "yes", "no", "ok", "okay", "yep", "nope", "sure", "thanks", "thank you",
+    "ta", "cheers", "hi", "hello", "hey", "bye", "goodbye", "help", "test",
+    "talk to sales", "talk to support", "speak to sales", "speak to support",
+    "contact sales", "contact support", "sales", "support",
+    "ask a question", "ask about a product", "general question",
+}
+
+# A question usually announces itself: it asks something, or it starts with
+# an interrogative. Anything shorter than this that does neither is almost
+# always a fragment or a product name typed on its own.
+_INTERROGATIVE = {
+    "what", "whats", "how", "why", "when", "where", "which", "who", "whose",
+    "can", "could", "does", "do", "did", "is", "are", "was", "will", "would",
+    "should", "may", "might", "any", "list", "give", "show", "tell", "explain",
+}
+_MIN_WORDS_WITHOUT_MARKER = 4
+
+
+def is_curatable_question(question: str) -> bool:
+    """Whether this is worth adding to the FAQ backlog.
+
+    Deliberately permissive: a false negative loses one real question from
+    the queue, which is recoverable because the visitor will ask again; a
+    false positive puts permanent noise on a list someone has to work
+    through by hand.
+    """
+    q = (question or "").strip()
+    if not q:
+        return False
+    key = _gap_key(q)
+    if not key or key in _GAP_STOPWORDS:
+        return False
+    words = key.split()
+    if "?" in q or (words and words[0] in _INTERROGATIVE):
+        return True
+    return len(words) >= _MIN_WORDS_WITHOUT_MARKER
+
+
 def record_gap(question: str, scope_key: str | None,
                shown: list[str] | None = None, reason: str = "") -> None:
     """Record a question the FAQ could not answer.
@@ -387,6 +458,9 @@ def record_gap(question: str, scope_key: str | None,
     """
     q = (question or "").strip()
     if not q:
+        return
+    if not is_curatable_question(q):
+        logger.debug(f"gap not recorded (not a curatable question): {q[:60]!r}")
         return
     key = _gap_key(q)
     if not key:
@@ -634,6 +708,110 @@ def cluster_gaps(gaps: list[dict],
     for c in clusters:
         c["variants"].sort(key=lambda v: -v["times_asked"])
     return sorted(clusters, key=lambda c: (-c["times_asked"], -c.get("ts", 0)))
+
+
+# ── moving or removing everything filed under a product ───────────────
+# Deleting a product used to remove only its catalogue row, leaving its
+# documents, answers and questions tagged to a key that no longer existed.
+# That is how `nv9st` and `coin_hoppers` became keys with real content
+# behind them and no product in front -- content nobody could find through
+# the console, because the console builds its lists from the catalogue.
+
+def _entry_products(item: dict) -> list[str]:
+    raw = item.get("products") or item.get("product") or ""
+    return [k.strip() for k in str(raw).split(",") if k.strip()]
+
+
+def count_for_product(product_key: str) -> dict:
+    """What is filed under this product, so an operator can be told what a
+    deletion would affect before confirming it."""
+    if not product_key:
+        return {"answers": 0, "questions": 0}
+    with _lock:
+        items = _load()
+    answers = sum(1 for it in items if product_key in _entry_products(it))
+    gaps = [g for g in _read_gaps() if g.get("scope") == product_key]
+    return {"answers": answers, "questions": len(gaps)}
+
+
+def retag_product(old_key: str, new_key: str | None) -> dict:
+    """Move FAQ entries and gaps from one product to another, or untag them
+    when new_key is None. Returns what moved."""
+    if not old_key or old_key == new_key:
+        return {"answers": 0, "questions": 0}
+
+    moved_answers = 0
+    with _lock:
+        items = _load()
+        for it in items:
+            keys = _entry_products(it)
+            if old_key not in keys:
+                continue
+            keys = [k for k in keys if k != old_key]
+            if new_key and new_key not in keys:
+                keys.append(new_key)
+            it["products"] = ",".join(keys)
+            it.pop("product", None)
+            moved_answers += 1
+        if moved_answers:
+            _save(items)
+
+    moved_gaps = 0
+    with _lock:
+        gaps = _read_gaps()
+        for g in gaps:
+            if g.get("scope") == old_key:
+                g["scope"] = new_key
+                moved_gaps += 1
+        if moved_gaps:
+            _write_gaps(gaps)
+
+    logger.info(f"retag {old_key!r} -> {new_key!r}: {moved_answers} answer(s), "
+                f"{moved_gaps} question(s)")
+    return {"answers": moved_answers, "questions": moved_gaps}
+
+
+def delete_for_product(product_key: str) -> dict:
+    """Delete FAQ entries and gaps belonging ONLY to this product.
+
+    An answer shared with another product is retagged rather than deleted,
+    for the same reason as db.delete_by_product: removing a shared answer
+    because one of its products went away would take it from a product
+    nobody touched.
+    """
+    if not product_key:
+        return {"answers": 0, "questions": 0, "kept_shared": 0}
+
+    deleted_answers = kept = 0
+    with _lock:
+        items = _load()
+        out = []
+        for it in items:
+            keys = _entry_products(it)
+            if product_key not in keys:
+                out.append(it)
+                continue
+            remaining = [k for k in keys if k != product_key]
+            if remaining:
+                it["products"] = ",".join(remaining)
+                it.pop("product", None)
+                out.append(it)
+                kept += 1
+            else:
+                deleted_answers += 1
+        _save(out)
+
+    with _lock:
+        gaps = _read_gaps()
+        keep = [g for g in gaps if g.get("scope") != product_key]
+        deleted_gaps = len(gaps) - len(keep)
+        if deleted_gaps:
+            _write_gaps(keep)
+
+    logger.info(f"delete_for_product {product_key!r}: {deleted_answers} answer(s), "
+                f"{deleted_gaps} question(s); {kept} shared answer(s) kept")
+    return {"answers": deleted_answers, "questions": deleted_gaps,
+            "kept_shared": kept}
 
 
 def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:

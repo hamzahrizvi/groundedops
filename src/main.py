@@ -2591,11 +2591,76 @@ def admin_add_product(payload: ProductReq, x_admin_password: str | None = Header
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/admin/product/{product_key}/contents")
+def admin_product_contents(product_key: str,
+                           x_admin_password: str | None = Header(default=None)):
+    """What is filed under a product: chunks, answers, questions, sources.
+
+    The console calls this before offering to delete, so the confirmation
+    can say "this will affect 82 document chunks and 18 questions" rather
+    than asking someone to agree to an unknown quantity.
+    """
+    _require_admin(x_admin_password)
+    return {"product": product_key,
+            "contents": catalog_mod.product_contents(product_key)}
+
+
 @app.delete("/admin/product/{category_key}/{product_key}")
 def admin_delete_product(category_key: str, product_key: str,
+                         reassign_to: str | None = None,
+                         delete_content: bool = False,
                          x_admin_password: str | None = Header(default=None)):
+    """Delete a product AND deal with everything filed under it.
+
+    One of `reassign_to` or `delete_content` is required. Deleting only the
+    catalogue row is what produced the orphaned `nv9st` and `coin_hoppers`
+    keys: real documents and questions behind a product that no longer
+    exists, invisible to a console that builds its lists from the
+    catalogue. A 400 asking which you meant is better than either default.
+    """
     _require_admin(x_admin_password)
-    return catalog_mod.delete_product(category_key, product_key)
+    try:
+        return catalog_mod.delete_product(
+            category_key, product_key,
+            reassign_to=reassign_to, delete_content=delete_content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class RetagReq(BaseModel):
+    from_key: str
+    to_key: str | None = None
+
+
+@app.post("/admin/product/retag")
+def admin_product_retag(payload: RetagReq,
+                        x_admin_password: str | None = Header(default=None)):
+    """Move everything filed under one product key to another.
+
+    Exists for the keys that are already orphaned — content tagged to a
+    product that was deleted before deletion cascaded. `to_key` may name a
+    product that is not in the catalogue only if it is null (untag); moving
+    content ONTO a nonexistent key would just create the same problem
+    again.
+    """
+    me = _require_admin(x_admin_password)
+    if payload.to_key:
+        known = {p["key"] for c in catalog_mod.catalog().get("categories", [])
+                 for p in c.get("products", [])}
+        if payload.to_key not in known:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{payload.to_key}' is not a product in the catalogue. "
+                       f"Create it first, or pass to_key=null to untag.")
+    # Imported here rather than at module scope: this is a rare admin
+    # operation, and a top-level import ties main.py's import list to what
+    # every test stub of `db` happens to provide.
+    from db import retag_product as _retag
+    chunks = _retag(payload.from_key, payload.to_key)
+    faq = faq_store.retag_product(payload.from_key, payload.to_key)
+    logger.info(f"retag {payload.from_key!r} -> {payload.to_key!r} by {me['email']}")
+    return {"chunks": chunks, "answers": faq["answers"],
+            "questions": faq["questions"]}
 
 
 @app.post("/admin/attach_source")
