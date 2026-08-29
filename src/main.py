@@ -567,6 +567,46 @@ APP_STATE = {
 APP_STATE_LOCK = threading.Lock()
 
 
+def build_answer_prompt(hist: str, context: str, question: str) -> str:
+    """The answering prompt, shared by the normal and streaming paths.
+
+    Extracted from answer_query v16.2 so /query/stream cannot drift from
+    /query. The text is unchanged -- every instruction in it was added in
+    response to a specific observed failure, so it is moved verbatim
+    rather than tidied.
+    """
+    _hist, resolved_query = hist, question
+    return f"""{_hist}<context>
+{context}
+</context>
+
+Using ONLY the information inside <context> above, answer the question below.
+
+Write the answer as a product expert would state it to a customer.
+NEVER refer to the source material or to your own reasoning. Do not write "the context", "the document", "the provided information", "as indicated by", "as shown in", "according to the", or "the section". The reader cannot see the context and does not know what it is; sources are attached separately, so you never need to point at them.
+Answer directly and factually, then stop. No preamble, no meta-commentary.
+If the question asks whether something exists or is supported, begin with a plain Yes or No, then give the specifics.
+If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
+If the context does not contain enough information, respond with exactly:
+"I could not find that in the knowledge base."
+Do not state what the context does or does not contain in any other words.
+Do not use any knowledge from outside the context.
+When the answer is a set of values - a pinout, a connector, a specification
+table, a list of options - write it as a markdown list with one item per line
+("- 1: Vend 1"), or as a markdown table when there are two or more columns.
+Never run a numbered set of values together in a sentence; it is unreadable.
+If the context makes clear which product the answer applies to, name that
+product in the first sentence, so the reader is never left guessing which one
+they were told about.
+If the question refers to something you said earlier ("the pinout above", "that
+one", "which product was that for"), use <conversation> to work out what is
+being referred to — but every FACT in your answer must still come from
+<context>.
+
+Question: {resolved_query}
+Answer:"""
+
+
 class QueryRequest(BaseModel):
     q: str
     session_id: str | None = None
@@ -3270,35 +3310,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             _turns.append(f"You: {(_h.get('a') or '')[:400]}")
         _hist = "<conversation>\n" + "\n".join(_turns) + "\n</conversation>\n\n"
 
-    prompt = f"""{_hist}<context>
-{context}
-</context>
-
-Using ONLY the information inside <context> above, answer the question below.
-
-Write the answer as a product expert would state it to a customer.
-NEVER refer to the source material or to your own reasoning. Do not write "the context", "the document", "the provided information", "as indicated by", "as shown in", "according to the", or "the section". The reader cannot see the context and does not know what it is; sources are attached separately, so you never need to point at them.
-Answer directly and factually, then stop. No preamble, no meta-commentary.
-If the question asks whether something exists or is supported, begin with a plain Yes or No, then give the specifics.
-If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
-If the context does not contain enough information, respond with exactly:
-"I could not find that in the knowledge base."
-Do not state what the context does or does not contain in any other words.
-Do not use any knowledge from outside the context.
-When the answer is a set of values - a pinout, a connector, a specification
-table, a list of options - write it as a markdown list with one item per line
-("- 1: Vend 1"), or as a markdown table when there are two or more columns.
-Never run a numbered set of values together in a sentence; it is unreadable.
-If the context makes clear which product the answer applies to, name that
-product in the first sentence, so the reader is never left guessing which one
-they were told about.
-If the question refers to something you said earlier ("the pinout above", "that
-one", "which product was that for"), use <conversation> to work out what is
-being referred to — but every FACT in your answer must still come from
-<context>.
-
-Question: {resolved_query}
-Answer:"""
+    prompt = build_answer_prompt(_hist, context, resolved_query)
 
     # ── LLM ──────────────────────────────────
     t3 = time.time()
@@ -3636,3 +3648,145 @@ except Exception as _e:  # pragma: no cover
 @app.get("/", include_in_schema=False)
 def root():
     return RedirectResponse(url="/admin", status_code=307)
+
+
+# ── streaming answers (v16.2) ─────────────────────────────────────────────
+
+# The exact refusal string /query emits, reused so a streamed refusal is
+# indistinguishable from a normal one to the widget and to the logs.
+_CANNED_REFUSAL = "I could not find that in the knowledge base."
+
+
+class StreamQueryRequest(BaseModel):
+    q: str
+    session_id: str | None = None
+    product: str | None = None
+    category: str | None = None
+    deepseek_api_key: str | None = None
+
+
+@app.post("/query/stream")
+def query_stream(payload: StreamQueryRequest,
+                 x_admin_password: str | None = Header(default=None)):
+    """Server-sent events: the answer, verified sentence by sentence.
+
+    WHY THIS IS SEPARATE FROM /query, and deliberately narrower:
+
+    Streaming only helps the slow path. A curated FAQ answer returns in
+    ~0.1s, so there is nothing to stream and the FAQ/clarify flows are left
+    to /query untouched -- this endpoint always goes to the documents.
+
+    THE GUARANTEE IS PRESERVED. Text is released only in whole sentences
+    that have passed the same NLI entailment check /query applies to the
+    finished answer (grounding.score_unit is the exact computation
+    check_grounding runs per unit, so the two paths cannot drift apart in
+    strictness). The first unsupported sentence stops the stream and the
+    client is told to discard everything shown -- a half-answer left on
+    screen reads as a complete one, which is the failure mode this system
+    exists to prevent.
+
+    Events: meta, delta, refusal, done, error.
+    """
+    from fastapi.responses import StreamingResponse
+    import json as _json
+    from grounding import StreamGrounder
+    from llm import can_stream, stream_generate
+
+    def sse(event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {_json.dumps(data)}\n\n"
+
+    def run():
+        try:
+            scope = None
+            if payload.product:
+                scope = {"product": payload.product}
+            elif payload.category:
+                scope = {"category": payload.category}
+
+            results = retrieve_from_db(payload.q, top_k=RETRIEVE_K, scope=scope)
+            if EXCLUDED_SOURCES:
+                results = [r for r in results
+                           if not any(ex in (r.get("source") or "").lower()
+                                      for ex in EXCLUDED_SOURCES)]
+            results = rerank(payload.q, results, top_k=CONTEXT_K)
+
+            if not passes_retrieval_gate(results, RETRIEVAL_GATE_THRESHOLD):
+                yield sse("refusal", {"answer": _CANNED_REFUSAL,
+                                      "reason": "retrieval"})
+                yield sse("done", {"grounding_score": None})
+                return
+
+            _top = results[0].get("rerank_score", 0.0)
+            _cands = [_strip_breadcrumb(r) for r in results[:CONTEXT_K]]
+            top_chunks = [r for r in _cands
+                          if r.get("rerank_score", 0.0) >= _top * CONTEXT_FLOOR_RATIO]
+            if len(top_chunks) < CONTEXT_MIN:
+                top_chunks = _cands[:CONTEXT_MIN]
+
+            yield sse("meta", {
+                "sources": _build_sources(top_chunks),
+                "retrieval_score": round(_top, 4),
+            })
+
+            context = "\n\n".join(r["text"][:CHUNK_CHAR_CAP] for r in top_chunks)
+            prompt = build_answer_prompt("", context, payload.q)
+
+            role, (provider, model) = route_model(payload.q)
+            if not can_stream(provider):
+                # Honest fallback rather than a silent non-answer: generate
+                # normally, gate normally, emit it in one delta.
+                out = generate_with_fallback(
+                    role, prompt, deepseek_api_key=payload.deepseek_api_key,
+                    api_keys={"deepseek": payload.deepseek_api_key})
+                text = _strip_meta(_strip_preamble((out or {}).get("text", "").strip()))
+                ok, score = check_grounding(text, top_chunks,
+                                            threshold=GROUNDING_THRESHOLD)
+                if not text or not ok:
+                    yield sse("refusal", {"answer": _CANNED_REFUSAL,
+                                          "reason": "grounding",
+                                          "grounding_score": score})
+                else:
+                    yield sse("delta", {"text": text})
+                yield sse("done", {"grounding_score": score, "streamed": False})
+                return
+
+            grounder = StreamGrounder(top_chunks, GROUNDING_THRESHOLD)
+            saw_any = False
+            for delta, done in stream_generate(
+                    provider, prompt, model, api_keys={"deepseek": payload.deepseek_api_key}):
+                if done:
+                    break
+                released, ok = grounder.feed(delta)
+                if not ok:
+                    yield sse("refusal", {
+                        "answer": _CANNED_REFUSAL, "reason": "grounding",
+                        "grounding_score": round(grounder.min_score, 4),
+                        "discard": True})
+                    yield sse("done", {"grounding_score": round(grounder.min_score, 4)})
+                    return
+                if released:
+                    saw_any = True
+                    yield sse("delta", {"text": released})
+
+            released, ok = grounder.finish()
+            if not ok:
+                yield sse("refusal", {
+                    "answer": _CANNED_REFUSAL, "reason": "grounding",
+                    "grounding_score": round(grounder.min_score, 4),
+                    "discard": True})
+            elif released:
+                saw_any = True
+                yield sse("delta", {"text": released})
+
+            if not saw_any:
+                yield sse("refusal", {"answer": _CANNED_REFUSAL,
+                                      "reason": "empty"})
+            yield sse("done", {"grounding_score": round(grounder.min_score, 4),
+                               "streamed": True})
+        except Exception as e:
+            logger.exception("stream failed")
+            yield sse("error", {"message": str(e)[:200]})
+
+    return StreamingResponse(run(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})

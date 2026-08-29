@@ -457,3 +457,79 @@ def warmup_local_models(models: list[str] | None = None) -> dict[str, bool]:
             logger.warning(f"Warmup failed: {model}")
 
     return results
+
+
+# ── streaming ─────────────────────────────────────────────────────────────
+#
+# Added v16.2. The non-streaming path above stays the default and is what
+# every existing caller uses; this is an additive second path so nothing
+# already working changes shape.
+#
+# Only the OpenAI-compatible providers stream here (DeepSeek, OpenAI).
+# Anthropic uses a different event schema and Ollama a different one again;
+# rather than half-implement three protocols, stream_generate returns None
+# for anything it cannot do and the caller falls back to generate().
+
+_STREAMABLE = {"deepseek", "openai"}
+
+
+def can_stream(provider: str) -> bool:
+    return provider in _STREAMABLE
+
+
+def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
+    """Yield answer text incrementally as (delta, done) tuples.
+
+    Yields ("", True) once at the end. Raises nothing on a provider error --
+    it logs and stops, leaving the caller to decide whether a partial answer
+    is usable. The caller MUST treat an early stop as a failed generation
+    rather than a complete answer, because a truncated answer that reads as
+    finished is worse than a visible error.
+    """
+    keys = api_keys or {}
+    if provider == "deepseek":
+        url = DEEPSEEK_URL
+        key = keys.get("deepseek") or os.getenv("DEEPSEEK_API_KEY")
+    elif provider == "openai":
+        url = "https://api.openai.com/v1/chat/completions"
+        key = keys.get("openai") or os.getenv("OPENAI_API_KEY")
+    else:
+        logger.warning(f"stream_generate: provider {provider!r} cannot stream")
+        return
+    if not key:
+        logger.info(f"stream_generate: no key for {provider}")
+        return
+
+    import json as _json
+    try:
+        with requests.post(
+            url,
+            headers={"Authorization": f"Bearer {key}",
+                     "Content-Type": "application/json"},
+            json={"model": model,
+                  "messages": [{"role": "user", "content": prompt}],
+                  "temperature": 0,
+                  "stream": True},
+            stream=True,
+            timeout=timeout,
+        ) as res:
+            if res.status_code != 200:
+                logger.warning(f"{provider} stream HTTP {res.status_code}")
+                return
+            for raw in res.iter_lines(decode_unicode=True):
+                if not raw or not raw.startswith("data:"):
+                    continue
+                payload = raw[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    delta = (_json.loads(payload)["choices"][0]
+                             .get("delta", {}).get("content") or "")
+                except Exception:
+                    continue
+                if delta:
+                    yield delta, False
+        yield "", True
+    except Exception as e:
+        logger.warning(f"{provider} stream failed: {e}")
+        return
