@@ -33,6 +33,28 @@ Access, so it never has a public door at all.
 
 ---
 
+## 0. Disable the dev override — do this first
+
+`docker/docker-compose.override.yml` is a **development** file, and
+`docker compose` merges it automatically with no flag asked for. On a staging
+host it does three things you do not want:
+
+- bind-mounts `../src` over `/app`, so the container runs host source instead
+  of the image you built
+- forces `uvicorn --reload`
+- hard-sets `WIDGET_ALLOWED_ORIGINS: "*"`, **silently overriding** whatever
+  you set in `docker/.env` in step 1
+
+Rename it before anything else:
+
+```bash
+cd docker
+mv docker-compose.override.yml override.disabled
+```
+
+Everything below assumes this is done. If CORS stays wide open no matter what
+you put in `.env`, this is why.
+
 ## 1. Fill in the environment
 
 ```bash
@@ -74,14 +96,24 @@ rsync -av documents/ staging:/srv/groundedops/documents/
 Compose bind-mounts it read-write at `/data/documents`, so the originals live
 on the host and survive the container.
 
+**The path is not arbitrary.** The mount is written `../documents`, relative
+to the `docker/` directory — so it resolves to `<checkout>/documents`. The
+command above is correct only if the repository is checked out at
+`/srv/groundedops`. Put the checkout somewhere else and you must rsync to
+`<checkout>/documents/` instead, or the container starts with an empty
+document store and every answer refuses.
+
 ## 3. Create the root account — before exposing the host
 
 Do this on the box. It needs no token and no exposed setup endpoint:
 
 ```bash
-docker compose up -d backend
+docker compose up -d --build backend
 docker compose exec backend python manage_accounts.py create you@company.com --level root
 ```
+
+`--build` is needed on the first run, and after any code change — the image
+does not exist yet. Later steps can drop it.
 
 Then build the index from the documents:
 
@@ -122,20 +154,46 @@ Then, from an allowlisted address, open `/admin`, sign in, and:
 
 ## 5. Point WordPress at it
 
-The plugin is `src/widget/groundedops-widget.php`. Zip it as
-`groundedops-widget/groundedops-widget.php`, upload under
-**Plugins → Add New → Upload Plugin**, activate.
+Build the plugin from the console rather than by hand: **Widget design →
+Install on WordPress**. Confirm the address visitors' browsers will use, and
+press **Download plugin zip**. The backend address is baked in, so there is
+no example URL left to forget.
 
-In `wp-config.php`, above *"That's all, stop editing"*:
+Upload it under **Plugins → Add New → Upload Plugin**, and activate.
+
+That leaves one setting, in `wp-config.php`, above *"That's all, stop
+editing"*:
 
 ```php
-define('GROUNDEDOPS_API',    'https://staging.yourcompany.com');
 define('GROUNDEDOPS_SECRET', 'the same value as WIDGET_TOKEN_SECRET');
 ```
 
 `GROUNDEDOPS_SECRET` **must** equal `WIDGET_TOKEN_SECRET`. If they differ,
 every signed-in visitor is silently treated as a guest — which presents as
-"the AI does not work" rather than as an auth mismatch.
+"the AI does not work" rather than as an auth mismatch. If it is missing
+altogether the plugin says so in the WordPress admin area; it cannot detect
+a secret that is present but wrong.
+
+**Skipping that last step.** A root account can tick *Embed the signing
+secret* before downloading, which produces a zip that needs no `wp-config`
+edit at all — upload, activate, done. The trade is real: that zip then
+**is** a credential. Anyone holding it can mint tokens that pose as a
+signed-in customer, get full AI answers and spend the provider budget. The
+file is named `…-CONFIDENTIAL.zip` and carries the warning in its
+`INSTALL.txt` for that reason. Send it to the one person installing it, over
+something private. If it leaks, rotate `WIDGET_TOKEN_SECRET` on the server
+and re-export — every old token dies immediately.
+
+Support-level accounts can only export the safe form; embedding the secret
+is root-only.
+
+Re-export only when the backend address or the secret changes. Branding,
+opening buttons and the contact forms are fetched from the server at page
+load, so changing those never needs a new zip.
+
+The plugin source is still `src/widget/groundedops-widget.php` if you would
+rather zip it by hand — as `groundedops-widget/groundedops-widget.php`, with
+both constants set in `wp-config.php`.
 
 Branding is **not** configured in the plugin. It used to hardcode
 `data-agent-name="Support"` and `data-accent="#E4002B"`; those were removed
@@ -210,8 +268,13 @@ Known and deliberate, so nobody discovers them as surprises:
 - **Per-session caps are a cost guard, not a security boundary.** The session
   id comes from the visitor's browser. The daily per-visitor and per-IP
   ceilings are what bound a determined caller.
-- **The grounding threshold (0.55) has never been swept**, so the
-  false-refusal rate is unknown. Worth measuring with `eval.py` once a
-  provider key is live.
+- **The grounding threshold (0.55) has been swept** — it discards nothing.
+  Every answered eval case scores above 0.99, and the threshold would have to
+  reach 0.95 to cost a single one, so it is not the tuning risk it was
+  believed to be. Re-measure with `sweep_grounding.py` (not `eval.py`) if the
+  corpus changes substantially; `--report-only` reprints the last run without
+  spending API calls. One case is a real outlier at 0.0051 — "Does MyCheckr
+  require integration with other systems?" — and is a retrieval problem, not
+  a threshold problem.
 - **Nothing schedules a backup yet.** Step 6 is a manual command. Put it on
   cron on the host before this carries anything you would miss.
