@@ -71,6 +71,7 @@ import catalog as catalog_mod
 
 import faq_store
 import widget_config
+import widget_export
 import hashlib, glob
 import conversations as convo_store
 from memory import add_to_memory, clear_memory, get_history, get_last_query
@@ -1611,6 +1612,76 @@ def widget_save_config(payload: dict,
 def widget_reset_config(x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
     return widget_config.reset()
+
+
+class PluginExportReq(BaseModel):
+    api_url: str = ""
+    include_secret: bool = False
+
+
+@app.post("/admin/widget/export_plugin")
+def widget_export_plugin(payload: PluginExportReq,
+                         x_admin_password: str | None = Header(default=None)):
+    """Build a WordPress plugin zip with this deployment's settings baked in.
+
+    POST rather than GET for the same reason as the backup export: the
+    response can carry a secret, and a GET is what ends up in browser history
+    and proxy access logs.
+
+    Embedding the secret needs `root`, not `support`. Without it the zip is
+    ordinary code; with it the zip is a credential that mints signed-in
+    visitors, so it sits at the same level as the other secret-handling
+    endpoints rather than with the day-to-day console.
+    """
+    me = _require_admin(x_admin_password)
+    if payload.include_secret and not accounts.has_level(me, "root"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a root account can export a plugin with the signing "
+                   "secret embedded. Export without it and add the secret to "
+                   "wp-config.php instead.")
+    try:
+        data, manifest = widget_export.build_plugin_zip(
+            payload.api_url, include_secret=payload.include_secret,
+            exported_by=me.get("email", ""))
+    except widget_export.ExportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("widget plugin export failed")
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
+
+    from fastapi.responses import Response
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{manifest["filename"]}"',
+            # So the console can warn about what it just handed over without
+            # reopening the archive in the browser.
+            "X-Plugin-Sensitive": "1" if manifest["sensitive"] else "0",
+            "X-Plugin-Api-Url": manifest["api_url"],
+        })
+
+
+@app.get("/admin/widget/detect_url")
+def widget_detect_url(x_admin_password: str | None = Header(default=None)):
+    """Best-effort discovery of a local run.cmd/run.ps1 Cloudflare quick
+    tunnel, so the plugin-export card can offer that address instead of
+    whatever this console page happens to be viewed from -- the two are NOT
+    the same address when the console itself is being reached over the LAN
+    while the tunnel is what the WIDGET needs.
+
+    Same access level as the rest of Widget design (support+): this reveals
+    no secret, only a URL, so it does not need root the way embedding the
+    signing secret does.
+
+    Returns {"url": null, ...} rather than 404 when nothing is found, which
+    is the ordinary case for a real deployment -- the console treats that as
+    an expected, silent no-op, not an error.
+    """
+    _require_admin(x_admin_password)
+    return widget_export.detect_tunnel_url()
 
 
 class LeadReq(BaseModel):

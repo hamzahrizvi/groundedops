@@ -2288,6 +2288,117 @@ function viewWidget() {
           "Where this form's submissions belong. \u26a0 Not emailed yet \u2014 there is no mail server configured, so enquiries are collected under Enquiries in this console and this address is stored ready for when sending is wired up. It is never shown to visitors.")));
   }
 
+  /* Builds the WordPress plugin zip with this deployment's backend address
+     already in it, so nobody has to hand-edit wp-config.php and get the
+     secret subtly wrong. Branding is NOT in the zip -- it is fetched at page
+     load -- so a colour change never needs a re-export. */
+  const installCard = () => {
+    // The console is served by the backend, so its own origin is the address
+    // the widget should call. Wrong only when the widget API is published on
+    // a different hostname, which is why it stays editable -- and wrong in
+    // one very common local-dev case: a run.cmd Cloudflare quick tunnel
+    // makes the console reachable over the LAN while the address the WIDGET
+    // needs is the tunnel's, and those are two different hostnames. That is
+    // what detectUrl below is for.
+    const urlIn = el("input", { class: "input", value: location.origin,
+                                placeholder: "https://support.yourcompany.com" });
+    const detectHint = el("div", { style: "font-size:11.5px;margin-top:6px;"
+                                        + "color:color-mix(in srgb,var(--color-text) 50%,transparent)" });
+    const secretCb = el("input", { type: "checkbox", disabled: !isRoot() });
+    const dlBtn = el("button", { class: "btn btn-primary" }, "Download plugin zip");
+
+    const fmtAge = (s) => s == null ? "" :
+      s < 5 ? " — just started" :
+      s < 120 ? ` — started ${s}s ago` :
+      ` — started ${Math.round(s / 60)}m ago`;
+
+    // auto=true only overwrites the field while it still holds the plain
+    // page-origin default, so an admin who has already typed (or already
+    // been auto-filled once) is never silently overwritten a second time by
+    // a later poll or by re-opening this page.
+    const detectUrl = async (auto) => {
+      try {
+        const r = await api("/admin/widget/detect_url");
+        if (r && r.url) {
+          if (auto && urlIn.value === location.origin) urlIn.value = r.url;
+          detectHint.textContent =
+            `Detected a local run.cmd tunnel${fmtAge(r.age_seconds)} — `
+            + "this address is random and changes on every restart.";
+        } else if (!auto) {
+          detectHint.textContent = "No local tunnel detected — using this page's own address.";
+        }
+      } catch (e) { /* best-effort convenience only; never block the card on it */ }
+    };
+    detectUrl(true);
+    const redetectBtn = el("button", { class: "btn btn-ghost",
+                                       style: "font-size:11px;padding:1px 8px;margin-left:8px",
+                                       onclick: () => detectUrl(false) }, "Re-check");
+
+    dlBtn.onclick = async () => {
+      const withSecret = secretCb.checked;
+      if (withSecret && !confirm(
+          "This zip will contain the signing secret.\n\n"
+        + "Anyone who has the file can impersonate a signed-in customer and "
+        + "spend your API budget. Send it only to the person installing it, "
+        + "over something private \u2014 not a shared drive, not a mailing list.\n\n"
+        + "Continue?")) return;
+      dlBtn.disabled = true; dlBtn.textContent = "Building\u2026";
+      try {
+        // fetch, not a plain link: the endpoint needs an auth header, and an
+        // <a href> cannot carry one. Same reason as the backup download.
+        const r = await fetch(API + "/admin/widget/export_plugin", {
+          method: "POST",
+          headers: { "x-admin-password": tok, "Content-Type": "application/json" },
+          body: JSON.stringify({ api_url: urlIn.value, include_secret: withSecret }) });
+        if (!r.ok) {
+          let d2; try { d2 = (await r.json()).detail; } catch (e) { d2 = r.statusText; }
+          throw new Error(typeof d2 === "string" ? d2 : "Export failed (" + r.status + ")");
+        }
+        const blob = await r.blob();
+        const cd = r.headers.get("content-disposition") || "";
+        const m = cd.match(/filename="([^"]+)"/);
+        const url = URL.createObjectURL(blob);
+        const a = el("a", { href: url, download: m ? m[1] : "groundedops-widget.zip" });
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        toast(withSecret
+          ? "Downloaded \u2014 this file is a credential, share it carefully"
+          : "Downloaded \u2014 safe to pass on; the installer adds the secret");
+      } catch (e) { toast(e.message, true); }
+      finally { dlBtn.disabled = false; dlBtn.textContent = "Download plugin zip"; }
+    };
+
+    return el("div", { class: "card elev-sm",
+                       style: "padding:18px 20px;gap:0;margin-top:16px",
+                       "data-sec": "Install on WordPress" },
+      el("div", { class: "sec-title" }, "Install on WordPress"),
+      el("div", { class: "sec-hint" },
+        "Builds a plugin zip with this server's address already set. Upload it "
+        + "under Plugins \u2192 Add New \u2192 Upload Plugin, and activate. The "
+        + "branding above is fetched at page load, so changing it never needs a "
+        + "new zip \u2014 re-export only if this address or the secret changes."),
+      el("div", { style: "margin-top:10px" },
+        el("label", { class: "flabel" }, "Address visitors' browsers will use"),
+        urlIn,
+        el("div", { style: "display:flex;align-items:baseline" }, detectHint, redetectBtn)),
+      el("label", { style: "display:flex;gap:9px;align-items:flex-start;margin-top:12px;"
+                         + "cursor:" + (isRoot() ? "pointer" : "default")
+                         + ";opacity:" + (isRoot() ? "1" : ".55") },
+        secretCb,
+        el("div", {},
+          el("div", { style: "font-size:13px" }, "Embed the signing secret"),
+          el("div", { style: "font-size:12px;line-height:1.45;margin-top:2px;"
+                           + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+            isRoot()
+              ? "Zero-config: upload and activate, nothing to edit. But the zip "
+                + "then IS a credential \u2014 whoever holds it can pose as a "
+                + "signed-in customer. Leave it off and the installer adds one "
+                + "line to wp-config.php instead."
+              : "Only a root account can embed the secret. Exported without it, "
+                + "the installer adds one line to wp-config.php."))),
+      el("div", { style: "margin-top:14px" }, dlBtn));
+  };
+
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
     saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
     try {
@@ -2337,7 +2448,8 @@ function viewWidget() {
             try { await api("/admin/widget/config/reset", { method: "POST" });
                   toast("Reset to defaults"); await refresh(); render(); }
             catch (e) { toast(e.message, true); }
-          } }, "Reset to defaults"))),
+          } }, "Reset to defaults")),
+        installCard()),
       el("div", { style: "position:sticky;top:0", "data-tour": "wd-preview" }, preview)),
   ];
 }
