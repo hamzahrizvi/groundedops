@@ -19,6 +19,13 @@ except Exception as _exc:                                    # pragma: no cover
                    f"flattened by pypdf and may be unusable")
 
 
+# Sentinels marking an extracted table so the chunker can treat it as one
+# atomic unit. Deliberately ugly and unlikely to occur in a manual. Stripped
+# by chunking.strip_table_fences() before anything is indexed.
+TABLE_OPEN = "<<<GO_TABLE>>>"
+TABLE_CLOSE = "<<</GO_TABLE>>>"
+
+
 def _render_table(rows: list[list[str | None]] | None) -> str:
     """A table as text a language model can actually read.
 
@@ -102,7 +109,15 @@ def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
                 except Exception:
                     rendered = ""
                 if rendered.strip():
-                    parts.append(rendered.strip())
+                    # Fenced so the chunker can keep a table whole. A spec
+                    # table split mid-row loses the row: "Validator NV9S" in
+                    # one chunk and "1.05 Kg" in the next answers nothing,
+                    # and it is exactly this corpus's most-asked content.
+                    # chunking.strip_table_fences() removes these before the
+                    # text is stored, so the marker never reaches the index
+                    # or a prompt.
+                    parts.append(TABLE_OPEN + "\n" + rendered.strip()
+                                 + "\n" + TABLE_CLOSE)
 
             text = "\n\n".join(parts).strip()
             if text:

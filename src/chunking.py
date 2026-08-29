@@ -74,11 +74,94 @@ def _split_into_units(text: str) -> list[str]:
     return units
 
 
+TABLE_OPEN = "<<<GO_TABLE>>>"
+TABLE_CLOSE = "<<</GO_TABLE>>>"
+_TABLE_RE = re.compile(
+    re.escape(TABLE_OPEN) + r"\s*(.*?)\s*" + re.escape(TABLE_CLOSE), re.DOTALL)
+
+
+def strip_table_fences(text: str) -> str:
+    """Remove the table sentinels, leaving the table text itself.
+
+    Called on every chunk before it is stored, so the markers exist only
+    between extraction and chunking and never reach the index, BM25 term
+    counts, an embedding or a prompt.
+    """
+    return (text.replace(TABLE_OPEN + "\n", "").replace("\n" + TABLE_CLOSE, "")
+                .replace(TABLE_OPEN, "").replace(TABLE_CLOSE, ""))
+
+
+def _split_table_rows(body: str, size: int) -> list[str]:
+    """Split an oversized table at ROW boundaries, repeating its first row.
+
+    Only used when a single table exceeds the chunk size and therefore
+    cannot be kept whole. Repeating the first row costs a little duplication
+    and keeps each piece self-describing -- a bare run of "0.10 Kg" lines
+    with the header left behind in the previous chunk is not retrievable by
+    anything.
+    """
+    rows = [r for r in body.split("\n") if r.strip()]
+    if len(rows) <= 1:
+        return [body]
+
+    # _render_table emits "label: value" lines for two-column tables and
+    # pipe-separated lines for wider ones. Only the latter has a header row
+    # worth repeating -- a two-column spec list is all data, and copying its
+    # first line into every piece would duplicate a real measurement rather
+    # than caption anything.
+    has_header = " | " in rows[0]
+    header = rows[0] if has_header else None
+    rest = rows[1:] if has_header else rows
+
+    def start():
+        return [header] if header else []
+
+    out, cur = [], start()
+    for row in rest:
+        candidate = "\n".join(cur + [row])
+        if len(candidate) > size and len(cur) > (1 if header else 0):
+            out.append("\n".join(cur))
+            cur = start() + [row]
+        else:
+            cur.append(row)
+    if len(cur) > (1 if header else 0):
+        out.append("\n".join(cur))
+    return out or [body]
+
+
+def _extract_table_units(text: str, size: int) -> list[str]:
+    """Split `text` into units, where each fenced table is ONE unit.
+
+    Prose between tables is handed to the ordinary unit splitter; tables are
+    emitted whole (or row-split if oversized), so the packer below can never
+    cut through the middle of one.
+    """
+    units: list[str] = []
+    pos = 0
+    for m in _TABLE_RE.finditer(text):
+        before = text[pos:m.start()]
+        if before.strip():
+            units.extend(_split_into_units(before))
+        body = m.group(1).strip()
+        if body:
+            units.extend(_split_table_rows(body, size) if len(body) > size
+                         else [body])
+        pos = m.end()
+    tail = text[pos:]
+    if tail.strip():
+        units.extend(_split_into_units(tail))
+    return units
+
+
 def chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:
     if not text or not text.strip():
         return []
 
-    units = _split_into_units(text)
+    # Tables first, so a spec table is never cut across two chunks.
+    if TABLE_OPEN in text:
+        units = _extract_table_units(text, size)
+    else:
+        units = _split_into_units(text)
     if not units:
         return []
 

@@ -5,7 +5,7 @@ import tempfile
 
 from parsing import extract_pages
 import docstore
-from chunking import chunk_text
+from chunking import chunk_text, strip_table_fences
 
 # Chunk geometry, env-tunable so it can be swept against eval.py without code
 # edits. 500/50 (chunking.py's own defaults) was too small to hold a spec table
@@ -190,6 +190,9 @@ def ingest_file(content: bytes, filename: str,
             for c in _enrich_chunks(
                     chunk_text(ptext, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP),
                     filename):
+                # Sentinels are a chunker-internal signal only — strip before
+                # anything is embedded, BM25-tokenised or shown to a model.
+                c = strip_table_fences(c)
                 if c.strip():
                     texts.append(c)
                     pageno.append(pno)
