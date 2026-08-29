@@ -748,9 +748,19 @@
     renderScopeBar();
     lockComposer();
     say(cfg.welcome);
-    announceGuestLimits();
-    say(cfg.prompt);
-    askIntent();
+    // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
+    // quota fetch that can resolve AFTER these two synchronous calls would
+    // already have put askIntent()'s menu on screen. The visible effect was
+    // a "you must sign in" notice appearing to have the last word, stacked
+    // UNDER a menu that already offered other ways to continue -- the menu
+    // still worked, since nothing removes it, but reading top-to-bottom it
+    // looked like signing in was the only option left. Waiting for it keeps
+    // the order a visitor actually reads in sane: limits stated first, then
+    // the real menu right below.
+    announceGuestLimits().then(function () {
+      say(cfg.prompt);
+      askIntent();
+    });
     save();
   }
 
@@ -760,7 +770,8 @@
    *  typing a real question has wasted their time.
    *
    *  Quota may not have loaded yet on a cold open, so this resolves against
-   *  the fetch rather than whatever happens to be cached. */
+   *  the fetch rather than whatever happens to be cached. Returns a promise
+   *  either way so startFresh() can sequence what follows against it. */
   function announceGuestLimits() {
     var show = function (d) {
       if (!d || d.tier !== "anonymous" || d.ai_available) return;
@@ -774,8 +785,8 @@
         }], null);
       }
     };
-    if (quotaState) show(quotaState);
-    else refreshQuota().then(show);
+    if (quotaState) return Promise.resolve(show(quotaState));
+    return refreshQuota().then(show);
   }
 
   function askIntent() {
