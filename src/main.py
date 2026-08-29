@@ -2083,7 +2083,13 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
 
 @app.get("/admin/sources")
 def admin_sources(x_admin_password: str | None = Header(default=None)):
-    """List ingested sources with their current tags (for the re-assign UI)."""
+    """List ingested sources with their current tags (for the re-assign UI).
+
+    2026-08-29: `chunks` was missing entirely, so the console's "N sections"
+    line always read 0 -- not because anything was empty, but because this
+    endpoint never counted per-source chunks in the first place. Every
+    metadata row is walked anyway to find sources, so counting them is free.
+    """
     _require_admin(x_admin_password)
     from db import get_collection
     col = get_collection()
@@ -2093,7 +2099,8 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
         src = m.get("source", "unknown")
         if src not in seen:
             seen[src] = {"source": src, "category": m.get("category", ""),
-                         "product": m.get("product", "")}
+                         "product": m.get("product", ""), "chunks": 0}
+        seen[src]["chunks"] += 1
     return {"sources": list(seen.values())}
 
 

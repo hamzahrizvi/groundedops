@@ -184,6 +184,20 @@ check(client.get("/faq").json()["faq"] == [], "draft is NOT auto-saved to the FA
 r = client.post("/admin/faq/answer_gap", headers=ADMIN, json={"gap_id": "does-not-exist"})
 check(r.status_code == 404, f"answer_gap on an unknown id -> 404 ({r.status_code})")
 
+print("\n== /admin/sources reports a real chunk count per source ==")
+# 2026-08-29: this endpoint walked every metadata row to find distinct
+# sources but never counted them, so the console's "N sections" line always
+# read 0 regardless of what was actually indexed.
+_harness.seed_doc("alpha.pdf", ["chunk one", "chunk two", "chunk three"],
+                  product="widgetco")
+_harness.seed_doc("beta.pdf", ["only chunk"], product="widgetco")
+by_source = {s["source"]: s for s in
+            client.get("/admin/sources", headers=ADMIN).json()["sources"]}
+check(by_source.get("alpha.pdf", {}).get("chunks") == 3,
+      "a 3-chunk source reports chunks=3, not 0")
+check(by_source.get("beta.pdf", {}).get("chunks") == 1,
+      "a 1-chunk source reports chunks=1")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} FAILURE(S):")
