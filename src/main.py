@@ -3818,3 +3818,14 @@ def query_stream(payload: StreamQueryRequest,
     return StreamingResponse(run(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+@app.get("/stream-test", include_in_schema=False)
+def stream_test_page():
+    """Hand-testing page for /query/stream. Local/LAN only -- it inherits the
+    same surface guard as the rest of the non-widget app, so a proxied request
+    404s here exactly as it does for /admin. Not linked from anywhere."""
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "stream_test.html"),
+                        media_type="text/html")

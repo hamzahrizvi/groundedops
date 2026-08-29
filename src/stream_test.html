@@ -1,0 +1,158 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GroundedOps — streaming test</title>
+<style>
+  :root { --ink:#1C2422; --paper:#EFF2EF; --card:#fff; --line:#D7DCD8;
+          --accent:#2E6659; --rust:#A6491F; --slate:#43597A; }
+  @media (prefers-color-scheme:dark){ :root{ --ink:#E7ECE9; --paper:#121715;
+          --card:#191F1D; --line:#2A3330; --accent:#74BBA4; --rust:#E0925F;
+          --slate:#93AAD0; } }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font:15px/1.55 "IBM Plex Sans",-apple-system,"Segoe UI",sans-serif;
+       padding:32px 20px}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:#7C877F;font-size:13.5px;margin:0 0 20px}
+  .row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  select,input,button{font:inherit;padding:9px 12px;border-radius:8px;
+       border:1px solid var(--line);background:var(--card);color:var(--ink)}
+  input{flex:1;min-width:240px}
+  button{background:var(--accent);color:#fff;border:0;cursor:pointer;font-weight:600}
+  button:disabled{opacity:.5;cursor:default}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:16px 18px;margin-top:14px}
+  .answer{font-size:16px;min-height:28px;white-space:pre-wrap}
+  .cursor{display:inline-block;width:7px;height:17px;background:var(--accent);
+          vertical-align:-2px;animation:b .9s steps(2) infinite}
+  @keyframes b{50%{opacity:0}}
+  .meta{font:12px "IBM Plex Mono",monospace;color:#7C877F;margin-top:10px}
+  .ev{font:11.5px "IBM Plex Mono",monospace;padding:2px 0;color:#7C877F}
+  .ev b{color:var(--slate)}
+  .ev.refusal b{color:var(--rust)}
+  .ev.delta b{color:var(--accent)}
+  .refused{color:var(--rust);font-weight:600}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .chip{font-size:12.5px;padding:5px 10px;border:1px solid var(--line);
+        border-radius:99px;background:var(--card);cursor:pointer}
+</style>
+
+<div class="wrap">
+  <h1>Streaming test</h1>
+  <p class="sub">Answers stream in whole sentences. Each sentence is
+     fact-checked against the manuals <em>before</em> it appears — an
+     unsupported one stops the stream and clears what you've seen.</p>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="row">
+    <select id="prod">
+      <option value="nv9_spectral">NV9 Spectral</option>
+      <option value="nv9usb">NV9USB+</option>
+      <option value="mycheckr">MyCheckr</option>
+      <option value="mycheckr_mini">MyCheckr mini</option>
+      <option value="sku_scs">SMART Coin System</option>
+      <option value="">(no product scope)</option>
+    </select>
+    <input id="q" placeholder="Ask something from the manuals…"
+           value="How much does the NV9S validator weigh on its own?">
+    <button id="go">Ask</button>
+  </div>
+
+  <div class="card">
+    <div class="answer" id="ans"></div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div class="card">
+    <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+                color:#7C877F;margin-bottom:6px">Raw events</div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const SAMPLES = [
+  ["How much does the NV9S validator weigh on its own?", "nv9_spectral"],
+  ["What is the operating temperature range?", "nv9_spectral"],
+  ["What is the note float capacity on the NV11+?", "nv9usb"],
+  ["Does this support a 24 volt supply?", "nv9_spectral"],
+  ["What is the default WiFi password?", "nv9_spectral"],
+];
+const $ = id => document.getElementById(id);
+SAMPLES.forEach(([q, p]) => {
+  const c = document.createElement("button");
+  c.className = "chip"; c.textContent = q;
+  c.onclick = () => { $("q").value = q; $("prod").value = p; ask(); };
+  $("chips").appendChild(c);
+});
+
+function logEv(name, data) {
+  const d = document.createElement("div");
+  d.className = "ev " + name;
+  d.innerHTML = "<b>" + name + "</b> " +
+    JSON.stringify(data).replace(/"sources":\[.*?\],/, '"sources":[…],').slice(0, 220);
+  $("log").appendChild(d);
+}
+
+async function ask() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  $("go").disabled = true;
+  $("ans").innerHTML = '<span class="cursor"></span>';
+  $("meta").textContent = ""; $("log").innerHTML = "";
+  let shown = "", t0 = performance.now(), firstAt = null;
+
+  try {
+    const r = await fetch("/query/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q, product: $("prod").value || null })
+    });
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      // SSE frames are separated by a blank line.
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = (frame.match(/^event: (.+)$/m) || [])[1];
+        const raw = (frame.match(/^data: (.+)$/m) || [])[1];
+        if (!ev || !raw) continue;
+        const data = JSON.parse(raw);
+        logEv(ev, data);
+
+        if (ev === "delta") {
+          if (firstAt === null) firstAt = performance.now() - t0;
+          shown += data.text;
+          $("ans").innerHTML = shown + '<span class="cursor"></span>';
+        } else if (ev === "refusal") {
+          // discard:true means everything already shown was provisional and
+          // must be cleared -- that is the guarantee, visible.
+          if (data.discard) shown = "";
+          $("ans").innerHTML = '<span class="refused">' + data.answer + "</span>" +
+            (data.discard ? ' <span style="font-weight:400;color:#7C877F">' +
+             "(a sentence failed verification — partial text discarded)</span>" : "");
+        } else if (ev === "done") {
+          $("ans").innerHTML = shown || $("ans").innerHTML;
+          const total = Math.round(performance.now() - t0);
+          $("meta").textContent =
+            "grounding " + (data.grounding_score ?? "n/a") +
+            "  ·  first text " + (firstAt === null ? "never" : Math.round(firstAt) + "ms") +
+            "  ·  total " + total + "ms" +
+            "  ·  streamed " + (data.streamed ? "yes" : "no (provider fell back)");
+        } else if (ev === "error") {
+          $("ans").innerHTML = '<span class="refused">Error: ' + data.message + "</span>";
+        }
+      }
+    }
+  } catch (e) {
+    $("ans").innerHTML = '<span class="refused">Request failed: ' + e.message + "</span>";
+  }
+  $("go").disabled = false;
+}
+$("go").onclick = ask;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
+</script>
