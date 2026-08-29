@@ -5,8 +5,17 @@ Each ranking is computed INDEPENDENTLY over the full corpus, so a chunk
 that's a strong keyword match but a weak embedding match (or vice versa)
 can still surface — a chunk ranking #1 on BM25 but absent from dense
 results entirely is not invisible to the merge.
+
+CAVEAT, and it is a big one (2026-08-28): "not invisible" is not the same
+as "competitive". RRF rewards agreement, so a chunk only ONE ranking finds
+scores at most 1/(RRF_K+1) and routinely loses to chunks both rankings rank
+mediocrely. Surfacing it therefore depends on the candidate window being
+wide enough to carry it to the reranker — see RETRIEVAL_CANDIDATE_MARGIN.
+For years the window was exactly top_k and this docstring's promise did not
+hold in practice.
 """
 
+import os
 import threading
 from rank_bm25 import BM25Okapi
 
@@ -15,6 +24,28 @@ from db import get_collection
 from text_utils import rrf_merge
 
 RRF_K = 60
+
+# How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
+# pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
+# margin retrieve_from_db already computes. See the note at the cut itself.
+# DEFAULT 1.0 ON EVIDENCE, not on principle. Widening the window to 2.0 was
+# the obvious fix for the single-list problem below and it MEASURED BADLY:
+# over the 34-case suite forced through retrieval it lost two cases, gained
+# none, and dropped mean grounding 0.9934 -> 0.9539. Sixteen extra mediocre
+# candidates displace good ones when the reranker picks CONTEXT_K. Kept as a
+# knob so the experiment is repeatable, but do not raise it without
+# re-running that comparison.
+RETRIEVAL_CANDIDATE_MARGIN = float(os.getenv("RETRIEVAL_CANDIDATE_MARGIN", "1.0"))
+
+# Guarantee the top N of EACH individual ranking reaches the reranker, even
+# when RRF buried them for being found by only one retriever. 0 disables.
+#
+# This is the fix that measured well, because it is surgical. Across the 51
+# questions in both suites it rescued a candidate on 12 of them, at an
+# average of 0.45 extra candidates per query, and changed the final answer
+# on exactly ONE -- the query that was broken (rerank top 0.216 -> 0.993).
+# End to end: no regressions on either suite, grounding and latency flat.
+RETRIEVAL_ARM_GUARANTEE = int(os.getenv("RETRIEVAL_ARM_GUARANTEE", "3"))
 
 _bm25_lock = threading.Lock()
 _bm25_cache = {"count": -1, "index": None, "chunks": None}
@@ -155,7 +186,49 @@ def retrieve_from_db(
 
     # Keep a margin of candidates (top_k*2) so the downstream reranker has
     # room to reorder before the answering pipeline trims to top_k.
+    #
+    # 2026-08-28: the margin built here was thrown away again by the
+    # `len(results) >= top_k` break below, so the reranker only ever saw
+    # top_k. That is not academic. RRF rewards agreement between the two
+    # rankings: with RRF_K=60 a chunk found by ONE retriever caps at
+    # 1/61 = 0.0164, while anything both rank in their top ten scores
+    # ~0.028+. So a chunk ranked #1 by dense and missed entirely by BM25
+    # loses to chunks both rank ~7th -- and gets cut before the reranker,
+    # which is the one stage that would have recognised it.
+    #
+    # Measured on "How much does the NV9S validator weigh on its own?":
+    # the correct chunk (p25, "Validator NV9S: 1.05 Kg") was dense #1,
+    # BM25 absent, RRF rank 20 of 46 -- four places outside a 16 cut. Given
+    # to the reranker it scores 0.9928; the table-of-contents chunk that
+    # won instead scores 0.2165. This hits spec tables hardest, where dense
+    # understands weigh->Weights and BM25 sees only numbers.
+    #
+    # RETRIEVAL_CANDIDATE_MARGIN is the multiple of top_k handed to the
+    # reranker. 1 is the old behaviour, kept so the change can be A/B'd
+    # and reverted by config rather than by a deploy.
     ranked_ids = sorted(scores, key=scores.get, reverse=True)[:top_k * 2]
+    keep_n = max(top_k, int(round(top_k * RETRIEVAL_CANDIDATE_MARGIN)))
+
+    # Measured 2026-08-28: simply widening keep_n to 2x fixes the single-list
+    # case but costs two others and drops mean grounding 0.993 -> 0.954,
+    # because 16 extra mediocre candidates displace good ones when the
+    # reranker picks its CONTEXT_K. The targeted alternative: keep the RRF
+    # order as-is, but guarantee the top ARM_GUARANTEE entries from EACH
+    # ranking survive even if RRF buried them. That admits ~2-6 extra
+    # candidates rather than 16, which is the whole point -- it rescues the
+    # "one retriever is certain, the other has never heard of it" case
+    # without diluting the consensus ones. 0 disables.
+    if RETRIEVAL_ARM_GUARANTEE > 0:
+        head = ranked_ids[:keep_n]
+        seen = set(head)
+        rescued = []
+        for arm in (dense_ids, bm25_ids):
+            for cid in arm[:RETRIEVAL_ARM_GUARANTEE]:
+                if cid not in seen:
+                    seen.add(cid)
+                    rescued.append(cid)
+        ranked_ids = head + rescued
+        keep_n = len(ranked_ids)
 
     _, chunks = _get_bm25_index(collection)
     by_id = {c["id"]: c for c in chunks}
@@ -188,7 +261,7 @@ def retrieve_from_db(
             "category": entry.get("category", ""),
             "retrieval_score": round(scores[doc_id], 6),
         })
-        if len(results) >= top_k:
+        if len(results) >= keep_n:
             break
 
     return results
