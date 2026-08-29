@@ -23,7 +23,8 @@ unretrievable in the way that matters: "Validator NV9S" in one chunk and
 # unstubbed them fails with "cannot load module more than once".
 from chunking import (chunk_text, strip_table_fences,
                       TABLE_OPEN, TABLE_CLOSE, _split_table_rows)
-from grounding import StreamGrounder, score_unit, check_grounding
+from grounding import (StreamGrounder, score_unit, check_grounding,
+                       _premises, _table_row_sentence)
 from text_utils import split_units
 
 import _harness  # noqa: E402,F401  — see the note above; ordering is load-bearing
@@ -195,6 +196,36 @@ for answer in ["The NV11+ Note Float holds 30 notes.",
     check(abs(whole_score - round(per_unit, 4)) < 1e-3,
           f"same score both ways for {answer[:38]!r} "
           f"({whole_score} vs {round(per_unit, 4)})")
+
+
+print("\n== pipe table rows are rejoined with their header ==")
+# Shaped like the real manual, degree symbols and dual units included --
+# a simplified "+5C" scores differently, so testing against tidied-up data
+# would not tell us whether this works on the corpus we actually have.
+TBL = ("Environmental requirements.\n"
+       "Environment | Minimum | Maximum\n"
+       "Temperature | +5°C / 37.4°F | +50°C / 122°F\n"
+       "Humidity | 5% | 95% Non-condensing")
+ps = _premises([TBL])
+check(any(p.startswith("Temperature: Minimum +5°C / 37.4°F, "
+                       "Maximum +50°C / 122°F") for p in ps),
+      "a table row is re-emitted as a sentence naming its columns")
+check("Temperature | +5°C / 37.4°F | +50°C / 122°F" in ps,
+      "and the raw row is kept too, since scoring takes the max of both")
+
+check(_table_row_sentence("A | B | C", "x | 1 | 2") == "x: B 1, C 2",
+      "header cells become the column labels")
+check(_table_row_sentence("only-one-column", "x | 1") is None,
+      "a header with no columns yields no sentence")
+check(_table_row_sentence("A | B", "x | 1 | 2 | 3") is None,
+      "a row wider than its header yields no sentence rather than guessing")
+
+# The regression this guards: stranded rows scored ~0.05, so every
+# table-derived answer was refused until the header was reattached.
+_strand = score_unit("The operating temperature range is +5°C to +50°C.",
+                     [{"text": TBL}])
+check(_strand >= 0.55,
+      f"a table-derived fact now clears the gate (scored {_strand:.4f})")
 
 
 print("\n" + "=" * 52)

@@ -96,20 +96,70 @@ _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _MIN_PREMISE = 15
 
 
+def _table_row_sentence(header: str, row: str) -> str | None:
+    """Turn a pipe table row into a sentence, using its header for column names.
+
+    Splitting a table into lines strands each row from the header that says
+    what its columns MEAN. The NLI model was trained on English sentences,
+    not pipe syntax, so a stranded row is close to unreadable to it:
+
+        Environment | Minimum | Maximum          -> 0.0008
+        Temperature | +5°C / 37.4°F | +50°C ...  -> 0.0519   (the real answer)
+
+    Rejoining them as "Temperature: Minimum +5°C / 37.4°F, Maximum +50°C /
+    122°F" gives it something it can actually judge. Returns None when the
+    shapes do not line up, in which case the caller keeps the raw row.
+    """
+    hcells = [c.strip() for c in header.split("|")]
+    rcells = [c.strip() for c in row.split("|")]
+    if len(hcells) < 2 or len(rcells) < 2 or len(rcells) > len(hcells):
+        return None
+    label = rcells[0]
+    if not label:
+        return None
+    parts = [f"{hcells[i]} {rcells[i]}".strip()
+             for i in range(1, len(rcells)) if rcells[i]]
+    if not parts:
+        return None
+    return f"{label}: " + ", ".join(parts)
+
+
 def _premises(context_texts: list[str]) -> list[str]:
     """Context split into sentence-sized premises, deduped.
 
     Very short fragments are dropped: a table row like "NV22: 2.92 Kg" is
     kept (it is a real premise) but a stray "-" or a page number is noise
     that only costs a model call.
+
+    Pipe table rows are emitted BOTH raw and header-rejoined (see
+    _table_row_sentence). Both, not just the rejoined form, because scoring
+    takes the max over premises: the raw row is sometimes self-explanatory,
+    the rejoined one carries the column meaning, and whichever reads better
+    to the model wins. The cost is a few extra pairs through a small model.
     """
     seen, out = set(), []
+
+    def add(s):
+        s = (s or "").strip()
+        if len(s) >= _MIN_PREMISE and s not in seen:
+            seen.add(s)
+            out.append(s)
+
     for text in context_texts:
+        header = None
         for s in _SENT_SPLIT.split(text or ""):
             s = s.strip()
-            if len(s) >= _MIN_PREMISE and s not in seen:
-                seen.add(s)
-                out.append(s)
+            if not s:
+                continue
+            if "|" in s:
+                # First pipe line of a run is the header; the rest are rows.
+                if header is None:
+                    header = s
+                else:
+                    add(_table_row_sentence(header, s))
+            else:
+                header = None      # a prose line ends the table
+            add(s)
     return out
 
 

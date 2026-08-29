@@ -83,11 +83,20 @@ def _save(data: dict) -> None:
 
 
 def catalog() -> dict:
-    """Full tree for the picker UI: categories -> products (names/keys)."""
+    """Full tree for the picker UI: categories -> products (names/keys).
+
+    `aliases` is projected too: it is part of what identifies a product, not
+    decoration. main._products_named_in reads this view, so a short code the
+    manuals use ("NV9S" for the NV9 Spectral) is invisible to question
+    matching unless it survives the projection -- which is exactly how "how
+    much does the NV9S weigh" ended up asking the visitor to choose between
+    two products they had already been specific about.
+    """
     data = _load()
     return {"categories": [
         {"key": c["key"], "name": c["name"],
-         "products": [{"key": p["key"], "name": p["name"]}
+         "products": [{"key": p["key"], "name": p["name"],
+                       "aliases": p.get("aliases", [])}
                       for p in c.get("products", [])]}
         for c in data["categories"]
     ]}

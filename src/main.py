@@ -889,7 +889,33 @@ def _product_names() -> dict[str, str]:
     return out
 
 
-def _product_alias_tokens(key: str, name: str) -> set[str]:
+def _product_aliases() -> dict[str, list[str]]:
+    """product key -> extra names the catalogue says this product goes by.
+
+    Real products have short codes their manuals use and their key and
+    display name do not contain. "How much does the NV9S weigh?" named
+    exactly one product -- the NV9 Spectral, whose own manual introduces it
+    as "NV9 Spectral (NV9S)" -- but neither "nv9_spectral" nor "NV9 Spectral"
+    contains "nv9s", so nothing matched and the visitor was asked to choose
+    between two products when they had already been specific.
+    """
+    out: dict[str, list[str]] = {}
+    try:
+        import catalog
+        for c in (catalog.catalog().get("categories") or []):
+            for p in (c.get("products") or []):
+                key = p.get("key")
+                if key:
+                    raw = p.get("aliases") or []
+                    if isinstance(raw, str):
+                        raw = [raw]
+                    out[key] = [str(a) for a in raw if str(a).strip()]
+    except Exception as exc:
+        logger.warning(f"Could not read product aliases: {exc}")
+    return out
+
+
+def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:
     """Comparable forms of one product, for matching against question wording.
 
     Both the key and the display name are reduced to alphanumerics-only, so
@@ -898,7 +924,7 @@ def _product_alias_tokens(key: str, name: str) -> set[str]:
     understood, rather than being asked the same question again.
     """
     forms = set()
-    for raw in (key, name):
+    for raw in (key, name, *aliases):
         if not raw:
             continue
         flat = re.sub(r"[^a-z0-9]+", "", raw.lower())
@@ -923,20 +949,28 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
         return []
 
     names = _product_names()
-    hits: list[tuple[int, str]] = []
+    aliases = _product_aliases()
+    hits: list[tuple[int, str, str]] = []   # (len, product key, matched form)
     for key in candidates:
-        for form in _product_alias_tokens(key, names.get(key, "")):
+        for form in _product_alias_tokens(key, names.get(key, ""),
+                                          aliases.get(key, ())):
             if form and form in flat_q:
-                hits.append((len(form), key))
+                hits.append((len(form), key, form))
                 break
 
     if not hits:
         return []
-    # Keep only the longest-matching form(s): if one candidate matched on a
-    # strictly longer alias than another, the shorter one is a substring
-    # coincidence, not a second product the visitor named.
-    best = max(h[0] for h in hits)
-    return sorted({key for length, key in hits if length == best})
+    # Drop a hit only when its matched form is CONTAINED IN another hit's
+    # form -- that is the substring coincidence this guards against ("nv9"
+    # inside "nv9usb"). Comparing lengths instead, as this did, also
+    # discarded genuinely distinct short codes: "compare NV9S and NV9USB+"
+    # named two products, but "nv9s" (4) lost to "nv9usb" (6) and the
+    # question was silently scoped to one of them instead of asking.
+    forms = {key: form for _len, key, form in hits}
+    kept = {key for key, form in forms.items()
+            if not any(other != form and form in other
+                       for other in forms.values())}
+    return sorted(kept)
 
 
 def _build_sources(results: list[dict]) -> list[dict]:

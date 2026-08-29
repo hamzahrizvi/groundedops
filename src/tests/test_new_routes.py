@@ -199,6 +199,38 @@ check(by_source.get("beta.pdf", {}).get("chunks") == 1,
       "a 1-chunk source reports chunks=1")
 
 print("\n" + "=" * 52)
+print("\n== a product short code scopes the question instead of asking ==")
+# "How much does the NV9S weigh?" named exactly one product -- the NV9
+# Spectral, whose manual introduces it as "NV9 Spectral (NV9S)" -- but
+# neither the key nor the display name contains "nv9s", so the visitor was
+# asked to choose between two products they had already been specific about.
+import main as _m
+_cands = ["nv9_spectral", "nv9usb"]
+_names, _aliases = _m._product_names, _m._product_aliases
+_m._product_names = lambda: {"nv9_spectral": "NV9 Spectral", "nv9usb": "NV9USB+"}
+_m._product_aliases = lambda: {"nv9_spectral": ["NV9S", "NV22"],
+                               "nv9usb": ["NV11+"]}
+try:
+    check(_m._products_named_in("How much does the NV9S weigh?", _cands)
+          == ["nv9_spectral"], "an alias scopes the question to one product")
+    check(_m._products_named_in("note float capacity on the NV11+?", _cands)
+          == ["nv9usb"], "an alias on the other product works too")
+    check(_m._products_named_in("pinout for nv9?", _cands) == [],
+          "a genuinely ambiguous stem still asks")
+    # "nv9s" is NOT a substring of "nv9usb", so both really were named. The
+    # old longest-form rule dropped the shorter and silently picked one.
+    check(_m._products_named_in("compare NV9S and NV9USB+", _cands)
+          == ["nv9_spectral", "nv9usb"],
+          "two distinct short codes return BOTH, so the visitor is asked")
+    # The rule this replaced still has to hold: a bare stem inside a longer
+    # alias is a coincidence, not a second product.
+    _m._product_aliases = lambda: {"nv9_spectral": ["nv9"], "nv9usb": []}
+    check(_m._products_named_in("how much does the NV9USB+ weigh?", _cands)
+          == ["nv9usb"], "a stem contained in a longer alias is still dropped")
+finally:
+    _m._product_names, _m._product_aliases = _names, _aliases
+
+print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} FAILURE(S):")
     for f in fails:
