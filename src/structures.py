@@ -191,11 +191,13 @@ def _doc_title(source: str) -> str:
 
 
 def collect(kind: str, cited: list[tuple[str, int]], doc_dir: str,
-            limit: int = 6) -> list[dict]:
+            query: str = "", limit: int = 4) -> list[dict]:
     """Verbatim blocks of `kind` from the (source, page) pairs an answer cited.
 
     Deduped on title+page so the same table found via two chunks appears
-    once, and capped so a broad question cannot return the whole manual.
+    once, then narrowed to the ones `query` is actually about (see
+    _most_relevant) and capped, so a broad question cannot return the whole
+    manual.
     """
     fn = tables_on_page if kind == "table" else checklists_on_page
     seen, out = set(), []
@@ -217,8 +219,58 @@ def collect(kind: str, cited: list[tuple[str, int]], doc_dir: str,
             # it is usually a continuation. Falling back to the document's own
             # name keeps every option in a "which did you mean?" list
             # distinguishable, which is the whole point of collecting titles.
-            title = b.get("title") or _doc_title(source)
-            out.append({**b, "source": source, "title": title})
-            if len(out) >= limit:
-                return out
-    return out
+            out.append({**b, "source": source})
+    # Relevance is judged BEFORE the document-name fallback is applied. That
+    # fallback repeats the product name, which is usually in the question
+    # too, so scoring it made every untitled block outrank the correctly
+    # captioned one: "show me the operating temperature table for MyCheckr
+    # Mini" ranked three blocks titled "MyCheckr Mini User Manual-v5" above
+    # the table actually captioned "Operation".
+    picked = _most_relevant(query, out, limit)
+    for b in picked:
+        if not b.get("title"):
+            b["title"] = _doc_title(b.get("source", ""))
+    return picked
+
+
+_STOP = {"show", "me", "the", "a", "an", "of", "for", "on", "in", "is", "what",
+         "give", "list", "table", "tables", "checklist", "checklists", "full",
+         "and", "to", "please", "can", "you", "it", "its", "with", "all"}
+
+
+def _most_relevant(query: str, blocks: list[dict], limit: int) -> list[dict]:
+    """Keep the blocks the question is actually about.
+
+    Every table on a cited page used to come back -- asking for the
+    operating temperature table returned six, led by an unlabelled
+    current-draw table, because the page also carries supply currents and
+    casing temperatures. Scoring on the words the visitor used, against the
+    caption first and the cells second, puts the right one at the top and
+    drops the unrelated ones entirely.
+
+    If nothing matches, the original order is kept: a weak guess at
+    relevance is worse than the document's own order.
+    """
+    terms = {w for w in re.findall(r"[a-z0-9]+", (query or "").lower())
+             if len(w) > 2 and w not in _STOP}
+    if not terms or not blocks:
+        return blocks[:limit]
+
+    scored = []
+    for b in blocks:
+        title = (b.get("title") or "").lower()
+        body = (b.get("markdown") or "").lower()
+        # Caption weighted above cells: "Operation" naming the table beats a
+        # stray mention of the same word in some other table's rows.
+        score = sum(3 for t in terms if t in title) + \
+                sum(1 for t in terms if t in body)
+        scored.append((score, b))
+
+    best = max(s for s, _ in scored)
+    if best == 0:
+        return blocks[:limit]
+    keep = [b for s, b in scored if s == best]
+    if len(keep) < limit:
+        keep += [b for s, b in sorted(scored, key=lambda x: -x[0])
+                 if s != best and s > 0][:limit - len(keep)]
+    return keep[:limit]

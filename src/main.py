@@ -740,10 +740,42 @@ def _structures_for(query: str, chunks: list[dict]) -> list[dict]:
         if not cited:
             return []
         import docstore
-        return structures.collect(kind, cited, docstore.store_dir())
+        return structures.collect(kind, cited, docstore.store_dir(), query=query)
     except Exception as exc:
         logger.warning(f"structure extraction skipped: {exc}")
         return []
+
+
+
+def _render_structures(blocks: list[dict]) -> str:
+    """Verbatim blocks as the answer text itself.
+
+    Written into `answer` rather than left only in the `structures` field so
+    EVERY client shows them -- the widget, the console test chat and the
+    stream page all render markdown already, and none of them knew about a
+    new field. A feature only the API can see is not a feature.
+
+    With more than one block the titles are listed first, which is the
+    disambiguation a visitor needs when a page carries both "Operation" and
+    "Storage" temperatures, or a guide carries three different checklists.
+    """
+    if not blocks:
+        return ""
+    kind = blocks[0].get("kind", "table")
+    if len(blocks) == 1:
+        b = blocks[0]
+        title = b.get("title") or kind.title()
+        return (f"**{title}** (page {b.get('page')})\n\n"
+                + b.get("markdown", ""))
+
+    lines = [f"I found {len(blocks)} {kind}s. Here they are:", ""]
+    for b in blocks:
+        lines.append(f"**{b.get('title') or kind.title()}** "
+                     f"(page {b.get('page')})")
+        lines.append("")
+        lines.append(b.get("markdown", ""))
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 @app.get("/health")
@@ -3507,6 +3539,19 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # line of defense; a verdict it isn't allowed to enforce is theater.
     # After the escalation attempt above, if the best answer we have is
     # still ungrounded, refuse rather than serve it.
+    # A verbatim table or checklist needs no grounding verdict -- it IS the
+    # source, copied out of the PDF rather than written by a model. Refusing
+    # while holding the exact table the visitor asked to see is the worst of
+    # both: they get "I could not find that" under Sources listing the page it
+    # is printed on. So when the prose cannot be stood behind but the document
+    # itself can, serve the document.
+    _verbatim = _structures_for(f"{q} {resolved_query or ''}", top_chunks)
+    if (template_leak or generation_failed or flagged) and _verbatim:
+        answer = _render_structures(_verbatim)
+        flagged = False
+        template_leak = False
+        generation_failed = False
+
     if template_leak or generation_failed or flagged:
         # "No model was reachable" is not "the documents do not cover this",
         # but both produced the same refusal -- so an outage was indistinguish-
