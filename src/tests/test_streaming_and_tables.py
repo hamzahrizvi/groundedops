@@ -137,6 +137,53 @@ check(good and "thermal printer" in shown,
       "grounding decision and not a broken pipe")
 
 
+print("\n== a terminator at the end of the buffer is not a sentence end ==")
+# Found by the FIRST live call to /query/stream: it released
+# "The NV9S validator weighs 1." because "1." ended the buffer. Mid-stream
+# that is indistinguishable from the start of "1.05".
+NUM_CTX = [{"text": "Weights listed below without notes unless otherwise "
+                    "indicated.\nValidator NV9S: 1.05 Kg\nBezel: 0.10 Kg"}]
+g = StreamGrounder(NUM_CTX, 0.55)
+out = ""
+for delta in ["The NV9S validator weighs 1.", "05 Kg.", " The bezel is 0.", "10 Kg."]:
+    rel, good = g.feed(delta)
+    out += rel
+    check(good, f"stream survives delta {delta!r}")
+rel, good = g.finish()
+out += rel
+check("weighs 1.05 Kg" in out,
+      "the decimal survives being split across deltas")
+check("weighs 1." not in out.replace("weighs 1.05", ""),
+      "no fragment was released as if it were a finished sentence")
+
+check(g._boundary("The value is 1.") == -1,
+      "a trailing terminator alone is NOT a boundary")
+check(g._boundary("Done. Next") > 0,
+      "a terminator with following text IS a boundary")
+
+
+print("\n== the streaming gate matches /query, not something stricter ==")
+# StreamGrounder without the lexical rescue refused answers /query serves,
+# because NLI is unreliable on table text: "weighs 1.05 Kg on its own"
+# scores ~0.02 (the qualifier is an inference no single premise states).
+TABLE_CTX = [{"text": "Weights listed below without notes unless otherwise "
+                      "indicated.\nValidator NV9S: 1.05 Kg"}]
+QUALIFIED = "The NV9S validator weighs 1.05 Kg on its own. "
+
+g_strict = StreamGrounder(TABLE_CTX, 0.55)          # no lexical_ok
+_, strict_ok = g_strict.feed(QUALIFIED)
+
+g_parity = StreamGrounder(
+    TABLE_CTX, 0.55,
+    lexical_ok=lambda t: bool(__import__("re").search(r"1\.05", t)))
+released, parity_ok = g_parity.feed(QUALIFIED)
+
+check(not strict_ok,
+      "NLI alone refuses the qualified table fact (that is the known gap)")
+check(parity_ok and "1.05 Kg" in released,
+      "with the same lexical rescue /query uses, it is served instead")
+
+
 print("\n== streamed and non-streamed grounding agree ==")
 
 for answer in ["The NV11+ Note Float holds 30 notes.",

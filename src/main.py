@@ -515,8 +515,28 @@ def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
     context-supported AND the answer is short (<= 3 sentences, typical of
     factual lookups). Long synthesized answers must pass NLI proper.
     """
-    numbers = re.findall(r"\d+(?:\.\d+)?", answer)
+    # 2026-08-29: was r"\d+(?:\.\d+)?", which pulls the "9" out of "NV9S"
+    # and the "11" out of "NV11+". EVERY product in this catalogue has a
+    # digit in its name, so any answer that merely NAMED a product counted
+    # as "number-bearing", and those digits trivially appear somewhere in
+    # the context -- so the rescue fired for pure prose inventions:
+    #
+    #   "The NV9S has a built-in thermal printer."   -> numbers ['9'] -> SERVED
+    #
+    # which is precisely what the docstring above says must not happen
+    # ("prose answers with no numbers still live or die by NLI alone").
+    # Requiring the digit run not to be glued to a preceding alphanumeric
+    # keeps real measurements ("1.05 Kg", "12V DC", "0.25V") and drops
+    # product-code digits.
+    numbers = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?", answer)
     if not numbers:
+        return False
+    # A lone single digit is not evidence: "5" occurs somewhere in almost any
+    # chunk ("5%", "+5°C", "0.57"), so "the NV9S includes 5G connectivity"
+    # would rescue itself. Require at least one SPECIFIC number -- a decimal
+    # or two-or-more digits -- which is what a real spec lookup returns
+    # ("1.05 Kg", "12V", "30 notes", "0.25V").
+    if not any("." in n or len(n) >= 2 for n in numbers):
         return False
     if answer.count(".") > 3 or len(answer) > 400:
         return False
@@ -3750,7 +3770,9 @@ def query_stream(payload: StreamQueryRequest,
                 yield sse("done", {"grounding_score": score, "streamed": False})
                 return
 
-            grounder = StreamGrounder(top_chunks, GROUNDING_THRESHOLD)
+            grounder = StreamGrounder(
+                top_chunks, GROUNDING_THRESHOLD,
+                lexical_ok=lambda t: _lexically_supported(t, top_chunks))
             saw_any = False
             for delta, done in stream_generate(
                     provider, prompt, model, api_keys={"deepseek": payload.deepseek_api_key}):
@@ -3770,11 +3792,17 @@ def query_stream(payload: StreamQueryRequest,
 
             released, ok = grounder.finish()
             if not ok:
+                # Return, do not fall through: the `saw_any` check below would
+                # otherwise emit a SECOND refusal for the same request, and a
+                # client applying both would show the refusal twice.
                 yield sse("refusal", {
                     "answer": _CANNED_REFUSAL, "reason": "grounding",
                     "grounding_score": round(grounder.min_score, 4),
                     "discard": True})
-            elif released:
+                yield sse("done", {"grounding_score": round(grounder.min_score, 4),
+                                   "streamed": True})
+                return
+            if released:
                 saw_any = True
                 yield sse("delta", {"text": released})
 

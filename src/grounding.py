@@ -208,21 +208,43 @@ class StreamGrounder:
     guarantee against.
     """
 
-    def __init__(self, context_chunks, threshold):
+    def __init__(self, context_chunks, threshold, lexical_ok=None):
+        """lexical_ok(text) -> bool is /query's _lexically_supported, passed
+        in rather than imported so this module keeps no dependency on main.
+
+        It is NOT optional in spirit. /query rescues a failed NLI score when
+        the answer's numbers appear verbatim in the context, because NLI is
+        unreliable on shredded table text. Without the same rescue here the
+        streaming path is STRICTER than /query and refuses answers the normal
+        endpoint serves -- measured: "The NV9S validator weighs 1.05 Kg on its
+        own" scores 0.0179 (the qualifier "on its own" is an inference no
+        single premise states) and /query serves it on lexical support.
+        """
         self.context = context_chunks
         self.threshold = threshold
+        self.lexical_ok = lexical_ok
         self._buf = ""
         self.released = ""
         self.min_score = 1.0
         self.failed_unit = None
 
     def _boundary(self, text: str) -> int:
-        """Index just past the last sentence terminator, or -1."""
+        """Index just past the last COMPLETE sentence terminator, or -1.
+
+        A terminator at the very end of the buffer does NOT count. Mid-stream
+        the next delta has not arrived yet, so "1." is indistinguishable from
+        the start of "1.05" -- and the first live test of this endpoint duly
+        released "The NV9S validator weighs 1." as a finished sentence, then
+        refused the rest. Only a terminator with a following character in
+        hand is a real boundary; the trailing fragment is finish()'s job.
+        """
         best = -1
         for i, ch in enumerate(text):
             if ch in ".!?\n":
-                nxt = text[i + 1] if i + 1 < len(text) else " "
-                if ch == "\n" or nxt.isspace() or i + 1 == len(text):
+                if i + 1 >= len(text):
+                    break          # terminator is last: undecidable yet
+                nxt = text[i + 1]
+                if ch == "\n" or nxt.isspace():
                     best = i + 1
         return best
 
@@ -260,6 +282,14 @@ class StreamGrounder:
         for u in units:
             s = score_unit(u, self.context)
             self.min_score = min(self.min_score, s)
+            # Same second chance /query gives a failed NLI score, and for the
+            # same reason: NLI is unreliable against shredded table text, so a
+            # unit whose numbers all appear verbatim in the context is
+            # released. Keeping this in step with /query is the whole point --
+            # a streaming path that refuses what /query serves is a different
+            # product, not a faster one.
+            if s < self.threshold and self.lexical_ok and self.lexical_ok(u):
+                continue
             if s < self.threshold:
                 self.failed_unit = u
                 return "", False
