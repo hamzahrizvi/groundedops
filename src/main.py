@@ -715,6 +715,37 @@ def status():
         return dict(APP_STATE)
 
 
+
+def _structures_for(query: str, chunks: list[dict]) -> list[dict]:
+    """Verbatim tables/checklists for a question that asked to SEE one.
+
+    Returns [] unless the wording explicitly asks ("show me the table",
+    "installer checklist"), because attaching a wall of markdown to an
+    ordinary question would be worse than not having the feature. Reads only
+    the pages the answer already cited, from the document store.
+
+    Never raises: a missing PDF or an unparsable page degrades to the normal
+    prose answer rather than failing the request.
+    """
+    try:
+        import structures
+        kind = structures.wanted_kind(query)
+        if not kind:
+            return []
+        cited = []
+        for c in chunks or []:
+            src, page = c.get("source"), c.get("page")
+            if src and page and (src, page) not in cited:
+                cited.append((src, page))
+        if not cited:
+            return []
+        import docstore
+        return structures.collect(kind, cited, docstore.store_dir())
+    except Exception as exc:
+        logger.warning(f"structure extraction skipped: {exc}")
+        return []
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -3583,6 +3614,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             "total_time": round(total_time, 3),
         },
         "sources": sources,
+        # Verbatim tables / checklists, when the wording asked to SEE one.
+        # Read back out of the source PDF rather than reconstructed from the
+        # answer, so what the visitor gets is the document's own rows.
+        # Intent is read from BOTH the typed question and the condensed one:
+        # condensation rewrites for retrieval and can drop the "show me the
+        # table" framing, which is the only thing that signals the visitor
+        # wanted to SEE the table rather than be told a number.
+        "structures": _structures_for(f"{q} {resolved_query or ''}", top_chunks),
     }
 
 
