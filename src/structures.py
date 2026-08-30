@@ -274,3 +274,133 @@ def _most_relevant(query: str, blocks: list[dict], limit: int) -> list[dict]:
         keep += [b for s, b in sorted(scored, key=lambda x: -x[0])
                  if s != best and s > 0][:limit - len(keep)]
     return keep[:limit]
+
+
+# ── FAQ pairs from a document's own tables and checklists ────────────────
+
+def _row_labels(markdown: str, limit: int = 8) -> list[str]:
+    """The first cell of each data row -- what the table is ABOUT.
+
+    These are the content words a customer's question will contain
+    ("Temperature", "Humidity"), and FAQ matching embeds the QUESTION text
+    only, so a question built from the caption alone ("Operation") would
+    never match "what is the operating temperature". The labels are what
+    make these entries findable.
+    """
+    out = []
+    for line in markdown.split("\n")[2:]:          # skip header + separator
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[0] and cells[0] not in out:
+            out.append(cells[0])
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _header_labels(markdown: str, limit: int = 6) -> list[str]:
+    head = markdown.split("\n", 1)[0]
+    return [c.strip() for c in head.strip().strip("|").split("|") if c.strip()][:limit]
+
+
+# Captions that are document furniture, never a customer question.
+_SKIP_CAPTION = re.compile(
+    r"^(change history|contents?|table of contents|revision|index|"
+    r"disclaimer|copyright|document revision)\b", re.I)
+
+
+def _is_useful_table(caption: str, markdown: str, captioned: bool) -> bool:
+    """Whether a table is worth becoming an FAQ entry.
+
+    A PDF's table detector finds real spec tables AND page furniture: the
+    change-history block, the contents listing, and the invisible grids some
+    layouts use for positioning. Left unfiltered those produced entries like
+    "MyCheckr Mini User Manual-v5: 3, 4, 5" -- a question nobody will ask,
+    answered by a table of page numbers, cluttering the FAQ a human then has
+    to weed.
+
+    Two signals do most of the work: a real spec table has at least a couple
+    of data rows, and its ROW LABELS are words ("Temperature", "Humidity"),
+    not numbers.
+    """
+    if _SKIP_CAPTION.search(caption or ""):
+        return False
+    rows = _row_labels(markdown, limit=12)
+    if len(rows) < 2:
+        return False
+    worded = sum(1 for r in rows if re.search(r"[A-Za-z]{3}", r))
+    if worded < max(2, len(rows) // 2):
+        return False
+    # An uncaptioned table whose labels are only a word or two long is
+    # usually a layout grid; a real one either has a caption or has content.
+    if not captioned and sum(len(r) for r in rows) < 40:
+        return False
+    return True
+
+
+def faq_pairs_for_document(path: str, source: str,
+                           max_pairs: int = 40) -> list[dict]:
+    """Every table and checklist in a document, as ready-made FAQ entries.
+
+    The point is to answer these from the FAQ store rather than the model:
+    the answer IS the document's own table, so it is exact, instant, costs
+    no tokens, and cannot be hallucinated or refused by the grounding gate.
+
+    Questions carry the caption AND the row/column labels because FAQ
+    matching embeds question text only -- "Operation" alone is unfindable,
+    "Operation: Temperature, Humidity" matches the question a customer
+    actually types.
+    """
+    if pdfplumber is None or not os.path.exists(path):
+        return []
+    try:
+        with pdfplumber.open(path) as pdf:
+            n_pages = len(pdf.pages)
+    except Exception as exc:
+        logger.warning(f"FAQ pairs: cannot open {path}: {exc}")
+        return []
+
+    pairs, seen = [], set()
+    for pno in range(1, n_pages + 1):
+        for b in tables_on_page(path, pno):
+            md = b.get("markdown", "")
+            rows = md.count("\n") - 1
+            if rows < 1:
+                continue
+            checklist = _is_checklist_table(md)
+            captioned = bool((b.get("title") or "").strip())
+            caption = (b.get("title") or "").strip() or _doc_title(source)
+            # Checklists are always worth keeping -- the tick column is
+            # already strong evidence of intent. Ordinary tables have to
+            # earn it.
+            if not checklist and not _is_useful_table(caption, md, captioned):
+                continue
+
+            labels = _row_labels(md) or _header_labels(md)
+            label_txt = ", ".join(labels[:6])
+            # A caption is sometimes a sentence of lead-in prose rather than
+            # a name ("The Page Help (?) icon in the top-right corner
+            # provides detailed"). As a heading it is useless and as a
+            # question it reads as nonsense, so fall back to the row labels,
+            # which are the part a customer would actually type.
+            if len(caption) > 60 or caption.count(" ") > 8:
+                caption = _doc_title(source) if not label_txt else ""
+            head = f"{caption} checklist".strip() if checklist else caption
+            question = f"{head}: {label_txt}".strip(": ") if label_txt else head
+            question = " ".join(question.split())[:220]
+            if not question:
+                continue
+            key = question.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            kind = "checklist" if checklist else "table"
+            pairs.append({
+                "question": question,
+                "answer": f"**{caption}** (page {pno})\n\n{md}",
+                "verbatim": kind,
+                "page": pno,
+            })
+            if len(pairs) >= max_pairs:
+                return pairs
+    return pairs

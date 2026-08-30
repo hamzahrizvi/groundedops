@@ -2152,12 +2152,37 @@ def admin_faq_autogenerate(payload: FaqAutoReq,
             detail="The model did not return usable question/answer pairs. "
                    "Try again, or switch to Online mode for drafting.")
 
+    # Every table and checklist in the document goes in as a VERBATIM entry
+    # alongside the drafted ones. These are the answers worth having in the
+    # FAQ most: served from the store they are exact, instant, cost no
+    # tokens, and cannot be paraphrased wrongly, refused by the grounding
+    # gate, or hallucinated -- the answer IS the document's own table.
+    verbatim = _verbatim_faq_pairs(payload.source)
+
     merged = faq_store.merge_questions(payload.source,
                                        payload.product or payload.category,
-                                       pairs[:n], category=payload.category)
+                                       verbatim + pairs[:n],
+                                       category=payload.category)
     merged["source"] = payload.source
     merged["model"] = (out or {}).get("model")
+    merged["verbatim_added"] = len(verbatim)
     return merged
+
+
+def _verbatim_faq_pairs(source: str) -> list[dict]:
+    """Tables and checklists from one document, as FAQ pairs. [] on any
+    problem -- a document we cannot re-read should not fail FAQ drafting."""
+    try:
+        import docstore
+        import structures
+        path = os.path.join(docstore.store_dir(), source)
+        if not os.path.exists(path):
+            return []
+        return [{"question": p["question"], "answer": p["answer"]}
+                for p in structures.faq_pairs_for_document(path, source)]
+    except Exception as exc:
+        logger.warning(f"verbatim FAQ pairs skipped for {source}: {exc}")
+        return []
 
 
 @app.post("/admin/reassign_source")
