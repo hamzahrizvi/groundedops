@@ -716,7 +716,8 @@ def status():
 
 
 
-def _structures_for(query: str, chunks: list[dict]) -> list[dict]:
+def _structures_for(query: str, chunks: list[dict],
+                    force_kind: str | None = None) -> list[dict]:
     """Verbatim tables/checklists for a question that asked to SEE one.
 
     Returns [] unless the wording explicitly asks ("show me the table",
@@ -724,12 +725,20 @@ def _structures_for(query: str, chunks: list[dict]) -> list[dict]:
     ordinary question would be worse than not having the feature. Reads only
     the pages the answer already cited, from the document store.
 
+    `force_kind` overrides that gate, for the one case where it should:
+    we are about to REFUSE. A spec question whose answer is a table with
+    several rows ("what is the weight?" -> four cashbox configurations) is
+    routinely refused by the model as ambiguous even with the right table
+    at rank 1 in its context. Showing the table beats "I could not find
+    that in the knowledge base" printed above a Sources line naming the
+    page it is on.
+
     Never raises: a missing PDF or an unparsable page degrades to the normal
     prose answer rather than failing the request.
     """
     try:
         import structures
-        kind = structures.wanted_kind(query)
+        kind = structures.wanted_kind(query) or force_kind
         if not kind:
             return []
         cited = []
@@ -3545,8 +3554,24 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # both: they get "I could not find that" under Sources listing the page it
     # is printed on. So when the prose cannot be stood behind but the document
     # itself can, serve the document.
-    _verbatim = _structures_for(f"{q} {resolved_query or ''}", top_chunks)
-    if (template_leak or generation_failed or flagged) and _verbatim:
+    # A model-emitted refusal counts too, not just a flagged one. The model
+    # follows its instruction to refuse when the context is "not enough",
+    # and a multi-row spec table reads as not enough -- so "what is the
+    # weight?" was refused with the weights table sitting at rank 1 in its
+    # own context. That path sets no flag, so keying only on `flagged` missed
+    # the most common case this feature exists for.
+    _model_refused = False
+    try:
+        from text_utils import is_refusal as _isref
+        _model_refused = bool(_isref(answer))
+    except Exception:
+        pass
+
+    _verbatim = _structures_for(
+        f"{q} {resolved_query or ''}", top_chunks,
+        force_kind="table" if (_model_refused or flagged) else None)
+    if (template_leak or generation_failed or flagged or _model_refused) \
+            and _verbatim:
         answer = _render_structures(_verbatim)
         flagged = False
         template_leak = False

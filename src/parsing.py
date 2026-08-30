@@ -191,6 +191,17 @@ def _strip_repeated_lines(pages: list[tuple[int, str]],
     counts: Counter = Counter()
     for _, text in pages:
         for line in {ln.strip() for ln in text.splitlines() if ln.strip()}:
+            # Structural markers are on their own line and repeat on every
+            # page that has a table, so they looked exactly like a running
+            # header and were deleted -- which silently turned OFF
+            # table-aware chunking for any document whose tables appear on
+            # more than 60% of its pages. Measured before this guard: 0 of
+            # 44 tables fenced in MyCheckr Mini, 0 of 140 in ICU_Network_API,
+            # 0 of 57 in MyCheckr v7, while NV9 and SMART Coin (tables on
+            # fewer pages) came through fine. That is exactly the shape of
+            # bug that reads as "it works for some products, not others".
+            if line in (TABLE_OPEN, TABLE_CLOSE):
+                continue
             counts[line] += 1
 
     cutoff = max(2, int(len(pages) * threshold))
