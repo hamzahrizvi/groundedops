@@ -18,6 +18,7 @@ resolved by label NAME so a wrong note here cannot cause it again.
 """
 
 import logging
+import os
 import re
 
 from sentence_transformers import CrossEncoder
@@ -95,6 +96,28 @@ def _get_nli_model() -> CrossEncoder:
 _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
 _MIN_PREMISE = 15
 
+# Splitting on EVERY newline cut sentences in half, because PDF text wraps
+# mid-sentence. The manual's own definition of MyCheckr arrived as two
+# premises -- "...performs anonymous age estima" and "age-restricted goods."
+# -- and neither half entails the answer built from the whole (0.0029 and
+# 0.0008; rejoined, 0.9763). That is why every "what is X?" answer was being
+# refused while spec lookups passed.
+#
+# A line is a continuation when it does not end the sentence and the next
+# line does not begin one. Table rows are left alone: they are newline-
+# separated by nature and _table_row_sentence depends on that.
+_CONT = re.compile(r"([^.!?:;|\n])\n(?![ \t]*[-*•|])(?=[a-z(])")
+
+
+def _dewrap(text: str) -> str:
+    """Rejoin lines a PDF wrapped mid-sentence, leaving real breaks alone."""
+    prev = None
+    out = text or ""
+    while out != prev:                 # a sentence can wrap several times
+        prev = out
+        out = _CONT.sub(r"\1 ", out)
+    return out
+
 
 def _table_row_sentence(header: str, row: str) -> str | None:
     """Turn a pipe table row into a sentence, using its header for column names.
@@ -147,7 +170,7 @@ def _premises(context_texts: list[str]) -> list[str]:
 
     for text in context_texts:
         header = None
-        for s in _SENT_SPLIT.split(text or ""):
+        for s in _SENT_SPLIT.split(_dewrap(text or "")):
             s = s.strip()
             if not s:
                 continue
@@ -161,6 +184,70 @@ def _premises(context_texts: list[str]) -> list[str]:
                 header = None      # a prose line ends the table
             add(s)
     return out
+
+
+_STOPish = {"the", "a", "an", "is", "are", "of", "for", "to", "and", "or",
+            "in", "on", "at", "it", "its", "this", "that", "with", "as",
+            "be", "by", "from", "was", "were", "has", "have", "can", "will"}
+MAX_PREMISES = int(os.getenv("GROUNDING_MAX_PREMISES", "12"))
+
+
+def _relevant_premises(unit: str, premises: list[str]) -> list[str]:
+    """The premises worth scoring this claim against.
+
+    A premise sharing no content word with the claim cannot entail it, so
+    running the cross-encoder over all of them is work with a known answer.
+    A retrieved context yields ~86 premises and the NLI pass was costing
+    1.2-3.6s of a 6.4s query -- the single largest unattributed slice.
+
+    Ranked by shared content words, capped at MAX_PREMISES. Falls back to the
+    first MAX_PREMISES when nothing overlaps, so a claim phrased entirely in
+    synonyms is still scored rather than silently refused.
+    """
+    words = {w for w in re.findall(r"[a-z0-9]+", (unit or "").lower())
+             if len(w) > 2 and w not in _STOPish}
+    if not words:
+        return premises[:MAX_PREMISES]
+    scored = []
+    for p in premises:
+        pw = set(re.findall(r"[a-z0-9]+", p.lower()))
+        overlap = len(words & pw)
+        if overlap:
+            scored.append((overlap, p))
+    if not scored:
+        return premises[:MAX_PREMISES]
+    scored.sort(key=lambda t: -t[0])
+    return [p for _, p in scored[:MAX_PREMISES]]
+
+
+# A generated answer often packs several facts into ONE sentence ("MyCheckr
+# is an all-in-one device that performs anonymous age estimation, requires no
+# integration and offers world-leading accuracy"). No single source sentence
+# entails all of it, so sentence-only premises scored those at ~0.001 and the
+# gate refused every descriptive answer -- which is why "what is X and what
+# does it do?", the first thing a new customer asks, was being declined while
+# spec lookups passed.
+#
+# Measured on that exact sentence:
+#     best single premise      0.0010
+#     combined top-2           0.0049
+#     combined top-3           0.0355
+#     combined top-4           0.9947
+#     combined top-6           0.5882
+#
+# So a WINDOW is scored alongside the individual premises and the best of all
+# of them wins. Six is worse than four: past a few sentences the premise
+# drifts back out of the model's single-premise training distribution, which
+# is the same effect that made whole-chunk premises useless.
+COMBINE_TOP = int(os.getenv("GROUNDING_COMBINE_TOP", "4"))
+
+
+def _scoring_premises(unit: str, premises: list[str]) -> list[str]:
+    """Individual premises, plus one combined window of the best few."""
+    cand = _relevant_premises(unit, premises)
+    if len(cand) > 1:
+        cand = cand + [" ".join(cand[:COMBINE_TOP])]
+    return cand
 
 
 def check_grounding(
@@ -200,7 +287,8 @@ def check_grounding(
         min_score = 1.0
 
         for unit in units:
-            logits = model.predict([(p, unit) for p in premises],
+            cand = _scoring_premises(unit, premises)
+            logits = model.predict([(p, unit) for p in cand],
                                    apply_softmax=True)
             best_entailment = float(max(logits[:, col]))
             min_score = min(min_score, best_entailment)
@@ -235,7 +323,8 @@ def score_unit(unit: str, context_chunks: list[dict]) -> float:
         if not premises:
             return 0.0
         model = _get_nli_model()
-        logits = model.predict([(p, unit) for p in premises],
+        cand = _scoring_premises(unit, premises)
+        logits = model.predict([(p, unit) for p in cand],
                                apply_softmax=True)
         return float(max(logits[:, _entailment_index()]))
     except Exception as exc:

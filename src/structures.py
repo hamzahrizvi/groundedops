@@ -509,3 +509,136 @@ def faq_pairs_for_document(path: str, source: str,
             if len(pairs) >= max_pairs:
                 return pairs
     return pairs
+
+
+# ── discovery ("what is X?") entries ──────────────────────────────────────
+#
+# The first thing a new customer types is "what is X and what does it do?",
+# and a 42-question assessment found that exact shape being REFUSED across
+# products while specification lookups passed. Retrieval was fine (0.9993);
+# the answers are syntheses, which the grounding gate scored near zero.
+#
+# The gate is fixed, but these belong in the FAQ store regardless: an
+# overview is the most-asked and least-changing question a product has, it
+# is stated verbatim in the manual's opening page, and serving it from the
+# store costs no model call and cannot be refused.
+
+_OVERVIEW_RE = re.compile(
+    r"\b(is an?|are|provides|enables|eliminates|offers|designed to|"
+    r"performs)\b", re.I)
+_OVERVIEW_SKIP = re.compile(
+    r"^(this (page|section|document|guide)|the (following|table|diagram)|"
+    r"note:|warning:|for more|please )", re.I)
+
+
+def overview_pairs_for_document(path: str, source: str,
+                                product_name: str = "",
+                                scan_pages: int = 8,
+                                max_pairs: int = 3) -> list[dict]:
+    """"What is X?" entries, taken verbatim from the manual's opening pages.
+
+    Deliberately narrow: only the first `scan_pages`, only sentences that
+    read like a product definition, and at most `max_pairs` per document.
+    An overview harvested from deep inside a manual would be a feature
+    description masquerading as a product definition.
+    """
+    if pdfplumber is None or not os.path.exists(path):
+        return []
+    name = product_name or _doc_title(source)
+    try:
+        with pdfplumber.open(path) as pdf:
+            pages = [(i + 1, pdf.pages[i].extract_text() or "")
+                     for i in range(min(scan_pages, len(pdf.pages)))]
+    except Exception as exc:
+        logger.warning(f"overview scan failed for {path}: {exc}")
+        return []
+
+    out, seen = [], set()
+    for pno, text in pages:
+        for raw in re.split(r"(?<=[.!?])\s+|\n", text):
+            s = raw.strip()
+            if not (60 <= len(s) <= 400):
+                continue
+            if _OVERVIEW_SKIP.match(s) or not _OVERVIEW_RE.search(s):
+                continue
+            # Must name something: a definition without a subject is prose.
+            if not re.match(r"^(The\s+)?[A-Z][\w+\- ]{2,40}\s+(is|are|from)\b", s):
+                continue
+            key = s[:60].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            subject = re.match(r"^(The\s+)?([\w+\- ]{2,40}?)\s+(is|are|from)\b", s)
+            subj = (subject.group(2) if subject else name).strip()
+            # The subject must read like a product name. Without this the
+            # regex happily lifted "key features of the MyCheckr Mini" and
+            # "MyCheckr Mini just like the MyCheckr" out of ordinary prose
+            # and turned them into FAQ questions.
+            if (len(subj.split()) > 4
+                    or not subj[0].isupper()
+                    or re.search(r"\b(just|like|key|features?|process|"
+                                 r"following|above|below|section|page)\b",
+                                 subj, re.I)):
+                continue
+            out.append({
+                "question": f"What is the {subj} and what does it do?",
+                "answer": f"{s}\n\n(Source: {source}, page {pno})",
+                "verbatim": "overview",
+                "kind": "overview",
+                "page": pno,
+            })
+            if len(out) >= max_pairs:
+                return out
+    return out
+
+
+def harvest_into_faq(doc_dir: str, catalog_products: dict,
+                     include_tables: bool = True,
+                     include_overviews: bool = True) -> dict:
+    """Put every table, checklist and product overview into the FAQ store.
+
+    These are the answers that should never involve a model: they are stated
+    verbatim in the manual, they do not change between releases, and serving
+    them from the store is instant, free and cannot be refused by the
+    grounding gate.
+
+    Overviews matter most. "What is X and what does it do?" is the first
+    thing a new customer types and a 42-question assessment found that exact
+    shape being refused across products -- not for want of retrieval (0.9993)
+    but because a synthesised description is not entailed sentence-by-
+    sentence. Curating it sidesteps the whole problem.
+
+    catalog_products maps source filename -> (product_key, product_name) so
+    each entry is filed against the right product; unmapped documents are
+    still harvested, just unscoped.
+
+    Non-destructive: faq_store.merge_questions never overwrites a curated
+    answer or a question that already exists.
+    """
+    import faq_store
+
+    added = skipped = docs = 0
+    for fname in sorted(os.listdir(doc_dir)):
+        if not fname.lower().endswith((".pdf", ".docx")):
+            continue
+        path = os.path.join(doc_dir, fname)
+        key, name = catalog_products.get(fname, ("", ""))
+
+        pairs = []
+        if include_overviews:
+            pairs += overview_pairs_for_document(path, fname, name)
+        if include_tables:
+            pairs += faq_pairs_for_document(path, fname)
+        if not pairs:
+            continue
+
+        res = faq_store.merge_questions(
+            fname, key, [{"question": p["question"], "answer": p["answer"]}
+                         for p in pairs])
+        added += res.get("added", 0)
+        skipped += res.get("skipped_duplicates", 0)
+        docs += 1
+        logger.info("FAQ harvest %s: +%d, %d duplicate(s)",
+                    fname, res.get("added", 0), res.get("skipped_duplicates", 0))
+
+    return {"documents": docs, "added": added, "skipped_duplicates": skipped}

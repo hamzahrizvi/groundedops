@@ -20,6 +20,8 @@ Endpoints
     GET  /widget/quota    remaining credits
     POST /widget/ask      ask a question (costs credits)
 """
+import asyncio
+import re
 import logging
 import os
 import time
@@ -477,6 +479,70 @@ def register(app, answer_query, draft_enquiry=None):
             "quota": quota.status(caller),
             "session": quota.session_check(payload.session_id),
         }
+
+
+    @router.post("/ask/stream")
+    async def widget_ask_stream(payload: AskRequest, request: Request):
+        """Streamed answer for the widget, over server-sent events.
+
+        DELIBERATELY NOT A SECOND PIPELINE. Every gate that /ask applies --
+        per-session caps, the anonymous FAQ-only rule, the daily quota -- is
+        applied by calling widget_ask() itself and streaming whatever it
+        decided. Re-implementing those checks here is how a streaming path
+        quietly stops charging credits or starts letting guests reach the
+        model; the gates are billing and safety logic and they get ONE
+        implementation.
+
+        The trade is honest: the answer is produced in full before the first
+        character is sent, so this does not lower time-to-first-token. What
+        it does give the widget is a progress channel -- "searching",
+        "checking" -- and an answer that arrives sentence by sentence instead
+        of as one block, which is the part users read as "fast".
+
+        A genuinely token-streamed widget needs the generation call itself
+        pushed down into this path, which means the gates above it must be
+        factored out first. That refactor touches the paid path, so it is not
+        something to do unverified.
+        """
+        from fastapi.responses import StreamingResponse
+        import json as _json
+
+        def sse(event, data):
+            return ("event: " + event + "\n"
+                    + "data: " + _json.dumps(data) + "\n\n")
+
+        async def run():
+            yield sse("status", {"stage": "searching the documentation"})
+            try:
+                result = await widget_ask(payload, request)
+            except HTTPException as e:
+                yield sse("error", {"status": e.status_code,
+                                    "detail": e.detail})
+                return
+            except Exception as e:
+                logger.exception("widget ask/stream failed")
+                yield sse("error", {"status": 503, "detail": str(e)[:160]})
+                return
+
+            answer = (result.get("answer") or "").strip()
+            yield sse("meta", {k: result.get(k) for k in
+                               ("sources", "from_faq", "faq_candidates",
+                                "offer_support", "needs_clarification",
+                                "flagged", "quota", "session")})
+
+            # Whole sentences, not tokens: a sentence is the unit the
+            # grounding gate verifies, so releasing anything smaller would
+            # show text that has not been checked.
+            _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*\s*|\n+")
+            for part in _SENTENCE.findall(answer) or [answer]:
+                if part:
+                    yield sse("delta", {"text": part})
+                    await asyncio.sleep(0)
+            yield sse("done", {"flagged": bool(result.get("flagged"))})
+
+        return StreamingResponse(run(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
 
     app.include_router(router)
     logger.info("Public widget API registered at /widget")

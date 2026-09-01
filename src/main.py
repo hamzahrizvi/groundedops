@@ -796,8 +796,78 @@ def _render_structures(blocks: list[dict]) -> str:
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(deep: int = 0):
+    """Liveness by default; readiness with ?deep=1.
+
+    The plain form stays a cheap "the process is up" probe, because that is
+    what a load balancer should hammer.
+
+    ?deep=1 answers the question that actually matters and that the plain
+    form CANNOT: is this instance able to answer? It reports whether the
+    index has chunks, whether a provider key is present, and whether the ML
+    models are loaded. All three can be false while the process is happily
+    returning 200:
+
+      * a fresh deploy with an empty index answers nothing, and
+        `docker compose ps` still says healthy -- exactly the state a new
+        install is most likely to be in;
+      * the models load LAZILY on the first query, so for the first ~30s the
+        service is up and cannot answer. An unattended assessment run lost
+        its opening seven questions to 503s for this reason.
+
+    Returns 503 when not ready, so a healthcheck or a deploy gate can act on
+    it. `ready` is the single field to check.
+    """
+    if not deep:
+        return {"status": "ok"}
+
+    from fastapi.responses import JSONResponse
+    checks: dict = {}
+    try:
+        from db import get_collection
+        checks["index_chunks"] = get_collection().count()
+    except Exception as e:
+        checks["index_chunks"] = 0
+        checks["index_error"] = str(e)[:120]
+
+    try:
+        from runtime_config import get_online_provider
+        checks["provider_key"] = bool(
+            keystore.has_key(get_online_provider())
+            or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+            or os.getenv("ANTHROPIC_API_KEY"))
+    except Exception:
+        checks["provider_key"] = bool(os.getenv("DEEPSEEK_API_KEY"))
+
+    # Reported, never triggered: loading them here would turn a health probe
+    # into a 30-second model download on a cold instance.
+    import embeddings as _emb
+    import reranker as _rr
+    import grounding as _gr
+    checks["models_loaded"] = {
+        "embeddings": _emb._model is not None,
+        "reranker": _rr._model is not None,
+        "grounding": _gr._nli_model is not None,
+    }
+    checks["models_warm"] = all(checks["models_loaded"].values())
+
+    # The authoritative signal, not a second opinion: _warmup_stack loads the
+    # models in a background thread at startup and flips APP_STATE.ready when
+    # it finishes. /health answers 200 the whole time that thread is running,
+    # which is the window where the service is up and cannot answer -- an
+    # unattended assessment lost its first seven questions to 503s inside it.
+    with APP_STATE_LOCK:
+        checks["warmup"] = {"ready": bool(APP_STATE.get("ready")),
+                            "progress": APP_STATE.get("progress"),
+                            "message": APP_STATE.get("message")}
+        if APP_STATE.get("error"):
+            checks["warmup"]["error"] = APP_STATE["error"]
+
+    ready = (bool(checks.get("index_chunks"))
+             and bool(checks.get("provider_key"))
+             and checks["warmup"]["ready"])
+    body = {"status": "ok" if ready else "not-ready", "ready": ready, **checks}
+    return JSONResponse(body, status_code=200 if ready else 503)
 
 
 @app.get("/stats")
