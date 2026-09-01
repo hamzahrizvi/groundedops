@@ -41,11 +41,60 @@ CHECKLIST_RE = re.compile(r"check\s?list", re.I)
 _HEADING_RE = re.compile(r"^\s*(\d+[A-Za-z]?[.)]\s+|[A-Z][A-Za-z ]{0,40}$)")
 
 
-def _render_markdown(rows: list[list]) -> str:
+def _unwrap_cell(text: str, vocab: set | None = None) -> str:
+    """Join a cell's wrapped lines without splitting words.
+
+    pdfplumber returns a cell's text with a newline wherever the PDF wrapped
+    it inside the column. Replacing every newline with a space -- which this
+    did -- breaks words at the wrap point: a narrow "Section" column came out
+    as "Sectio n", and "Live Camera View" as "Live Camer a View", in both the
+    harvested FAQ question AND the answer a customer reads.
+
+    Telling a mid-word wrap from a word boundary needs a vocabulary, and the
+    page itself is the right one: a genuine mid-word wrap rejoins into a word
+    the page uses elsewhere ("Camer"+"a" -> "camera", which appears in the
+    prose above the table), while a word boundary does not
+    ("installation"+"to" -> "installationto", which appears nowhere). A
+    simpler letter-adjacency rule got the first case right and turned
+    "installation to ensure" into "installationto ensure".
+
+    With no vocabulary supplied it falls back to space-joining, which is the
+    old behaviour: readable, occasionally split.
+    """
+    t = (text or "").replace("\r", "")
+    if not vocab:
+        return re.sub(r"\s*\n\s*", " ", t).strip()
+
+    # Walk the line junctions one at a time rather than regex-substituting
+    # them all: a cell wraps in a CHAIN ("Live\nCamer\na View"), and a
+    # pattern that consumes both sides of a break never gets to examine the
+    # next one -- which left "Live Camer a View" half-repaired.
+    parts = [p for p in t.split("\n")]
+    out = parts[0]
+    for nxt in parts[1:]:
+        left = re.search(r"(\w+)$", out)
+        right = re.match(r"^(\w+)", nxt)
+        joined = False
+        if left and right:
+            l, r = left.group(1), right.group(1)
+            # Join when the halves make a word the DOCUMENT uses elsewhere.
+            # A "is the left half a real word?" fallback was tried and had to
+            # go: the vocabulary is built from extracted text, which contains
+            # the same wrapped fragments, so "sectio" and "indicat" are
+            # themselves "words" and the test never fired.
+            if (l + r).lower() in vocab:
+                out += nxt
+                joined = True
+        if not joined:
+            out += " " + nxt
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def _render_markdown(rows: list[list], vocab: set | None = None) -> str:
     """A table as markdown, with the source's own cells and nothing added."""
     clean = []
     for row in rows or []:
-        cells = [(c or "").replace("\n", " ").strip() for c in row]
+        cells = [_unwrap_cell(c, vocab) for c in row]
         if any(cells):
             clean.append(cells)
     if not clean:
@@ -94,6 +143,34 @@ def _caption_above(page, bbox) -> str:
     return ""
 
 
+_VOCAB_CACHE: dict[tuple, set] = {}
+
+
+def _doc_vocab(path: str, pdf) -> set:
+    """Every word the WHOLE document uses, lowercased.
+
+    Document-level, not page-level, because the page a table sits on is the
+    one place its column headings are guaranteed to be wrapped -- "Section"
+    appears only as "Sectio"+"n" there, so a page vocabulary can never
+    confirm the rejoin. Elsewhere in the manual the same word is printed in
+    full. Extracted once per file and cached; the cost is one full text pass
+    per document, not per table.
+    """
+    try:
+        key = (path, os.path.getmtime(path))
+    except OSError:
+        return set()
+    if key not in _VOCAB_CACHE:
+        if len(_VOCAB_CACHE) > 16:
+            _VOCAB_CACHE.clear()
+        try:
+            text = " ".join((p.extract_text() or "") for p in pdf.pages)
+        except Exception:
+            text = ""
+        _VOCAB_CACHE[key] = {w.lower() for w in re.findall(r"\w+", text)}
+    return _VOCAB_CACHE[key]
+
+
 def tables_on_page(path: str, page_no: int) -> list[dict]:
     """Every table on one page, verbatim. [] if the page has none."""
     if pdfplumber is None or not os.path.exists(path):
@@ -111,8 +188,9 @@ def tables_on_page(path: str, page_no: int) -> list[dict]:
             if not (1 <= page_no <= len(pdf.pages)):
                 return []
             page = pdf.pages[page_no - 1]
+            vocab = _doc_vocab(path, pdf)
             for t in page.find_tables():
-                md = _render_markdown(t.extract())
+                md = _render_markdown(t.extract(), vocab)
                 if not md:
                     continue
                 out.append({"kind": "table", "page": page_no,
@@ -191,7 +269,8 @@ def _doc_title(source: str) -> str:
 
 
 def collect(kind: str, cited: list[tuple[str, int]], doc_dir: str,
-            query: str = "", limit: int = 4) -> list[dict]:
+            query: str = "", limit: int = 4,
+            require_match: bool = False) -> list[dict]:
     """Verbatim blocks of `kind` from the (source, page) pairs an answer cited.
 
     Deduped on title+page so the same table found via two chunks appears
@@ -226,7 +305,7 @@ def collect(kind: str, cited: list[tuple[str, int]], doc_dir: str,
     # captioned one: "show me the operating temperature table for MyCheckr
     # Mini" ranked three blocks titled "MyCheckr Mini User Manual-v5" above
     # the table actually captioned "Operation".
-    picked = _most_relevant(query, out, limit)
+    picked = _most_relevant(query, out, limit, require_match)
     for b in picked:
         if not b.get("title"):
             b["title"] = _doc_title(b.get("source", ""))
@@ -238,7 +317,8 @@ _STOP = {"show", "me", "the", "a", "an", "of", "for", "on", "in", "is", "what",
          "and", "to", "please", "can", "you", "it", "its", "with", "all"}
 
 
-def _most_relevant(query: str, blocks: list[dict], limit: int) -> list[dict]:
+def _most_relevant(query: str, blocks: list[dict], limit: int,
+                   require_match: bool = False) -> list[dict]:
     """Keep the blocks the question is actually about.
 
     Every table on a cited page used to come back -- asking for the
@@ -254,7 +334,7 @@ def _most_relevant(query: str, blocks: list[dict], limit: int) -> list[dict]:
     terms = {w for w in re.findall(r"[a-z0-9]+", (query or "").lower())
              if len(w) > 2 and w not in _STOP}
     if not terms or not blocks:
-        return blocks[:limit]
+        return [] if require_match else blocks[:limit]
 
     scored = []
     for b in blocks:
@@ -266,9 +346,29 @@ def _most_relevant(query: str, blocks: list[dict], limit: int) -> list[dict]:
                 sum(1 for t in terms if t in body)
         scored.append((score, b))
 
+    # For a lookup WE initiated (require_match), one incidental word is not
+    # relevance: "how do I reset the password on my Cisco router?" shares
+    # "reset" with a coin-system error-code table and came back with three of
+    # them. Demand that most of what the visitor actually asked about is
+    # present, not that something matched.
+    if require_match:
+        need = max(1, (len(terms) + 1) // 2)
+        scored = [(s, b) for s, b in scored
+                  if sum(1 for t in terms
+                         if t in (b.get("title") or "").lower()
+                         or t in (b.get("markdown") or "").lower()) >= need]
+        if not scored:
+            return []
+
     best = max(s for s, _ in scored)
     if best == 0:
-        return blocks[:limit]
+        # Nothing on the cited pages relates to the question. Returning the
+        # blocks anyway is how "how do I reset my Cisco router password?"
+        # came back with three SMART Coin System error-code tables, and how
+        # "is MyCheckr better than Yoti?" came back with analytics tables --
+        # a confidently irrelevant table is strictly worse than the refusal
+        # it replaced, because it looks like an answer.
+        return [] if require_match else blocks[:limit]
     keep = [b for s, b in scored if s == best]
     if len(keep) < limit:
         keep += [b for s, b in sorted(scored, key=lambda x: -x[0])
@@ -395,10 +495,15 @@ def faq_pairs_for_document(path: str, source: str,
             seen.add(key)
 
             kind = "checklist" if checklist else "table"
+            # An uncaptioned table rendered as "**** (page 13)" -- four bare
+            # asterisks, because the heading was empty. Fall back to the
+            # document's own name so the answer always says what it is.
+            heading = (caption or "").strip() or _doc_title(source)
             pairs.append({
                 "question": question,
-                "answer": f"**{caption}** (page {pno})\n\n{md}",
+                "answer": f"**{heading}** (page {pno})\n\n{md}",
                 "verbatim": kind,
+                "kind": kind,
                 "page": pno,
             })
             if len(pairs) >= max_pairs:

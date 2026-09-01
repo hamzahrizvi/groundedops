@@ -749,7 +749,15 @@ def _structures_for(query: str, chunks: list[dict],
         if not cited:
             return []
         import docstore
-        return structures.collect(kind, cited, docstore.store_dir(), query=query)
+        # require_match only when WE decided to look (force_kind), not when
+        # the visitor asked to see a table. An explicit "show me the bezel
+        # table" should still return the page's tables even if the wording
+        # shares no words with the caption; a refusal-triggered lookup must
+        # find something genuinely on-topic or return nothing, or it turns a
+        # correct refusal into an irrelevant table.
+        return structures.collect(kind, cited, docstore.store_dir(),
+                                  query=query,
+                                  require_match=bool(force_kind))
     except Exception as exc:
         logger.warning(f"structure extraction skipped: {exc}")
         return []
