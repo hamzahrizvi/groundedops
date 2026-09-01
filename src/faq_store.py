@@ -99,10 +99,17 @@ _STOP = {
 
 # ── persistence ───────────────────────────────────────────────────────
 
+# EVERY open() in this module names encoding="utf-8" deliberately. Python on
+# Windows defaults to the locale codec (cp1252), and json.dump's default
+# ensure_ascii=True hid that for years by never writing a non-ASCII byte. The
+# moment anything wrote the store as real UTF-8, _load() raised
+# UnicodeDecodeError, the bare except swallowed it, and the FAQ store silently
+# read as EMPTY -- every curated answer gone with no error surfaced anywhere.
+
 def _load() -> list[dict]:
     if os.path.exists(_PATH):
         try:
-            with open(_PATH) as f:
+            with open(_PATH, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"faq store read failed: {e}")
@@ -110,7 +117,7 @@ def _load() -> list[dict]:
 
 
 def _save(items: list[dict]) -> None:
-    with open(_PATH, "w") as f:
+    with open(_PATH, "w", encoding="utf-8") as f:
         json.dump(items, f, indent=2)
 
 
@@ -212,7 +219,10 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
                 "question": q,
                 "answer": qa.get("answer", ""),
                 "edited": False,
-                "origin": "generated",
+                # Harvested reference material (a verbatim table, a product
+                # overview) is not curated Q&A and must not outrank it when
+                # matching -- see HARVEST_MIN_SCORE in suggest_candidates.
+                "origin": qa.get("origin", "generated"),
             })
             added += 1
         _save(items)
@@ -471,7 +481,7 @@ def record_gap(question: str, scope_key: str | None,
             gaps = []
             if os.path.exists(_GAP_PATH):
                 try:
-                    with open(_GAP_PATH) as f:
+                    with open(_GAP_PATH, encoding="utf-8") as f:
                         gaps = json.load(f)
                 except Exception:
                     gaps = []
@@ -493,7 +503,7 @@ def record_gap(question: str, scope_key: str | None,
                         g["reason"] = reason
                     if shown:
                         g["suggestions_shown"] = shown
-                    with open(_GAP_PATH, "w") as f:
+                    with open(_GAP_PATH, "w", encoding="utf-8") as f:
                         json.dump(gaps, f, indent=2)
                     return
             gaps.append({
@@ -510,7 +520,7 @@ def record_gap(question: str, scope_key: str | None,
             })
             if len(gaps) > 500:
                 gaps = gaps[-500:]            # keep it bounded
-            with open(_GAP_PATH, "w") as f:
+            with open(_GAP_PATH, "w", encoding="utf-8") as f:
                 json.dump(gaps, f, indent=2)
     except Exception as e:
         logger.warning(f"could not record FAQ gap (non-fatal): {e}")
@@ -540,7 +550,7 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
     if not os.path.exists(_GAP_PATH):
         return []
     try:
-        with open(_GAP_PATH) as f:
+        with open(_GAP_PATH, encoding="utf-8") as f:
             gaps = json.load(f)
     except Exception:
         return []
@@ -830,7 +840,7 @@ def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:
         return 0
     try:
         with _lock:
-            with open(_GAP_PATH) as f:
+            with open(_GAP_PATH, encoding="utf-8") as f:
                 gaps = json.load(f)
             n = 0
             for g in gaps:
@@ -840,7 +850,7 @@ def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:
                     g["resolved_at"] = __import__("time").time()
                     n += 1
             if n:
-                with open(_GAP_PATH, "w") as f:
+                with open(_GAP_PATH, "w", encoding="utf-8") as f:
                     json.dump(gaps, f, indent=2)
             return n
     except Exception as e:
@@ -852,7 +862,7 @@ def gap_stats() -> dict:
     if not os.path.exists(_GAP_PATH):
         return {"open": 0, "resolved": 0, "total_asks": 0}
     try:
-        with open(_GAP_PATH) as f:
+        with open(_GAP_PATH, encoding="utf-8") as f:
             gaps = json.load(f)
     except Exception:
         return {"open": 0, "resolved": 0, "total_asks": 0}
@@ -873,12 +883,12 @@ def dismiss_gap(gap_id: str) -> bool:
         return False
     try:
         with _lock:
-            with open(_GAP_PATH) as f:
+            with open(_GAP_PATH, encoding="utf-8") as f:
                 gaps = json.load(f)
             n = len(gaps)
             gaps = [g for g in gaps
                     if (g.get("id") or _gap_key(g.get("question"))) != gap_id]
-            with open(_GAP_PATH, "w") as f:
+            with open(_GAP_PATH, "w", encoding="utf-8") as f:
                 json.dump(gaps, f, indent=2)
             return len(gaps) < n
     except Exception as e:
@@ -893,12 +903,12 @@ def dismiss_gap_bulk(gap_ids: list[str]) -> int:
     ids = set(gap_ids)
     try:
         with _lock:
-            with open(_GAP_PATH) as f:
+            with open(_GAP_PATH, encoding="utf-8") as f:
                 gaps = json.load(f)
             n = len(gaps)
             gaps = [g for g in gaps
                     if (g.get("id") or _gap_key(g.get("question"))) not in ids]
-            with open(_GAP_PATH, "w") as f:
+            with open(_GAP_PATH, "w", encoding="utf-8") as f:
                 json.dump(gaps, f, indent=2)
             return n - len(gaps)
     except Exception as e:
@@ -915,7 +925,7 @@ def mark_spam(gap_id: str) -> bool:
         return False
     try:
         with _lock:
-            with open(_GAP_PATH) as f:
+            with open(_GAP_PATH, encoding="utf-8") as f:
                 gaps = json.load(f)
             found = False
             for g in gaps:
@@ -923,7 +933,7 @@ def mark_spam(gap_id: str) -> bool:
                     g["spam"] = True
                     found = True
             if found:
-                with open(_GAP_PATH, "w") as f:
+                with open(_GAP_PATH, "w", encoding="utf-8") as f:
                     json.dump(gaps, f, indent=2)
             return found
     except Exception as e:
@@ -938,7 +948,7 @@ def mark_spam_bulk(gap_ids: list[str]) -> int:
     ids = set(gap_ids)
     try:
         with _lock:
-            with open(_GAP_PATH) as f:
+            with open(_GAP_PATH, encoding="utf-8") as f:
                 gaps = json.load(f)
             n = 0
             for g in gaps:
@@ -946,7 +956,7 @@ def mark_spam_bulk(gap_ids: list[str]) -> int:
                     g["spam"] = True
                     n += 1
             if n:
-                with open(_GAP_PATH, "w") as f:
+                with open(_GAP_PATH, "w", encoding="utf-8") as f:
                     json.dump(gaps, f, indent=2)
             return n
     except Exception as e:
@@ -1088,6 +1098,30 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     if not scored:
         record_gap(question, scope_key, [])
         logger.info(f"FAQ: no candidates for {question!r} — going to retrieval")
+        return {"mode": "none"}
+
+    # Harvested reference material -- a verbatim spec table, a product
+    # overview -- is scored on a stricter bar than curated Q&A.
+    #
+    # Measured: adding 175 harvested entries lifted discovery answers from
+    # 3/7 to 7/9 but dropped FACTUAL lookups from 19/22 to 16/22, because a
+    # keyword-dense table entry ("NV9USB+: Standby, Running, Peak") beat the
+    # precise curated question a customer had actually asked. "How many coins
+    # per second?" started returning the Twin's 24 instead of the standard 12
+    # -- a confidently wrong answer replacing a correct one.
+    #
+    # These entries earn their place as a FALLBACK: when a curated question
+    # matches, it wins; when nothing does, the table is better than a refusal.
+    _harvest_min = float(os.getenv("FAQ_HARVEST_MIN_SCORE", "0.80"))
+    _curated = [t for t in scored if t[1].get("origin") != "harvested"]
+    _harvest = [t for t in scored if t[1].get("origin") == "harvested"
+                and t[0] >= _harvest_min]
+    scored = _curated + _harvest
+
+    if not scored:
+        record_gap(question, scope_key, [])
+        logger.info(f"FAQ: only weak harvested matches for {question!r} "
+                    f"- going to retrieval")
         return {"mode": "none"}
 
     scored.sort(key=lambda t: -t[0])

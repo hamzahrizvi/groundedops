@@ -633,7 +633,8 @@ def harvest_into_faq(doc_dir: str, catalog_products: dict,
             continue
 
         res = faq_store.merge_questions(
-            fname, key, [{"question": p["question"], "answer": p["answer"]}
+            fname, key, [{"question": p["question"], "answer": p["answer"],
+                          "origin": "harvested"}
                          for p in pairs])
         added += res.get("added", 0)
         skipped += res.get("skipped_duplicates", 0)

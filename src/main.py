@@ -694,6 +694,16 @@ def _warmup_stack():
         # POST /models/warmup (and unloads via POST /models/unload when
         # switching to online mode). First local-mode query without a
         # manual warmup still works — it just pays cold-load on that call.
+        # Build the cross-product spec index here rather than on the first
+        # sales question: it walks every table in every manual and took 52s
+        # on the first such query, which the visitor paid for.
+        _set_app_state(progress=80, message="Indexing product specifications")
+        try:
+            import sales as _sales, docstore as _ds
+            _sales.get_index(_ds.store_dir(), _source_to_product())
+        except Exception as exc:
+            logger.warning(f"spec index warmup skipped: {exc}")
+
         _set_app_state(progress=85, message="Local LLMs available (load via settings)")
 
         _set_app_state(progress=100, message="Ready", ready=True, error=None)
@@ -793,6 +803,44 @@ def _render_structures(blocks: list[dict]) -> str:
         lines.append(b.get("markdown", ""))
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _source_to_product() -> dict:
+    """filename -> (product key, product name, category name)."""
+    out = {}
+    try:
+        import catalog as _cat
+        data = _cat._load()
+        for c in data.get("categories", []):
+            for p in c.get("products", []):
+                for src in p.get("sources", []):
+                    out[src] = (p.get("key", ""), p.get("name", ""),
+                                c.get("name", ""))
+    except Exception as exc:
+        logger.warning(f"sales: could not map sources to products: {exc}")
+    return out
+
+
+def _sales_answer(raw_q: str, resolved: str | None):
+    """A cross-product answer, or None to fall through to the pipeline.
+
+    Reads the RAW question as well as the condensed one: condensation
+    rewrites for retrieval and can drop the "which of your products" framing
+    that is the only signal this is a sales question at all.
+
+    Never raises -- a failure here must degrade to the normal pipeline, not
+    fail the request.
+    """
+    try:
+        import sales, docstore, faq_store as _fs, catalog as _cat
+        q = f"{raw_q} {resolved or ''}"
+        if not sales.is_sales_question(q):
+            return None
+        idx = sales.get_index(docstore.store_dir(), _source_to_product())
+        return sales.answer(q, _fs._load(), idx, _cat.catalog())
+    except Exception as exc:
+        logger.warning(f"sales answer skipped: {exc}")
+        return None
 
 
 @app.get("/health")
@@ -3180,6 +3228,28 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 "sources": [],
             }
         logger.warning(f"faq_id {payload.faq_id} not found — falling through")
+
+    # (a2) Cross-product sales questions, before the FAQ and retrieval.
+    #
+    # "Which of your validators run on 24V?" and "do you have anything that
+    # sorts coins?" range ACROSS products, so the answer is a list of product
+    # names that appears in no single chunk -- product-scoped retrieval
+    # cannot produce it and every question of that shape was refused. It is
+    # answered from the catalogue and the spec index, both verbatim, so
+    # nothing here can invent a product or a specification.
+    _sales = _sales_answer(payload.q, resolved_query)
+    if _sales:
+        total_time = time.time() - start_total
+        return {
+            "answer": _sales["answer"],
+            "response_time_ms": int(total_time * 1000),
+            "role": "sales",
+            "model": None, "provider": "catalogue",
+            "grounding_score": None, "flagged": False,
+            "from_faq": False, "sources": [],
+            "retrieval_score": None,
+            "timing": {"total_time": round(total_time, 3)},
+        }
 
     # (b) The user rejected the suggestions: log the gap, answer from docs.
     if payload.skip_faq:
