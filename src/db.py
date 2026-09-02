@@ -4,6 +4,7 @@ here so they operate on the SAME persistent collection.
 """
 
 import os
+import time
 import logging
 import chromadb
 from typing import Optional
@@ -26,15 +27,58 @@ def get_client() -> chromadb.PersistentClient:
     return _client
 
 
+_CHECK_SECS = float(os.getenv("CHROMA_HANDLE_CHECK_SECS", "5"))
+_checked_at = 0.0
+
+
 def get_collection() -> chromadb.Collection:
-    global _collection
+    """The shared 'docs' collection, re-acquired if it was reset elsewhere.
+
+    A Collection handle is bound to the collection's UUID at the moment it is
+    fetched, and reset_collection() below deletes and recreates the row -- so
+    the new collection has a NEW UUID and every handle taken before it points
+    at a row that no longer exists.
+
+    Chroma does not raise for that. Reads against the dead UUID return EMPTY.
+    On 2026-09-01 a server that had been up since 08-30 therefore reported
+    zero documents and zero chunks -- admin inventory, catalogue doc_counts
+    and retrieval all silently reading as an empty corpus -- while the store
+    on disk held all 11 documents and 684 chunks the whole time. A reindex run
+    from any second process (a CLI re-ingest, a test run, the scheduled
+    backup) is enough to cause it, and it looks exactly like data loss.
+
+    So the handle is re-validated against the client's current UUID for the
+    name, at most once every CHROMA_HANDLE_CHECK_SECS.
+    """
+    global _collection, _checked_at
+    now = time.monotonic()
+    if _collection is not None and now - _checked_at < _CHECK_SECS:
+        return _collection
+
+    client = get_client()
+    if _collection is not None:
+        try:
+            live = client.get_collection(COLLECTION_NAME)
+            if live.id != _collection.id:
+                logger.warning(
+                    f"collection '{COLLECTION_NAME}' was reset by another "
+                    f"process ({_collection.id} -> {live.id}); "
+                    "re-acquiring the handle")
+                _collection = live
+        except Exception as exc:
+            # Gone entirely, mid-reset, or the store is being rebuilt.
+            logger.warning(f"re-acquiring collection handle: {exc}")
+            _collection = None
+
     if _collection is None:
-        _collection = get_client().get_or_create_collection(COLLECTION_NAME)
+        _collection = client.get_or_create_collection(COLLECTION_NAME)
+    _checked_at = now
     return _collection
 
 
 def reset_collection() -> chromadb.Collection:
-    global _collection
+    global _collection, _checked_at
+    _checked_at = time.monotonic()
     client = get_client()
     try:
         client.delete_collection(COLLECTION_NAME)
