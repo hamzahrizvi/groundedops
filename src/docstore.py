@@ -33,6 +33,8 @@ import os
 import shutil
 from datetime import datetime, timezone
 
+import jsonstore
+
 logger = logging.getLogger(__name__)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -126,14 +128,14 @@ def load_manifest() -> dict:
     p = _manifest_path()
     if not os.path.isfile(p):
         return {"version": 1, "documents": {}}
-    try:
-        with open(p, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        data.setdefault("documents", {})
-        return data
-    except Exception as exc:
-        logger.warning(f"Unreadable manifest at {p} ({exc}); starting a new one")
+    data = jsonstore.load(p, None, label="document manifest")
+    if not isinstance(data, dict):
+        # Deliberately NOT "starting a new one": save_manifest() will refuse
+        # to overwrite the unreadable file, so the record of the other
+        # documents survives to be repaired.
         return {"version": 1, "documents": {}}
+    data.setdefault("documents", {})
+    return data
 
 
 def record(filename: str, *, content: bytes | None = None,
@@ -160,10 +162,13 @@ def record(filename: str, *, content: bytes | None = None,
 
     try:
         os.makedirs(store_dir(), exist_ok=True)
-        tmp = _manifest_path() + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, sort_keys=True)
-        os.replace(tmp, _manifest_path())
+        jsonstore.save(_manifest_path(), data, label="document manifest",
+                       sort_keys=True)
+    except jsonstore.StateUnreadable as exc:
+        # The refusal did its job: the manifest on disk is unreadable and has
+        # been left alone rather than replaced by a one-document copy. Still
+        # not a reason to fail the ingest -- the chunks are already indexed.
+        logger.error(f"Manifest NOT updated for {filename}: {exc}")
     except Exception as exc:
         # Never fail an ingest because bookkeeping failed.
         logger.warning(f"Could not write manifest ({exc})")

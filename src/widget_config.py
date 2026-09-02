@@ -58,6 +58,8 @@ import re
 import threading
 import uuid
 import logging
+
+import jsonstore
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -120,24 +122,21 @@ _DEFAULT = {
 # ── config ────────────────────────────────────────────────────────────
 
 def _load() -> dict:
-    if os.path.exists(_CONFIG_PATH):
-        try:
-            with open(_CONFIG_PATH) as f:
-                data = json.load(f)
-            if isinstance(data, dict) and data:
-                # Merge over defaults so a config written by an older
-                # version keeps working when new keys are added.
-                merged = json.loads(json.dumps(_DEFAULT))
-                merged.update(data)
-                return merged
-        except Exception as e:
-            logger.warning(f"widget config read failed, using defaults: {e}")
+    data = jsonstore.load(_CONFIG_PATH, None, label="widget config")
+    if isinstance(data, dict) and data:
+        # Merge over defaults so a config written by an older
+        # version keeps working when new keys are added.
+        merged = json.loads(json.dumps(_DEFAULT))
+        merged.update(data)
+        return merged
     return json.loads(json.dumps(_DEFAULT))
 
 
 def _save_raw(data: dict) -> None:
-    with open(_CONFIG_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+    """Atomic, and refuses to overwrite an unreadable config -- otherwise a
+    bad read served _DEFAULT and the next save made the defaults the real
+    configuration."""
+    jsonstore.save(_CONFIG_PATH, data, label="widget config")
 
 
 def _clean_label(v, fallback: str = "") -> str:
@@ -299,20 +298,14 @@ def public_config() -> dict:
 # ── leads ─────────────────────────────────────────────────────────────
 
 def _load_leads() -> list[dict]:
-    if os.path.exists(_LEADS_PATH):
-        try:
-            with open(_LEADS_PATH) as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            logger.warning(f"leads read failed: {e}")
-    return []
+    data = jsonstore.load(_LEADS_PATH, [], label="widget leads")
+    return data if isinstance(data, list) else []
 
 
 def _save_leads(items: list[dict]) -> None:
-    with open(_LEADS_PATH, "w") as f:
-        json.dump(items, f, indent=2)
+    """Atomic, and refuses to clobber an unreadable file. These are customer
+    enquiries -- the one store here with no other copy anywhere."""
+    jsonstore.save(_LEADS_PATH, items, label="widget leads")
 
 
 MAX_ENQUIRY_CHARS = 4000

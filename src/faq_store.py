@@ -48,6 +48,8 @@ import threading
 import uuid
 import logging
 
+import jsonstore
+
 logger = logging.getLogger(__name__)
 
 _PATH = os.getenv("FAQ_STORE_PATH", "faq_store.json")
@@ -107,18 +109,14 @@ _STOP = {
 # read as EMPTY -- every curated answer gone with no error surfaced anywhere.
 
 def _load() -> list[dict]:
-    if os.path.exists(_PATH):
-        try:
-            with open(_PATH, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"faq store read failed: {e}")
-    return []
+    return jsonstore.load(_PATH, [], label="FAQ store")
 
 
 def _save(items: list[dict]) -> None:
-    with open(_PATH, "w", encoding="utf-8") as f:
-        json.dump(items, f, indent=2)
+    """Atomic, and refuses to overwrite an unreadable store -- see
+    jsonstore. This store is the one that nearly proved why: read it as
+    cp1252, get [], write it back, and every curated answer is gone."""
+    jsonstore.save(_PATH, items, label="FAQ store")
 
 
 def record_questions(source: str, products: str, qa_pairs: list[dict],

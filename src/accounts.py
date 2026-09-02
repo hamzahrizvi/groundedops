@@ -45,6 +45,8 @@ from datetime import datetime, timezone
 
 import keystore
 
+import jsonstore
+
 logger = logging.getLogger(__name__)
 
 _PATH = os.getenv("ACCOUNTS_PATH", "accounts.json")
@@ -87,24 +89,19 @@ def _session_secret() -> str:
 # ── persistence ───────────────────────────────────────────────────────
 
 def _load() -> list[dict]:
-    if os.path.exists(_PATH):
-        try:
-            with open(_PATH, encoding="utf-8") as f:
-                data = json.load(f)
-            return data.get("users", []) if isinstance(data, dict) else data
-        except Exception as e:
-            logger.warning(f"accounts read failed: {e}")
-    return []
+    data = jsonstore.load(_PATH, [], label="accounts")
+    if isinstance(data, dict):
+        return data.get("users", [])
+    return data if isinstance(data, list) else []
 
 
 def _save(users: list[dict]) -> None:
-    """Written via a temp file and os.replace. Unlike the FAQ store, a
-    half-written accounts file locks everyone out of the console, so this
-    one is atomic."""
-    tmp = _PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"users": users}, f, indent=2)
-    os.replace(tmp, _PATH)
+    """Atomic -- a half-written accounts file locks everyone out of the
+    console -- and refusing to overwrite an unreadable one, which matters
+    more here than anywhere else: a bad read returns [], and saving that
+    back deletes every account but the one just added. These are scrypt
+    hashes with no other copy."""
+    jsonstore.save(_PATH, {"users": users}, label="accounts")
 
 
 # ── passwords ─────────────────────────────────────────────────────────

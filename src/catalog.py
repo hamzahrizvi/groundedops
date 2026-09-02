@@ -21,6 +21,8 @@ import os
 import threading
 import logging
 
+import jsonstore
+
 logger = logging.getLogger(__name__)
 
 _PATH = os.getenv("CATALOG_CONFIG", "catalog_config.json")
@@ -66,20 +68,17 @@ _SEED = {
 
 
 def _load() -> dict:
-    if os.path.exists(_PATH):
-        try:
-            with open(_PATH) as f:
-                data = json.load(f)
-            if data.get("categories"):
-                return data
-        except Exception as e:
-            logger.warning(f"catalog read failed, using seed: {e}")
+    data = jsonstore.load(_PATH, None, label="catalogue")
+    if isinstance(data, dict) and data.get("categories"):
+        return data
     return json.loads(json.dumps(_SEED))  # deep copy
 
 
 def _save(data: dict) -> None:
-    with open(_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+    """Atomic, and refuses to overwrite an unreadable catalogue. Without
+    that, one bad read replaced the real product tree with the seed and the
+    next edit made it permanent."""
+    jsonstore.save(_PATH, data, label="catalogue")
 
 
 def catalog() -> dict:
