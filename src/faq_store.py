@@ -315,9 +315,98 @@ def delete_all(scope_key: str | None = None, source: str | None = None) -> int:
     return removed
 
 
-def list_for_product(scope_key: str | None) -> list[dict]:
-    """Match by PRODUCT or CATEGORY key (case/format tolerant)."""
+# A question a person could plausibly have typed. Harvesting tables and
+# checklists gives an entry whose "question" is really a caption glued to its
+# column headers -- "Operation: Temperature, Humidity", "Start Up Procedure:
+# White, Green, Purple, Blue", "Updating MyCheckr Mini checklist: 2". As a
+# RETRIEVAL key that is fine and even good: it is keyword-dense and it is what
+# lifted discovery answers from 3/7 to 7/9. As DISPLAY text it is nonsense,
+# and on guest chat the suggested-question list is the entire interface, so
+# 192 of 345 entries were showing up as gibberish menu items.
+#
+# Display and matching are therefore separated: everything stays searchable,
+# only question-shaped entries are ever shown. Judged on SHAPE rather than on
+# origin, so a badly generated question is caught too and a harvested entry
+# that happens to read well is not punished for its provenance.
+_INTERROGATIVE = (
+    "what", "how", "does", "do", "is", "are", "can", "could", "should",
+    "why", "where", "which", "who", "when", "will", "must", "may", "if",
+)
+# "Caption: Item, Item, Item" -- a table header row, not a question.
+_CAPTION_LIST = re.compile(r":\s*[^,?]+(?:,\s*[^,?]+){1,}\s*$")
+# "...checklist: 2" -- a caption with a row count stuck on the end.
+_TRAILING_COUNT = re.compile(r":\s*\d+\s*$")
+# There is deliberately no "word broken by a PDF column split" rule. The
+# obvious one -- a word of 3+ letters followed by a single letter, to catch
+# "Informatio n" and "Camer a View" -- had to come out: it also matches every
+# ordinary use of the articles "a" and "I", so "What should be sourced before
+# installing a MyCheckr device?" was rejected as mangled. Fourteen good
+# generated questions were hidden by it.
+#
+# Telling "Camer a" from "installing a" needs to know whether the preceding
+# fragment is a real word, which is a dictionary lookup this predicate should
+# not be doing. It is also unnecessary: every mangled example is a list of
+# column headers, so it fails the interrogative test below on its own.
+
+
+def is_question_shaped(text: str) -> bool:
+    """Whether this reads like something a person typed, not a table caption."""
+    q = (text or "").strip()
+    if not (8 <= len(q) <= 120):
+        return False
+    if "�" in q:            # mojibake from a bad decode
+        return False
+    if _TRAILING_COUNT.search(q) or _CAPTION_LIST.search(q):
+        return False
+    if q.endswith("?"):
+        return True
+    return q.split()[0].lower().strip(",") in _INTERROGATIVE
+
+
+def is_displayable(entry: dict) -> bool:
+    """Whether this entry may be SHOWN to a visitor as a suggestion."""
+    return is_question_shaped(entry.get("question") or "")
+
+
+# Best first. The widget shows the first N and nothing ranks them, so
+# insertion order was deciding which questions a visitor ever sees -- which
+# is the other half of "the suggestions look random". A hand-curated answer
+# should outrank a doc2query one, which should outrank a harvested table.
+_ORIGIN_RANK = {"curated": 0, "manual": 0, "generated": 1, "harvested": 2}
+
+
+def _for_display(items: list[dict]) -> list[dict]:
+    """Presentable entries, de-duplicated, best first.
+
+    De-duplication matters as much as the filter: two MyCheckr manuals in
+    the corpus produce two identical "What is the MyCheckr and what does it
+    do?" entries, and the same question listed twice reads as a bug to the
+    person reading it.
+    """
+    seen, out = set(), []
+    for it in items:
+        if not is_displayable(it):
+            continue
+        key = _norm_q(it.get("question"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    out.sort(key=lambda it: _ORIGIN_RANK.get(it.get("origin") or "curated", 1))
+    return out
+
+
+def list_for_product(scope_key: str | None,
+                     display_only: bool = False) -> list[dict]:
+    """Match by PRODUCT or CATEGORY key (case/format tolerant).
+
+    display_only is for the surfaces a visitor reads -- the suggestion menu
+    and the disambiguation list. Retrieval must NOT pass it: an entry being
+    unpresentable is no reason to stop it answering a question.
+    """
     items = _load()
+    if display_only:
+        items = _for_display(items)
     if not scope_key or _norm_key(scope_key) == "all":
         return items
     want = _norm_key(scope_key)
@@ -1156,6 +1245,21 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # Relative cut: keep only what's competitive with the best match.
     _best = scored[0][0]
     scored = [t for t in scored if t[0] >= _best - CANDIDATE_RELATIVE_MARGIN]
+
+    # Only question-shaped entries may be OFFERED. A harvested table caption
+    # is a good match key and an unusable menu item, so the two roles split
+    # here rather than by dropping it from the pool.
+    _showable = [t for t in scored if is_displayable(t[1])]
+    if not _showable:
+        # Nothing presentable survived, but something matched well enough to
+        # get here. Serving it beats both offering gibberish and refusing:
+        # the ANSWER is a verbatim table, only its title is unpresentable.
+        _s, _it, _, _ = scored[0]
+        logger.info(f"FAQ serve-unpresentable ({_s:.3f}) for {question!r}: "
+                    f"{(_it.get('question') or '')[:50]!r}")
+        return {"mode": "answer", "entry": _it, "score": round(_s, 3)}
+    scored = _showable
+
     cands = [{
         "id": it["id"],
         "question": it["question"],

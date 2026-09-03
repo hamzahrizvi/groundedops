@@ -174,7 +174,12 @@ def widget_faq(product: str | None = None, limit: int = 4):
     """
     try:
         import faq_store
-        items = [f for f in faq_store.list_for_product(product)
+        # display_only: on guest chat this list IS the interface, so a
+        # harvested table caption ("Operation: Temperature, Humidity") shown
+        # as a suggested question is worse than one fewer suggestion. Those
+        # entries stay fully searchable -- see faq_store.is_displayable.
+        items = [f for f in faq_store.list_for_product(product,
+                                                       display_only=True)
                  if (f.get("answer") or "").strip()]
     except Exception as e:
         logger.error(f"widget faq failed: {e}")

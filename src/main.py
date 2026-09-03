@@ -1488,8 +1488,16 @@ def reload_folder(x_admin_password: str | None = Header(default=None)):
 
 @app.get("/faq")
 def faq_list(product: str | None = None):
-    """Generated questions for a product (or all). Public read."""
-    return {"faq": faq_store.list_for_product(product)}
+    """Generated questions for a product (or all). Public read.
+
+    Deliberately UNFILTERED: this is what the admin console lists, and an
+    entry too ugly to show a visitor is exactly the one an admin needs to
+    find and rewrite. Each carries a `displayable` flag so the console can
+    surface them for curation -- the guest-facing list at /widget/faq is the
+    one that hides them.
+    """
+    return {"faq": [dict(f, displayable=faq_store.is_displayable(f))
+                    for f in faq_store.list_for_product(product)]}
 
 
 class FaqGenerateReq(BaseModel):
