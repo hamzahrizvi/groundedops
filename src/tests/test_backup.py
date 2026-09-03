@@ -326,6 +326,103 @@ r = client.post("/admin/backup/import?restore_index=false", headers=ROOT,
                 files={"file": ("b.gobk", snapshot, "application/octet-stream")})
 check(r.json()["restart_required"] is False, "no index restored, no restart claimed")
 
+print("\n== restore rehearsal: the two expensive payloads ==")
+# Everything above proves a restore puts a JSON store back. What it did not
+# prove is that the two payloads the backup actually exists for survive the
+# round trip: the source documents (the only copy of some PDFs) and the
+# index (45 minutes of embedding for the real corpus). "documents can be
+# left out" tested EXCLUSION from an export, which is the opposite claim.
+#
+# Asserted at the FILE level, not through Chroma: _harness stubs the whole
+# db module (reset_collection returns None) so this process has no chromadb
+# at all. That is not a gap here -- backup.py's job is to carry the index
+# DIRECTORY faithfully, and a real sqlite database written with the stdlib
+# proves a live DB file survives the round trip rather than merely that some
+# bytes did. Whether Chroma can reopen those bytes is Chroma's contract.
+import shutil
+import sqlite3
+
+docs_dir = os.environ["SOURCE_FILE_DIR"]
+os.makedirs(docs_dir, exist_ok=True)
+
+# One ASCII name, one carrying an en dash — the real corpus has exactly such
+# a file, and a filename is the part of an archive most likely to be mangled
+# by an encoding assumption on the way through a zip.
+FIXTURES = {
+    "Plain Manual-v1.pdf": b"%PDF-1.4\nplain fixture\n%%EOF\n",
+    "CS-MyConnect Quick Start – Installer Edition.pdf":
+        b"%PDF-1.4\nen-dash fixture \xc2\xb0C\n%%EOF\n",
+}
+for name, blob in FIXTURES.items():
+    with open(os.path.join(docs_dir, name), "wb") as fh:
+        fh.write(blob)
+
+index_dir = os.environ["CHROMA_DIR"]
+os.makedirs(index_dir, exist_ok=True)
+sqlite_path = os.path.join(index_dir, "chroma.sqlite3")
+con = sqlite3.connect(sqlite_path)
+try:
+    con.execute("create table if not exists embeddings (id text, src text)")
+    con.executemany("insert into embeddings values (?, ?)",
+                    [("c1", "Plain Manual-v1.pdf"), ("c2", "Plain Manual-v1.pdf"),
+                     ("c3", "Plain Manual-v1.pdf")])
+    con.commit()
+finally:
+    con.close()
+
+# Chroma's HNSW segment lives in a binary sibling file, and it is the part a
+# careless archive format mangles -- it is zero-padded, so anything treating
+# archive members as text would silently corrupt it.
+seg_dir = os.path.join(index_dir, "abc-segment")
+os.makedirs(seg_dir, exist_ok=True)
+SEG = bytes(range(256)) * 8
+with open(os.path.join(seg_dir, "data_level0.bin"), "wb") as fh:
+    fh.write(SEG)
+check(os.path.isfile(sqlite_path), "index seeded (sqlite + a binary segment)")
+
+archive, _ = backup.create_archive(created_by="rehearsal", level="root",
+                                   passphrase=PW)
+n = names(archive)
+check(any(x.startswith("documents/") for x in n), "documents are in the archive")
+check(any(x.startswith("index/") for x in n), "and so is the index")
+
+# Now lose both, the way a failed disk or a bad reindex would.
+shutil.rmtree(docs_dir)
+shutil.rmtree(index_dir)
+check(not os.path.isdir(docs_dir) or not os.listdir(docs_dir), "documents wiped")
+check(not os.path.isfile(sqlite_path), "index wiped")
+
+r = client.post("/admin/backup/import", headers=ROOT, data={"passphrase": PW},
+                files={"file": ("b.gobk", archive, "application/octet-stream")})
+check(r.status_code == 200, f"restore accepted ({r.status_code})")
+
+restored = sorted(os.listdir(docs_dir)) if os.path.isdir(docs_dir) else []
+check(restored == sorted(FIXTURES), f"both documents came back ({restored})")
+for name, blob in FIXTURES.items():
+    p = os.path.join(docs_dir, name)
+    got = open(p, "rb").read() if os.path.isfile(p) else b""
+    check(got == blob, f"byte-identical after the round trip: {name[:34]}")
+
+check(os.path.isfile(sqlite_path), "the index sqlite file is back on disk")
+if os.path.isfile(sqlite_path):
+    # Reopened as a database, not just stat'ed: a torn or text-mangled copy
+    # is still a file of about the right size, and would pass a size check
+    # while being useless.
+    con = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+    try:
+        rows = con.execute("select count(*) from embeddings").fetchone()[0]
+    finally:
+        con.close()
+    check(rows == 3, f"and it still opens, with its 3 rows ({rows})")
+
+seg_path = os.path.join(seg_dir, "data_level0.bin")
+got_seg = open(seg_path, "rb").read() if os.path.isfile(seg_path) else b""
+check(got_seg == SEG, "the binary HNSW segment is byte-identical too")
+
+check(r.json()["restart_required"] is True,
+      "and the response says a restart is required — the live client is "
+      "still holding the pre-restore files")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")

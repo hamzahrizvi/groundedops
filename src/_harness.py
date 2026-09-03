@@ -52,6 +52,15 @@ os.environ.setdefault("BACKUP_SNAPSHOT_DIR", "/tmp/apitest/data/snapshots")
 # setting it empty here wins. Tests that want the plaintext path set it
 # themselves, explicitly.
 os.environ["BACKUP_ALLOW_PLAINTEXT"] = ""
+# BACKUP_PASSPHRASE needs the same treatment, and for a sharper reason: the
+# export endpoint falls back to it when a request omits one, which is the
+# whole point of the unattended/cron path. So on any machine that has set up
+# the daily backup, "exporting with no passphrase is refused" stopped being
+# true -- the export quietly succeeded using the environment's passphrase
+# and returned a binary archive where the test expected a JSON error.
+# Found exactly that way: the setup instructions were followed, and this
+# suite started failing on a passing tree.
+os.environ["BACKUP_PASSPHRASE"] = ""
 # main.py's LAN-only gate checks request.client.host against this prefix
 # list and 404s anything that doesn't match (see PRIVATE_NETWORKS in
 # main.py) — a real, intended security control, not something to weaken.
