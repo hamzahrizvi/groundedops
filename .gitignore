@@ -105,3 +105,11 @@ HANDOFF_*.md
 # but it is a measurement artifact, not source.
 sweep_grounding.json
 sweep_run.log
+
+# The uploaded source documents. ~107MB of PDFs, and the durable asset this
+# install cannot regenerate -- but git is the wrong home for them: they are
+# binary, they never diff usefully, and once committed they are in the
+# history permanently. backup_daily.ps1 / manage_backup.py carry them
+# instead, encrypted. Keep the manifest out too: it describes files that are
+# not here.
+documents/
