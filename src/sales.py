@@ -193,20 +193,10 @@ _STOP = {"the", "a", "an", "of", "for", "to", "in", "on", "is", "are", "do",
          "make", "sell", "does", "it", "its", "there", "how"}
 
 
-def _stem(w: str) -> str:
-    """Crude suffix strip, enough to match a question to a manual.
-
-    Customers type plurals and manuals use singulars: "anything that sorts
-    and pays out COINS" against "bulk COIN validator", "check customer AGES"
-    against "AGE estimation". Exact word matching missed both and the
-    questions were refused. Not linguistics -- just enough that "coins",
-    "coin" and "sorting" land on the same key.
-    """
-    w = w.lower()
-    for suf in ("ing", "ers", "er", "es", "s"):
-        if len(w) - len(suf) >= 3 and w.endswith(suf):
-            return w[: -len(suf)]
-    return w
+# Promoted to text_utils once more_context.py needed the same thing; kept
+# under the private name here so this module's call sites did not have to
+# change with it.
+from text_utils import stem as _stem
 
 
 def _terms(q: str) -> set:

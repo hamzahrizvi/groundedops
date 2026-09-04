@@ -55,6 +55,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 import accounts
+import more_context
 import backup
 import keystore
 import policy
@@ -3257,6 +3258,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             "from_faq": False, "sources": [],
             "retrieval_score": None,
             "timing": {"total_time": round(total_time, 3)},
+            # Assembled from the catalogue across several products, so there
+            # is no one document to open. A person is the honest next step.
+            "more_context": more_context.for_source(None),
         }
 
     # (b) The user rejected the suggestions: log the gap, answer from docs.
@@ -3293,6 +3297,10 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 "faq_matched_question": _entry["question"],
                 "faq_exact": True,
                 "sources": [],
+                # No retrieval ran, so there is no spare material and
+                # claiming otherwise would be a lie -- but a curated answer
+                # still knows which manual it was written from.
+                "more_context": more_context.for_source(_entry.get("source")),
             }
 
         if _faq["mode"] == "disambiguate":
@@ -3342,7 +3350,21 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             r for r in results
             if not any(ex in (r.get("source") or "").lower() for ex in EXCLUDED_SOURCES)
         ]
-    results = rerank(resolved_query, results, top_k=CONTEXT_K)
+    # Rerank the FULL set and truncate here, rather than letting rerank do
+    # it. `results` ends up identical -- same model, same ordering, same
+    # slice -- but the chunks ranked below CONTEXT_K keep their
+    # cross-encoder score instead of having it discarded, and more_context
+    # needs that to tell "there is more on this" from "there is more, on
+    # something else".
+    #
+    # This costs nothing: rerank() already calls predict() over EVERY
+    # candidate and only then truncates, so those scores were computed and
+    # thrown away. RRF's retrieval_score cannot substitute -- it is
+    # rank-derived and far too flat to discriminate. Measured on "how do I
+    # install and mount the NV9USB+": "Vertical Bezel Mounting" (relevant)
+    # scored 0.0164 and "Cleaning the Product" (irrelevant) 0.0156.
+    _retrieved = rerank(resolved_query, results, top_k=len(results))
+    results = _retrieved[:CONTEXT_K]
     retrieval_time = time.time() - t1
 
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
@@ -3431,6 +3453,12 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             # offer it. Only on a genuine rejection: a clarify is a working
             # conversation, not a dead end.
             "offer_support": role_out == "rejected",
+            # Same shape as the answered path so a client has one thing to
+            # read. Nothing cleared the retrieval gate here, so there is no
+            # honest "more detail" to offer and no page worth pointing at --
+            # this resolves to support, which is the whole point of it.
+            "more_context": more_context.build(
+                results, [], answer, [], refused=(role_out == "rejected")),
             "needs_clarification": needs_clarification,
             "clarification_options": clarification_options,
             "reason": reason,
@@ -3865,6 +3893,17 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             "total_time": round(total_time, 3),
         },
         "sources": sources,
+        # What to offer next, so an answer is never a dead end: genuinely
+        # unused retrieved material, else the original document at the right
+        # page, else a person. See more_context.py -- it only claims "there
+        # is more" when the spare chunks actually carry something the answer
+        # does not.
+        # Breadcrumbs stripped first: the surplus chunks still carry the
+        # "[Doc — Section]" prefix that retrieval needs, and showing that to
+        # a visitor would leak an internal retrieval artefact into the UI.
+        "more_context": more_context.build(
+            [_strip_breadcrumb(r) for r in _retrieved],
+            top_chunks, answer, sources, refused=offer_support),
         # Verbatim tables / checklists, when the wording asked to SEE one.
         # Read back out of the source PDF rather than reconstructed from the
         # answer, so what the visitor gets is the document's own rows.

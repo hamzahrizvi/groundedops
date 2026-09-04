@@ -48,6 +48,27 @@ STEP_HEADER_RE = re.compile(r"^step\s+\d+", re.IGNORECASE)
 
 # ── camelCase / merge-artifact cleanup ──────────────────────────────────
 
+def stem(w: str) -> str:
+    """Crude suffix strip, enough to match a question to a manual.
+
+    Customers type plurals and manuals print singulars: "anything that sorts
+    and pays out COINS" against "bulk COIN validator", "check customer AGES"
+    against "AGE estimation". Exact word matching missed both and the
+    questions were refused. Not linguistics -- just enough that "coins",
+    "coin" and "sorting" land on the same key.
+
+    Lives here because three separate places needed it: sales.py to match a
+    need to a product, more_context.py to tell genuinely new material from a
+    reworded restatement ("operating" vs "operates" made a restatement look
+    40% novel), and anything that compares typed text to document text next.
+    """
+    w = w.lower()
+    for suf in ("ing", "ers", "er", "es", "s"):
+        if len(w) - len(suf) >= 3 and w.endswith(suf):
+            return w[: -len(suf)]
+    return w
+
+
 def fix_camel_case(line: str) -> str:
     """
     Insert a space at lower->upper case boundaries to fix PDF extraction

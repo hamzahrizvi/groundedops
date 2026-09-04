@@ -171,12 +171,21 @@ stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s: None,
 stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0})
 stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
      _invalidate_bm25_cache=lambda: None)
+# text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
+# imports nothing but `re`. So stem() is handed through for real rather than
+# faked: more_context.py depends on it to tell new material from a reworded
+# restatement, and a lambda here would silently change that judgement in
+# every API test. Imported before the stub replaces the module; the function
+# object stays valid afterwards.
+from text_utils import stem as _real_stem  # noqa: E402
+
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
      retrieval_confidence_band=lambda r, t, a: ("none" if not r else "confident"),
      is_refusal=lambda a: False, is_followup_turn=lambda *a: False,
      has_domain_vocabulary=lambda q: False, has_reference_markers=lambda q: False,
-     is_template_leak=lambda a: False, build_clarification_options=lambda *a: [])
+     is_template_leak=lambda a: False, build_clarification_options=lambda *a: [],
+     stem=_real_stem)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],
      get_conversation=lambda *a: None, delete_conversation=lambda *a: True)

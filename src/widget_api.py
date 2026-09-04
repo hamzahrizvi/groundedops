@@ -200,6 +200,24 @@ def _public_sources(sources) -> list:
     } for s in (sources or [])]
 
 
+def _public_more_context(mc) -> dict | None:
+    """The follow-up offer, minus the internals.
+
+    chunk_ids go, for the same reason _public_sources drops them; the
+    passages stay, because they are the document text the offer exists to
+    show and the widget has no id-based way to fetch it.
+    """
+    if not isinstance(mc, dict):
+        return None
+    return {
+        "kind": mc.get("kind"),
+        "label": mc.get("label"),
+        "support": bool(mc.get("support")),
+        "document": mc.get("document"),
+        "passages": mc.get("passages") or [],
+    }
+
+
 def _faq_response(answer: str, caller: dict, matched: str | None = None,
                   candidates: list | None = None, clarify: bool = False,
                   needs_sign_in: bool = False) -> dict:
@@ -209,6 +227,15 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         "from_faq": not needs_sign_in and not clarify,
         "faq_matched_question": matched,
         "faq_candidates": candidates,
+        # A curated FAQ answer ran no retrieval, so there is no spare
+        # material to offer and claiming otherwise would be a lie. Support is
+        # the honest offer -- but only once an answer has actually been
+        # given: a clarify is a live conversation and a sign-in prompt is not
+        # an answer, so neither is a dead end needing an escape hatch.
+        "more_context": None if (clarify or needs_sign_in) else {
+            "kind": "support", "support": True, "document": None,
+            "passages": [], "label": "Contact support for more information",
+        },
         "needs_clarification": clarify,
         "needs_sign_in": needs_sign_in,
         "flagged": False,
@@ -477,6 +504,12 @@ def register(app, answer_query, draft_enquiry=None):
             # only offers product choices when no product is set, so those
             # options can never be populated here.
             "offer_support": bool(result.get("offer_support")),
+            # Passed through for the same reason offer_support had to be: this
+            # endpoint builds its own dict, so anything /query adds stops at
+            # the console unless it is named here -- and the widget is the
+            # surface customers actually use. chunk_ids are dropped in line
+            # with _public_sources; the passages carry the text instead.
+            "more_context": _public_more_context(result.get("more_context")),
             "needs_clarification": bool(result.get("needs_clarification")),
             "flagged": bool(result.get("flagged")),
             "effort": level,
