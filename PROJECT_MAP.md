@@ -47,6 +47,11 @@ groundedops/
 ├── handover.txt                  live URLs + member token from the last run.cmd
 │                                 (quick-tunnel URL rotates every restart), gitignored
 ├── install.cmd  install.ps1  install.sh        one-time setup: .venv, models, .env
+├── serve.ps1                     unattended launcher: restarts on exit, prefers a
+│                                 named tunnel, starts at boot
+├── backup_daily.ps1              registers the daily encrypted backup as a Windows
+│                                 scheduled task; rotation + log (needs
+│                                 BACKUP_PASSPHRASE in src/.env)
 ├── run.cmd  run.ps1              the one launcher (start.cmd/start.ps1/start.sh/
 │                                 start-lan.cmd were removed — strictly redundant
 │                                 with flags here): rebuild frontend if stale,
@@ -73,8 +78,11 @@ groundedops/
     ├── .env                                    secrets, gitignored
     ├── main.py                   FastAPI app, every route, /query orchestration (2297)
     ├── db.py                     shared persistent ChromaDB client
-    ├── parsing.py                page-preserving text extraction (PDF/DOCX/TXT)
-    ├── chunking.py               step-boundary-aware chunking
+    ├── parsing.py                page-preserving text extraction (PDF/DOCX/TXT),
+    │                             tables fenced, headings found by FONT SIZE/WEIGHT
+    ├── chunking.py               step-, table- and heading-aware chunking; a
+    │                             heading forces a boundary and rides along as
+    │                             `section` metadata (74% of chunks carry one)
     ├── ingest.py                 parse → chunk → breadcrumb → embed → store
     ├── embeddings.py             all-MiniLM-L6-v2 wrapper
     ├── retrieval_db.py           hybrid BM25 + dense, RRF-merged, scope-aware
@@ -82,6 +90,13 @@ groundedops/
     ├── router.py                 semantic query classification
     │                             (extract / fast / accurate / reasoning)
     ├── structure.py              checklist / procedure extraction
+    ├── structures.py             verbatim tables/checklists read back out of the
+    │                             source PDF, and the FAQ harvest built from them
+    ├── sales.py                  cross-product questions ("which run on 24V?")
+    │                             from the catalogue + a spec index, no generation
+    ├── more_context.py           what to offer AFTER an answer: genuinely unused
+    │                             passages, else the document at its page, else
+    │                             a person. Relevance-gated, novelty-checked
     ├── llm.py                    Ollama + DeepSeek/OpenAI/Anthropic, condense_query,
     │                             rethink options, model warmup
     ├── grounding.py              NLI-based answer verification
@@ -94,6 +109,9 @@ groundedops/
     ├── catalog.py                category / product catalog, source attachment
     ├── conversations.py          server-side conversation persistence
     ├── text_utils.py             pure-stdlib shared helpers, fully unit-tested
+    ├── jsonstore.py              atomic JSON writes that REFUSE to overwrite an
+    │                             unreadable file, so a bad read cannot be
+    │                             persisted over good data. Used by every store
     ├── widget_api.py             public /widget/* router (v12.0), registered by main.py
     ├── quota.py                  tiers, per-caller quota, signed tokens
     ├── widget_config.py          widget branding + lead capture, imported by main.py —
