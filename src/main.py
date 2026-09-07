@@ -3190,48 +3190,56 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     except Exception as _exc:
         logger.warning(f"Sticky scope unavailable: {_exc}")
 
+    # ── Product scope, and expanding the names the documents use ─────
+    #
+    # Two SEPARATE jobs, and conflating them was a real bug: alias expansion
+    # lived inside the "no scope yet" branch, so it ran only for an unscoped
+    # question. In a product chat -- which is the normal case, and the only
+    # case the widget allows -- the query kept the bare acronym and retrieval
+    # failed. Measured: "what is scs" unscoped resolved to "what is scs
+    # (SMART Coin System)" and scored 0.998; the SAME question with
+    # product=sku_scs was not expanded, scored 0.341, and refused. Being
+    # already in the right manual made the answer WORSE.
     _scope = None
     if payload.product:
         _scope = {"product": payload.product}
     elif payload.category:
         _scope = {"category": payload.category}
-    else:
-        # An UNSCOPED question that names exactly one product should be
-        # scoped to it. _products_named_in already resolves the catalogue's
-        # aliases -- "SCS" is registered against sku_scs, as "NV9S" is
-        # against nv9_spectral -- but it was only ever consulted in the
-        # disambiguation branch, to narrow evidence that spanned several
-        # products. Nothing used it to scope in the first place, so "what is
-        # the SCS?" searched all eleven manuals and answered from whatever
-        # came back.
-        #
-        # Exactly one hit is the whole condition. Two or more means the
-        # visitor really did name several products and asking which is the
-        # right behaviour, which is what that branch is still for.
-        try:
-            _named = _products_named_in(resolved_query,
-                                        list(_product_names().keys()))
-            if len(_named) == 1:
-                _scope = {"product": _named[0]}
-                # Scoping alone is not enough, and measuring proved it: with
-                # the scope set but the query still reading "what is the
-                # SCS?", retrieval inside the right manual STILL refused,
-                # because that manual calls the product "SMART Coin System"
-                # throughout and never "SCS". Scoping narrows where to look;
-                # it does not make the words match.
-                #
-                # So the full name is spliced in. BM25, the embedder, the
-                # cross-encoder and the FAQ matcher then all see the term the
-                # documents actually use, which is the one thing all four
-                # needed. The acronym is kept alongside it rather than
-                # replaced -- it may be the more specific term.
-                _full = (_product_names().get(_named[0]) or "").strip()
-                if _full and _full.lower() not in resolved_query.lower():
-                    resolved_query = f"{resolved_query} ({_full})"
-                logger.info(f"Auto-scoped to {_named[0]!r} and expanded to "
-                            f"{resolved_query!r} — named via a catalogue alias")
-        except Exception as _exc:
-            logger.warning(f"Auto-scope skipped: {_exc}")
+
+    # Which products the question itself names, aliases resolved. Computed
+    # unconditionally now, because both jobs below need it.
+    _named: list[str] = []
+    try:
+        _named = _products_named_in(resolved_query,
+                                    list(_product_names().keys()))
+    except Exception as _exc:
+        logger.warning(f"Product-name resolution skipped: {_exc}")
+
+    # (1) SCOPE, only when nothing set one already. Exactly one hit is the
+    # whole condition: two or more means the visitor really did name several
+    # products, and asking which is the right behaviour.
+    if _scope is None and len(_named) == 1:
+        _scope = {"product": _named[0]}
+        logger.info(f"Auto-scoped to {_named[0]!r} — named in the question "
+                    f"via the catalogue's own aliases")
+
+    # (2) EXPAND, however the scope was arrived at. The catalogue knows
+    # "SCS" is the SMART Coin System and "NV9S" the NV9 Spectral, but the
+    # manuals use the full names throughout, so BM25, the embedder, the
+    # cross-encoder and the FAQ matcher all need the term the documents
+    # actually contain. The acronym is kept alongside rather than replaced --
+    # it may be the more specific term.
+    #
+    # Preference order matters: expand the product the question NAMED when it
+    # named exactly one, otherwise the product being discussed. That way
+    # "what is scs" expands correctly inside an nv9usb chat too.
+    _expand_key = _named[0] if len(_named) == 1 else (
+        (_scope or {}).get("product") if _named else None)
+    if _expand_key:
+        _full = (_product_names().get(_expand_key) or "").strip()
+        if _full and _full.lower() not in resolved_query.lower():
+            resolved_query = f"{resolved_query} ({_full})"
+            logger.info(f"Expanded alias -> {resolved_query!r}")
 
     # ── Curated FAQ (v12.0: ask, don't guess) ─────────────────────────
     # Earlier versions DECIDED whether the user's question was equivalent to

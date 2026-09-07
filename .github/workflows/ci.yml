@@ -48,19 +48,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - name: Install lightweight web deps (needed for tests/test_new_routes.py)
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install web deps + sentence-transformers
         # python-multipart is what FastAPI needs to parse the UploadFile
         # document-upload endpoint. It was missing here, so test_new_routes.py
         # could not import at all -- and that went unnoticed for as long as
         # run_tests.py swallowed load failures (see the note above, now fixed).
-        # Kept as an explicit list rather than -r requirements.txt on purpose:
-        # this job is meant to prove the routes import WITHOUT torch,
-        # chromadb or sentence-transformers, which is what makes it fast.
         # httpx: starlette's TestClient is built on it. Verified against this
         # exact dependency set in a clean Python 3.11 venv, which is what CI
         # uses -- the local venv is 3.14 and behaves differently here.
-        run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx cryptography
+        #
+        # sentence-transformers was DELIBERATELY absent until now, so this job
+        # proved the routes import without the ML stack. That guarantee is
+        # traded knowingly: test_streaming_and_tables needs the real NLI model,
+        # and skipping it meant the streaming grounding rule -- that a streamed
+        # answer cannot assert something the documents do not support -- was
+        # never exercised in CI, only locally. An untested guarantee is the
+        # more expensive thing to be missing.
+        #
+        # It pulls torch, so pip caching is on above. If this job's runtime
+        # becomes a problem, the alternative is to split it: keep `unit` lean
+        # and give the ML-dependent files their own job, rather than dropping
+        # the coverage again.
+        run: pip install fastapi "uvicorn[standard]" pydantic python-multipart httpx cryptography sentence-transformers
       - name: Run unit + route test suite
         run: |
           cd src
