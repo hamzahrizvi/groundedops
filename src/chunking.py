@@ -153,11 +153,57 @@ def _extract_table_units(text: str, size: int) -> list[str]:
     return units
 
 
+SECTION_OPEN = "<<<GO_SECTION>>>"
+SECTION_CLOSE = "<<</GO_SECTION>>>"
+_SECTION_SPLIT = re.compile(
+    "(" + re.escape(SECTION_OPEN) + r".*?" + re.escape(SECTION_CLOSE) + ")")
+_SECTION_ONE = re.compile(
+    re.escape(SECTION_OPEN) + r"(.*?)" + re.escape(SECTION_CLOSE))
+
+
+def pop_section(chunk: str) -> tuple[str, str | None]:
+    """Split a chunk into (text, section), removing the marker.
+
+    Called once per chunk at ingest so the heading becomes METADATA. Storing
+    it only as a text prefix was the old approach and it could be embedded
+    but never filtered on.
+    """
+    m = _SECTION_ONE.match(chunk or "")
+    if not m:
+        return chunk, None
+    return chunk[m.end():].lstrip("\n"), (m.group(1).strip() or None)
+
+
+def strip_section_marks(text: str) -> str:
+    return _SECTION_ONE.sub("", text or "")
+
+
 def chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:
     if not text or not text.strip():
         return []
 
-    # Tables first, so a spec table is never cut across two chunks.
+    # A heading is a hard boundary, and the strongest one available: it is
+    # the document's own statement that what follows is a new subject.
+    # Packing across it merges two subjects into one chunk and leaves the
+    # heading describing only the first half of it.
+    if SECTION_OPEN in text:
+        out: list[str] = []
+        section: str | None = None
+        for seg in _SECTION_SPLIT.split(text):
+            if not seg or not seg.strip():
+                continue
+            m = _SECTION_ONE.fullmatch(seg.strip())
+            if m:
+                section = m.group(1).strip() or None
+                continue
+            for c in chunk_text(seg, size=size, overlap=overlap):
+                # Re-attached so ingest can read it back off the chunk. The
+                # marker never reaches the index: pop_section removes it.
+                out.append(f"{SECTION_OPEN}{section}{SECTION_CLOSE}\n{c}"
+                           if section else c)
+        return out
+
+    # Tables next, so a spec table is never cut across two chunks.
     if TABLE_OPEN in text:
         units = _extract_table_units(text, size)
     else:

@@ -368,6 +368,46 @@ def is_displayable(entry: dict) -> bool:
     return is_question_shaped(entry.get("question") or "")
 
 
+# A DEFINITIONAL entry: one that answers "what is this thing". Two flavours
+# exist -- the curated "What is the MyCheckr Mini?" and the harvested "What
+# is the SMART Coin System and what does it do?" -- and gating only the
+# second missed the first, which then answered "how big is the MyCheckr
+# Mini" with a definition.
+_DEFINITIONAL_Q = re.compile(
+    r"^what\s+(is|are)\s+(the\s+)?[\w+\s().-]{2,60}\?*$"
+    r"|^what\s+is\s+.+\s+and\s+what\s+does\s+it\s+do\?*$"
+    r"|^what\s+does\s+.+\s+do\?*$"
+    r"|^tell\s+me\s+about\s+.+$", re.I)
+
+
+def _is_definitional(entry: dict) -> bool:
+    """Whether this entry answers "what is it" rather than a specific fact.
+
+    An entry naming an attribute in its OWN question is never definitional,
+    however it starts: "What is the operating temperature range for the NV9
+    USB+?" opens with "what is the" and is exactly the entry an attribute
+    question should be allowed to match.
+    """
+    q = (entry.get("question") or "").strip()
+    if not q or _ATTRIBUTE_RE.search(q):
+        return False
+    return bool(_DEFINITIONAL_Q.match(q))
+
+
+# Markers that a question wants a SPECIFIC attribute rather than a
+# definition. A closed set of measurable things, deliberately: this decides
+# which KIND of entry may answer which KIND of question, which is a
+# structural rule, not an attempt to second-guess a relevance score.
+_ATTRIBUTE_RE = re.compile(
+    r"\bhow\s+(many|much|fast|long|big|heavy|wide|tall|often)\b"
+    r"|\b(capacity|throughput|rate|speed|weight|dimensions?|size|voltage|"
+    r"current|amperage|wattage|temperature|humidity|tolerance|pinout|"
+    r"interface|protocol|baud|price|cost|warranty|lifespan|mtbf)\b"
+    r"|\b(come|comes|shipped|supplied|included?|includes)\s+with\b"
+    r"|\bdoes\s+it\s+(come|include|support|need|require|have)\b"
+    r"|\bwhat\s+(size|voltage|current|rate|capacity)\b", re.I)
+
+
 # Best first. The widget shows the first N and nothing ranks them, so
 # insertion order was deciding which questions a visitor ever sees -- which
 # is the other half of "the suggestions look random". A hand-curated answer
@@ -1082,6 +1122,36 @@ def lexical_score(a: str, b: str) -> float:
     return inter / smaller
 
 
+def verbatim_score(a: str, b: str) -> float:
+    """Symmetric overlap, for deciding two questions are THE SAME question.
+
+    lexical_score above is the overlap coefficient -- intersection over the
+    SMALLER set -- which is right for shortlisting candidates because it is
+    recall-oriented. It is badly wrong for auto-serve, because it returns
+    1.0 whenever the shorter question's words are merely a SUBSET of the
+    longer one's.
+
+    That is not a corner case. "What is the SMART Coin System and what does
+    it do?" reduces to {smart, coin, system}; any question mentioning the
+    product contains all three, so it scored a perfect 1.000 and was served
+    as "near-verbatim". Observed in one five-turn conversation: "how many
+    coins can it hold", "how fast does it pay out" and "does it come with a
+    hopper" were each answered with the product overview, and the log
+    claimed 1.000 near-verbatim confidence for all three. The whole scoring
+    apparatus below -- the harvest bar, the semantic-only floor, the
+    relative margin, the disambiguation prompt this module exists for -- sat
+    underneath an early return that was firing on almost everything.
+
+    Jaccard is the right shape here: it only approaches 1.0 when neither
+    question has much the other lacks, which is what "the same question"
+    means. A tapped suggestion chip still scores exactly 1.0.
+    """
+    A, B = _tokens(a), _tokens(b)
+    if not A or not B:
+        return 0.0
+    return len(A & B) / len(A | B)
+
+
 # ── semantic ranking ──────────────────────────────────────────────────
 
 _cache_lock = threading.Lock()
@@ -1176,16 +1246,68 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     for it in pool:
         s_lex = lexical_score(question, it["question"])
         s_sem = sem.get(it["id"], 0.0)
-        if s_lex >= AUTO_SERVE_LEXICAL:
-            logger.info(f"FAQ auto-serve (near-verbatim {s_lex:.3f}): {question!r}")
-            return {"mode": "answer", "entry": it, "score": round(s_lex, 3)}
+        # Auto-serve is judged on the SYMMETRIC score, not s_lex. It skips
+        # every check below it, so it has to mean "this is the same
+        # question" -- see verbatim_score for what went wrong when it did
+        # not. s_lex keeps its recall-oriented job of shortlisting.
+        s_verb = verbatim_score(question, it["question"])
+        if s_verb >= AUTO_SERVE_LEXICAL:
+            logger.info(f"FAQ auto-serve (verbatim {s_verb:.3f}): {question!r}")
+            return {"mode": "answer", "entry": it, "score": round(s_verb, 3)}
         if s_sem >= CANDIDATE_COSINE_FLOOR or s_lex >= CANDIDATE_LEXICAL_FLOOR:
+            # Deliberately s_lex, not the symmetric s_verb, and this was
+            # MEASURED rather than assumed. Ranking candidates on the
+            # symmetric score looked more principled and was worse: over the
+            # same 25-turn conversation set, actionable turns fell from
+            # 23/25 to 17/25. Jaccard penalises a length difference, and a
+            # short curated question genuinely IS a good match for a longer
+            # typed one -- suppressing those cost more than the inflated
+            # scores did. The symmetric score earns its place only on the
+            # auto-serve path above, where a claim of "same question" is
+            # being made and acted on without asking.
             scored.append((max(s_sem, s_lex), it, s_sem, s_lex))
 
     if not scored:
         record_gap(question, scope_key, [])
         logger.info(f"FAQ: no candidates for {question!r} — going to retrieval")
         return {"mode": "none"}
+
+    # A product OVERVIEW answers "what is this thing". It must not answer
+    # "how many coins can it hold".
+    #
+    # Measured over five-turn conversations: after "what is the SCS?" was
+    # answered from the overview, the next THREE turns -- "how many coins can
+    # it hold", "how fast does it pay out", "does it come with a hopper" --
+    # each came back with that same overview, word for word. Five of
+    # twenty-five turns were repeats and every one was this.
+    #
+    # The mechanism is the follow-up condenser doing its job: it rewrites
+    # "how many coins can it hold" to name the SMART Coin System, and that
+    # rewritten query is then extremely similar to "what is the SMART Coin
+    # System and what does it do?" -- similar enough to clear the harvest
+    # bar. Raising that bar would not help, because the match really is
+    # close; it is close on the SUBJECT while being wrong about what was
+    # asked.
+    #
+    # So the gate is structural rather than score-based: an overview is
+    # eligible only for a question that does not ask for a specific
+    # attribute. Anything naming a quantity, a rate, a dimension or an
+    # included part goes to retrieval, which is where the tables are.
+    # Env-gated because the measurement was genuinely close -- see the
+    # commit message. Off by default: it removes wrong answers but converts
+    # them to REFUSALS rather than to answers, because retrieval cannot yet
+    # find these spec values either. Symmetric scoring below already stops
+    # a definitional entry from claiming a perfect match, which was the
+    # bigger half of the problem.
+    _asks_attribute = (bool(_ATTRIBUTE_RE.search(question))
+                       and os.getenv("FAQ_BLOCK_DEFINITIONAL", "").strip().lower()
+                       in ("1", "true", "yes", "on"))
+    if _asks_attribute:
+        _before = len(scored)
+        scored = [t for t in scored if not _is_definitional(t[1])]
+        if len(scored) != _before:
+            logger.info(f"FAQ: dropped {_before - len(scored)} definitional "
+                        f"entr(ies) for the attribute question {question!r}")
 
     # Harvested reference material -- a verbatim spec table, a product
     # overview -- is scored on a stricter bar than curated Q&A.

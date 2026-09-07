@@ -5,7 +5,8 @@ import tempfile
 
 from parsing import extract_pages
 import docstore
-from chunking import chunk_text, strip_table_fences
+from chunking import (chunk_text, strip_table_fences, pop_section,
+                      strip_section_marks)
 
 # Chunk geometry, env-tunable so it can be swept against eval.py without code
 # edits. 500/50 (chunking.py's own defaults) was too small to hold a spec table
@@ -111,16 +112,24 @@ def _breadcrumb(chunk: str) -> str | None:
     return None
 
 
-def _enrich_chunks(chunks: list[str], filename: str) -> list[str]:
+def _enrich_chunks(chunks: list[str], filename: str,
+                   section: str | None = None) -> list[str]:
     """
     Prepend "[<doc> — <section>]" (or "[<doc>]" when no header is found) to
     each chunk so section identity travels into embedding, BM25, and rerank.
     Stripped again in main.py before generation/grounding.
+
+    `section` is the heading the chunker found by LAYOUT (font size and
+    weight) and is preferred when present. SECTION_TITLES below is the older
+    route: a 19-entry whitelist tuned to four documents, which covered 65 of
+    684 chunks -- 9% -- once the corpus reached eleven. It stays as the
+    fallback for a document whose headings carry no size or weight signal at
+    all, such as the two-page CS checklist.
     """
     doc = os.path.splitext(filename)[0]
     out = []
     for c in chunks:
-        crumb = _breadcrumb(c)
+        crumb = section or _breadcrumb(c)
         prefix = f"[{doc} — {crumb}]" if crumb else f"[{doc}]"
         out.append(f"{prefix}\n{c}")
     return out
@@ -183,19 +192,26 @@ def ingest_file(content: bytes, filename: str,
         # can tell near-identical sections apart (e.g. app-login credentials
         # vs. device-registration API credentials). See the block comment at
         # the top of this file.
-        texts, pageno = [], []
+        texts, pageno, sections = [], [], []
         for pno, ptext in pages:
             if not ptext or not ptext.strip():
                 continue
-            for c in _enrich_chunks(
-                    chunk_text(ptext, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP),
-                    filename):
-                # Sentinels are a chunker-internal signal only — strip before
-                # anything is embedded, BM25-tokenised or shown to a model.
-                c = strip_table_fences(c)
-                if c.strip():
-                    texts.append(c)
-                    pageno.append(pno)
+            for raw in chunk_text(ptext, size=CHUNK_SIZE,
+                                  overlap=CHUNK_OVERLAP):
+                # The heading the chunker attached, taken off BEFORE
+                # enrichment so it can be stored as metadata rather than
+                # only embedded in the text. That distinction is the point
+                # of the change: as metadata it can be filtered and boosted.
+                body, section = pop_section(raw)
+                for c in _enrich_chunks([body], filename, section):
+                    # Sentinels are a chunker-internal signal only — strip
+                    # before anything is embedded, BM25-tokenised or shown
+                    # to a model.
+                    c = strip_table_fences(strip_section_marks(c))
+                    if c.strip():
+                        texts.append(c)
+                        pageno.append(pno)
+                        sections.append(section or "")
         if not texts:
             logger.warning(f"No usable chunks from '{filename}'")
             return 0
@@ -241,7 +257,15 @@ def ingest_file(content: bytes, filename: str,
                         "products": _prod_tag,
                         "category": _cat_tag,
                         # v12.0: page number for citation + deep-linking.
-                        "page": pageno[i]} for i in range(len(texts))],
+                        "page": pageno[i],
+                        # The document's own heading for this chunk, found by
+                        # layout rather than by matching against a list of
+                        # known titles. Stored so it can be FILTERED and
+                        # boosted, not just embedded -- "more on this" can
+                        # then mean "more from the same section", and a spec
+                        # question can prefer the section that names it.
+                        "section": sections[i]}
+                       for i in range(len(texts))],
             ids=ids,
         )
 

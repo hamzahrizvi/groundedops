@@ -1,4 +1,5 @@
 import logging
+import os
 
 from pypdf import PdfReader
 from docx import Document
@@ -65,6 +66,105 @@ def _render_table(rows: list[list[str | None]] | None) -> str:
     return "\n".join(lines)
 
 
+SECTION_OPEN = "<<<GO_SECTION>>>"
+SECTION_CLOSE = "<<</GO_SECTION>>>"
+
+# A heading has to be this much bigger than body text. Measured across the
+# corpus: body is 10.0pt in most manuals and 11.4pt in the CS guides, and
+# headings sit at 12/14/16/18 and 14.3 respectively -- ratios of 1.2 to 1.8.
+# The CS guides also contain an 11.7pt variant at 1.03x which is body text
+# with a slightly different face, so the bar has to sit above that.
+HEADING_SIZE_RATIO = float(os.getenv("HEADING_SIZE_RATIO", "1.15"))
+
+# A heading is a label, not a sentence. Both bounds earn their place: the
+# long limit stops an emphasised paragraph becoming a section, and requiring
+# no terminal full stop stops a bold lead-in sentence doing the same.
+HEADING_MAX_CHARS = 90
+
+
+def _body_font_size(pdf) -> float:
+    """The document's dominant character size, by character count.
+
+    Per DOCUMENT rather than per page: a page that happens to be all
+    heading and caption would otherwise decide its own body size and
+    report no headings at all.
+    """
+    counts: dict[float, int] = {}
+    for page in pdf.pages[:40]:
+        try:
+            for c in page.chars:
+                s = round(c.get("size") or 0, 1)
+                if s:
+                    counts[s] = counts.get(s, 0) + 1
+        except Exception:
+            continue
+    if not counts:
+        return 0.0
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+def _is_heading(line: dict, body: float, doc_is_bold: bool) -> bool:
+    """Whether one extract_text_lines() line is a section heading.
+
+    Size first, because it is the signal every document in this corpus
+    actually carries; boldness second, for sub-headings set at body size.
+    Bold is skipped entirely in documents that are mostly bold, where it
+    says nothing.
+    """
+    text = (line.get("text") or "").strip()
+    if not text or len(text) > HEADING_MAX_CHARS:
+        return False
+    if not any(ch.isalpha() for ch in text):
+        return False
+    # A heading is a label. Sentences end in a full stop; headings do not.
+    if text.endswith((".", ";", ",")):
+        return False
+    chars = line.get("chars") or []
+    if not chars:
+        return False
+
+    sizes = [round(c.get("size") or 0, 1) for c in chars]
+    sizes = [s for s in sizes if s]
+    if sizes and body and max(sizes) >= body * HEADING_SIZE_RATIO:
+        return True
+
+    if not doc_is_bold:
+        bold = sum(1 for c in chars if "bold" in (c.get("fontname") or "").lower())
+        if bold >= max(1, int(len(chars) * 0.8)):
+            return True
+    return False
+
+
+def _headings_on_page(page, body: float, doc_is_bold: bool) -> list[str]:
+    """Heading texts on this page, in reading order."""
+    try:
+        lines = page.extract_text_lines()
+    except Exception:
+        return []
+    return [(L.get("text") or "").strip() for L in lines
+            if _is_heading(L, body, doc_is_bold)]
+
+
+def _mark_sections(prose: str, headings: list[str]) -> str:
+    """Fence each heading so the chunker can start a new chunk at it.
+
+    Matched by text against the prose extract_text() produced, rather than
+    rebuilding the page from line objects: extract_text() is what the rest
+    of the pipeline has always consumed, and re-deriving it here would
+    change spacing and column handling for every document at once.
+    """
+    if not headings:
+        return prose
+    wanted = {h for h in headings if h}
+    out = []
+    for raw in prose.split("\n"):
+        if raw.strip() in wanted:
+            out.append(f"{SECTION_OPEN}{raw.strip()}{SECTION_CLOSE}")
+        else:
+            out.append(raw)
+    return "\n".join(out)
+
+
 def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
     """Layout-aware PDF text, with tables rendered separately.
 
@@ -79,6 +179,18 @@ def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
     empty: list[int] = []
 
     with pdfplumber.open(path) as pdf:
+        body_size = _body_font_size(pdf)
+        _bold = _tot = 0
+        for _p in pdf.pages[:40]:
+            try:
+                for _c in _p.chars:
+                    _tot += 1
+                    if "bold" in (_c.get("fontname") or "").lower():
+                        _bold += 1
+            except Exception:
+                continue
+        doc_is_bold = _tot > 0 and _bold / _tot > 0.5
+
         for i, page in enumerate(pdf.pages, start=1):
             try:
                 tables = page.find_tables()
@@ -101,6 +213,16 @@ def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
                     else (page.extract_text() or "")
             except Exception:
                 prose = page.extract_text() or ""
+
+            # Fence the headings before anything else touches the text, so
+            # a chunk boundary can be forced at each one and the section
+            # travels into chunk METADATA rather than only into a text
+            # prefix. Replaces the 19-title whitelist in ingest.py, which
+            # covered 9% of chunks -- it was tuned to four documents and the
+            # corpus has eleven.
+            if prose.strip() and body_size:
+                prose = _mark_sections(
+                    prose, _headings_on_page(page, body_size, doc_is_bold))
 
             parts = [prose.strip()] if prose.strip() else []
             for t in tables:
@@ -201,6 +323,15 @@ def _strip_repeated_lines(pages: list[tuple[int, str]],
             # fewer pages) came through fine. That is exactly the shape of
             # bug that reads as "it works for some products, not others".
             if line in (TABLE_OPEN, TABLE_CLOSE):
+                continue
+            # Section-marked lines are exempt for the same reason the table
+            # sentinels are, and it is not hypothetical: this function
+            # deleted the table fences as page furniture once already,
+            # silently disabling table-aware chunking for 4 of 11
+            # documents. A section heading repeated across a long chapter
+            # ("SMART Coin System Range User Manual") looks exactly like a
+            # running header to a frequency count.
+            if line.startswith(SECTION_OPEN):
                 continue
             counts[line] += 1
 
