@@ -9,6 +9,7 @@ Usage: python3 run_tests.py
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -73,8 +74,27 @@ def discover_and_run():
                 passed += 1
                 print(f"  PASS  {path.stem}  (own process)")
             else:
-                failed.append((path.stem, "(own process)", out.strip()))
-                print(f"  FAIL  {path.stem}  (own process)")
+                # A missing OPTIONAL dependency is a skip here too. The
+                # in-process branch below has said so since it was written,
+                # but this branch only sees a non-zero exit code, so a file
+                # needing BOTH its own process and an optional package could
+                # never skip -- it could only fail.
+                #
+                # test_streaming_and_tables is exactly that file: it needs
+                # isolation because it loads the real NLI model, and that
+                # model needs sentence-transformers, which CI's `unit` job
+                # deliberately does not install. So it failed CI while
+                # passing locally, and the two paths disagreed about the
+                # same policy.
+                _m = re.search(r"ModuleNotFoundError: No module named '([^']+)'",
+                               out)
+                if _m:
+                    skipped += 1
+                    print(f"  SKIP  {path.stem}  (needs {_m.group(1)}, "
+                          f"own process)")
+                else:
+                    failed.append((path.stem, "(own process)", out.strip()))
+                    print(f"  FAIL  {path.stem}  (own process)")
             continue
 
         saved_modules = sys.modules.copy()

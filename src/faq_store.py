@@ -333,7 +333,20 @@ _INTERROGATIVE = (
     "why", "where", "which", "who", "when", "will", "must", "may", "if",
 )
 # "Caption: Item, Item, Item" -- a table header row, not a question.
-_CAPTION_LIST = re.compile(r":\s*[^,?]+(?:,\s*[^,?]+){1,}\s*$")
+#
+# The \s* quantifiers this used to carry were removable and had to go: they
+# overlapped with [^,?]+, which also matches whitespace, so the same string
+# could be split many ways and the engine tried all of them. Measured on
+# ":+," followed by n repetitions of " +," and a character that cannot be
+# consumed: 0.2ms at n=10, 2.4ms at n=14, 37ms at n=18, 152ms at n=20 --
+# exponential, and reachable from any FAQ question text. CodeQL flagged it
+# on this PR (alert 116).
+#
+# Here a comma can only ever be matched by the literal ",", because the
+# character class excludes it, so the segmentation is unambiguous and the
+# match is linear: 0.011ms at n=20 and flat. The trailing \s* is simply
+# unnecessary -- is_question_shaped strips before calling this.
+_CAPTION_LIST = re.compile(r":[^,?]*(?:,[^,?]*)+$")
 # "...checklist: 2" -- a caption with a row count stuck on the end.
 _TRAILING_COUNT = re.compile(r":\s*\d+\s*$")
 # There is deliberately no "word broken by a PDF column split" rule. The

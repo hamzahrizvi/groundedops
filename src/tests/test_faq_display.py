@@ -150,3 +150,16 @@ def test_display_puts_curated_first():
     finally:
         faq_store._PATH = old
         faq_store._invalidate_cache()
+
+
+def test_caption_pattern_is_not_exponential():
+    r"""CodeQL alert 116. The pattern had overlapping \s* quantifiers beside
+    a class that also matches whitespace, so one string could be split many
+    ways and the engine tried all of them: 0.2ms at n=10 rising to 152ms at
+    n=20, from FAQ question text. A time bound is the only honest assertion
+    here -- the old pattern fails it by three orders of magnitude."""
+    import time
+    hostile = ":+," + " +," * 22 + "?"
+    t0 = time.perf_counter()
+    faq_store.is_question_shaped(hostile)
+    assert (time.perf_counter() - t0) < 0.05
