@@ -178,6 +178,7 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
 # every API test. Imported before the stub replaces the module; the function
 # object stays valid afterwards.
 from text_utils import stem as _real_stem  # noqa: E402
+from text_utils import is_more_request as _real_is_more  # noqa: E402
 
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
@@ -185,7 +186,7 @@ stub("text_utils",
      is_refusal=lambda a: False, is_followup_turn=lambda *a: False,
      has_domain_vocabulary=lambda q: False, has_reference_markers=lambda q: False,
      is_template_leak=lambda a: False, build_clarification_options=lambda *a: [],
-     stem=_real_stem)
+     stem=_real_stem, is_more_request=_real_is_more)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],
      get_conversation=lambda *a: None, delete_conversation=lambda *a: True)

@@ -83,6 +83,7 @@ from text_utils import (
     retrieval_confidence_band,
     is_refusal,
     is_followup_turn,
+    is_more_request,
     has_domain_vocabulary,
     has_reference_markers,
     is_template_leak,
@@ -3194,6 +3195,43 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         _scope = {"product": payload.product}
     elif payload.category:
         _scope = {"category": payload.category}
+    else:
+        # An UNSCOPED question that names exactly one product should be
+        # scoped to it. _products_named_in already resolves the catalogue's
+        # aliases -- "SCS" is registered against sku_scs, as "NV9S" is
+        # against nv9_spectral -- but it was only ever consulted in the
+        # disambiguation branch, to narrow evidence that spanned several
+        # products. Nothing used it to scope in the first place, so "what is
+        # the SCS?" searched all eleven manuals and answered from whatever
+        # came back.
+        #
+        # Exactly one hit is the whole condition. Two or more means the
+        # visitor really did name several products and asking which is the
+        # right behaviour, which is what that branch is still for.
+        try:
+            _named = _products_named_in(resolved_query,
+                                        list(_product_names().keys()))
+            if len(_named) == 1:
+                _scope = {"product": _named[0]}
+                # Scoping alone is not enough, and measuring proved it: with
+                # the scope set but the query still reading "what is the
+                # SCS?", retrieval inside the right manual STILL refused,
+                # because that manual calls the product "SMART Coin System"
+                # throughout and never "SCS". Scoping narrows where to look;
+                # it does not make the words match.
+                #
+                # So the full name is spliced in. BM25, the embedder, the
+                # cross-encoder and the FAQ matcher then all see the term the
+                # documents actually use, which is the one thing all four
+                # needed. The acronym is kept alongside it rather than
+                # replaced -- it may be the more specific term.
+                _full = (_product_names().get(_named[0]) or "").strip()
+                if _full and _full.lower() not in resolved_query.lower():
+                    resolved_query = f"{resolved_query} ({_full})"
+                logger.info(f"Auto-scoped to {_named[0]!r} and expanded to "
+                            f"{resolved_query!r} — named via a catalogue alias")
+        except Exception as _exc:
+            logger.warning(f"Auto-scope skipped: {_exc}")
 
     # ── Curated FAQ (v12.0: ask, don't guess) ─────────────────────────
     # Earlier versions DECIDED whether the user's question was equivalent to
@@ -3238,6 +3276,35 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             }
         logger.warning(f"faq_id {payload.faq_id} not found — falling through")
 
+    # (a1b) "Tell me more" -- expand the LAST answer, do not re-answer.
+    #
+    # This is the typed form of the more_context "show it" button, and it was
+    # broken twice over. Retrieval on the literal words scored 0.0001 and
+    # refused, having just answered the same topic; once history was recorded
+    # it instead re-served the previous answer WORD FOR WORD, which is not
+    # "more". Both are the same mistake -- treating a request to expand as a
+    # new question -- so it is answered from the previous turn instead.
+    if is_more_request(q) and history:
+        _prev = history[-1]
+        _expanded = _expand_previous(_prev.get("q") or "",
+                                     _prev.get("a") or "", _scope)
+        if _expanded:
+            total_time = time.time() - start_total
+            add_to_memory(session_id, q, _expanded["answer"])
+            return {
+                "answer": _expanded["answer"],
+                "response_time_ms": round(total_time * 1000),
+                "role": "expand",
+                "model": None, "provider": "documents",
+                "grounding_score": None, "flagged": False,
+                "from_faq": False,
+                "sources": _expanded["sources"],
+                "retrieval_score": None,
+                "resolved_query": _prev.get("q") or None,
+                "timing": {"total_time": round(total_time, 3)},
+                "more_context": _expanded["more_context"],
+            }
+
     # (a2) Cross-product sales questions, before the FAQ and retrieval.
     #
     # "Which of your validators run on 24V?" and "do you have anything that
@@ -3249,6 +3316,10 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     _sales = _sales_answer(payload.q, resolved_query)
     if _sales:
         total_time = time.time() - start_total
+        # Same omission as the FAQ path above: a catalogue answer lists
+        # products, so "tell me more about the second one" is the obvious
+        # next turn and needs this turn in history to mean anything.
+        add_to_memory(session_id, q, _sales["answer"])
         return {
             "answer": _sales["answer"],
             "response_time_ms": int(total_time * 1000),
@@ -3274,6 +3345,15 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         if _faq["mode"] == "answer":
             _entry = _faq["entry"]
             total_time = time.time() - start_total
+            # Conversational memory, which this path used to skip. Only the
+            # main answered path recorded a turn, so ANY follow-up after a
+            # FAQ answer met an empty history: is_followup_turn requires a
+            # non-empty one, so "it" was never resolved and retrieval ran on
+            # the literal words. Measured: "What is the SMART Coin System?"
+            # then "tell me more about it" scored 0.0001 and was refused,
+            # having just answered the same topic. add_to_memory drops
+            # refusals itself, so this is safe to call unconditionally.
+            add_to_memory(session_id, q, _entry["answer"])
             _uid = convo_store.resolve_user_id(x_user_id)
             _convo_id = None
             if _uid:
@@ -3913,6 +3993,59 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # wanted to SEE the table rather than be told a number.
         "structures": _structures_for(f"{q} {resolved_query or ''}", top_chunks),
     }
+
+
+def _expand_previous(prev_q: str, prev_a: str, scope: dict | None) -> dict | None:
+    """Answer "tell me more" from what the LAST answer left out.
+
+    Retrieval is re-run on the PREVIOUS question, because the current one
+    ("tell me more") carries no content words to retrieve on. The previous
+    ANSWER is then used as the thing to be novel against, so what comes back
+    is the material that answer did not already contain.
+
+    Served verbatim rather than regenerated: the passages are the document's
+    own words, and paraphrasing them would reintroduce exactly the
+    fabrication risk the grounding gate exists to catch.
+
+    Returns None only when there is no previous question to expand.
+    """
+    if not (prev_q or "").strip():
+        return None
+
+    results = retrieve_from_db(prev_q, top_k=RETRIEVE_K, scope=scope)
+    if EXCLUDED_SOURCES:
+        results = [r for r in results
+                   if not any(ex in (r.get("source") or "").lower()
+                              for ex in EXCLUDED_SOURCES)]
+    ranked = [_strip_breadcrumb(r) for r in
+              rerank(prev_q, results, top_k=len(results))] if results else []
+    used = ranked[:CONTEXT_K]
+    sources = _build_sources(used)
+    mc = more_context.build(ranked, used, prev_a, sources)
+
+    if mc["kind"] == "detail":
+        parts = []
+        for p in mc["passages"]:
+            where = f" (page {p['page']})" if p.get("page") else ""
+            parts.append(f"**From {p['source']}{where}**\n\n{p['text']}")
+        return {"answer": "Here is more from the documentation:\n\n"
+                          + "\n\n---\n\n".join(parts),
+                "sources": sources, "more_context": mc}
+
+    # Nothing further in the corpus. Saying so plainly beats repeating the
+    # previous answer, which is what happened before this existed.
+    doc = mc.get("document") or {}
+    if doc.get("source"):
+        pages = doc.get("pages") or []
+        where = (f", pages {', '.join(str(p) for p in pages)}" if len(pages) > 1
+                 else f", page {pages[0]}" if pages else "")
+        tail = (f" The full detail is in {doc['source']}{where}, which you "
+                f"can download below.")
+    else:
+        tail = " Our support team can help with anything beyond it."
+    return {"answer": "That is everything the documentation has on this."
+                      + tail,
+            "sources": sources, "more_context": mc}
 
 
 # ── Public widget API (v12.0) ────────────────────────────────────────

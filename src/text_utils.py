@@ -48,6 +48,29 @@ STEP_HEADER_RE = re.compile(r"^step\s+\d+", re.IGNORECASE)
 
 # ── camelCase / merge-artifact cleanup ──────────────────────────────────
 
+# "Tell me more" is a request to EXPAND THE LAST ANSWER, not a new question.
+# Treated as one, it retrieves on the literal words -- which carry no content
+# at all -- and refuses: measured 0.0001 retrieval score straight after
+# answering the same topic. Resolving it against history is not enough
+# either, because that just re-serves the previous answer verbatim, which is
+# not "more".
+#
+# Anchored at the start so "tell me more about the hopper capacity" is NOT
+# caught: that names its own subject and is a real question.
+_MORE_RE = re.compile(
+    r"^\s*(?:and\s+|ok(?:ay)?[,\s]+|so\s+)?"
+    r"(?:tell\s+me\s+more|more\s+(?:info(?:rmation)?|detail|on\s+(?:this|that|it))"
+    r"|elaborate|go\s+on|continue|expand(?:\s+on\s+(?:this|that|it))?"
+    r"|anything\s+else|what\s+else|say\s+more)"
+    r"(?:\s+(?:about|on)\s+(?:it|this|that|the\s+above))?"
+    r"\s*[.?!]*\s*$", re.I)
+
+
+def is_more_request(q: str) -> bool:
+    """True when the user is asking to expand the previous answer."""
+    return bool(_MORE_RE.match(q or ""))
+
+
 def stem(w: str) -> str:
     """Crude suffix strip, enough to match a question to a manual.
 

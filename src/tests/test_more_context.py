@@ -152,3 +152,27 @@ def test_detail_is_ordered_by_relevance_not_novelty():
     got = more_context.build(USED + [far, near], USED, ANSWER, SOURCES)
     assert got["kind"] == "detail"
     assert got["chunk_ids"][0] == "near", got["chunk_ids"]
+
+
+# ── "tell me more" is a request to EXPAND, not a new question ───────────
+
+def test_recognises_a_request_to_expand():
+    from text_utils import is_more_request
+    for q in ("tell me more", "tell me more about it", "more info",
+              "more detail", "more on that", "elaborate", "go on",
+              "continue", "anything else?", "what else", "say more",
+              "expand on this", "ok tell me more", "and tell me more"):
+        assert is_more_request(q), q
+
+
+def test_a_question_naming_its_own_subject_is_not_an_expand_request():
+    """The distinction that keeps this from hijacking real questions: "tell
+    me more about the hopper capacity" names what it wants and must go
+    through normal retrieval."""
+    from text_utils import is_more_request
+    for q in ("tell me more about the hopper capacity",
+              "what is the coin capacity?",
+              "more coins per second than the twin?",
+              "how do I calibrate it?",
+              "elaborate the pinout table for nv9"):
+        assert not is_more_request(q), q
