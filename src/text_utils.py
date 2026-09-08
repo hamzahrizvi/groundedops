@@ -254,7 +254,8 @@ def passes_retrieval_gate(results: list[dict], threshold: float = 0.5) -> bool:
 
 
 def retrieval_confidence_band(results: list[dict], gate_threshold: float = 0.5,
-                               ambiguous_ceiling: float = 0.65) -> str:
+                               ambiguous_ceiling: float = 0.65,
+                               ambiguous_floor: float = 0.5) -> str:
     """
     Classify retrieval confidence into one of three bands: "confident",
     "ambiguous" (borderline score AND results scattered across several
@@ -270,6 +271,26 @@ def retrieval_confidence_band(results: list[dict], gate_threshold: float = 0.5,
 
     top_sources = {r.get("source") for r in results[:4] if r.get("source")}
     if len(top_sources) >= 3:
+        # Scattered across several sources AND weak is ABSENCE, not
+        # ambiguity, and the two look identical from a source count alone.
+        # When nothing matches, results scatter precisely BECAUSE nothing
+        # matches, so the spread is wide for the opposite reason.
+        #
+        # It matters because RETRIEVAL_GATE_THRESHOLD is 0.0001 -- close
+        # enough to off that "none" is only reached when retrieval scores a
+        # literal zero. So everything weak-but-nonzero landed here. Measured:
+        # "how do I reset the password on my Cisco router" scored 0.204 and
+        # was asked which of four products it meant; eval.py expects it
+        # REJECTED, and being asked to pick a product for a question no
+        # product answers is a loop that cannot end.
+        #
+        # The floor is the reranker's OWN decision boundary: reranker.py
+        # sigmoids its logits so 0.5 means a raw logit of zero, the point
+        # where the model stops calling a passage relevant. To be worth
+        # disambiguating, the best candidate should at least be more likely
+        # relevant than not.
+        if top_score < ambiguous_floor:
+            return "none"
         return "ambiguous"
 
     return "confident"

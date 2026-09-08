@@ -3598,8 +3598,21 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             confidence = retrieval_confidence_band(
                 results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
 
+    # A multi-product span is only AMBIGUITY when there is credible evidence
+    # to be ambiguous between. With nothing relevant retrieved, results are
+    # scattered across products precisely BECAUSE the corpus cannot answer --
+    # so the span is wide for the opposite reason, and asking "which product
+    # did you mean?" about a question no product answers sends the visitor
+    # round a loop that cannot end.
+    #
+    # Measured: "how do I reset the password on my Cisco router" scored 0.204
+    # and was offered a product choice; eval.py expects it REJECTED, and a
+    # refusal plus a route to support is the honest reply. Confidence "none"
+    # is the retrieval gate's own verdict, so this defers to it rather than
+    # inventing a second threshold.
     _ask_product = (not payload.product and not payload.category
-                    and len(_span) > 1)
+                    and len(_span) > 1
+                    and confidence != "none")
     if _ask_product:
         confidence = "ambiguous"
 

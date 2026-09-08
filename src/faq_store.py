@@ -60,9 +60,39 @@ _lock = threading.Lock()
 # retrieval + grounding.
 FAQ_ENABLED = os.getenv("FAQ_ENABLED", "on").strip().lower() not in ("off", "0", "false")
 
-# Auto-serve without asking. Deliberately near-1.0: this is for verbatim
-# repeats and tapped suggestion chips only.
+# Auto-serve without asking, by either of two routes.
+#
+# (a) VERBATIM: symmetric word overlap at 0.95 is effectively "the same
+#     string". This is the tapped-suggestion-chip case, and the only route
+#     available when the semantic model cannot be imported.
+#
+# (b) PARAPHRASE: a very high semantic score AND substantial word overlap.
+#     Both are required, and that is the whole design.
+#
+# Why (b) exists: fixing auto-serve to use a symmetric score was correct --
+# the old overlap coefficient returned 1.000 whenever the shorter question's
+# words were a subset of the longer one's, so auto-serve fired on almost
+# everything. But the THRESHOLD was left at 0.95, which on the old metric was
+# loose and on the new one means near-identical. Genuine paraphrases score
+# 0.60-0.80, so they stopped auto-serving and fell through to "ask the user".
+# Measured consequence: eval.py went from 81% to 53%, with 13 of 34 cases
+# answering "please select the one you meant" -- including "Does MyCheckr
+# need an internet connection?", which has a near-verbatim curated entry.
+# Changing what a metric MEANS without recalibrating what is built on it.
+#
+# Why BOTH conditions, and not semantic alone: semantic alone is exactly the
+# v3.1 design this module's docstring records as a production failure -- it
+# served "no internet required" for "Does the MyCheckr have WiFi or Ethernet
+# ports?". Measured against that same pair now: its best matches score
+# 0.943/0.400, 0.932/0.222 and 0.909/0.125, so it fails BOTH bars with room
+# to spare. The separation is real:
+#
+#     genuine paraphrase           sem 0.994-0.995   jaccard 0.60-0.80
+#     wrong but related            sem 0.884-0.947   jaccard 0.43-0.50
+#     out of corpus                sem 0.58-0.61     jaccard 0.00
 AUTO_SERVE_LEXICAL = float(os.getenv("FAQ_AUTO_SERVE", "0.95"))
+AUTO_SERVE_SEMANTIC = float(os.getenv("FAQ_AUTO_SERVE_SEM", "0.98"))
+AUTO_SERVE_SEM_LEX_FLOOR = float(os.getenv("FAQ_AUTO_SERVE_SEM_LEX", "0.60"))
 
 # Candidate shortlisting.
 #
@@ -1187,10 +1217,30 @@ def _store_mtime() -> float:
         return 0.0
 
 
-def _build_cache(items: list[dict]):
+def _build_cache(items: list[dict] | None = None):
+    """Embed EVERY answerable question in the store, not the caller's subset.
+
+    `items` is ignored and kept only for call compatibility. It used to be
+    trusted, and that was a silent, severe bug: suggest_candidates passes a
+    PRODUCT-SCOPED pool, so the cache was built from whichever product was
+    asked about first after startup -- and because the cache key is the
+    store's mtime, which does not change, it was never rebuilt for any other
+    scope. Every subsequent question about a different product got NO
+    semantic score at all and was ranked on lexical overlap alone.
+
+    Measured on the live server: the cache was built from the 45 SMART Coin
+    System questions, and 0 of the 41 MyCheckr questions then scored. The log
+    line said "cache built: 45 questions" against a 345-entry store, which is
+    the tell. Nothing raised, so _semantic_available stayed True and the
+    "semantic ranking unavailable" warning never fired.
+
+    This is most of why the FAQ felt erratic: half its ranking signal was
+    absent for all but one product, which leaves the overlap coefficient --
+    the one that returns 1.0 for a subset match -- deciding everything.
+    """
     global _cache_mtime, _cache_ids, _cache_vecs, _semantic_available
     from embeddings import embed_texts
-    answerable = [it for it in items if (it.get("answer") or "").strip()]
+    answerable = [it for it in _load() if (it.get("answer") or "").strip()]
     if not answerable:
         _cache_ids, _cache_vecs, _cache_mtime = [], None, _store_mtime()
         return
@@ -1264,21 +1314,38 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
         # question" -- see verbatim_score for what went wrong when it did
         # not. s_lex keeps its recall-oriented job of shortlisting.
         s_verb = verbatim_score(question, it["question"])
-        if s_verb >= AUTO_SERVE_LEXICAL:
-            logger.info(f"FAQ auto-serve (verbatim {s_verb:.3f}): {question!r}")
-            return {"mode": "answer", "entry": it, "score": round(s_verb, 3)}
+        # (a) the same string, or (b) a paraphrase the semantic model is
+        # near-certain about AND that shares most of its words. See the
+        # AUTO_SERVE_* block above for why both halves of (b) are required.
+        _verbatim = s_verb >= AUTO_SERVE_LEXICAL
+        _paraphrase = (s_sem >= AUTO_SERVE_SEMANTIC
+                       and s_verb >= AUTO_SERVE_SEM_LEX_FLOOR)
+        if _verbatim or _paraphrase:
+            logger.info(
+                f"FAQ auto-serve ({'verbatim' if _verbatim else 'paraphrase'}"
+                f" sem={s_sem:.3f} jac={s_verb:.3f}): {question!r}")
+            return {"mode": "answer", "entry": it,
+                    "score": round(max(s_verb, s_sem), 3)}
         if s_sem >= CANDIDATE_COSINE_FLOOR or s_lex >= CANDIDATE_LEXICAL_FLOOR:
-            # Deliberately s_lex, not the symmetric s_verb, and this was
-            # MEASURED rather than assumed. Ranking candidates on the
-            # symmetric score looked more principled and was worse: over the
-            # same 25-turn conversation set, actionable turns fell from
-            # 23/25 to 17/25. Jaccard penalises a length difference, and a
-            # short curated question genuinely IS a good match for a longer
-            # typed one -- suppressing those cost more than the inflated
-            # scores did. The symmetric score earns its place only on the
-            # auto-serve path above, where a claim of "same question" is
-            # being made and acted on without asking.
-            scored.append((max(s_sem, s_lex), it, s_sem, s_lex))
+            # ADMITTED on s_lex (recall-oriented), RANKED on s_sem/s_verb.
+            #
+            # s_lex is the overlap coefficient, so it returns 1.0 for any
+            # short entry whose words are a subset of the question. Using it
+            # as the SCORE tied the right answer with the wrong ones and let
+            # the relative-margin cut keep all three: "What is the standard
+            # lid assembly for the SMART Hopper?" offered its own exact
+            # entry alongside "What is the SMART Coin System?" and "...and
+            # what does it do?", every one at 1.000. "How many coins per
+            # second" ranked the correct "operating speed" entry THIRD at
+            # 0.974, behind two definitional entries at 1.000.
+            #
+            # An earlier attempt at this measured WORSE and was reverted.
+            # That measurement was invalid: the semantic cache was being
+            # built from one product's subset, so s_sem was 0.0 for
+            # everything else and removing s_lex left nothing to rank on.
+            # With the cache fixed, semantic carries the ranking and the
+            # correct entry comes first.
+            scored.append((max(s_sem, s_verb), it, s_sem, s_lex))
 
     if not scored:
         record_gap(question, scope_key, [])
