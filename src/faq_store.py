@@ -1373,15 +1373,30 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # eligible only for a question that does not ask for a specific
     # attribute. Anything naming a quantity, a rate, a dimension or an
     # included part goes to retrieval, which is where the tables are.
-    # Env-gated because the measurement was genuinely close -- see the
-    # commit message. Off by default: it removes wrong answers but converts
-    # them to REFUSALS rather than to answers, because retrieval cannot yet
-    # find these spec values either. Symmetric scoring below already stops
-    # a definitional entry from claiming a perfect match, which was the
-    # bigger half of the problem.
+    # ON by default now, and turning it off was my mistake. I disabled it
+    # because it converted wrong answers into REFUSALS and eval.py scores a
+    # refusal as a failure -- but for a question the corpus cannot answer, a
+    # refusal is the CORRECT outcome, so I was reading the harness rather
+    # than the behaviour.
+    #
+    # What it fixes, from a real report: "what is the size of MyCheckr?"
+    # offered "What is MyCheckr used for?" (0.898), "What is the MyCheckr and
+    # what does it do" (0.897) and "What additional features does MyCheckr
+    # offer" (0.894). Three definitional entries, none about size, all
+    # scoring ~0.89 for the sole reason that they mention MyCheckr. And the
+    # dimensions are genuinely NOT in the corpus: page 5 of that manual says
+    # "Refer to MyCheckr Range Technical Data for the dimensions of the
+    # device", a document this install does not hold. So the honest reply is
+    # that we do not have it, and every one of those three suggestions was a
+    # dead end dressed up as a choice.
+    #
+    # An entry naming an attribute in its OWN question is not definitional,
+    # so "What is the operating speed of the SMART Coin System?" survives to
+    # answer "how many coins per second" -- the gate removes the vague, not
+    # the specific.
     _asks_attribute = (bool(_ATTRIBUTE_RE.search(question))
-                       and os.getenv("FAQ_BLOCK_DEFINITIONAL", "").strip().lower()
-                       in ("1", "true", "yes", "on"))
+                       and os.getenv("FAQ_BLOCK_DEFINITIONAL", "on").strip().lower()
+                       not in ("0", "false", "no", "off"))
     if _asks_attribute:
         _before = len(scored)
         scored = [t for t in scored if not _is_definitional(t[1])]
@@ -1437,7 +1452,24 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
                     f"overlap for {question!r} - going to retrieval")
         return {"mode": "none"}
 
-    _floor = float(os.getenv("FAQ_CANDIDATE_MIN_SCORE", "0.45"))
+    # 0.45 was set when the semantic half of this scoring was dead -- the
+    # cache was built from one product's subset, so s_sem was 0.0 for
+    # everything else and the floor only ever saw lexical overlap. With
+    # semantic working the same number means something entirely different,
+    # and 0.45 admits anything that merely mentions the product.
+    #
+    # Measured separation, now that the scores are real:
+    #     genuine paraphrase              0.994
+    #     the correct specific entry      0.947 - 0.974
+    #     same product, unrelated         0.843 - 0.898   <-- must not offer
+    #     out of corpus                   0.58  - 0.61
+    #
+    # 0.92 sits in the gap with ~0.05 either side. "what is the size of
+    # MyCheckr?" was offered "What additional features does MyCheckr offer"
+    # (0.894), "How can MyCheckr be mounted?" (0.853) and "Does MyCheckr
+    # store any personal data?" (0.843) -- three dead ends dressed up as a
+    # choice, for a question whose answer is not in the corpus at all.
+    _floor = float(os.getenv("FAQ_CANDIDATE_MIN_SCORE", "0.92"))
     if scored[0][0] < _floor:
         record_gap(question, scope_key, [])
         logger.info(f"FAQ: best candidate {scored[0][0]:.3f} < {_floor} for "

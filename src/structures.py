@@ -352,11 +352,35 @@ def _most_relevant(query: str, blocks: list[dict], limit: int,
     # them. Demand that most of what the visitor actually asked about is
     # present, not that something matched.
     if require_match:
-        need = max(1, (len(terms) + 1) // 2)
-        scored = [(s, b) for s, b in scored
-                  if sum(1 for t in terms
-                         if t in (b.get("title") or "").lower()
-                         or t in (b.get("markdown") or "").lower()) >= need]
+        # Half the terms was still too lenient, because the terms a question
+        # turns on are not the ones a nearby table happens to share.
+        # Measured: "can I set the settings of the MyCheckr on linux?" gave
+        # terms {set, settings, mycheckr, linux}; three settings tables
+        # satisfied "settings" and "mycheckr", cleared 2-of-4, and came back
+        # as the answer -- with LINUX, the entire point of the question,
+        # matched by none of them.
+        #
+        # On a lookup WE initiated the alternative is an honest refusal, so
+        # the bar is that the table actually COVERS the question: no query
+        # term may be entirely absent. A missing term means it does not.
+        #
+        # Two adjustments make that workable rather than merely strict:
+        #  * stems, so "set"/"settings" is one requirement, not two;
+        #  * terms drawn from the document's own name are dropped, since
+        #    every table in the MyCheckr manual "matches" MyCheckr and the
+        #    word carries no discriminating power inside it.
+        from text_utils import stem as _stem
+        kept = []
+        for sc, b in scored:
+            title = (b.get("title") or "").lower()
+            body = (b.get("markdown") or "").lower()
+            doc = (b.get("source") or "").lower()
+            need_terms = {_stem(t) for t in terms if t not in doc}
+            haystack = {_stem(w) for w in re.findall(r"[a-z0-9]+",
+                                                     f"{title} {body}")}
+            if need_terms and need_terms <= haystack:
+                kept.append((sc, b))
+        scored = kept
         if not scored:
             return []
 
