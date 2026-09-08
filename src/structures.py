@@ -369,6 +369,23 @@ def _most_relevant(query: str, blocks: list[dict], limit: int,
         #  * terms drawn from the document's own name are dropped, since
         #    every table in the MyCheckr manual "matches" MyCheckr and the
         #    word carries no discriminating power inside it.
+        # An UNCAPTIONED table is too weak to answer on. collect() later
+        # fills a missing title with the document name, which is how "what is
+        # the username and password" came back as a bare "Step | Screenshot |
+        # Description" procedure table and a DNS settings grid -- both
+        # title='' underneath, both satisfying {username, password} from
+        # incidental cell text.
+        #
+        # A caption is the document's own statement of what a table is ABOUT,
+        # so on a lookup WE initiated it is the minimum evidence. Verified
+        # against the case that must keep working: the NV9USB+ weight tables
+        # are captioned 'NV9USB+' and 'NV11+' and survive. The same MyCheckr
+        # page also carries a table captioned "This page allows API
+        # credentials stored on the device to be" -- the one that should win.
+        scored = [(sc, b) for sc, b in scored if (b.get("title") or "").strip()]
+        if not scored:
+            return []
+
         from text_utils import stem as _stem
         kept = []
         for sc, b in scored:

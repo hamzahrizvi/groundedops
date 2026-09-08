@@ -767,8 +767,19 @@ def _structures_for(query: str, chunks: list[dict],
         # shares no words with the caption; a refusal-triggered lookup must
         # find something genuinely on-topic or return nothing, or it turns a
         # correct refusal into an irrelevant table.
+        # ONE block when WE decided to look, several only when the visitor
+        # asked to see tables.
+        #
+        # The fallback exists to show the table that answers a question the
+        # model refused. Showing four is not that -- it is the system saying
+        # "somewhere in here", which reads as a search result rather than an
+        # answer, and was reported as exactly that: asked for a username and
+        # password it returned three tables. If the best match cannot be
+        # picked out on its own, we do not know the answer, and a refusal
+        # plus a page reference is the more honest reply.
         return structures.collect(kind, cited, docstore.store_dir(),
                                   query=query,
+                                  limit=1 if force_kind else 4,
                                   require_match=bool(force_kind))
     except Exception as exc:
         logger.warning(f"structure extraction skipped: {exc}")
@@ -797,7 +808,13 @@ def _render_structures(blocks: list[dict]) -> str:
         return (f"**{title}** (page {b.get('page')})\n\n"
                 + b.get("markdown", ""))
 
-    lines = [f"I found {len(blocks)} {kind}s. Here they are:", ""]
+    # Phrased as a statement about the DOCUMENTATION, not about the search.
+    # "I found 3 tables. Here they are:" is the system narrating its own
+    # retrieval, which is why a table answer read as a machine shrugging
+    # rather than as a reply. Only reachable now when the visitor explicitly
+    # asked to see tables, so saying there are several is useful orientation
+    # rather than an excuse.
+    lines = [f"The documentation covers this in {len(blocks)} {kind}s:", ""]
     for b in blocks:
         lines.append(f"**{b.get('title') or kind.title()}** "
                      f"(page {b.get('page')})")
