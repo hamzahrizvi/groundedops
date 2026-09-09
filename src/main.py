@@ -699,6 +699,20 @@ def _warmup_stack():
         # Build the cross-product spec index here rather than on the first
         # sales question: it walks every table in every manual and took 52s
         # on the first such query, which the visitor paid for.
+        # The FAQ ranking cache. Embedding every curated question is the
+        # slowest single thing in a cold process -- 354 questions measured
+        # 117.6s on CPU -- and it was landing on whoever asked the FIRST
+        # question after a restart, on the FAQ path, which is meant to be
+        # the fast one. Built here instead, and persisted to disk, so a
+        # restart usually loads it in milliseconds.
+        _set_app_state(progress=75, message="Preparing FAQ search")
+        try:
+            import faq_store as _fq
+            _n = _fq.warm_cache()
+            logger.info(f"FAQ ranking cache warm: {_n} questions")
+        except Exception as exc:
+            logger.warning(f"FAQ cache warmup skipped: {exc}")
+
         _set_app_state(progress=80, message="Indexing product specifications")
         try:
             import sales as _sales, docstore as _ds

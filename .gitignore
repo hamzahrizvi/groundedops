@@ -113,3 +113,7 @@ sweep_run.log
 # instead, encrypted. Keep the manifest out too: it describes files that are
 # not here.
 documents/
+
+# Derived FAQ question vectors: rebuildable from faq_store.json in ~2 minutes,
+# ~600KB of binary, and invalidated by its own mtime key.
+src/*.vectors.npz

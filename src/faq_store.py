@@ -1239,16 +1239,100 @@ def _build_cache(items: list[dict] | None = None):
     the one that returns 1.0 for a subset match -- deciding everything.
     """
     global _cache_mtime, _cache_ids, _cache_vecs, _semantic_available
-    from embeddings import embed_texts
+    from embeddings import embed_texts, EMBED_MODEL
     answerable = [it for it in _load() if (it.get("answer") or "").strip()]
     if not answerable:
         _cache_ids, _cache_vecs, _cache_mtime = [], None, _store_mtime()
         return
-    _cache_ids = [it["id"] for it in answerable]
+
+    ids = [it["id"] for it in answerable]
+    mt = _store_mtime()
+
+    # Try disk first. Embedding every FAQ question is the single slowest
+    # thing in a cold process: 354 questions through gte-modernbert-base on
+    # CPU measured 117.6 SECONDS, and it was being paid by whoever asked the
+    # first question after a restart -- including on the FAQ path, which is
+    # supposed to be the fast one. Warm, the same lookup is 106ms.
+    #
+    # Keyed on the store's mtime, the model name and the id list, so an
+    # edited FAQ, a swapped embedding model or an added entry all invalidate
+    # it rather than serving vectors that no longer describe the questions.
+    if _load_cache_from_disk(ids, mt, EMBED_MODEL):
+        _semantic_available = True
+        logger.info(f"FAQ ranking cache loaded from disk: {len(_cache_ids)} "
+                    f"questions")
+        return
+
+    _cache_ids = ids
     _cache_vecs = embed_texts([it["question"] for it in answerable])
-    _cache_mtime = _store_mtime()
+    _cache_mtime = mt
     _semantic_available = True
     logger.info(f"FAQ ranking cache built: {len(_cache_ids)} questions")
+    _save_cache_to_disk(mt, EMBED_MODEL)
+
+
+def _cache_file() -> str:
+    return os.getenv("FAQ_VECTOR_CACHE") or (_PATH + ".vectors.npz")
+
+
+def _load_cache_from_disk(ids: list[str], mtime: float, model: str) -> bool:
+    """True if a matching cache was loaded into the module globals."""
+    global _cache_ids, _cache_vecs, _cache_mtime
+    p = _cache_file()
+    if not os.path.exists(p):
+        return False
+    try:
+        import numpy as np
+        with np.load(p, allow_pickle=False) as z:
+            if (str(z["model"]) != model
+                    or float(z["mtime"]) != float(mtime)
+                    or list(z["ids"]) != ids):
+                return False
+            _cache_vecs = z["vecs"]
+        _cache_ids, _cache_mtime = ids, mtime
+        return True
+    except Exception as exc:
+        # A corrupt or older-format cache is a cache miss, never an error:
+        # the worst case is paying the build once, which is what used to
+        # happen every time.
+        logger.warning(f"FAQ vector cache unreadable ({exc}); rebuilding")
+        return False
+
+
+def _save_cache_to_disk(mtime: float, model: str) -> None:
+    p = _cache_file()
+    try:
+        import numpy as np
+        tmp = p + ".tmp"
+        # Written through a FILE OBJECT, not a path: np.savez appends ".npz"
+        # to a path that lacks it, so saving to "<p>.tmp" produced
+        # "<p>.tmp.npz" and the os.replace below then looked for a file that
+        # did not exist. Given a handle it writes exactly where told.
+        #
+        # allow_pickle stays off on the read side, so ids go in as a plain
+        # unicode array rather than as objects.
+        with open(tmp, "wb") as fh:
+            np.savez(fh,
+                     vecs=_cache_vecs,
+                     ids=np.array(_cache_ids, dtype="U"),
+                     model=np.array(model, dtype="U"),
+                     mtime=np.array(float(mtime)))
+        os.replace(tmp, p)
+        logger.info(f"FAQ vector cache written to {os.path.basename(p)}")
+    except Exception as exc:
+        # Non-fatal: without it the next cold start pays the build again.
+        logger.warning(f"could not write the FAQ vector cache: {exc}")
+
+
+def warm_cache() -> int:
+    """Build or load the ranking cache NOW. Called from startup warmup so a
+    visitor never pays for it. Returns the number of cached questions."""
+    try:
+        _semantic_scores("warm up", _load())
+        return len(_cache_ids)
+    except Exception as exc:
+        logger.warning(f"FAQ cache warmup skipped: {exc}")
+        return 0
 
 
 def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:
