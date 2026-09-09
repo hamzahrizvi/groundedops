@@ -305,10 +305,22 @@
     ".go-fnote{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.45}" +
     // sources
     ".go-src{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}" +
+    // The summary is the button. list-style:none plus the ::-webkit- rule
+    // removes the native triangle in every engine that still ships one, so
+    // the chevron below is the only marker and it can be rotated.
     ".go-srch{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);" +
-    "margin-bottom:5px;display:flex;align-items:center;gap:5px}.go-srch svg{width:12px;height:12px}" +
-    ".go-srci{font-size:12.5px;margin-bottom:5px}" +
-    ".go-srcn{font-weight:600}.go-srcs{color:var(--mut);font-size:12px}" +
+    "display:flex;align-items:center;gap:5px;cursor:pointer;list-style:none;" +
+    "padding:3px 0;border-radius:6px;user-select:none}" +
+    ".go-srch::-webkit-details-marker{display:none}" +
+    ".go-srch:hover{color:var(--ink)}" +
+    ".go-srch svg{width:12px;height:12px}" +
+    ".go-srch::after{content:'';width:6px;height:6px;margin-left:2px;" +
+    "border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;" +
+    "transform:rotate(45deg);transition:transform .12s}" +
+    ".go-src[open] .go-srch::after{transform:rotate(-135deg)}" +
+    ".go-src[open] .go-srch{margin-bottom:5px}" +
+    ".go-srci{font-size:12.5px;margin-bottom:4px;line-height:1.45}" +
+    ".go-srcn{font-weight:600}" +
     ".go-pg{font-weight:500;color:var(--mut);font-size:11.5px}" +
     ".go-dl{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--a);text-decoration:none}" +
     ".go-dl:hover{text-decoration:underline}" +
@@ -516,26 +528,37 @@
     b.appendChild(txt);
 
     if (msg.sources && msg.sources.length) {
-      var s = document.createElement("div");
+      // COLLAPSED by default, and short when open. It used to be an always-
+      // expanded list carrying a text snippet per source, which put several
+      // lines of document prose under every answer -- the answer is the
+      // answer, and provenance is something you go and look at.
+      //
+      // <details>/<summary> rather than a click handler: the open/closed
+      // state, the keyboard behaviour and the ARIA semantics all come free,
+      // which matters in a widget injected into someone else's page.
+      var s = document.createElement("details");
       s.className = "go-src";
-      s.innerHTML = '<div class="go-srch">' + I_SHIELD + "Sources</div>";
+      var n = Math.min(msg.sources.length, 4);
+      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + "Sources (" +
+        n + ")</summary>";
       msg.sources.slice(0, 4).forEach(function (x) {
         var i = document.createElement("div");
         i.className = "go-srci";
-        // v12.0: name + page reference + download link for the original.
+        // Name, the pages that actually carried the answer, and a way to
+        // open the original. The snippet is deliberately gone: it repeated
+        // in prose what the answer had just said.
+        //
         // The page label is built server-side so every client renders it
         // identically ("page 12" / "pages 12, 14").
-        var head = '<div class="go-srcn">' + esc(pretty(x.source)) +
-          (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "") +
-          "</div>";
+        var head = '<span class="go-srcn">' + esc(pretty(x.source)) + "</span>" +
+          (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "");
         // Fetched with the bearer token rather than a plain link: external
         // /source_file access now requires a valid member token, and an
         // <a href> cannot carry an Authorization header.
         var dl = x.download_url
-          ? '<a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download source</a>'
+          ? ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>'
           : "";
-        i.innerHTML = head +
-          (x.snippet ? '<div class="go-srcs">' + esc(x.snippet) + "</div>" : "") + dl;
+        i.innerHTML = head + dl;
         s.appendChild(i);
       });
       s.querySelectorAll("[data-dl]").forEach(function (a) {

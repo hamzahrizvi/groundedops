@@ -2700,7 +2700,14 @@ function viewTest() {
       const bub = el("div", { class: "bub a" });
       bub.append(renderMarkdown(r.answer || "No answer"));
       if (r.sources && r.sources.length) {
-        bub.append(el("div", { class: "lbl", style: "margin-top:9px" }, "Sources"));
+        // Collapsed, to match the widget. Provenance is something you go and
+        // look at, so it should not sit open under every answer -- and this
+        // is the pipeline check, so what it shows should be what a customer
+        // sees. <details> gives the toggle, the keyboard handling and the
+        // ARIA semantics with no state to manage.
+        const det = el("details", { style: "margin-top:9px" });
+        det.append(el("summary", { class: "lbl", style: "cursor:pointer;user-select:none" },
+                      "Sources (" + r.sources.length + ")"));
         // The document is a link, and the pages are named, so the reader can
         // go and check. download_url and page_label already come from the
         // server -- they were being flattened into plain text here.
@@ -2713,8 +2720,9 @@ function viewTest() {
             row.append(el("span", { style: "color:color-mix(in srgb, var(--color-text) 55%, transparent)" },
               "  \u2014 see " + s.page_label));
           }
-          bub.append(row);
+          det.append(row);
         });
+        bub.append(det);
       }
 
       // The conversation window holds a fixed number of turns, after which the
