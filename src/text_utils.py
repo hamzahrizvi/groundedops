@@ -26,6 +26,12 @@ REFUSAL_PHRASE_VARIANTS = [
     "i don't have that information",
     "i do not have that information",
     "please contact support",
+    # The customer-facing rewrite of the canonical refusal above. Listed here
+    # so is_refusal() still recognises a refusal AFTER it has been reworded
+    # for the reader: offer_support, the follow-up handling and the logs all
+    # key off that check, and none of them may stop working because the
+    # wording became friendlier.
+    "i don't have that in the product documentation",
 ]
 
 MIN_UNIT_LEN = 12

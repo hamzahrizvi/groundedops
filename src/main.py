@@ -742,6 +742,56 @@ def status():
 
 
 
+def _friendly_refusal(scope_key: str | None, product_label: str = "") -> str:
+    """The customer-facing form of a refusal.
+
+    "I could not find that in the knowledge base." is the token the PROMPT
+    asks the model for and the string is_refusal() matches, so it stays as
+    the internal contract -- but it is written for us, not for a visitor. It
+    names an internal thing ("the knowledge base"), it is a flat dead end,
+    and it arrives with no route onward.
+
+    So the internal phrasing is kept and the reader gets this instead:
+    what we do not have, then a few questions we CAN answer, then a person.
+    The suggestions come from the displayable curated set for the scope --
+    is_question_shaped already guarantees they read like questions rather
+    than harvested table captions.
+
+    Deliberately NOT claimed as "relevant to your query": nothing matched,
+    which is why we are refusing, and dressing the list up as related
+    results would be the same overclaim that made the old FAQ suggestions
+    feel random. They are offered as what this product's documentation does
+    cover.
+
+    Contact details are left to the caller. The widget already appends the
+    configured support email and phone when offer_support is set, and
+    hardcoding them here would give a visitor two versions to reconcile.
+    """
+    what = f" about the {product_label}" if product_label else ""
+    lines = [f"I don't have that in the product documentation{what}."]
+
+    try:
+        import faq_store
+        suggestions = [e["question"] for e in
+                       faq_store.list_for_product(scope_key, display_only=True)
+                       if (e.get("answer") or "").strip()][:3]
+    except Exception as exc:
+        logger.warning(f"refusal suggestions skipped: {exc}")
+        suggestions = []
+
+    if suggestions:
+        lines.append("")
+        lines.append("Here are some things I can answer:")
+        lines.extend(f"- {q}" for q in suggestions)
+        lines.append("")
+        lines.append("If you meant something else, our support team can help "
+                     "with the detail I don't hold.")
+    else:
+        lines.append("")
+        lines.append("Our support team can help with this one.")
+    return "\n".join(lines)
+
+
 def _structures_for(query: str, chunks: list[dict],
                     force_kind: str | None = None) -> list[dict]:
     """Verbatim tables/checklists for a question that asked to SEE one.
@@ -3544,7 +3594,11 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             needs_clarification = True
             clarification_options = build_clarification_options("ambiguous_in_domain", history, results)
         else:
-            answer = "I could not find that in the knowledge base."
+            # Reworded for the reader; is_refusal() still matches it, so
+            # offer_support and the logs behave exactly as before.
+            answer = _friendly_refusal(
+                payload.product or payload.category,
+                _product_names().get(payload.product or "", ""))
             role_out = "rejected"
             reason = "low_retrieval_confidence"
             needs_clarification = False
@@ -3932,7 +3986,12 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                       "reachable. Your documents were searched fine; this is a "
                       "configuration problem, not a missing answer.")
         else:
-            answer = "I could not find that in the knowledge base."
+            # Same rewrite as the retrieval-gate branch. This is the
+            # ungrounded/refused-by-the-model path, which is the commonest
+            # refusal a customer actually sees.
+            answer = _friendly_refusal(
+                payload.product or payload.category,
+                _product_names().get(payload.product or "", ""))
 
         if template_leak or generation_failed:
             grounding_score = None
@@ -3977,6 +4036,20 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     try:
         from text_utils import is_refusal as _is_refusal
         offer_support = bool(_is_refusal(answer))
+        # Reword HERE, not in the individual branches. The commonest refusal
+        # is the one the MODEL emits -- the prompt asks it for that exact
+        # string -- so rewriting only the app-set branches missed it, which
+        # is how the first attempt at this still showed the old text. This
+        # is the one place every refusal has already been detected.
+        #
+        # The canonical string stays the internal contract (the prompt asks
+        # for it, the sanitiser protects it, is_refusal matches it); only
+        # what the reader sees changes, and the friendly form is itself a
+        # recognised variant so nothing downstream stops working.
+        if offer_support:
+            answer = _friendly_refusal(
+                payload.product or payload.category,
+                _product_names().get(payload.product or "", ""))
     except Exception:
         offer_support = False
     log_interaction(q, answer, role, output.get("model"),
