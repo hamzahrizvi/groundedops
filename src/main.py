@@ -1878,6 +1878,21 @@ def source_file(filename: str):
     return FileResponse(path, filename=safe)
 
 
+def _category_product_keys(key: str) -> set[str]:
+    """Product keys inside the category `key`, or an empty set if `key` is
+    not a category. Used to make a range selection mean "everything in this
+    range" rather than "the handful of questions filed against the range
+    itself"."""
+    try:
+        import catalog as _cat
+        for c in _cat.catalog().get("categories", []):
+            if c.get("key") == key:
+                return {p.get("key") for p in c.get("products", []) if p.get("key")}
+    except Exception as exc:
+        logger.warning(f"category expansion failed for {key!r}: {exc}")
+    return set()
+
+
 @app.get("/faq/gaps")
 def faq_gaps(product: str | None = None,
              sort: str = "demand",
@@ -1905,6 +1920,16 @@ def faq_gaps(product: str | None = None,
     # (an empty string means "no filter"), so it is handled here.
     if product == "__none__":
         gaps = [g for g in faq_store.list_gaps(None) if not g.get("scope")]
+    elif product and _category_product_keys(product):
+        # A CATEGORY, not a product. Gaps are filed against product keys, so
+        # filtering on the category key alone matched nothing and the console
+        # showed "0 entries" for a range that plainly had questions in it.
+        # Expand it to the products it contains, and keep the category key
+        # itself: a question asked with only a range selected is filed under
+        # that key and belongs in this view too.
+        wanted = _category_product_keys(product) | {product}
+        gaps = [g for g in faq_store.list_gaps(None)
+                if (g.get("scope") or "") in wanted]
     else:
         gaps = faq_store.list_gaps(product)
 

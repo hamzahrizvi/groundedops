@@ -69,7 +69,13 @@
   .nav button[aria-current="page"] .badge{background:var(--color-accent-800);color:var(--color-accent-100)}
 
   .main{flex:1;overflow-y:auto;padding:30px 34px 90px;position:relative}
-  .wrap{max-width:1000px;animation:rise .18s ease both}
+  /* Fills the window. This was max-width:1000px with no centring, so on
+     anything wider than about 1300px the content hugged the left edge and
+     the rest of the window was dead space -- half of it on a 2560 display.
+     Width is not what keeps text readable here: the prose elements carry
+     their own ch-based measures (.lede, .sec-hint), and the tables and
+     lists are the things that actually wanted the room. */
+  .wrap{width:100%;animation:rise .18s ease both}
   h1{font-size:26px;letter-spacing:-.025em;margin:0 0 4px;font-family:var(--font-heading);font-weight:500}
   .lede{margin:0 0 22px;max-width:66ch;font-size:14px;
         color:color-mix(in srgb, var(--color-text) 60%, transparent)}
@@ -101,7 +107,13 @@
   .gap-row{align-items:flex-start}
   /* Product index for the unanswered list. Every product and its share of
      the backlog visible at once, instead of one at a time behind a select. */
-  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px;align-items:center}
+  /* The products inside the selected range. Indented and marked with a short
+     rail so it reads as a level down rather than a second, equal row. */
+  .chips-sub{margin:-4px 0 12px 14px}
+  .chips-rail{width:10px;height:1px;flex:0 0 auto;
+        background:color-mix(in srgb, var(--color-text) 22%, transparent)}
+  .chips-sub .chip{font-size:12px;padding:5px 11px}
   .chip{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
         font:inherit;font-size:12.5px;line-height:1;padding:7px 12px;
         border-radius:999px;color:var(--color-text);
@@ -1803,20 +1815,6 @@ function viewFaq() {
   if (!cache.gapScopes) {
     cache.gapScopes = [...new Set(cache.gaps.map(g => g.scope || ""))].sort();
   }
-  // Same reason, for the per-product totals the chips show. The first page
-  // load comes from the shared refresh(), which does not call /faq/gaps and
-  // so carries no scope_counts -- without this the chips render "0" beside
-  // every product until something triggers a reload, which reads as "no
-  // questions here" rather than "not counted yet".
-  if (!cache.gapCounts) {
-    cache.gapCounts = {};
-    cache.gaps.forEach(g => {
-      const k = g.scope || "";
-      const e = cache.gapCounts[k] || (cache.gapCounts[k] = { questions: 0, asks: 0 });
-      e.questions += 1;
-      e.asks += (g.times_asked || 1);
-    });
-  }
 
   const scopeSel = el("select", { class: "input", style: "width:auto",
                                   onchange: e => { scope = e.target.value; render2(); } },
@@ -2218,6 +2216,28 @@ function viewGaps() {
   // product, to find that out. The same options as a row of chips put every
   // product and its weight on screen at once, and make switching between
   // them one click instead of three.
+  // Derived here, not in the shared refresh(): the first paint of this page
+  // does not go through reload() and so carries no scope_counts from the
+  // server. Without it every chip reads "0", which says "nothing here"
+  // rather than "not counted yet". (This lived in viewFaq() briefly, which
+  // meant the counts were only right if you happened to visit the FAQ
+  // editor first -- an ordering the page-by-page audit accidentally
+  // satisfied and a direct link did not.)
+  // Same ordering trap as the counts below: the scope list is also derived
+  // lazily elsewhere, so arriving on this page directly left it empty and
+  // the range chips never rendered at all.
+  if (!cache.gapScopes) {
+    cache.gapScopes = [...new Set(cache.gaps.map(g => g.scope || ""))].sort();
+  }
+  if (!cache.gapCounts) {
+    cache.gapCounts = {};
+    cache.gaps.forEach(g => {
+      const k = g.scope || "";
+      const e = cache.gapCounts[k] || (cache.gapCounts[k] = { questions: 0, asks: 0 });
+      e.questions += 1;
+      e.asks += (g.times_asked || 1);
+    });
+  }
   const counts = cache.gapCounts || {};
   const totalQs = Object.values(counts).reduce((n, c) => n + (c.questions || 0), 0);
   const chip = (key, label, n) => {
@@ -2229,14 +2249,71 @@ function viewGaps() {
       label,
       n != null ? el("span", { class: "chip-n" }, String(n)) : null);
   };
-  const scopeChips = el("div", { class: "chips", "data-tour": "gaps-filter" },
+  // Two levels, not one flat row. Eleven products across three ranges is
+  // already too many chips to scan, and it will only grow -- so the top row
+  // is ranges, and the products inside one appear only once that range is
+  // chosen. Choosing a range also filters the list to it, so the first click
+  // is useful on its own rather than only a step towards the second.
+  const catOf = k => {
+    const pr = prods.find(x => x.key === k);
+    if (pr) return pr.categoryKey || pr.category || "";
+    return (cache.catalog || []).some(c => c.key === k) ? k : "";
+  };
+  const catName = ck => {
+    const c = (cache.catalog || []).find(x => x.key === ck);
+    if (c) return c.name;
+    const pr = prods.find(x => (x.categoryKey || x.category) === ck);
+    return pr ? pr.categoryName : ck;
+  };
+  const scopeKeys = (cache.gapScopes || []).filter(Boolean);
+  const byCat = new Map();
+  scopeKeys.forEach(k => {
+    const ck = catOf(k) || "__other__";
+    if (!byCat.has(ck)) byCat.set(ck, []);
+    byCat.get(ck).push(k);
+  });
+  const sumFor = keys => keys.reduce((n, k) => n + ((counts[k] || {}).questions || 0), 0);
+  const activeCat = gapFilter.scope
+    ? (gapFilter.scope === "__none__" ? "" : (catOf(gapFilter.scope) || gapFilter.scope))
+    : "";
+
+  const catRow = el("div", { class: "chips", "data-tour": "gaps-filter" },
     chip("", "All products", totalQs),
-    (cache.gapScopes || []).filter(Boolean)
-      .sort((a, b) => ((counts[b] || {}).questions || 0) - ((counts[a] || {}).questions || 0))
-      .map(k => chip(k, nameFor(k) || k, (counts[k] || {}).questions)),
-    (cache.gapScopes || []).indexOf("") >= 0
-      ? chip("__none__", "No product selected", (counts[""] || {}).questions)
+    [...byCat.entries()]
+      .sort((a, b) => sumFor(b[1]) - sumFor(a[1]))
+      .map(([ck, keys]) => {
+        // A range chip is active when it is selected itself OR when one of
+        // its products is, so the trail back up stays visible while drilled in.
+        const on = activeCat === ck && gapFilter.scope !== "";
+        return el("button", {
+          class: "chip" + (on ? " chip-on" : ""),
+          "aria-pressed": on ? "true" : "false",
+          onclick: () => {
+            // Clicking the range you are already inside steps back out,
+            // so the top row doubles as the way back.
+            gapFilter.scope = on && gapFilter.scope === ck ? "" : ck;
+            reload();
+          } },
+          ck === "__other__" ? "Unfiled" : (catName(ck) || ck),
+          el("span", { class: "chip-n" }, String(sumFor(keys))));
+      }),
+    scopeKeys.indexOf("") >= 0 || (cache.gapScopes || []).indexOf("") >= 0
+      ? chip("__none__", "No product selected", (counts[""] || {}).questions || 0)
       : null);
+
+  const childKeys = activeCat && byCat.has(activeCat) ? byCat.get(activeCat) : [];
+  const productRow = childKeys.length > 1
+    ? el("div", { class: "chips chips-sub" },
+        el("span", { class: "chips-rail" }),
+        childKeys
+          .sort((a, b) => ((counts[b] || {}).questions || 0) - ((counts[a] || {}).questions || 0))
+          .map(k => {
+            const label = (nameFor(k) || k).split(" › ").pop();
+            return chip(k, label, (counts[k] || {}).questions || 0);
+          }))
+    : null;
+
+  const scopeChips = el("div", {}, catRow, productRow);
 
   const scopeSel = el("select", { class: "input", style: "width:auto;display:none",
     onchange: () => { gapFilter.scope = scopeSel.value; reload(); } },
