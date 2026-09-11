@@ -1187,7 +1187,8 @@ _INGEST_LOCK = threading.Lock()
 
 def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
                    category_key: str | None = None, product_key: str | None = None,
-                   ingest_provider: str | None = None):
+                   ingest_provider: str | None = None,
+                   replace_source: str | None = None):
     def _progress(stage, done, total):
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id].update(
@@ -1202,6 +1203,18 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
     try:
         count = ingest_file(content, filename, api_keys=api_keys, progress=_progress,
                             category_key=category_key, product_key=product_key)
+        # A new version of a document already held. The old chunks go only
+        # AFTER the new ones are in: if ingest fails we still have the
+        # version we had, which is the whole point of replacing rather than
+        # deleting first and uploading second.
+        if replace_source and replace_source != filename:
+            try:
+                removed = db.delete_source(replace_source)
+                logger.info("replaced %r with %r (%s old chunk(s) removed)",
+                            replace_source, filename, removed)
+            except Exception as exc:
+                logger.error("could not remove the replaced source %r: %s",
+                             replace_source, exc)
         # v10.3: admin uploaded into a specific product -> tag the source so
         # it's scoped to that product/category from now on.
         if category_key and product_key:
@@ -1219,6 +1232,66 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id] = {"status": "error", "error": str(e),
                                     "file": filename, "done": True}
+
+
+def _source_product_label(source: str) -> str:
+    """Where a source is currently filed, for a message that tells the
+    uploader what they already have rather than just refusing them."""
+    try:
+        import catalog as _cat
+        for c in _cat.catalog().get("categories", []):
+            for pr in c.get("products", []):
+                if source in (_cat.sources_for(pr.get("key")) or []):
+                    return f"{c.get('name')} › {pr.get('name')}"
+    except Exception:
+        pass
+    return "no product"
+
+
+def _doc_key(filename: str) -> str:
+    """A filename reduced to what makes it the SAME DOCUMENT.
+
+    Name only, deliberately: the two copies of the MyCheckr manual sitting in
+    this corpus are 7,147,709 and 7,147,175 bytes with different hashes, so a
+    content check would have called them distinct and let the duplicate in.
+    What actually distinguishes them is " (1)" -- the suffix a browser adds
+    when you download a file you already have.
+
+    So: drop the extension, fold case and whitespace, and strip a trailing
+    " (n)". Anything more aggressive starts merging real documents -- "v7"
+    and "v8" of a manual differ by two characters and are not the same file.
+    """
+    import re as _re
+    stem = os.path.splitext(os.path.basename(filename or ""))[0]
+    stem = _re.sub(r"\s*\((\d+)\)\s*$", "", stem)
+    return " ".join(stem.lower().split())
+
+
+def _existing_source_like(filename: str) -> str | None:
+    """The indexed source this upload would duplicate, or None."""
+    key = _doc_key(filename)
+    if not key:
+        return None
+    try:
+        import docstore as _ds
+        names = [e.get("source") or "" for e in _ds.inventory()]
+    except Exception as exc:
+        logger.warning(f"duplicate check skipped ({exc})")
+        return None
+
+    # An exact name wins over a normalised one. The store can hold BOTH
+    # "X.pdf" and "X (1).pdf" -- a stray browser copy sitting beside the real
+    # file -- and reporting the "(1)" as the thing you already have names the
+    # wrong document back at the person uploading.
+    for src in names:
+        if src == filename:
+            return src
+    matches = [src for src in names if _doc_key(src) == key]
+    if not matches:
+        return None
+    # Otherwise prefer the copy without the "(n)" suffix: the shorter name is
+    # the original, the suffixed one is the accident.
+    return sorted(matches, key=len)[0]
 
 
 @app.post("/upload")
@@ -1254,6 +1327,35 @@ async def upload(request: Request,
             f"product={product_key!r}) — '{file.filename}' will need manual "
             f"assignment. Headers received: {list(_h.keys())}")
 
+    # Refuse a document already in the index unless the caller says this is
+    # a new version of it. Without this the same manual accumulates copies --
+    # each one re-answering the same questions from slightly different text,
+    # and each needing to be filed by hand.
+    replace = (_h.get("replace-source") or _h.get("replace_source") or "").strip()
+    clash = _existing_source_like(file.filename)
+    if replace and not (category_key and product_key):
+        # A replacement with no scope chosen keeps the filing of the version
+        # it replaces. Losing it silently is exactly how two documents ended
+        # up in "Unassigned" after a reindex, needing to be filed by hand.
+        import catalog as _cat
+        for _c in _cat.catalog().get("categories", []):
+            for _p in _c.get("products", []):
+                if replace in (_cat.sources_for(_p.get("key")) or []):
+                    category_key = category_key or _c.get("key")
+                    product_key = product_key or _p.get("key")
+                    logger.info("replacement inherits scope %s/%s from %r",
+                                category_key, product_key, replace)
+                    break
+    if clash and not replace:
+        raise HTTPException(status_code=409, detail={
+            "error": "duplicate_document",
+            "existing": clash,
+            "product": _source_product_label(clash),
+            "message": f"“{clash}” is already indexed. Upload it as a "
+                       f"new version to replace it, or rename the file if it "
+                       f"is genuinely a different document.",
+        })
+
     content = await file.read()
     filename = file.filename
     job_id = str(uuid.uuid4())
@@ -1262,7 +1364,7 @@ async def upload(request: Request,
                                 "pct": 0.0, "done": False}
     threading.Thread(target=_ingest_worker,
                      args=(job_id, content, filename, {}, category_key, product_key,
-                           ingest_provider),
+                           ingest_provider, replace or None),
                      daemon=True).start()
     return {"job_id": job_id, "file": filename, "status": "started"}
 
