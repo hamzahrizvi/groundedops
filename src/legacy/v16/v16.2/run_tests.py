@@ -106,15 +106,6 @@ def discover_and_run():
             module.SkipTest = SkipTest
             try:
                 spec.loader.exec_module(module)
-            except SkipTest as e:
-                # A module can decline to run for a reason no import check
-                # can see: test_ui needs a backend LISTENING, not just
-                # playwright installed. Before this, installing playwright
-                # turned that clean skip into a load error, and a load error
-                # fails the whole run.
-                skipped += 1
-                print(f"  SKIP  {path.stem}  ({e})")
-                continue
             except ModuleNotFoundError as e:
                 # A missing OPTIONAL dependency (playwright for the UI tests)
                 # is a skip, not a failure -- otherwise a dev without it can

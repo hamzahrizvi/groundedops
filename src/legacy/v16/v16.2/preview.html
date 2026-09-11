@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Widget preview</title>
+<!--
+  A stand-in for a customer's web page, so the console can show the REAL
+  widget rather than a second chat UI that imitates it.
+
+  Served inside an iframe by the console's Test chat. The iframe matters: the
+  widget positions itself fixed to the viewport and appends to document.body,
+  so loading it directly into the console would float its launcher over the
+  admin UI and put its stylesheet in the same document. An iframe gives it
+  its own viewport and its own document — which is also exactly what it gets
+  on a real customer page, so the preview is honest rather than approximate.
+
+  data-api is deliberately absent below: it is filled in at runtime from this
+  page's own origin, so the preview always talks to the server that served
+  it and there is nothing to keep in sync.
+-->
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #f6f7f9;
+    color: #6b7480;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .hint { max-width: 320px; }
+  .hint b { display: block; color: #16191c; font-size: 15px; margin-bottom: 6px; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1d21; color: #9aa4b0; }
+    .hint b { color: #e8eaed; }
+  }
+</style>
+</head>
+<body>
+  <div class="hint">
+    <b>This is a stand-in customer page</b>
+    The widget is bottom-right, exactly as a visitor sees it. Branding,
+    opening options and contact forms come from Widget design.
+  </div>
+
+  <script>
+    // Same origin as this page, so the preview follows whatever host the
+    // console is being used on — localhost, a LAN address, or a tunnel —
+    // without a hardcoded URL to drift.
+    (function () {
+      var s = document.createElement("script");
+      s.src = "/widget/groundedops-widget.js";
+      s.setAttribute("data-api", window.location.origin);
+
+      // ?token=... previews the widget as a SIGNED-IN visitor. Without it
+      // the preview is anonymous, which is what most real visitors are and
+      // therefore the more honest default. The console mints a short-lived
+      // member token for this (POST /admin/widget/preview_token); it is a
+      // real credential, so it is passed per-preview and never stored here.
+      var q = new URLSearchParams(window.location.search);
+      var tok = q.get("token");
+      if (tok) s.setAttribute("data-token", tok);
+
+      var hint = document.querySelector(".hint b");
+      if (hint) {
+        hint.textContent = tok
+          ? "Previewing as a signed-in customer"
+          : "Previewing as a guest (not signed in)";
+      }
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>

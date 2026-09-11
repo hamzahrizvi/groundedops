@@ -1,0 +1,119 @@
+# ── Vector DB / Chroma ─────────────────────
+src/chroma_db/
+chroma_db/
+
+# ── Binary / index files ───────────────────
+*.bin
+*.sqlite3
+*.db
+
+# ── Logs ──────────────────────────────────
+logs.json
+logs.jsonl
+*.log
+*.log.err
+
+# ── Secrets ───────────────────────────────
+.deepseek_key.json
+.deepseek_key.enc
+*.enc
+.env
+*.env
+# run.ps1's summary of the last run — includes the member token and the
+# widget secret. Never commit this.
+handover.txt
+
+# ── Python ────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+
+# ── Node / build output ───────────────────
+# Both are regenerated: install.ps1/install.sh run `npm install && npm run build`,
+# and docker/Dockerfile.frontend builds its own copy. docker/.dockerignore skips
+# them too.
+node_modules/
+dist/
+
+# ── OS / IDE ──────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+eval_results.json
+# eval_baseline*.json is deliberately NOT ignored — eval.py diffs each run
+# against the committed baseline (see eval.py:11).
+
+corpus/*
+!corpus/README.md
+
+uploads/
+
+# ── Obsidian notes vault (not part of the app) ─
+GroundedOps-Vault/
+.obsidian/
+
+# ── Runtime data (regenerated on first write, see PROJECT_MAP.md) ──
+faq_store.json
+faq_gaps.json
+gaps_store.json
+catalog_config.json
+ingest_stamp.txt
+conversations.db
+# sqlite runtime DBs and their write-ahead/shared-memory siblings. The -wal
+# and -shm files were untracked-but-not-ignored, so they showed up as noise
+# in every status.
+quota.db
+*.db-wal
+*.db-shm
+# widget_leads.json holds real customer contact details — the widget's
+# sales/support forms are live and write to it.
+widget_config.json
+widget_leads.json
+# Admin accounts: password hashes and staff email addresses. Never commit
+# this, and note that it is NOT regenerated — losing it means losing every
+# account, so it needs a real backup (see accounts.py).
+accounts.json
+accounts.json.tmp
+# Access limits an operator has changed from the defaults (policy.py).
+# Safe to lose -- it falls back to the env/installed defaults.
+policy.json
+policy.json.tmp
+
+# Pre-restore safety snapshots written by backup.py, and any backup
+# archive left in the tree. Both contain password hashes and customer data.
+backup_snapshots/
+*-backup-*.zip
+# Ad-hoc snapshots taken before a data migration. Same contents, same
+# sensitivity -- the naming is whatever the operator chose at the time,
+# so match the shapes rather than one exact name.
+before-*.zip
+before-*.gobk
+*.gobk
+
+# Session handoff notes. Untracked on purpose: they aggregate this
+# install's current weaknesses in one place -- what is unverified, what is
+# switched off, what has never been deployed -- and this repo is PUBLIC.
+# Useful to the next session, useful to nobody else. The convention already
+# applied to HANDOFF_console_ux.md; making it explicit so a handoff does
+# not get committed by accident.
+HANDOFF.md
+HANDOFF_*.md
+
+# sweep_grounding.py's saved run. Real questions + timings, no secrets,
+# but it is a measurement artifact, not source.
+sweep_grounding.json
+sweep_run.log
+
+# The uploaded source documents. ~107MB of PDFs, and the durable asset this
+# install cannot regenerate -- but git is the wrong home for them: they are
+# binary, they never diff usefully, and once committed they are in the
+# history permanently. backup_daily.ps1 / manage_backup.py carry them
+# instead, encrypted. Keep the manifest out too: it describes files that are
+# not here.
+documents/
+
+# Derived FAQ question vectors: rebuildable from faq_store.json in ~2 minutes,
+# ~600KB of binary, and invalidated by its own mtime key.
+src/*.vectors.npz

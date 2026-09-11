@@ -1,9 +1,24 @@
 """Drive the real console in a headless browser against the live test
 backend. Catches what a syntax check cannot: runtime errors on render,
 broken wiring, views that throw when a list is empty."""
+import socket
+
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8099"
+
+# This drives a REAL console against a REAL backend, which the harness does
+# not start. Skip rather than fail when nothing is listening: the alternative
+# is a red suite on every machine that has playwright installed but no test
+# server up, which says nothing about the code under test.
+_probe = socket.socket()
+_probe.settimeout(1.0)
+try:
+    _probe.connect(("127.0.0.1", 8099))
+except OSError:
+    raise SkipTest("needs the test backend on 127.0.0.1:8099")  # noqa: F821
+finally:
+    _probe.close()
 errors, fails = [], []
 
 

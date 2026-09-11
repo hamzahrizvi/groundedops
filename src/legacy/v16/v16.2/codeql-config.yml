@@ -1,0 +1,37 @@
+name: "GroundedOps CodeQL config"
+
+# WHY THIS FILE EXISTS
+#
+# src/legacy/ holds byte-for-byte archives of what shipped in each release
+# (v3 through v15). They are never imported, never served and never executed
+# — release.py writes them and nothing reads them but a human comparing
+# versions.
+#
+# CodeQL was scanning them anyway, which produced two problems:
+#
+#   1. ~73 open alerts against code that cannot run, drowning the handful in
+#      live code that actually matter. The signal was unusable.
+#   2. Every release made it worse in a way that blocked CI. A new drop copies
+#      main.py, admin.html and the rest into a new folder, so CodeQL counted
+#      those copies as newly-INTRODUCED vulnerable code and failed the PR with
+#      "16 new alerts including 14 high severity" — none of them new, none of
+#      them reachable, and unfixable without editing archives to make them lie
+#      about what shipped.
+#
+# Excluding them is not sweeping anything under the rug: the live equivalents
+# of every one of those findings were fixed in v15.2 (path traversal in
+# docstore, credential digests in logs, Math.random for ids). This filter only
+# stops the same code being re-reported once per historical copy.
+#
+# NOTE: paths-ignore is only honoured by an ADVANCED setup like this workflow.
+# GitHub's default setup ignores config files entirely, which is why the repo
+# had to be switched over.
+paths-ignore:
+  - src/legacy
+  - "**/files.zip"
+
+# corpus/ and documents/ hold customer PDFs, not code, but list them so a
+# future stray script in either directory does not silently start being
+# scanned as part of the application.
+  - corpus
+  - documents

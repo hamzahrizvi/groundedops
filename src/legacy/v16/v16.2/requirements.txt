@@ -1,0 +1,29 @@
+fastapi
+uvicorn[standard]
+pydantic
+# Required by FastAPI to parse multipart form data, which the document
+# upload endpoint (UploadFile) depends on. It was only ever present as a
+# local venv leftover: CI could not even import test_new_routes.py, and
+# that went unnoticed because run_tests.py used to swallow load failures
+# without affecting its exit code.
+python-multipart
+# starlette's TestClient (tests/test_new_routes.py) is built on httpx. It was
+# only present locally as a transitive install.
+httpx
+
+chromadb
+sentence-transformers
+rank-bm25
+torch
+
+pypdf
+# Layout-aware PDF reading (parsing.py). pypdf alone flattens tables
+# into space-joined cells, which made spec tables unusable. MIT, unlike
+# PyMuPDF which is AGPL-3.0 without a commercial licence.
+pdfplumber
+python-docx
+
+cryptography
+
+streamlit
+requests

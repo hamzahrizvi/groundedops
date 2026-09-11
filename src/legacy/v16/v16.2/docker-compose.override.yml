@@ -1,0 +1,19 @@
+# DEV ONLY — Compose auto-merges this over docker-compose.yml.
+# Bind-mounts source + hot-reload so code changes reflect WITHOUT a
+# rebuild. Delete/rename this file for a production run.
+# Rename to disable: mv docker-compose.override.yml override.disabled
+services:
+  backend:
+    volumes:
+      - ../src:/app
+      - grounded-data:/data
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # v3.0.0: INGEST_PROVIDER removed — it only ever selected the model
+    # for doc2query's ingest-time question generation, which no longer
+    # exists. Ingest is now parse/chunk/embed only, with no LLM call.
+    environment:
+      # Wide-open CORS in dev so widget-demo.html works from file:// or
+      # any local port. Never carry this into production.
+      WIDGET_ALLOWED_ORIGINS: "*"
+
+  # frontend service removed in v15.2 (React SPA retired).
