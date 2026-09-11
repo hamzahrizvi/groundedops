@@ -283,6 +283,25 @@
      padding + 3px mark + 9px gap = 31px), so the list reads as that item's
      contents. An earlier version indented off a vertical rule, which sat
      awkwardly against both the rail border and the active item's block. */
+  /* Section switcher, across the top of the content it scrolls. Sticky so
+     it stays reachable on the long pages that most need it. */
+  .topbar{position:sticky;top:0;z-index:30;display:flex;gap:4px;flex-wrap:wrap;
+          /* Full-bleed sideways, but NOT pulled up: a negative top margin
+             here left the bar sitting 8px over the page heading. It stays
+             in flow and the heading follows it. */
+          align-items:center;margin:0 -34px 20px;padding:9px 34px;
+          background:color-mix(in srgb, var(--color-bg) 88%, transparent);
+          backdrop-filter:blur(8px);
+          border-bottom:1px solid var(--color-divider)}
+  .topbar:empty{display:none}
+  .topbar button{border:0;background:transparent;cursor:pointer;font:inherit;
+          font-size:12.5px;padding:6px 11px;border-radius:999px;
+          color:color-mix(in srgb, var(--color-text) 62%, transparent)}
+  .topbar button:hover{background:color-mix(in srgb, var(--color-text) 8%, transparent);
+          color:var(--color-text)}
+  .topbar button[aria-current="true"]{background:var(--color-accent-800);
+          color:var(--color-accent-100)}
+  .topbar button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
   .subnav{display:flex;flex-direction:column;padding:1px 10px 6px}
   .subnav button{display:block;width:100%;text-align:left;border:0;background:transparent;
                  cursor:pointer;font:inherit;font-size:12.5px;
@@ -383,7 +402,11 @@ function signOut(msg) {
   if (msg) toast(msg, true);
   render();
 }
-let view = "overview";
+// Documents, not Overview: the job this console exists for is getting
+// manuals in and keeping them filed, and that is also the first thing a new
+// install needs. Overview is a summary of work done elsewhere -- a fine
+// second stop, a poor front door.
+let view = "documents";
 // Set by the Unanswered page's "Answer this" so the Answers page opens
 // with the question prefilled and scrolled into view.
 let pendingAnswer = null;
@@ -650,6 +673,10 @@ function render() {
       railToggle(collapsed),
     ),
     el("main", { class: "main" },
+      // Filled by buildSubnav() after the view renders; it removes itself
+      // when the page has fewer than two sections, so pages without them
+      // keep their full height.
+      el("nav", { class: "topbar", "aria-label": "Sections on this page" }),
       el("div", { class: "chrome-btns" },
         themeToggle(),
         el("button", { class: "help-btn", onclick: startTour,
@@ -657,21 +684,55 @@ function render() {
       el("div", { class: "wrap" }, body()))
   ));
 
-  buildSubnav(navBtns);
+  buildSubnav();
 }
 
 // Lists the active page's sections under its nav row. Reads the rendered DOM
 // rather than a per-view table, so tagging a card data-sec is all a view has to
 // do to appear here. Fewer than two sections is not worth the extra chrome.
-function buildSubnav(navBtns) {
-  const active = navBtns.find(([id]) => id === view);
-  if (!active) return;
+// The active page's sections, as a bar across the top of the content.
+//
+// These used to nest under the page's row in the rail, which put two
+// different kinds of navigation in one column -- "which page am I on" and
+// "where am I within it" -- and made the rail jump height as you moved
+// between pages. On top they sit with the content they scroll, and the
+// rail is left saying one thing.
+//
+// Still read from the rendered DOM rather than a per-view table, so tagging
+// a card data-sec remains all a view has to do to appear here. Fewer than
+// two sections is not worth the chrome.
+function buildSubnav() {
+  const host = document.querySelector(".topbar");
+  if (!host) return;
   const secs = [...document.querySelectorAll(".main [data-sec]")];
-  if (secs.length < 2) return;
-  active[1].after(el("div", { class: "subnav" },
-    secs.map(sec => el("button", {
-      onclick: () => sec.scrollIntoView({ behavior: "smooth", block: "start" }),
-    }, sec.getAttribute("data-sec")))));
+  if (secs.length < 2) { host.remove(); return; }
+
+  const btns = secs.map(sec => el("button", {
+    onclick: () => {
+      sec.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Mark it immediately: the scroll is smooth, so waiting for the
+      // observer below leaves the press feeling unacknowledged.
+      btns.forEach(b => b.removeAttribute("aria-current"));
+      btns[secs.indexOf(sec)].setAttribute("aria-current", "true");
+    },
+  }, sec.getAttribute("data-sec")));
+  btns[0].setAttribute("aria-current", "true");
+  host.append(...btns);
+
+  // Follow the scroll, so the bar reports where you are rather than only
+  // where you last clicked.
+  try {
+    const io2 = new IntersectionObserver(entries => {
+      const vis = entries.filter(e => e.isIntersecting)
+                         .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (!vis) return;
+      const i = secs.indexOf(vis.target);
+      if (i < 0) return;
+      btns.forEach(b => b.removeAttribute("aria-current"));
+      btns[i].setAttribute("aria-current", "true");
+    }, { rootMargin: "-72px 0px -65% 0px", threshold: 0 });
+    secs.forEach(sec => io2.observe(sec));
+  } catch (e) { /* no observer: the click handler still marks it */ }
 }
 
 // Who you are signed in as, and the way out. Worth showing permanently:
@@ -1558,13 +1619,18 @@ function viewAdvanced() {
 
   const p = Object.assign({}, polCache.policy);
 
-  const card = (title, hint, ...rows) =>
-    el("div", { class: "card elev-sm",
+  // data-sec is the TAB label, which is not always the heading: the top bar
+  // wants two words, the card can afford a sentence. Pass "Heading|Tab" to
+  // split them.
+  const card = (title, hint, ...rows) => {
+    const [head, tab] = String(title).split("|");
+    return el("div", { class: "card elev-sm",
                 style: "padding:18px 20px;gap:0;margin-bottom:14px",
-                "data-sec": title },
-      el("h3", {}, title),
+                "data-sec": tab || head },
+      el("h3", {}, head),
       hint ? el("p", { class: "sec-hint" }, hint) : null,
       rows);
+  };
 
   const hintLine = t => el("div", { style: "font-size:12px;margin-top:4px;"
     + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, t);
@@ -1593,7 +1659,7 @@ function viewAdvanced() {
   };
 
   // ── verification ──
-  const verifyCard = card("Checking answers before they are sent",
+  const verifyCard = card("Checking answers before they are sent|Answer checks",
     "Every answer is checked against the documents it came from, and held "
     + "back if it cannot be verified. That protects customers from confident "
     + "wrong answers — but the checker is strict about tables, and most "
@@ -1644,7 +1710,7 @@ function viewAdvanced() {
       + "searched like any other manual, whichever option is chosen here."));
 
   // ── indexing ──
-  const indexCard = card("Reading uploaded documents",
+  const indexCard = card("Reading uploaded documents|Uploads",
     "How a PDF is broken up when it is uploaded. These affect documents "
     + "uploaded from now on — existing ones keep the settings they were "
     + "uploaded with.",
