@@ -466,9 +466,11 @@ def session_check(session_id: str | None, tokens_wanted: int = 0) -> dict:
     if not session_id or (q_cap <= 0 and t_cap <= 0):
         return {"allowed": True, "reason": None,
                 "questions_limit": q_cap, "questions_used": 0,
-                "tokens_limit": t_cap, "tokens_used": 0}
+                "tokens_limit": t_cap, "tokens_used": 0,
+                "reset_at": _window_start() + WINDOW_SECONDS}
 
     win = _window_start()
+    reset_at = win + WINDOW_SECONDS
     with _lock, _conn() as c:
         q_used = _used(c, _session_key(session_id, "q"), win)
         t_used = _used(c, _session_key(session_id, "t"), win)
@@ -476,14 +478,49 @@ def session_check(session_id: str | None, tokens_wanted: int = 0) -> dict:
     if q_cap > 0 and q_used >= q_cap:
         return {"allowed": False, "reason": "session_questions",
                 "questions_limit": q_cap, "questions_used": q_used,
-                "tokens_limit": t_cap, "tokens_used": t_used}
+                "tokens_limit": t_cap, "tokens_used": t_used,
+                "reset_at": reset_at}
     if t_cap > 0 and t_used + max(0, tokens_wanted) > t_cap:
         return {"allowed": False, "reason": "session_tokens",
                 "questions_limit": q_cap, "questions_used": q_used,
-                "tokens_limit": t_cap, "tokens_used": t_used}
+                "tokens_limit": t_cap, "tokens_used": t_used,
+                "reset_at": reset_at}
     return {"allowed": True, "reason": None,
             "questions_limit": q_cap, "questions_used": q_used,
-            "tokens_limit": t_cap, "tokens_used": t_used}
+            "tokens_limit": t_cap, "tokens_used": t_used,
+            "reset_at": reset_at}
+
+
+def reset_session(session_id: str) -> None:
+    """Admin action: clear one conversation's per-session caps so it can
+    carry on immediately, instead of the visitor having to start a new
+    chat. Deletes across every window, not just the current one."""
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM usage WHERE identity IN (?, ?)",
+                  (_session_key(session_id, "q"), _session_key(session_id, "t")))
+
+
+def reset_uid(uid: str) -> None:
+    """Admin action: clear a signed-in member/staff caller's daily credit
+    usage, identified by the account id from their token."""
+    identity = "u:" + _h(uid)
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM usage WHERE identity=?", (identity,))
+
+
+def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
+    """Admin action: clear an anonymous caller's daily credit and FAQ-lookup
+    usage. Needs the same (visitor_id, client_ip) pair `identify()` hashed
+    together, since that pair - not visitor_id alone - is the identity key;
+    the per-IP ceiling is cleared too when an IP is given."""
+    identity = "v:" + _h(f"{visitor_id}|{client_ip}")
+    ip_identity = "i:" + _h(client_ip) if client_ip else None
+    with _lock, _conn() as c:
+        keys = [identity, identity + ":faq"]
+        if ip_identity:
+            keys.append(ip_identity + ":faq")
+        c.execute(f"DELETE FROM usage WHERE identity IN ({','.join('?' * len(keys))})",
+                  keys)
 
 
 def session_record(session_id: str | None, tokens_used: int = 0) -> None:

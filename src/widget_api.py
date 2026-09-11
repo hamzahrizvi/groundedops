@@ -381,6 +381,7 @@ def register(app, answer_query, draft_enquiry=None):
                 "tier": tier,
                 "limit": (sess["questions_limit"] if sess["reason"] == "session_questions"
                           else sess["tokens_limit"]),
+                "reset_at": sess["reset_at"],
                 "message": ("This conversation has reached its limit. "
                             "Start a new chat to carry on."),
             })

@@ -546,6 +546,99 @@ def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
     return all(n in context for n in set(numbers))
 
 
+# Both of these are operator-facing switches on the console's Advanced page,
+# so they are read through policy.py per request rather than frozen at
+# import: changing how answers are verified is something you do while a
+# customer is waiting, not something worth a restart. The env var remains the
+# initial value, and a broken policy file degrades to it rather than
+# taking verification offline.
+def _policy_setting(key: str, fallback):
+    try:
+        import policy
+        v = policy.value(key)
+        return fallback if v is None else v
+    except Exception:
+        return fallback
+
+
+def llm_verify_enabled() -> bool:
+    return bool(_policy_setting(
+        "llm_verify",
+        os.getenv("LLM_VERIFY", "1").strip().lower() in ("1", "true", "yes")))
+
+
+def grounding_retries() -> int:
+    try:
+        return int(_policy_setting(
+            "grounding_retries", int(os.getenv("GROUNDING_RETRIES", "1"))))
+    except (TypeError, ValueError):
+        return 1
+
+_VERIFY_PROMPT = """You are checking whether an ANSWER is fully supported by SOURCE text extracted from a product manual.
+
+The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
+
+Reply with exactly one word on the first line:
+SUPPORTED   - every factual claim in the ANSWER appears in the SOURCE
+UNSUPPORTED - any claim is absent from the SOURCE, or pairs values that the SOURCE does not pair together
+
+Then one short line saying why.
+
+SOURCE:
+{ctx}
+
+ANSWER:
+{ans}
+"""
+
+
+def _llm_verified(answer: str, chunks: list[dict],
+                  deepseek_api_key: str | None = None) -> bool:
+    """Last-resort check for an answer the NLI model could not verify.
+
+    WHY A SECOND VERIFIER. The cross-encoder cannot read a table. These
+    manuals keep their facts in tables, and a row reaches it shredded --
+    "Switch between the selected main protocol programmed to SSP | Powered
+    ON | Press and hold more than 3 seconds". Measured: correct answers
+    restating such a row scored 0.0023, and regenerating changed nothing
+    (three retries returned 0.0113 every time, to four decimal places).
+
+    A lexical containment rescue was tried first and rejected. The true
+    answers scored 0.93/0.80/0.71 on token overlap and a deliberately WRONG
+    one -- "four long flashes means the note path is open", which pairs a
+    real fault with the wrong row -- scored 0.78. The distributions overlap,
+    so no threshold separates a faithful restatement from a mispairing, and
+    a mispaired fault code is the worst thing this system could tell a
+    customer.
+
+    An LLM reading the flattened row can tell those apart. On a 12-case
+    prototype it rescued 6/6 correct answers NLI had killed and rejected
+    6/6 fabrications, including both mispairings, with no false accepts.
+
+    Fails CLOSED, unlike check_grounding: a verifier that errors must not
+    wave an unverified answer through, because everything upstream has
+    already failed by the time we reach this.
+    """
+    if not (llm_verify_enabled() and answer and chunks):
+        return False
+    try:
+        ctx = "\n\n".join(c.get("text", "")[:CHUNK_CHAR_CAP] for c in chunks)
+        if not ctx.strip():
+            return False
+        out = generate_with_fallback(
+            "accurate", _VERIFY_PROMPT.format(ctx=ctx, ans=answer),
+            deepseek_api_key=deepseek_api_key)
+        verdict = ((out or {}).get("text") or "").strip()
+        ok = bool(re.match(r"^\W*SUPPORTED\b", verdict, re.I))
+        logger.info("LLM verify: %s (%s)",
+                    "SUPPORTED" if ok else "UNSUPPORTED",
+                    verdict[:120].replace("\n", " "))
+        return ok
+    except Exception as exc:
+        logger.warning(f"LLM verify failed, keeping the refusal: {exc}")
+        return False
+
+
 def _normalize_query(q: str) -> str:
     """Light cleanup of user phrasing quirks that derail the small local
     generator without affecting retrieval: collapse repeated terminal
@@ -904,23 +997,58 @@ def _source_to_product() -> dict:
     return out
 
 
-def _sales_answer(raw_q: str, resolved: str | None):
+def _is_product_scope(scope_key: str | None) -> bool:
+    """True when the visitor has narrowed to ONE product rather than a whole
+    category. A category scope ("Note Validators") still spans several
+    manuals, so a cross-product question is fair there; a product scope means
+    they have already chosen the manual they want answered from."""
+    if not scope_key or scope_key == "all":
+        return False
+    try:
+        import catalog as _cat
+        data = _cat.catalog()
+        if any(c.get("key") == scope_key for c in data.get("categories", [])):
+            return False        # it is a category
+        return any(p.get("key") == scope_key
+                   for c in data.get("categories", [])
+                   for p in c.get("products", []))
+    except Exception:
+        return False
+
+
+def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None):
     """A cross-product answer, or None to fall through to the pipeline.
 
     Reads the RAW question as well as the condensed one: condensation
     rewrites for retrieval and can drop the "which of your products" framing
     that is the only signal this is a sales question at all.
 
+    Honours the operator's sales_mode (see policy.py): the catalogue answer
+    is the default, but a site that would rather its assistant did not speak
+    for the sales department can have every sales question deflected to a
+    fixed reply, or ignored so the manuals answer it.
+
     Never raises -- a failure here must degrade to the normal pipeline, not
     fail the request.
     """
     try:
-        import sales, docstore, faq_store as _fs, catalog as _cat
+        import sales, docstore, faq_store as _fs, catalog as _cat, policy
         q = f"{raw_q} {resolved or ''}"
         if not sales.is_sales_question(q):
             return None
+
+        mode = (policy.value("sales_mode") or "answer").strip().lower()
+        if mode == "documents":
+            return None
+        if mode == "deflect":
+            reply = (policy.value("sales_reply") or "").strip()
+            if not reply:
+                return None
+            return {"answer": reply, "kind": "deflected"}
+
         idx = sales.get_index(docstore.store_dir(), _source_to_product())
-        return sales.answer(q, _fs._load(), idx, _cat.catalog())
+        return sales.answer(q, _fs._load(), idx, _cat.catalog(),
+                            scoped=_is_product_scope(scope_key))
     except Exception as exc:
         logger.warning(f"sales answer skipped: {exc}")
         return None
@@ -3011,6 +3139,41 @@ def admin_policy_reset(x_admin_password: str | None = Header(default=None)):
     return {"policy": policy.reset(actor=me["email"])}
 
 
+class QuotaResetReq(BaseModel):
+    session_id: str | None = None   # clears one conversation's per-session cap
+    uid: str | None = None          # clears a signed-in member/staff caller's daily credits
+    visitor_id: str | None = None   # clears an anonymous visitor's daily credits/FAQ lookups
+    client_ip: str | None = None    # paired with visitor_id - see quota.reset_visitor
+
+
+@app.post("/admin/quota/reset")
+def admin_quota_reset(payload: QuotaResetReq,
+                      x_admin_password: str | None = Header(default=None)):
+    """Support-desk relief valve for the widget's "That didn't go through"
+    complaint: a visitor who actually hit a 429 quota limit (session, daily
+    credits, or anonymous FAQ lookups) reads it as a broken connection, and
+    the honest fix is a widget that tells them what happened - this
+    endpoint is the "let them back in right now" companion to that, for
+    when waiting for the window to roll over isn't good enough."""
+    me = _require_admin(x_admin_password)
+    import quota as _q
+    reset = []
+    if payload.session_id:
+        _q.reset_session(payload.session_id)
+        reset.append("session")
+    if payload.uid:
+        _q.reset_uid(payload.uid)
+        reset.append("member")
+    if payload.visitor_id:
+        _q.reset_visitor(payload.visitor_id, payload.client_ip or "")
+        reset.append("visitor")
+    if not reset:
+        raise HTTPException(status_code=400,
+                            detail="Provide session_id, uid, and/or visitor_id")
+    logger.info(f"/admin/quota/reset: {reset} reset by {me.get('email')}")
+    return {"reset": reset}
+
+
 @app.post("/admin/widget/preview_token")
 def admin_widget_preview_token(x_admin_password: str | None = Header(default=None)):
     """Mint a short-lived widget token so the console can preview the widget
@@ -3402,7 +3565,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # cannot produce it and every question of that shape was refused. It is
     # answered from the catalogue and the spec index, both verbatim, so
     # nothing here can invent a product or a specification.
-    _sales = _sales_answer(payload.q, resolved_query)
+    _sales = _sales_answer(payload.q, resolved_query, payload.product)
     if _sales:
         total_time = time.time() - start_total
         # Same omission as the FAQ path above: a catalogue answer lists
@@ -3895,6 +4058,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             is_grounded = True
             logger.info("Grounding rescued by lexical containment "
                         f"(nli={grounding_score}) for: {resolved_query[:60]}")
+        # The NLI model cannot read a flattened table row, and these manuals
+        # keep their facts in tables. Ask a model that can, before throwing a
+        # correct answer away. See _llm_verified.
+        elif not is_grounded and _llm_verified(answer, top_chunks,
+                                               deepseek_api_key):
+            is_grounded = True
+            logger.info("Grounding rescued by LLM verifier "
+                        f"(nli={grounding_score}) for: {resolved_query[:60]}")
         flagged = not is_grounded
 
     # ── DeepSeek escalation on grounding failure ──
@@ -3930,7 +4101,72 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                     is_grounded = True
                     logger.info("Escalated answer rescued by lexical "
                                 f"containment (nli={grounding_score})")
+                elif not is_grounded and _llm_verified(answer, top_chunks,
+                                                       deepseek_api_key):
+                    is_grounded = True
+                    logger.info("Escalated answer rescued by LLM verifier "
+                                f"(nli={grounding_score})")
                 flagged = not is_grounded
+
+    # ── Retry a flagged answer before giving up ──
+    # The grounding check is the single biggest source of lost CORRECT
+    # answers, and it is not deterministic across regenerations. Measured
+    # over 30 runs (10 questions x 3): the same question, same index, same
+    # model returned a verified answer on one run and a suppressed one on
+    # the next -- "can I plug USB straight into the host PC" passed at
+    # 0.9088 and 0.9936, then failed at 0.2074. Whether the model happens to
+    # phrase the fact in one clause or two decides which premise the NLI
+    # model scores it against, and a table-derived premise scores near zero.
+    #
+    # So: when we are about to throw an answer away, ask again. Each attempt
+    # is a fresh generation, and the first one that verifies is served.
+    # Bounded by the retry setting because the failure mode this protects
+    # against is a coin flip, not a hard error -- if three tries cannot
+    # produce a verifiable answer, the refusal is probably honest.
+    #
+    # NOT gated on retrieval_score: see the note at the top of this file --
+    # it is an RRF rank score, and measured here it points the wrong way
+    # (answered at 0.31, suppressed at 0.9998). What justifies a retry is
+    # that we retrieved context at all and the model produced something we
+    # could not verify.
+    if (flagged and not generation_failed and top_chunks
+            and role != "rethink" and grounding_retries() > 0):
+        _max_retries = grounding_retries()
+        for _attempt in range(1, _max_retries + 1):
+            logger.info(
+                f"Grounding retry {_attempt}/{_max_retries} "
+                f"(score={grounding_score}) for: {resolved_query[:60]}")
+            _retry = generate_with_fallback(
+                role, prompt, deepseek_api_key=deepseek_api_key,
+                api_keys=api_keys)
+            _text = _strip_meta(_strip_preamble((_retry or {}).get("text", "").strip()))
+            if not _text:
+                continue
+            # A model that declines on its own is not a grounding failure and
+            # must not be retried into a hallucination: take it and stop.
+            if is_refusal(_text):
+                answer, output = _text, _retry
+                is_grounded, grounding_score, flagged = True, None, False
+                break
+            if is_template_leak(_text):
+                continue
+            _ok, _score = check_grounding(_text, top_chunks,
+                                          threshold=GROUNDING_THRESHOLD)
+            if not _ok and _lexically_supported(_text, top_chunks):
+                _ok = True
+            elif not _ok and _llm_verified(_text, top_chunks, deepseek_api_key):
+                _ok = True
+            if _ok:
+                answer, output = _text, _retry
+                is_grounded, grounding_score, flagged = True, _score, False
+                logger.info(f"Grounding retry {_attempt} succeeded "
+                            f"(score={_score})")
+                break
+            # Keep the best score seen, so the log shows how close it got.
+            if isinstance(_score, float) and (
+                    not isinstance(grounding_score, float)
+                    or _score > grounding_score):
+                grounding_score = _score
 
     # ── Suppress an answer we could not verify ──
     # PRECISION-FIRST ENFORCEMENT (v8.4): suppress on ANY unresolved flag,

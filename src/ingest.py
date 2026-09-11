@@ -135,6 +135,89 @@ def _enrich_chunks(chunks: list[str], filename: str,
     return out
 
 
+def _dedupe_enabled() -> bool:
+    """Operator switch (console > Advanced). Defaults on; a broken policy
+    file must not silently change how documents are indexed."""
+    try:
+        import policy
+        v = policy.value("dedupe_shadowed_chunks")
+        return True if v is None else bool(v)
+    except Exception:
+        return True
+
+
+def _shingles(s: str, n: int = 3) -> set:
+    """Word trigrams of `s`, lowercased. Comparing these rather than raw
+    substrings is deliberate: the two copies of an introducing sentence are
+    not byte-identical. pdfplumber's prose pass and its table-title pass
+    disagree on leading articles and stray spacing -- observed as "The NV9
+    Spectral has..." against "NV9 Spectral has...", which defeats a plain
+    `in` test while being obviously the same sentence."""
+    w = "".join(c if c.isalnum() or c.isspace() else " "
+                for c in (s or "").lower()).split()
+    if len(w) < n:
+        return {" ".join(w)} if w else set()
+    return {" ".join(w[i:i + n]) for i in range(len(w) - n + 1)}
+
+
+CONTAINED_AT = 0.90     # share of the short chunk's trigrams the long one
+                        # must already hold before the short one is dropped
+
+
+def _drop_shadowed(texts: list[str], pageno: list[int], sections: list[str],
+                   filename: str = "") -> tuple[list[str], list[int], list[str]]:
+    """Drop a chunk whose entire text already sits inside another chunk from
+    the same page.
+
+    WHY. When a page introduces a table, pdfplumber hands the introducing
+    sentence back twice: once as prose (it falls outside the table's bbox)
+    and again as the rendered table's title. The prose-only chunk is then a
+    strict subset of the prose+table chunk -- same section heading, same
+    opening sentence, none of the rows.
+
+    That short chunk is not merely redundant, it is a decoy. It is dense with
+    the words a question about the table uses ("flash", "codes", "error") and
+    carries no answer, so it outranks the chunk that does. Measured on the
+    NV9 Spectral flash-code table, the empty chunk ranked #1 and the chunk
+    holding "1 long 1 short -> Note path open" ranked #3; the model cited the
+    right page and then correctly said it could not see the answer.
+
+    Nothing is lost by dropping it: every word it held is still in the chunk
+    that shadows it, alongside the rows.
+    """
+    shing = [_shingles(t) for t in texts]
+    by_page: dict[int, list[int]] = {}
+    for i, p in enumerate(pageno):
+        by_page.setdefault(p, []).append(i)
+
+    keep, dropped = [], 0
+    for i, p in enumerate(pageno):
+        me = shing[i]
+        if not me:
+            keep.append(i)
+            continue
+        shadowed = False
+        for j in by_page.get(p, ()):
+            # Only a STRICTLY longer chunk may shadow a shorter one. Without
+            # the length test a pair of identical chunks would each shadow
+            # the other and both would vanish.
+            if j == i or len(texts[j]) <= len(texts[i]):
+                continue
+            if len(me & shing[j]) / len(me) >= CONTAINED_AT:
+                shadowed = True
+                break
+        if shadowed:
+            dropped += 1
+        else:
+            keep.append(i)
+
+    if dropped:
+        logger.info("%s: dropped %d chunk(s) wholly contained in another on "
+                    "the same page", filename or "document", dropped)
+    return ([texts[i] for i in keep], [pageno[i] for i in keep],
+            [sections[i] for i in keep])
+
+
 def ingest_file(content: bytes, filename: str,
                 api_keys: dict | None = None,  # accepted for call-site compat; unused since doc2query removal (v10.16)
                 progress=None,
@@ -215,6 +298,10 @@ def ingest_file(content: bytes, filename: str,
         if not texts:
             logger.warning(f"No usable chunks from '{filename}'")
             return 0
+
+        if _dedupe_enabled():
+            texts, pageno, sections = _drop_shadowed(texts, pageno, sections,
+                                                     filename)
 
         # ── Retain original for download ──────────────────────────────────────
         try:

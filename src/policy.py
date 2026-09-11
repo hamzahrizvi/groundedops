@@ -57,13 +57,55 @@ _DEFAULTS = {
     # 0 = no per-session cap.
     "questions_per_session": int(os.getenv("WIDGET_QUESTIONS_PER_SESSION", "0")),
     "tokens_per_session": int(os.getenv("WIDGET_TOKENS_PER_SESSION", "0")),
+
+    # ── Answer verification ────────────────────────────────────────────
+    # Every generated answer is checked against the retrieved text before it
+    # is served, and suppressed if it cannot be verified. That check is an
+    # NLI model, which cannot read a table -- and these manuals keep their
+    # facts in tables. Measured: correct answers restating a table row scored
+    # 0.0023 and were thrown away. The LLM verifier is the second opinion for
+    # exactly that case; it reads the flattened row and says whether the
+    # answer is supported. Costs one model call per otherwise-refused answer.
+    "llm_verify": os.getenv("LLM_VERIFY", "1").strip().lower()
+                  in ("1", "true", "yes"),
+    # How many times to regenerate before serving a refusal. Blind retries
+    # help only where the failure is a coin flip; with the verifier on, 1 is
+    # enough (measured: retries=1 + verifier beat retries=3 without it, on
+    # both accuracy and speed). 0 disables retrying.
+    "grounding_retries": int(os.getenv("GROUNDING_RETRIES", "1")),
+    # When a page introduces a table, the introducing sentence is extracted
+    # twice -- once as prose, once as the table's title -- leaving a short
+    # chunk that holds the words of the question and none of the answer. It
+    # then outranks the chunk with the table in it. Dropping it loses
+    # nothing; every word is still in the chunk that shadowed it. Applies at
+    # upload, so changing this only affects documents indexed afterwards.
+    "dedupe_shadowed_chunks": True,
+
+    # ── Sales questions ────────────────────────────────────────────────
+    # "which products run on 24V?" ranges across the catalogue, so no single
+    # manual answers it. sales.py can answer that shape from the catalogue
+    # and the spec tables, but an operator may not want the assistant
+    # speaking for the sales department at all.
+    #
+    #   answer     build the answer from the catalogue (the default)
+    #   deflect    say sales_reply and nothing else
+    #   documents  ignore the question's shape and search the manuals
+    "sales_mode": os.getenv("WIDGET_SALES_MODE", "answer"),
+    "sales_reply": (
+        "I can only answer technical questions from our product "
+        "documentation. For sales enquiries please contact our team."
+    ),
 }
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
                "anon_faq_daily", "anon_ip_daily", "questions_per_session",
-               "tokens_per_session")
-_BOOL_FIELDS = ("anon_llm_enabled",)
-_TEXT_FIELDS = ("anon_notice",)
+               "tokens_per_session", "grounding_retries")
+_BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks")
+_TEXT_FIELDS = ("anon_notice", "sales_reply")
+# Fields that accept one of a fixed set of values. Rejecting anything else
+# keeps a typo out of the request path: an unrecognised sales_mode would
+# otherwise silently fall through to whichever branch the code checked last.
+_CHOICE_FIELDS = {"sales_mode": ("answer", "deflect", "documents")}
 
 MAX_NOTICE_CHARS = 400
 # Ceilings on what an operator can set through the console. Not security --
@@ -77,6 +119,8 @@ _MAX = {
     "anon_ip_daily": 100000,
     "questions_per_session": 1000,
     "tokens_per_session": 2000000,
+    # More than a handful of regenerations is a bill, not a retry strategy.
+    "grounding_retries": 5,
 }
 
 
@@ -126,6 +170,12 @@ def _coerce(key: str, raw):
         if cap is not None and n > cap:
             raise PolicyError(f"'{key}' is capped at {cap}")
         return n
+    if key in _CHOICE_FIELDS:
+        v = str(raw or "").strip().lower()
+        if v not in _CHOICE_FIELDS[key]:
+            raise PolicyError(f"'{key}' must be one of "
+                              + ", ".join(_CHOICE_FIELDS[key]))
+        return v
     if key in _TEXT_FIELDS:
         return str(raw or "").strip()[:MAX_NOTICE_CHARS]
     raise PolicyError(f"unknown setting '{key}'")

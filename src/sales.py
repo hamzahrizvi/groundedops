@@ -37,12 +37,25 @@ logger = logging.getLogger(__name__)
 # Up to three words may sit between "which" and the noun -- "which of your
 # note validators" -- which a tighter pattern missed.
 _CROSS = re.compile(
+    # Nouns that only ever mean "across the catalogue".
     r"\b(which|what)\b(?:\s+\w+){0,3}\s+"
-    r"\b(products?|models?|validators?|devices?|units?|options?|hoppers?|"
-    r"ranges?|ones?)\b"
+    r"\b(products?|models?|validators?|hoppers?|ranges?)\b"
+    # "device", "unit", "option" and "one" are also ordinary manual
+    # vocabulary -- "which device settings", "what options are available in
+    # Ads mode", "what units is the threshold in" are all questions about
+    # ONE product. Measured: they were 4 of the 10 support questions this
+    # module was hijacking. So those nouns count only with an explicit
+    # "your" framing, which no in-manual question has.
+    r"|\b(which|what)\b(?:\s+of)?\s+your\s+(?:\w+\s+){0,2}"
+    r"\b(devices?|units?|options?|ones?|machines?)\b"
     r"|\bdo\s+you\s+(have|make|sell|offer|do|stock)\b"
     r"|\banything\s+(that|which|for)\b"
-    r"|\brecommend\b|\bsuitable\s+for\b|\bi\s+need\s+(a|an|to)\b",
+    # "I need A validator" is someone buying. "I need TO mount it" is
+    # someone who already owns it and is reading the manual -- the single
+    # biggest source of misrouted support questions, and the reason
+    # "what size screws do I need to mount the MyCheckr?" was answered
+    # with a product list instead of the mounting instructions on page 6.
+    r"|\brecommend\b|\bsuitable\s+for\b|\bi\s+need\s+(a|an)\b",
     re.I)
 
 _LISTING = re.compile(
@@ -217,7 +230,8 @@ def _overviews(faq_items: list[dict]) -> list[dict]:
 
 
 def answer(question: str, faq_items: list[dict], index: list[dict],
-           catalog_tree: dict | None = None) -> dict | None:
+           catalog_tree: dict | None = None,
+           scoped: bool = False) -> dict | None:
     """A cross-product answer, or None to let the normal pipeline run.
 
     Three shapes, in order of specificity:
@@ -229,6 +243,14 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
     Every product name comes from the catalogue and every quoted value from
     a table cell, so this cannot name a product that does not exist or
     attribute a specification to the wrong one.
+
+    `scoped` says the visitor has already picked ONE product in the widget.
+    That suppresses the overview branch below, which needs only a single
+    shared word to fire: once someone has chosen the MyCheckr manual, "here
+    is what we make that fits" is never the answer they were after, and the
+    word it matched on was usually just the product's own name. The spec and
+    catalogue branches still run -- both demand far more of the question,
+    and "what else do you sell?" is a fair thing to ask mid-conversation.
     """
     if not is_sales_question(question):
         return None
@@ -265,7 +287,7 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
 
     # 2. A need described in words ("anything that sorts and pays out coins").
     terms = _terms(question)
-    if terms:
+    if terms and not scoped:
         scored = []
         for f in _overviews(faq_items):
             body = _stems_in((f.get("question") or "") + " "

@@ -676,6 +676,24 @@
     save();
   }
 
+  // Turns a reset_at epoch-seconds (quota.py's WINDOW_SECONDS boundary)
+  // into "It resets at 3:00 PM." / "It resets tomorrow at 3:00 PM." so a
+  // quota message tells the visitor when to come back instead of just
+  // that they can't right now.
+  function resetsAt(epochSeconds) {
+    if (!epochSeconds) return "";
+    var d = new Date(epochSeconds * 1000);
+    if (isNaN(d.getTime())) return "";
+    var now = new Date();
+    var sameDay = d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate();
+    var time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return sameDay
+      ? "It resets at " + time + "."
+      : "It resets tomorrow at " + time + ".";
+  }
+
   function status(text) {
     var d = document.createElement("div");
     d.className = "go-status";
@@ -1547,7 +1565,20 @@
       }),
     })
       .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (!r.ok) {
+          // A 429 quota_exceeded is not a connection failure - it is the
+          // backend's own, specific "you're out of X, here's when it comes
+          // back" answer (see quota.py). Reading the body here so the
+          // catch below can tell that apart from an actual dropped
+          // request instead of flattening both into the same generic
+          // "check your connection" message.
+          return r.json().catch(function () { return null; }).then(function (body) {
+            var err = new Error("HTTP " + r.status);
+            err.status = r.status;
+            err.body = body;
+            throw err;
+          });
+        }
         return r.json();
       })
       .then(function (d) {
@@ -1640,6 +1671,22 @@
       })
       .catch(function (e) {
         s.remove();
+        var detail = e && e.status === 429 && e.body ? e.body : null;
+        if (detail && detail.error === "quota_exceeded") {
+          var msg = detail.message || "You have reached your limit for now.";
+          if (detail.reset_at) msg += " " + resetsAt(detail.reset_at);
+          var quotaChips = [];
+          if (detail.reason === "session_questions" || detail.reason === "session_tokens") {
+            quotaChips.push({
+              label: "Start a new chat",
+              onClick: function () { startFresh(); },
+            });
+          }
+          say(msg, { flagged: true });
+          if (quotaChips.length) chips(quotaChips, "What would you like to do?");
+          console.warn("[GroundedOps] /query quota exceeded:", detail);
+          return;
+        }
         say("That didn't go through — please check your connection and try again.", { flagged: true });
         console.error("[GroundedOps] /query failed:", e);
       })

@@ -508,6 +508,7 @@ function render() {
         isRoot() ? nav("accounts", "Accounts") : null,
         isRoot() ? nav("keys", "API keys") : null,
         isRoot() ? nav("policy", "Access & limits") : null,
+        isRoot() ? nav("advanced", "Advanced") : null,
         nav("backup", "Backup"),
       ),
       whoBox(),
@@ -602,6 +603,7 @@ function body() {
   if (view === "accounts") return viewAccounts();
   if (view === "keys") return viewKeys();
   if (view === "policy") return viewPolicy();
+  if (view === "advanced") return viewAdvanced();
   if (view === "backup") return viewBackup();
   if (view === "overview") return viewOverview();
   if (view === "documents") return viewDocuments();
@@ -1195,6 +1197,77 @@ function viewPolicy() {
     finally { saveBtn.disabled = false; saveBtn.textContent = "Save changes"; }
   } }, "Save changes");
 
+  // \u2500\u2500 One caller, unstuck right now \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // The limits above change the ceiling for everyone, going forward. This
+  // clears one caller's usage back to zero immediately, for the visitor
+  // who is stuck mid-conversation right now and does not want to wait for
+  // the daily window (or the per-conversation cap) to roll over.
+  const sessIn = el("input", { class: "input", placeholder: "Session ID" });
+  const sessBtn = el("button", { class: "btn btn-secondary", onclick: async () => {
+    const v = sessIn.value.trim();
+    if (!v) return toast("Paste the conversation's session ID first", true);
+    try {
+      await api("/admin/quota/reset", { method: "POST",
+        body: JSON.stringify({ session_id: v }) });
+      toast("Conversation limit cleared \u2014 they can carry on now");
+      sessIn.value = "";
+    } catch (e) { toast(e.message, true); }
+  } }, "Reset conversation");
+
+  const uidIn = el("input", { class: "input", placeholder: "Account ID (uid)" });
+  const uidBtn = el("button", { class: "btn btn-secondary", onclick: async () => {
+    const v = uidIn.value.trim();
+    if (!v) return toast("Enter the account's uid first", true);
+    try {
+      await api("/admin/quota/reset", { method: "POST",
+        body: JSON.stringify({ uid: v }) });
+      toast("Daily allowance cleared for that account");
+      uidIn.value = "";
+    } catch (e) { toast(e.message, true); }
+  } }, "Reset account");
+
+  const visIn = el("input", { class: "input", placeholder: "Visitor ID" });
+  const ipIn = el("input", { class: "input", placeholder: "IP address (if known)" });
+  const visBtn = el("button", { class: "btn btn-secondary", onclick: async () => {
+    const v = visIn.value.trim();
+    if (!v) return toast("Enter the visitor ID first", true);
+    try {
+      await api("/admin/quota/reset", { method: "POST",
+        body: JSON.stringify({ visitor_id: v, client_ip: ipIn.value.trim() }) });
+      toast("Daily allowance cleared for that guest");
+      visIn.value = ""; ipIn.value = "";
+    } catch (e) { toast(e.message, true); }
+  } }, "Reset guest");
+
+  const resetCard = el("div", { class: "card elev-sm",
+                               style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                               "data-sec": "Reset one caller" },
+    el("h3", {}, "Unstick one caller"),
+    el("p", { class: "sec-hint" },
+      "Clears one caller's usage back to zero immediately, without waiting "
+      + "for the daily window or the per-conversation cap to roll over. IDs "
+      + "come from a support ticket, the browser console, or the widget's "
+      + "own quota_exceeded error \u2014 not something to guess at."),
+    el("div", { class: "item", style: "align-items:flex-start;margin-top:12px" },
+      el("div", { style: "flex:1 1 260px" },
+        el("div", { style: "font-size:13.5px" }, "By conversation"),
+        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+          "Clears the per-conversation question/token cap for one session id.")),
+      el("div", { style: "flex:0 0 auto;display:flex;gap:8px" }, sessIn, sessBtn)),
+    el("div", { class: "item", style: "align-items:flex-start" },
+      el("div", { style: "flex:1 1 260px" },
+        el("div", { style: "font-size:13.5px" }, "By account"),
+        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+          "Clears a signed-in customer or staff member's daily credits.")),
+      el("div", { style: "flex:0 0 auto;display:flex;gap:8px" }, uidIn, uidBtn)),
+    el("div", { class: "item", style: "align-items:flex-start" },
+      el("div", { style: "flex:1 1 260px" },
+        el("div", { style: "font-size:13.5px" }, "By guest"),
+        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+          "Clears an anonymous visitor's daily credits and FAQ lookups. The IP is optional but "
+          + "needed to also clear their per-IP ceiling \u2014 without it only their own allowance is reset.")),
+      el("div", { style: "flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap" }, visIn, ipIn, visBtn)));
+
   return [
     el("h1", {}, "Access & limits"),
     el("p", { class: "lede" },
@@ -1211,6 +1284,139 @@ function viewPolicy() {
           polCache = null; await loadPolicy();
         } catch (e) { toast(e.message, true); }
       } }, "Reset to defaults")),
+    resetCard,
+  ];
+}
+
+/* ---------------- advanced (root only) ---------------- */
+// Everything here changes HOW an answer is produced or verified, rather than
+// who may ask. Each switch is written for someone who has to decide whether
+// to flip it at 4pm with a customer waiting, so the hint says what happens
+// and what it costs -- not what the code does.
+function viewAdvanced() {
+  if (!polCache) { loadPolicy(); return [el("h1", {}, "Advanced"),
+    el("p", { class: "lede" }, "Loading…")]; }
+  if (polCache.error) return [el("h1", {}, "Advanced"),
+    el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
+      el("b", {}, "Could not load settings"), polCache.error))];
+
+  const p = Object.assign({}, polCache.policy);
+
+  const card = (title, hint, ...rows) =>
+    el("div", { class: "card elev-sm",
+                style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                "data-sec": title },
+      el("h3", {}, title),
+      hint ? el("p", { class: "sec-hint" }, hint) : null,
+      rows);
+
+  const hintLine = t => el("div", { style: "font-size:12px;margin-top:4px;"
+    + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, t);
+
+  const toggleRow = (key, label, hint) => {
+    const box = el("input", { type: "checkbox" });
+    box.checked = !!p[key];
+    box.addEventListener("change", () => { p[key] = box.checked; });
+    return el("div", { style: "margin-top:14px" },
+      el("label", { style: "display:flex;align-items:center;gap:8px;"
+        + "font-size:13.5px;cursor:pointer" }, box, label),
+      hintLine(hint));
+  };
+
+  const numRow = (key, label, hint, unit, max) => {
+    const inp = el("input", { class: "input", type: "number", min: "0",
+      max: String(max), value: String(p[key] === undefined ? 0 : p[key]),
+      style: "max-width:110px" });
+    inp.addEventListener("input", () => { p[key] = inp.value; });
+    return el("div", { class: "item", style: "align-items:flex-start;margin-top:14px" },
+      el("div", { style: "flex:1 1 260px" },
+        el("div", { style: "font-size:13.5px" }, label), hintLine(hint)),
+      el("div", { style: "flex:0 0 auto;display:flex;align-items:center;gap:8px" },
+        inp, el("span", { style: "font-size:12px;color:color-mix(in srgb,"
+          + "var(--color-text) 50%,transparent)" }, unit || "")));
+  };
+
+  // ── verification ──
+  const verifyCard = card("Checking answers before they are sent",
+    "Every answer is checked against the documents it came from, and held "
+    + "back if it cannot be verified. That protects customers from confident "
+    + "wrong answers — but the checker is strict about tables, and most "
+    + "of these manuals keep their facts in tables.",
+    toggleRow("llm_verify", "Second opinion on held-back answers",
+      "When the first check cannot verify an answer, ask the AI to read the "
+      + "page and decide. Measured on 57 questions: 68% answered without "
+      + "this, 96% with it, and nothing wrong slipped through. Costs one "
+      + "extra AI call, but only for answers that would otherwise be "
+      + "refused — in testing it was slightly faster overall, because "
+      + "fewer answers fall through to retrying."),
+    numRow("grounding_retries", "Retries before giving up",
+      "If an answer cannot be verified, write it again and re-check. Useful "
+      + "because the same question sometimes verifies on a second attempt. "
+      + "Each retry is a full AI call, so keep it low — 1 is plenty "
+      + "with the second opinion switched on. 0 means never retry.",
+      "attempts", 5));
+
+  // ── sales ──
+  const salesReply = el("textarea", { class: "input", rows: "3" },
+                        p.sales_reply || "");
+  salesReply.addEventListener("input", () => { p.sales_reply = salesReply.value; });
+  const salesReplyWrap = el("div", { style: "margin-top:14px;display:"
+      + (p.sales_mode === "deflect" ? "" : "none") },
+    el("label", { class: "flabel" }, "What a sales question is answered with"),
+    salesReply,
+    hintLine("Shown on its own, word for word, so put the phone number or "
+      + "address you want people to use directly in the text."));
+  const salesSel = el("select", { class: "input", onchange: e => {
+      p.sales_mode = e.target.value;
+      salesReplyWrap.style.display = e.target.value === "deflect" ? "" : "none";
+    } },
+    el("option", { value: "answer" }, "Answer them from the product list"),
+    el("option", { value: "deflect" }, "Reply with a fixed message"),
+    el("option", { value: "documents" }, "Treat them as ordinary questions"));
+  salesSel.value = p.sales_mode || "answer";
+
+  const salesCard = card("Sales questions",
+    "Questions that span the whole range rather than one product — "
+    + "“which products run on 24V?”, “do you have anything "
+    + "that sorts coins?”. Answering from the product list is safe "
+    + "(every name and figure is copied, never invented), but a fixed reply "
+    + "hands every sales enquiry to a person instead.",
+    el("label", { class: "flabel", style: "margin-top:14px" }, "How to handle them"),
+    salesSel, salesReplyWrap,
+    hintLine("To answer from a brochure or price list instead, upload it on "
+      + "the Documents page and attach it to a product — it is then "
+      + "searched like any other manual, whichever option is chosen here."));
+
+  // ── indexing ──
+  const indexCard = card("Reading uploaded documents",
+    "How a PDF is broken up when it is uploaded. These affect documents "
+    + "uploaded from now on — existing ones keep the settings they were "
+    + "uploaded with.",
+    toggleRow("dedupe_shadowed_chunks", "Drop duplicate scraps of a page",
+      "When a page introduces a table, the sentence above the table often "
+      + "gets stored twice — once on its own, once with the table. The "
+      + "copy without the table matches the question but holds none of the "
+      + "answer, and can crowd out the copy that does. Leaving this on "
+      + "discards it; nothing is lost, because every word is still in the "
+      + "copy that kept the table."));
+
+  const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
+    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    try {
+      await api("/admin/policy", { method: "PUT",
+        body: JSON.stringify({ changes: p }) });
+      toast("Saved — applies to the next question, no restart");
+      polCache = null; await loadPolicy();
+    } catch (e) { toast(e.message, true); }
+    finally { saveBtn.disabled = false; saveBtn.textContent = "Save changes"; }
+  } }, "Save changes");
+
+  return [
+    el("h1", {}, "Advanced"),
+    el("p", { class: "lede" },
+      "How answers are produced and checked. Changes apply to the next "
+      + "question — no restart. Only root accounts see this page."),
+    verifyCard, salesCard, indexCard, saveBtn,
   ];
 }
 
