@@ -1918,6 +1918,15 @@ def faq_gaps(product: str | None = None,
                                            -int(g.get("times_asked", 1))))
     # "demand" is the order list_gaps/cluster_gaps already return.
 
+    # One pass over the unfiltered set feeds both the scope list and the
+    # per-scope totals below.
+    _scope_totals: dict[str, dict] = {}
+    for _g in faq_store.list_gaps(None):
+        _e = _scope_totals.setdefault(_g.get("scope") or "",
+                                      {"questions": 0, "asks": 0})
+        _e["questions"] += 1
+        _e["asks"] += int(_g.get("times_asked") or 1)
+
     return {
         "gaps": gaps,
         "stats": faq_store.gap_stats(),
@@ -1925,8 +1934,13 @@ def faq_gaps(product: str | None = None,
         # rather than the catalogue: a scope that no longer exists as a
         # product (nv9st, coin_hoppers) still has real questions filed under
         # it, and hiding it from the filter would hide those questions.
-        "scopes": sorted({(g.get("scope") or "") for g in
-                          faq_store.list_gaps(None)}),
+        "scopes": sorted(_scope_totals),
+        # How much each product is carrying, so the console can show it on
+        # the filter itself rather than making someone select a product to
+        # find out whether it has anything in it. Counted over ALL gaps, not
+        # the filtered view, or every count would collapse to the one
+        # product currently selected.
+        "scope_counts": _scope_totals,
         "grouped": bool(group_similar),
         "sort": sort,
     }

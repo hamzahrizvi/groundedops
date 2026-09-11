@@ -94,6 +94,37 @@
 
   /* ---------- checklist (overview "what to do next") ---------- */
   .step{display:flex;gap:12px;padding:13px 0;border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
+  /* An unanswered-question row. Everything pins to the first line, so a row
+     that grows (a wrapped question, the "other wordings" line) does not leave
+     the checkbox and the buttons floating at its centre while the count stays
+     at its top. */
+  .gap-row{align-items:flex-start}
+  /* Product index for the unanswered list. Every product and its share of
+     the backlog visible at once, instead of one at a time behind a select. */
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+  .chip{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+        font:inherit;font-size:12.5px;line-height:1;padding:7px 12px;
+        border-radius:999px;color:var(--color-text);
+        background:var(--color-surface);
+        border:1px solid color-mix(in srgb, var(--color-text) 14%, transparent);
+        transition:background .12s,border-color .12s}
+  .chip:hover{border-color:color-mix(in srgb, var(--color-accent) 45%, transparent)}
+  .chip-n{font-variant-numeric:tabular-nums;font-size:11.5px;
+          padding:1px 6px;border-radius:999px;
+          background:color-mix(in srgb, var(--color-text) 10%, transparent);
+          color:color-mix(in srgb, var(--color-text) 62%, transparent)}
+  .chip-on{background:var(--color-accent-800);color:var(--color-accent-100);
+           border-color:var(--color-accent)}
+  .chip-on .chip-n{background:color-mix(in srgb, var(--color-accent-100) 22%, transparent);
+                   color:var(--color-accent-100)}
+  /* The three actions were a filled button, an outlined button and a bare
+     text link, each sized by its own label -- so no two rows agreed on where
+     the actions started, and the group read as three unrelated things. Same
+     geometry for all three, right-aligned as one block, keeps them a single
+     control group; the weight difference alone still says which is primary. */
+  .gap-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:auto}
+  .gap-actions .btn{font-size:12.5px;padding:5px 12px;min-width:104px;
+        justify-content:center;white-space:nowrap}
   .step:first-of-type{border-top:0}
   .mark-dot{width:21px;height:21px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;
         justify-content:center;font-size:11px;font-weight:700}
@@ -1772,6 +1803,20 @@ function viewFaq() {
   if (!cache.gapScopes) {
     cache.gapScopes = [...new Set(cache.gaps.map(g => g.scope || ""))].sort();
   }
+  // Same reason, for the per-product totals the chips show. The first page
+  // load comes from the shared refresh(), which does not call /faq/gaps and
+  // so carries no scope_counts -- without this the chips render "0" beside
+  // every product until something triggers a reload, which reads as "no
+  // questions here" rather than "not counted yet".
+  if (!cache.gapCounts) {
+    cache.gapCounts = {};
+    cache.gaps.forEach(g => {
+      const k = g.scope || "";
+      const e = cache.gapCounts[k] || (cache.gapCounts[k] = { questions: 0, asks: 0 });
+      e.questions += 1;
+      e.asks += (g.times_asked || 1);
+    });
+  }
 
   const scopeSel = el("select", { class: "input", style: "width:auto",
                                   onchange: e => { scope = e.target.value; render2(); } },
@@ -2086,12 +2131,17 @@ function viewGaps() {
           list.length + (list.length === 1 ? " question" : " questions") + " \u00b7 " + asks + " asks")),
       list.map(g => {
         const draftBox = el("div", {});
-        const cb = el("input", { type: "checkbox", style: "margin-top:3px", onchange: e => {
+        // 2px lines the box up with the cap-height of the count beside it.
+        // The row is align-items:flex-start (see .gap-row) so neither drifts
+        // when the question wraps or the "other wordings" line appears --
+        // previously the count stayed at the top while the checkbox and the
+        // buttons floated to the middle of a three-line row.
+        const cb = el("input", { type: "checkbox", style: "margin-top:2px", onchange: e => {
           idsFor(g).forEach(id => {
             if (e.target.checked) selected.add(id); else selected.delete(id);
           });
         } });
-        const row = el("div", { class: "step" },
+        const row = el("div", { class: "step gap-row" },
           cb,
           el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;color:var(--color-accent-400);flex:0 0 42px" },
             (g.times_asked || 1) + "\u00d7"),
@@ -2116,31 +2166,32 @@ function viewGaps() {
                 : "Nothing in the documents matched.")
               + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : "")),
             draftBox),
-          el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:4px 12px", onclick: async e => {
-            const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
-            try {
-              const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
-                gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
-              draftBox.innerHTML = "";
-              draftBox.append(
-                el("p", { class: "sec-hint", style: "margin:8px 0 4px" }, "AI draft \u2014 not saved yet:"),
-                el("p", { style: "font-size:13px;white-space:pre-wrap" }, r.answer || "(no answer)"),
-                el("div", { style: "display:flex;gap:8px" },
-                  el("button", { class: "btn btn-primary", style: "font-size:12px;padding:3px 10px",
-                    onclick: () => answerHere(g, r.answer) }, "Use this \u2014 review & save"),
-                  el("button", { class: "btn btn-ghost", style: "font-size:12px;padding:3px 10px",
-                    onclick: () => { draftBox.innerHTML = ""; } }, "Discard")));
-            } catch (e2) { toast(e2.message, true); }
-            finally { btn.disabled = false; btn.textContent = "Answer with AI"; }
-          } }, "Answer with AI"),
-          el("button", { class: "btn btn-primary", style: "font-size:12.5px;padding:4px 12px",
-                         onclick: () => answerHere(g) }, "Answer this"),
-          el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
-            if (!confirm("Dismiss this question?\n\nAsking it again starts a fresh entry. Use \"Mark spam\" instead if it should never come back.")) return;
-            try { await api("/faq/gaps/" + encodeURIComponent(g.id), { method: "DELETE" });
-                  toast("Dismissed"); await refresh(); render(); }
-            catch (e) { toast(e.message, true); }
-          } }, "Dismiss"));
+          el("div", { class: "gap-actions" },
+            el("button", { class: "btn btn-secondary", onclick: async e => {
+              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
+              try {
+                const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
+                  gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
+                draftBox.innerHTML = "";
+                draftBox.append(
+                  el("p", { class: "sec-hint", style: "margin:8px 0 4px" }, "AI draft \u2014 not saved yet:"),
+                  el("p", { style: "font-size:13px;white-space:pre-wrap" }, r.answer || "(no answer)"),
+                  el("div", { style: "display:flex;gap:8px" },
+                    el("button", { class: "btn btn-primary", style: "font-size:12px;padding:3px 10px",
+                      onclick: () => answerHere(g, r.answer) }, "Use this \u2014 review & save"),
+                    el("button", { class: "btn btn-ghost", style: "font-size:12px;padding:3px 10px",
+                      onclick: () => { draftBox.innerHTML = ""; } }, "Discard")));
+              } catch (e2) { toast(e2.message, true); }
+              finally { btn.disabled = false; btn.textContent = "Answer with AI"; }
+            } }, "Answer with AI"),
+            el("button", { class: "btn btn-primary",
+                             onclick: () => answerHere(g) }, "Answer this"),
+            el("button", { class: "btn btn-ghost", onclick: async () => {
+              if (!confirm("Dismiss this question?\n\nAsking it again starts a fresh entry. Use \"Mark spam\" instead if it should never come back.")) return;
+              try { await api("/faq/gaps/" + encodeURIComponent(g.id), { method: "DELETE" });
+                    toast("Dismissed"); await refresh(); render(); }
+              catch (e) { toast(e.message, true); }
+            } }, "Dismiss")));
         return row;
       }));
   });
@@ -2157,11 +2208,37 @@ function viewGaps() {
       const r = await api("/faq/gaps" + qs);
       cache.gaps = r.gaps || [];
       cache.gapScopes = r.scopes || [];
+      cache.gapCounts = r.scope_counts || {};
       render();
     } catch (e) { toast(e.message, true); }
   };
 
-  const scopeSel = el("select", { class: "input", style: "width:auto",
+  // A dropdown hid the one thing this page is for: seeing WHICH product is
+  // underserved. You had to open it, pick a product and wait, once per
+  // product, to find that out. The same options as a row of chips put every
+  // product and its weight on screen at once, and make switching between
+  // them one click instead of three.
+  const counts = cache.gapCounts || {};
+  const totalQs = Object.values(counts).reduce((n, c) => n + (c.questions || 0), 0);
+  const chip = (key, label, n) => {
+    const active = (gapFilter.scope || "") === key;
+    return el("button", {
+      class: "chip" + (active ? " chip-on" : ""),
+      "aria-pressed": active ? "true" : "false",
+      onclick: () => { gapFilter.scope = key; reload(); } },
+      label,
+      n != null ? el("span", { class: "chip-n" }, String(n)) : null);
+  };
+  const scopeChips = el("div", { class: "chips", "data-tour": "gaps-filter" },
+    chip("", "All products", totalQs),
+    (cache.gapScopes || []).filter(Boolean)
+      .sort((a, b) => ((counts[b] || {}).questions || 0) - ((counts[a] || {}).questions || 0))
+      .map(k => chip(k, nameFor(k) || k, (counts[k] || {}).questions)),
+    (cache.gapScopes || []).indexOf("") >= 0
+      ? chip("__none__", "No product selected", (counts[""] || {}).questions)
+      : null);
+
+  const scopeSel = el("select", { class: "input", style: "width:auto;display:none",
     onchange: () => { gapFilter.scope = scopeSel.value; reload(); } },
     el("option", { value: "" }, "All products"),
     (cache.gapScopes || []).filter(Boolean).map(k =>
@@ -2183,11 +2260,15 @@ function viewGaps() {
     onchange: () => { gapFilter.grouped = groupCb.checked; reload(); } });
   groupCb.checked = gapFilter.grouped;
 
+  // flex-direction:row is not redundant. .card is itself a flex column, so
+  // a toolbar that sets only display:flex inherits that column and stacks --
+  // and then align-items:center, written to centre a ROW vertically, centres
+  // the whole thing horizontally instead. That is how this filter bar came
+  // to render as a narrow centred stack rather than a left-aligned bar.
   const controls = el("div", { class: "card elev-sm",
-      style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;"
-           + "align-items:center;gap:12px;flex-wrap:wrap",
+      style: "padding:12px 20px;margin-bottom:12px;display:flex;"
+           + "flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap",
       "data-tour": "gaps-filter" },
-    el("label", { class: "flabel", style: "margin:0" }, "Product"), scopeSel,
     el("label", { class: "flabel", style: "margin:0" }, "Sort"), sortSel,
     el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
       groupCb, "Group similar wordings"),
@@ -2198,8 +2279,9 @@ function viewGaps() {
   return [
     el("h1", {}, "FAQs from customers"),
     el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover. Rewordings of the same question are counted together, so the number beside each one is how many people asked it \u2014 not how many ways they phrased it."),
+    scopeChips,
     controls,
-    cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;gap:0;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+    cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;margin-bottom:12px;display:flex;flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap" },
       el("span", { class: "sec-hint", style: "margin:0" }, "Select questions above, then:"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps", "DELETE", "Dismissed") }, "Dismiss selected"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps/spam", "POST", "Marked spam:") }, "Mark spam"),
