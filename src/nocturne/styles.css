@@ -5,14 +5,14 @@
   --color-bg: #161826;
   --color-surface: #232532;
   --color-text: #e9e9ed;
-  --color-accent: #9184d9; /* review round 7 (Barron): the accent moves to
+  --color-accent: #B77A35; /* review round 7 (Barron): the accent moves to
      the product's blurple — OKLCH hue 289.2, the hue of the app's own Pro
      accent (#9a8fe0, --om-accent-pro) — at the same lightness the steel
      accent held (L 0.660, so the documented ratios survive) and chroma
      in the product blurple's own range (its token sits at C 0.118; the
      accent takes 0.125, from the old steel's 0.030):
      the accent now reads as an accent rather than another neutral. */
-  --color-accent-2: #a7a1db; /* the machine-derived stand-in follows: same
+  --color-accent-2: #8C7A62; /* the machine-derived stand-in follows: same
      hue, same L 0.734, chroma at the same 2:3 proportion it held */
   --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
   /* Accent used as TEXT on --color-surface. The ramp steps are an absolute
@@ -33,25 +33,25 @@
   --color-neutral-800: #3f424d;
   --color-neutral-900: #292b31;
 
-  --color-accent-100: #f5f4ff;
-  --color-accent-200: #e7e5fe;
-  --color-accent-300: #d2cefd;
-  --color-accent-400: #b5abfc;
-  --color-accent-500: #968ae0;
-  --color-accent-600: #796cbf;
-  --color-accent-700: #5d5294;
-  --color-accent-800: #423a6a;
-  --color-accent-900: #2b2741;
+  --color-accent-100: #fbf4e9;
+  --color-accent-200: #f2e1c8;
+  --color-accent-300: #e4c79c;
+  --color-accent-400: #d2a96b;
+  --color-accent-500: #b7873c;
+  --color-accent-600: #9a6e2c;
+  --color-accent-700: #7c5722;
+  --color-accent-800: #553b17;
+  --color-accent-900: #37270f;
 
-  --color-accent-2-100: #f5f4ff;
-  --color-accent-2-200: #e7e5fe;
-  --color-accent-2-300: #d2cefd;
-  --color-accent-2-400: #b5afe8;
-  --color-accent-2-500: #9690c9;
-  --color-accent-2-600: #7972a9;
-  --color-accent-2-700: #5c5783;
-  --color-accent-2-800: #423e5d;
-  --color-accent-2-900: #2b293a;
+  --color-accent-2-100: #faf7f2;
+  --color-accent-2-200: #ece5da;
+  --color-accent-2-300: #d8ccbb;
+  --color-accent-2-400: #bcac94;
+  --color-accent-2-500: #9c8b72;
+  --color-accent-2-600: #7e6e58;
+  --color-accent-2-700: #605343;
+  --color-accent-2-800: #443b30;
+  --color-accent-2-900: #2b251e;
 
   /* Deck section-divider ground — review round 3: saturation as presence.
      Dividers take a saturated deep indigo (hue 277, the neutral ramp's own
@@ -59,9 +59,9 @@
      round-7 blurple raised it past the ground's) with a lighter bloom and
      a ghost tint of the same hue, while the slide grounds stay
      desaturated. Deck-scale fills only — not interface colors. */
-  --color-section: #262a60;
-  --color-section-glow: #353b80;
-  --color-section-ghost: #4c5397;
+  --color-section: #3a2f20;
+  --color-section-glow: #4d3d28;
+  --color-section-ghost: #6b5539;
 
   --font-heading: "Inter", system-ui, sans-serif;
   --font-heading-weight: 500;
@@ -101,13 +101,13 @@
   --color-bg: #f6f6f4;
   --color-surface: #ffffff;
   --color-text: #16161a;
-  /* The accent darkens: #9184d9 is tuned to sit on a near-black ground and
-     drops to roughly 2.3:1 on white, which fails text contrast. This holds
-     the hue and takes the lightness down to clear 4.5:1. */
-  --color-accent: #5a4cb8;
-  --color-accent-2: #6f63c4;
+  /* The accent darkens: the brand bronze #B77A35 is tuned for a near-black
+     ground and drops to 3.59:1 on white, under the 4.5:1 text bar. This
+     holds the hue and takes the lightness down to 4.53:1 against white. */
+  --color-accent: #9a6e2c;
+  --color-accent-2: #7e6e58;
   --color-divider: color-mix(in srgb, #16161a 14%, transparent);
-  --color-accent-ink: #5a4cb8;
+  --color-accent-ink: #7c5722;
 
   /* Ring-plus-drop, the same shape as the dark shadows, but the ring is a
      real hairline and the drop is faint: on a light ground the ring does
@@ -116,9 +116,9 @@
   --shadow-md: 0 0 0 1px #d8d8e0, 0 4px 14px rgba(22,22,30,0.07);
   --shadow-lg: 0 0 0 1px #c9c9d4, 0 14px 34px rgba(22,22,30,0.12);
 
-  --color-section: #e9eaf7;
-  --color-section-glow: #dcdef2;
-  --color-section-ghost: #c8cbe8;
+  --color-section: #f4ece0;
+  --color-section-glow: #e9dcc8;
+  --color-section-ghost: #d5c3a5;
 }
 
 /* An explicit choice always wins; this only applies when none was made. */
@@ -127,16 +127,16 @@
     --color-bg: #f6f6f4;
     --color-surface: #ffffff;
     --color-text: #16161a;
-    --color-accent: #5a4cb8;
-    --color-accent-2: #6f63c4;
+    --color-accent: #9a6e2c;
+    --color-accent-2: #7e6e58;
     --color-divider: color-mix(in srgb, #16161a 14%, transparent);
-    --color-accent-ink: #5a4cb8;
+    --color-accent-ink: #7c5722;
     --shadow-sm: 0 0 0 1px #e3e3e8;
     --shadow-md: 0 0 0 1px #d8d8e0, 0 4px 14px rgba(22,22,30,0.07);
     --shadow-lg: 0 0 0 1px #c9c9d4, 0 14px 34px rgba(22,22,30,0.12);
-    --color-section: #e9eaf7;
-    --color-section-glow: #dcdef2;
-    --color-section-ghost: #c8cbe8;
+    --color-section: #f4ece0;
+    --color-section-glow: #e9dcc8;
+    --color-section-ghost: #d5c3a5;
   }
 }
 
