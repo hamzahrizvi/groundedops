@@ -15,6 +15,11 @@
   --color-accent-2: #a7a1db; /* the machine-derived stand-in follows: same
      hue, same L 0.734, chroma at the same 2:3 proportion it held */
   --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
+  /* Accent used as TEXT on --color-surface. The ramp steps are an absolute
+     lightness scale, so the step that reads well on a near-black ground is
+     the one that disappears on white -- accent-400 measures about 2.1:1
+     there. This is the one accent value that has to follow the theme. */
+  --color-accent-ink: var(--color-accent-400);
 
   /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
      same step of any role matches the others in visual value. */
@@ -79,6 +84,62 @@
   --shadow-md: 0 0 0 1px #595d6c, 0 6px 18px rgba(0,0,0,0.55);
   --shadow-lg: 0 0 0 1px #9397ab, 0 16px 40px rgba(0,0,0,0.65);
 }
+/* ── Light theme ───────────────────────────────────────────────────────
+   Only the SEMANTIC tokens flip. The tonal ramps below are an absolute
+   lightness scale shared by every role, so re-pointing them per theme
+   would break the "same step of any role matches in visual value"
+   guarantee they were generated to hold.
+
+   That works because the console states most of its colour RELATIVELY --
+   61 color-mix() calls against var(--color-text) for dividers, hints and
+   muted rows. Flip --color-text and every one of them follows, which is
+   why this is a token change rather than a repaint.
+
+   Applied by [data-theme], set on <html> from the toggle beside the help
+   button and persisted; with no explicit choice the OS preference wins. */
+:root[data-theme="light"] {
+  --color-bg: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-text: #16161a;
+  /* The accent darkens: #9184d9 is tuned to sit on a near-black ground and
+     drops to roughly 2.3:1 on white, which fails text contrast. This holds
+     the hue and takes the lightness down to clear 4.5:1. */
+  --color-accent: #5a4cb8;
+  --color-accent-2: #6f63c4;
+  --color-divider: color-mix(in srgb, #16161a 14%, transparent);
+  --color-accent-ink: #5a4cb8;
+
+  /* Ring-plus-drop, the same shape as the dark shadows, but the ring is a
+     real hairline and the drop is faint: on a light ground the ring does
+     the separating and a heavy shadow just looks dirty. */
+  --shadow-sm: 0 0 0 1px #e3e3e8;
+  --shadow-md: 0 0 0 1px #d8d8e0, 0 4px 14px rgba(22,22,30,0.07);
+  --shadow-lg: 0 0 0 1px #c9c9d4, 0 14px 34px rgba(22,22,30,0.12);
+
+  --color-section: #e9eaf7;
+  --color-section-glow: #dcdef2;
+  --color-section-ghost: #c8cbe8;
+}
+
+/* An explicit choice always wins; this only applies when none was made. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --color-bg: #f6f6f4;
+    --color-surface: #ffffff;
+    --color-text: #16161a;
+    --color-accent: #5a4cb8;
+    --color-accent-2: #6f63c4;
+    --color-divider: color-mix(in srgb, #16161a 14%, transparent);
+    --color-accent-ink: #5a4cb8;
+    --shadow-sm: 0 0 0 1px #e3e3e8;
+    --shadow-md: 0 0 0 1px #d8d8e0, 0 4px 14px rgba(22,22,30,0.07);
+    --shadow-lg: 0 0 0 1px #c9c9d4, 0 14px 34px rgba(22,22,30,0.12);
+    --color-section: #e9eaf7;
+    --color-section-glow: #dcdef2;
+    --color-section-ghost: #c8cbe8;
+  }
+}
+
 
 body {
   background: var(--color-bg);

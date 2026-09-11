@@ -2442,6 +2442,25 @@ else:
     logger.warning(
         f"No {_NOCTURNE_DIR} — the admin console at /admin will render unstyled.")
 
+# The brand mark and icon set. Sat unserved next to the console until now,
+# which is why /admin had no logo and a 404 favicon.
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+if os.path.isdir(_ASSETS_DIR):
+    from fastapi.staticfiles import StaticFiles as _StaticFiles2
+
+    app.mount("/assets", _StaticFiles2(directory=_ASSETS_DIR), name="assets")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """The console asked for this on every load and got a 404 every time."""
+    from fastapi.responses import FileResponse, Response
+    for name in ("groundedops-logo-animated.svg", "logo.svg"):
+        path = os.path.join(_ASSETS_DIR, name)
+        if os.path.exists(path):
+            return FileResponse(path, media_type="image/svg+xml")
+    return Response(status_code=204)
+
 
 class FaqAutoReq(BaseModel):
     source: str
