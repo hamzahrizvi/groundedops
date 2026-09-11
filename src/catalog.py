@@ -95,7 +95,12 @@ def catalog() -> dict:
     return {"categories": [
         {"key": c["key"], "name": c["name"],
          "products": [{"key": p["key"], "name": p["name"],
-                       "aliases": p.get("aliases", [])}
+                       "aliases": p.get("aliases", []),
+                       # Who owns this product's unanswered questions, and
+                       # how often they hear about them. Projected because
+                       # the console renders it on the product row.
+                       "champion": p.get("champion", ""),
+                       "digest": p.get("digest", "off")}
                       for p in c.get("products", [])]}
         for c in data["categories"]
     ]}
@@ -189,6 +194,59 @@ def add_product(category_key: str, key: str, name: str, sources: list[str] | Non
         cat["products"].append({"key": key, "name": name, "sources": sources or []})
         _save(data)
     return catalog()
+
+
+DIGEST_CADENCE = ("off", "daily", "weekly")
+
+
+def set_champion(product_key: str, email: str, digest: str = "weekly") -> dict:
+    """Assign a product's champion -- the person whose job it is to answer
+    what customers asked about it and nobody could.
+
+    Deliberately stores an ACCOUNT EMAIL rather than a free-text address.
+    The console picks from existing console accounts, so the address is one
+    that already signs in here, and "who is allowed to see this" needs no
+    second answer. A typo becomes an impossible choice rather than a digest
+    quietly posted into the void.
+
+    Storage only for now -- nothing sends. The cadence is recorded so the
+    delivery job, when it exists, reads its schedule from here rather than
+    inventing one.
+    """
+    digest = (digest or "off").strip().lower()
+    if digest not in DIGEST_CADENCE:
+        raise ValueError(f"digest must be one of {', '.join(DIGEST_CADENCE)}")
+    email = (email or "").strip().lower()
+    with _lock:
+        data = _load()
+        for c in data["categories"]:
+            for p in c.get("products", []):
+                if p["key"] == product_key:
+                    if email:
+                        p["champion"] = email
+                        p["digest"] = digest
+                    else:
+                        # Clearing the champion clears the schedule with it:
+                        # a cadence with nobody to send to is a trap for
+                        # whoever reads this file next.
+                        p.pop("champion", None)
+                        p["digest"] = "off"
+                    _save(data)
+                    return catalog()
+        raise ValueError(f"unknown product '{product_key}'")
+
+
+def champions() -> list[dict]:
+    """Every product with a champion, for the delivery job to iterate."""
+    out = []
+    for c in _load()["categories"]:
+        for p in c.get("products", []):
+            if p.get("champion") and p.get("digest", "off") != "off":
+                out.append({"product": p["key"], "product_name": p["name"],
+                            "category": c["key"], "category_name": c["name"],
+                            "champion": p["champion"],
+                            "digest": p.get("digest", "off")})
+    return out
 
 
 def product_contents(product_key: str) -> dict:

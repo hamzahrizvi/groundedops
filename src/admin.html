@@ -3174,6 +3174,49 @@ function viewLeads() {
 }
 
 /* ---------------- catalog ---------------- */
+// Product champion: who owns this product's unanswered questions, and how
+// often they hear about them.
+//
+// The person is picked from existing console accounts rather than typed. A
+// digest is a link into this console, so sending one to an address that
+// cannot sign in here is a dead end, and a typed address fails silently --
+// the worst kind of failure for something that runs on a schedule.
+function championPicker(p) {
+  const users = (acctCache && acctCache.users) || [];
+  const save = async (email, digest) => {
+    try {
+      await api("/admin/product/champion", { method: "POST", body: JSON.stringify({
+        product_key: p.key, email, digest }) });
+      toast(email ? "Champion set" : "Champion cleared");
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const who = el("select", { class: "input", style: "width:auto;font-size:12.5px",
+    title: "Who owns this product's unanswered questions",
+    onchange: () => save(who.value, who.value
+                           ? (when.value === "off" ? "weekly" : when.value)
+                           : "off") },
+    el("option", { value: "" }, "No champion"),
+    users.filter(u => !u.disabled).map(u =>
+      el("option", { value: u.email, selected: u.email === p.champion ? "true" : null },
+         u.name || u.email)));
+
+  const when = el("select", { class: "input", style: "width:auto;font-size:12.5px",
+    title: "How often they are sent this product's new questions",
+    disabled: p.champion ? null : "true",
+    onchange: () => save(p.champion || "", when.value) },
+    [["off", "No updates"], ["daily", "Daily"], ["weekly", "Weekly"]].map(([v, t]) =>
+      el("option", { value: v, selected: (p.digest || "off") === v ? "true" : null }, t)));
+
+  // The account list is root-only and loaded lazily, so without this the
+  // picker would render empty for a root who has not opened Accounts yet.
+  if (!acctCache && isRoot()) loadAccounts();
+
+  return el("div", { style: "display:flex;gap:6px;flex:0 0 auto;align-items:center" },
+    who, when);
+}
+
 function viewCatalog() {
   const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   const cName = el("input", { class: "input", type: "text", placeholder: "Coin hoppers" });
@@ -3193,7 +3236,11 @@ function viewCatalog() {
       (c.products || []).length
         ? (c.products || []).map(p => el("div", { class: "item" },
             el("div", { class: "grow" }, el("b", {}, p.name),
-              el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents")),
+              el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents"
+                             + (p.champion ? " · " + p.champion
+                                             + (p.digest && p.digest !== "off"
+                                                ? " (" + p.digest + ")" : "") : ""))),
+            championPicker(p),
             el("span", { class: "tag tag-neutral mono" }, p.key),
             el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
                            onclick: () => deleteProductFlow(c, p) }, "Delete")))

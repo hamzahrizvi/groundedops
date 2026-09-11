@@ -3400,6 +3400,54 @@ def admin_add_product(payload: ProductReq, x_admin_password: str | None = Header
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class ChampionReq(BaseModel):
+    product_key: str
+    email: str = ""          # "" clears the assignment
+    digest: str = "weekly"   # off | daily | weekly
+
+
+@app.post("/admin/product/champion")
+def admin_set_champion(payload: ChampionReq,
+                       x_admin_password: str | None = Header(default=None)):
+    """Assign the person who owns a product's unanswered questions.
+
+    The email must belong to an existing console account. Accepting a free
+    address would mean a digest addressed to someone who cannot open the
+    page it links to, and a typo that fails silently -- neither is worth the
+    flexibility.
+    """
+    me = _require_admin(x_admin_password)
+    email = (payload.email or "").strip().lower()
+    if email:
+        known = {u.get("email", "").lower() for u in accounts.list_users()
+                 if not u.get("disabled")}
+        if email not in known:
+            raise HTTPException(status_code=400, detail={
+                "error": "not_an_account",
+                "message": f"{email} is not an active console account. Add "
+                           f"them under Accounts first, so the digest goes "
+                           f"to someone who can open what it links to.",
+            })
+    try:
+        tree = catalog_mod.set_champion(payload.product_key, email,
+                                        payload.digest)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info("champion for %s set to %r (%s) by %s", payload.product_key,
+                email or "nobody", payload.digest, me.get("email"))
+    return tree
+
+
+@app.get("/admin/champions")
+def admin_champions(x_admin_password: str | None = Header(default=None)):
+    """What a delivery job would send, and to whom. Exposed now so the
+    assignment can be verified before anything sends -- the schedule is
+    real even though delivery is not wired up yet."""
+    _require_admin(x_admin_password)
+    rows = catalog_mod.champions()
+    return {"champions": rows, "count": len(rows), "delivery": "not configured"}
+
+
 @app.get("/admin/product/{product_key}/contents")
 def admin_product_contents(product_key: str,
                            x_admin_password: str | None = Header(default=None)):
