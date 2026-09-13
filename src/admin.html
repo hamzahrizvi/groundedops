@@ -1898,6 +1898,8 @@ function viewOverview() {
 }
 
 /* ---------------- documents ---------------- */
+let pendingReplace = null;
+
 function viewDocuments() {
   const prods = products();
   let chosenCat = cache.catalog.length === 1 ? cache.catalog[0].key : "";
@@ -1939,28 +1941,111 @@ function viewDocuments() {
   }
   sync();
 
+  // One POST. `replaceSource` names the document this is a new version of;
+  // without it the server refuses a duplicate with 409 and we ask.
+  async function postUpload(f, p, replaceSource) {
+    const fd = new FormData(); fd.append("file", f);
+    const headers = { "x-admin-password": tok,
+                      "category-key": p.category, "product-key": p.key };
+    if (replaceSource) headers["replace-source"] = replaceSource;
+    const r = await fetch(API + "/upload", { method: "POST", body: fd, headers });
+    if (r.status === 409) {
+      const body = await r.json().catch(() => null);
+      const d = (body && body.detail) || {};
+      if (d.error === "duplicate_document") return { duplicate: d };
+      throw new Error(d.message || "Duplicate document");
+    }
+    if (!r.ok) throw new Error(await r.text());
+    return { job_id: (await r.json()).job_id };
+  }
+
   async function upload(files) {
     if (!chosen) return toast("Choose a product first", true);
     const p = prods.find(x => x.key === chosen);
     for (const f of files) {
       const line = el("div", { class: "item" },
-        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading\u2026")));
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading...")));
       progress.append(line);
       try {
-        const fd = new FormData(); fd.append("file", f);
-        const r = await fetch(API + "/upload", {
-          method: "POST", body: fd,
-          headers: { "x-admin-password": tok, "category-key": p.category, "product-key": p.key },
-        });
-        if (!r.ok) throw new Error(await r.text());
-        const { job_id } = await r.json();
-        await track(job_id, line, f.name);
+        let res = await postUpload(f, p, null);
+
+        // Already indexed. Rather than refusing and leaving them to work out
+        // what to do, offer the two things they can actually mean: this is a
+        // newer version of that document, or it was a mistake.
+        if (res.duplicate) {
+          const d = res.duplicate;
+          const choice = await new Promise(resolve => {
+            const span = line.querySelector("span");
+            span.textContent = "";
+            span.append(
+              el("div", { style: "margin-bottom:6px" },
+                "Already indexed as " + d.existing
+                + (d.product ? " (" + d.product + ")" : "") + "."),
+              el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
+                el("button", { class: "btn btn-primary", style: "font-size:12px;padding:4px 10px",
+                  onclick: () => resolve("replace") }, "Replace with this version"),
+                el("button", { class: "btn btn-ghost", style: "font-size:12px;padding:4px 10px",
+                  onclick: () => resolve("skip") }, "Skip")));
+          });
+          if (choice === "skip") { line.querySelector("span").textContent = "Skipped"; continue; }
+          line.querySelector("span").textContent = "Replacing...";
+          res = await postUpload(f, p, d.existing);
+          if (res.duplicate) throw new Error("Still refused as a duplicate");
+          await track(res.job_id, line, f.name);
+          afterReplace(line, p, f.name, d.existing);
+          continue;
+        }
+        await track(res.job_id, line, f.name);
       } catch (e) {
         line.querySelector("span").textContent = "Failed: " + e.message;
       }
     }
     await refresh(); render();
   }
+
+  // Recorded rather than drawn inline: upload() finishes with refresh() +
+  // render(), which rebuilds this whole view and threw the prompt away the
+  // first time it was written into the progress line. viewDocuments() picks
+  // this up on the way back.
+  function afterReplace(line, p, newName, oldName) {
+    pendingReplace = { product: p.key, category: p.category,
+                       newName, oldName };
+  }
+
+  function replacePrompt() {
+    if (!pendingReplace) return null;
+    const r = pendingReplace;
+    const p = prods.find(x => x.key === r.product) || { key: r.product, category: r.category };
+    const done = msg => { pendingReplace = null; if (msg) toast(msg); render(); };
+    return el("div", { class: "card elev-sm",
+        style: "padding:14px 20px;margin-bottom:12px;display:flex;"
+             + "flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap;"
+             + "box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-accent)" },
+      el("div", { style: "flex:1 1 320px" },
+        el("b", { style: "display:block;font-size:13.5px" },
+          "Replaced " + r.oldName),
+        el("span", { class: "sec-hint", style: "margin:0" },
+          "Answers written from the old version may no longer match it.")),
+      el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
+        el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
+          const b = e.target; b.disabled = true; b.textContent = "Generating…";
+          try {
+            await api("/admin/faq/autogenerate", { method: "POST", body: JSON.stringify({
+              source: r.newName, product: p.key, category: p.category }) });
+            await refresh();
+            done("Questions regenerated from the new version");
+          } catch (err) {
+            toast(err.message, true);
+            b.disabled = false; b.textContent = "Re-generate questions";
+          }
+        } }, "Re-generate questions"),
+        el("button", { class: "btn btn-secondary", style: BTN,
+          onclick: () => { pendingReplace = null; view = "faq"; render(); } },
+          "Review existing answers"),
+        el("button", { class: "btn btn-ghost", style: BTN,
+          onclick: () => done(null) }, "Leave them")));
+  }
+
 
   async function track(job, line, name) {
     for (let i = 0; i < 600; i++) {
@@ -2038,6 +2123,9 @@ function viewDocuments() {
   return [
     el("h1", {}, "Documents"),
     el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
+    // Sits above the page when a document was just replaced, and stays put
+    // across the re-render that follows the upload.
+    replacePrompt(),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "doc-add", "data-sec": "Add documents" },
       el("div", { class: "sec-title" }, "Add documents"),

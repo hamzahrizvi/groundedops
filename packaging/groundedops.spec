@@ -35,7 +35,13 @@ binaries, hiddenimports = [], []
 
 # These four resolve plugins, models and metadata at runtime, so their data
 # files and submodules are invisible to static analysis.
-for pkg in ("chromadb", "sentence_transformers", "transformers", "tokenizers"):
+# torch is FIRST and is not optional. Without collect_all the DLLs land
+# without the layout c10.dll's loader expects and the exe dies at import
+# with "WinError 1114: A dynamic link library (DLL) initialization routine
+# failed" -- which names c10.dll and not the real cause, so it is worth
+# recognising on sight.
+for pkg in ("torch", "chromadb", "sentence_transformers", "transformers",
+            "tokenizers"):
     try:
         d, b, h = collect_all(pkg)
         datas += d; binaries += b; hiddenimports += h
