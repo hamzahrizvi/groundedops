@@ -1187,7 +1187,8 @@ _INGEST_LOCK = threading.Lock()
 
 def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
                    category_key: str | None = None, product_key: str | None = None,
-                   ingest_provider: str | None = None):
+                   ingest_provider: str | None = None,
+                   replace_source: str | None = None):
     def _progress(stage, done, total):
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id].update(
@@ -1202,6 +1203,18 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
     try:
         count = ingest_file(content, filename, api_keys=api_keys, progress=_progress,
                             category_key=category_key, product_key=product_key)
+        # A new version of a document already held. The old chunks go only
+        # AFTER the new ones are in: if ingest fails we still have the
+        # version we had, which is the whole point of replacing rather than
+        # deleting first and uploading second.
+        if replace_source and replace_source != filename:
+            try:
+                removed = db.delete_source(replace_source)
+                logger.info("replaced %r with %r (%s old chunk(s) removed)",
+                            replace_source, filename, removed)
+            except Exception as exc:
+                logger.error("could not remove the replaced source %r: %s",
+                             replace_source, exc)
         # v10.3: admin uploaded into a specific product -> tag the source so
         # it's scoped to that product/category from now on.
         if category_key and product_key:
@@ -1219,6 +1232,66 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id] = {"status": "error", "error": str(e),
                                     "file": filename, "done": True}
+
+
+def _source_product_label(source: str) -> str:
+    """Where a source is currently filed, for a message that tells the
+    uploader what they already have rather than just refusing them."""
+    try:
+        import catalog as _cat
+        for c in _cat.catalog().get("categories", []):
+            for pr in c.get("products", []):
+                if source in (_cat.sources_for(pr.get("key")) or []):
+                    return f"{c.get('name')} › {pr.get('name')}"
+    except Exception:
+        pass
+    return "no product"
+
+
+def _doc_key(filename: str) -> str:
+    """A filename reduced to what makes it the SAME DOCUMENT.
+
+    Name only, deliberately: the two copies of the MyCheckr manual sitting in
+    this corpus are 7,147,709 and 7,147,175 bytes with different hashes, so a
+    content check would have called them distinct and let the duplicate in.
+    What actually distinguishes them is " (1)" -- the suffix a browser adds
+    when you download a file you already have.
+
+    So: drop the extension, fold case and whitespace, and strip a trailing
+    " (n)". Anything more aggressive starts merging real documents -- "v7"
+    and "v8" of a manual differ by two characters and are not the same file.
+    """
+    import re as _re
+    stem = os.path.splitext(os.path.basename(filename or ""))[0]
+    stem = _re.sub(r"\s*\((\d+)\)\s*$", "", stem)
+    return " ".join(stem.lower().split())
+
+
+def _existing_source_like(filename: str) -> str | None:
+    """The indexed source this upload would duplicate, or None."""
+    key = _doc_key(filename)
+    if not key:
+        return None
+    try:
+        import docstore as _ds
+        names = [e.get("source") or "" for e in _ds.inventory()]
+    except Exception as exc:
+        logger.warning(f"duplicate check skipped ({exc})")
+        return None
+
+    # An exact name wins over a normalised one. The store can hold BOTH
+    # "X.pdf" and "X (1).pdf" -- a stray browser copy sitting beside the real
+    # file -- and reporting the "(1)" as the thing you already have names the
+    # wrong document back at the person uploading.
+    for src in names:
+        if src == filename:
+            return src
+    matches = [src for src in names if _doc_key(src) == key]
+    if not matches:
+        return None
+    # Otherwise prefer the copy without the "(n)" suffix: the shorter name is
+    # the original, the suffixed one is the accident.
+    return sorted(matches, key=len)[0]
 
 
 @app.post("/upload")
@@ -1254,6 +1327,35 @@ async def upload(request: Request,
             f"product={product_key!r}) — '{file.filename}' will need manual "
             f"assignment. Headers received: {list(_h.keys())}")
 
+    # Refuse a document already in the index unless the caller says this is
+    # a new version of it. Without this the same manual accumulates copies --
+    # each one re-answering the same questions from slightly different text,
+    # and each needing to be filed by hand.
+    replace = (_h.get("replace-source") or _h.get("replace_source") or "").strip()
+    clash = _existing_source_like(file.filename)
+    if replace and not (category_key and product_key):
+        # A replacement with no scope chosen keeps the filing of the version
+        # it replaces. Losing it silently is exactly how two documents ended
+        # up in "Unassigned" after a reindex, needing to be filed by hand.
+        import catalog as _cat
+        for _c in _cat.catalog().get("categories", []):
+            for _p in _c.get("products", []):
+                if replace in (_cat.sources_for(_p.get("key")) or []):
+                    category_key = category_key or _c.get("key")
+                    product_key = product_key or _p.get("key")
+                    logger.info("replacement inherits scope %s/%s from %r",
+                                category_key, product_key, replace)
+                    break
+    if clash and not replace:
+        raise HTTPException(status_code=409, detail={
+            "error": "duplicate_document",
+            "existing": clash,
+            "product": _source_product_label(clash),
+            "message": f"“{clash}” is already indexed. Upload it as a "
+                       f"new version to replace it, or rename the file if it "
+                       f"is genuinely a different document.",
+        })
+
     content = await file.read()
     filename = file.filename
     job_id = str(uuid.uuid4())
@@ -1262,7 +1364,7 @@ async def upload(request: Request,
                                 "pct": 0.0, "done": False}
     threading.Thread(target=_ingest_worker,
                      args=(job_id, content, filename, {}, category_key, product_key,
-                           ingest_provider),
+                           ingest_provider, replace or None),
                      daemon=True).start()
     return {"job_id": job_id, "file": filename, "status": "started"}
 
@@ -1878,6 +1980,21 @@ def source_file(filename: str):
     return FileResponse(path, filename=safe)
 
 
+def _category_product_keys(key: str) -> set[str]:
+    """Product keys inside the category `key`, or an empty set if `key` is
+    not a category. Used to make a range selection mean "everything in this
+    range" rather than "the handful of questions filed against the range
+    itself"."""
+    try:
+        import catalog as _cat
+        for c in _cat.catalog().get("categories", []):
+            if c.get("key") == key:
+                return {p.get("key") for p in c.get("products", []) if p.get("key")}
+    except Exception as exc:
+        logger.warning(f"category expansion failed for {key!r}: {exc}")
+    return set()
+
+
 @app.get("/faq/gaps")
 def faq_gaps(product: str | None = None,
              sort: str = "demand",
@@ -1905,6 +2022,16 @@ def faq_gaps(product: str | None = None,
     # (an empty string means "no filter"), so it is handled here.
     if product == "__none__":
         gaps = [g for g in faq_store.list_gaps(None) if not g.get("scope")]
+    elif product and _category_product_keys(product):
+        # A CATEGORY, not a product. Gaps are filed against product keys, so
+        # filtering on the category key alone matched nothing and the console
+        # showed "0 entries" for a range that plainly had questions in it.
+        # Expand it to the products it contains, and keep the category key
+        # itself: a question asked with only a range selected is filed under
+        # that key and belongs in this view too.
+        wanted = _category_product_keys(product) | {product}
+        gaps = [g for g in faq_store.list_gaps(None)
+                if (g.get("scope") or "") in wanted]
     else:
         gaps = faq_store.list_gaps(product)
 
@@ -1918,6 +2045,15 @@ def faq_gaps(product: str | None = None,
                                            -int(g.get("times_asked", 1))))
     # "demand" is the order list_gaps/cluster_gaps already return.
 
+    # One pass over the unfiltered set feeds both the scope list and the
+    # per-scope totals below.
+    _scope_totals: dict[str, dict] = {}
+    for _g in faq_store.list_gaps(None):
+        _e = _scope_totals.setdefault(_g.get("scope") or "",
+                                      {"questions": 0, "asks": 0})
+        _e["questions"] += 1
+        _e["asks"] += int(_g.get("times_asked") or 1)
+
     return {
         "gaps": gaps,
         "stats": faq_store.gap_stats(),
@@ -1925,8 +2061,13 @@ def faq_gaps(product: str | None = None,
         # rather than the catalogue: a scope that no longer exists as a
         # product (nv9st, coin_hoppers) still has real questions filed under
         # it, and hiding it from the filter would hide those questions.
-        "scopes": sorted({(g.get("scope") or "") for g in
-                          faq_store.list_gaps(None)}),
+        "scopes": sorted(_scope_totals),
+        # How much each product is carrying, so the console can show it on
+        # the filter itself rather than making someone select a product to
+        # find out whether it has anything in it. Counted over ALL gaps, not
+        # the filtered view, or every count would collapse to the one
+        # product currently selected.
+        "scope_counts": _scope_totals,
         "grouped": bool(group_similar),
         "sort": sort,
     }
@@ -2300,6 +2441,25 @@ if os.path.isdir(_NOCTURNE_DIR):
 else:
     logger.warning(
         f"No {_NOCTURNE_DIR} — the admin console at /admin will render unstyled.")
+
+# The brand mark and icon set. Sat unserved next to the console until now,
+# which is why /admin had no logo and a 404 favicon.
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+if os.path.isdir(_ASSETS_DIR):
+    from fastapi.staticfiles import StaticFiles as _StaticFiles2
+
+    app.mount("/assets", _StaticFiles2(directory=_ASSETS_DIR), name="assets")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """The console asked for this on every load and got a 404 every time."""
+    from fastapi.responses import FileResponse, Response
+    for name in ("groundedops-logo-animated.svg", "logo.svg"):
+        path = os.path.join(_ASSETS_DIR, name)
+        if os.path.exists(path):
+            return FileResponse(path, media_type="image/svg+xml")
+    return Response(status_code=204)
 
 
 class FaqAutoReq(BaseModel):
@@ -3238,6 +3398,54 @@ def admin_add_product(payload: ProductReq, x_admin_password: str | None = Header
                                        payload.name, payload.sources)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class ChampionReq(BaseModel):
+    product_key: str
+    email: str = ""          # "" clears the assignment
+    digest: str = "weekly"   # off | daily | weekly
+
+
+@app.post("/admin/product/champion")
+def admin_set_champion(payload: ChampionReq,
+                       x_admin_password: str | None = Header(default=None)):
+    """Assign the person who owns a product's unanswered questions.
+
+    The email must belong to an existing console account. Accepting a free
+    address would mean a digest addressed to someone who cannot open the
+    page it links to, and a typo that fails silently -- neither is worth the
+    flexibility.
+    """
+    me = _require_admin(x_admin_password)
+    email = (payload.email or "").strip().lower()
+    if email:
+        known = {u.get("email", "").lower() for u in accounts.list_users()
+                 if not u.get("disabled")}
+        if email not in known:
+            raise HTTPException(status_code=400, detail={
+                "error": "not_an_account",
+                "message": f"{email} is not an active console account. Add "
+                           f"them under Accounts first, so the digest goes "
+                           f"to someone who can open what it links to.",
+            })
+    try:
+        tree = catalog_mod.set_champion(payload.product_key, email,
+                                        payload.digest)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info("champion for %s set to %r (%s) by %s", payload.product_key,
+                email or "nobody", payload.digest, me.get("email"))
+    return tree
+
+
+@app.get("/admin/champions")
+def admin_champions(x_admin_password: str | None = Header(default=None)):
+    """What a delivery job would send, and to whom. Exposed now so the
+    assignment can be verified before anything sends -- the schedule is
+    real even though delivery is not wired up yet."""
+    _require_admin(x_admin_password)
+    rows = catalog_mod.champions()
+    return {"champions": rows, "count": len(rows), "delivery": "not configured"}
 
 
 @app.get("/admin/product/{product_key}/contents")
