@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GroundedOps Console</title>
-<link rel="icon" href="/assets/groundedops-logo-animated.svg" type="image/svg+xml" />
+<link rel="icon" href="/assets/logo-mark.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="nocturne/styles.css" />
 <style>
   /* ------------------------------------------------------------------
@@ -36,9 +36,21 @@
   .rail{width:246px;flex:0 0 auto;display:flex;flex-direction:column;padding:18px 0 14px;
         border-right:1px solid var(--color-divider)}
   .brand{padding:0 18px 18px}
-  .brand b{display:block;font-size:16px;font-weight:500;letter-spacing:-.01em;font-family:var(--font-heading)}
-  .brand span{font-size:11.5px;color:color-mix(in srgb, var(--color-text) 45%, transparent)}
-  .nav{flex:1;padding:0 10px;display:flex;flex-direction:column;gap:2px}
+  .brand b,
+  .gate-brand b{display:block;font-size:16px;font-weight:500;letter-spacing:-.01em;font-family:var(--font-heading)}
+  .brand span,
+  .gate-brand span{font-size:11.5px;color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  /* min-height:0 is what makes this scroll. A flex item's default
+     min-height:auto is its content, so on a short window the nav refused to
+     shrink and pushed the account box and the Collapse control below the
+     fold -- with .shell overflow:hidden there was no scrollbar to reach
+     them. Measured at 620px tall: rail content 734px, Collapse ended 114px
+     past the bottom edge. */
+  .nav{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+       padding:0 10px;display:flex;flex-direction:column;gap:2px}
+  .nav::-webkit-scrollbar{width:8px}
+  .nav::-webkit-scrollbar-thumb{border-radius:4px;
+       background:color-mix(in srgb, var(--color-text) 14%, transparent)}
   .nav-ic{flex:0 0 auto;opacity:.82}
   .nav button[aria-current="page"] .nav-ic{opacity:1}
   /* Collapse to icons. A width transition on the rail alone is enough --
@@ -227,8 +239,11 @@
      stays put when the bubble grows. */
   .chat-row{display:flex;gap:9px;align-items:flex-end;max-width:100%}
   .chat-row .bub{max-width:100%}
-  .chat-av{flex:0 0 auto;width:24px;height:24px;border-radius:7px;margin-bottom:2px;
+  /* auto width: the mark is 1.54:1, and a square box squashed it. */
+  .chat-av{flex:0 0 auto;width:auto;height:17px;margin:3px 0 2px;
            display:block;opacity:.95}
+  .wait-box{display:inline-flex;gap:8px;align-items:center}
+  .wait-line{font-size:13px;color:color-mix(in srgb, var(--color-text) 62%, transparent)}
   .typing{display:inline-flex;gap:4px;align-items:center;padding:3px 0}
   .typing i{width:6px;height:6px;border-radius:50%;display:block;
             background:color-mix(in srgb, var(--color-text) 45%, transparent);
@@ -290,10 +305,12 @@
              here left the bar sitting 8px over the page heading. It stays
              in flow and the heading follows it. */
           align-items:center;margin:0 -34px 20px;padding:9px 34px;
-          background:color-mix(in srgb, var(--color-bg) 88%, transparent);
-          backdrop-filter:blur(8px);
+          /* Opaque, not 88%: at 88% the row of the page underneath showed
+             through the bar as it scrolled, which read as a rendering
+             fault rather than as depth. */
+          background:var(--color-bg);
           border-bottom:1px solid var(--color-divider)}
-  .topbar:empty{display:none}
+  .topbar-tabs{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
   .topbar button{border:0;background:transparent;cursor:pointer;font:inherit;
           font-size:12.5px;padding:6px 11px;border-radius:999px;
           color:color-mix(in srgb, var(--color-text) 62%, transparent)}
@@ -302,6 +319,9 @@
   .topbar button[aria-current="true"]{background:var(--color-accent-800);
           color:var(--color-accent-100)}
   .topbar button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+  [hidden]{display:none!important}
+  .gap-more{display:flex;gap:8px;align-items:center;padding:6px 0 10px}
+  .gap-more-n{font-size:12px;color:color-mix(in srgb, var(--color-text) 45%, transparent)}
   .subnav{display:flex;flex-direction:column;padding:1px 10px 6px}
   .subnav button{display:block;width:100%;text-align:left;border:0;background:transparent;
                  cursor:pointer;font:inherit;font-size:12.5px;
@@ -316,10 +336,26 @@
      while the page scrolls. */
   /* Help and the theme toggle share one fixed rail in the top-right, so
      they read as one set of page controls rather than two loose buttons. */
-  .chrome-btns{position:fixed;top:18px;right:26px;z-index:40;display:flex;gap:8px}
+  /* These used to be position:fixed in the top-right corner, which meant
+     they floated over whatever happened to be under them -- section tabs at
+     one width, a document row at another -- and the translucent bar let that
+     content show through them. They now sit at the end of the section bar,
+     which is sticky, so they stay reachable without ever overlapping. */
+  .chrome-btns{display:flex;gap:8px;flex:0 0 auto;margin-left:auto}
   .chrome-btns .help-btn{position:static;top:auto;right:auto}
   .brand{display:flex;align-items:center;gap:10px}
-  .brand-mark{flex:0 0 auto;border-radius:7px;display:block}
+  .brand-mark{flex:0 0 auto;display:block}
+  /* The mark is two-tone: the G follows the theme, the O stays the brand
+     bronze at its own value on either ground. Logos are exempt from the
+     contrast rule and this one is the brand's, so it is not re-tuned. */
+  .go-ink{fill:var(--color-text)}
+  .go-brz{fill:#C59055}
+  .gate-brand{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  /* .help-btn is position:fixed by default -- that is how it sits in the
+     corner before the shell exists. In the sign-in card it has to sit in
+     the row with the mark, or it floats off to the page corner. */
+  .gate-brand .help-btn{position:static;top:auto;right:auto}
+  .gate-brand .brand-txt{flex:1;min-width:0}
   .brand-txt{display:flex;flex-direction:column;min-width:0}
   .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:34px;height:34px;
             border-radius:50%;border:0;cursor:pointer;background:var(--color-surface);
@@ -354,14 +390,33 @@
     .tour-pop{animation:none}
   }
 
+  /* A narrow window keeps the SIDEBAR, collapsed to icons.
+     It used to become a horizontal strip with overflow-x:auto, which left
+     the rail 1696px wide inside a 760px window: eleven of the thirteen nav
+     rows sat off-screen behind a scroll with no visible affordance, so the
+     navigation was present and unreachable. Icon-only is already a working
+     mode here, so a narrow window simply enters it. */
   @media (max-width:820px){
-    .shell{flex-direction:column;height:auto;min-height:100vh}
-    .rail{width:100%;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
-    .brand{border:0;padding:0 14px 0 6px;margin:0}
-    .nav{flex-direction:row;flex:1}
-    .subnav{display:none}
+    .rail{width:68px}
+    .nav-lbl,
+    .brand-txt,
+    .who-id,
+    .who-mail,
+    .who-acts{display:none}
+    .nav button,
+    .rail-toggle{justify-content:center;gap:0;padding-left:0;padding-right:0}
+    .brand{justify-content:center;padding:0 0 18px}
+    .who{justify-content:center;padding:10px 0 0}
+    .nav button{position:relative}
+    .nav .badge{position:absolute;top:5px;right:12px;min-width:0;
+        padding:0;width:7px;height:7px;border-radius:50%;overflow:hidden;
+        color:transparent;background:var(--color-accent)}
+    /* Already collapsed: a control that cannot change anything is noise. */
+    .rail-toggle{display:none}
     .readout{grid-template-columns:repeat(2,1fr)}
     .main{padding:18px}
+    /* The bar is full-bleed, so its negative margin has to track .main. */
+    .topbar{margin:0 -18px 16px;padding:9px 18px}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -645,10 +700,7 @@ function render() {
   app.append(el("div", { class: "shell" + (collapsed ? " rail-min" : "") },
     el("aside", { class: "rail" },
       el("div", { class: "brand" },
-        // The mark sits on its own cream card, so it holds up on either
-        // theme without a per-theme variant.
-        el("img", { class: "brand-mark", src: "/assets/groundedops-logo-animated.svg",
-                    alt: "", width: "26", height: "26" }),
+        brandMark(22),
         el("div", { class: "brand-txt" },
           el("b", {}, "GroundedOps"), el("span", {}, "Support console"))),
       el("nav", { class: "nav" },
@@ -676,11 +728,13 @@ function render() {
       // Filled by buildSubnav() after the view renders; it removes itself
       // when the page has fewer than two sections, so pages without them
       // keep their full height.
-      el("nav", { class: "topbar", "aria-label": "Sections on this page" }),
-      el("div", { class: "chrome-btns" },
-        themeToggle(),
-        el("button", { class: "help-btn", onclick: startTour,
-                       title: "How to use this page", "aria-label": "How to use this page" }, "?")),
+      el("nav", { class: "topbar", "aria-label": "Sections on this page" },
+        // Filled by buildSubnav() after the view renders.
+        el("div", { class: "topbar-tabs" }),
+        el("div", { class: "chrome-btns" },
+          themeToggle(),
+          el("button", { class: "help-btn", onclick: startTour,
+                         title: "How to use this page", "aria-label": "How to use this page" }, "?"))),
       el("div", { class: "wrap" }, body()))
   ));
 
@@ -699,40 +753,56 @@ function render() {
 // rail is left saying one thing.
 //
 // Still read from the rendered DOM rather than a per-view table, so tagging
-// a card data-sec remains all a view has to do to appear here. Fewer than
-// two sections is not worth the chrome.
+// a card data-sec remains all a view has to do to appear here.
+//
+// The tabs now SWITCH sections rather than scrolling to them. Scrolling still
+// left every section on one page, so pages that carry four or five cards --
+// Documents, FAQs, Advanced -- were a long scroll with a bar on top that only
+// moved you down it faster. One section at a time makes each tab a page.
+// Which section of each page was last open, so a re-render -- and every save
+// causes one -- puts you back on the section you were reading rather than on
+// the first one.
+const secTab = {};
+// Set by buildSubnav for the page currently on screen. Anything that jumps to
+// an element has to bring its section to the front first, or it scrolls to
+// something that is not on screen.
+let showSection = null;
+
+function revealSection(node) {
+  if (!showSection || !node || !node.closest) return;
+  const sec = node.closest("[data-sec]");
+  if (sec) showSection(sec);
+}
+
 function buildSubnav() {
-  const host = document.querySelector(".topbar");
+  showSection = null;
+  const host = document.querySelector(".topbar-tabs");
   if (!host) return;
   const secs = [...document.querySelectorAll(".main [data-sec]")];
-  if (secs.length < 2) { host.remove(); return; }
+  // One section is not a choice, and the bar still has the page controls in
+  // it, so it stays -- it simply carries no tabs.
+  if (secs.length < 2) return;
 
-  const btns = secs.map(sec => el("button", {
-    onclick: () => {
-      sec.scrollIntoView({ behavior: "smooth", block: "start" });
-      // Mark it immediately: the scroll is smooth, so waiting for the
-      // observer below leaves the press feeling unacknowledged.
-      btns.forEach(b => b.removeAttribute("aria-current"));
-      btns[secs.indexOf(sec)].setAttribute("aria-current", "true");
-    },
-  }, sec.getAttribute("data-sec")));
-  btns[0].setAttribute("aria-current", "true");
+  const show = (i, fromClick) => {
+    secTab[view] = i;
+    secs.forEach((sec, n) => { sec.hidden = n !== i; });
+    btns.forEach((b, n) => n === i
+      ? b.setAttribute("aria-current", "true")
+      : b.removeAttribute("aria-current"));
+    // Only on a press: doing it on every build would throw the reader back to
+    // the top of the page each time a save re-rendered it.
+    if (fromClick) {
+      const main = document.querySelector(".main");
+      if (main) main.scrollTop = 0;
+    }
+  };
+
+  const btns = secs.map((sec, i) => el("button", { onclick: () => show(i, true) },
+                                       sec.getAttribute("data-sec")));
   host.append(...btns);
+  showSection = sec => { const i = secs.indexOf(sec); if (i >= 0) show(i, true); };
 
-  // Follow the scroll, so the bar reports where you are rather than only
-  // where you last clicked.
-  try {
-    const io2 = new IntersectionObserver(entries => {
-      const vis = entries.filter(e => e.isIntersecting)
-                         .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (!vis) return;
-      const i = secs.indexOf(vis.target);
-      if (i < 0) return;
-      btns.forEach(b => b.removeAttribute("aria-current"));
-      btns[i].setAttribute("aria-current", "true");
-    }, { rootMargin: "-72px 0px -65% 0px", threshold: 0 });
-    secs.forEach(sec => io2.observe(sec));
-  } catch (e) { /* no observer: the click handler still marks it */ }
+  show(Math.min(secTab[view] || 0, secs.length - 1), false);
 }
 
 // Who you are signed in as, and the way out. Worth showing permanently:
@@ -814,6 +884,30 @@ function body() {
   if (view === "test") return viewTest();
 }
 
+// The GO mark, inlined rather than loaded as an image, so the charcoal half
+// can follow the console's own theme -- an <img> cannot see the page's tokens,
+// and this console's toggle can disagree with the OS.
+//
+// It is lifted from src/assets/logo.svg, which is the full lockup (mark plus
+// wordmark); the console sets the wordmark as text beside it. What was here
+// before was a hand-drawn approximation of the mark sitting on a baked-in
+// cream card -- hence a white tile on a dark page, and a mark that was not
+// quite the brand's.
+const MARK_VB = "450.2 535.9 1147.3 744.2";
+const MARK_RATIO = 1.5417;
+const MARK_PATHS = '<path class="go-brz" d="M 1197.22 552.541 C 1203.69 552.208 1210.16 552.06 1216.64 552.095 C 1321.31 552.277 1404.23 584.669 1478.3 659.161 C 1537.23 717.851 1573.11 795.766 1579.38 878.699 C 1583.49 931.245 1577.99 970.357 1561.21 1020.24 C 1541.95 1077.49 1515.77 1116.3 1473.05 1158.65 C 1417.19 1215.09 1343.88 1250.97 1265.05 1260.45 C 1247.09 1262.64 1239.43 1264.08 1220.82 1263.98 C 1163.13 1263.62 1106.47 1248.62 1056.17 1220.37 C 1022.64 1201.86 1009.08 1187.87 982.847 1160.79 C 967.362 1144.76 951.787 1128.81 936.123 1112.94 C 882.724 1058.88 831.316 1002.33 778.4 948.821 C 771.046 940.64 752.154 925.12 751.827 915.98 C 752.277 915.131 752.556 914.167 753.176 913.433 C 754.416 911.968 757.931 910.672 759.574 909.29 C 764.858 904.843 769.697 899.27 774.577 894.361 C 784.466 884.412 852.707 812.859 859.227 810.451 C 861.69 809.541 866.262 814.105 867.812 815.694 C 874.502 822.547 880.21 830.385 886.829 837.319 L 1028.9 985.917 C 1055.18 1013.46 1083.92 1044.56 1112.51 1069.33 C 1161.11 1110.26 1238.99 1117.27 1295.95 1091.74 C 1393.33 1048.09 1446.5 934.031 1405.42 833.004 C 1381.9 775.15 1325.5 732.883 1267.23 714.994 C 1242.05 707.262 1222.92 706.751 1196.85 708.492 C 1191.89 708.812 1169.38 713.278 1165.98 710.228 C 1156 701.263 1148.2 687.952 1138.86 678.115 C 1119.45 657.452 1098.99 637.59 1077.76 618.806 C 1071.58 613.302 1053.53 600.792 1051.24 594.885 L 1052.38 592.792 C 1057.71 589.074 1061.58 589.676 1067.53 586.679 C 1102.95 568.846 1157.68 553.891 1197.22 552.541 z"/><path class="go-ink" d="M 790.476 552.548 C 834.138 549.89 875.874 551.651 918.618 562.953 C 1007.07 586.34 1074.04 653.804 1131.16 721.758 C 1136.73 728.385 1109.89 741.295 1105.66 745.204 C 1089.22 760.407 1072.97 775.888 1057.46 792.061 C 1050.03 799.519 1033.68 819.246 1025.44 823.591 C 1021.75 823.566 1019.89 823.982 1017.36 821.425 C 1010.35 814.337 1004.79 804.372 998.084 797.153 C 976.897 774.622 953.524 754.251 928.311 736.339 C 840.168 674.807 719.839 710.159 663.987 792.965 C 598.915 889.441 625.536 1006.11 716.77 1070.2 C 757.738 1098.98 804.761 1113.2 852.758 1104.12 C 856.679 1103.91 875.993 1099.02 877.383 1100.48 C 882.698 1106.06 888.775 1113.81 893.505 1120.02 C 918.15 1152.4 947.714 1181.18 980.926 1204.69 C 985.642 1208.03 989.798 1209.53 994.262 1213.57 C 995.134 1216.38 994.921 1216.25 993.961 1219.1 C 990.444 1222.98 987.894 1222.36 983.056 1224.94 C 951.707 1242.01 917.645 1253.54 882.373 1259.02 C 858.494 1262.66 826.553 1266.05 801.983 1263.97 C 733.84 1258.2 670.782 1236.51 614.872 1196.75 C 610.814 1193.86 604.991 1187.48 600.779 1184.06 C 589.085 1174.57 575.942 1164.02 565.491 1153.18 C 516.249 1102.1 479.683 1035.05 470.347 964.24 C 466.726 947.012 468.685 928.851 467.863 911.637 C 464.209 835.082 490.32 758.939 535.705 697.57 C 552.39 675.008 572.292 656.16 593.611 636.779 C 652.605 583.151 713.161 563.612 790.476 552.548 z"/><path class="go-brz" d="M 1274.48 941.088 C 1260.16 981.066 1219.21 1005 1177.35 997.866 C 1135.48 990.73 1104.78 954.581 1104.51 912.115 C 1104.24 869.65 1134.49 833.115 1176.25 825.45 C 1218.02 817.785 1259.27 841.201 1274.1 880.995 C 1273.08 890.542 1274.48 902.506 1274.43 912.41 C 1274.38 921.971 1273.84 931.618 1274.48 941.088 z"/><path class="go-brz" d="M 1274.1 880.995 C 1281.31 900.354 1281.44 921.639 1274.48 941.088 C 1273.84 931.618 1274.38 921.971 1274.43 912.41 C 1274.48 902.506 1273.08 890.542 1274.1 880.995 z"/>';
+
+function brandMark(h, cls) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", cls || "brand-mark");
+  svg.setAttribute("viewBox", MARK_VB);
+  svg.setAttribute("height", h);
+  svg.setAttribute("width", Math.round(h * MARK_RATIO));
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = MARK_PATHS;
+  return svg;
+}
+
 // Line icons for the rail. Inline SVG rather than the PNGs in assets/icons:
 // they inherit currentColor so they follow the theme and the active state
 // for free, stay crisp at any zoom, and cost no extra requests. 20x20 on a
@@ -830,7 +924,10 @@ const NAV_ICON = {
   accounts:  '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/>',
   keys:      '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.3-8.3M17 6l2.5 2.5M14.5 8.5 17 11"/>',
   policy:    '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>',
-  advanced:  '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 14a1.7 1.7 0 0 0-1.6-1H1a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 2.7 7a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 7 2.7h.1A1.7 1.7 0 0 0 8.7 1.1V1a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.6 1H23a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  // Lucide's settings glyph. The previous path put the gear teeth at x/y
+  // 1 and 23 with 2-unit arcs on a 24 grid, so every tooth was clipped by
+  // the viewBox edge -- visible as a gear with flat sides.
+  advanced:  '<circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>',
   backup:    '<path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><rect x="1" y="3" width="22" height="5" rx="1"/><path d="M10 12h4"/>',
 };
 
@@ -946,6 +1043,8 @@ function gate() {
   const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
                     "Checking this install\u2026");
   const btn = el("button", { class: "btn btn-primary", disabled: "true" }, "Sign in");
+  // Set once the server says whether any account exists.
+  const heading = el("h2", {}, "Sign in");
   const nameIn = el("input", { class: "input", placeholder: "Your name (optional)" });
   const nameField = el("div", { class: "field", style: "display:none" }, nameIn);
 
@@ -1024,6 +1123,7 @@ function gate() {
     if (firstRun) {
       status.textContent = "No accounts exist yet. Create the first one \u2014 it "
         + "will be the root account, the only level that can add others.";
+      heading.textContent = "Create the first account";
       btn.textContent = "Create root account";
       btn.onclick = createRoot;
       nameField.style.display = "";
@@ -1042,7 +1142,15 @@ function gate() {
 
   return el("div", { class: "gate" },
     el("div", { class: "card elev-md", style: "padding:22px" },
-      el("h2", {}, "GroundedOps console"),
+      // The first thing anyone sees of this console was a bare heading on an
+      // empty ground -- no mark, no theme control, nothing that said whose
+      // console this is.
+      el("div", { class: "gate-brand" },
+        brandMark(26),
+        el("div", { class: "brand-txt" },
+          el("b", {}, "GroundedOps"), el("span", {}, "Support console")),
+        themeToggle()),
+      heading,
       status,
       el("div", { class: "field" }, emailIn),
       nameField,
@@ -2367,7 +2475,10 @@ function viewFaq() {
     // Consumed on read: a later re-render (e.g. after saving) must not
     // resurrect a question the admin has already dealt with.
     pendingAnswer = null;
-    setTimeout(() => { na.focus(); na.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60);
+    setTimeout(() => {
+      revealSection(na);
+      na.focus(); na.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
   }
 
   return [
@@ -2434,6 +2545,15 @@ function viewFaq() {
 // survives render(), which rebuilds the whole view on every change.
 let gapFilter = { scope: "", sort: "demand", grouped: true };
 
+// How many questions a product group shows before asking. 256 gaps across
+// six products meant 256 rows, each with a checkbox, a details element and
+// three buttons, all built synchronously on every render -- the page took
+// seconds to appear and every filter click paid it again. Nobody reads past
+// the first handful: they are sorted by how often the question was asked, so
+// the ones that matter are at the top.
+const GAP_PAGE = 10;
+const gapShown = {};
+
 function viewGaps() {
   const prods = products();
   const nameFor = key => {
@@ -2494,7 +2614,7 @@ function viewGaps() {
         el("span", { class: "sec-title", style: "flex:1;margin:0" }, label),
         el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
           list.length + (list.length === 1 ? " question" : " questions") + " \u00b7 " + asks + " asks")),
-      list.map(g => {
+      list.slice(0, Math.min(gapShown[key] || GAP_PAGE, list.length)).map(g => {
         const draftBox = el("div", {});
         // 2px lines the box up with the cap-height of the count beside it.
         // The row is align-items:flex-start (see .gap-row) so neither drifts
@@ -2558,7 +2678,26 @@ function viewGaps() {
               catch (e) { toast(e.message, true); }
             } }, "Dismiss")));
         return row;
-      }));
+      }),
+      (() => {
+        const shown = Math.min(gapShown[key] || GAP_PAGE, list.length);
+        if (shown >= list.length) return null;
+        const rest = list.length - shown;
+        return el("div", { class: "gap-more" },
+          el("button", { class: "btn btn-secondary",
+            onclick: () => { gapShown[key] = shown + GAP_PAGE; render(); } },
+            rest <= GAP_PAGE
+              ? "Show the remaining " + rest
+              : "Show " + GAP_PAGE + " more"),
+          // Only worth offering while it would actually save a press.
+          rest > GAP_PAGE
+            ? el("button", { class: "btn btn-ghost",
+                onclick: () => { gapShown[key] = list.length; render(); } },
+                "Show all " + list.length)
+            : null,
+          el("span", { class: "gap-more-n" },
+            rest + " not shown"));
+      })());
   });
 
   // Reloads from the server rather than filtering in the browser: grouping
@@ -3168,7 +3307,11 @@ function viewWidget() {
             d.intro_options.push({ id: uid(), label: "New option", action: "general" });
             drawOpts(); drawPreview();
           } }, "Add option")),
-        el("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:16px" },
+        // Tagged so the section bar covers the whole page: an untagged card
+        // stays on screen under every tab, which reads as a bug once the
+        // tabs are switching pages rather than scrolling to them.
+        el("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:16px",
+                    "data-sec": "Contact forms" },
           formCard("sales_form", "Talk to sales form",
                    "Appears in chat when a visitor picks \u201cTalk to sales\u201d."),
           formCard("support_form", "Talk to support form",
@@ -3445,18 +3588,53 @@ function widgetPreviewCard(withEdit) {
 function aiTurn(...kids) {
   const bub = el("div", { class: "bub a" }, ...kids);
   const row = el("div", { class: "chat-row" },
-    el("img", { class: "chat-av", src: "/assets/groundedops-logo-animated.svg",
-                alt: "", width: "24", height: "24" }),
+    brandMark(17, "chat-av"),
     bub);
   bub._row = row;
   return bub;
 }
 
+// What the wait says while it waits. A single frozen "Checking the
+// documentation" told you nothing about whether anything was still happening;
+// these move, and they move in the order the pipeline actually works in --
+// find the pages, read them, then check the answer against them -- so the
+// line is a rough progress report rather than decoration.
+const WAIT_LINES = [
+  "Sifting through the documentation",
+  "Finding the pages that mention this",
+  "Reading the ones that look right",
+  "Linking the dots",
+  "Checking the tables",
+  "Following a cross-reference",
+  "Matching the wording to your question",
+  "Weighing two possible answers",
+  "Drafting an answer",
+  "Checking every figure against the page it came from",
+  "Making sure nothing here was invented",
+  "Confirming the part numbers",
+  "Re-reading the fine print",
+  "Looking for anything that contradicts this",
+  "Tidying the wording",
+  "Nearly there",
+];
+
 function typingBubble() {
+  const line = el("span", { class: "wait-line" }, WAIT_LINES[0]);
   const dots = el("span", { class: "typing" }, el("i", {}), el("i", {}), el("i", {}));
-  dots.setAttribute("role", "status");
-  dots.setAttribute("aria-label", "Checking the documentation");
-  return aiTurn(dots);
+  const box = el("span", { class: "wait-box" }, line, dots);
+  box.setAttribute("role", "status");
+  box.setAttribute("aria-live", "polite");
+  const bub = aiTurn(box);
+  // Self-terminating rather than cleared by the caller: the bubble is removed
+  // in several places (answered, failed, chat reset) and an interval that
+  // outlives its node would keep a detached tree alive.
+  let i = 0;
+  const t = setInterval(() => {
+    if (!bub._row.isConnected) return clearInterval(t);
+    i = (i + 1) % WAIT_LINES.length;
+    line.textContent = WAIT_LINES[i];
+  }, 2200);
+  return bub;
 }
 
 function viewTest() {
@@ -3771,6 +3949,8 @@ function drawTour() {
   if (tourHi) tourHi.classList.remove("tour-hi");
   tourHi = tourTarget(s.ref);
   if (!tourHi) return endTour();
+  // Its section may not be the one on screen.
+  revealSection(tourHi);
   tourHi.classList.add("tour-hi");
   tourHi.scrollIntoView({ behavior: "smooth", block: "center" });
 
