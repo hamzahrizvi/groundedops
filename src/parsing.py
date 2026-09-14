@@ -182,11 +182,38 @@ def _headings_on_page(page, body: float, doc_is_bold: bool) -> list[str]:
         nxt = texts[i + 1] if i + 1 < len(texts) else ""
         if nxt[:1].islower():
             continue
-        out.append(text)
+        sizes = [round(c.get("size") or 0, 1) for c in (L.get("chars") or [])]
+        out.append((text, max(sizes) if sizes else 0.0))
     return out
 
 
-def _mark_sections(prose: str, headings: list[str]) -> str:
+def _heading_paths(headings):
+    """Each heading mapped to itself plus its parents, biggest type first.
+
+    A heading alone is not always enough to say what a chunk IS. Page 19 of
+    the NV4000 manual carries two tables that are word-for-word identical
+    apart from four numbers -- operating limits and storage limits -- under
+    the one-word headings "Operation" and "Storage", both sitting beneath
+    "Environmental Requirements". Filed correctly and still nearly
+    indistinguishable: asked for the operating range the pipeline answered
+    with the storage one three times out of three, and asked the same of the
+    SMART Coin System it refused a question its own manual answers.
+
+    Larger type means a parent. Carrying the path makes the two chunks
+    differ by more than a single word, which is what the embedding and BM25
+    both need in order to tell them apart.
+    """
+    stack = []
+    paths = {}
+    for text, size in headings:
+        while stack and stack[-1][1] <= size:
+            stack.pop()
+        stack.append((text, size))
+        paths[text] = " › ".join(t for t, _ in stack)
+    return paths
+
+
+def _mark_sections(prose: str, headings) -> str:
     """Fence each heading so the chunker can start a new chunk at it.
 
     Matched by text against the prose extract_text() produced, rather than
@@ -196,11 +223,12 @@ def _mark_sections(prose: str, headings: list[str]) -> str:
     """
     if not headings:
         return prose
-    wanted = {h for h in headings if h}
+    paths = _heading_paths(headings)
     out = []
     for raw in prose.split("\n"):
-        if raw.strip() in wanted:
-            out.append(f"{SECTION_OPEN}{raw.strip()}{SECTION_CLOSE}")
+        key = raw.strip()
+        if key in paths:
+            out.append(f"{SECTION_OPEN}{paths[key]}{SECTION_CLOSE}")
         else:
             out.append(raw)
     return "\n".join(out)

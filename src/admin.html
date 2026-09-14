@@ -356,14 +356,19 @@
     .topbar{background:var(--color-bg)}
   }
   .topbar-tabs{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
-  .topbar button{border:0;background:transparent;cursor:pointer;font:inherit;
+  /* Scoped to the tabs, NOT ".topbar button". Once the page controls moved
+     into this bar, a rule on every button in it also styled them -- and
+     ".topbar button" out-specifies ".help-btn", so its 4px 10px padding won:
+     a 28px border-box button became 8px of content and the 17px glyph
+     overflowed to the right, 1px from the rim. That is the clipped icon. */
+  .topbar-tabs button{border:0;background:transparent;cursor:pointer;font:inherit;
           font-size:12px;padding:4px 10px;border-radius:999px;
           color:color-mix(in srgb, var(--color-text) 62%, transparent)}
-  .topbar button:hover{background:color-mix(in srgb, var(--color-text) 8%, transparent);
+  .topbar-tabs button:hover{background:color-mix(in srgb, var(--color-text) 8%, transparent);
           color:var(--color-text)}
-  .topbar button[aria-current="true"]{background:var(--color-accent-800);
+  .topbar-tabs button[aria-current="true"]{background:var(--color-accent-800);
           color:var(--color-accent-100)}
-  .topbar button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+  .topbar-tabs button:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
   [hidden]{display:none!important}
   .gap-more{display:flex;gap:8px;align-items:center;padding:6px 0 10px}
   .gap-more-n{font-size:12px;color:color-mix(in srgb, var(--color-text) 45%, transparent)}
@@ -402,7 +407,12 @@
   .gate-brand .help-btn{position:static;top:auto;right:auto}
   .gate-brand .brand-txt{flex:1;min-width:0}
   .brand-txt{display:flex;flex-direction:column;min-width:0}
-  .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:28px;height:28px;
+  /* padding:0 matters. The design system gives every <button> 4px 10px, and
+     with box-sizing:border-box a 28px button is then 8px of content -- so the
+     17px glyph overflowed its own grid column to the right and sat 1px from
+     the rim, reading as a clipped icon. Measured after: 5.5px clear on all
+     four sides. */
+  .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:28px;height:28px;padding:0;
             border-radius:50%;border:0;cursor:pointer;background:var(--color-surface);
             box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-divider);
             color:var(--color-accent-ink);font-size:14px;font-weight:600;
@@ -759,10 +769,18 @@ function render() {
         railToggle(collapsed)),
       el("nav", { class: "nav" },
         nav("overview", "Overview"),
-        nav("documents", "Documents", cache.sources.length),
-        nav("faq", "Generate/Edit FAQs", answered().length),
+        // A badge means SOMETHING IS WAITING FOR YOU, not "how many of these
+        // exist". Ten documents and seven products are inventory: the number
+        // never changes on its own and there is nothing to do about it, so a
+        // permanent "10" beside Documents is furniture that trains the eye to
+        // ignore the one badge that does mean something. What is left is the
+        // three counts that arrive on their own and go down when you act:
+        // documents waiting to be filed, questions customers asked that
+        // nothing answered, and enquiries nobody has replied to.
+        nav("documents", "Documents", unassigned().length),
+        nav("faq", "Generate/Edit FAQs"),
         nav("gaps", "FAQs from customers", cache.gaps.length),
-        nav("catalog", "Products", products().length),
+        nav("catalog", "Products"),
         nav("widget", "Widget design"),
         nav("leads", "Enquiries", cache.leadStats.unhandled || 0),
         nav("test", "Test chat"),
