@@ -2419,7 +2419,13 @@ def admin_console():
     if not os.path.isfile(path):
         raise HTTPException(status_code=404,
                             detail="admin.html not found next to main.py")
-    return FileResponse(path, media_type="text/html")
+    # no-store, because this file IS the deployment: it is replaced in place
+    # and the next reload is meant to be the new console. Without it a browser
+    # serves its cached copy from the last visit and the fix you just shipped
+    # is invisible until someone thinks to hard-reload -- which looks exactly
+    # like the change not working.
+    return FileResponse(path, media_type="text/html",
+                        headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 # admin.html's first <link> is `nocturne/styles.css`, resolved by the browser

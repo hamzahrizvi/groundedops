@@ -80,9 +80,16 @@
      most of what the rail says at a glance -- so it becomes a dot on the
      icon rather than disappearing with the label. */
   .rail-min .nav button{position:relative}
-  .rail-min .nav .badge{position:absolute;top:5px;right:12px;min-width:0;
-        padding:0;width:7px;height:7px;border-radius:50%;overflow:hidden;
-        color:transparent;background:var(--color-accent)}
+  /* Collapsed, the count becomes a small pill ON the icon -- still the
+     number, because "how many" is the whole point of it. It used to be a
+     7px dot with overflow:hidden clipping the digits inside it, which on
+     the selected row showed as a clipped smudge rather than a marker. */
+  .rail-min .nav .badge{position:absolute;top:2px;right:5px;
+        min-width:15px;height:15px;padding:0 3.5px;border-radius:99px;
+        font-size:9.5px;line-height:15px;text-align:center;
+        background:var(--color-accent);color:#fff}
+  .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
+        color:#fff}
   /* signed-in account, at the foot of the rail */
   .who{padding:12px 16px 2px;margin:8px 10px 0;border-top:1px solid var(--color-divider)}
   .who-id{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
@@ -155,8 +162,16 @@
 
   /* ---------- readout: overview stat band ---------- */
   .readout{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
-  .readout>div{background:var(--color-surface);border-radius:var(--radius-md);padding:15px 16px 13px;
+  .readout>div,
+  .readout>.stat{background:var(--color-surface);border-radius:var(--radius-md);padding:15px 16px 13px;
                box-shadow:var(--shadow-sm)}
+  .readout>.stat{border:0;cursor:pointer;font:inherit;text-align:left;display:block;width:100%;
+               color:var(--color-text);transition:box-shadow .12s ease,transform .12s ease}
+  .readout>.stat:hover{box-shadow:var(--shadow-md),inset 0 0 0 1px var(--color-divider);
+               transform:translateY(-1px)}
+  .readout>.stat:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+  .stat-go{display:block;font-size:11.5px;margin-top:4px;
+           color:color-mix(in srgb, var(--color-accent-ink) 85%, transparent)}
   .readout b{display:block;font-family:ui-monospace,monospace;font-size:29px;font-weight:500;
              letter-spacing:-.03em;line-height:1.15;margin-top:6px}
   .readout .warn b{color:var(--color-accent-ink)}
@@ -438,9 +453,10 @@
     .brand{justify-content:center;padding:0 0 18px}
     .who{justify-content:center;padding:10px 0 0}
     .nav button{position:relative}
-    .nav .badge{position:absolute;top:5px;right:12px;min-width:0;
-        padding:0;width:7px;height:7px;border-radius:50%;overflow:hidden;
-        color:transparent;background:var(--color-accent)}
+    .nav .badge{position:absolute;top:2px;right:5px;
+        min-width:15px;height:15px;padding:0 3.5px;border-radius:99px;
+        font-size:9.5px;line-height:15px;text-align:center;
+        background:var(--color-accent);color:#fff}
     /* Already collapsed: a control that cannot change anything is noise. */
     .rail-toggle{display:none}
     .readout{grid-template-columns:repeat(2,1fr)}
@@ -722,7 +738,11 @@ function render() {
       title: label,
     }, el("span", { class: "mark" }), navIcon(id),
        el("span", { class: "nav-lbl", style: "flex:1" }, label),
-       count !== undefined ? el("span", { class: "badge mono" }, String(count)) : null);
+       // Only when there IS something. A row of "0"s is four pieces of
+       // furniture saying nothing, and collapsed it put a dot of attention
+       // on every icon in the rail.
+       count ? el("span", { class: "badge mono" },
+                  count > 99 ? "99+" : String(count)) : null);
     navBtns.push([id, b]);
     return b;
   };
@@ -1973,8 +1993,23 @@ function viewKeys() {
 function viewOverview() {
   const prods = products(), un = unassigned(), ans = answered();
 
-  const stat = (label, value, tone) =>
-    el("div", { class: tone || "" }, el("div", { class: "lbl" }, label), el("b", {}, String(value)));
+  const scopeLabel = key => {
+    const p = prods.find(x => x.key === key);
+    if (p) return p.categoryName + " › " + p.name;
+    const c = cache.catalog.find(x => x.key === key);
+    return c ? c.name : key;
+  };
+
+  // Every tile is a button. The numbers were the first thing on the first
+  // page and the only thing you could not act on: reading "193 unanswered"
+  // and then hunting the rail for where that lives is a step the page can
+  // take for you.
+  const stat = (label, value, tone, target, hint) =>
+    el("button", { class: "stat " + (tone || ""), title: hint || ("Go to " + label),
+                   onclick: () => { view = target; render(); } },
+      el("div", { class: "lbl" }, label),
+      el("b", {}, String(value)),
+      el("span", { class: "stat-go" }, hint || ""));
 
   const step = (state, title, desc, actions) =>
     el("div", { class: "step" },
@@ -2024,6 +2059,36 @@ function viewOverview() {
     : step("idle", "Questions people could not get answered",
         "Anything the widget could not answer shows up here once visitors start using it.", []));
 
+  // The backlog, on the front page, in the order it should be worked --
+  // and answerable from here. Overview summarised work that lived somewhere
+  // else; the one list everybody actually opens this console to work
+  // through was two clicks away.
+  const topGaps = [...(cache.gaps || [])]
+    .sort((a, b) => (b.times_asked || 1) - (a.times_asked || 1))
+    .slice(0, 5);
+  const topAsked = topGaps.length
+    ? el("div", { class: "card elev-sm", style: "padding:18px 20px 10px;gap:0;margin-bottom:16px",
+                  "data-sec": "Most asked" },
+        el("div", { class: "sec-title" }, "Most asked, still unanswered"),
+        el("div", { class: "sec-hint" },
+          "The five questions customers asked most often that the reviewed "
+          + "answers did not cover. Answering one resolves every rewording of it."),
+        topGaps.map(g => el("div", { class: "step gap-row" },
+          el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;"
+                            + "color:var(--color-accent-ink);flex:0 0 42px" },
+            (g.times_asked || 1) + "×"),
+          el("div", { class: "step-b" },
+            el("div", { style: "font-size:13.5px" }, g.question),
+            el("p", {}, g.scope ? scopeLabel(g.scope) : "No product selected")),
+          el("div", { class: "gap-actions" },
+            el("button", { class: "btn btn-primary", onclick: () => {
+              pendingAnswer = { question: g.question, product: g.scope || "", answer: "" };
+              view = "faq"; render();
+            } }, "Answer this"),
+            el("button", { class: "btn btn-ghost", onclick: () => { view = "gaps"; render(); } },
+              "See all")))))
+    : null;
+
   const unhandled = (cache.leadStats || {}).unhandled || 0;
   if (unhandled) {
     steps.push(step("todo", unhandled + " enquir" + (unhandled === 1 ? "y" : "ies") + " waiting",
@@ -2035,10 +2100,15 @@ function viewOverview() {
     el("h1", {}, "Overview"),
     el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked."),
     el("div", { class: "readout", "data-tour": "ov-readout", "data-sec": "At a glance" },
-      stat("Documents", cache.sources.length),
-      stat("Need filing", un.length, un.length ? "warn" : ""),
-      stat("Reviewed answers", ans.length),
-      stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "")),
+      stat("Documents", cache.sources.length, "", "documents",
+           cache.sources.length ? "Manage documents" : "Add the first one"),
+      stat("Need filing", un.length, un.length ? "warn" : "", "documents",
+           un.length ? "File them" : "All filed"),
+      stat("Reviewed answers", ans.length, "", "faq",
+           ans.length ? "Review or edit" : "Write the first"),
+      stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "", "gaps",
+           cache.gaps.length ? "Answer them" : "Nothing waiting")),
+    topAsked,
     el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0",
                 "data-tour": "ov-next", "data-sec": "What to do next" },
       el("div", { class: "sec-title" }, "What to do next"),
