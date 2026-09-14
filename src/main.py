@@ -1445,6 +1445,23 @@ def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:
     return forms
 
 
+# A question that sets two products against each other. Deliberately narrow:
+# the word has to be doing comparative work ("difference between", "vs",
+# "compare"), and the caller additionally requires that the wording NAME two
+# or more products. "What is the difference between Ads mode and Bill mode"
+# names no products and stays a single-manual question -- the same discipline
+# sales.py applies to "which device settings".
+_COMPARISON = re.compile(
+    r"\b(difference|differences|differ|differs|compare|comparison|compared)\b"
+    r"|\bvs\.?\b|\bversus\b"
+    r"|\bwhich\s+(one\s+)?is\s+(better|best|faster|cheaper|bigger|smaller)\b"
+    r"|\bbetter\s+than\b", re.I)
+
+
+def _is_comparison(query: str) -> bool:
+    return bool(_COMPARISON.search(query or ""))
+
+
 def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     """Which of `candidates` the question wording actually picks out.
 
@@ -3854,7 +3871,17 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         faq_store.record_gap(resolved_query, _faq_scope)
 
     # (c) Normal path.
-    if not payload.skip_faq:
+    # A comparison is never answered by one curated FAQ, and offering a list of
+    # single-product FAQs to "what is the difference between A and B" ends the
+    # conversation with a menu instead of an answer. Measured against the live
+    # corpus: every comparison stopped here and never reached retrieval at all.
+    # Two or more CATALOGUE products named, not just comparative wording: "the
+    # difference between Ads mode and Bill mode" is one manual's question and
+    # should still be offered its curated answer.
+    _comparing = (_is_comparison(resolved_query)
+                  and len(_products_named_in(resolved_query,
+                                             list(_product_names().keys()))) >= 2)
+    if not payload.skip_faq and not _comparing:
         _faq = faq_store.suggest_candidates(resolved_query, _faq_scope)
 
         if _faq["mode"] == "answer":
@@ -4121,9 +4148,16 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # refusal plus a route to support is the honest reply. Confidence "none"
     # is the retrieval gate's own verdict, so this defers to it rather than
     # inventing a second threshold.
+    # ...and a COMPARISON is the one case where a multi-product span is the
+    # point rather than a problem. The visitor named both products; asking
+    # "which did you mean?" answers a question nobody asked, and either reply
+    # throws away half of what they asked for.
+    _cmp_named = (_products_named_in(resolved_query, _span)
+                  if _comparing and len(_span) > 1 else [])
     _ask_product = (not payload.product and not payload.category
                     and len(_span) > 1
-                    and confidence != "none")
+                    and confidence != "none"
+                    and len(_cmp_named) < 2)
     if _ask_product:
         confidence = "ambiguous"
 
