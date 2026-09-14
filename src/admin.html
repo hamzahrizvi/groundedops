@@ -114,22 +114,43 @@
               padding:1px 7px;border-radius:99px}
   .nav button[aria-current="page"] .badge{background:var(--color-accent-800);color:var(--color-accent-100)}
 
-  .main{flex:1;overflow-y:auto;padding:30px 34px 90px;position:relative}
+  /* No top padding: the section bar is the first thing in here and it is
+     sticky, so 30px of padding above it meant the bar sat 30px down at rest
+     and content slid up INTO that strip on scroll, appearing above the bar.
+     The bar carries the top spacing itself now. Pages without one (a basic
+     account's chat) get it back below. */
+  .main{flex:1;overflow-y:auto;padding:0 34px 90px;position:relative}
+  .shell-plain .main{padding-top:28px}
   /* Fills the window. This was max-width:1000px with no centring, so on
      anything wider than about 1300px the content hugged the left edge and
      the rest of the window was dead space -- half of it on a 2560 display.
      Width is not what keeps text readable here: the prose elements carry
      their own ch-based measures (.lede, .sec-hint), and the tables and
      lists are the things that actually wanted the room. */
-  .wrap{width:100%;animation:rise .18s ease both}
+  /* ONE measure for every block of prose. The page lede was 66ch at 14px
+     and the section hint 60ch at 12.5px -- two different widths on screen,
+     about 590px and 480px, so two paragraphs in the same card wrapped in two
+     different places and the wrapping read as accidental. A measure in px
+     rather than ch is what makes them agree, since ch scales with the font
+     size the cap is trying to counteract. Prose is still measured: these
+     pages are as wide as the window, and a 1900px line of 12.5px text is
+     not readable however tidy it looks. */
+  .wrap{width:100%;animation:rise .18s ease both;--measure:780px}
   h1{font-size:26px;letter-spacing:-.025em;margin:0 0 4px;font-family:var(--font-heading);font-weight:500}
-  .lede{margin:0 0 22px;max-width:66ch;font-size:14px;
+  .lede{margin:0 0 22px;max-width:var(--measure,780px);font-size:14px;
         color:color-mix(in srgb, var(--color-text) 60%, transparent)}
 
   /* section-header pattern used inside cards, matching the design's
      15px/500 title + 12.5px muted hint pairing */
   .sec-title{font-size:15px;font-weight:500;margin:0 0 2px;font-family:var(--font-heading)}
-  .sec-hint{font-size:12.5px;margin:0 0 14px;max-width:60ch;
+  /* The hint under a settings row. It was an inline style repeated five
+     times, and being inside a flex item it stretched to whatever width was
+     going -- on a wide window that is a 1300px line of 12px text beside a
+     600px one in the same card, which is what made the wrapping look
+     arbitrary. Same measure as every other hint now. */
+  .row-hint{font-size:12px;margin-top:2px;max-width:var(--measure,780px);
+            color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .sec-hint{font-size:12.5px;margin:0 0 14px;max-width:var(--measure,780px);
             color:color-mix(in srgb, var(--color-text) 55%, transparent)}
 
   /* ---------- readout: overview stat band ---------- */
@@ -306,12 +327,19 @@
           /* Full-bleed sideways, but NOT pulled up: a negative top margin
              here left the bar sitting 8px over the page heading. It stays
              in flow and the heading follows it. */
-          align-items:center;margin:0 -34px 16px;padding:5px 34px;
-          /* Opaque, not 88%: at 88% the row of the page underneath showed
-             through the bar as it scrolled, which read as a rendering
-             fault rather than as depth. */
-          background:var(--color-bg);
+          align-items:center;margin:0 -34px 16px;padding:12px 34px 6px;
+          /* Frosted. The blur is what makes this readable: at 88% with an
+             8px blur the row underneath was still legible through the bar
+             and read as a rendering fault. A heavier blur and a touch more
+             ground turns the same effect into depth. */
+          background:color-mix(in srgb, var(--color-bg) 72%, transparent);
+          backdrop-filter:blur(18px) saturate(140%);
+          -webkit-backdrop-filter:blur(18px) saturate(140%);
           border-bottom:1px solid var(--color-divider)}
+  /* Without the blur, translucency is just bleed-through. */
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+    .topbar{background:var(--color-bg)}
+  }
   .topbar-tabs{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
   .topbar button{border:0;background:transparent;cursor:pointer;font:inherit;
           font-size:12px;padding:4px 10px;border-radius:999px;
@@ -362,7 +390,7 @@
   .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:28px;height:28px;
             border-radius:50%;border:0;cursor:pointer;background:var(--color-surface);
             box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-divider);
-            color:var(--color-accent-ink);font-size:13px;font-weight:600;
+            color:var(--color-accent-ink);font-size:14px;font-weight:600;
             display:grid;place-items:center;font-family:inherit}
   .help-btn:hover{color:var(--color-accent)}
   .help-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
@@ -416,9 +444,10 @@
     /* Already collapsed: a control that cannot change anything is noise. */
     .rail-toggle{display:none}
     .readout{grid-template-columns:repeat(2,1fr)}
-    .main{padding:18px}
+    .main{padding:0 18px 60px}
+    .shell-plain .main{padding-top:18px}
     /* The bar is full-bleed, so its negative margin has to track .main. */
-    .topbar{margin:0 -18px 16px;padding:9px 18px}
+    .topbar{margin:0 -18px 14px;padding:10px 18px 6px}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -1018,9 +1047,20 @@ function themeToggle() {
       applyTheme(next);
       render();
     } });
+  // Drawn like the rail's icons -- 17px on a 24 grid at 1.7 -- because they
+  // sit in the same console and the old pair matched neither it nor each
+  // other: a stroke-2 sun whose eight rays were 2-unit ticks stranded well
+  // clear of the disc, beside a single-path moon. Same weight and rhythm
+  // now, and the rays reach the disc.
+  const ICO = 'width="17" height="17" viewBox="0 0 24 24" fill="none" '
+    + 'stroke="currentColor" stroke-width="1.7" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true"';
   btn.innerHTML = dark
-    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>'
-    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+    ? '<svg ' + ICO + '><circle cx="12" cy="12" r="4.2"/>'
+      + '<path d="M12 1.8v2.4M12 19.8v2.4M1.8 12h2.4M19.8 12h2.4'
+      + 'M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></svg>'
+    : '<svg ' + ICO + '><path d="M20.8 14.2A8.6 8.6 0 0 1 9.8 3.2'
+      + 'a8.6 8.6 0 1 0 11 11z"/></svg>';
   return btn;
 }
 
@@ -1248,7 +1288,7 @@ function viewAccounts() {
         el("span", { style: "flex:1" }),
         el("span", { style: "font-size:11.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
           u.last_login ? "last in " + shortDate(u.last_login) : "never signed in")),
-      u.name ? el("div", { class: "mono", style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, u.email) : null,
+      u.name ? el("div", { class: "mono row-hint" }, u.email) : null,
       el("div", { class: "item", style: "margin-top:10px" },
         el("div", { style: "flex:0 0 90px;font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, "Level"),
         el("div", { style: "flex:0 0 150px" }, sel),
@@ -1538,7 +1578,7 @@ function viewPolicy() {
     mk.push(el("div", { class: "item", style: "align-items:flex-start" },
       el("div", { style: "flex:1 1 260px" },
         el("div", { style: "font-size:13.5px" }, label),
-        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, hint)),
+        el("div", { class: "row-hint" }, hint)),
       el("div", { style: "flex:0 0 auto;display:flex;align-items:center;gap:8px" },
         inp,
         el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 50%,transparent)" }, unit || ""))));
@@ -1679,19 +1719,19 @@ function viewPolicy() {
     el("div", { class: "item", style: "align-items:flex-start;margin-top:12px" },
       el("div", { style: "flex:1 1 260px" },
         el("div", { style: "font-size:13.5px" }, "By conversation"),
-        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+        el("div", { class: "row-hint" },
           "Clears the per-conversation question/token cap for one session id.")),
       el("div", { style: "flex:0 0 auto;display:flex;gap:8px" }, sessIn, sessBtn)),
     el("div", { class: "item", style: "align-items:flex-start" },
       el("div", { style: "flex:1 1 260px" },
         el("div", { style: "font-size:13.5px" }, "By account"),
-        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+        el("div", { class: "row-hint" },
           "Clears a signed-in customer or staff member's daily credits.")),
       el("div", { style: "flex:0 0 auto;display:flex;gap:8px" }, uidIn, uidBtn)),
     el("div", { class: "item", style: "align-items:flex-start" },
       el("div", { style: "flex:1 1 260px" },
         el("div", { style: "font-size:13.5px" }, "By guest"),
-        el("div", { style: "font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+        el("div", { class: "row-hint" },
           "Clears an anonymous visitor's daily credits and FAQ lookups. The IP is optional but "
           + "needed to also clear their per-IP ceiling \u2014 without it only their own allowance is reset.")),
       el("div", { style: "flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap" }, visIn, ipIn, visBtn)));
@@ -1743,8 +1783,7 @@ function viewAdvanced() {
       rows);
   };
 
-  const hintLine = t => el("div", { style: "font-size:12px;margin-top:4px;"
-    + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" }, t);
+  const hintLine = t => el("div", { class: "row-hint" }, t);
 
   const toggleRow = (key, label, hint) => {
     const box = el("input", { type: "checkbox" });
