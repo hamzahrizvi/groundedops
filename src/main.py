@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import socket
 import threading
 import time
 import uuid
@@ -2404,6 +2405,54 @@ class ReassignReq(BaseModel):
     source: str
     category_key: str
     product_key: str
+
+
+@app.get("/admin/network")
+def admin_network(request: Request, x_admin_password: str | None = Header(default=None)):
+    """Where this server can be reached from other machines.
+
+    The console cannot work this out for itself: a browser knows the address
+    IT used, which is "localhost" for whoever is sitting at the machine --
+    the one address nobody else can use. So the answer has to come from the
+    server, and the rail can then say where to point a colleague or a widget
+    embed without anyone running ipconfig.
+    """
+    _require_admin(x_admin_password)
+    port = request.url.port or 8000
+    addrs = []
+    try:
+        s_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s_.settimeout(0.4)
+        try:
+            # Nothing is sent; this just makes the OS choose the interface it
+            # would really route over, which is the one a colleague reaches.
+            s_.connect(("8.8.8.8", 80))
+            addrs.append(s_.getsockname()[0])
+        finally:
+            s_.close()
+    except Exception:
+        pass
+    # Everything else the host answers to, MINUS the virtual switches. A
+    # Hyper-V or WSL adapter has a real address that answers locally and is
+    # reachable from nothing, so listing it sends a colleague to a dead end.
+    # Without psutil there are no adapter names to filter by, so the filter
+    # is by subnet: keep an address only if it shares a /16 with the one the
+    # OS actually routes over, which is how a second real NIC on the same
+    # site looks and how a host-only switch does not.
+    routed = addrs[0] if addrs else ""
+    site = ".".join(routed.split(".")[:2]) if routed else ""
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip.startswith(("127.", "169.254.")) or ip in addrs:
+                continue
+            if site and ".".join(ip.split(".")[:2]) != site:
+                continue
+            addrs.append(ip)
+    except Exception:
+        pass
+    return {"port": port, "addresses": addrs,
+            "urls": [f"http://{a}:{port}" for a in addrs]}
 
 
 @app.get("/admin", include_in_schema=False)

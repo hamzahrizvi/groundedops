@@ -90,6 +90,20 @@
         background:var(--color-accent);color:#fff}
   .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
         color:#fff}
+  /* where to point a colleague, at the foot of the rail */
+  .lan{padding:10px 16px 0;margin:6px 10px 0;border-top:1px solid var(--color-divider)}
+  .lan:empty{display:none}
+  .lan-lbl{font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;
+           color:color-mix(in srgb, var(--color-text) 42%, transparent)}
+  .lan-url{display:block;margin-top:2px;padding:0;border:0;background:transparent;
+           font-size:12px;cursor:pointer;text-align:left;
+           color:var(--color-accent-ink)}
+  .lan-url:hover{text-decoration:underline}
+  .lan-alt{font-size:10.5px;margin-top:2px;
+           color:color-mix(in srgb, var(--color-text) 38%, transparent)}
+  /* Collapsed there is no room for an address, and an icon cannot say one. */
+  .rail-min .lan{display:none}
+
   /* signed-in account, at the foot of the rail */
   .who{padding:12px 16px 2px;margin:8px 10px 0;border-top:1px solid var(--color-divider)}
   .who-id{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
@@ -457,7 +471,8 @@
     .brand-txt,
     .who-id,
     .who-mail,
-    .who-acts{display:none}
+    .who-acts,
+    .lan{display:none}
     .nav button,
     .rail-toggle{justify-content:center;gap:0;padding-left:0;padding-right:0}
     .brand{justify-content:center;padding:0 0 18px}
@@ -793,6 +808,7 @@ function render() {
         isRoot() ? nav("advanced", "Advanced") : null,
         nav("backup", "Backup"),
       ),
+      lanBox(),
       whoBox(),
     ),
     el("main", { class: "main" },
@@ -874,6 +890,39 @@ function buildSubnav() {
   showSection = sec => { const i = secs.indexOf(sec); if (i >= 0) show(i, true); };
 
   show(Math.min(secTab[view] || 0, secs.length - 1), false);
+}
+
+// Where this server can be reached from another machine. Asked of the
+// SERVER, because the browser only knows the address it used itself -- which
+// for whoever is sitting at the machine is "localhost", the one address that
+// works for nobody else. Fetched once and held, since it cannot change while
+// the process is up.
+let lanInfo = null;
+function lanBox() {
+  const box = el("div", { class: "lan" });
+  const draw = () => {
+    box.innerHTML = "";
+    if (!lanInfo || !lanInfo.urls || !lanInfo.urls.length) return;
+    const url = lanInfo.urls[0];
+    box.append(
+      el("div", { class: "lan-lbl" }, "Reachable on the network at"),
+      el("button", { class: "lan-url mono", title: "Copy " + url + "/admin",
+        onclick: () => {
+          navigator.clipboard.writeText(url + "/admin")
+            .then(() => toast("Address copied"))
+            .catch(() => toast(url + "/admin", false));
+        } }, url.replace("http://", "")),
+      // Not el(): box.append() is the DOM's, and it turns a null child into
+      // the literal text "null".
+      );
+    if (lanInfo.urls.length > 1) {
+      box.append(el("div", { class: "lan-alt" },
+        "also " + lanInfo.urls.slice(1).map(u => u.replace("http://", "")).join(", ")));
+    }
+  };
+  if (lanInfo) draw();
+  else api("/admin/network").then(r => { lanInfo = r; draw(); }).catch(() => {});
+  return box;
 }
 
 // Who you are signed in as, and the way out. Worth showing permanently:
