@@ -229,9 +229,223 @@ def _overviews(faq_items: list[dict]) -> list[dict]:
                          (f.get("question") or "").strip(), re.I)]
 
 
+# ── comparisons ───────────────────────────────────────────────────────────
+#
+# "What is the difference between the NV9 and the NV22?" is this module's
+# shape too: it ranges ACROSS products and the answer appears in no single
+# chunk. It arrives here rather than at retrieval because one top-k over the
+# whole corpus does not guarantee both products are represented in it --
+# measured, "how does the NV9USB+ differ from the NV9 Spectral?" retrieved
+# both manuals and still refused, because nothing made the coverage
+# symmetric. Asking each product separately does.
+#
+# Two shapes, and the first matters most in this corpus:
+#
+#   SAME TABLE   a range manual prints its own comparison -- "Product |
+#                Interfaces" lists NV9 Spectral, NV11 Spectral and NV22 as
+#                ROW LABELS. Both sides are already side by side and
+#                attributed; the answer is to quote those rows. This also
+#                covers products with no manual of their own, which no
+#                per-product fan-out could reach.
+#
+#   PER PRODUCT  otherwise, take each named product's spec rows and keep the
+#                attributes BOTH have and DISAGREE on. That is what a
+#                difference is, and confining it to shared attributes stops
+#                the answer listing one product's features as though the
+#                other lacked them when its manual simply never says.
+#
+# Nothing is generated either way: every value is a table cell and every row
+# stays attributed to the manual it came from, so a specification cannot
+# migrate to the wrong product -- the mistake a comparison is most likely to
+# make, and the most convincing when it makes it.
+
+_COMPARE = re.compile(
+    r"\b(difference|differences|differ|differs|compare|comparison|compared)\b"
+    r"|\bvs\.?\b|\bversus\b"
+    r"|\bbetter\s+than\b", re.I)
+
+
+def is_comparison(question: str) -> bool:
+    return bool(_COMPARE.search(question or ""))
+
+
+def _label_token(label: str) -> str:
+    """The model designator a person would actually type: "NV9 Spectral" ->
+    "nv9". Matching the whole label fails the common case, because nobody
+    writes the range name out in full."""
+    toks = re.findall(r"[a-z0-9]+", (label or "").lower())
+    return toks[0] if toks else ""
+
+
+def _named_in(question: str, label: str) -> bool:
+    """Whether the question names this row label, as a WORD.
+
+    Word boundaries matter more here than anywhere else in this module:
+    flattened matching makes "nv9" a substring of "nv9usb", which would
+    quietly answer about one product with another product's row.
+    """
+    tok = _label_token(label)
+    if not tok:
+        return False
+    return bool(re.search(r"\b" + re.escape(tok) + r"\b", question or "", re.I))
+
+
+def _same_table_rows(question: str, index: list[dict]) -> list[dict]:
+    """Rows of ONE table whose labels the question names, when it names 2+."""
+    by_table: dict[tuple, list[dict]] = {}
+    for r in index:
+        by_table.setdefault((r["source"], r["page"], r["table"]), []).append(r)
+
+    best: list[dict] = []
+    for rows in by_table.values():
+        hit = [r for r in rows if _named_in(question, r["attribute"])]
+        # Distinct labels, so a table repeating one name does not qualify.
+        if len({_label_token(r["attribute"]) for r in hit}) >= 2 \
+                and len(hit) > len(best):
+            best = hit
+    return best
+
+
+# Not every table in a manual is a specification. These documents also print
+# change histories, cable schedules and part-number lists, and an unfiltered
+# comparison offered "Change History > 1: 03 Nov 2025 against 18 Dec 2024" and
+# a pair of cable part numbers as though they were product differences. True,
+# grounded, and of no use to anyone deciding between two products.
+_NOT_SPEC_TABLE = re.compile(
+    r"change\s*history|revision|document\s*control|contact|"
+    r"table\s*of\s*contents|cable|accessor|spare|order(ing)?\s*(code|info)",
+    re.I)
+
+# A row LABEL that is a part number ("CN00392", "WR02040") or a bare number is
+# an entry in a list, not an attribute anything can be compared on.
+_PART_NUMBER = re.compile(r"^[a-z]{2,3}[\s-]?\d{3,}[a-z0-9-]*$", re.I)
+_DATE_ISH = re.compile(r"^\d{1,2}\s+\w{3,}\s+\d{4}", re.I)
+
+
+def _is_spec_row(row: dict) -> bool:
+    label = (row.get("attribute") or "").strip()
+    if not label or len(label) < 2:
+        return False
+    if _NOT_SPEC_TABLE.search(row.get("table") or ""):
+        return False
+    if _PART_NUMBER.match(label) or label.isdigit():
+        return False
+    cells = [c.strip() for c in (row.get("values") or []) if c and c.strip()]
+    vals = " ".join(cells)
+    if _DATE_ISH.match(vals.strip()):
+        return False
+    # A value that is a part number makes this a parts list whatever the
+    # table is called: "Cable: CN00392, Validator to USB Cable" is an
+    # accessory, not a specification two products differ on.
+    if any(_PART_NUMBER.match(c) for c in cells):
+        return False
+    # Header bleed: a sub-heading read as data repeats the row label back as
+    # a cell, giving "Length: 115 mm, 167 mm, Length, 115 mm, 160 mm" --
+    # two columns of a split table stitched into one unreadable run.
+    if any(c.lower() == label.lower() for c in cells):
+        return False
+    return True
+
+
+def _shared_differences(named: list[str], index: list[dict],
+                        question: str) -> list:
+    """(attribute, {product: value}) for attributes every named product has
+    and does not agree on."""
+    wanted = set(named)
+    by_attr: dict = {}
+    for r in index:
+        if r["product"] not in wanted:
+            continue
+        if not _is_spec_row(r):
+            continue
+        vals = ", ".join(v for v in r["values"] if v and v != "---")
+        if not vals:
+            continue
+        # Qualified by its table: "Temperature" under Operation and under
+        # Storage are different rows, and merging them would compare one
+        # product's operating limit against another's storage limit.
+        table = (r.get("table") or "").strip()
+        key = (table + " › " + r["attribute"]) if table else r["attribute"]
+        by_attr.setdefault(key, {}).setdefault(r["product"], vals)
+
+    documented, differing = [], []
+    for attr, per_product in sorted(by_attr.items()):
+        if len(per_product) < len(wanted):
+            continue                      # not documented for both
+        documented.append((attr, per_product))
+        if len(set(per_product.values())) > 1:
+            differing.append((attr, per_product))
+
+    # When the question NAMES a dimension, answer that dimension -- including
+    # when the two agree. "The difference in operating temperature" where both
+    # manuals say +5°C to +50°C has the answer "there is none", and that is
+    # worth saying: dropping equal rows here made the pipeline refuse a
+    # question whose answer was sitting in both tables.
+    terms = _terms(question)
+    if terms:
+        focused = [(a, v) for a, v in documented if terms & _terms(a)]
+        if focused:
+            return focused
+    # Open-ended: the rows they disagree on ARE the difference.
+    return differing[:12]                 # a table nobody reads is not an answer
+
+
+def compare(question: str, index: list[dict], named: list,
+            product_names: dict | None = None) -> dict | None:
+    """A side-by-side answer built from table cells, or None to fall through.
+
+    `named` is the catalogue products the QUESTION names, resolved by the
+    caller: main.py already owns that resolver, aliases and all, and a second
+    implementation here would be a second thing to keep correct.
+    """
+    if not is_comparison(question):
+        return None
+    names = product_names or {}
+
+    # Shape 1: one table already puts them side by side.
+    rows = _same_table_rows(question, index)
+    if rows:
+        head = rows[0]
+        # The source and page, not the table caption: structures.py takes the
+        # nearest heading as a title, which on page 47 is "Introduction" --
+        # citing that as the table's name is wrong and looks careless.
+        lines = ["From " + head["source"]
+                 + ", page " + str(head["page"]) + ":", ""]
+        for r in sorted(rows, key=lambda x: x["attribute"]):
+            vals = ", ".join(v for v in r["values"] if v and v != "---")
+            lines.append("- **" + r["attribute"] + "** — " + vals)
+        return {"answer": "\n".join(lines), "kind": "comparison_table",
+                "products": sorted({r["product"] for r in rows})}
+
+    # Shape 2: ask each product separately, keep what they disagree on.
+    if len(named) < 2:
+        return None
+    diffs = _shared_differences(named, index, question)
+    if not diffs:
+        return None
+    labels = [names.get(k, k) for k in named]
+    lines = ["| | " + " | ".join("**" + l + "**" for l in labels) + " |",
+             "|---|" + "---|" * len(labels)]
+    same = 0
+    for attr, per_product in diffs:
+        vals = [per_product.get(k, "not documented") for k in named]
+        if len(set(vals)) == 1:
+            same += 1
+        lines.append("| " + attr + " | " + " | ".join(vals) + " |")
+    if same == len(diffs):
+        lines += ["", "These are the same for both products."]
+    lines += ["", "Only the specifications both manuals state are compared "
+                  "here; anything one manual does not mention is left out "
+                  "rather than assumed."]
+    return {"answer": "\n".join(lines), "kind": "comparison_specs",
+            "products": list(named)}
+
+
 def answer(question: str, faq_items: list[dict], index: list[dict],
            catalog_tree: dict | None = None,
-           scoped: bool = False) -> dict | None:
+           scoped: bool = False,
+           named_products: list | None = None,
+           product_names: dict | None = None) -> dict | None:
     """A cross-product answer, or None to let the normal pipeline run.
 
     Three shapes, in order of specificity:
@@ -252,6 +466,14 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
     catalogue branches still run -- both demand far more of the question,
     and "what else do you sell?" is a fair thing to ask mid-conversation.
     """
+    # 0. A comparison: a cross-product question whose wording looks nothing
+    #    like a sales one, so it is checked before that gate.
+    if is_comparison(question):
+        cmp_out = compare(question, index, named_products or [],
+                          product_names)
+        if cmp_out:
+            return cmp_out
+
     if not is_sales_question(question):
         return None
 

@@ -1035,7 +1035,9 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
     try:
         import sales, docstore, faq_store as _fs, catalog as _cat, policy
         q = f"{raw_q} {resolved or ''}"
-        if not sales.is_sales_question(q):
+        # A comparison is this module's shape too, and its wording looks
+        # nothing like a sales question, so it gets in on its own terms.
+        if not sales.is_sales_question(q) and not sales.is_comparison(q):
             return None
 
         mode = (policy.value("sales_mode") or "answer").strip().lower()
@@ -1048,8 +1050,14 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
             return {"answer": reply, "kind": "deflected"}
 
         idx = sales.get_index(docstore.store_dir(), _source_to_product())
+        # The products the WORDING names, resolved here because this is
+        # where that resolver lives -- aliases, longest-form-wins and all.
+        _names = _product_names()
+        _named = _products_named_in(q, list(_names.keys()))
         return sales.answer(q, _fs._load(), idx, _cat.catalog(),
-                            scoped=_is_product_scope(scope_key))
+                            scoped=_is_product_scope(scope_key),
+                            named_products=_named,
+                            product_names=_names)
     except Exception as exc:
         logger.warning(f"sales answer skipped: {exc}")
         return None
