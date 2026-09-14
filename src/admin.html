@@ -742,7 +742,12 @@ const answered = () => cache.faq.filter(f => (f.answer || "").trim());
 /* ---------------- shell ---------------- */
 function render() {
   const app = document.getElementById("app");
-  endTour();                 // the popover lives on <body>, so it outlives app.innerHTML
+  // The popover lives on <body>, so it outlives app.innerHTML and has to be
+  // taken down by hand. A GUIDED run is the one case where the page changing
+  // is the tour doing its job rather than the reader leaving it, so its state
+  // survives -- ending it here made the guided flow kill itself on its own
+  // first step.
+  if (guidedOn) clearTourUI(); else endTour();
   app.innerHTML = "";
   if (!tok) return app.append(gate());
 
@@ -792,10 +797,15 @@ function render() {
         // three counts that arrive on their own and go down when you act:
         // documents waiting to be filed, questions customers asked that
         // nothing answered, and enquiries nobody has replied to.
+        // Products first: a document is filed against a product and the widget
+        // asks a visitor to pick one, so nothing works until a product exists.
+        // The rail now runs in the order the work actually happens -- set up
+        // the products, add the documents, write the answers, read what
+        // customers asked, then try it as a customer.
+        nav("catalog", "Products"),
         nav("documents", "Documents", unassigned().length),
         nav("faq", "Generate/Edit FAQs"),
         nav("gaps", "FAQs from customers", cache.gaps.length),
-        nav("catalog", "Products"),
         nav("widget", "Widget design"),
         nav("leads", "Enquiries", cache.leadStats.unhandled || 0),
         nav("test", "Test chat"),
@@ -826,6 +836,10 @@ function render() {
   ));
 
   buildSubnav();
+
+  // A view that re-rendered itself (its data arrived) has just had the
+  // popover cleared above; put it back where it was.
+  if (guidedOn && tourOn) setTimeout(() => { if (guidedOn && tourOn) drawTour(); }, 80);
 }
 
 // Lists the active page's sections under its nav row. Reads the rendered DOM
@@ -2164,8 +2178,15 @@ function viewOverview() {
   }
 
   return [
-    el("h1", {}, "Overview"),
-    el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked."),
+    el("div", { class: "row-between", style: "align-items:flex-start;gap:16px" },
+      el("div", {},
+        el("h1", {}, "Overview"),
+        el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked.")),
+      // The per-page help answers "what is on this page". Nothing answered
+      // "what do I do first", which is the only question a new install has.
+      el("button", { class: "btn btn-primary", style: "flex:0 0 auto",
+                     onclick: startGuided },
+        "Show me how it all fits together")),
     el("div", { class: "readout", "data-tour": "ov-readout", "data-sec": "At a glance" },
       stat("Documents", cache.sources.length, "", "documents",
            cache.sources.length ? "Manage documents" : "Add the first one"),
@@ -2341,7 +2362,11 @@ function viewDocuments() {
       const span = line.querySelector("span");
       if (s.status === "done") { span.textContent = "Added \u2014 " + (s.chunks || 0) + " sections"; return; }
       if (s.status === "error") { span.textContent = "Failed: " + (s.error || "unknown"); return; }
-      span.textContent = (s.stage || "working") + " " + (s.pct || 0) + "%";
+      // pct is 0 until the first real step reports, and "working 0%" for a
+      // minute reads as stuck. Show the stage, and the number only once it
+      // means something.
+      span.textContent = (s.stage || "working")
+        + (s.pct ? " — " + Math.round(s.pct) + "%" : "…");
     }
   }
 
@@ -2576,8 +2601,40 @@ function viewFaq() {
 
   const srcSel = el("select", { class: "input" },
     el("option", { value: "" }, "Choose a document\u2026"),
-    el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"),
-    cache.sources.map(s => el("option", { value: s.source }, s.source)));
+    el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"));
+
+  // Eleven documents in one flat list is already a hunt, and the list only
+  // grows. Narrowing by product first is the same two-level move the gaps
+  // page makes, and it answers "which manual was that?" by where it is filed
+  // rather than by remembering its filename.
+  const srcFilter = el("select", { class: "input", style: "width:auto" },
+    el("option", { value: "" }, "All products"),
+    products().map(p => el("option", { value: p.key },
+      p.categoryName + " › " + p.name)),
+    el("option", { value: "__none__" }, "Not filed against a product"));
+
+  const drawSources = () => {
+    const want = srcFilter.value;
+    const keep = cache.sources.filter(s => {
+      if (!want) return true;
+      const owner = s.product || s.products || "";
+      return want === "__none__" ? !owner : owner === want;
+    });
+    // Rebuilt rather than hidden: a <select> with display:none options is
+    // still keyboard-navigable to them, which is how you end up generating
+    // FAQs for a document you filtered out.
+    // From index 2: the two fixed options are "Choose a document" and "Every
+    // document with no FAQs yet", and removing from 1 ate the second one --
+    // taking the bulk-generate path with it.
+    while (srcSel.options.length > 2) srcSel.remove(2);
+    keep.forEach(s => srcSel.append(el("option", { value: s.source }, s.source)));
+    if (!keep.length) {
+      srcSel.append(el("option", { value: "", disabled: "true" },
+        "No documents filed here yet"));
+    }
+  };
+  srcFilter.addEventListener("change", drawSources);
+  drawSources();
   const provSel = providerBox();
   const modelIn = linkModelBox(provSel,
     el("input", { class: "input", type: "text", placeholder: "model (optional)" }));
@@ -2671,6 +2728,8 @@ function viewFaq() {
       // five equal columns whose minimums overflowed the card, which is what
       // pushed the model field under the button.
       el("div", { class: "row" },
+        el("div", { style: "flex:0 1 200px" },
+          el("label", { class: "flabel" }, "Filter by product"), srcFilter),
         el("div", { style: "flex:1 1 240px" },
           el("label", { class: "flabel" }, "Document"), srcSel),
         el("div", { style: "flex:0 1 180px" },
@@ -3049,10 +3108,15 @@ function viewGaps() {
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => bulkAction("/faq/gaps/spam", "POST", "Marked spam:") }, "Mark spam"),
       el("span", { style: "flex:1" }),
       el("label", { class: "flabel", style: "margin:0" }, "AI model:"), provSel, modelIn) : null,
+    // The anchor is on BOTH branches: on a new install this page is empty,
+    // and the walkthrough step explaining what will collect here is exactly
+    // the one a new install needs. Anchored only to the list, it had nothing
+    // to point at and the step was skipped for the people it was written for.
     cache.gaps.length ? el("div", { "data-tour": "gaps-list" }, rows)
-      : el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
-          el("b", {}, "Nothing unanswered"),
-          "Questions the widget could not answer will collect here once visitors start using it.")),
+      : el("div", { class: "card elev-sm", "data-tour": "gaps-list" },
+          el("div", { class: "empty" },
+            el("b", {}, "Nothing unanswered"),
+            "Questions the widget could not answer will collect here once visitors start using it.")),
   ];
 }
 
@@ -4002,6 +4066,61 @@ function viewTest() {
    A step targets [data-tour="<ref>"]. Steps whose target is absent get dropped
    when the tour starts, so an empty-state page that renders fewer cards gets a
    correctly-numbered shorter tour rather than a step pointing at nothing. */
+// The whole job, across the pages, in the order it happens. The per-page
+// walkthrough below answers "what is on this page"; this answers "what do I
+// do first", which is the question a new install actually has and the one no
+// single page could answer -- each page's help stopped at its own edge.
+//
+// A step names the view it belongs to; the runner switches pages between
+// steps and waits for the render before pointing at anything.
+const GUIDED = [
+  { view: "catalog", ref: "cat-range", title: "1. Set up a product",
+    text: "Everything hangs off a product: documents are filed against one, and the widget asks a visitor to pick one before it answers. Add the range first, then the products inside it." },
+  { view: "documents", ref: "doc-add", title: "2. Add its documents",
+    text: "The manuals and datasheets answers are drawn from. Pick the range and product, then drop the files in — a document with no product is searchable but never offered to a visitor." },
+  { view: "faq", ref: "ans-draft", title: "3. Draft the answers",
+    text: "Reads a document you have added and writes the questions a customer would ask, answered from that document alone. Nothing goes live until you have read it: signed-out visitors see only these." },
+  { view: "faq", ref: "ans-hand", title: "4. Or write one yourself",
+    text: "Hand-written answers are protected — drafting never overwrites one. This is also where a question from the Unanswered page lands when you press Answer this." },
+  { view: "test", ref: "test-widget", title: "5. Try it as a customer",
+    text: "The real widget, on a stand-in page, reading the same settings a visitor gets. Ask it something you know the answer to, and check the sources it cites." },
+  { view: "gaps", ref: "gaps-list", title: "6. Come back to what it could not answer",
+    text: "Every question a visitor asked that the answers did not cover lands here, most asked first. Working down this list is the upkeep — answering one removes it automatically." },
+];
+
+let guidedOn = false;
+
+function startGuided() {
+  guidedOn = true;
+  const live = GUIDED.slice();
+  tourSteps = live; tourStep = 0; tourOn = true;
+  bindTourKeys();
+  goGuided(0);
+}
+
+// Switching pages between steps means the target does not exist yet when the
+// step is drawn, so the render has to finish first. render() is synchronous,
+// but the views that fetch on demand (products, gaps) paint a second time
+// when their data lands -- hence the retry rather than a single timeout.
+function goGuided(i) {
+  const step = tourSteps[i];
+  if (!step) return endTour();
+  tourStep = i;
+  if (view !== step.view) { view = step.view; render(); }
+  let tries = 0;
+  const tick = () => {
+    if (!tourOn) return;
+    if (tourTarget(step.ref)) return drawTour();
+    // Out of patience: the step's anchor is not on this page at all. On an
+    // empty install that is normal -- the Unanswered page has no list until a
+    // visitor asks something -- so the step still gets said, pointed at the
+    // page heading rather than at nothing.
+    if (tries++ > 20) return drawTour(true);
+    setTimeout(tick, 120);
+  };
+  tick();
+}
+
 const tourStepsByView = {
   backup: [
     { ref: "backup-export", title: "Take a copy of everything",
@@ -4076,12 +4195,8 @@ let tourPop = null, tourHi = null, tourKeys = null, tourReflow = null;
 
 const tourTarget = ref => document.querySelector('[data-tour="' + ref + '"]');
 
-function startTour() {
-  const live = (tourStepsByView[view] || []).filter(s => tourTarget(s.ref));
-  if (!live.length) return toast("No walkthrough for this page yet");
-  endTour();
-  tourSteps = live; tourOn = true; tourStep = 0;
-
+// Shared by the per-page walkthrough and the guided flow.
+function bindTourKeys() {
   tourKeys = e => {
     if (!tourOn) return;
     if (e.key === "Escape") endTour();
@@ -4089,21 +4204,32 @@ function startTour() {
     else if (e.key === "ArrowLeft") tourGo(-1);
   };
   document.addEventListener("keydown", tourKeys);
-
-  // .main is the scroll container, not the window, so the popover has to
-  // follow its scroll to stay beside the element it points at.
   tourReflow = () => { if (tourOn) placeTour(); };
   window.addEventListener("resize", tourReflow);
   const main = document.querySelector(".main");
   if (main) main.addEventListener("scroll", tourReflow);
+}
+
+function startTour() {
+  const live = (tourStepsByView[view] || []).filter(s => tourTarget(s.ref));
+  if (!live.length) return toast("No walkthrough for this page yet");
+  endTour();
+  tourSteps = live; tourOn = true; tourStep = 0;
+
+  bindTourKeys();
 
   drawTour();
 }
 
-function endTour() {
-  tourOn = false; tourStep = 0; tourSteps = [];
+// Just the visuals, leaving the run in place.
+function clearTourUI() {
   if (tourPop) { tourPop.remove(); tourPop = null; }
   if (tourHi) { tourHi.classList.remove("tour-hi"); tourHi = null; }
+}
+
+function endTour() {
+  tourOn = false; guidedOn = false; tourStep = 0; tourSteps = [];
+  clearTourUI();
   if (tourKeys) { document.removeEventListener("keydown", tourKeys); tourKeys = null; }
   if (tourReflow) {
     window.removeEventListener("resize", tourReflow);
@@ -4117,17 +4243,26 @@ function tourGo(delta) {
   if (!tourOn) return;
   const n = tourStep + delta;
   if (n < 0) return;
+  if (guidedOn) {
+    if (n >= tourSteps.length) return endTour();
+    return goGuided(n);
+  }
   if (n >= tourSteps.length) return endTour();
   tourStep = n; drawTour();
 }
 
-function drawTour() {
+function drawTour(fallback) {
   const s = tourSteps[tourStep];
   if (!s) return endTour();
 
   if (tourHi) tourHi.classList.remove("tour-hi");
   tourHi = tourTarget(s.ref);
-  if (!tourHi) return endTour();
+  // Products and the gaps page fetch on demand and paint a SECOND time when
+  // their data lands, which wipes the popover and, on the first paint, has
+  // not drawn the target yet. Ending the run there stranded the guided flow
+  // on its own first step. A missing target is now just "not yet".
+  if (!tourHi && fallback) tourHi = document.querySelector(".main h1");
+  if (!tourHi) { if (guidedOn) return; return endTour(); }
   // Its section may not be the one on screen.
   revealSection(tourHi);
   tourHi.classList.add("tour-hi");

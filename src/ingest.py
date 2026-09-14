@@ -230,6 +230,18 @@ def ingest_file(content: bytes, filename: str,
     """
     collection = get_collection()
 
+    # The caller passes this so the console can show what is happening; it was
+    # accepted and never called, so /upload/status reported the 0.0 it was
+    # created with until the job finished. Every upload read "working 0%" for
+    # its whole run -- on a 200-page manual that is minutes of a progress
+    # indicator that looks stuck.
+    def _step(stage, done=0, total=0):
+        if progress:
+            try:
+                progress(stage, done, total)
+            except Exception:      # a broken reporter must not fail an ingest
+                pass
+
     # v12.0: keep the ORIGINAL file so answers can offer a download link
     # back to the source document. Previously the upload lived only in a
     # temp file that was deleted after parsing, so there was nothing to
@@ -265,6 +277,7 @@ def ingest_file(content: bytes, filename: str,
         # Page-crossing content is largely recovered by retrieval returning
         # both halves, and by the breadcrumb enrichment below keeping each
         # half attributable to its section.
+        _step("reading the document", 0, 1)
         pages = extract_pages(tmp_path)
         if not pages:
             logger.warning(f"No text extracted from '{filename}'")
@@ -275,8 +288,11 @@ def ingest_file(content: bytes, filename: str,
         # can tell near-identical sections apart (e.g. app-login credentials
         # vs. device-registration API credentials). See the block comment at
         # the top of this file.
+        _step("splitting into sections", 0, len(pages))
         texts, pageno, sections = [], [], []
-        for pno, ptext in pages:
+        for _pi, (pno, ptext) in enumerate(pages, start=1):
+            if _pi % 5 == 0 or _pi == len(pages):
+                _step("splitting into sections", _pi, len(pages))
             if not ptext or not ptext.strip():
                 continue
             for raw in chunk_text(ptext, size=CHUNK_SIZE,
@@ -314,7 +330,11 @@ def ingest_file(content: bytes, filename: str,
             logger.warning(f"could not retain source file for '{filename}': {e}")
 
         # ── Embed ─────────────────────────────────────────────────────────────
+        # The long pole on a big document, and the reason the console needs to
+        # say something: a 235-chunk manual spends most of its ingest here.
+        _step("understanding the text", 0, len(texts))
         vectors = embed_texts(texts)
+        _step("saving", len(texts), len(texts))
 
         # ── Store ─────────────────────────────────────────────────────────────
         # v12.0: product key(s) this file belongs to, comma-joined for
