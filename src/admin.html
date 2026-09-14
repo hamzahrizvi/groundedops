@@ -57,10 +57,12 @@
      animating the labels as well makes them reflow mid-flight and look
      like a fault. They are simply gone at the narrow width. */
   .rail{transition:width .16s ease}
-  .rail-toggle{margin:6px 10px 0;display:flex;align-items:center;gap:11px;
-        padding:8px 11px;border:0;border-radius:var(--radius-md);cursor:pointer;
-        background:transparent;color:color-mix(in srgb, var(--color-text) 58%, transparent);
-        font:inherit;font-size:13px;text-align:left;width:calc(100% - 20px)}
+  /* An icon, not a row: the word said nothing the arrow does not, and it
+     was the only full-width control in the rail. */
+  .rail-toggle{flex:0 0 auto;margin-left:auto;display:grid;place-items:center;
+        width:28px;height:28px;padding:0;border:0;border-radius:var(--radius-md);
+        cursor:pointer;background:transparent;
+        color:color-mix(in srgb, var(--color-text) 52%, transparent)}
   .rail-toggle:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent);
         color:var(--color-text)}
   .rail-toggle svg{flex:0 0 auto}
@@ -70,9 +72,9 @@
   .rail-min .who-id,
   .rail-min .who-mail,
   .rail-min .who-acts{display:none}
-  .rail-min .nav button,
-  .rail-min .rail-toggle{justify-content:center;gap:0;padding-left:0;padding-right:0}
-  .rail-min .brand{justify-content:center;padding:0 0 18px}
+  .rail-min .nav button{justify-content:center;gap:0;padding-left:0;padding-right:0}
+  .rail-min .brand{flex-direction:column;justify-content:center;gap:8px;padding:0 0 16px}
+  .rail-min .rail-toggle{margin-left:0}
   .rail-min .who{justify-content:center;padding:10px 0 0}
   /* The count still matters when collapsed -- "something is waiting" is
      most of what the rail says at a glance -- so it becomes a dot on the
@@ -304,7 +306,7 @@
           /* Full-bleed sideways, but NOT pulled up: a negative top margin
              here left the bar sitting 8px over the page heading. It stays
              in flow and the heading follows it. */
-          align-items:center;margin:0 -34px 20px;padding:9px 34px;
+          align-items:center;margin:0 -34px 16px;padding:5px 34px;
           /* Opaque, not 88%: at 88% the row of the page underneath showed
              through the bar as it scrolled, which read as a rendering
              fault rather than as depth. */
@@ -312,7 +314,7 @@
           border-bottom:1px solid var(--color-divider)}
   .topbar-tabs{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
   .topbar button{border:0;background:transparent;cursor:pointer;font:inherit;
-          font-size:12.5px;padding:6px 11px;border-radius:999px;
+          font-size:12px;padding:4px 10px;border-radius:999px;
           color:color-mix(in srgb, var(--color-text) 62%, transparent)}
   .topbar button:hover{background:color-mix(in srgb, var(--color-text) 8%, transparent);
           color:var(--color-text)}
@@ -357,10 +359,10 @@
   .gate-brand .help-btn{position:static;top:auto;right:auto}
   .gate-brand .brand-txt{flex:1;min-width:0}
   .brand-txt{display:flex;flex-direction:column;min-width:0}
-  .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:34px;height:34px;
+  .help-btn{position:fixed;top:18px;right:26px;z-index:40;width:28px;height:28px;
             border-radius:50%;border:0;cursor:pointer;background:var(--color-surface);
             box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-divider);
-            color:var(--color-accent-ink);font-size:15px;font-weight:600;
+            color:var(--color-accent-ink);font-size:13px;font-weight:600;
             display:grid;place-items:center;font-family:inherit}
   .help-btn:hover{color:var(--color-accent)}
   .help-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
@@ -702,7 +704,10 @@ function render() {
       el("div", { class: "brand" },
         brandMark(22),
         el("div", { class: "brand-txt" },
-          el("b", {}, "GroundedOps"), el("span", {}, "Support console"))),
+          el("b", {}, "GroundedOps"), el("span", {}, "Support console")),
+        // Top-right of the sidebar rather than at its foot: it acts on the
+        // rail, so it belongs in the rail's own header, beside the mark.
+        railToggle(collapsed)),
       el("nav", { class: "nav" },
         nav("overview", "Overview"),
         nav("documents", "Documents", cache.sources.length),
@@ -722,7 +727,6 @@ function render() {
         nav("backup", "Backup"),
       ),
       whoBox(),
-      railToggle(collapsed),
     ),
     el("main", { class: "main" },
       // Filled by buildSubnav() after the view renders; it removes itself
@@ -962,8 +966,7 @@ function railToggle(collapsed) {
     + 'stroke-linejoin="round" aria-hidden="true">'
     + '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>'
     + (collapsed ? '<path d="M14 9l3 3-3 3"/>' : '<path d="M17 9l-3 3 3 3"/>')
-    + '</svg>'
-    + '<span class="nav-lbl">' + (collapsed ? "Expand" : "Collapse") + '</span>';
+    + '</svg>';
   return btn;
 }
 
