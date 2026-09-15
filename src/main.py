@@ -1907,6 +1907,10 @@ class FaqEdit(BaseModel):
     # and retyped.
     question: str | None = None
     answer: str | None = None
+    # Which products this answer applies to, comma-joined. None leaves the
+    # tagging alone; "" means it applies to every product, which is what an
+    # untagged answer has always meant.
+    products: str | None = None
 
 
 class FaqCreate(BaseModel):
@@ -1937,7 +1941,8 @@ def faq_create(payload: FaqCreate, x_admin_password: str | None = Header(default
 @app.patch("/faq/{faq_id}")
 def faq_edit(faq_id: str, payload: FaqEdit, x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    updated = faq_store.update_entry(faq_id, payload.question, payload.answer)
+    updated = faq_store.update_entry(faq_id, payload.question, payload.answer,
+                                     products=payload.products)
     if not updated:
         raise HTTPException(status_code=404, detail="FAQ entry not found")
     return updated
@@ -2892,6 +2897,126 @@ def admin_faq_bulk(payload: FaqBulkReq,
     return merged
 
 
+@app.post("/admin/faq/import")
+async def admin_faq_import(request: Request,
+                           file: UploadFile = File(...),
+                           x_admin_password: str | None = Header(default=None)):
+    """Read question/answer pairs OUT of a document, without indexing it.
+
+    A support team that already has an FAQ -- a Word document, a page of the
+    website, a spreadsheet exported to text -- has answers somebody already
+    approved. Putting that through the document pipeline is the wrong shape:
+    it would be chunked and retrieved from, when what is wanted is the pairs
+    themselves, served exactly as written.
+
+    Nothing is saved here either. The pairs come back for the same review the
+    drafting flow uses, because an import is exactly as capable of producing
+    a mangled pair as a model is.
+    """
+    _require_admin(x_admin_password)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="That file is empty")
+
+    import tempfile
+    suffix = os.path.splitext(file.filename or "")[1] or ".txt"
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fh:
+            fh.write(raw)
+            tmp = fh.name
+        from parsing import extract_pages
+        pages = extract_pages(tmp)
+    except Exception as exc:
+        logger.warning(f"FAQ import could not read {file.filename!r}: {exc}")
+        raise HTTPException(status_code=400,
+                            detail=f"Could not read that file: {exc}")
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    text = "\n\n".join(t for _pno, t in (pages or []) if t and t.strip())
+    if not text.strip():
+        raise HTTPException(status_code=422,
+                            detail="No text could be read from that file.")
+
+    # Structured first: a document that already marks its questions does not
+    # need a model to find them, and a literal read cannot paraphrase.
+    pairs = _pairs_from_marked_text(text)
+    how = "read from the file"
+
+    if not pairs:
+        # Otherwise ask a model to pull out the pairs that ARE there, which
+        # is a different instruction from writing new ones: nothing may be
+        # composed, and anything without an answer in the file is dropped.
+        prompt = (
+            "The document below is an existing FAQ or support page.\n\n"
+            f"<document>\n{text[:12000]}\n</document>\n\n"
+            "Extract the question-and-answer pairs it ALREADY CONTAINS. "
+            "Rules:\n"
+            "- Copy the wording. Do not rewrite, summarise or improve it.\n"
+            "- Do not invent a question, and do not answer one the document "
+            "leaves unanswered.\n"
+            "- Skip headings, navigation and contact details.\n\n"
+            "Return ONLY a JSON array, no other text, in this exact form:\n"
+            '[{"question": "...", "answer": "..."}]')
+        try:
+            from llm import generate_with_fallback
+            out = generate_with_fallback("accurate", prompt)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Import failed: {exc}")
+        if (out or {}).get("provider") == "none":
+            raise HTTPException(
+                status_code=502,
+                detail="No model could be reached to read that file, and it "
+                       "carries no question markers to read literally.")
+        pairs = _parse_qa_json((out or {}).get("text", "") or "")
+        how = "read by " + str((out or {}).get("model") or "the model")
+
+    if not pairs:
+        raise HTTPException(
+            status_code=422,
+            detail="No question and answer pairs could be found in that file.")
+    return {"entries": pairs[:60], "file": file.filename, "how": how,
+            "count": len(pairs[:60])}
+
+
+# "Q: ... A: ..." and "Question: ... Answer: ..." are how exported FAQs
+# actually look, and a file that marks its pairs should never need a model:
+# reading it literally is both free and incapable of paraphrasing.
+_Q_MARK = re.compile(r"^\s*(?:Q|Question)\s*[:.\)-]\s*(.+)$", re.I)
+_A_MARK = re.compile(r"^\s*(?:A|Answer)\s*[:.\)-]\s*(.+)$", re.I)
+
+
+def _pairs_from_marked_text(text: str) -> list[dict]:
+    pairs, q, a = [], None, []
+    for line in (text or "").split("\n"):
+        mq = _Q_MARK.match(line)
+        ma = _A_MARK.match(line)
+        if mq:
+            if q and a:
+                pairs.append({"question": q, "answer": " ".join(a).strip()})
+            q, a = mq.group(1).strip(), []
+        elif ma and q:
+            a = [ma.group(1).strip()]
+        elif q and a and not line.strip():
+            # A blank line ENDS the answer. Without this the pair ran on into
+            # whatever followed it -- the last answer in a file swallowed the
+            # "Contact us at ..." footer sitting two lines below it.
+            pairs.append({"question": q, "answer": " ".join(a).strip()})
+            q, a = None, []
+        elif q and a and line.strip():
+            # A wrapped answer keeps going to the end of its paragraph, which
+            # is how these documents lay one out.
+            a.append(line.strip())
+    if q and a:
+        pairs.append({"question": q, "answer": " ".join(a).strip()})
+    return [p for p in pairs if p["question"] and p["answer"]]
+
+
 @app.post("/admin/reassign_source")
 def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = Header(default=None)):
     """v10.5: re-tag every chunk of an already-ingested SOURCE to a
@@ -2904,10 +3029,22 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     ids = got.get("ids", [])
     if not ids:
         raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
+    # Several products, comma-joined: an installation guide covering the
+    # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
+    # meant the other product's visitors were never offered it.
+    keys = [k.strip() for k in (payload.product_key or "").split(",") if k.strip()]
     metas = got["metadatas"]
     for m in metas:
+        # Flags from a previous assignment have to go, or a document moved off
+        # a product stays findable under it -- the worst kind of stale tag,
+        # because nothing on screen says it is still there.
+        for stale in [k for k in list(m.keys()) if k.startswith("prod_")]:
+            m.pop(stale, None)
         m["category"] = payload.category_key
-        m["product"] = payload.product_key
+        m["product"] = ",".join(keys)
+        m["products"] = ",".join(keys)
+        for k in keys:
+            m["prod_" + k] = True
     col.update(ids=ids, metadatas=metas)
     # bust the BM25 cache so the new tags take effect
     try:

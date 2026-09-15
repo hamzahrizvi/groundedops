@@ -363,6 +363,14 @@ def ingest_file(content: bytes, filename: str,
                         "product": _prod_tag,
                         "products": _prod_tag,
                         "category": _cat_tag,
+                        # One flag per product this document belongs to, so a
+                        # document can belong to SEVERAL. Chroma's `where` is
+                        # exact-match, so a comma-joined "a,b" matches neither
+                        # "a" nor "b" and multi-tagging would have silently
+                        # made a document invisible to both products. A flag
+                        # per key keeps the filter server-side and exact.
+                        **{("prod_" + k): True
+                           for k in _prod_tag.split(",") if k.strip()},
                         # v12.0: page number for citation + deep-linking.
                         "page": pageno[i],
                         # The document's own heading for this chunk, found by

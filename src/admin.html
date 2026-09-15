@@ -90,6 +90,18 @@
         background:var(--color-accent);color:#fff}
   .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
         color:#fff}
+  /* product tags: a chip per product, on or off. A multi-select is a control
+     nobody uses correctly without being told to hold ctrl. */
+  .tagbox{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;
+          max-width:460px}
+  .chip{border:0;cursor:pointer;font:inherit;font-size:11.5px;
+        padding:3px 10px;border-radius:999px;
+        background:color-mix(in srgb, var(--color-text) 8%, transparent);
+        color:color-mix(in srgb, var(--color-text) 62%, transparent)}
+  .chip:hover{color:var(--color-text)}
+  .chip.on{background:var(--color-accent-800);color:var(--color-accent-100)}
+  .chip:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+
   /* drafts awaiting review */
   .gap-row.dropped{opacity:.45}
   .gap-row.dropped .step-b p{text-decoration:line-through}
@@ -1292,7 +1304,8 @@ function draftReviewCard() {
       el("div", { class: "sec-hint" },
         d.state === "drafting"
           ? "Nothing is saved yet. Answers appear as they are written."
-          : kept + " of " + d.entries.length + " will be saved. Nothing is "
+          : (d.note ? d.note + ". " : "")
+            + kept + " of " + d.entries.length + " will be saved. Nothing is "
             + "stored until you press Save.")),
     d.state === "review"
       ? el("div", { style: "display:flex;gap:8px;flex:0 0 auto" },
@@ -2700,21 +2713,38 @@ function viewDocuments() {
   // Grouped by category > product instead of one flat list \u2014 unassigned
   // docs are their own pinned-first group, same idea as viewGaps' scope
   // grouping.
+  // A document can belong to SEVERAL products -- an installation guide
+  // covering the MyCheckr and the MyCheckr Mini belongs to both, and filing
+  // it under one meant the other product's visitors were never offered it.
+  // A chip per product, because a multi-select is a control nobody can use
+  // without being told to hold ctrl.
   const docRow = s => {
-    const cur = s.product || s.products || "";
-    const move = el("select", { class: "input", style: "width:auto", onchange: async e => {
-      const p = prods.find(x => x.key === e.target.value);
-      if (!p) return;
+    const cur = (s.product || s.products || "")
+      .split(",").map(x => x.trim()).filter(Boolean);
+
+    const save = async keys => {
+      const first = prods.find(x => x.key === keys[0]);
       try {
         await api("/admin/reassign_source", { method: "POST",
-          body: JSON.stringify({ source: s.source, category_key: p.category, product_key: p.key }) });
-        toast("Filed under " + p.name);
+          body: JSON.stringify({ source: s.source,
+                                 category_key: first ? first.category : "",
+                                 product_key: keys.join(",") }) });
+        toast(keys.length
+          ? "Filed under " + keys.length + " product" + (keys.length === 1 ? "" : "s")
+          : "Unfiled — searchable, but never offered in the widget");
         await refresh(); render();
       } catch (err) { toast(err.message, true); }
-    } }, el("option", { value: "" }, cur ? "Move to\u2026" : "File under\u2026"),
-       prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
+    };
 
-    return el("div", { class: "item" + (cur ? "" : " flagged") },
+    const move = el("div", { class: "tagbox" },
+      prods.map(p => el("button", {
+        class: "chip" + (cur.includes(p.key) ? " on" : ""),
+        title: p.categoryName + " › " + p.name,
+        onclick: () => save(cur.includes(p.key)
+          ? cur.filter(k => k !== p.key) : cur.concat([p.key]))
+      }, p.name)));
+
+    return el("div", { class: "item" + (cur.length ? "" : " flagged") },
       el("div", { class: "grow" },
         el("b", {}, s.source),
         el("span", {}, (s.chunks || 0) + " sections")),
@@ -2962,6 +2992,37 @@ function viewFaq() {
       category: s.category || "",
       provider: provSel.value || null, model: modelIn.value.trim() || null }) });
 
+  // Import: the same review list, filled from a file instead of a model.
+  const importFile = el("input", { type: "file", accept: ".pdf,.docx,.txt,.md",
+                                   style: "display:none" });
+  importFile.addEventListener("change", async () => {
+    const f = importFile.files && importFile.files[0];
+    importFile.value = "";
+    if (!f) return;
+    faqDrafts = { source: f.name, product: scope || "", category: "",
+                  entries: [], state: "drafting", raw: "", partial: null,
+                  seen: new Set() };
+    render();
+    try {
+      const fd = new FormData(); fd.append("file", f);
+      const r = await fetch(API + "/admin/faq/import",
+        { method: "POST", body: fd, headers: { "x-admin-password": tok } });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((body && body.detail) || ("HTTP " + r.status));
+      (body.entries || []).forEach(e => addDraft(e.question, e.answer, false));
+      faqDrafts.state = "review";
+      faqDrafts.note = body.count + " pairs " + body.how;
+    } catch (e) {
+      faqDrafts.state = faqDrafts.entries.length ? "review" : "error";
+      faqDrafts.error = e.message;
+    }
+    render();
+  });
+
+  const importBtn = el("button", { class: "btn btn-secondary", style: BTN,
+    title: "Read an existing FAQ document and add the pairs it contains",
+    onclick: () => importFile.click() }, "Import from a file");
+
   const genBtn = el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
     const pick = srcSel.value;
     if (!pick) return toast("Choose a document first", true);
@@ -3047,7 +3108,8 @@ function viewFaq() {
           el("label", { class: "flabel" }, "Provider"), provSel),
         el("div", { style: "flex:0 1 180px" },
           el("label", { class: "flabel" }, "Model"), modelIn),
-        el("div", { style: "flex:0 0 auto;min-width:0" }, genBtn))),
+        el("div", { style: "flex:0 0 auto;min-width:0;display:flex;gap:8px" },
+          genBtn, importBtn, importFile))),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "ans-hand", "data-sec": "Write one yourself" },
       // Shown once, after drafts were saved: the drafting pass answers what
