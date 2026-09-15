@@ -90,6 +90,19 @@
         background:var(--color-accent);color:#fff}
   .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
         color:#fff}
+  /* drafts awaiting review */
+  .gap-row.dropped{opacity:.45}
+  .gap-row.dropped .step-b p{text-decoration:line-through}
+  .tag{display:inline-block;margin-top:4px;font-size:10.5px;padding:1px 7px;
+       border-radius:999px;
+       background:color-mix(in srgb, var(--color-accent-ink) 16%, transparent);
+       color:var(--color-accent-ink)}
+  /* the answer still being written */
+  .caret{display:inline-block;width:7px;height:13px;margin-left:2px;
+         vertical-align:-2px;background:var(--color-accent);
+         animation:caret 1s step-end infinite}
+  @keyframes caret{50%{opacity:0}}
+
   /* a progress bar, used by the sign-in button and every upload */
   .bar{height:4px;border-radius:99px;overflow:hidden;margin-top:6px;
        background:color-mix(in srgb, var(--color-text) 12%, transparent)}
@@ -1133,6 +1146,196 @@ function railCollapsed() {
 function toggleRail() {
   try { localStorage.setItem(RAIL_KEY, railCollapsed() ? "0" : "1"); } catch (e) {}
   render();
+}
+
+/* ---------------- FAQ drafts, reviewed before they are saved ---------------- */
+// Generating used to write straight into the store: the first time anyone saw
+// a drafted answer, it was already live to customers and the only way to undo
+// a bad one was to find and delete it. Drafts now land HERE, are read, and are
+// saved only for the ones somebody approved.
+//
+// Module-level because render() rebuilds the page: a review list owned by the
+// view would be thrown away by the first refresh that lands mid-review.
+let faqDrafts = null;   // {source, product, category, entries:[...], state, raw}
+
+// A pair the model has finished writing. Matched on the stream as it arrives
+// so the reviewer reads answers in the order they are committed to, rather
+// than waiting for the whole array and then being handed eight at once.
+const _PAIR_RE = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+// The one still being written, so its answer can be shown mid-sentence.
+const _PARTIAL_RE = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)$/;
+
+function _unjson(s) {
+  try { return JSON.parse('"' + s + '"'); } catch (e) { return s; }
+}
+
+async function streamDrafts(source, product, category, provider, model, count) {
+  faqDrafts = { source, product, category, entries: [], state: "drafting",
+                raw: "", partial: null, seen: new Set() };
+  render();
+
+  const res = await fetch(API + "/admin/faq/draft/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-admin-password": tok },
+    body: JSON.stringify({ source, count, provider, model,
+                           product, category }) });
+  if (!res.ok || !res.body) {
+    faqDrafts.state = "error";
+    faqDrafts.error = "Could not start drafting (" + res.status + ")";
+    return render();
+  }
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf("\n\n")) >= 0) {
+      const line = buf.slice(0, cut); buf = buf.slice(cut + 2);
+      if (!line.startsWith("data: ")) continue;
+      let ev; try { ev = JSON.parse(line.slice(6)); } catch (e) { continue; }
+      handleDraftEvent(ev);
+    }
+  }
+  if (faqDrafts && faqDrafts.state === "drafting") {
+    // The stream ended without a done event: treat it as finished with
+    // whatever completed, rather than leaving a spinner forever.
+    faqDrafts.state = faqDrafts.entries.length ? "review" : "error";
+    faqDrafts.error = faqDrafts.entries.length ? "" : "Nothing was drafted.";
+    render();
+  }
+}
+
+function handleDraftEvent(ev) {
+  if (!faqDrafts) return;
+  if (ev.type === "verbatim") {
+    // The document's own tables. Approved by default: they are quotations,
+    // not drafts, and the reviewer can still turn any of them off.
+    (ev.entries || []).forEach(e => addDraft(e.question, e.answer, true));
+    return render();
+  }
+  if (ev.type === "delta") {
+    faqDrafts.raw += ev.text;
+    let m;
+    _PAIR_RE.lastIndex = 0;
+    while ((m = _PAIR_RE.exec(faqDrafts.raw))) {
+      addDraft(_unjson(m[1]), _unjson(m[2]), false);
+    }
+    const partial = _PARTIAL_RE.exec(faqDrafts.raw);
+    faqDrafts.partial = partial
+      ? { question: _unjson(partial[1]), answer: _unjson(partial[2]) } : null;
+    return render();
+  }
+  if (ev.type === "done") {
+    (ev.entries || []).forEach(e => addDraft(e.question, e.answer, false));
+    faqDrafts.partial = null;
+    faqDrafts.state = "review";
+    return render();
+  }
+  if (ev.type === "error") {
+    faqDrafts.partial = null;
+    faqDrafts.state = faqDrafts.entries.length ? "review" : "error";
+    faqDrafts.error = ev.message || "Drafting failed";
+    return render();
+  }
+}
+
+function addDraft(question, answer, verbatim) {
+  question = (question || "").trim(); answer = (answer || "").trim();
+  if (!question || !answer) return;
+  const key = question.toLowerCase();
+  if (faqDrafts.seen.has(key)) return;   // the stream re-matches as it grows
+  faqDrafts.seen.add(key);
+  faqDrafts.entries.push({ question, answer, verbatim, keep: true });
+}
+
+async function saveDrafts() {
+  const keep = faqDrafts.entries.filter(e => e.keep);
+  if (!keep.length) { faqDrafts = null; render(); return toast("Nothing kept"); }
+  try {
+    const r = await api("/admin/faq/bulk", { method: "POST", body: JSON.stringify({
+      source: faqDrafts.source, product: faqDrafts.product,
+      category: faqDrafts.category, entries: keep }) });
+    const added = r.added || 0, dupes = r.skipped_duplicates || 0;
+    toast("Saved " + added + " answer" + (added === 1 ? "" : "s")
+          + (dupes ? ", skipped " + dupes + " already there" : ""));
+    // Straight on to the obvious next question: was anything missed? The
+    // hand-written form is where that goes, so go there and say so rather
+    // than leaving them on a page whose work is finished.
+    faqDrafts = null;
+    await refresh();
+    askForMore = { added };
+    view = "faq"; render();
+    setTimeout(() => {
+      const card = document.querySelector('[data-sec="Write one yourself"]');
+      if (card) revealSection(card);
+    }, 60);
+  } catch (e) { toast(e.message, true); }
+}
+
+// Shown once after a save, on the hand-written card.
+let askForMore = null;
+
+function draftReviewCard() {
+  if (!faqDrafts) return null;
+  const d = faqDrafts;
+  const kept = d.entries.filter(e => e.keep).length;
+
+  const head = el("div", { class: "row-between", style: "align-items:flex-start;gap:12px" },
+    el("div", {},
+      el("div", { class: "sec-title" },
+        d.state === "drafting" ? "Drafting from " + d.source
+                               : "Review before saving"),
+      el("div", { class: "sec-hint" },
+        d.state === "drafting"
+          ? "Nothing is saved yet. Answers appear as they are written."
+          : kept + " of " + d.entries.length + " will be saved. Nothing is "
+            + "stored until you press Save.")),
+    d.state === "review"
+      ? el("div", { style: "display:flex;gap:8px;flex:0 0 auto" },
+          el("button", { class: "btn btn-ghost", onclick: () => {
+            d.entries.forEach(e => e.keep = false); render(); } }, "Dismiss all"),
+          el("button", { class: "btn btn-secondary", onclick: () => {
+            d.entries.forEach(e => e.keep = true); render(); } }, "Keep all"),
+          el("button", { class: "btn btn-primary", onclick: saveDrafts },
+            "Save " + kept))
+      : el("button", { class: "btn btn-ghost", style: "flex:0 0 auto",
+                       onclick: () => { faqDrafts = null; render(); } }, "Cancel"));
+
+  const rows = d.entries.map((e, i) => el("div", {
+      class: "step gap-row" + (e.keep ? "" : " dropped") },
+    el("input", { type: "checkbox", style: "margin-top:3px",
+                  checked: e.keep ? "true" : null,
+                  onchange: ev => { e.keep = ev.target.checked; render(); } }),
+    el("div", { class: "step-b" },
+      el("div", { style: "font-size:13.5px;font-weight:500" }, e.question),
+      el("p", { style: "white-space:pre-wrap" }, e.answer),
+      e.verbatim
+        ? el("span", { class: "tag" }, "from the document's own table")
+        : null)));
+
+  const writing = d.partial
+    ? el("div", { class: "step gap-row" },
+        el("span", { style: "flex:0 0 18px" }, ""),
+        el("div", { class: "step-b" },
+          el("div", { style: "font-size:13.5px;font-weight:500" }, d.partial.question),
+          el("p", { style: "white-space:pre-wrap" }, d.partial.answer,
+            el("span", { class: "caret" }, ""))))
+    : null;
+
+  return el("div", { class: "card elev-sm",
+                     style: "padding:18px 20px 8px;gap:0;margin-bottom:16px",
+                     "data-sec": "Review drafts" },
+    head,
+    d.state === "drafting"
+      ? el("div", { class: "bar indet", style: "margin:10px 0 4px" }, el("i", {}))
+      : null,
+    d.error ? el("p", { class: "sec-hint", style: "color:var(--color-accent-ink)" },
+                 d.error) : null,
+    rows, writing);
 }
 
 /* ---------------- background jobs ---------------- */
@@ -2762,31 +2965,21 @@ function viewFaq() {
   const genBtn = el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
     const pick = srcSel.value;
     if (!pick) return toast("Choose a document first", true);
-
-    const docs = pick === ALL_DOCS ? undraftedDocs()
-                                   : cache.sources.filter(s => s.source === pick);
-    if (!docs.length) {
-      return toast(pick === ALL_DOCS ? "Every document already has FAQs"
-                                     : "That document is no longer listed", true);
+    // ALL_DOCS drafts from every document with no answers yet; one at a time
+    // so each set can be reviewed on its own rather than arriving as fifty
+    // pairs from six manuals with no way to tell which came from where.
+    const docs = pick === ALL_DOCS
+      ? cache.sources.filter(x => !answered().some(f => f.source === x.source))
+      : cache.sources.filter(x => x.source === pick);
+    if (!docs.length) return toast("Nothing to draft from", true);
+    const d = docs[0];
+    if (docs.length > 1) {
+      toast("Drafting from " + d.source + " first — review it, then run "
+            + "this again for the next document");
     }
-    if (docs.length > 1 && !confirm("Generate FAQs from " + docs.length +
-        " documents? This calls the model once per document.")) return;
-
-    genBtn.disabled = true;
-    let done = 0, added = 0, dupes = 0;
-    try {
-      for (const s of docs) {
-        genBtn.textContent = docs.length > 1
-          ? "Generating " + (++done) + "/" + docs.length + "\u2026" : "Generating\u2026";
-        try {
-          const r = await genOne(s);
-          added += r.added || 0; dupes += r.skipped_duplicates || 0;
-        } catch (e) { toast(s.source + ": " + e.message, true); }
-      }
-      toast("Added " + added + " new FAQ" + (added === 1 ? "" : "s") +
-            (dupes ? ", skipped " + dupes + " already there" : ""));
-      await refresh(); render();
-    } finally { genBtn.disabled = false; genBtn.textContent = "Generate FAQs"; }
+    await streamDrafts(d.source, d.product || d.products || "",
+                       d.category || "", provSel.value || null,
+                       modelIn.value.trim() || null, 8);
   } }, "Generate FAQs");
 
   // #7: PATCH every row edited but not yet saved.
@@ -2832,9 +3025,12 @@ function viewFaq() {
     }, 60);
   }
 
+  const review = draftReviewCard();
+
   return [
     el("h1", {}, "Generate/Edit FAQs"),
     el("p", { class: "lede" }, "FAQs are shown to visitors exactly as written and cost nothing to serve. Anyone not signed in sees only these, so treat the wording as published copy."),
+    review,
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "ans-draft", "data-sec": "Generate from a document" },
       el("div", { class: "sec-title" }, "Generate FAQs from a document"),
@@ -2854,6 +3050,20 @@ function viewFaq() {
         el("div", { style: "flex:0 0 auto;min-width:0" }, genBtn))),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "ans-hand", "data-sec": "Write one yourself" },
+      // Shown once, after drafts were saved: the drafting pass answers what
+      // the document says, and the thing it cannot know is what customers
+      // actually ask that the document does not spell out. Asking here is
+      // the only moment anybody is thinking about it.
+      askForMore ? el("div", { class: "item",
+          style: "margin-bottom:12px;background:color-mix(in srgb,var(--color-accent-ink) 10%,transparent);border-radius:var(--radius-md);padding:10px 12px" },
+        el("div", { class: "grow" },
+          el("b", {}, "Saved " + askForMore.added + " answer"
+            + (askForMore.added === 1 ? "" : "s") + ". Anything to add by hand?"),
+          el("div", { class: "row-hint" },
+            "Questions customers ask that the manual does not answer in so "
+            + "many words are the ones worth writing yourself.")),
+        el("button", { class: "btn btn-ghost", style: "flex:0 0 auto",
+          onclick: () => { askForMore = null; render(); } }, "Skip")) : null,
       el("div", { class: "sec-title" }, "Write one yourself"),
       el("div", { class: "sec-hint" }, "Hand-written answers are protected \u2014 drafting will never replace them."),
       el("label", { class: "flabel" }, "Question"), nq,

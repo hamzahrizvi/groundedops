@@ -2667,27 +2667,10 @@ def admin_faq_autogenerate(payload: FaqAutoReq,
     """
     _require_admin(x_admin_password)
 
-    sample = _source_text(payload.source)
-    if not sample.strip():
-        raise HTTPException(
-            status_code=404,
-            detail=f"No indexed text found for '{payload.source}'. If it was "
-                   f"just uploaded, wait for processing to finish.")
+    sample = _draft_sample(payload.source)
 
     n = max(1, min(int(payload.count or 8), 20))
-    prompt = (
-        "You write support FAQ entries from product documentation.\n\n"
-        f"<document>\n{sample}\n</document>\n\n"
-        f"Write {n} question-and-answer pairs a customer might ask that this "
-        "document answers. Rules:\n"
-        "- Use ONLY facts stated in the document. Invent nothing.\n"
-        "- Each answer must read correctly on its own, without the question — "
-        "write \"No internet connection is required\", not \"No\".\n"
-        "- Keep answers to one or two sentences.\n"
-        "- Skip anything the document does not actually state.\n\n"
-        "Return ONLY a JSON array, no other text, in this exact form:\n"
-        '[{"question": "...", "answer": "..."}]'
-    )
+    prompt = _faq_prompt(sample, n)
 
     try:
         if payload.provider:
@@ -2768,6 +2751,145 @@ def _verbatim_faq_pairs(source: str) -> list[dict]:
     except Exception as exc:
         logger.warning(f"verbatim FAQ pairs skipped for {source}: {exc}")
         return []
+
+
+def _faq_prompt(sample: str, n: int) -> str:
+    """The drafting prompt, shared by the saving endpoint and the streaming
+    one so the two cannot drift into producing different FAQs."""
+    return (
+        "You write support FAQ entries from product documentation.\n\n"
+        f"<document>\n{sample}\n</document>\n\n"
+        f"Write {n} question-and-answer pairs a customer might ask that this "
+        "document answers. Rules:\n"
+        "- Use ONLY facts stated in the document. Invent nothing.\n"
+        "- Each answer must read correctly on its own, without the question — "
+        "write \"No internet connection is required\", not \"No\".\n"
+        "- Keep answers to one or two sentences.\n"
+        "- Skip anything the document does not actually state.\n\n"
+        "Return ONLY a JSON array, no other text, in this exact form:\n"
+        '[{"question": "...", "answer": "..."}]'
+    )
+
+
+def _draft_sample(source: str) -> str:
+    sample = _source_text(source)
+    if not sample.strip():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No indexed text found for '{source}'. If it was just "
+                   f"uploaded, wait for processing to finish.")
+    return sample
+
+
+class FaqBulkReq(BaseModel):
+    source: str = ""
+    product: str = ""
+    category: str = ""
+    entries: list = []
+
+
+@app.post("/admin/faq/draft/stream")
+def admin_faq_draft_stream(payload: FaqAutoReq,
+                           x_admin_password: str | None = Header(default=None)):
+    """Draft FAQs and stream them as they are written. NOTHING IS SAVED.
+
+    Two things this buys that the saving endpoint cannot. The wait stops
+    being blank -- drafting eight pairs from a long manual is tens of
+    seconds during which the old endpoint returned nothing at all, so the
+    console could only show a spinner and hope. And the person reviewing
+    sees the answers arrive in the order the model commits to them, which is
+    the same order they will read them in.
+
+    Saving is a separate, deliberate step (/admin/faq/bulk) because these
+    are drafts: the console shows them for approval first, and anything
+    dismissed there should never have touched the store.
+    """
+    _require_admin(x_admin_password)
+    sample = _draft_sample(payload.source)
+    n = max(1, min(int(payload.count or 8), 20))
+    prompt = _faq_prompt(sample, n)
+    provider, model = payload.provider, payload.model
+
+    def events():
+        import json as _json
+        raw = []
+
+        def sse(obj):
+            return "data: " + _json.dumps(obj) + "\n\n"
+
+        # The verbatim pairs need no model at all -- they are the document's
+        # own tables -- so they go first and the reviewer has something to
+        # read while the drafting runs.
+        try:
+            verbatim = _verbatim_faq_pairs(payload.source)
+        except Exception:
+            verbatim = []
+        yield sse({"type": "verbatim", "entries": verbatim})
+
+        try:
+            from llm import stream_generate
+            # No provider chosen means "whatever the server has": the picker
+            # offers the same list, and an empty one is a real state on a
+            # install with no key set.
+            use = provider
+            if not use:
+                avail = _available_providers()
+                if not avail:
+                    yield sse({"type": "error", "message":
+                               "No provider is configured, so nothing can be "
+                               "drafted. Set an API key under API keys."})
+                    return
+                use = avail[0]["key"]
+            mdl = model or _default_model_for(use)
+            # stream_generate yields (delta, done) and stops silently on a
+            # provider error, so an empty result is treated as a failure
+            # below rather than as a finished draft.
+            for delta, _done in stream_generate(use, prompt, mdl):
+                if not delta:
+                    continue
+                raw.append(delta)
+                yield sse({"type": "delta", "text": delta})
+        except Exception as exc:
+            logger.warning(f"FAQ draft stream failed: {exc}")
+            yield sse({"type": "error", "message": str(exc)[:200]})
+            return
+
+        pairs = _parse_qa_json("".join(raw))
+        if not pairs:
+            yield sse({"type": "error", "message":
+                       "The model did not return usable question/answer "
+                       "pairs. Try again, or switch provider."})
+            return
+        yield sse({"type": "done", "entries": pairs[:n],
+                   "model": model or "", "verbatim": len(verbatim)})
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.post("/admin/faq/bulk")
+def admin_faq_bulk(payload: FaqBulkReq,
+                   x_admin_password: str | None = Header(default=None)):
+    """Save the drafts a person APPROVED, and only those.
+
+    Goes through the same merge as autogenerate, so a curated answer is
+    still never overwritten and a question already present is still skipped
+    rather than duplicated.
+    """
+    _require_admin(x_admin_password)
+    pairs = [{"question": (e or {}).get("question", ""),
+              "answer": (e or {}).get("answer", "")}
+             for e in (payload.entries or [])
+             if (e or {}).get("question") and (e or {}).get("answer")]
+    if not pairs:
+        raise HTTPException(status_code=400, detail="Nothing to save")
+    merged = faq_store.merge_questions(payload.source or "",
+                                       payload.product or payload.category,
+                                       pairs, category=payload.category)
+    merged["source"] = payload.source
+    return merged
 
 
 @app.post("/admin/reassign_source")
