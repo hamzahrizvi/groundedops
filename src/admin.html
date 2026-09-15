@@ -90,6 +90,32 @@
         background:var(--color-accent);color:#fff}
   .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
         color:#fff}
+  /* a progress bar, used by the sign-in button and every upload */
+  .bar{height:4px;border-radius:99px;overflow:hidden;margin-top:6px;
+       background:color-mix(in srgb, var(--color-text) 12%, transparent)}
+  .bar>i{display:block;height:100%;border-radius:99px;
+         background:var(--color-accent);transition:width .35s ease}
+  /* Indeterminate while the server has not reported a figure yet: a bar
+     sitting at 0% says "stuck", and a made-up percentage is a lie. */
+  .bar.indet>i{width:34%;animation:indet 1.15s ease-in-out infinite}
+  @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
+
+  /* background jobs, bottom left, over whatever page you moved to */
+  .bgtasks{position:fixed;left:16px;bottom:16px;z-index:60;width:296px;
+           display:flex;flex-direction:column;gap:8px}
+  .bgtask{background:var(--color-surface);border-radius:var(--radius-md);
+          padding:10px 12px;box-shadow:var(--shadow-lg),
+          inset 0 0 0 1px var(--color-divider);animation:rise .18s ease both}
+  .bgtask.bad{box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-accent)}
+  .bgtask-top{display:flex;align-items:flex-start;gap:8px}
+  .bgtask b{flex:1;font-size:12.5px;font-weight:500;word-break:break-word}
+  .bgtask-x{flex:0 0 auto;border:0;background:transparent;cursor:pointer;
+            font-size:15px;line-height:1;padding:0 2px;
+            color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .bgtask .st{font-size:11.5px;margin-top:2px;
+              color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+  @media (max-width:820px){ .bgtasks{left:8px;right:8px;width:auto} }
+
   /* where to point a colleague, at the foot of the rail */
   .lan{padding:10px 16px 0;margin:6px 10px 0;border-top:1px solid var(--color-divider)}
   .lan:empty{display:none}
@@ -1109,6 +1135,86 @@ function toggleRail() {
   render();
 }
 
+/* ---------------- background jobs ---------------- */
+// An upload is the one thing in this console that takes minutes, and it used
+// to hold you on the Documents page to watch a line of text: navigating away
+// lost the only indication it was still running, and the progress it showed
+// was a stage name rewritten once a second, which reads as activity rather
+// than as progress.
+//
+// Jobs live HERE rather than in the view, because render() rebuilds the page
+// on every navigation and any state owned by a view dies with it. The panel
+// is appended to <body> for the same reason: it is the one piece of the
+// console that has to outlive the page under it.
+const jobs = new Map();          // job id -> {name, stage, pct, status, subs}
+
+function jobsHost() {
+  let host = document.querySelector(".bgtasks");
+  if (!host) {
+    host = el("div", { class: "bgtasks", "aria-live": "polite" });
+    document.body.append(host);
+  }
+  return host;
+}
+
+function drawJobs() {
+  const host = jobsHost();
+  host.innerHTML = "";
+  if (!jobs.size) { host.remove(); return; }
+  for (const [id, j] of jobs) {
+    const done = j.status === "done", failed = j.status === "error";
+    const bar = el("div", { class: "bar" + (j.pct ? "" : " indet") },
+      el("i", { style: j.pct ? "width:" + Math.min(100, j.pct) + "%" : "" }));
+    host.append(el("div", { class: "bgtask" + (failed ? " bad" : "") },
+      el("div", { class: "bgtask-top" },
+        el("b", {}, j.name),
+        el("button", { class: "bgtask-x", title: "Hide", "aria-label": "Hide",
+                       onclick: () => { jobs.delete(id); drawJobs(); } }, "×")),
+      el("div", { class: "st" }, j.stage + (j.pct && !done && !failed
+        ? " — " + Math.round(j.pct) + "%" : "")),
+      done || failed ? null : bar));
+  }
+}
+
+// One poller per job, however many things are watching it. The Documents page
+// passes a callback so its own row can follow along; the panel is updated
+// either way, so closing the page costs nothing.
+function trackUpload(jobId, name, onUpdate) {
+  const j = { name, stage: "queued", pct: 0, status: "working" };
+  jobs.set(jobId, j);
+  drawJobs();
+
+  (async () => {
+    for (let i = 0; i < 2000; i++) {
+      // 1.2s, not the 1s it was: every poll rewrote the line, so stage names
+      // flickered past faster than they could be read.
+      await new Promise(r => setTimeout(r, 1200));
+      if (!jobs.has(jobId)) return;           // dismissed by hand
+      let s;
+      try { s = await api("/upload/status/" + jobId); }
+      catch (e) { continue; }                 // a blip is not a failure
+
+      if (s.status === "done") {
+        j.status = "done"; j.pct = 100;
+        j.stage = "Added — " + (s.chunks || 0) + " sections";
+        drawJobs(); if (onUpdate) onUpdate(j);
+        try { await refresh(); render(); } catch (e) {}
+        // Left up long enough to be seen from another page, then gone.
+        setTimeout(() => { jobs.delete(jobId); drawJobs(); }, 8000);
+        return;
+      }
+      if (s.status === "error") {
+        j.status = "error"; j.stage = "Failed: " + (s.error || "unknown");
+        drawJobs(); if (onUpdate) onUpdate(j);
+        return;
+      }
+      j.stage = s.stage || "working";
+      j.pct = s.pct || 0;
+      drawJobs(); if (onUpdate) onUpdate(j);
+    }
+  })();
+}
+
 /* ---------------- theme ---------------- */
 // Three states, not two: "dark", "light", or no stored choice at all, in
 // which case the OS preference decides and keeps deciding. Storing a value
@@ -1187,6 +1293,15 @@ function gate() {
   const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
                     "Checking this install\u2026");
   const btn = el("button", { class: "btn btn-primary", disabled: "true" }, "Sign in");
+  // Signing in checks a password hash and then loads every cache the console
+  // renders from, which is long enough that a button doing nothing reads as a
+  // button that did not register the press.
+  const signingIn = el("div", { class: "bar indet", style: "display:none" },
+                       el("i", {}));
+  const busy = on => {
+    signingIn.style.display = on ? "" : "none";
+    btn.disabled = !!on;
+  };
   // Set once the server says whether any account exists.
   const heading = el("h2", {}, "Sign in");
   const nameIn = el("input", { class: "input", placeholder: "Your name (optional)" });
@@ -1232,24 +1347,24 @@ function gate() {
 
   const signIn = async () => {
     if (!emailIn.value.trim() || !pwIn.value) return toast("Email and password, please", true);
-    btn.disabled = true;
+    busy(true);
     try {
       await enter(await api("/admin/login", { method: "POST",
         body: JSON.stringify({ email: emailIn.value.trim(), password: pwIn.value }) }));
-    } catch (e) { fail(e, "Sign-in"); btn.disabled = false; }
+    } catch (e) { fail(e, "Sign-in"); busy(false); }
   };
 
   const createRoot = async () => {
     if (!emailIn.value.trim() || !pwIn.value) return toast("Email and password, please", true);
     if (pwIn.value.length < 12)
       return toast("Use at least 12 characters for the first account", true);
-    btn.disabled = true;
+    busy(true);
     try {
       await enter(await api("/admin/auth/bootstrap", { method: "POST",
         body: JSON.stringify({ email: emailIn.value.trim(), password: pwIn.value,
                                name: nameIn.value.trim() }) }));
       toast("Root account created \u2014 you can now add others under Accounts");
-    } catch (e) { fail(e, "Setup"); btn.disabled = false; }
+    } catch (e) { fail(e, "Setup"); busy(false); }
   };
 
   // Asked unauthenticated, because deciding which form to show is exactly
@@ -1299,7 +1414,7 @@ function gate() {
       el("div", { class: "field" }, emailIn),
       nameField,
       el("div", { class: "field" }, pwIn),
-      el("div", { style: "margin-top:14px" }, btn)));
+      el("div", { style: "margin-top:14px" }, btn, signingIn)));
 }
 
 /* ---------------- accounts (root only) ---------------- */
@@ -2299,11 +2414,11 @@ function viewDocuments() {
           line.querySelector("span").textContent = "Replacing...";
           res = await postUpload(f, p, d.existing);
           if (res.duplicate) throw new Error("Still refused as a duplicate");
-          await track(res.job_id, line, f.name);
+          track(res.job_id, line, f.name);
           afterReplace(line, p, f.name, d.existing);
           continue;
         }
-        await track(res.job_id, line, f.name);
+        track(res.job_id, line, f.name);
       } catch (e) {
         line.querySelector("span").textContent = "Failed: " + e.message;
       }
