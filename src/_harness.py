@@ -61,6 +61,19 @@ os.environ["BACKUP_ALLOW_PLAINTEXT"] = ""
 # Found exactly that way: the setup instructions were followed, and this
 # suite started failing on a passing tree.
 os.environ["BACKUP_PASSPHRASE"] = ""
+# Provider keys and their role assignments need the same forcing, and the
+# reason is the same: ENV_FILE_PATH above only redirects what keystore
+# WRITES. main.py still loads the developer's real src/.env into os.environ
+# at import, so a key present there made "an unset provider masks to None"
+# fail on their machine while passing in CI.
+#
+# Blanked, not popped — _load_env_file skips keys already in os.environ, and
+# popping would let the real value back in when main is imported below. Every
+# keystore read strips before testing, so "" is indistinguishable from unset.
+for _leaky in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+               "PROVIDER_ROLE_DEFAULT", "PROVIDER_ROLE_ADVANCED",
+               "PROVIDER_ROLE_BACKUP"):
+    os.environ[_leaky] = ""
 # main.py's LAN-only gate checks request.client.host against this prefix
 # list and 404s anything that doesn't match (see PRIVATE_NETWORKS in
 # main.py) — a real, intended security control, not something to weaken.
