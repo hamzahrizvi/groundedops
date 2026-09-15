@@ -2693,6 +2693,9 @@ function viewOverview() {
 /* ---------------- documents ---------------- */
 let pendingReplace = null;
 
+// Survives render(), which rebuilds the page on every change.
+let docFilter = { cat: "", prod: "" };
+
 function viewDocuments() {
   const prods = products();
   let chosenCat = cache.catalog.length === 1 ? cache.catalog[0].key : "";
@@ -2934,27 +2937,70 @@ function viewDocuments() {
       } }, "Remove"));
   };
 
+  // Grouped by CATEGORY, filtered by product. Grouping by product put a
+  // document tagged to three of them under three headings, and a "General"
+  // pseudo-product existed only to hold the ones that belong to a range
+  // rather than to one model -- which is what the category heading already
+  // says. One heading per range, and the product is a filter.
+  const keysOfDoc = s => (s.product || s.products || "")
+    .split(",").map(x => x.trim()).filter(Boolean);
+  const catOfDoc = s => {
+    if (s.category) return s.category;
+    const first = prods.find(p => keysOfDoc(s).includes(p.key));
+    return first ? first.category : "";
+  };
+
+  const matches = s => {
+    if (docFilter.cat && catOfDoc(s) !== docFilter.cat) return false;
+    if (docFilter.prod && !keysOfDoc(s).includes(docFilter.prod)) return false;
+    return true;
+  };
+
+  const catName = k => (cache.catalog.find(c => c.key === k) || {}).name || k;
   const groups = new Map();
-  cache.sources.forEach(s => {
-    const key = s.product || s.products || "";
+  cache.sources.filter(matches).forEach(s => {
+    const key = catOfDoc(s);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   });
-  const label = key => {
-    if (!key) return "Unassigned";
-    const p = prods.find(x => x.key === key);
-    return p ? p.categoryName + " \u203a " + p.name : key;
-  };
   const ordered = [...groups.entries()].sort((a, b) =>
-    a[0] === "" ? -1 : b[0] === "" ? 1 : label(a[0]).localeCompare(label(b[0])));
+    a[0] === "" ? -1 : b[0] === "" ? 1 : catName(a[0]).localeCompare(catName(b[0])));
+
+  const filterCat = el("select", { class: "input", style: "width:auto",
+    onchange: e => { docFilter.cat = e.target.value; docFilter.prod = ""; render(); } },
+    el("option", { value: "" }, "All ranges"),
+    cache.catalog.map(c => el("option", { value: c.key,
+      selected: docFilter.cat === c.key ? "true" : null }, c.name)));
+
+  const inScope = prods.filter(p => !docFilter.cat || p.category === docFilter.cat);
+  const filterProd = el("select", { class: "input", style: "width:auto",
+    onchange: e => { docFilter.prod = e.target.value; render(); } },
+    el("option", { value: "" }, "All products"),
+    inScope.map(p => el("option", { value: p.key,
+      selected: docFilter.prod === p.key ? "true" : null }, p.name)));
+
+  const shownCount = cache.sources.filter(matches).length;
+  const filters = el("div", { class: "row", style: "align-items:flex-end;margin-bottom:14px" },
+    el("div", { style: "flex:0 0 auto" },
+      el("label", { class: "flabel" }, "Range"), filterCat),
+    el("div", { style: "flex:0 0 auto" },
+      el("label", { class: "flabel" }, "Product"), filterProd),
+    el("div", { style: "flex:1" }),
+    el("div", { class: "row-hint" },
+      shownCount + (shownCount === 1 ? " document" : " documents")
+      + (shownCount !== cache.sources.length ? " of " + cache.sources.length : "")));
 
   const list = ordered.length ? ordered.map(([key, docs]) =>
     el("div", { style: "margin-bottom:16px" },
       el("div", { class: "sec-title", style: key ? "" : "color:var(--color-accent-ink)" },
-        label(key) + " \u00b7 " + docs.length + (docs.length === 1 ? " document" : " documents")),
+        (key ? catName(key) : "Not filed against a range")
+        + " · " + docs.length + (docs.length === 1 ? " document" : " documents")),
       docs.map(docRow)))
-    : [el("div", { class: "empty" }, el("b", {}, "No documents yet"),
-        "Add a manual or datasheet above and the widget can start answering from it.")];
+    : [el("div", { class: "empty" },
+        el("b", {}, cache.sources.length ? "Nothing matches that filter"
+                                         : "No documents yet"),
+        cache.sources.length ? "Clear the filters to see the rest."
+          : "Add a manual or datasheet above and the widget can start answering from it.")];
 
   return [
     el("h1", {}, "Documents"),
@@ -2974,6 +3020,7 @@ function viewDocuments() {
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
                 "data-tour": "doc-list", "data-sec": "All documents" },
       el("div", { class: "sec-title" }, "All documents"),
+      filters,
       el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget."),
       list),
   ];
@@ -2983,11 +3030,17 @@ function viewDocuments() {
 function viewFaq() {
   const prods = products();
 
+  // faq_store stores keys lower-cased with hyphens ("sku_scs" -> "sku-scs")
+  // and normalises BOTH sides when it serves, so serving is correct. The
+  // console compared raw keys: tagging an answer to a product made it vanish
+  // from that product's own list, and its tick box never showed as ticked.
+  const nk = k => (k || "").trim().toLowerCase().replace(/ /g, "-").replace(/_/g, "-");
+  const keysOf = f => (f.products || "").split(",").map(nk).filter(Boolean);
   const scopeOf = f => (f.products || "").split(",")[0] || f.category || "";
 
   // scope -> "Category \u203a Product" label.
   const scopeLabel = key => {
-    if (!key || key === NO_SCOPE) return "Not tagged to a product";
+    if (!key || key === NO_SCOPE) return "Shown for every product";
     const p = prods.find(x => x.key === key);
     return p ? p.categoryName + " \u203a " + p.name : key;
   };
@@ -3002,14 +3055,14 @@ function viewFaq() {
   const hasUnscoped = usedScopes.includes("");
   const countFor = key => (key === NO_SCOPE
     ? cache.faq.filter(f => !scopeOf(f)).length
-    : cache.faq.filter(f => (f.products || "").split(",").includes(key) || f.category === key).length);
+    : cache.faq.filter(f => keysOf(f).includes(nk(key)) || nk(f.category) === nk(key)).length);
 
   let scope = "";
   const shown = () => {
     if (!scope) return [];
     if (scope === NO_SCOPE) return cache.faq.filter(f => !scopeOf(f));
     return cache.faq.filter(f =>
-      (f.products || "").split(",").includes(scope) || f.category === scope);
+      keysOf(f).includes(nk(scope)) || nk(f.category) === nk(scope));
   };
 
   // On the first render the page has whatever refresh() loaded, which does
@@ -3027,10 +3080,61 @@ function viewFaq() {
     orphanScopes.map(k => el("option", { value: k },
       k + " \u2014 not in the catalogue (" + countFor(k) + ")")),
     hasUnscoped ? el("option", { value: NO_SCOPE },
-      "Not tagged to a product (" + countFor(NO_SCOPE) + ")") : null);
+      "Shown for every product (" + countFor(NO_SCOPE) + ")") : null);
 
   let expandedId = null;      // one row open for editing at a time
   const dirty = new Map();    // id -> {question, answer} not yet saved
+
+  // What an answer is scoped to, in words. An empty scope is EVERY product,
+  // which is a deliberate and useful state -- it is how one answer covers the
+  // whole range -- so it is named as that rather than as "not tagged", which
+  // reads like a mistake nobody made.
+  // faq_store normalises a key to lower case with hyphens, so a catalogue
+  // "sku_scs" is stored as "sku-scs". Serving normalises both sides and works;
+  // the CONSOLE compared raw keys, so a tagged answer showed its raw key and
+  // its own tick box never appeared ticked.
+  const normKey = nk;
+  const faqKeys = keysOf;
+  const prodByKey = k => prods.find(p => nk(p.key) === nk(k));
+
+  const faqScopeText = f => {
+    const keys = faqKeys(f);
+    if (!keys.length) return "every product";
+    if (keys.length === 1) {
+      const p = prodByKey(keys[0]);
+      return p ? p.name : scopeLabel(keys[0]);
+    }
+    return keys.length + " products";
+  };
+
+  const faqTagPicker = f => {
+    const cur = faqKeys(f);
+    const saveTags = async keys => {
+      keys = [...new Set(keys)];
+      try {
+        await api("/faq/" + f.id, { method: "PATCH",
+          body: JSON.stringify({ products: keys.join(",") }) });
+        toast(keys.length ? "Applies to " + keys.length + " product"
+                            + (keys.length === 1 ? "" : "s")
+                          : "Applies to every product");
+        await refresh(); render();
+      } catch (e) { toast(e.message, true); }
+    };
+    return el("details", { class: "tagpick" },
+      el("summary", {}, faqScopeText(f)),
+      el("div", { class: "tagpick-list" },
+        el("label", { class: "tagpick-row" },
+          el("input", { type: "checkbox", checked: cur.length ? null : "true",
+                        onchange: () => saveTags([]) }),
+          el("span", {}, "Every product")),
+        prods.map(p => el("label", { class: "tagpick-row" },
+          el("input", { type: "checkbox",
+            checked: cur.includes(normKey(p.key)) ? "true" : null,
+            onchange: e => saveTags(e.target.checked
+              ? cur.concat([normKey(p.key)])
+              : cur.filter(k => k !== normKey(p.key))) }),
+          el("span", {}, p.categoryName + " › " + p.name)))));
+  };
 
   const listBox = el("div", {});
   function render2() {
@@ -3077,6 +3181,7 @@ function viewFaq() {
         row.append(
           el("div", { class: "grow" }, el("b", {}, f.question),
             el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
+          el("span", { class: "tag" }, faqScopeText(f)),
           dirty.has(f.id) ? el("span", { class: "tag tag-neutral mono" }, "unsaved") : null);
       } else {
         const draft = dirty.get(f.id) || {};
@@ -3089,6 +3194,12 @@ function viewFaq() {
           el("div", { class: "row", style: "margin-bottom:8px" },
             el("div", { style: "flex:3" }, el("label", { class: "flabel" }, "Question"), q)),
           el("label", { class: "flabel" }, "Answer"), a,
+          // The same tick list documents use. An answer's products decide who
+          // is ever shown it, and until now that could be set when the answer
+          // was created and never seen again.
+          el("div", { style: "margin-top:10px" },
+            el("label", { class: "flabel" }, "Applies to"),
+            faqTagPicker(f)),
           el("p", { class: "sec-hint", style: "margin:7px 0 0" },
             "Write it so it reads correctly on its own \u2014 it may be shown to someone whose wording was slightly different."),
           el("div", { style: "margin-top:9px;display:flex;gap:8px" },
