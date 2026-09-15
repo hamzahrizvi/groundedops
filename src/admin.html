@@ -91,25 +91,38 @@
   .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
         color:#fff}
   /* quick setup: the common jobs, each as the pages it takes */
-  .flows{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
-         gap:12px;margin-top:12px}
-  .flow{padding:12px 14px;border-radius:var(--radius-md);
-        background:color-mix(in srgb, var(--color-text) 4%, transparent)}
-  .flow b{font-size:13px;font-weight:500}
-  .flow-hint{font-size:11.5px;margin:2px 0 8px;
-             color:color-mix(in srgb, var(--color-text) 52%, transparent)}
-  .flow-steps{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
-  .flow-step{display:inline-flex;align-items:center;gap:6px;border:0;
-        cursor:pointer;font:inherit;font-size:11.5px;padding:4px 10px;
-        border-radius:999px;background:var(--color-surface);
-        color:var(--color-text);box-shadow:inset 0 0 0 1px var(--color-divider)}
-  .flow-step:hover{box-shadow:inset 0 0 0 1px var(--color-accent)}
-  .flow-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
-  .flow-n{display:grid;place-items:center;width:15px;height:15px;font-size:9.5px;
-          border-radius:50%;background:var(--color-accent);color:#fff}
-  .flow-walk{margin-top:9px;font-size:11.5px;padding:2px 0}
-  .flow-arrow{font-size:12px;
-              color:color-mix(in srgb, var(--color-text) 35%, transparent)}
+  .flows{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));
+         gap:10px;margin-top:14px}
+  /* A card, not a tinted box: the tint read as a disabled panel, and the
+     steps inside it as dead chips. Same surface and hairline as everything
+     else on the page, lifting on hover so it reads as a thing you use. */
+  .flow{padding:14px 15px 13px;border-radius:var(--radius-md);
+        background:var(--color-surface);
+        box-shadow:inset 0 0 0 1px var(--color-divider);
+        transition:box-shadow .14s ease}
+  .flow:hover{box-shadow:inset 0 0 0 1px
+        color-mix(in srgb, var(--color-accent) 40%, var(--color-divider))}
+  .flow b{font-size:13px;font-weight:500;letter-spacing:-.01em}
+  .flow-hint{font-size:11.5px;margin:3px 0 11px;line-height:1.45;
+             color:color-mix(in srgb, var(--color-text) 50%, transparent)}
+  /* The steps are a LADDER, not a wrapped row of pills. Wrapped, the arrows
+     pointed off the end of a line and the order stopped being readable. */
+  .flow-steps{display:flex;flex-direction:column;gap:0}
+  .flow-step{display:flex;align-items:center;gap:9px;width:100%;border:0;
+        cursor:pointer;font:inherit;font-size:12px;text-align:left;
+        padding:6px 8px;border-radius:var(--radius-sm);
+        background:transparent;color:var(--color-text)}
+  .flow-step:hover{background:color-mix(in srgb, var(--color-text) 6%, transparent)}
+  .flow-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:-1px}
+  .flow-n{flex:0 0 auto;display:grid;place-items:center;width:18px;height:18px;
+          font-size:10px;font-weight:500;border-radius:50%;
+          background:color-mix(in srgb, var(--color-accent) 16%, transparent);
+          color:var(--color-accent-ink)}
+  .flow-step:hover .flow-n{background:var(--color-accent);color:#fff}
+  /* The line joining one step to the next, drawn through the number column. */
+  .flow-arrow{display:block;width:1px;height:7px;margin:0 0 0 17px;
+              background:color-mix(in srgb, var(--color-text) 18%, transparent)}
+  .flow-walk{margin-top:10px;font-size:11.5px;padding:3px 0}
 
   /* product tags: a chip per product, on or off. A multi-select is a control
      nobody uses correctly without being told to hold ctrl. */
@@ -2644,7 +2657,7 @@ function quickSetup() {
         el("div", { class: "flow-hint" }, f.hint),
         el("div", { class: "flow-steps" },
           f.steps.map(([label, target], i) => [
-            i ? el("span", { class: "flow-arrow" }, "→") : null,
+            i ? el("span", { class: "flow-arrow" }) : null,
             el("button", { class: "flow-step",
                            onclick: () => { view = target; render(); } },
               el("span", { class: "flow-n" }, String(i + 1)), label),
@@ -3095,6 +3108,14 @@ function viewDocuments() {
 }
 
 /* ---------------- answers (FAQ) ---------------- */
+// Which product the answers list is filtered to, and which row is open for
+// editing. Module-level because render() rebuilds the view: declared inside
+// it, both reset on EVERY re-render -- so saving a tag threw you back to the
+// default list with the row you were editing closed, which is the one moment
+// you are certain to still be working on it.
+let faqScope = "";
+let faqExpandedId = null;
+
 function viewFaq() {
   const prods = products();
 
@@ -3106,7 +3127,7 @@ function viewFaq() {
   const keysOf = f => (f.products || "").split(",").map(nk).filter(Boolean);
   const scopeOf = f => (f.products || "").split(",")[0] || f.category || "";
 
-  // scope -> "Category \u203a Product" label.
+  // faqScope -> "Category \u203a Product" label.
   const scopeLabel = key => {
     if (!key || key === NO_SCOPE) return "Shown for every product";
     const p = prods.find(x => x.key === key);
@@ -3114,7 +3135,7 @@ function viewFaq() {
   };
 
   // The list is gated on a product (below), so the picker has to offer every
-  // scope that actually holds answers -- otherwise entries tagged with a key
+  // faqScope that actually holds answers -- otherwise entries tagged with a key
   // the catalogue does not know about become unreachable rather than merely
   // unsurfaced, and those are exactly the ones needing to be retagged.
   const known = new Set(prods.map(p => p.key));
@@ -3125,23 +3146,22 @@ function viewFaq() {
     ? cache.faq.filter(f => !scopeOf(f)).length
     : cache.faq.filter(f => keysOf(f).includes(nk(key)) || nk(f.category) === nk(key)).length);
 
-  let scope = "";
   const shown = () => {
-    if (!scope) return [];
-    if (scope === NO_SCOPE) return cache.faq.filter(f => !scopeOf(f));
+    if (!faqScope) return [];
+    if (faqScope === NO_SCOPE) return cache.faq.filter(f => !scopeOf(f));
     return cache.faq.filter(f =>
-      keysOf(f).includes(nk(scope)) || nk(f.category) === nk(scope));
+      keysOf(f).includes(nk(faqScope)) || nk(f.category) === nk(faqScope));
   };
 
   // On the first render the page has whatever refresh() loaded, which does
-  // not carry the scope list. Derive it from the gaps in hand so the filter
+  // not carry the faqScope list. Derive it from the gaps in hand so the filter
   // is populated immediately rather than empty until something reloads.
   if (!cache.gapScopes) {
-    cache.gapScopes = [...new Set(cache.gaps.map(g => g.scope || ""))].sort();
+    cache.gapScopes = [...new Set(cache.gaps.map(g => g.faqScope || ""))].sort();
   }
 
   const scopeSel = el("select", { class: "input", style: "width:auto",
-                                  onchange: e => { scope = e.target.value; render2(); } },
+                                  onchange: e => { faqScope = e.target.value; render2(); } },
     el("option", { value: "" }, "Choose a product\u2026"),
     prods.map(p => el("option", { value: p.key },
       p.categoryName + " \u203a " + p.name + " (" + countFor(p.key) + ")")),
@@ -3150,10 +3170,9 @@ function viewFaq() {
     hasUnscoped ? el("option", { value: NO_SCOPE },
       "Shown for every product (" + countFor(NO_SCOPE) + ")") : null);
 
-  let expandedId = null;      // one row open for editing at a time
   const dirty = new Map();    // id -> {question, answer} not yet saved
 
-  // What an answer is scoped to, in words. An empty scope is EVERY product,
+  // What an answer is scoped to, in words. An empty faqScope is EVERY product,
   // which is a deliberate and useful state -- it is how one answer covers the
   // whole range -- so it is named as that rather than as "not tagged", which
   // reads like a mistake nobody made.
@@ -3206,13 +3225,13 @@ function viewFaq() {
 
   const listBox = el("div", {});
   function render2() {
-    scopeSel.value = scope;
+    scopeSel.value = faqScope;
     listBox.innerHTML = "";
 
     // Nothing is listed until a product is chosen. The full list ran to
     // hundreds of rows across every product at once, which is not a thing
     // anyone reads -- and the wording is edited product by product anyway.
-    if (!scope) {
+    if (!faqScope) {
       listBox.append(el("div", { class: "empty" },
         el("b", {}, "Choose a product to see its answers"),
         cache.faq.length
@@ -3226,26 +3245,26 @@ function viewFaq() {
     const items = shown();
     if (!items.length) {
       listBox.append(el("div", { class: "empty" },
-        el("b", {}, "No answers for " + scopeLabel(scope)),
+        el("b", {}, "No answers for " + scopeLabel(faqScope)),
         "Draft some from a document above, or write one by hand."));
       return;
     }
 
     listBox.append(el("div", { style: "display:flex;align-items:center;gap:10px;margin:4px 0 6px" },
-      el("b", { style: "font-size:13.5px" }, scopeLabel(scope)),
+      el("b", { style: "font-size:13.5px" }, scopeLabel(faqScope)),
       el("span", { class: "tag tag-neutral" }, String(items.length)),
       el("button", { class: "btn btn-ghost", style: "font-size:11.5px;margin-left:auto", onclick: () => {
-        appliesSel.value = scope === NO_SCOPE ? "" : scope; nq.value = ""; na.value = "";
+        appliesSel.value = faqScope === NO_SCOPE ? "" : faqScope; nq.value = ""; na.value = "";
         na.closest(".card").scrollIntoView({ behavior: "smooth", block: "center" });
         setTimeout(() => nq.focus(), 300);
       } }, "+ Add answer")));
 
     items.forEach(f => {
-      const open = expandedId === f.id;
+      const open = faqExpandedId === f.id;
       const row = el("div", { class: "item", style: open ? "display:block" : "cursor:pointer" });
 
       if (!open) {
-        row.addEventListener("click", () => { expandedId = f.id; render2(); });
+        row.addEventListener("click", () => { faqExpandedId = f.id; render2(); });
         row.append(
           el("div", { class: "grow" }, el("b", {}, f.question),
             el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
@@ -3278,7 +3297,7 @@ function viewFaq() {
               catch (e) { toast(e.message, true); }
             } }, "Save"),
             el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px", onclick: () => {
-              expandedId = null; render2();
+              faqExpandedId = null; render2();
             } }, "Close"),
             el("button", { class: "btn btn-ghost", style: "font-size:12.5px;padding:5px 11px;margin-left:auto", onclick: async () => {
               if (!confirm("Delete this answer?")) return;
@@ -3295,7 +3314,7 @@ function viewFaq() {
   //
   // This was two buttons, "Draft answers" and "Draft all", which differed only
   // in WHICH documents they covered -- and that is a property of the picker,
-  // not a separate action. One button now, with the scope chosen above it.
+  // not a separate action. One button now, with the faqScope chosen above it.
   const ALL_DOCS = "__all__";
   const undraftedDocs = () => cache.sources.filter(s => {
     const key = s.product || s.products || "";
@@ -3354,7 +3373,7 @@ function viewFaq() {
     const f = importFile.files && importFile.files[0];
     importFile.value = "";
     if (!f) return;
-    faqDrafts = { source: f.name, product: scope || "", category: "",
+    faqDrafts = { source: f.name, product: faqScope || "", category: "",
                   entries: [], state: "drafting", raw: "", partial: null,
                   seen: new Set() };
     render();
@@ -3428,7 +3447,7 @@ function viewFaq() {
       // Only when the picker actually offers it: a gap carries
       // `product || category`, and a category key has no option here.
       if ([...scopeSel.options].some(o => o.value === pendingAnswer.product)) {
-        scope = pendingAnswer.product;          // open the list on that product
+        faqScope = pendingAnswer.product;          // open the list on that product
         render2();
       }
     }
@@ -3510,13 +3529,13 @@ function viewFaq() {
       el("div", { style: "margin-top:14px;display:flex;gap:8px;flex-wrap:wrap" },
         saveAllBtn,
         el("button", { class: "btn btn-ghost", style: BTN, onclick: async () => {
-          if (!scope) return toast("Choose a product first", true);
-          if (scope === NO_SCOPE) return toast("Retag these to a product before deleting in bulk", true);
-          const label = scopeLabel(scope);
+          if (!faqScope) return toast("Choose a product first", true);
+          if (faqScope === NO_SCOPE) return toast("Retag these to a product before deleting in bulk", true);
+          const label = scopeLabel(faqScope);
           if (!confirm("Delete every answer for " + label + "?\n\nHand-written answers cannot be recovered.")) return;
           if (prompt('Type DELETE to confirm') !== "DELETE") return toast("Cancelled");
           try {
-            await api("/faq?confirm=true&product=" + encodeURIComponent(scope), { method: "DELETE" });
+            await api("/faq?confirm=true&product=" + encodeURIComponent(faqScope), { method: "DELETE" });
             toast("Deleted"); await refresh(); render();
           } catch (e) { toast(e.message, true); }
         } }, "Delete all shown"))),
