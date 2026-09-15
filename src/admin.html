@@ -90,6 +90,26 @@
         background:var(--color-accent);color:#fff}
   .rail-min .nav button[aria-current="page"] .badge{background:var(--color-accent);
         color:#fff}
+  /* quick setup: the common jobs, each as the pages it takes */
+  .flows{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+         gap:12px;margin-top:12px}
+  .flow{padding:12px 14px;border-radius:var(--radius-md);
+        background:color-mix(in srgb, var(--color-text) 4%, transparent)}
+  .flow b{font-size:13px;font-weight:500}
+  .flow-hint{font-size:11.5px;margin:2px 0 8px;
+             color:color-mix(in srgb, var(--color-text) 52%, transparent)}
+  .flow-steps{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+  .flow-step{display:inline-flex;align-items:center;gap:6px;border:0;
+        cursor:pointer;font:inherit;font-size:11.5px;padding:4px 10px;
+        border-radius:999px;background:var(--color-surface);
+        color:var(--color-text);box-shadow:inset 0 0 0 1px var(--color-divider)}
+  .flow-step:hover{box-shadow:inset 0 0 0 1px var(--color-accent)}
+  .flow-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+  .flow-n{display:grid;place-items:center;width:15px;height:15px;font-size:9.5px;
+          border-radius:50%;background:var(--color-accent);color:#fff}
+  .flow-arrow{font-size:12px;
+              color:color-mix(in srgb, var(--color-text) 35%, transparent)}
+
   /* product tags: a chip per product, on or off. A multi-select is a control
      nobody uses correctly without being told to hold ctrl. */
   .tagpick{position:relative;flex:0 0 auto}
@@ -2460,6 +2480,56 @@ function viewKeys() {
 }
 
 /* ---------------- overview ---------------- */
+// The jobs people actually arrive with, each as the sequence of pages it
+// takes. A single "show me how it all fits together" run answered one
+// question -- what is this console -- and only for somebody willing to sit
+// through six steps. These answer "I have a new manual, now what?", which is
+// the question that recurs, and each step is a link to the page that does it.
+const FLOWS = [
+  { title: "A new product, from scratch",
+    hint: "Nothing set up for it yet.",
+    steps: [["Add the range and product", "catalog"],
+            ["Upload its documents", "documents"],
+            ["Draft the answers", "faq"],
+            ["Try it as a customer", "test"]] },
+  { title: "A new document for a product you already have",
+    hint: "A manual revision, a datasheet, an installation guide.",
+    steps: [["Upload it against the product", "documents"],
+            ["Draft answers from it", "faq"],
+            ["Check what it now answers", "test"]] },
+  { title: "Work through what customers asked",
+    hint: "The backlog the widget could not answer.",
+    steps: [["Read the unanswered questions", "gaps"],
+            ["Answer the most asked", "faq"],
+            ["Confirm the fix", "test"]] },
+  { title: "Put the widget on a site",
+    hint: "Branding, opening options, and the embed code.",
+    steps: [["Set the branding", "widget"],
+            ["Copy the install snippet", "widget"],
+            ["Watch the enquiries arrive", "leads"]] },
+];
+
+function quickSetup() {
+  return el("div", { class: "card elev-sm",
+                     style: "padding:18px 20px 14px;gap:0;margin-bottom:16px" },
+    el("div", { class: "sec-title" }, "Quick setup"),
+    el("div", { class: "sec-hint" },
+      "The common jobs, and the order they go in. Every step is a link to the "
+      + "page that does it."),
+    el("div", { class: "flows" },
+      FLOWS.map(f => el("div", { class: "flow" },
+        el("b", {}, f.title),
+        el("div", { class: "flow-hint" }, f.hint),
+        el("div", { class: "flow-steps" },
+          f.steps.map(([label, target], i) => [
+            i ? el("span", { class: "flow-arrow" }, "→") : null,
+            el("button", { class: "flow-step",
+                           onclick: () => { view = target; render(); } },
+              el("span", { class: "flow-n" }, String(i + 1)), label),
+          ]))))));
+}
+
+
 function viewOverview() {
   const prods = products(), un = unassigned(), ans = answered();
 
@@ -2529,36 +2599,6 @@ function viewOverview() {
     : step("idle", "Questions people could not get answered",
         "Anything the widget could not answer shows up here once visitors start using it.", []));
 
-  // The backlog, on the front page, in the order it should be worked --
-  // and answerable from here. Overview summarised work that lived somewhere
-  // else; the one list everybody actually opens this console to work
-  // through was two clicks away.
-  const topGaps = [...(cache.gaps || [])]
-    .sort((a, b) => (b.times_asked || 1) - (a.times_asked || 1))
-    .slice(0, 5);
-  const topAsked = topGaps.length
-    ? el("div", { class: "card elev-sm", style: "padding:18px 20px 10px;gap:0;margin-bottom:16px",
-                  "data-sec": "Most asked" },
-        el("div", { class: "sec-title" }, "Most asked, still unanswered"),
-        el("div", { class: "sec-hint" },
-          "The five questions customers asked most often that the reviewed "
-          + "answers did not cover. Answering one resolves every rewording of it."),
-        topGaps.map(g => el("div", { class: "step gap-row" },
-          el("span", { style: "font-size:15px;font-variant-numeric:tabular-nums;"
-                            + "color:var(--color-accent-ink);flex:0 0 42px" },
-            (g.times_asked || 1) + "×"),
-          el("div", { class: "step-b" },
-            el("div", { style: "font-size:13.5px" }, g.question),
-            el("p", {}, g.scope ? scopeLabel(g.scope) : "No product selected")),
-          el("div", { class: "gap-actions" },
-            el("button", { class: "btn btn-primary", onclick: () => {
-              pendingAnswer = { question: g.question, product: g.scope || "", answer: "" };
-              view = "faq"; render();
-            } }, "Answer this"),
-            el("button", { class: "btn btn-ghost", onclick: () => { view = "gaps"; render(); } },
-              "See all")))))
-    : null;
-
   const unhandled = (cache.leadStats || {}).unhandled || 0;
   if (unhandled) {
     steps.push(step("todo", unhandled + " enquir" + (unhandled === 1 ? "y" : "ies") + " waiting",
@@ -2571,12 +2611,8 @@ function viewOverview() {
       el("div", {},
         el("h1", {}, "Overview"),
         el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked.")),
-      // The per-page help answers "what is on this page". Nothing answered
-      // "what do I do first", which is the only question a new install has.
-      el("button", { class: "btn btn-primary", style: "flex:0 0 auto",
-                     onclick: startGuided },
-        "Show me how it all fits together")),
-    el("div", { class: "readout", "data-tour": "ov-readout", "data-sec": "At a glance" },
+      ),
+    el("div", { class: "readout", "data-tour": "ov-readout" },
       stat("Documents", cache.sources.length, "", "documents",
            cache.sources.length ? "Manage documents" : "Add the first one"),
       stat("Need filing", un.length, un.length ? "warn" : "", "documents",
@@ -2585,9 +2621,9 @@ function viewOverview() {
            ans.length ? "Review or edit" : "Write the first"),
       stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "", "gaps",
            cache.gaps.length ? "Answer them" : "Nothing waiting")),
-    topAsked,
+    quickSetup(),
     el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0",
-                "data-tour": "ov-next", "data-sec": "What to do next" },
+                "data-tour": "ov-next" },
       el("div", { class: "sec-title" }, "What to do next"),
       el("div", { class: "sec-hint" }, "Read from live state. Anything needing attention is marked in the accent."),
       steps),
@@ -4193,12 +4229,17 @@ function viewCatalog() {
   return [
     el("h1", {}, "Products"),
     el("p", { class: "lede" }, "Ranges group products; documents are filed against a product. This is what the widget asks visitors to choose from."),
+    // One card, not two. A range and a product are the same job -- setting up
+    // what the widget offers -- and splitting them across two tabs meant
+    // adding a product started by pressing a tab to find the form for it.
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
-                "data-tour": "cat-range", "data-sec": "Add a range" },
-      el("div", { class: "sec-title" }, "Add a range"),
-      el("div", { class: "sec-hint" }, "A family of products, such as Coin hoppers."),
-      el("div", { class: "row" },
-        el("div", {}, el("label", { class: "flabel" }, "Name"), cName),
+                "data-tour": "cat-range", "data-sec": "Add a range or product" },
+      el("div", { class: "sec-title" }, "Add a range or product"),
+      el("div", { class: "sec-hint" },
+        "A range is a family, such as Coin hoppers. A product sits inside one, "
+        + "and is what documents are filed against."),
+      el("div", { class: "row", style: "align-items:flex-end" },
+        el("div", {}, el("label", { class: "flabel" }, "New range"), cName),
         el("div", { style: "flex:0 0 auto" },
           el("button", { class: "btn btn-secondary", onclick: async () => {
             if (!cName.value.trim()) return toast("Give the range a name", true);
@@ -4206,22 +4247,23 @@ function viewCatalog() {
                     body: JSON.stringify({ key: slug(cName.value), name: cName.value.trim() }) });
                   cName.value = ""; toast("Range added"); await refresh(); render(); }
             catch (e) { toast(e.message, true); }
-          } }, "Add range")))),
-    cache.catalog.length ? el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
-                                      "data-tour": "cat-product", "data-sec": "Add a product" },
-      el("div", { class: "sec-title" }, "Add a product"),
-      el("div", { class: "sec-hint" }, "Documents and widget conversations are scoped to a product."),
-      el("div", { class: "row" },
-        el("div", {}, el("label", { class: "flabel" }, "Range"), pCat),
-        el("div", {}, el("label", { class: "flabel" }, "Name"), pName),
-        el("div", { style: "flex:0 0 auto" },
-          el("button", { class: "btn btn-primary", onclick: async () => {
-            if (!pName.value.trim()) return toast("Give the product a name", true);
-            try { await api("/admin/product", { method: "POST", body: JSON.stringify({
-                    category_key: pCat.value, key: slug(pName.value), name: pName.value.trim(), sources: [] }) });
-                  pName.value = ""; toast("Product added"); await refresh(); render(); }
-            catch (e) { toast(e.message, true); }
-          } }, "Add product")))) : null,
+          } }, "Add range"))),
+      cache.catalog.length
+        ? el("div", { class: "row", style: "align-items:flex-end;margin-top:14px;"
+                             + "border-top:1px solid var(--color-divider);padding-top:14px",
+                      "data-tour": "cat-product" },
+            el("div", {}, el("label", { class: "flabel" }, "Range"), pCat),
+            el("div", {}, el("label", { class: "flabel" }, "New product"), pName),
+            el("div", { style: "flex:0 0 auto" },
+              el("button", { class: "btn btn-primary", onclick: async () => {
+                if (!pName.value.trim()) return toast("Give the product a name", true);
+                try { await api("/admin/product", { method: "POST", body: JSON.stringify({
+                        category_key: pCat.value, key: slug(pName.value), name: pName.value.trim(), sources: [] }) });
+                      pName.value = ""; toast("Product added"); await refresh(); render(); }
+                catch (e) { toast(e.message, true); }
+              } }, "Add product")))
+        : el("div", { class: "row-hint", style: "margin-top:10px" },
+            "Add a range first — a product has to live in one.")),
     el("div", { "data-tour": "cat-list", "data-sec": "Your catalogue" }, rows),
   ];
 }
