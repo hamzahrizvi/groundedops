@@ -3032,7 +3032,8 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     # Several products, comma-joined: an installation guide covering the
     # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
     # meant the other product's visitors were never offered it.
-    keys = [k.strip() for k in (payload.product_key or "").split(",") if k.strip()]
+    keys = list(dict.fromkeys(
+        k.strip() for k in (payload.product_key or "").split(",") if k.strip()))
     metas = got["metadatas"]
     for m in metas:
         # Flags from a previous assignment have to go, or a document moved off
