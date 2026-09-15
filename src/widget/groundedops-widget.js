@@ -703,6 +703,46 @@
     return d;
   }
 
+  /* What the wait says while it waits. One frozen line ("Checking the
+   * documentation") for what can be twenty seconds reads as a stall; these
+   * move, and they move in the order the pipeline actually works in -- find
+   * the pages, read them, then check the answer against them -- so the line
+   * is a rough progress report rather than decoration. */
+  var WAIT_LINES = [
+    "Sifting through the documentation",
+    "Finding the pages that mention this",
+    "Reading the ones that look right",
+    "Linking the dots",
+    "Checking the tables",
+    "Following a cross-reference",
+    "Matching the wording to your question",
+    "Weighing two possible answers",
+    "Drafting an answer",
+    "Checking every figure against the page it came from",
+    "Making sure nothing here was invented",
+    "Confirming the part numbers",
+    "Re-reading the fine print",
+    "Looking for anything that contradicts this",
+    "Tidying the wording",
+    "Nearly there",
+  ];
+
+  /* Returns the same node status() does, so every caller still just removes
+   * it. The timer stops itself once the node leaves the log rather than
+   * being cleared by hand: the status line is removed on an answer, on a
+   * failure and on a reset, and one missed clear would leave a detached
+   * node ticking for the life of the page. */
+  function waiting() {
+    var d = status(WAIT_LINES[0]);
+    var label = d.lastChild, i = 0;
+    var t = setInterval(function () {
+      if (!d.parentNode) { clearInterval(t); return; }
+      i = (i + 1) % WAIT_LINES.length;
+      label.textContent = WAIT_LINES[i];
+    }, 2200);
+    return d;
+  }
+
   /** Render a set of tappable pointers. Chips are ephemeral UI derived
    *  from the current stage — deliberately NOT stored in messages, so a
    *  resumed conversation doesn't show stale buttons for choices that
@@ -1545,7 +1585,7 @@
     $send.disabled = true;
     clearChips();
     heard(q);
-    var s = status("Checking the documentation");
+    var s = waiting();
 
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;

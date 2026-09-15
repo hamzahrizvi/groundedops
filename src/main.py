@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import socket
 import threading
 import time
 import uuid
@@ -1034,7 +1035,9 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
     try:
         import sales, docstore, faq_store as _fs, catalog as _cat, policy
         q = f"{raw_q} {resolved or ''}"
-        if not sales.is_sales_question(q):
+        # A comparison is this module's shape too, and its wording looks
+        # nothing like a sales question, so it gets in on its own terms.
+        if not sales.is_sales_question(q) and not sales.is_comparison(q):
             return None
 
         mode = (policy.value("sales_mode") or "answer").strip().lower()
@@ -1047,8 +1050,14 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
             return {"answer": reply, "kind": "deflected"}
 
         idx = sales.get_index(docstore.store_dir(), _source_to_product())
+        # The products the WORDING names, resolved here because this is
+        # where that resolver lives -- aliases, longest-form-wins and all.
+        _names = _product_names()
+        _named = _products_named_in(q, list(_names.keys()))
         return sales.answer(q, _fs._load(), idx, _cat.catalog(),
-                            scoped=_is_product_scope(scope_key))
+                            scoped=_is_product_scope(scope_key),
+                            named_products=_named,
+                            product_names=_names)
     except Exception as exc:
         logger.warning(f"sales answer skipped: {exc}")
         return None
@@ -1442,6 +1451,23 @@ def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:
         if flat:
             forms.add(flat)
     return forms
+
+
+# A question that sets two products against each other. Deliberately narrow:
+# the word has to be doing comparative work ("difference between", "vs",
+# "compare"), and the caller additionally requires that the wording NAME two
+# or more products. "What is the difference between Ads mode and Bill mode"
+# names no products and stays a single-manual question -- the same discipline
+# sales.py applies to "which device settings".
+_COMPARISON = re.compile(
+    r"\b(difference|differences|differ|differs|compare|comparison|compared)\b"
+    r"|\bvs\.?\b|\bversus\b"
+    r"|\bwhich\s+(one\s+)?is\s+(better|best|faster|cheaper|bigger|smaller)\b"
+    r"|\bbetter\s+than\b", re.I)
+
+
+def _is_comparison(query: str) -> bool:
+    return bool(_COMPARISON.search(query or ""))
 
 
 def _products_named_in(query: str, candidates: list[str]) -> list[str]:
@@ -1881,6 +1907,10 @@ class FaqEdit(BaseModel):
     # and retyped.
     question: str | None = None
     answer: str | None = None
+    # Which products this answer applies to, comma-joined. None leaves the
+    # tagging alone; "" means it applies to every product, which is what an
+    # untagged answer has always meant.
+    products: str | None = None
 
 
 class FaqCreate(BaseModel):
@@ -1911,7 +1941,8 @@ def faq_create(payload: FaqCreate, x_admin_password: str | None = Header(default
 @app.patch("/faq/{faq_id}")
 def faq_edit(faq_id: str, payload: FaqEdit, x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    updated = faq_store.update_entry(faq_id, payload.question, payload.answer)
+    updated = faq_store.update_entry(faq_id, payload.question, payload.answer,
+                                     products=payload.products)
     if not updated:
         raise HTTPException(status_code=404, detail="FAQ entry not found")
     return updated
@@ -2406,6 +2437,54 @@ class ReassignReq(BaseModel):
     product_key: str
 
 
+@app.get("/admin/network")
+def admin_network(request: Request, x_admin_password: str | None = Header(default=None)):
+    """Where this server can be reached from other machines.
+
+    The console cannot work this out for itself: a browser knows the address
+    IT used, which is "localhost" for whoever is sitting at the machine --
+    the one address nobody else can use. So the answer has to come from the
+    server, and the rail can then say where to point a colleague or a widget
+    embed without anyone running ipconfig.
+    """
+    _require_admin(x_admin_password)
+    port = request.url.port or 8000
+    addrs = []
+    try:
+        s_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s_.settimeout(0.4)
+        try:
+            # Nothing is sent; this just makes the OS choose the interface it
+            # would really route over, which is the one a colleague reaches.
+            s_.connect(("8.8.8.8", 80))
+            addrs.append(s_.getsockname()[0])
+        finally:
+            s_.close()
+    except Exception:
+        pass
+    # Everything else the host answers to, MINUS the virtual switches. A
+    # Hyper-V or WSL adapter has a real address that answers locally and is
+    # reachable from nothing, so listing it sends a colleague to a dead end.
+    # Without psutil there are no adapter names to filter by, so the filter
+    # is by subnet: keep an address only if it shares a /16 with the one the
+    # OS actually routes over, which is how a second real NIC on the same
+    # site looks and how a host-only switch does not.
+    routed = addrs[0] if addrs else ""
+    site = ".".join(routed.split(".")[:2]) if routed else ""
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip.startswith(("127.", "169.254.")) or ip in addrs:
+                continue
+            if site and ".".join(ip.split(".")[:2]) != site:
+                continue
+            addrs.append(ip)
+    except Exception:
+        pass
+    return {"port": port, "addresses": addrs,
+            "urls": [f"http://{a}:{port}" for a in addrs]}
+
+
 @app.get("/admin", include_in_schema=False)
 def admin_console():
     """Serve the admin console (v12.0).
@@ -2419,7 +2498,13 @@ def admin_console():
     if not os.path.isfile(path):
         raise HTTPException(status_code=404,
                             detail="admin.html not found next to main.py")
-    return FileResponse(path, media_type="text/html")
+    # no-store, because this file IS the deployment: it is replaced in place
+    # and the next reload is meant to be the new console. Without it a browser
+    # serves its cached copy from the last visit and the fix you just shipped
+    # is invisible until someone thinks to hard-reload -- which looks exactly
+    # like the change not working.
+    return FileResponse(path, media_type="text/html",
+                        headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 # admin.html's first <link> is `nocturne/styles.css`, resolved by the browser
@@ -2587,27 +2672,10 @@ def admin_faq_autogenerate(payload: FaqAutoReq,
     """
     _require_admin(x_admin_password)
 
-    sample = _source_text(payload.source)
-    if not sample.strip():
-        raise HTTPException(
-            status_code=404,
-            detail=f"No indexed text found for '{payload.source}'. If it was "
-                   f"just uploaded, wait for processing to finish.")
+    sample = _draft_sample(payload.source)
 
     n = max(1, min(int(payload.count or 8), 20))
-    prompt = (
-        "You write support FAQ entries from product documentation.\n\n"
-        f"<document>\n{sample}\n</document>\n\n"
-        f"Write {n} question-and-answer pairs a customer might ask that this "
-        "document answers. Rules:\n"
-        "- Use ONLY facts stated in the document. Invent nothing.\n"
-        "- Each answer must read correctly on its own, without the question — "
-        "write \"No internet connection is required\", not \"No\".\n"
-        "- Keep answers to one or two sentences.\n"
-        "- Skip anything the document does not actually state.\n\n"
-        "Return ONLY a JSON array, no other text, in this exact form:\n"
-        '[{"question": "...", "answer": "..."}]'
-    )
+    prompt = _faq_prompt(sample, n)
 
     try:
         if payload.provider:
@@ -2690,6 +2758,268 @@ def _verbatim_faq_pairs(source: str) -> list[dict]:
         return []
 
 
+def _faq_prompt(sample: str, n: int) -> str:
+    """The drafting prompt, shared by the saving endpoint and the streaming
+    one so the two cannot drift into producing different FAQs."""
+    return (
+        "You write support FAQ entries from product documentation.\n\n"
+        f"<document>\n{sample}\n</document>\n\n"
+        f"Write {n} question-and-answer pairs a customer might ask that this "
+        "document answers. Rules:\n"
+        "- Use ONLY facts stated in the document. Invent nothing.\n"
+        "- Each answer must read correctly on its own, without the question — "
+        "write \"No internet connection is required\", not \"No\".\n"
+        "- Keep answers to one or two sentences.\n"
+        "- Skip anything the document does not actually state.\n\n"
+        "Return ONLY a JSON array, no other text, in this exact form:\n"
+        '[{"question": "...", "answer": "..."}]'
+    )
+
+
+def _draft_sample(source: str) -> str:
+    sample = _source_text(source)
+    if not sample.strip():
+        raise HTTPException(
+            status_code=404,
+            detail=f"No indexed text found for '{source}'. If it was just "
+                   f"uploaded, wait for processing to finish.")
+    return sample
+
+
+class FaqBulkReq(BaseModel):
+    source: str = ""
+    product: str = ""
+    category: str = ""
+    entries: list = []
+
+
+@app.post("/admin/faq/draft/stream")
+def admin_faq_draft_stream(payload: FaqAutoReq,
+                           x_admin_password: str | None = Header(default=None)):
+    """Draft FAQs and stream them as they are written. NOTHING IS SAVED.
+
+    Two things this buys that the saving endpoint cannot. The wait stops
+    being blank -- drafting eight pairs from a long manual is tens of
+    seconds during which the old endpoint returned nothing at all, so the
+    console could only show a spinner and hope. And the person reviewing
+    sees the answers arrive in the order the model commits to them, which is
+    the same order they will read them in.
+
+    Saving is a separate, deliberate step (/admin/faq/bulk) because these
+    are drafts: the console shows them for approval first, and anything
+    dismissed there should never have touched the store.
+    """
+    _require_admin(x_admin_password)
+    sample = _draft_sample(payload.source)
+    n = max(1, min(int(payload.count or 8), 20))
+    prompt = _faq_prompt(sample, n)
+    provider, model = payload.provider, payload.model
+
+    def events():
+        import json as _json
+        raw = []
+
+        def sse(obj):
+            return "data: " + _json.dumps(obj) + "\n\n"
+
+        # The model stream starts FIRST. Extracting the document's tables
+        # re-opens the PDF and walks every page, which on a long manual is the
+        # pause before anything appears -- the reader waited through it with an
+        # empty panel and then got everything at once. The tables follow the
+        # drafting, by which point they are the fast half.
+        verbatim = []
+        try:
+            from llm import stream_generate
+            # No provider chosen means "whatever the server has": the picker
+            # offers the same list, and an empty one is a real state on a
+            # install with no key set.
+            use = provider
+            if not use:
+                avail = _available_providers()
+                if not avail:
+                    yield sse({"type": "error", "message":
+                               "No provider is configured, so nothing can be "
+                               "drafted. Set an API key under API keys."})
+                    return
+                use = avail[0]["key"]
+            mdl = model or _default_model_for(use)
+            # stream_generate yields (delta, done) and stops silently on a
+            # provider error, so an empty result is treated as a failure
+            # below rather than as a finished draft.
+            for delta, _done in stream_generate(use, prompt, mdl):
+                if not delta:
+                    continue
+                raw.append(delta)
+                yield sse({"type": "delta", "text": delta})
+        except Exception as exc:
+            logger.warning(f"FAQ draft stream failed: {exc}")
+            yield sse({"type": "error", "message": str(exc)[:200]})
+            return
+
+        pairs = _parse_qa_json("".join(raw))
+        if not pairs:
+            yield sse({"type": "error", "message":
+                       "The model did not return usable question/answer "
+                       "pairs. Try again, or switch provider."})
+            return
+        try:
+            verbatim = _verbatim_faq_pairs(payload.source)
+        except Exception:
+            verbatim = []
+        if verbatim:
+            yield sse({"type": "verbatim", "entries": verbatim})
+        yield sse({"type": "done", "entries": pairs[:n],
+                   "model": model or "", "verbatim": len(verbatim)})
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.post("/admin/faq/bulk")
+def admin_faq_bulk(payload: FaqBulkReq,
+                   x_admin_password: str | None = Header(default=None)):
+    """Save the drafts a person APPROVED, and only those.
+
+    Goes through the same merge as autogenerate, so a curated answer is
+    still never overwritten and a question already present is still skipped
+    rather than duplicated.
+    """
+    _require_admin(x_admin_password)
+    pairs = [{"question": (e or {}).get("question", ""),
+              "answer": (e or {}).get("answer", "")}
+             for e in (payload.entries or [])
+             if (e or {}).get("question") and (e or {}).get("answer")]
+    if not pairs:
+        raise HTTPException(status_code=400, detail="Nothing to save")
+    merged = faq_store.merge_questions(payload.source or "",
+                                       payload.product or payload.category,
+                                       pairs, category=payload.category)
+    merged["source"] = payload.source
+    return merged
+
+
+@app.post("/admin/faq/import")
+async def admin_faq_import(request: Request,
+                           file: UploadFile = File(...),
+                           x_admin_password: str | None = Header(default=None)):
+    """Read question/answer pairs OUT of a document, without indexing it.
+
+    A support team that already has an FAQ -- a Word document, a page of the
+    website, a spreadsheet exported to text -- has answers somebody already
+    approved. Putting that through the document pipeline is the wrong shape:
+    it would be chunked and retrieved from, when what is wanted is the pairs
+    themselves, served exactly as written.
+
+    Nothing is saved here either. The pairs come back for the same review the
+    drafting flow uses, because an import is exactly as capable of producing
+    a mangled pair as a model is.
+    """
+    _require_admin(x_admin_password)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="That file is empty")
+
+    import tempfile
+    suffix = os.path.splitext(file.filename or "")[1] or ".txt"
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fh:
+            fh.write(raw)
+            tmp = fh.name
+        from parsing import extract_pages
+        pages = extract_pages(tmp)
+    except Exception as exc:
+        logger.warning(f"FAQ import could not read {file.filename!r}: {exc}")
+        raise HTTPException(status_code=400,
+                            detail=f"Could not read that file: {exc}")
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    text = "\n\n".join(t for _pno, t in (pages or []) if t and t.strip())
+    if not text.strip():
+        raise HTTPException(status_code=422,
+                            detail="No text could be read from that file.")
+
+    # Structured first: a document that already marks its questions does not
+    # need a model to find them, and a literal read cannot paraphrase.
+    pairs = _pairs_from_marked_text(text)
+    how = "read from the file"
+
+    if not pairs:
+        # Otherwise ask a model to pull out the pairs that ARE there, which
+        # is a different instruction from writing new ones: nothing may be
+        # composed, and anything without an answer in the file is dropped.
+        prompt = (
+            "The document below is an existing FAQ or support page.\n\n"
+            f"<document>\n{text[:12000]}\n</document>\n\n"
+            "Extract the question-and-answer pairs it ALREADY CONTAINS. "
+            "Rules:\n"
+            "- Copy the wording. Do not rewrite, summarise or improve it.\n"
+            "- Do not invent a question, and do not answer one the document "
+            "leaves unanswered.\n"
+            "- Skip headings, navigation and contact details.\n\n"
+            "Return ONLY a JSON array, no other text, in this exact form:\n"
+            '[{"question": "...", "answer": "..."}]')
+        try:
+            from llm import generate_with_fallback
+            out = generate_with_fallback("accurate", prompt)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Import failed: {exc}")
+        if (out or {}).get("provider") == "none":
+            raise HTTPException(
+                status_code=502,
+                detail="No model could be reached to read that file, and it "
+                       "carries no question markers to read literally.")
+        pairs = _parse_qa_json((out or {}).get("text", "") or "")
+        how = "read by " + str((out or {}).get("model") or "the model")
+
+    if not pairs:
+        raise HTTPException(
+            status_code=422,
+            detail="No question and answer pairs could be found in that file.")
+    return {"entries": pairs[:60], "file": file.filename, "how": how,
+            "count": len(pairs[:60])}
+
+
+# "Q: ... A: ..." and "Question: ... Answer: ..." are how exported FAQs
+# actually look, and a file that marks its pairs should never need a model:
+# reading it literally is both free and incapable of paraphrasing.
+_Q_MARK = re.compile(r"^\s*(?:Q|Question)\s*[:.\)-]\s*(.+)$", re.I)
+_A_MARK = re.compile(r"^\s*(?:A|Answer)\s*[:.\)-]\s*(.+)$", re.I)
+
+
+def _pairs_from_marked_text(text: str) -> list[dict]:
+    pairs, q, a = [], None, []
+    for line in (text or "").split("\n"):
+        mq = _Q_MARK.match(line)
+        ma = _A_MARK.match(line)
+        if mq:
+            if q and a:
+                pairs.append({"question": q, "answer": " ".join(a).strip()})
+            q, a = mq.group(1).strip(), []
+        elif ma and q:
+            a = [ma.group(1).strip()]
+        elif q and a and not line.strip():
+            # A blank line ENDS the answer. Without this the pair ran on into
+            # whatever followed it -- the last answer in a file swallowed the
+            # "Contact us at ..." footer sitting two lines below it.
+            pairs.append({"question": q, "answer": " ".join(a).strip()})
+            q, a = None, []
+        elif q and a and line.strip():
+            # A wrapped answer keeps going to the end of its paragraph, which
+            # is how these documents lay one out.
+            a.append(line.strip())
+    if q and a:
+        pairs.append({"question": q, "answer": " ".join(a).strip()})
+    return [p for p in pairs if p["question"] and p["answer"]]
+
+
 @app.post("/admin/reassign_source")
 def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = Header(default=None)):
     """v10.5: re-tag every chunk of an already-ingested SOURCE to a
@@ -2702,10 +3032,23 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     ids = got.get("ids", [])
     if not ids:
         raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
+    # Several products, comma-joined: an installation guide covering the
+    # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
+    # meant the other product's visitors were never offered it.
+    keys = list(dict.fromkeys(
+        k.strip() for k in (payload.product_key or "").split(",") if k.strip()))
     metas = got["metadatas"]
     for m in metas:
+        # Flags from a previous assignment have to go, or a document moved off
+        # a product stays findable under it -- the worst kind of stale tag,
+        # because nothing on screen says it is still there.
+        for stale in [k for k in list(m.keys()) if k.startswith("prod_")]:
+            m.pop(stale, None)
         m["category"] = payload.category_key
-        m["product"] = payload.product_key
+        m["product"] = ",".join(keys)
+        m["products"] = ",".join(keys)
+        for k in keys:
+            m["prod_" + k] = True
     col.update(ids=ids, metadatas=metas)
     # bust the BM25 cache so the new tags take effect
     try:
@@ -2757,8 +3100,12 @@ def get_catalog():
             if not src:
                 continue
             p, c = m.get("product", ""), m.get("category", "")
-            if p:
-                prod_sources.setdefault(p, set()).add(src)
+            # A document tagged to several products counts under EACH of them.
+            # Counting the comma-joined value as one key filed a shared manual
+            # under a product nobody has, and showed 0 against the products
+            # that actually carry it.
+            for key in [k.strip() for k in (p or "").split(",") if k.strip()]:
+                prod_sources.setdefault(key, set()).add(src)
             if c:
                 cat_sources.setdefault(c, set()).add(src)
         for category in cat["categories"]:
@@ -3799,7 +4146,17 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         faq_store.record_gap(resolved_query, _faq_scope)
 
     # (c) Normal path.
-    if not payload.skip_faq:
+    # A comparison is never answered by one curated FAQ, and offering a list of
+    # single-product FAQs to "what is the difference between A and B" ends the
+    # conversation with a menu instead of an answer. Measured against the live
+    # corpus: every comparison stopped here and never reached retrieval at all.
+    # Two or more CATALOGUE products named, not just comparative wording: "the
+    # difference between Ads mode and Bill mode" is one manual's question and
+    # should still be offered its curated answer.
+    _comparing = (_is_comparison(resolved_query)
+                  and len(_products_named_in(resolved_query,
+                                             list(_product_names().keys()))) >= 2)
+    if not payload.skip_faq and not _comparing:
         _faq = faq_store.suggest_candidates(resolved_query, _faq_scope)
 
         if _faq["mode"] == "answer":
@@ -4066,9 +4423,16 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # refusal plus a route to support is the honest reply. Confidence "none"
     # is the retrieval gate's own verdict, so this defers to it rather than
     # inventing a second threshold.
+    # ...and a COMPARISON is the one case where a multi-product span is the
+    # point rather than a problem. The visitor named both products; asking
+    # "which did you mean?" answers a question nobody asked, and either reply
+    # throws away half of what they asked for.
+    _cmp_named = (_products_named_in(resolved_query, _span)
+                  if _comparing and len(_span) > 1 else [])
     _ask_product = (not payload.product and not payload.category
                     and len(_span) > 1
-                    and confidence != "none")
+                    and confidence != "none"
+                    and len(_cmp_named) < 2)
     if _ask_product:
         confidence = "ambiguous"
 

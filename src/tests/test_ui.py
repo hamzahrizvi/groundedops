@@ -52,6 +52,20 @@ def check(cond, label):
         fails.append(label)
 
 
+def section(pg, label):
+    """Open a section of the page currently on screen.
+
+    The bar across the top of a page SWITCHES sections rather than scrolling
+    to them, so everything outside the open one is hidden. Clicking straight
+    at a control then waits on an element that is in the DOM and will never be
+    visible -- a timeout that says nothing about the code under test.
+    """
+    tab = pg.locator(".topbar-tabs button:has-text(" + repr(label) + ")")
+    if tab.count():
+        tab.first.click()
+        pg.wait_for_timeout(250)
+
+
 with sync_playwright() as p:
     br = p.chromium.launch()
     pg = br.new_page()
@@ -63,7 +77,9 @@ with sync_playwright() as p:
     pg.wait_for_timeout(600)
 
     print("\n== login gate ==")
-    check(pg.locator("text=GroundedOps console").count() > 0, "gate renders")
+    # The gate carries the mark and the product name as separate lines now,
+    # so no single element reads "GroundedOps console" any more.
+    check(pg.locator(".gate-brand").count() > 0, "gate renders, with branding")
     pg.fill("input[type=email]", EMAIL)
     pg.fill("input[type=password]", PASSWORD)
     # Shown only when the install has no accounts yet, i.e. this sign-in is
@@ -71,12 +87,16 @@ with sync_playwright() as p:
     name = pg.locator("input[placeholder*='Your name']")
     if name.count() and name.first.is_visible():
         name.first.fill("UI Test")
-    # The gate has exactly one button, and its label depends on the state:
-    # "Sign in" normally, "Create root account" on an install with no
-    # accounts. Matching the button rather than the words survives both.
-    pg.locator(".gate button").first.click()
+    # The submit button's label depends on the state -- "Sign in" normally,
+    # "Create root account" on an install with no accounts -- so match the
+    # class, not the words. NOT ".gate button": the theme toggle is a button
+    # in this card too, and it comes first in the DOM.
+    pg.locator(".gate .btn-primary").first.click()
     pg.wait_for_timeout(1500)
-    check(pg.locator("h1:has-text('Overview')").count() > 0, "logs in to Overview")
+    # Documents, not Overview: the console's landing page moved in v16.3 --
+    # getting manuals in and keeping them filed is the job it exists for, and
+    # it is the first thing a new install needs.
+    check(pg.locator("h1:has-text('Documents')").count() > 0, "logs in to Documents")
 
     print("\n== all nav pages render ==")
     # Two of these were renamed in the console: "Answers" -> "Generate/Edit
@@ -103,12 +123,14 @@ with sync_playwright() as p:
     print("\n== widget design: live preview + save ==")
     pg.click(".nav button:has-text('Widget design')")
     pg.wait_for_timeout(600)
+    section(pg, "Branding")
     name_in = pg.locator("input.input").first
     name_in.fill("Acme Helper")
     pg.wait_for_timeout(300)
     check(pg.locator("text=Acme Helper").count() >= 1, "preview updates live as you type")
 
     # add an opening option, confirm it appears in the preview
+    section(pg, "Opening options")
     before = pg.locator("button:has-text('Remove')").count()
     pg.click("button:has-text('Add option')")
     pg.wait_for_timeout(300)
@@ -123,12 +145,14 @@ with sync_playwright() as p:
     pg.wait_for_timeout(1500)
     pg.click(".nav button:has-text('Widget design')")
     pg.wait_for_timeout(700)
+    section(pg, "Branding")
     check(pg.locator("input[value='Acme Helper']").count() > 0
           or pg.locator("text=Acme Helper").count() > 0, "config persisted across reload")
 
     print("\n== answers: write one by hand ==")
     pg.click(".nav button:has-text('Generate/Edit FAQs')")
     pg.wait_for_timeout(600)
+    section(pg, "Write one yourself")
     qbox = pg.locator("input[placeholder*='internet connection']")
     qbox.fill("Is the hopper waterproof?")
     pg.locator("textarea[placeholder*='No. Everything']").fill("No, it is for indoor use only.")

@@ -10,6 +10,22 @@ logger = logging.getLogger(__name__)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
+# The OpenAI-compatible endpoint, overridable. It was hardcoded at both call
+# sites, which meant the "openai" provider could only ever mean OpenAI's own
+# servers -- and an OpenAI-compatible gateway is how most on-prem model
+# hosting is exposed, ITL's LiteLLM included. Pointing this at one keeps every
+# customer question inside the building and off a metered API, with no other
+# change: same request shape, same auth header, same streaming format.
+#
+#   OPENAI_BASE_URL=http://ukman-hsp-litellm.local.innovative-technology.co.uk:4000/v1
+#   OPENAI_API_KEY=innovative
+#   ONLINE_PROVIDER=openai
+#   ONLINE_OPENAI_MODEL=itl-gpt-pro
+#
+# Default unchanged, so an install that sets nothing still talks to OpenAI.
+OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+OPENAI_URL = OPENAI_BASE + "/chat/completions"
+
 MODEL_LOCKS = {
     "phi": threading.Lock(),
     "mistral": threading.Lock(),
@@ -256,7 +272,7 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         return None
     try:
         res = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+            OPENAI_URL,
             headers={"Authorization": f"Bearer {key}"},
             json={"model": model, "temperature": 0,
                   "messages": [{"role": "user", "content": prompt}]},
@@ -491,7 +507,7 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
         url = DEEPSEEK_URL
         key = keys.get("deepseek") or os.getenv("DEEPSEEK_API_KEY")
     elif provider == "openai":
-        url = "https://api.openai.com/v1/chat/completions"
+        url = OPENAI_URL
         key = keys.get("openai") or os.getenv("OPENAI_API_KEY")
     else:
         logger.warning(f"stream_generate: provider {provider!r} cannot stream")
