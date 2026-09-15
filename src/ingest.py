@@ -332,8 +332,18 @@ def ingest_file(content: bytes, filename: str,
         # ── Embed ─────────────────────────────────────────────────────────────
         # The long pole on a big document, and the reason the console needs to
         # say something: a 235-chunk manual spends most of its ingest here.
+        # In batches, so the percentage MOVES. One embed_texts call over 200
+        # chunks is a single minutes-long step that can only report 0% -- and
+        # a progress figure that never changes is indistinguishable from a
+        # stalled job, which is the one thing a progress bar exists to rule
+        # out.
         _step("understanding the text", 0, len(texts))
-        vectors = embed_texts(texts)
+        vectors = []
+        _batch = 16
+        for _i in range(0, len(texts), _batch):
+            vectors.extend(embed_texts(texts[_i:_i + _batch]))
+            _step("understanding the text", min(_i + _batch, len(texts)),
+                  len(texts))
         _step("saving", len(texts), len(texts))
 
         # ── Store ─────────────────────────────────────────────────────────────

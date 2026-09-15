@@ -107,6 +107,7 @@
   .flow-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
   .flow-n{display:grid;place-items:center;width:15px;height:15px;font-size:9.5px;
           border-radius:50%;background:var(--color-accent);color:#fff}
+  .flow-walk{margin-top:9px;font-size:11.5px;padding:2px 0}
   .flow-arrow{font-size:12px;
               color:color-mix(in srgb, var(--color-text) 35%, transparent)}
 
@@ -161,7 +162,7 @@
   @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
 
   /* background jobs, bottom left, over whatever page you moved to */
-  .bgtasks{position:fixed;left:16px;bottom:16px;z-index:60;width:296px;
+  .bgtasks{position:fixed;right:16px;bottom:16px;z-index:60;width:296px;
            display:flex;flex-direction:column;gap:8px}
   .bgtask{background:var(--color-surface);border-radius:var(--radius-md);
           padding:10px 12px;box-shadow:var(--shadow-lg),
@@ -1222,7 +1223,7 @@ function _unjson(s) {
 
 async function streamDrafts(source, product, category, provider, model, count) {
   faqDrafts = { source, product, category, entries: [], state: "drafting",
-                raw: "", partial: null, seen: new Set() };
+                raw: "", partial: null, seen: new Set(), want: count || 8 };
   render();
 
   const res = await fetch(API + "/admin/faq/draft/stream", {
@@ -1379,8 +1380,7 @@ function draftReviewCard() {
     : null;
 
   return el("div", { class: "card elev-sm",
-                     style: "padding:18px 20px 8px;gap:0;margin-bottom:16px",
-                     "data-sec": "Review drafts" },
+                     style: "padding:18px 20px 8px;gap:0;margin-bottom:16px" },
     head,
     d.state === "drafting"
       ? el("div", { class: "bar indet", style: "margin:10px 0 4px" }, el("i", {}))
@@ -1414,26 +1414,37 @@ function jobsHost() {
 
 function drawJobs() {
   const host = jobsHost();
-  host.innerHTML = "";
   if (!jobs.size) { host.remove(); return; }
+
+  // Patched in place, NOT rebuilt. Clearing the panel on every poll destroyed
+  // and recreated each card 1.2 seconds apart, which replayed its entry
+  // animation every time -- a card that blinks rather than one that reports.
   for (const [id, j] of jobs) {
     const done = j.status === "done", failed = j.status === "error";
-    const bar = el("div", { class: "bar" + (j.pct ? "" : " indet") },
-      el("i", { style: j.pct ? "width:" + Math.min(100, j.pct) + "%" : "" }));
-    host.append(el("div", { class: "bgtask" + (failed ? " bad" : "")
-                                          + (done ? " done" : "") },
-      el("div", { class: "bgtask-top" },
-        el("b", {}, j.name),
-        el("button", { class: "bgtask-x", title: "Hide", "aria-label": "Hide",
-                       onclick: () => { jobs.delete(id); drawJobs(); } }, "×")),
-      el("div", { class: "st" }, j.stage + (j.pct && !done && !failed
-        ? " — " + Math.round(j.pct) + "%" : "")),
-      done || failed ? null : bar,
+    let card = host.querySelector('[data-job="' + id + '"]');
+    if (!card) {
+      card = el("div", { class: "bgtask", "data-job": id },
+        el("div", { class: "bgtask-top" },
+          el("b", {}, j.name),
+          el("button", { class: "bgtask-x", title: "Hide", "aria-label": "Hide",
+                         onclick: () => { jobs.delete(id); drawJobs(); } }, "×")),
+        el("div", { class: "st" }, ""),
+        el("div", { class: "bar" }, el("i", {})),
+        el("div", { class: "bgtask-acts" }));
+      host.append(card);
+    }
+    card.className = "bgtask" + (failed ? " bad" : "") + (done ? " done" : "");
+    card.querySelector(".st").textContent = j.stage + pctText(j.pct, j.status);
+    const bar = card.querySelector(".bar");
+    bar.hidden = done || failed;
+    bar.className = "bar" + (j.pct ? "" : " indet");
+    bar.firstChild.style.width = j.pct ? Math.min(100, j.pct) + "%" : "";
+
+    const acts = card.querySelector(".bgtask-acts");
+    if (done && !acts.childElementCount) {
       // An indexed document is not finished work: it has no answers yet, and
-      // it may belong to more than the product it was filed under. Both are a
-      // click from here, while the person is still thinking about THIS
-      // document -- ten minutes later they are on another page.
-      done ? el("div", { class: "bgtask-acts" },
+      // it may belong to more products than the one it was filed under.
+      acts.append(
         el("button", { class: "btn btn-primary", onclick: () => {
           jobs.delete(id); drawJobs();
           view = "faq"; render();
@@ -1443,14 +1454,27 @@ function drawJobs() {
           jobs.delete(id); drawJobs();
           view = "documents"; render();
           setTimeout(() => {
-            const card = document.querySelector('[data-sec="All documents"]');
-            if (card) revealSection(card);
+            const c = document.querySelector('[data-sec="All documents"]');
+            if (c) revealSection(c);
             flashDocRow(j.name);
           }, 80);
         } }, "Manage tags"),
         el("button", { class: "btn btn-ghost",
-          onclick: () => { jobs.delete(id); drawJobs(); } }, "Skip")) : null));
+          onclick: () => { jobs.delete(id); drawJobs(); } }, "Skip"));
+    }
   }
+  // Cards whose job was dismissed
+  [...host.children].forEach(c => {
+    if (!jobs.has(c.getAttribute("data-job"))) c.remove();
+  });
+}
+
+// One way of saying how far along something is, everywhere it is said. A bar
+// with no figure cannot tell "slow" from "stalled", which is the question
+// anybody watching one is actually asking.
+function pctText(pct, status) {
+  if (status === "done" || status === "error") return "";
+  return pct ? " — " + Math.round(pct) + "%" : " — starting…";
 }
 
 // One poller per job, however many things are watching it. The Documents page
@@ -2491,22 +2515,52 @@ const FLOWS = [
     steps: [["Add the range and product", "catalog"],
             ["Upload its documents", "documents"],
             ["Draft the answers", "faq"],
-            ["Try it as a customer", "test"]] },
+            ["Try it as a customer", "test"]],
+    guide: [
+      { view: "catalog", ref: "cat-range", title: "1. The range and the product",
+        text: "A range is a family; a product sits inside it. Documents are filed against a product, and the widget asks a visitor to pick one, so this comes first." },
+      { view: "documents", ref: "doc-add", title: "2. Its documents",
+        text: "Pick the range and product, then drop the manuals in. A document with no product is searchable but never offered to a visitor." },
+      { view: "faq", ref: "ans-draft", title: "3. Draft the answers",
+        text: "Reads the document and writes the questions a customer would ask. Nothing is saved until you have read them -- you keep or dismiss each one." },
+      { view: "test", ref: "test-widget", title: "4. Try it as a customer",
+        text: "The real widget, on a stand-in page. Ask something you know the answer to and check the sources it cites." }] },
   { title: "A new document for a product you already have",
     hint: "A manual revision, a datasheet, an installation guide.",
     steps: [["Upload it against the product", "documents"],
             ["Draft answers from it", "faq"],
-            ["Check what it now answers", "test"]] },
+            ["Check what it now answers", "test"]],
+    guide: [
+      { view: "documents", ref: "doc-add", title: "1. Add it to the product",
+        text: "Choose the range and product first -- that is what files it. If this replaces an older revision, upload it anyway: you will be offered the choice to replace." },
+      { view: "faq", ref: "ans-draft", title: "2. Draft from it",
+        text: "Draft answers from the new document, review them, and keep the ones worth publishing." },
+      { view: "test", ref: "test-widget", title: "3. Check it",
+        text: "Ask the thing the new document answers, and confirm it cites that document." }] },
   { title: "Work through what customers asked",
     hint: "The backlog the widget could not answer.",
     steps: [["Read the unanswered questions", "gaps"],
             ["Answer the most asked", "faq"],
-            ["Confirm the fix", "test"]] },
+            ["Confirm the fix", "test"]],
+    guide: [
+      { view: "gaps", ref: "gaps-list", title: "1. What they asked",
+        text: "Every question the answers did not cover, most asked first. Rewordings of the same question are grouped, so the number is people, not phrasings." },
+      { view: "faq", ref: "ans-hand", title: "2. Answer it",
+        text: "Answer this brings the question here with the product already set. Saving it resolves the backlog entry automatically." },
+      { view: "test", ref: "test-widget", title: "3. Confirm",
+        text: "Ask it the way a customer did and check the answer that comes back." }] },
   { title: "Put the widget on a site",
     hint: "Branding, opening options, and the embed code.",
     steps: [["Set the branding", "widget"],
             ["Copy the install snippet", "widget"],
-            ["Watch the enquiries arrive", "leads"]] },
+            ["Watch the enquiries arrive", "leads"]],
+    guide: [
+      { view: "widget", ref: "wd-branding", title: "1. How it looks",
+        text: "The name, greeting and accent colour a visitor sees. The preview beside it updates as you type; nothing is published until you save." },
+      { view: "widget", ref: "wd-install", title: "2. Put it on the site",
+        text: "One script tag. Paste it before the closing body tag of any page the widget should appear on." },
+      { view: "leads", ref: "leads-list", title: "3. What comes back",
+        text: "Sales and support forms land here. They are not emailed anywhere, so this is the only place they appear." }] },
 ];
 
 function quickSetup() {
@@ -2526,7 +2580,13 @@ function quickSetup() {
             el("button", { class: "flow-step",
                            onclick: () => { view = target; render(); } },
               el("span", { class: "flow-n" }, String(i + 1)), label),
-          ]))))));
+          ])),
+        // Step by step ON the pages, pointing at the control that does each
+        // part -- the same runner the single walkthrough used, given this
+        // flow's steps rather than all of them.
+        el("button", { class: "btn btn-ghost flow-walk",
+                       onclick: () => startGuided(f.guide) },
+          "Walk me through it")))));
 }
 
 
@@ -2793,7 +2853,7 @@ function viewDocuments() {
     const label = span.querySelector(".st-line");
     trackUpload(job, name, j => {
       if (!label.isConnected) return;      // page moved on; the panel has it
-      label.textContent = j.stage;
+      label.textContent = j.stage + pctText(j.pct, j.status);
       if (j.status === "working" && j.pct) {
         bar.className = "bar";
         bar.firstChild.style.width = Math.min(100, j.pct) + "%";
@@ -3207,7 +3267,6 @@ function viewFaq() {
   return [
     el("h1", {}, "Generate/Edit FAQs"),
     el("p", { class: "lede" }, "FAQs are shown to visitors exactly as written and cost nothing to serve. Anyone not signed in sees only these, so treat the wording as published copy."),
-    review,
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "ans-draft", "data-sec": "Generate from a document" },
       el("div", { class: "sec-title" }, "Generate FAQs from a document"),
@@ -3226,6 +3285,10 @@ function viewFaq() {
           el("label", { class: "flabel" }, "Model"), modelIn),
         el("div", { style: "flex:0 0 auto;min-width:0;display:flex;gap:8px" },
           genBtn, importBtn, importFile))),
+    // Directly UNDER the control that started it: drafts appearing at the top
+    // of the page put the thing you are waiting for above the thing you just
+    // pressed, and on a short window off the screen entirely.
+    review,
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "ans-hand", "data-sec": "Write one yourself" },
       // Shown once, after drafts were saved: the drafting pass answers what
@@ -3987,6 +4050,7 @@ function viewWidget() {
 
     return el("div", { class: "card elev-sm",
                        style: "padding:18px 20px;gap:0;margin-top:16px",
+                       "data-tour": "wd-install",
                        "data-sec": "Install on WordPress" },
       el("div", { class: "sec-title" }, "Install on WordPress"),
       el("div", { class: "sec-hint" },
@@ -4213,7 +4277,8 @@ function viewCatalog() {
       (c.products || []).length
         ? (c.products || []).map(p => el("div", { class: "item" },
             el("div", { class: "grow" }, el("b", {}, p.name),
-              el("span", {}, (p.doc_count || (p.sources || []).length || 0) + " documents"
+              el("span", {}, (n => n + (n === 1 ? " document" : " documents"))(
+                   p.doc_count || (p.sources || []).length || 0)
                              + (p.champion ? " · " + p.champion
                                              + (p.digest && p.digest !== "off"
                                                 ? " (" + p.digest + ")" : "") : ""))),
@@ -4599,9 +4664,9 @@ const GUIDED = [
 
 let guidedOn = false;
 
-function startGuided() {
+function startGuided(steps) {
   guidedOn = true;
-  const live = GUIDED.slice();
+  const live = (steps && steps.length ? steps : GUIDED).slice();
   tourSteps = live; tourStep = 0; tourOn = true;
   bindTourKeys();
   goGuided(0);

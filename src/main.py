@@ -3097,8 +3097,12 @@ def get_catalog():
             if not src:
                 continue
             p, c = m.get("product", ""), m.get("category", "")
-            if p:
-                prod_sources.setdefault(p, set()).add(src)
+            # A document tagged to several products counts under EACH of them.
+            # Counting the comma-joined value as one key filed a shared manual
+            # under a product nobody has, and showed 0 against the products
+            # that actually carry it.
+            for key in [k.strip() for k in (p or "").split(",") if k.strip()]:
+                prod_sources.setdefault(key, set()).add(src)
             if c:
                 cat_sources.setdefault(c, set()).add(src)
         for category in cat["categories"]:
