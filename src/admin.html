@@ -2581,7 +2581,72 @@ function viewKeys() {
       + "page or the keys' status. A key is never shown again once saved, "
       + "only a masked form for recognising it."),
     el("div", { "data-sec": "Providers", "data-tour": "keys-list" }, rows),
+    keyRolesCard(),
   ];
+}
+
+// Which key does which job. Saving a second key used to change nothing on
+// its own — everything still went to the one provider named in Settings —
+// so the page could show two configured keys while one of them was inert.
+function keyRolesCard() {
+  const configured = keysCache.providers.filter(p => p.configured);
+  const fallbackLabel = (keysCache.providers.find(
+    p => p.key === keysCache.fallback_provider) || {}).label
+    || keysCache.fallback_provider || "the Settings provider";
+
+  const rows = (keysCache.roles || []).map(r => {
+    const sel = el("select", { class: "input" },
+      el("option", { value: "" },
+        r.role === "backup" ? "None — no second attempt"
+                            : "Follow " + (r.role === "default"
+                                ? "Settings (" + fallbackLabel + ")"
+                                : "the default")),
+      configured.map(p => el("option", { value: p.key }, p.label)));
+    sel.value = r.assigned || "";
+
+    sel.addEventListener("change", async () => {
+      try {
+        const res = await api("/admin/keys/roles/" + r.role, {
+          method: "POST",
+          body: JSON.stringify({ provider: sel.value || null }) });
+        keysCache.roles = res.roles;
+        toast(r.label + ": " + (sel.value
+          ? (configured.find(p => p.key === sel.value) || {}).label
+          : "no preference") + " — in effect from the next question");
+      } catch (e) { toast(e.message, true); sel.value = r.assigned || ""; }
+    });
+
+    // An assignment whose key was later removed is not silently ignored:
+    // generation falls back, and the page says so rather than showing a
+    // selection that does nothing.
+    const dangling = r.assigned && !r.effective;
+
+    return el("div", { class: "row",
+                       style: "align-items:flex-start;margin-bottom:12px" },
+      el("div", { style: "flex:1 1 220px;min-width:0" },
+        el("b", {}, r.label),
+        el("div", { style: "font-size:12.5px;margin-top:2px;"
+          + "color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
+          r.hint),
+        dangling
+          ? el("div", { style: "font-size:12.5px;margin-top:4px;color:var(--color-warn,#c47f00)" },
+              "The key for this provider has been removed — falling back.")
+          : null),
+      el("div", { style: "flex:0 1 240px;min-width:0" }, sel));
+  });
+
+  return el("div", { class: "card elev-sm", "data-sec": "Which key does what",
+                     "data-tour": "keys-roles", style: "margin-top:18px" },
+    el("h2", {}, "Which key does what"),
+    el("p", { class: "lede", style: "margin-top:0" },
+      "One provider per job. The same key can do all three — assign a second "
+      + "one only when you want deep questions answered elsewhere, or a "
+      + "different provider to pick up when the first fails. Applies in "
+      + "Online mode."),
+    configured.length
+      ? el("div", {}, rows)
+      : el("div", { class: "empty" }, el("b", {}, "No keys configured yet"),
+          "Save a key above and it can then be given a job."));
 }
 
 /* ---------------- overview ---------------- */
@@ -4903,6 +4968,8 @@ const tourStepsByView = {
   keys: [
     { ref: "keys-list", title: "Provider API keys",
       text: "Paste a key and save it — it works on the very next request, no restart. Once saved, a key is never shown again, only a masked form so you can tell which one is loaded. Only root accounts can see this page at all." },
+    { ref: "keys-roles", title: "Which key does what",
+      text: "A saved key does nothing until it is given a job. Default answers the everyday question; Advanced answers a deep one, so you can pay for reasoning only where it is asked for; Backup is tried when the first provider fails a request, which is the only thing that keeps Online mode answering through an outage. One key can hold all three." },
   ],
   accounts: [
     { ref: "accounts-new", title: "Add someone",

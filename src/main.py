@@ -3437,14 +3437,72 @@ class ApiKeyReq(BaseModel):
     value: str
 
 
+class KeyRoleReq(BaseModel):
+    # null clears the assignment — "no preference", which is not the same
+    # as a blank string and must survive JSON round-tripping as such.
+    provider: str | None = None
+
+
+def _key_roles() -> list[dict]:
+    """Each job, what is assigned to it, and whether that assignment is live.
+    `assigned` is what was written; `effective` is what generation will
+    actually use — they differ when the assigned provider's key was removed,
+    and showing only one of them is how a dangling assignment stays
+    invisible."""
+    return [
+        {"role": r, "label": keystore.role_label(r), "hint": keystore.role_hint(r),
+         "assigned": keystore.get_role_assignment(r),
+         "effective": keystore.get_role(r)}
+        for r in keystore.roles()
+    ]
+
+
 @app.get("/admin/keys")
 def admin_keys_list(x_admin_password: str | None = Header(default=None)):
     _require_root(x_admin_password)
-    return {"providers": [
-        {"key": p, "label": keystore.label_for(p),
-         "configured": keystore.has_key(p), "masked": keystore.masked_key(p)}
-        for p in keystore.providers()
-    ]}
+    return {
+        "providers": [
+            {"key": p, "label": keystore.label_for(p),
+             "configured": keystore.has_key(p), "masked": keystore.masked_key(p)}
+            for p in keystore.providers()
+        ],
+        "roles": _key_roles(),
+        # What the Settings picker holds, so the page can say what an
+        # unassigned default will fall back to rather than implying nothing
+        # answers at all.
+        "fallback_provider": get_settings().get("online_provider"),
+    }
+
+
+@app.post("/admin/keys/roles/{role}")
+def admin_keys_set_role(role: str, payload: KeyRoleReq,
+                        x_admin_password: str | None = Header(default=None)):
+    """Assign a provider to a job, or clear it. Takes effect on the next
+    request — llm.py reads the assignment per call, not at import.
+
+    Assigning the DEFAULT also moves the Settings provider picker, because
+    two controls that both decide "which API answers" and disagree is the
+    kind of split that makes a saved setting look ignored."""
+    me = _require_root(x_admin_password)
+    provider = (payload.provider or "").strip().lower() or None
+    if provider and not keystore.has_key(provider):
+        raise HTTPException(
+            status_code=400,
+            detail=f"no key is configured for {keystore.label_for(provider)} — "
+                   "save its key before giving it a job")
+    try:
+        keystore.set_role(role, provider)
+    except keystore.UnknownRoleError:
+        raise HTTPException(status_code=404, detail=f"unknown role '{role}'")
+    except keystore.UnknownProviderError:
+        raise HTTPException(status_code=404, detail=f"unknown provider '{provider}'")
+    if role == "default" and provider:
+        try:
+            set_online_provider(provider)
+        except ValueError:
+            pass
+    logger.info(f"key role '{role}' set to {provider or 'none'} by {me['email']}")
+    return {"ok": True, "roles": _key_roles()}
 
 
 @app.post("/admin/keys/{provider}")

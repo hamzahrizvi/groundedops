@@ -157,3 +157,82 @@ def test_fallback_chain_without_mistral_forces_single_final_mistral_attempt():
     # fixture, not a real model name, so it does not go stale.
     assert calls == [("deepseek", "deepseek-chat"), ("local", "mistral")]
     assert result["fallback_used"] is True
+
+# ── which key does which job (v16.5) ──────────────────────────────────
+# A second saved key used to change nothing: every role went to the one
+# provider named in Settings. These pin what an assignment actually does to
+# the chain, which is the only place the feature is observable.
+#
+# `_rewrite_env_line` is patched out throughout: keystore.set_role writes to
+# a real .env, and this module runs without _harness's ENV_FILE_PATH
+# redirect, so an unpatched run would edit the developer's own file.
+
+from contextlib import contextmanager
+
+import keystore
+
+
+@contextmanager
+def roles(assignments, keyed=True):
+    """Assignments live in os.environ only, with every provider reporting a
+    key (or none of them, for `keyed=False`)."""
+    with patch.object(keystore, "_rewrite_env_line", lambda k, v: None), \
+         patch.object(keystore, "has_key", lambda p: keyed):
+        for role in keystore.roles():
+            keystore.set_role(role, assignments.get(role))
+        try:
+            yield
+        finally:
+            for role in keystore.roles():
+                keystore.set_role(role, None)
+
+
+def test_default_assignment_leads_the_chain_and_advanced_falls_back_to_it():
+    with roles({"default": "anthropic"}):
+        assert llm._chain_for("accurate")[0][0] == "anthropic"
+        # An unassigned Advanced must not mean "nothing" — a deep question
+        # still has to be answered.
+        assert llm._provider_for_job("advanced") == "anthropic"
+        assert llm._chain_for("reasoning")[0][0] == "anthropic"
+
+
+def test_advanced_assignment_routes_only_the_reasoning_role():
+    with roles({"default": "anthropic", "advanced": "deepseek"}):
+        assert llm._chain_for("reasoning")[0][0] == "deepseek"
+        assert llm._chain_for("accurate")[0][0] == "anthropic"
+        assert llm._chain_for("fast")[0][0] == "anthropic"
+
+
+def test_no_backup_leaves_the_chain_one_attempt_long():
+    with roles({"default": "anthropic"}):
+        assert len(llm._chain_for("accurate")) == 1
+
+
+def test_backup_appends_one_attempt_after_the_leader():
+    with roles({"default": "anthropic", "backup": "deepseek"}):
+        assert [p for p, _ in llm._chain_for("accurate")] == ["anthropic", "deepseek"]
+
+
+def test_backup_equal_to_the_leader_is_not_two_attempts_at_one_provider():
+    # Retrying the model that just failed is exactly the behaviour this
+    # module exists to prevent.
+    with roles({"default": "anthropic", "backup": "anthropic"}):
+        assert len(llm._chain_for("accurate")) == 1
+
+
+def test_an_assignment_whose_key_was_removed_does_not_route_generation():
+    with roles({"default": "anthropic"}, keyed=False):
+        # The assignment is still written — masked, not lost — but a provider
+        # certain to fail auth must not lead the chain.
+        assert keystore.get_role_assignment("default") == "anthropic"
+        assert keystore.get_role("default") is None
+        assert llm._chain_for("accurate")[0][0] == runtime_config.get_online_provider()
+
+
+def test_local_mode_ignores_key_roles_entirely():
+    with roles({"default": "anthropic", "backup": "deepseek"}):
+        runtime_config.set_generation_mode("local")
+        try:
+            assert llm._chain_for("accurate") == llm.FALLBACK_CHAIN["accurate"]
+        finally:
+            runtime_config.set_generation_mode("api")
