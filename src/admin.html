@@ -1216,14 +1216,56 @@ let faqDrafts = null;   // {source, product, category, entries:[...], state, raw
 const _PAIR_RE = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
 // The one still being written, so its answer can be shown mid-sentence.
 const _PARTIAL_RE = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"answer"\s*:\s*"((?:[^"\\]|\\.)*)$/;
+// The question alone, while it is still being typed -- so something moves
+// from the first token rather than from the first complete pair.
+const _PARTIAL_Q_RE = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)$/;
 
 function _unjson(s) {
   try { return JSON.parse('"' + s + '"'); } catch (e) { return s; }
 }
 
+// The product the drafts were filed against, so the answers page can open on
+// them rather than on whatever was last chosen.
+let faqScopeHint = "";
+
+// Reveals the buffered text at a readable rate. 7 characters every 30ms is
+// about 230 a second -- still faster than anyone reads, and slow enough that
+// a paragraph visibly arrives rather than appearing whole.
+let revealTimer = null;
+function startReveal() {
+  if (revealTimer || !faqDrafts) return;
+  revealTimer = setInterval(() => {
+    const d = faqDrafts;
+    if (!d) { clearInterval(revealTimer); revealTimer = null; return; }
+    if (!d.pending.length) {
+      if (d.streamEnded) {
+        clearInterval(revealTimer); revealTimer = null;
+        finishDrafts();
+      }
+      return;
+    }
+    const take = d.pending.slice(0, 7);
+    d.pending = d.pending.slice(7);
+    handleDraftEvent({ type: "_reveal", text: d.raw + take });
+  }, 30);
+}
+
+function finishDrafts() {
+  const d = faqDrafts;
+  if (!d) return;
+  (d.tail || []).forEach(e => addDraft(e.question, e.answer, false));
+  (d.verbatim || []).forEach(e => addDraft(e.question, e.answer, true));
+  d.partial = null;
+  d.state = d.entries.length ? "review" : "error";
+  if (!d.entries.length && !d.error) d.error = "Nothing was drafted.";
+  render();
+}
+
 async function streamDrafts(source, product, category, provider, model, count) {
+  faqScopeHint = product || category || "";
   faqDrafts = { source, product, category, entries: [], state: "drafting",
-                raw: "", partial: null, seen: new Set(), want: count || 8 };
+                raw: "", pending: "", tail: [], verbatim: [], streamEnded: false,
+                partial: null, seen: new Set(), want: count || 8 };
   render();
 
   const res = await fetch(API + "/admin/faq/draft/stream", {
@@ -1252,7 +1294,9 @@ async function streamDrafts(source, product, category, provider, model, count) {
       handleDraftEvent(ev);
     }
   }
-  if (faqDrafts && faqDrafts.state === "drafting") {
+  if (faqDrafts) faqDrafts.streamEnded = true;
+  startReveal();
+  if (faqDrafts && faqDrafts.state === "drafting" && !faqDrafts.pending.length) {
     // The stream ended without a done event: treat it as finished with
     // whatever completed, rather than leaving a spinner forever.
     faqDrafts.state = faqDrafts.entries.length ? "review" : "error";
@@ -1265,29 +1309,45 @@ function handleDraftEvent(ev) {
   if (!faqDrafts) return;
   if (ev.type === "verbatim") {
     // The document's own tables. Approved by default: they are quotations,
-    // not drafts, and the reviewer can still turn any of them off.
-    (ev.entries || []).forEach(e => addDraft(e.question, e.answer, true));
-    return render();
+    // not drafts, and the reviewer can still turn any of them off. Held until
+    // the reveal has caught up, so they do not appear above text still being
+    // typed.
+    faqDrafts.verbatim = ev.entries || [];
+    return;
   }
   if (ev.type === "delta") {
-    faqDrafts.raw += ev.text;
+    // Into a buffer, not onto the screen. The provider streams in bursts --
+    // measured, whole pairs arrive between two 300ms samples -- so rendering
+    // each delta as it lands produces the jumping this was meant to replace.
+    // The reveal loop below takes it out at a steady rate instead.
+    faqDrafts.pending += ev.text;
+    startReveal();
+    return;
+  }
+  if (ev.type === "_reveal") {
+    faqDrafts.raw = ev.text;
     let m;
     _PAIR_RE.lastIndex = 0;
     while ((m = _PAIR_RE.exec(faqDrafts.raw))) {
       addDraft(_unjson(m[1]), _unjson(m[2]), false);
     }
     const partial = _PARTIAL_RE.exec(faqDrafts.raw);
+    const partialQ = partial ? null : _PARTIAL_Q_RE.exec(faqDrafts.raw);
     faqDrafts.partial = partial
-      ? { question: _unjson(partial[1]), answer: _unjson(partial[2]) } : null;
+      ? { question: _unjson(partial[1]), answer: _unjson(partial[2]) }
+      : (partialQ ? { question: _unjson(partialQ[1]), answer: "" } : null);
     return render();
   }
   if (ev.type === "done") {
-    (ev.entries || []).forEach(e => addDraft(e.question, e.answer, false));
-    faqDrafts.partial = null;
-    faqDrafts.state = "review";
-    return render();
+    // The parsed pairs are the authority -- the reveal may still be mid-way
+    // through the raw text -- but they wait for it to finish.
+    faqDrafts.tail = ev.entries || [];
+    faqDrafts.streamEnded = true;
+    startReveal();
+    return;
   }
   if (ev.type === "error") {
+    faqDrafts.streamEnded = true;
     faqDrafts.partial = null;
     faqDrafts.state = faqDrafts.entries.length ? "review" : "error";
     faqDrafts.error = ev.message || "Drafting failed";
@@ -1317,12 +1377,15 @@ async function saveDrafts() {
     // Straight on to the obvious next question: was anything missed? The
     // hand-written form is where that goes, so go there and say so rather
     // than leaving them on a page whose work is finished.
+    // Straight to Answers by product, which is where an answer is edited,
+    // retagged, added to or deleted. Building any of that into the review
+    // list would be a second, worse copy of a page that already does it.
     faqDrafts = null;
     await refresh();
-    askForMore = { added };
+    askForMore = { added, scope: faqScopeHint };
     view = "faq"; render();
     setTimeout(() => {
-      const card = document.querySelector('[data-sec="Write one yourself"]');
+      const card = document.querySelector('[data-sec="Answers by product"]');
       if (card) revealSection(card);
     }, 60);
   } catch (e) { toast(e.message, true); }
@@ -1370,12 +1433,16 @@ function draftReviewCard() {
         ? el("span", { class: "tag" }, "from the document's own table")
         : null)));
 
+  // The pair currently being written, shown as it arrives rather than when
+  // it finishes. Without this the panel sat still through a whole answer and
+  // then produced it complete, which reads as a stall followed by a jump.
   const writing = d.partial
-    ? el("div", { class: "step gap-row" },
+    ? el("div", { class: "step gap-row writing" },
         el("span", { style: "flex:0 0 18px" }, ""),
         el("div", { class: "step-b" },
-          el("div", { style: "font-size:13.5px;font-weight:500" }, d.partial.question),
-          el("p", { style: "white-space:pre-wrap" }, d.partial.answer,
+          el("div", { style: "font-size:13.5px;font-weight:500" },
+            d.partial.question || "writing the next question…"),
+          el("p", { style: "white-space:pre-wrap" }, d.partial.answer || "",
             el("span", { class: "caret" }, ""))))
     : null;
 
@@ -1446,12 +1513,13 @@ function drawJobs() {
       // it may belong to more products than the one it was filed under.
       acts.append(
         el("button", { class: "btn btn-primary", onclick: () => {
-          jobs.delete(id); drawJobs();
+          // The card STAYS. Acting on one of these is not finishing with the
+          // document -- you may well want the other action next -- so only
+          // Skip takes it away.
           view = "faq"; render();
           streamDrafts(j.name, j.product || "", j.category || "", null, null, 8);
         } }, "Generate FAQs"),
         el("button", { class: "btn btn-secondary", onclick: () => {
-          jobs.delete(id); drawJobs();
           view = "documents"; render();
           setTimeout(() => {
             const c = document.querySelector('[data-sec="All documents"]');

@@ -2822,15 +2822,12 @@ def admin_faq_draft_stream(payload: FaqAutoReq,
         def sse(obj):
             return "data: " + _json.dumps(obj) + "\n\n"
 
-        # The verbatim pairs need no model at all -- they are the document's
-        # own tables -- so they go first and the reviewer has something to
-        # read while the drafting runs.
-        try:
-            verbatim = _verbatim_faq_pairs(payload.source)
-        except Exception:
-            verbatim = []
-        yield sse({"type": "verbatim", "entries": verbatim})
-
+        # The model stream starts FIRST. Extracting the document's tables
+        # re-opens the PDF and walks every page, which on a long manual is the
+        # pause before anything appears -- the reader waited through it with an
+        # empty panel and then got everything at once. The tables follow the
+        # drafting, by which point they are the fast half.
+        verbatim = []
         try:
             from llm import stream_generate
             # No provider chosen means "whatever the server has": the picker
@@ -2865,6 +2862,12 @@ def admin_faq_draft_stream(payload: FaqAutoReq,
                        "The model did not return usable question/answer "
                        "pairs. Try again, or switch provider."})
             return
+        try:
+            verbatim = _verbatim_faq_pairs(payload.source)
+        except Exception:
+            verbatim = []
+        if verbatim:
+            yield sse({"type": "verbatim", "entries": verbatim})
         yield sse({"type": "done", "entries": pairs[:n],
                    "model": model or "", "verbatim": len(verbatim)})
 
