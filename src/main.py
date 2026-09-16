@@ -1088,6 +1088,51 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         return None
 
 
+def _provider_reachable(provider: str | None,
+                        timeout: float = 4.0) -> tuple[bool, str]:
+    """Can the configured provider actually be talked to right now?
+
+    A model listing, not a completion: it is the cheapest call every one of
+    these APIs offers, it costs nothing, and it exercises the whole path that
+    matters — DNS, route, TLS, auth. Returns (reachable, reason); reason is
+    empty when reachable, and short enough to sit in a health payload.
+
+    Deliberately NOT cached: a health probe that answers from a cache cannot
+    report the outage it exists to report.
+    """
+    if not provider:
+        return False, "no provider configured"
+    try:
+        import requests as _rq
+        if provider == "local":
+            base = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+            url = base.rsplit("/api/", 1)[0] + "/api/tags"
+            r = _rq.get(url, timeout=timeout)
+        elif provider == "anthropic":
+            r = _rq.get("https://api.anthropic.com/v1/models", timeout=timeout,
+                        headers={"x-api-key": keystore.get_key(provider),
+                                 "anthropic-version": "2023-06-01"})
+        else:
+            # deepseek and every OpenAI-compatible endpoint, the on-prem
+            # gateway included, share this shape.
+            base = ("https://api.deepseek.com/v1" if provider == "deepseek"
+                    else os.getenv("OPENAI_BASE_URL",
+                                   "https://api.openai.com/v1").rstrip("/"))
+            r = _rq.get(base + "/models", timeout=timeout,
+                        headers={"Authorization":
+                                 "Bearer " + keystore.get_key(provider)})
+        if r.status_code < 400:
+            return True, ""
+        return False, f"HTTP {r.status_code} from {provider}"
+    except keystore.MissingKeyError:
+        return False, f"no API key set for {provider}"
+    except Exception as exc:
+        # The class name carries the useful distinction (a name that does not
+        # resolve vs a refused connection vs a timeout) without dragging a
+        # multi-line urllib traceback into a JSON payload.
+        return False, f"{type(exc).__name__}: {str(exc)[:110]}"
+
+
 @app.get("/health")
 def health(deep: int = 0):
     """Liveness by default; readiness with ?deep=1.
@@ -1123,24 +1168,45 @@ def health(deep: int = 0):
         checks["index_chunks"] = 0
         checks["index_error"] = str(e)[:120]
 
+    # The CONFIGURED provider's key, not "a key, any key". The old form
+    # OR'd in every provider's env var, so an install pointed at one provider
+    # reported a healthy key because a DIFFERENT provider had one — green
+    # here, and every question refused.
     try:
         from runtime_config import get_online_provider
-        checks["provider_key"] = bool(
-            keystore.has_key(get_online_provider())
-            or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
-            or os.getenv("ANTHROPIC_API_KEY"))
-    except Exception:
-        checks["provider_key"] = bool(os.getenv("DEEPSEEK_API_KEY"))
+        _prov = get_online_provider()
+        checks["provider"] = _prov
+        checks["provider_key"] = bool(keystore.has_key(_prov))
+    except Exception as e:
+        _prov = None
+        checks["provider"] = None
+        checks["provider_key"] = False
+        checks["provider_error"] = str(e)[:120]
+
+    # Whether the provider ANSWERS, which a key cannot tell you. An on-prem
+    # gateway whose hostname stops resolving leaves the key set and every
+    # check above green while generation is 100% dead — and because a failed
+    # generation surfaces as "I don't have that in the product
+    # documentation", an outage is indistinguishable from a corpus gap to
+    # everyone including the operator. Observed exactly that way on
+    # 2026-09-16: a whole session of refusals, DNS the actual cause.
+    checks["provider_reachable"], _why = _provider_reachable(_prov)
+    if _why:
+        checks["provider_unreachable_reason"] = _why
 
     # Reported, never triggered: loading them here would turn a health probe
     # into a 30-second model download on a cold instance.
+    # getattr, not attribute access: a health probe that raises is worse than
+    # useless -- it turns "tell me what is wrong" into a 500 and hides the
+    # answer. The private handles are an implementation detail of three
+    # modules that are free to rename them.
     import embeddings as _emb
     import reranker as _rr
     import grounding as _gr
     checks["models_loaded"] = {
-        "embeddings": _emb._model is not None,
-        "reranker": _rr._model is not None,
-        "grounding": _gr._nli_model is not None,
+        "embeddings": getattr(_emb, "_model", None) is not None,
+        "reranker": getattr(_rr, "_model", None) is not None,
+        "grounding": getattr(_gr, "_nli_model", None) is not None,
     }
     checks["models_warm"] = all(checks["models_loaded"].values())
 
@@ -1158,6 +1224,7 @@ def health(deep: int = 0):
 
     ready = (bool(checks.get("index_chunks"))
              and bool(checks.get("provider_key"))
+             and bool(checks.get("provider_reachable"))
              and checks["warmup"]["ready"])
     body = {"status": "ok" if ready else "not-ready", "ready": ready, **checks}
     return JSONResponse(body, status_code=200 if ready else 503)
@@ -4692,7 +4759,27 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     answer = _strip_meta(_strip_preamble(raw_text)) if raw_text else "I could not generate a response."
 
     # ── Grounding check ──────────────────────
+    # Two clocks, because one was measuring the wrong thing. `t_grounding`
+    # used to be read ~160 lines below, AFTER the backup escalation and the
+    # grounding-retry loop — both of which run whole extra generations. So
+    # "grounding_time" reported 15.85s on a turn where the NLI verifier had
+    # done a fraction of that and the rest was re-generation, and anyone
+    # tuning on it would have gone after the verifier instead of the model
+    # call. grounding_time is now only the verification work; regeneration is
+    # reported separately as escalation_time.
     t_grounding = time.time()
+    # A dict, not two floats with `nonlocal`: the helper only mutates it, so
+    # it needs no scope declaration and cannot shadow.
+    _spent = {"verify": 0.0, "regen": 0.0}
+
+    def _timed(bucket: str, fn, *a, **kw):
+        """Run one step and bill its wall time to `bucket`."""
+        _start = time.time()
+        try:
+            return fn(*a, **kw)
+        finally:
+            _spent[bucket] += time.time() - _start
+
     verifier_unavailable = False
     refusal = is_refusal(answer)
     template_leak = is_template_leak(answer)
@@ -4724,14 +4811,15 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         is_grounded, grounding_score = True, None
         flagged = False
     else:
-        is_grounded, grounding_score = check_grounding(
+        is_grounded, grounding_score = _timed(
+            "verify", check_grounding,
             answer, top_chunks, threshold=GROUNDING_THRESHOLD
         )
         verifier_unavailable = grounding_score is None
         # NLI fails on table-shredded text; give short numeric answers a
         # lexical second chance (see _lexically_supported docstring).
         if (not is_grounded and not verifier_unavailable
-                and _lexically_supported(answer, top_chunks)):
+                and _timed("verify", _lexically_supported, answer, top_chunks)):
             is_grounded = True
             logger.info("Grounding rescued by lexical containment "
                         f"(nli={grounding_score}) for: {resolved_query[:60]}")
@@ -4739,50 +4827,69 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # keep their facts in tables. Ask a model that can, before throwing a
         # correct answer away. See _llm_verified.
         elif (not is_grounded and not verifier_unavailable
-              and _llm_verified(answer, top_chunks, deepseek_api_key)):
+              and _timed("verify", _llm_verified,
+                         answer, top_chunks, deepseek_api_key)):
             is_grounded = True
             logger.info("Grounding rescued by LLM verifier "
                         f"(nli={grounding_score}) for: {resolved_query[:60]}")
         flagged = not is_grounded
 
-    # ── DeepSeek escalation on grounding failure ──
-    # Auto-retry on DeepSeek whenever the local answer is flagged (bad
-    # grounding, a template leak, or a total local failure) AND a key is
-    # available. This is the "auto-retry on DeepSeek if key present"
-    # behaviour.
+    # ── Escalation to the BACKUP provider on grounding failure ──
+    # Retry on a second provider whenever the first answer is flagged (bad
+    # grounding, a template leak, or a total generation failure).
+    #
+    # This used to hardcode `generate("deepseek", ...)`, which meant it
+    # ignored the configured provider entirely and billed a DeepSeek key that
+    # might belong to somebody personally. It fired hardest in exactly the
+    # situation where it was least wanted: when the configured provider is
+    # UNREACHABLE, every single question fails generation, and every single
+    # one then escalated onto that key. Measured on 2026-09-16 against an
+    # on-prem gateway whose hostname had stopped resolving — five queries,
+    # five billed calls, none of which could help, because the answer was
+    # never the problem.
+    #
+    # The escalation now goes to whatever is assigned the BACKUP role on the
+    # API keys page, and does not happen at all when nothing is assigned.
+    # That makes "never bill this provider automatically" expressible: leave
+    # it out of the roles. An operator who wants the old behaviour assigns
+    # DeepSeek as backup, deliberately, and can see that they have.
     escalated = False
+    _backup_provider = keystore.get_role("backup")
     if (flagged and not verifier_unavailable and role != "rethink"
-            and output.get("provider") in ("local", "none")):
+            and output.get("provider") in ("local", "none")
+            and _backup_provider):
         logger.warning(
-            f"Flagged local answer (grounding={grounding_score}, "
+            f"Flagged answer (grounding={grounding_score}, "
             f"template_leak={template_leak}, failed={generation_failed}) — "
-            f"escalating to DeepSeek for: {resolved_query[:60]}"
+            f"escalating to backup provider '{_backup_provider}' "
+            f"for: {resolved_query[:60]}"
         )
-        # v12.0: model name comes from env. "deepseek-chat" was hardcoded
-        # here, and DeepSeek RETIRED that alias on 24 July 2026 — calls to it
-        # are no longer routed anywhere, so this escalation path was silently
-        # dead. Keep it aligned with ONLINE_DEEPSEEK_MODEL.
-        _ds_model = os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
-        deepseek_result = generate("deepseek", prompt, _ds_model, deepseek_api_key=deepseek_api_key)
-        if deepseek_result and deepseek_result.get("text"):
-            output = deepseek_result
+        _bk_model = _default_model_for(_backup_provider)
+        backup_result = _timed("regen", generate,
+                               _backup_provider, prompt, _bk_model,
+                               deepseek_api_key=deepseek_api_key)
+        if backup_result and backup_result.get("text"):
+            output = backup_result
             answer = _strip_meta(_strip_preamble(output["text"].strip()))
             escalated = True
             template_leak = is_template_leak(answer)
             if template_leak:
                 is_grounded, grounding_score, flagged = False, 0.0, True
             else:
-                is_grounded, grounding_score = check_grounding(
+                is_grounded, grounding_score = _timed(
+                    "verify", check_grounding,
                     answer, top_chunks, threshold=GROUNDING_THRESHOLD
                 )
                 verifier_unavailable = grounding_score is None
                 if (not is_grounded and not verifier_unavailable
-                        and _lexically_supported(answer, top_chunks)):
+                        and _timed("verify", _lexically_supported,
+                                   answer, top_chunks)):
                     is_grounded = True
                     logger.info("Escalated answer rescued by lexical "
                                 f"containment (nli={grounding_score})")
                 elif (not is_grounded and not verifier_unavailable
-                      and _llm_verified(answer, top_chunks, deepseek_api_key)):
+                      and _timed("verify", _llm_verified,
+                                 answer, top_chunks, deepseek_api_key)):
                     is_grounded = True
                     logger.info("Escalated answer rescued by LLM verifier "
                                 f"(nli={grounding_score})")
@@ -4816,9 +4923,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             logger.info(
                 f"Grounding retry {_attempt}/{_max_retries} "
                 f"(score={grounding_score}) for: {resolved_query[:60]}")
-            _retry = generate_with_fallback(
-                role, prompt, deepseek_api_key=deepseek_api_key,
-                api_keys=api_keys)
+            _retry = _timed("regen", generate_with_fallback,
+                            role, prompt, deepseek_api_key=deepseek_api_key,
+                            api_keys=api_keys)
             _text = _strip_meta(_strip_preamble((_retry or {}).get("text", "").strip()))
             if not _text:
                 continue
@@ -4830,14 +4937,16 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 break
             if is_template_leak(_text):
                 continue
-            _ok, _score = check_grounding(_text, top_chunks,
-                                          threshold=GROUNDING_THRESHOLD)
+            _ok, _score = _timed("verify", check_grounding, _text, top_chunks,
+                                 threshold=GROUNDING_THRESHOLD)
             if _score is None:
                 verifier_unavailable = True
                 break
-            if not _ok and _lexically_supported(_text, top_chunks):
+            if not _ok and _timed("verify", _lexically_supported,
+                                  _text, top_chunks):
                 _ok = True
-            elif not _ok and _llm_verified(_text, top_chunks, deepseek_api_key):
+            elif not _ok and _timed("verify", _llm_verified,
+                                    _text, top_chunks, deepseek_api_key):
                 _ok = True
             if _ok:
                 answer, output = _text, _retry
@@ -4851,7 +4960,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                     or _score > grounding_score):
                 grounding_score = _score
 
-    grounding_time = time.time() - t_grounding
+    # grounding_time is now ONLY the verification work (NLI, the lexical
+    # rescue, the LLM verifier). escalation_time is the regeneration the
+    # backup provider and the retry loop did. verify_stage_time is the whole
+    # span the old grounding_time reported, kept so the three can be
+    # reconciled: verify + escalation + overhead == stage.
+    grounding_time = _spent["verify"]
+    escalation_time = _spent["regen"]
+    verify_stage_time = time.time() - t_grounding
 
     # ── Suppress an answer we could not verify ──
     # PRECISION-FIRST ENFORCEMENT (v8.4): suppress on ANY unresolved flag,
@@ -4961,6 +5077,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # final answer so every refusal branch is covered -- low retrieval
     # confidence, a suppressed ungrounded answer, or the model declining
     # because its chunks did not carry the fact.
+    # Bound before the try: the except below only resets offer_support, and
+    # the response dict reads system_refusal unconditionally.
+    system_refusal = False
     try:
         from text_utils import is_refusal as _is_refusal
         offer_support = bool(_is_refusal(answer)) or verifier_unavailable
@@ -4980,8 +5099,32 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             answer = _friendly_refusal(
                 payload.product or payload.category,
                 _product_names().get(payload.product or "", ""))
+        elif generation_failed and output.get("provider") == "none":
+            # NOT the verifier-unavailable case — that one already has its
+            # own wording upstream ("could not verify an answer"), and
+            # test_verifier_failure_route pins it. This branch is the other
+            # system failure: no provider could be reached at all.
+            #
+            # "I don't have that in the product documentation" for an
+            # unreachable provider is a lie that costs hours: it reads as a
+            # corpus gap, so the operator goes looking for a missing manual
+            # while the actual cause is DNS. The visitor-facing wording stays
+            # calm and blameless; `service_degraded` is the machine-readable
+            # part the console and /health can act on.
+            answer = ("I can't answer that at the moment — the answering "
+                      "service isn't reachable from here. This is a problem "
+                      "on our side, not a gap in the documentation. Please "
+                      "try again shortly, or contact support if it persists.")
+            logger.error(
+                "SERVICE DEGRADED: no provider could generate for %r "
+                "(provider=%s)", resolved_query[:60], output.get("provider"))
     except Exception:
         offer_support = False
+    # Computed BEFORE the log call, not after it: the logged timing block had
+    # every stage except the one that says whether the turn was slow, because
+    # total_time did not exist yet at the point the line was written.
+    total_time = time.time() - start_total
+
     log_interaction(q, answer, role, output.get("model"),
                     [s["source"] for s in sources],
                     grounding_score=grounding_score, flagged=flagged,
@@ -4991,9 +5134,10 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                             "rerank_time": rerank_time,
                             "extraction_time": extraction_time,
                             "llm_time": llm_time,
-                            "grounding_time": grounding_time})
-
-    total_time = time.time() - start_total
+                            "grounding_time": grounding_time,
+                            "escalation_time": escalation_time,
+                            "verify_stage_time": verify_stage_time,
+                            "total_time": total_time})
 
     # v12.0: persist for registered users (anonymous -> uid None -> skip;
     # their history stays browser-local). convo_id echoed back so the
@@ -5028,6 +5172,11 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         "turn_limit": _MEM_LIMIT,
         "context_full": len(history or []) >= _MEM_LIMIT,
         "flagged": flagged,
+        # True when the turn failed because the SYSTEM could not answer (no
+        # provider reachable, or the verifier is down) rather than because
+        # the corpus does not cover the question. A client should say so, and
+        # must not file it as an unanswered question.
+        "service_degraded": bool(system_refusal),
         "retrieval_score": round(top_score, 4),
         "resolved_query": resolved_query if resolved_query != q else None,
         "timing": {
@@ -5037,7 +5186,12 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             "retrieval_time": round(retrieval_time, 3),
             "extraction_time": round(extraction_time, 3),
             "llm_time": round(llm_time, 3),
+            # Verification only. Regeneration by the backup provider and the
+            # grounding-retry loop is escalation_time; verify_stage_time is
+            # the whole span, so the three reconcile.
             "grounding_time": round(grounding_time, 3),
+            "escalation_time": round(escalation_time, 3),
+            "verify_stage_time": round(verify_stage_time, 3),
             "total_time": round(total_time, 3),
         },
         "sources": sources,

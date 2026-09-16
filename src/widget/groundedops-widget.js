@@ -531,6 +531,9 @@
       renderMd(msg.text, txt);
     }
     b.appendChild(txt);
+    // Handed back so revealInto() can re-render into this exact node while
+    // the answer types out, rather than rebuilding the bubble each frame.
+    row._txt = txt;
 
     if (msg.sources && msg.sources.length) {
       // COLLAPSED by default, and short when open. It used to be an always-
@@ -665,12 +668,62 @@
     });
   }
 
+  /* Characters a second while an answer types out. Fast enough to stay
+   * ahead of a reader, slow enough that the answer arrives rather than
+   * appearing. */
+  var REVEAL_CPS = 260;
+
+  /* Type an answer in instead of pasting it whole.
+   *
+   * This is PRESENTATION, not transport, and the distinction is worth being
+   * honest about: the pipeline produces the whole answer before it sends
+   * anything, and /widget/ask/stream does too -- its own docstring says it
+   * "does not lower time-to-first-token". So streaming the response over SSE
+   * would look exactly like this while also touching the gated, paid path,
+   * which widget_api.py explicitly warns is not a change to make unverified.
+   * Real token streaming needs the generation call pushed below the quota
+   * gates first; that is a separate piece of work.
+   *
+   * What this does buy: the answer lands the way a person reads it, and the
+   * wait no longer ends with a wall of text appearing at once.
+   */
+  function revealInto(row, text) {
+    var el = row && row._txt;
+    if (!el) return;
+    var reduced = window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A markdown table revealed a character at a time renders as broken
+    // pipe syntax for most of its life. Tables arrive whole.
+    if (reduced || /\n\s*\|/.test(text) || text.length < 40) {
+      renderMd(text, el);
+      return;
+    }
+    var shown = 0, last = 0;
+    renderMd("", el);
+    function step(ts) {
+      if (!row.isConnected) return;               // bubble removed mid-reveal
+      if (!last) last = ts;
+      shown = Math.min(text.length,
+                       shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS)));
+      last = ts;
+      renderMd(text.slice(0, shown), el);
+      scrollDown();
+      if (shown < text.length) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
   function say(text, extra) {
     var m = Object.assign({ role: "bot", text: text }, extra || {});
     state.messages.push(m);
-    $log.appendChild(bubble(m));
+    var row = bubble(m);
+    $log.appendChild(row);
     scrollDown();
     save();
+    // Only a freshly-arrived answer types out. Restoring a saved
+    // conversation re-renders every past turn, and replaying those would be
+    // absurd -- so the flag is set at the answer call site, not here.
+    if (extra && extra.reveal) revealInto(row, m.text);
   }
 
   function heard(text) {
@@ -1683,6 +1736,10 @@
           return;
         }
         say(d.answer || "No answer returned.", {
+          // A curated FAQ answer comes back in ~0.08s; typing it out would
+          // add a delay to the one path that is genuinely instant. Only the
+          // answers that cost a wait get the reveal.
+          reveal: !d.from_faq,
           sources: d.flagged ? null : d.sources,
           flagged: !!d.flagged,
           badge: d.from_faq ? "Reviewed answer" : null,
