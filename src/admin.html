@@ -3032,6 +3032,21 @@ function viewDocuments() {
   const docRow = s => {
     const cur = (s.product || s.products || "")
       .split(",").map(x => x.trim()).filter(Boolean);
+    const freshness = s.freshness || {};
+    const freshnessText = {
+      original_missing: "original file missing",
+      original_unreadable: "original file unreadable",
+      manifest_missing: "ingest record missing",
+      original_changed: "stored file changed since indexing",
+      index_version_mismatch: "index and stored version differ",
+      settings_unknown: "ingest settings unknown",
+      ingest_settings_changed: "ingest settings changed"
+    };
+    const staleWhy = (freshness.reasons || [])
+      .map(x => freshnessText[x] || x).join("; ");
+    const indexedWhen = freshness.ingested_at
+      ? " · indexed " + new Date(freshness.ingested_at).toLocaleDateString()
+      : "";
 
     const save = async keys => {
       // Deduped: `cur` is captured when the row renders, so two ticks before a
@@ -3072,7 +3087,12 @@ function viewDocuments() {
     return el("div", { class: "item" + (cur.length ? "" : " flagged") },
       el("div", { class: "grow" },
         el("b", {}, s.source),
-        el("span", {}, (s.chunks || 0) + " sections")),
+        el("span", {}, (s.chunks || 0) + " sections" + indexedWhen)),
+      freshness.status === "stale"
+        ? el("span", { class: "tag tag-accent", title: staleWhy }, "Needs re-index")
+        : el("span", { class: "tag tag-neutral",
+                       title: freshness.version
+                         ? "Version " + freshness.version.slice(0, 12) : "" }, "Current"),
       cur ? el("span", { class: "tag tag-neutral" }, cur) : el("span", { class: "tag tag-accent" }, "no product"),
       move,
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {

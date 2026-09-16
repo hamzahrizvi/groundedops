@@ -1212,8 +1212,10 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
     if ingest_provider:
         os.environ["INGEST_PROVIDER"] = ingest_provider
     try:
-        count = ingest_file(content, filename, api_keys=api_keys, progress=_progress,
-                            category_key=category_key, product_key=product_key)
+        count = ingest_file(
+            content, filename, api_keys=api_keys, progress=_progress,
+            category_key=category_key, product_key=product_key,
+            replace_existing=bool(replace_source and replace_source == filename))
         # A new version of a document already held. The old chunks go only
         # AFTER the new ones are in: if ingest fails we still have the
         # version we had, which is the whole point of replacing rather than
@@ -3076,12 +3078,21 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     col = get_collection()
     got = col.get(include=["metadatas"])
     seen = {}
+    indexed_versions = {}
     for m in got.get("metadatas", []):
         src = m.get("source", "unknown")
         if src not in seen:
             seen[src] = {"source": src, "category": m.get("category", ""),
                          "product": m.get("product", ""), "chunks": 0}
+            indexed_versions[src] = (m.get("document_version") or
+                                     m.get("content_sha256"))
         seen[src]["chunks"] += 1
+    try:
+        import docstore as _ds
+        for src, item in seen.items():
+            item["freshness"] = _ds.freshness(src, indexed_versions.get(src))
+    except Exception as exc:
+        logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
     return {"sources": list(seen.values())}
 
 
@@ -4940,7 +4951,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # for it, the sanitiser protects it, is_refusal matches it); only
         # what the reader sees changes, and the friendly form is itself a
         # recognised variant so nothing downstream stops working.
-        if offer_support:
+        system_refusal = verifier_unavailable or (
+            generation_failed and output.get("provider") == "none")
+        if offer_support and not system_refusal:
             answer = _friendly_refusal(
                 payload.product or payload.category,
                 _product_names().get(payload.product or "", ""))

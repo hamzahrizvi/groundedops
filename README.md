@@ -98,7 +98,7 @@ Query → query condensation (Rewrite-Retrieve-Read, session-scoped)
 | `main.py` | FastAPI app, CORS, `/api` prefix rewrite, static frontend serving, async startup warmup, query orchestration, clarifying-question and rethink logic |
 | `db.py` | Shared persistent ChromaDB client, per-source deletion, chunk-by-id lookup |
 | `parsing.py` | Page-preserving text extraction (PDF / DOCX / TXT) |
-| `ingest.py` | Per-page parsing → chunking → breadcrumb enrichment → embedding → storage; retains original files for download |
+| `ingest.py` | Per-page parsing → chunking → breadcrumb enrichment → embedding → versioned storage; retains original files for download |
 | `chunking.py` | Step-boundary-aware chunking (prevents unrelated sections merging into one chunk) |
 | `retrieval_db.py` | Hybrid full-corpus BM25 + dense retrieval (RRF-merged), optional source/product scoping |
 | `reranker.py` | Sigmoid-calibrated cross-encoder reranking |
@@ -518,6 +518,15 @@ table lookup, fixed with a narrow lexical-containment rescue.
   This is the one remaining automatic escalation path and is slated for
   removal for consistency with the `llm.py` change.
 - **Ingest is single-worker**, and re-ingesting a large corpus is slow.
+- **Document versions are content-addressed.** Every chunk carries the source
+  SHA-256 and indexed timestamp. Replacing a same-name source writes the new
+  version before retiring the old chunks, and the document manifest retains a
+  compact version history. The Documents page flags missing, changed, or
+  stale sources as needing re-indexing.
+- **Full re-index has automatic rollback.** `reindex.py` captures the live
+  collection before resetting it and restores that snapshot if any retained
+  source cannot produce chunks. Keep the backend stopped while rebuilding;
+  rollback protects processing failures, not a machine-level power loss.
 - **Page-crossing passages are split** at the boundary, since chunking is
   per page. Retrieval usually returns both halves.
 - **Table-heavy PDF sections** can still produce an occasional truncated

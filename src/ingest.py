@@ -2,6 +2,7 @@ import os
 import re
 import logging
 import tempfile
+from datetime import datetime, timezone
 
 from parsing import extract_pages
 import docstore
@@ -20,7 +21,7 @@ from chunking import (chunk_text, strip_table_fences, pop_section,
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1200"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 from embeddings import embed_texts
-from db import get_collection
+from db import get_collection, invalidate_retrieval_cache
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,8 @@ def ingest_file(content: bytes, filename: str,
                 api_keys: dict | None = None,  # accepted for call-site compat; unused since doc2query removal (v10.16)
                 progress=None,
                 category_key: str | None = None,
-                product_key: str | None = None) -> int:
+                product_key: str | None = None,
+                replace_existing: bool = False) -> int:
     """
     Parse, chunk, embed and store a file.
 
@@ -251,13 +253,32 @@ def ingest_file(content: bytes, filename: str,
     # than the Docker path "/data/source_files" -- that default silently
     # resolved to C:\data\source_files on Windows, outside the repo and any
     # backup, and was mistaken for data loss.
-    _src_dir = docstore.store_dir()
-
-    # ── Duplicate check ───────────────────────────────────────────────────────
-    existing = collection.get(where={"source": filename})
-    if existing and existing.get("ids"):
+    # ── Duplicate/version check ───────────────────────────────────────────────
+    content_hash = docstore.sha256(content)
+    existing = collection.get(where={"source": filename}, include=["metadatas"])
+    old_ids = list((existing or {}).get("ids") or [])
+    old_versions = {
+        (m or {}).get("document_version") or (m or {}).get("content_sha256")
+        for m in ((existing or {}).get("metadatas") or [])
+    }
+    if old_ids and content_hash in old_versions:
+        logger.info("Skipping unchanged document: %s (%s)", filename,
+                    content_hash[:12])
+        return 0
+    if old_ids and not replace_existing:
         logger.info(f"Skipping duplicate: {filename}")
         return 0
+
+    previous_content = None
+    if old_ids:
+        previous_path = docstore.find(filename)
+        if previous_path:
+            try:
+                with open(previous_path, "rb") as fh:
+                    previous_content = fh.read()
+            except Exception as exc:
+                logger.warning("could not stage the previous original for "
+                               "replacement rollback: %s", exc)
 
     # ── Save to temp file for parsing ────────────────────────────────────────
     # Use only the extension as suffix so extract_text() can detect the type
@@ -319,16 +340,6 @@ def ingest_file(content: bytes, filename: str,
             texts, pageno, sections = _drop_shadowed(texts, pageno, sections,
                                                      filename)
 
-        # ── Retain original for download ──────────────────────────────────────
-        try:
-            os.makedirs(_src_dir, exist_ok=True)
-            with open(os.path.join(_src_dir, os.path.basename(filename)), "wb") as fh:
-                fh.write(content)
-        except Exception as e:
-            # Non-fatal: ingestion still succeeds, the answer just won't
-            # offer a download link for this source.
-            logger.warning(f"could not retain source file for '{filename}': {e}")
-
         # ── Embed ─────────────────────────────────────────────────────────────
         # The long pole on a big document, and the reason the console needs to
         # say something: a 235-chunk manual spends most of its ingest here.
@@ -355,7 +366,11 @@ def ingest_file(content: bytes, filename: str,
         # chunk so retrieval filters on the explicit assignment.
         _cat_tag = category_key or ""
         _prod_tag = product_key or ""
-        ids = [f"{filename}_{i}" for i in range(len(texts))]
+        # IDs include the immutable content version. This lets a replacement
+        # be written completely before the old IDs are removed, so an embed or
+        # database failure cannot erase the working version first.
+        ids = [f"{filename}:{content_hash[:16]}:{i}" for i in range(len(texts))]
+        indexed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         collection.add(
             documents=texts,
@@ -373,6 +388,9 @@ def ingest_file(content: bytes, filename: str,
                         "product": _prod_tag,
                         "products": _prod_tag,
                         "category": _cat_tag,
+                        "document_version": content_hash,
+                        "content_sha256": content_hash,
+                        "indexed_at": indexed_at,
                         # One flag per product this document belongs to, so a
                         # document can belong to SEVERAL. Chroma's `where` is
                         # exact-match, so a comma-joined "a,b" matches neither
@@ -394,6 +412,33 @@ def ingest_file(content: bytes, filename: str,
             ids=ids,
         )
 
+        # The new version is queryable now. Commit the durable original with
+        # an atomic replace, then retire the previous chunks. If retaining the
+        # source fails, roll the new IDs back and leave the old index intact.
+        try:
+            docstore.save(filename, content)
+        except Exception:
+            collection.delete(ids=ids)
+            raise
+
+        if old_ids:
+            try:
+                collection.delete(ids=old_ids)
+            except Exception:
+                # Prefer a duplicate index over data loss, but do not report a
+                # successful replacement: the operator needs to retry/repair.
+                try:
+                    collection.delete(ids=ids)
+                finally:
+                    if previous_content is not None:
+                        try:
+                            docstore.save(filename, previous_content)
+                        except Exception as restore_exc:
+                            logger.critical("could not restore original %r after "
+                                            "index replacement failed: %s",
+                                            filename, restore_exc)
+                    raise
+
         # v10.16: doc2query removed. It generated synthetic per-chunk
         # questions (kind="query") purely to boost retrieval recall; the
         # hybrid BM25+dense/RRF retriever, breadcrumb enrichment and the
@@ -411,6 +456,10 @@ def ingest_file(content: bytes, filename: str,
                             pages=len(pages), settings=docstore.current_settings())
         except Exception as _exc:
             logger.warning(f"Could not record manifest entry: {_exc}")
+
+        # A replacement may have exactly the same number of chunks. BM25's
+        # normal count-based refresh cannot detect that content change.
+        invalidate_retrieval_cache()
 
         logger.info(f"Ingested '{filename}': {len(texts)} chunks")
         return len(texts)
