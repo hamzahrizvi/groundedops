@@ -735,7 +735,13 @@ Do not use any knowledge from outside the context.
 When the answer is a set of values - a pinout, a connector, a specification
 table, a list of options - write it as a markdown list with one item per line
 ("- 1: Vend 1"), or as a markdown table when there are two or more columns.
+Every markdown table must have a descriptive header row and a separator row,
+with one table row per line. Keep cell text concise; never place a table on
+the same line as a heading or paragraph.
 Never run a numbered set of values together in a sentence; it is unreadable.
+For a short answer, do not add a heading. When an answer genuinely has two or
+more distinct sections, introduce each with a concise `###` markdown heading.
+Never use a generic heading such as "Answer", "Response", or "Details".
 If the context makes clear which product the answer applies to, name that
 product in the first sentence, so the reader is never left guessing which one
 they were told about.

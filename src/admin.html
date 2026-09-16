@@ -393,8 +393,8 @@
          box-shadow:inset 0 0 0 1px var(--color-divider)}
   /* The assistant's turns are a row so the mark sits beside the bubble and
      stays put when the bubble grows. */
-  .chat-row{display:flex;gap:9px;align-items:flex-end;max-width:100%}
-  .chat-row .bub{max-width:100%}
+  .chat-row{display:flex;gap:9px;align-items:flex-end;max-width:100%;min-width:0}
+  .chat-row .bub{max-width:calc(100% - 35px);min-width:0}
   /* auto width: the mark is 1.54:1, and a square box squashed it. */
   .chat-av{flex:0 0 auto;width:auto;height:17px;margin:3px 0 2px;
            display:block;opacity:.95}
@@ -403,6 +403,9 @@
   /* The line fades in rather than snapping to the next string. An instant
      swap of one short phrase for another reads as a flicker; half a second
      of fade reads as a step. */
+  .wait-clock{margin-left:auto;font-size:11.5px;font-variant-numeric:tabular-nums;
+              color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .wait-box{width:100%}
   .wait-in{animation:waitfade .5s ease}
   @keyframes waitfade{from{opacity:.25}to{opacity:1}}
   @media (prefers-reduced-motion:reduce){.wait-in{animation:none}}
@@ -441,17 +444,33 @@
         background:var(--color-bg);color:var(--color-text)}
   .gate .card{max-width:380px;width:100%}
 
+  .md{min-width:0}
   .md p{margin:0 0 7px}
   .md p:last-child{margin-bottom:0}
+  .md-heading{margin:13px 0 6px;font-weight:650;line-height:1.3;
+              letter-spacing:-.01em;color:var(--color-text)}
+  .md-heading:first-child{margin-top:0}
+  .md h3.md-heading{font-size:14.5px}
+  .md h4.md-heading{font-size:13.5px}
   .md ul,.md ol{margin:4px 0 7px;padding-left:20px;display:flex;flex-direction:column;gap:3px}
   .md li{font-size:13.5px}
   .md code{font-family:ui-monospace,monospace;font-size:.88em;
            background:color-mix(in srgb, var(--color-text) 9%, transparent);
            padding:.1em .32em;border-radius:3px}
-  .md-table{border-collapse:collapse;margin:5px 0 8px;font-size:12.5px;
-            display:block;overflow-x:auto;max-width:100%}
-  .md-table td{border:1px solid var(--color-divider);padding:4px 8px;
-               vertical-align:top;font-variant-numeric:tabular-nums}
+  .md-table-wrap{max-width:100%;overflow-x:auto;margin:7px 0 9px;
+                 border:1px solid var(--color-divider);border-radius:var(--radius-md);
+                 background:var(--color-surface)}
+  .md-table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;
+            margin:0;font-size:12.5px;line-height:1.4}
+  .md-table th,.md-table td{padding:7px 9px;text-align:left;vertical-align:top;
+                            border-right:1px solid var(--color-divider);
+                            border-bottom:1px solid var(--color-divider);
+                            white-space:normal;overflow-wrap:anywhere;
+                            font-variant-numeric:tabular-nums}
+  .md-table th{font-weight:650;background:color-mix(in srgb, var(--color-text) 6%, var(--color-surface))}
+  .md-table tbody tr:nth-child(even) td{background:color-mix(in srgb, var(--color-text) 2.5%, var(--color-surface))}
+  .md-table tr:last-child td{border-bottom:0}
+  .md-table th:last-child,.md-table td:last-child{border-right:0}
   /* ---------- in-page sub-navigation ---------- */
   /* Sections of the active page, listed under its nav row so they can be
      reached without scrolling for them. Built from the rendered DOM in
@@ -740,10 +759,50 @@ const MD_BULLET = /^\s*[-*•]\s+(.*)$/;
 const MD_NUM = /^\s*\d+[.)]\s+(.*)$/;
 const MD_ROW = /^\s*\|.*\|\s*$/;
 const MD_SEP = /^[\s|:-]+$/;
+const MD_HEADING = /^\s*(#{1,4})\s+(.+?)\s*#*\s*$/;
+const MD_BOLD_HEADING = /^\s*\*\*(.+?)\*\*:?\s*$/;
+
+// Split a table row without breaking escaped pipes or pipes inside inline
+// code. String.split("|") made cells drift whenever a value such as `A | B`
+// appeared, which is exactly the kind of crooked table this renderer exists
+// to avoid.
+function mdTableCells(line) {
+  const body = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  const cells = [];
+  let cell = "";
+  let inCode = false;
+  for (let n = 0; n < body.length; n++) {
+    const ch = body[n];
+    if (ch === "\\" && body[n + 1] === "|") {
+      cell += "|"; n++; continue;
+    }
+    if (ch === "`") inCode = !inCode;
+    if (ch === "|" && !inCode) {
+      cells.push(cell.trim()); cell = "";
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function mdAlignment(marker) {
+  const value = marker.trim();
+  if (value.startsWith(":") && value.endsWith(":")) return "center";
+  if (value.endsWith(":")) return "right";
+  return "left";
+}
 
 function renderMarkdown(text) {
   const box = el("div", { class: "md" });
-  const lines = String(text || "").split(/\r?\n/);
+  // Recover the common malformed form "**Heading:** | Col | Col |". The
+  // generation prompt now forbids it, but saved conversations and answers
+  // from other providers still deserve a clean rendering.
+  const normalized = String(text || "").replace(
+    /^(\s*(?:#{1,4}\s+.+?|\*\*[^*]+\*\*:?)\s+)(\|.*\|)\s*$/gm,
+    "$1\n$2");
+  const lines = normalized.split(/\r?\n/);
   let i = 0;
 
   const flushList = (ordered) => {
@@ -761,19 +820,54 @@ function renderMarkdown(text) {
     const line = lines[i];
     if (!line.trim()) { i++; continue; }
 
-    // A pipe table, which is how spec rows arrive now parsing keeps them.
+    const heading = line.match(MD_HEADING);
+    const boldHeading = line.match(MD_BOLD_HEADING);
+    if (heading || boldHeading) {
+      // Chat content is nested below the page heading, so Markdown H1/H2 map
+      // to H3 here rather than introducing a second page-level heading.
+      const tag = !heading || heading[1].length <= 2 ? "h3" : "h4";
+      box.append(el(tag, { class: "md-heading",
+                           html: mdInline(heading ? heading[2] : boldHeading[1]) }));
+      i++;
+      continue;
+    }
+
+    // A real table stays a table. The scroll container owns overflow so the
+    // browser can keep one shared column grid instead of laying rows out like
+    // unrelated blocks.
     if (MD_ROW.test(line)) {
-      const tbl = el("table", { class: "md-table" });
+      const rows = [];
+      let separators = null;
       while (i < lines.length && MD_ROW.test(lines[i])) {
-        if (!MD_SEP.test(lines[i])) {          // the |---|---| row carries no data
-          const tr = el("tr", {});
-          lines[i].trim().replace(/^\||\|$/g, "").split("|")
-            .forEach(c => tr.append(el("td", { html: mdInline(c.trim()) })));
-          tbl.append(tr);
-        }
+        if (MD_SEP.test(lines[i])) separators = mdTableCells(lines[i]);
+        else rows.push(mdTableCells(lines[i]));
         i++;
       }
-      box.append(tbl);
+      if (!rows.length) continue;
+
+      const columnCount = rows.reduce((n, row) => Math.max(n, row.length), 0);
+      const aligns = Array.from({ length: columnCount }, (_, column) =>
+        mdAlignment((separators && separators[column]) || ""));
+      const wrap = el("div", { class: "md-table-wrap", role: "region",
+                               "aria-label": "Scrollable table", tabindex: "0" });
+      const tbl = el("table", { class: "md-table" });
+      const head = el("thead", {});
+      const body = el("tbody", {});
+      rows.forEach((row, rowIndex) => {
+        const tr = el("tr", {});
+        for (let column = 0; column < columnCount; column++) {
+          const isHeader = rowIndex === 0;
+          tr.append(el(isHeader ? "th" : "td", {
+            ...(isHeader ? { scope: "col" } : {}),
+            style: `text-align:${aligns[column]}`,
+            html: mdInline(row[column] || "")
+          }));
+        }
+        (rowIndex === 0 ? head : body).append(tr);
+      });
+      tbl.append(head, body);
+      wrap.append(tbl);
+      box.append(wrap);
       continue;
     }
 
@@ -783,7 +877,8 @@ function renderMarkdown(text) {
     const para = [];
     while (i < lines.length && lines[i].trim()
            && !MD_BULLET.test(lines[i]) && !MD_NUM.test(lines[i])
-           && !MD_ROW.test(lines[i])) {
+           && !MD_ROW.test(lines[i]) && !MD_HEADING.test(lines[i])
+           && !MD_BOLD_HEADING.test(lines[i])) {
       para.push(lines[i]); i++;
     }
     box.append(el("p", { html: mdInline(para.join(" ")) }));
@@ -4725,13 +4820,89 @@ const WAIT_LINES = [
 // the change as movement rather than as information.
 const WAIT_DWELL = 4500;
 
+// Characters a second while an answer types out. Matches the widget's
+// REVEAL_CPS -- the console is meant to show what a customer gets, so a
+// different rate here would make it lie about pace as well as content.
+const REVEAL_CPS = 260;
+
+// Type an answer into a bubble, then render its markdown once.
+//
+// Plain text first, markdown at the end, deliberately: renderMarkdown builds
+// a fresh node per call, so revealing through it would mean rebuilding and
+// re-appending the whole subtree every frame -- which is exactly how the
+// widget's first attempt at this stacked forty copies of the answer on top
+// of each other. Growing a single text node cannot do that, and it also
+// means no half-parsed markdown is ever on screen.
+function revealAnswerInto(bub, text, animate) {
+  // A placeholder goes in FIRST and is replaced in place. The caller appends
+  // Sources and the support button to this same bubble immediately after, so
+  // finishing with bub.append() would file the answer underneath its own
+  // sources.
+  const holder = el("div", { class: "md" });
+  bub.append(holder);
+  const finish = () => holder.replaceWith(renderMarkdown(text));
+
+  const reduced = window.matchMedia
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Tables assemble as broken pipe syntax when revealed; short answers and
+  // curated FAQ hits are already instant and gain nothing but delay.
+  if (!animate || reduced || /\n\s*\|/.test(text) || text.length < 40) {
+    finish();
+    return;
+  }
+  let shown = 0, last = 0, done = false;
+  const complete = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(safety);
+    finish();
+  };
+  // requestAnimationFrame STOPS in a background tab, which leaves the answer
+  // frozen wherever it had got to -- observed stuck at "The SMART". A timer
+  // past the expected duration completes it regardless; setTimeout is
+  // throttled in the background but still fires, where rAF does not.
+  const safety = setTimeout(complete,
+                            Math.ceil(text.length / REVEAL_CPS * 1000) + 3000);
+  const step = (ts) => {
+    if (done) return;
+    // isConnected, so a chat reset mid-reveal stops it. The first frame runs
+    // after the caller has appended the row, so this is never false on entry.
+    if (!holder.isConnected) { clearTimeout(safety); return; }
+    if (!last) last = ts;
+    shown = Math.min(text.length,
+                     shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS)));
+    last = ts;
+    if (shown >= text.length) { complete(); return; }
+    holder.textContent = text.slice(0, shown);
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function typingBubble() {
   const line = el("span", { class: "wait-line" }, WAIT_LINES[0]);
   const dots = el("span", { class: "typing" }, el("i", {}), el("i", {}), el("i", {}));
   const box = el("span", { class: "wait-box" }, line, dots);
   box.setAttribute("role", "status");
   box.setAttribute("aria-live", "polite");
+  // Elapsed seconds, ticking. A wait carrying a number reads as work in
+  // progress; the same wait without one reads as a hang, and these waits are
+  // long -- generation alone is 2.5-8s. Blank under a second, so a fast
+  // answer never flashes a counter on its way past.
+  const clock = el("span", { class: "wait-clock" });
+  box.append(clock);
+
   const bub = aiTurn(box);
+
+  // Declared after `bub`, not before it: the interval closes over it, and
+  // reading a `const` from its temporal dead zone is a race waiting for a
+  // faster first tick.
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    if (!bub._row.isConnected) return clearInterval(tick);
+    const secs = Math.floor((Date.now() - t0) / 1000);
+    clock.textContent = secs >= 1 ? secs + "s" : "";
+  }, 250);
   // Self-terminating rather than cleared by the caller: the bubble is removed
   // in several places (answered, failed, chat reset) and a timer that outlives
   // its node would keep a detached tree alive.
@@ -4793,7 +4964,11 @@ function viewTest() {
         faq_id: opts.faqId || null, skip_faq: !!opts.skipFaq }) });
       wait._row.remove();
       const bub = aiTurn();
-      bub.append(renderMarkdown(r.answer || "No answer"));
+      // The console chat had no reveal at all -- only the widget did -- so
+      // "the answers come out instantly" was true here however the widget
+      // behaved. Both clients now type an answer out at the same rate.
+      revealAnswerInto(bub, r.answer || "No answer",
+                       !r.from_faq && !r.flagged && !r.service_degraded);
       if (r.sources && r.sources.length) {
         // Collapsed, to match the widget. Provenance is something you go and
         // look at, so it should not sit open under every answer -- and this
