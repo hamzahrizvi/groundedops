@@ -254,14 +254,15 @@ def check_grounding(
     answer: str,
     context_chunks: list[dict],
     threshold: float = 0.35,
-) -> tuple[bool, float]:
+) -> tuple[bool, float | None]:
     """
     Returns (is_grounded, min_entailment_score).
 
     is_grounded=False means at least one unit in the answer
     is not supported by the retrieved context.
-    Fails open (returns True, 1.0) if the NLI model itself crashes,
-    so a model error never hard-blocks a response.
+    A verifier outage is distinct from an unsupported answer: it returns
+    ``(False, None)``. Callers must treat that as a temporary verification
+    failure, not as permission to serve an unverified answer.
     """
     try:
         model = _get_nli_model()
@@ -297,10 +298,10 @@ def check_grounding(
 
     except Exception as exc:
         logger.error(f"Grounding check failed: {exc}")
-        return True, 1.0   # fail open
+        return False, None
 
 
-def score_unit(unit: str, context_chunks: list[dict]) -> float:
+def score_unit(unit: str, context_chunks: list[dict]) -> float | None:
     """Entailment score for ONE unit against the context.
 
     Extracted so the streaming path can verify each sentence as it lands
@@ -309,8 +310,9 @@ def score_unit(unit: str, context_chunks: list[dict]) -> float:
     scored here and a sentence scored there get identical treatment, and
     the streamed and non-streamed paths cannot drift apart in strictness.
 
-    Fails OPEN (1.0) on model error, matching check_grounding: an NLI crash
-    must never silently turn into "this answer is a hallucination".
+    Returns ``None`` when the verifier itself is unavailable. StreamGrounder
+    treats that as a refusal, preserving the same fail-closed guarantee as
+    the non-streaming path.
     """
     try:
         if not unit or not unit.strip():
@@ -329,7 +331,7 @@ def score_unit(unit: str, context_chunks: list[dict]) -> float:
         return float(max(logits[:, _entailment_index()]))
     except Exception as exc:
         logger.error(f"score_unit failed: {exc}")
-        return 1.0
+        return None
 
 
 class StreamGrounder:
@@ -366,6 +368,7 @@ class StreamGrounder:
         self.released = ""
         self.min_score = 1.0
         self.failed_unit = None
+        self.verifier_unavailable = False
 
     def _boundary(self, text: str) -> int:
         """Index just past the last COMPLETE sentence terminator, or -1.
@@ -420,6 +423,13 @@ class StreamGrounder:
         units = split_units(candidate)
         for u in units:
             s = score_unit(u, self.context)
+            if s is None:
+                self.verifier_unavailable = True
+                self.failed_unit = u
+                # Keep a numeric internal score for callers that report it;
+                # the separate flag makes the failure cause explicit.
+                self.min_score = 0.0
+                return "", False
             self.min_score = min(self.min_score, s)
             # Same second chance /query gives a failed NLI score, and for the
             # same reason: NLI is unreliable against shredded table text, so a

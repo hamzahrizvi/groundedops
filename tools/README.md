@@ -5,6 +5,14 @@ kept because each one caught something that reading the code did not.
 
 All of them expect a backend already running; none of them start one.
 
+For a release-facing gate, use `src/eval.py --repeats 3`. Cases can be marked
+as `faq`, `retrieval`, `comparison`, `refusal`, or `grounding`; use
+`--layer retrieval` with `skip_faq: true` to measure retrieval rather than the
+curated-answer shortcut. A repeated case is stable only when every run passes.
+The starter retrieval suite is `src/eval_cases_retrieval.json`; review three
+runs, then lock it separately with `--baseline eval_baseline_retrieval.json
+--update-baseline`.
+
 | Script | What it is for |
 |---|---|
 | `eval_battery.py` | 19 grounded questions × 3 repeats against `/query`, across all four product ranges. **Repeats are the point** — a single pass cannot tell a fix from noise (see HANDOFF.md). |
