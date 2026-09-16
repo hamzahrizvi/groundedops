@@ -278,6 +278,11 @@
     ".go-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--mut);" +
     "border-radius:50%;animation:go-spin .7s linear infinite}" +
     "@keyframes go-spin{to{transform:rotate(360deg)}}" +
+    // The wait line fades in rather than snapping to the next string. An
+    // instant swap of one short phrase for another reads as a flicker.
+    ".go-waitin{animation:go-waitfade .5s ease}" +
+    "@keyframes go-waitfade{from{opacity:.25}to{opacity:1}}" +
+    "@media (prefers-reduced-motion:reduce){.go-waitin{animation:none}}" +
     // chips (suggested pointers)
     ".go-chips{display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-top:2px}" +
     ".go-chip{border:0;background:#2f3a45;color:#fff;padding:11px 17px;border-radius:999px;cursor:pointer;" +
@@ -707,25 +712,26 @@
    * documentation") for what can be twenty seconds reads as a stall; these
    * move, and they move in the order the pipeline actually works in -- find
    * the pages, read them, then check the answer against them -- so the line
-   * is a rough progress report rather than decoration. */
+   * is a rough progress report rather than decoration.
+   *
+   * Sixteen lines on a 2.2s loop was too much of both. The status changed
+   * before it could be read, and past ~35 seconds it WRAPPED back to "Sifting
+   * through the documentation" -- a progress report that starts over reads as
+   * a stall, which is the exact opposite of what it is there to say. Four
+   * steps now, each held long enough to read, ending on a line that STAYS.
+   * Most answers land inside the first dwell, so the common case is one
+   * steady line that never moves at all. */
   var WAIT_LINES = [
-    "Sifting through the documentation",
-    "Finding the pages that mention this",
-    "Reading the ones that look right",
-    "Linking the dots",
-    "Checking the tables",
-    "Following a cross-reference",
-    "Matching the wording to your question",
-    "Weighing two possible answers",
+    "Searching the documentation",
+    "Reading the pages that matched",
     "Drafting an answer",
-    "Checking every figure against the page it came from",
-    "Making sure nothing here was invented",
-    "Confirming the part numbers",
-    "Re-reading the fine print",
-    "Looking for anything that contradicts this",
-    "Tidying the wording",
-    "Nearly there",
+    "Checking it against the source",
+    "Still working — this one is taking a moment",
   ];
+
+  /* Long enough to read the line and look away. Under about 3s the eye
+   * catches the change as movement rather than as information. */
+  var WAIT_DWELL = 4500;
 
   /* Returns the same node status() does, so every caller still just removes
    * it. The timer stops itself once the node leaves the log rather than
@@ -735,11 +741,22 @@
   function waiting() {
     var d = status(WAIT_LINES[0]);
     var label = d.lastChild, i = 0;
-    var t = setInterval(function () {
-      if (!d.parentNode) { clearInterval(t); return; }
-      i = (i + 1) % WAIT_LINES.length;
+    /* Chained timeouts rather than an interval, because the sequence has to
+     * be able to STOP: it holds on the last line instead of looping round to
+     * claim it is starting the search again. */
+    function step() {
+      if (!d.parentNode || i >= WAIT_LINES.length - 1) return;
+      i += 1;
       label.textContent = WAIT_LINES[i];
-    }, 2200);
+      /* Restart the fade: drop the class, force a reflow, put it back.
+       * Without the reflow the browser coalesces remove+add and the
+       * animation never re-runs. */
+      label.className = "";
+      void label.offsetWidth;
+      label.className = "go-waitin";
+      setTimeout(step, WAIT_DWELL);
+    }
+    setTimeout(step, WAIT_DWELL);
     return d;
   }
 

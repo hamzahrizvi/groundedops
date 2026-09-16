@@ -400,6 +400,12 @@
            display:block;opacity:.95}
   .wait-box{display:inline-flex;gap:8px;align-items:center}
   .wait-line{font-size:13px;color:color-mix(in srgb, var(--color-text) 62%, transparent)}
+  /* The line fades in rather than snapping to the next string. An instant
+     swap of one short phrase for another reads as a flicker; half a second
+     of fade reads as a step. */
+  .wait-in{animation:waitfade .5s ease}
+  @keyframes waitfade{from{opacity:.25}to{opacity:1}}
+  @media (prefers-reduced-motion:reduce){.wait-in{animation:none}}
   .typing{display:inline-flex;gap:4px;align-items:center;padding:3px 0}
   .typing i{width:6px;height:6px;border-radius:50%;display:block;
             background:color-mix(in srgb, var(--color-text) 45%, transparent);
@@ -4699,24 +4705,25 @@ function aiTurn(...kids) {
 // these move, and they move in the order the pipeline actually works in --
 // find the pages, read them, then check the answer against them -- so the
 // line is a rough progress report rather than decoration.
+//
+// Sixteen lines on a 2.2s loop was too much of both. The status changed before
+// it could be read, and past ~35 seconds it WRAPPED back to "Sifting through
+// the documentation" -- a progress report that starts over reads as a stall,
+// which is the exact opposite of what it is there to say. Four steps now, each
+// held long enough to read, ending on a line that STAYS. Most answers land
+// inside the first dwell, so the common case is one steady line that never
+// moves at all.
 const WAIT_LINES = [
-  "Sifting through the documentation",
-  "Finding the pages that mention this",
-  "Reading the ones that look right",
-  "Linking the dots",
-  "Checking the tables",
-  "Following a cross-reference",
-  "Matching the wording to your question",
-  "Weighing two possible answers",
+  "Searching the documentation",
+  "Reading the pages that matched",
   "Drafting an answer",
-  "Checking every figure against the page it came from",
-  "Making sure nothing here was invented",
-  "Confirming the part numbers",
-  "Re-reading the fine print",
-  "Looking for anything that contradicts this",
-  "Tidying the wording",
-  "Nearly there",
+  "Checking it against the source",
+  "Still working — this one is taking a moment",
 ];
+
+// Long enough to read the line and look away. Under about 3s the eye catches
+// the change as movement rather than as information.
+const WAIT_DWELL = 4500;
 
 function typingBubble() {
   const line = el("span", { class: "wait-line" }, WAIT_LINES[0]);
@@ -4726,14 +4733,26 @@ function typingBubble() {
   box.setAttribute("aria-live", "polite");
   const bub = aiTurn(box);
   // Self-terminating rather than cleared by the caller: the bubble is removed
-  // in several places (answered, failed, chat reset) and an interval that
-  // outlives its node would keep a detached tree alive.
+  // in several places (answered, failed, chat reset) and a timer that outlives
+  // its node would keep a detached tree alive.
+  //
+  // Chained timeouts rather than an interval, because the sequence has to be
+  // able to STOP: it holds on the last line instead of looping round to claim
+  // it is starting the search again.
   let i = 0;
-  const t = setInterval(() => {
-    if (!bub._row.isConnected) return clearInterval(t);
-    i = (i + 1) % WAIT_LINES.length;
+  const step = () => {
+    if (!bub._row.isConnected || i >= WAIT_LINES.length - 1) return;
+    i += 1;
     line.textContent = WAIT_LINES[i];
-  }, 2200);
+    // Restart the fade: drop the class, force a reflow, put it back. Without
+    // the reflow the browser coalesces remove+add and the animation never
+    // re-runs.
+    line.classList.remove("wait-in");
+    void line.offsetWidth;
+    line.classList.add("wait-in");
+    setTimeout(step, WAIT_DWELL);
+  };
+  setTimeout(step, WAIT_DWELL);
   return bub;
 }
 

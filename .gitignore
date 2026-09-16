@@ -117,3 +117,11 @@ documents/
 # Derived FAQ question vectors: rebuildable from faq_store.json in ~2 minutes,
 # ~600KB of binary, and invalidated by its own mtime key.
 src/*.vectors.npz
+
+# PyInstaller output. `build/` is intermediate, `dist/` is the product; both
+# are regenerable and both are large -- 290MB of them reached a commit once,
+# on a public repo, because neither was listed here.
+build/
+dist/
+# Per-developer editor/agent settings, not project configuration.
+.claude/
