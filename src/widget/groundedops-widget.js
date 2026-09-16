@@ -694,21 +694,35 @@
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     // A markdown table revealed a character at a time renders as broken
     // pipe syntax for most of its life. Tables arrive whole.
-    if (reduced || /\n\s*\|/.test(text) || text.length < 40) {
-      renderMd(text, el);
-      return;
-    }
+    if (reduced || /\n\s*\|/.test(text) || text.length < 40) return;
+
+    // textContent, NOT renderMd, for the growing text: renderMd APPENDS into
+    // the node (it is a sequence of into.appendChild calls) and never clears,
+    // so re-rendering each frame stacked every partial copy on top of the
+    // last -- the answer arrived as a staircase of itself, under a complete
+    // copy that bubble() had already rendered. textContent replaces, so each
+    // frame supersedes the one before.
+    //
+    // It also removes the partial-markdown problem entirely: raw syntax is
+    // never half-parsed, because nothing is parsed until the end.
     var shown = 0, last = 0;
-    renderMd("", el);
+    el.textContent = "";
     function step(ts) {
       if (!row.isConnected) return;               // bubble removed mid-reveal
       if (!last) last = ts;
       shown = Math.min(text.length,
                        shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS)));
       last = ts;
-      renderMd(text.slice(0, shown), el);
+      if (shown >= text.length) {
+        // Done: swap the plain text for the real markdown, once.
+        el.textContent = "";
+        renderMd(text, el);
+        scrollDown();
+        return;
+      }
+      el.textContent = text.slice(0, shown);
       scrollDown();
-      if (shown < text.length) requestAnimationFrame(step);
+      requestAnimationFrame(step);
     }
     requestAnimationFrame(step);
   }
@@ -1736,10 +1750,14 @@
           return;
         }
         say(d.answer || "No answer returned.", {
-          // A curated FAQ answer comes back in ~0.08s; typing it out would
-          // add a delay to the one path that is genuinely instant. Only the
-          // answers that cost a wait get the reveal.
-          reveal: !d.from_faq,
+          // Only a real answer types out.
+          //  - a curated FAQ answer returns in ~0.08s, so revealing it would
+          //    ADD delay to the one path that is genuinely instant;
+          //  - a refusal or a service-outage notice is not an answer being
+          //    composed, and typing out "the answering service isn't
+          //    reachable" one character at a time is a slow way to deliver
+          //    bad news.
+          reveal: !d.from_faq && !d.flagged && !d.service_degraded,
           sources: d.flagged ? null : d.sources,
           flagged: !!d.flagged,
           badge: d.from_faq ? "Reviewed answer" : null,
