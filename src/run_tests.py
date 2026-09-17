@@ -72,6 +72,10 @@ def discover_and_run():
             or "from grounding import" in source
             or "import router" in source
             or "from router import" in source
+            # ingest pulls the PDF and embedding stack, which is the same
+            # "cannot load module more than once per process" case.
+            or "import ingest" in source
+            or "from ingest import" in source
         )
         if needs_process:
             total += 1

@@ -91,6 +91,47 @@ def _detect_header(line: str) -> str | None:
     return None
 
 
+_FOOTER_LINE = re.compile(r"^(?P<title>.{3,70}?)\s*[–—-]\s*\d{1,4}\s*$")
+
+
+def _strip_running_footer(text: str, filename: str) -> str:
+    """Remove the manual's own running footer from a page.
+
+    Every page of these manuals ends "NV200S Range User Manual – 107". It is
+    not content, and it does two kinds of damage:
+
+      * a chunk that holds nothing else becomes a chunk whose entire body is
+        a page footer. 64 of 1749 chunks (3.7%) are exactly that, and they
+        are not inert -- one of them ("[... — WR00147 - SMART Payout to NV200
+        Adapter] NV200S Range User Manual – 107") reranked #1 at 0.9974 for
+        "can the NV200 be used with a SMART Payout?", winning on the heading
+        alone and then carrying no answer;
+      * on every other chunk it is a tail of title words that the embedder
+        and BM25 both see, making chunks from one manual look more alike.
+
+    Conservative on purpose: a line is only a footer if it ends in a number
+    AND its words are mostly the document's own title. A page whose last line
+    happens to be "Supply Voltage - 24" keeps it, because "supply voltage" is
+    nothing like the filename.
+    """
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    title_words = {w for w in re.findall(r"[a-z0-9]+", stem.lower())
+                   if len(w) > 2}
+    if not title_words:
+        return text
+    out = []
+    for line in (text or "").split("\n"):
+        m = _FOOTER_LINE.match(line.strip())
+        if m:
+            words = {w for w in re.findall(r"[a-z0-9]+", m.group("title").lower())
+                     if len(w) > 2}
+            # Most of the line's words are title words -> it is the footer.
+            if words and len(words & title_words) >= max(1, int(len(words) * 0.6)):
+                continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def _breadcrumb(chunk: str) -> str | None:
     """
     Find the nearest section/step header inside a chunk. Takes the FIRST
@@ -316,6 +357,11 @@ def ingest_file(content: bytes, filename: str,
                 _step("splitting into sections", _pi, len(pages))
             if not ptext or not ptext.strip():
                 continue
+            # Before chunking, so the footer never reaches an embedding and
+            # cannot become a chunk's entire body.
+            ptext = _strip_running_footer(ptext, filename)
+            if not ptext.strip():
+                continue
             for raw in chunk_text(ptext, size=CHUNK_SIZE,
                                   overlap=CHUNK_OVERLAP):
                 # The heading the chunker attached, taken off BEFORE
@@ -323,6 +369,12 @@ def ingest_file(content: bytes, filename: str,
                 # only embedded in the text. That distinction is the point
                 # of the change: as metadata it can be filtered and boosted.
                 body, section = pop_section(raw)
+                # Tested on the BODY, not on the enriched chunk. The check
+                # below runs after _enrich_chunks has prepended a breadcrumb,
+                # so "[Doc — Section]\n" is always non-empty and a chunk with
+                # nothing in it would be stored as though it had content.
+                if not body.strip():
+                    continue
                 for c in _enrich_chunks([body], filename, section):
                     # Sentinels are a chunker-internal signal only — strip
                     # before anything is embedded, BM25-tokenised or shown
