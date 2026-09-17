@@ -2751,6 +2751,41 @@ function viewAdvanced() {
       + "discards it; nothing is lost, because every word is still in the "
       + "copy that kept the table."));
 
+  // Which cross-encoder orders the retrieved passages. A PROFILE, not a
+  // model name: the choice is a hardware trade-off, and a free-text model
+  // box is a way to take the assistant down with a typo.
+  const rrSel = el("select", { class: "input", onchange: e => {
+    p.reranker_profile = e.target.value;
+    rrHint.textContent = RR_HINT[e.target.value] || "";
+  } },
+    el("option", { value: "fast" }, "Fast — MiniLM (default)"),
+    el("option", { value: "accurate" }, "Accurate — BGE reranker"));
+  rrSel.value = p.reranker_profile || "fast";
+  const RR_HINT = {
+    fast: "Puts the right passage first 68% of the time. ~2s per question "
+        + "on the dev box.",
+    accurate: "73% — five points better — for roughly 8x the compute. "
+        + "That measured 17s per question on a CPU-only machine and will be "
+        + "far quicker on a GPU server. Benchmark it there before leaving it on.",
+  };
+  const rrHint = el("p", { class: "sec-hint" }, RR_HINT[rrSel.value]);
+  const rerankCard = el("div", { class: "card elev-sm",
+                                 style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                                 "data-sec": "Passage ranking" },
+    el("h3", {}, "Passage ranking"),
+    el("p", { class: "sec-hint" },
+      "Which model decides the order of the passages an answer is written "
+      + "from. Measured over the 19-question retrieval suite: both reach the "
+      + "right passage 100% of the time, they differ only in how often it "
+      + "comes FIRST."),
+    el("div", { style: "margin-top:12px;max-width:340px" }, rrSel),
+    rrHint,
+    el("p", { class: "sec-hint", style: "margin-top:8px" },
+      "Safe to change whenever — ranking happens as a question is asked, "
+      + "so nothing is reindexed and no stored data changes. The first "
+      + "question after a switch waits for the new model to load, and the "
+      + "very first one downloads it."));
+
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
     saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     try {
@@ -2767,7 +2802,7 @@ function viewAdvanced() {
     el("p", { class: "lede" },
       "How answers are produced and checked. Changes apply to the next "
       + "question — no restart. Only root accounts see this page."),
-    verifyCard, salesCard, indexCard, saveBtn,
+    verifyCard, rerankCard, salesCard, indexCard, saveBtn,
   ];
 }
 
