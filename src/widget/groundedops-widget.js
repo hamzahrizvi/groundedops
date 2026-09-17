@@ -447,7 +447,7 @@
 
   var MD_BULLET = /^\s*[-*•]\s+(.*)$/;
   var MD_NUM = /^\s*\d+[.)]\s+(.*)$/;
-  var MD_ROW = /^\s*\|.*\|\s*$/;
+  var MD_ROW = /^\s*\|.*\|.*$/;
   var MD_SEP = /^[\s|:\-]+$/;
   var MD_HEADING = /^\s*(#{1,4})\s+(.+?)\s*#*\s*$/;
   var MD_BOLD_HEADING = /^\s*\*\*(.+?)\*\*:?\s*$/;
@@ -480,13 +480,55 @@
     return "left";
   }
 
+  var MD_HEADER_HINTS = {
+    parameter: 1, minimum: 1, nominal: 1, maximum: 1, feature: 1,
+    dimension: 1, configuration: 1, mode: 1, pin: 1, signal: 1,
+    direction: 1, description: 1, length: 1, width: 1, item: 1,
+    value: 1, type: 1, voltage: 1, current: 1
+  };
+
+  function mdLooksLikeHeader(row) {
+    var cells = mdTableCells(row), hits = 0;
+    for (var c = 0; c < cells.length; c++) {
+      var words = cells[c].toLowerCase().replace(/[*_`]/g, "").match(/[a-z]+/g) || [];
+      for (var w = 0; w < words.length; w++) {
+        if (MD_HEADER_HINTS[words[w]]) { hits++; break; }
+      }
+    }
+    return hits >= 2;
+  }
+
+  function mdNormalizeText(text) {
+    var rawLines = String(text == null ? "" : text).split(/\r?\n/);
+    var out = [];
+    for (var i = 0; i < rawLines.length; i++) {
+      var line = rawLines[i].replace(/\s+$/, "");
+      if (/^\s*\\\|/.test(line) && (line.match(/\|/g) || []).length >= 3)
+        line = line.replace(/^(\s*)\\\|/, "$1|");
+
+      var merged = line.match(/^(.*)(\*\*[^*\n]{2,90}\*\*:?)\s*(\|.*\|)\s*$/);
+      var embeddedRow = merged && /^\s*\|/.test(merged[1]);
+      var sectionHeading = merged && /\b(?:operation|requirements?|specifications?|options?|notes?|pinout|dimensions?|limits?|settings?|installation|configuration)\b/i.test(merged[2]);
+      if (merged && mdLooksLikeHeader(merged[3]) && (!embeddedRow || sectionHeading)) {
+        if (merged[1].replace(/^\s+|\s+$/g, "")) out.push(merged[1].replace(/^\s+|\s+$/g, ""));
+        out.push(merged[2].replace(/^\s+|\s+$/g, ""), merged[3].replace(/^\s+|\s+$/g, ""));
+        continue;
+      }
+      var inline = line.match(/^([^|\n].*?\S)\s+(\|.*\|)\s*$/);
+      if (inline && mdLooksLikeHeader(inline[2])) {
+        out.push(inline[1].replace(/^\s+|\s+$/g, ""), inline[2].replace(/^\s+|\s+$/g, ""));
+        continue;
+      }
+      out.push(line);
+    }
+    return out.join("\n");
+  }
+
   function renderMd(text, into) {
     // A model sometimes runs a table onto the same line as its heading
     // ("**Pulse:** | Pin | Name |"), so split pipe runs onto their own lines
     // before parsing or the whole thing reads as one paragraph.
-    var normalized = String(text == null ? "" : text).replace(
-      /^(\s*(?:#{1,4}\s+.+?|\*\*[^*]+\*\*:?)\s+)(\|.*\|)\s*$/gm,
-      "$1\n$2");
+    var normalized = mdNormalizeText(text);
     var lines = normalized.split(/\r?\n/);
     var i = 0;
 
@@ -532,8 +574,16 @@
         }
         if (!rows.length) continue;
 
-        var columnCount = 0;
-        for (var r = 0; r < rows.length; r++) columnCount = Math.max(columnCount, rows[r].length);
+        // The header defines the grid. Extra cells are prose that leaked onto
+        // a row and must not stretch every other row into empty columns.
+        var columnCount = rows[0].length;
+        var overflow = [];
+        for (var r = 0; r < rows.length; r++) {
+          if (rows[r].length > columnCount) {
+            if (r > 0) overflow.push(rows[r].slice(columnCount).join(" | "));
+            rows[r] = rows[r].slice(0, columnCount);
+          }
+        }
         var aligns = [];
         for (var a = 0; a < columnCount; a++) aligns.push(mdAlignment(separators && separators[a] || ""));
         var wrap = document.createElement("div");
@@ -561,6 +611,13 @@
         tbl.appendChild(tbody);
         wrap.appendChild(tbl);
         into.appendChild(wrap);
+        for (var x = 0; x < overflow.length; x++) {
+          if (!overflow[x]) continue;
+          var extra = document.createElement("p");
+          extra.className = "go-md-p";
+          extra.innerHTML = mdInline(overflow[x]);
+          into.appendChild(extra);
+        }
         continue;
       }
 

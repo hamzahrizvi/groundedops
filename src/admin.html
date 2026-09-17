@@ -757,7 +757,7 @@ function mdInline(t) {
 
 const MD_BULLET = /^\s*[-*•]\s+(.*)$/;
 const MD_NUM = /^\s*\d+[.)]\s+(.*)$/;
-const MD_ROW = /^\s*\|.*\|\s*$/;
+const MD_ROW = /^\s*\|.*\|.*$/;
 const MD_SEP = /^[\s|:-]+$/;
 const MD_HEADING = /^\s*(#{1,4})\s+(.+?)\s*#*\s*$/;
 const MD_BOLD_HEADING = /^\s*\*\*(.+?)\*\*:?\s*$/;
@@ -794,14 +794,53 @@ function mdAlignment(marker) {
   return "left";
 }
 
+const MD_HEADER_HINTS = new Set([
+  "parameter", "minimum", "nominal", "maximum", "feature", "dimension",
+  "configuration", "mode", "pin", "signal", "direction", "description",
+  "length", "width", "item", "value", "type", "voltage", "current"
+]);
+
+function mdLooksLikeHeader(row) {
+  const hits = mdTableCells(row).filter(cell => {
+    const words = cell.toLowerCase().replace(/[*_`]/g, "").match(/[a-z]+/g) || [];
+    return words.some(word => MD_HEADER_HINTS.has(word));
+  }).length;
+  return hits >= 2;
+}
+
+function mdNormalizeText(text) {
+  const out = [];
+  String(text || "").split(/\r?\n/).forEach(raw => {
+    let line = raw.replace(/\s+$/, "");
+    if (/^\s*\\\|/.test(line) && (line.match(/\|/g) || []).length >= 3)
+      line = line.replace(/^(\s*)\\\|/, "$1|");
+
+    // Repair both "prose **Heading** | Header |" and a second heading/header
+    // accidentally appended to the last row of the previous table.
+    const merged = line.match(/^(.*)(\*\*[^*\n]{2,90}\*\*:?)\s*(\|.*\|)\s*$/);
+    const embeddedRow = merged && /^\s*\|/.test(merged[1]);
+    const sectionHeading = merged && /\b(?:operation|requirements?|specifications?|options?|notes?|pinout|dimensions?|limits?|settings?|installation|configuration)\b/i.test(merged[2]);
+    if (merged && mdLooksLikeHeader(merged[3]) && (!embeddedRow || sectionHeading)) {
+      if (merged[1].trim()) out.push(merged[1].trim());
+      out.push(merged[2].trim(), merged[3].trim());
+      return;
+    }
+    const inline = line.match(/^([^|\n].*?\S)\s+(\|.*\|)\s*$/);
+    if (inline && mdLooksLikeHeader(inline[2])) {
+      out.push(inline[1].trim(), inline[2].trim());
+      return;
+    }
+    out.push(line);
+  });
+  return out.join("\n");
+}
+
 function renderMarkdown(text) {
   const box = el("div", { class: "md" });
   // Recover the common malformed form "**Heading:** | Col | Col |". The
   // generation prompt now forbids it, but saved conversations and answers
   // from other providers still deserve a clean rendering.
-  const normalized = String(text || "").replace(
-    /^(\s*(?:#{1,4}\s+.+?|\*\*[^*]+\*\*:?)\s+)(\|.*\|)\s*$/gm,
-    "$1\n$2");
+  const normalized = mdNormalizeText(text);
   const lines = normalized.split(/\r?\n/);
   let i = 0;
 
@@ -845,7 +884,16 @@ function renderMarkdown(text) {
       }
       if (!rows.length) continue;
 
-      const columnCount = rows.reduce((n, row) => Math.max(n, row.length), 0);
+      // The header defines the grid. A malformed extra cell is prose that
+      // leaked onto a table row; it must not widen every row in the table.
+      const columnCount = rows[0].length;
+      const overflow = [];
+      rows.forEach((row, rowIndex) => {
+        if (row.length > columnCount) {
+          if (rowIndex > 0) overflow.push(row.slice(columnCount).join(" | "));
+          rows[rowIndex] = row.slice(0, columnCount);
+        }
+      });
       const aligns = Array.from({ length: columnCount }, (_, column) =>
         mdAlignment((separators && separators[column]) || ""));
       const wrap = el("div", { class: "md-table-wrap", role: "region",
@@ -868,6 +916,8 @@ function renderMarkdown(text) {
       tbl.append(head, body);
       wrap.append(tbl);
       box.append(wrap);
+      overflow.filter(Boolean).forEach(extra =>
+        box.append(el("p", { html: mdInline(extra) })));
       continue;
     }
 

@@ -89,6 +89,7 @@ from text_utils import (
     has_reference_markers,
     is_template_leak,
     build_clarification_options,
+    normalize_markdown_tables,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -4762,7 +4763,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
 
     raw_text = output.get("text", "").strip()
     generation_failed = (output.get("model") == "none") or not raw_text
-    answer = _strip_meta(_strip_preamble(raw_text)) if raw_text else "I could not generate a response."
+    answer = normalize_markdown_tables(
+        _strip_meta(_strip_preamble(raw_text))) if raw_text else "I could not generate a response."
 
     # ── Grounding check ──────────────────────
     # Two clocks, because one was measuring the wrong thing. `t_grounding`
@@ -4876,7 +4878,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                                deepseek_api_key=deepseek_api_key)
         if backup_result and backup_result.get("text"):
             output = backup_result
-            answer = _strip_meta(_strip_preamble(output["text"].strip()))
+            answer = normalize_markdown_tables(
+                _strip_meta(_strip_preamble(output["text"].strip())))
             escalated = True
             template_leak = is_template_leak(answer)
             if template_leak:
@@ -4932,7 +4935,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             _retry = _timed("regen", generate_with_fallback,
                             role, prompt, deepseek_api_key=deepseek_api_key,
                             api_keys=api_keys)
-            _text = _strip_meta(_strip_preamble((_retry or {}).get("text", "").strip()))
+            _text = normalize_markdown_tables(_strip_meta(
+                _strip_preamble((_retry or {}).get("text", "").strip())))
             if not _text:
                 continue
             # A model that declines on its own is not a grounding failure and
@@ -5489,7 +5493,8 @@ def query_stream(payload: StreamQueryRequest,
                 out = generate_with_fallback(
                     role, prompt, deepseek_api_key=payload.deepseek_api_key,
                     api_keys={"deepseek": payload.deepseek_api_key})
-                text = _strip_meta(_strip_preamble((out or {}).get("text", "").strip()))
+                text = normalize_markdown_tables(_strip_meta(
+                    _strip_preamble((out or {}).get("text", "").strip())))
                 ok, score = check_grounding(text, top_chunks,
                                             threshold=GROUNDING_THRESHOLD)
                 if not text or not ok:

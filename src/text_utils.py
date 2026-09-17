@@ -134,6 +134,149 @@ def clean_table_artifacts(line: str) -> str:
     return line.strip()
 
 
+# Models occasionally know exactly which rows belong in an answer but emit
+# invalid Markdown around them. The production NV9 power answer was the sharp
+# example: the "12 V DC operation" heading and its four-column header were
+# appended to the final four-column row of the 24 V table, producing one
+# eight-column row and a visibly broken table. This is presentation repair,
+# not factual rewriting: it only inserts structural line breaks, restores a
+# leading escaped table pipe, pads short rows and moves cells beyond the
+# declared header width back to prose.
+_MD_HEADER_HINTS = {
+    "parameter", "minimum", "nominal", "maximum", "feature", "dimension",
+    "configuration", "mode", "pin", "signal", "direction", "description",
+    "length", "width", "item", "value", "type", "voltage", "current",
+}
+_MD_SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
+_MD_BOLD_HEADING_WITH_TABLE = re.compile(
+    r"^(.*)(\*\*[^*\n]{2,90}\*\*:?)\s*(\|.*\|)\s*$")
+_MD_PROSE_WITH_TABLE = re.compile(r"^([^|\n].*?\S)\s+(\|.*\|)\s*$")
+_MD_SECTION_HEADING = re.compile(
+    r"\b(?:operation|requirements?|specifications?|options?|notes?|pinout|"
+    r"dimensions?|limits?|settings?|installation|configuration)\b", re.I)
+
+
+def _markdown_cells(line: str) -> list[str]:
+    """Split a pipe row without treating escaped/code pipes as columns."""
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith(r"\|"):
+        body = body[:-1]
+
+    cells: list[str] = []
+    cell: list[str] = []
+    in_code = False
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if char == "\\" and i + 1 < len(body) and body[i + 1] == "|":
+            cell.extend(("\\", "|"))
+            i += 2
+            continue
+        if char == "`":
+            in_code = not in_code
+        if char == "|" and not in_code:
+            cells.append("".join(cell).strip())
+            cell = []
+        else:
+            cell.append(char)
+        i += 1
+    cells.append("".join(cell).strip())
+    return cells
+
+
+def _looks_like_markdown_header(row: str) -> bool:
+    cells = _markdown_cells(row)
+    if len(cells) < 2:
+        return False
+    hits = 0
+    for cell in cells:
+        words = set(re.findall(r"[a-z]+", re.sub(r"[*_`]", "", cell.lower())))
+        if words & _MD_HEADER_HINTS:
+            hits += 1
+    return hits >= 2
+
+
+def _format_markdown_row(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
+
+
+def normalize_markdown_tables(text: str) -> str:
+    """Repair common model-produced table joins without changing facts.
+
+    Valid Markdown is returned unchanged apart from consistent row spacing.
+    Malformed rows are constrained to the first row's column count, so one
+    accidental extra cell can never make the entire rendered table crooked.
+    """
+    if not text or "|" not in text:
+        return text
+
+    split_lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        # A model sometimes escapes the first pipe, making a real row render
+        # literally. Only repair row-shaped lines with several delimiters.
+        if re.match(r"^\s*\\\|", line) and line.count("|") >= 3:
+            line = re.sub(r"^(\s*)\\\|", r"\1|", line, count=1)
+
+        # Prefer the LAST bold span before a header-shaped pipe run. That
+        # leaves ordinary emphasis earlier in the prose alone.
+        merged = _MD_BOLD_HEADING_WITH_TABLE.match(line)
+        embedded_row = bool(merged and merged.group(1).lstrip().startswith("|"))
+        section_heading = bool(merged and _MD_SECTION_HEADING.search(merged.group(2)))
+        if (merged and _looks_like_markdown_header(merged.group(3))
+                and (not embedded_row or section_heading)):
+            prefix, heading, table = (part.strip() for part in merged.groups())
+            if prefix:
+                split_lines.append(prefix)
+            split_lines.extend((heading, table))
+            continue
+
+        # Also repair "Intro sentence: | Column | Column |" without requiring
+        # a heading. The prefix cannot itself contain a pipe, so valid rows do
+        # not match this branch.
+        inline = _MD_PROSE_WITH_TABLE.match(line)
+        if inline and _looks_like_markdown_header(inline.group(2)):
+            split_lines.extend((inline.group(1).strip(), inline.group(2).strip()))
+            continue
+        split_lines.append(line)
+
+    out: list[str] = []
+    expected_columns: int | None = None
+    for line in split_lines:
+        stripped = line.strip()
+        is_row = stripped.startswith("|") and stripped.count("|") >= 2
+        if not is_row:
+            expected_columns = None
+            out.append(line)
+            continue
+
+        cells = _markdown_cells(stripped)
+        separator = bool(cells) and all(
+            not cell or _MD_SEPARATOR_CELL.fullmatch(cell)
+            for cell in cells)
+        if expected_columns is None:
+            expected_columns = len(cells)
+
+        overflow: list[str] = []
+        if len(cells) > expected_columns:
+            if not separator:
+                overflow = cells[expected_columns:]
+            cells = cells[:expected_columns]
+        elif len(cells) < expected_columns:
+            cells.extend([""] * (expected_columns - len(cells)))
+        out.append(_format_markdown_row(cells))
+
+        if overflow:
+            prose = " | ".join(cell for cell in overflow if cell).strip()
+            if prose:
+                out.extend(("", prose))
+            expected_columns = None
+
+    return "\n".join(out)
+
+
 # ── split_units (for grounding NLI checks) ──────────────────────────────
 
 def split_units(answer: str, min_len: int = MIN_UNIT_LEN) -> list[str]:
