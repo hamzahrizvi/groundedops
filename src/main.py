@@ -744,6 +744,8 @@ the same line as a heading or paragraph.
 Never run a numbered set of values together in a sentence; it is unreadable.
 For a short answer, do not add a heading. When an answer genuinely has two or
 more distinct sections, introduce each with a concise `###` markdown heading.
+Every heading must begin on its own line; never append a heading to a sentence
+or list item.
 Never use a generic heading such as "Answer", "Response", or "Details".
 If the context makes clear which product the answer applies to, name that
 product in the first sentence, so the reader is never left guessing which one

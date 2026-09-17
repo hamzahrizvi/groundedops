@@ -810,7 +810,11 @@ function mdLooksLikeHeader(row) {
 
 function mdNormalizeText(text) {
   const out = [];
-  String(text || "").split(/\r?\n/).forEach(raw => {
+  // Markdown only recognises a heading at the start of a line. Repair model
+  // output such as "Humidity: 95% ### Power requirements" before parsing.
+  const expanded = String(text || "").replace(
+    /(\S)[ \t]+(?=#{1,4}\s+\S)/g, "$1\n");
+  expanded.split(/\r?\n/).forEach(raw => {
     let line = raw.replace(/\s+$/, "");
     if (/^\s*\\\|/.test(line) && (line.match(/\|/g) || []).length >= 3)
       line = line.replace(/^(\s*)\\\|/, "$1|");

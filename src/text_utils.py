@@ -154,6 +154,7 @@ _MD_PROSE_WITH_TABLE = re.compile(r"^([^|\n].*?\S)\s+(\|.*\|)\s*$")
 _MD_SECTION_HEADING = re.compile(
     r"\b(?:operation|requirements?|specifications?|options?|notes?|pinout|"
     r"dimensions?|limits?|settings?|installation|configuration)\b", re.I)
+_MD_INLINE_HEADING = re.compile(r"(\S)[ \t]+(?=#{1,4}\s+\S)")
 
 
 def _markdown_cells(line: str) -> list[str]:
@@ -209,11 +210,19 @@ def normalize_markdown_tables(text: str) -> str:
     Malformed rows are constrained to the first row's column count, so one
     accidental extra cell can never make the entire rendered table crooked.
     """
-    if not text or "|" not in text:
+    if not text:
         return text
 
+    # A heading only has Markdown meaning at the beginning of a line. Small
+    # models regularly append it to the sentence or list item before it:
+    # "For the SCS: ### Operating temperature". Split at the marker while
+    # preserving the preceding content byte-for-byte.
+    expanded = _MD_INLINE_HEADING.sub(r"\1\n", text)
+    if "|" not in expanded:
+        return expanded
+
     split_lines: list[str] = []
-    for raw in text.splitlines():
+    for raw in expanded.splitlines():
         line = raw.rstrip()
         # A model sometimes escapes the first pipe, making a real row render
         # literally. Only repair row-shaped lines with several delimiters.

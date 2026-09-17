@@ -499,7 +499,11 @@
   }
 
   function mdNormalizeText(text) {
-    var rawLines = String(text == null ? "" : text).split(/\r?\n/);
+    // Markdown only recognises a heading at the start of a line. Repair model
+    // output such as "Humidity: 95% ### Power requirements" before parsing.
+    var expanded = String(text == null ? "" : text).replace(
+      /(\S)[ \t]+(?=#{1,4}\s+\S)/g, "$1\n");
+    var rawLines = expanded.split(/\r?\n/);
     var out = [];
     for (var i = 0; i < rawLines.length; i++) {
       var line = rawLines[i].replace(/\s+$/, "");

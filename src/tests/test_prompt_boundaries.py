@@ -34,3 +34,4 @@ def test_answer_prompt_requests_structured_but_proportionate_markdown():
     assert "For a short answer, do not add a heading" in compact
     assert "two or more distinct sections" in compact
     assert "concise `###` markdown heading" in compact
+    assert "Every heading must begin on its own line" in compact

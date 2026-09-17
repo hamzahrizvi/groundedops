@@ -64,6 +64,24 @@ def test_normalize_markdown_tables_does_not_promote_bold_table_cell():
     assert normalize_markdown_tables(valid) == valid
 
 
+def test_normalize_markdown_tables_splits_inline_headings_from_prose_and_list_items():
+    broken = (
+        "For the SMART Coin System: ### Operating temperature\n"
+        "- Temperature: +3°C to +50°C\n"
+        "- Humidity: 5% to 95% non-condensing ### Power requirements\n"
+        "- Supply: 24 V DC / 6.5 A\n"
+        "| State | Minimum | Nominal | Maximum |\n"
+        "| --- | --- | --- | --- |\n"
+        "| Standby | 0.4 A | 0.4 A | 0.7 A |"
+    )
+
+    fixed = normalize_markdown_tables(broken)
+
+    assert "For the SMART Coin System:\n### Operating temperature" in fixed
+    assert "- Humidity: 5% to 95% non-condensing\n### Power requirements" in fixed
+    assert "| State | Minimum | Nominal | Maximum |" in fixed
+
+
 # ── split_units ────────────────────────────────────────────────────────────
 
 def test_split_units_prose():
