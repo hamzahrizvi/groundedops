@@ -1074,13 +1074,28 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         q = f"{raw_q} {resolved or ''}"
         # A comparison is this module's shape too, and its wording looks
         # nothing like a sales question, so it gets in on its own terms.
-        if not sales.is_sales_question(q) and not sales.is_comparison(q):
+        # A COMMERCIAL question (price, lead time, who to buy from) is a third
+        # shape, and it used to reach none of this: _CROSS carries only
+        # catalogue-navigation vocabulary, so "what is the price for a nv9 st"
+        # returned None here and the operator's configured deflect was never
+        # consulted at all.
+        commercial = sales.is_commercial_question(q)
+        if not (sales.is_sales_question(q) or sales.is_comparison(q)
+                or commercial):
             return None
 
         mode = (policy.value("sales_mode") or "answer").strip().lower()
         if mode == "documents":
+            # An explicit "let the manuals answer it", including for price.
+            # Honoured as set -- but see the note in sales.is_commercial_
+            # question about what the manuals actually say about pricing.
             return None
-        if mode == "deflect":
+        # `deflect` deflects everything. The default `answer` mode deflects a
+        # COMMERCIAL question too, because the catalogue answer it would
+        # otherwise produce is assembled from manuals that contain no prices:
+        # the mode chooses who answers catalogue questions, and there is no
+        # setting that can put a price in a document that has none.
+        if mode == "deflect" or commercial:
             reply = (policy.value("sales_reply") or "").strip()
             if not reply:
                 return None

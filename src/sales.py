@@ -68,6 +68,44 @@ def is_sales_question(q: str) -> bool:
     return bool(_CROSS.search(q or ""))
 
 
+# COMMERCIAL questions are a different thing from the catalogue-navigation
+# ones _CROSS matches, and conflating them is what let a price question reach
+# the model. "which products run on 24V" is answerable FROM THE DOCUMENTS;
+# "what is the price for an NV9" is not in the corpus at any scope, because
+# no manual contains a price.
+#
+# Observed before this existed: "what is the price for a nv9 st" matched
+# nothing here, so _sales_answer returned None before it read sales_mode, the
+# operator's configured deflect never fired, and the pipeline answered from
+# the manual -- "The NV9 Spectral is offered at a mid-range price, delivering
+# casino-level security", with six pages cited behind it. A marketing claim
+# invented to fill a price question is the worst thing this system can do:
+# it is confident, it is sourced, and it is not an answer.
+#
+# Deliberately NOT in this pattern:
+#   "how much" on its own  -- "how much does it weigh", "how much power does
+#                             it draw" are ordinary spec questions
+#   "order"  on its own    -- "in order to" appears throughout these manuals
+#   "warranty"             -- warranty TERMS may genuinely be documented;
+#                             needs checking against the corpus before it is
+#                             treated as a question only sales can take
+_COMMERCIAL = re.compile(
+    r"\b(price|prices|priced|pricing|cost|costs|quote|quotation)\b"
+    r"|\bhow\s+much\s+(is|are)\b"
+    r"|\b(buy|buying|purchase|purchasing)\b"
+    r"|\blead[\s-]?time\b|\bin\s+stock\b"
+    r"|\bdiscount\b|\bmoq\b|\bminimum\s+order\b"
+    r"|\b(reseller|distributor|dealer)\b"
+    r"|\bplace\s+an\s+order\b",
+    re.I)
+
+
+def is_commercial_question(q: str) -> bool:
+    """Price, availability, or who-to-buy-from — a question the product
+    documentation cannot answer at any scope."""
+    return bool(_COMMERCIAL.search(q or ""))
+
+
 # ── spec index ────────────────────────────────────────────────────────────
 
 _INDEX: list[dict] | None = None

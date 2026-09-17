@@ -76,6 +76,14 @@ def discover_and_run():
             # "cannot load module more than once per process" case.
             or "import ingest" in source
             or "from ingest import" in source
+            # main imports the whole application -- llm, keystore, quota, the
+            # widget router -- and loads the real .env. A file that imports it
+            # WITHOUT the harness leaves all of that in sys.modules for
+            # whatever runs next in the same process. Caught when a test that
+            # only inspected main's source made test_llm, test_keystore and
+            # test_widget_export start failing, all three of which pass alone.
+            or "import main" in source
+            or "from main import" in source
         )
         if needs_process:
             total += 1
