@@ -253,6 +253,14 @@ emails, and **not regenerable**). First run: the console offers to create the
 root account, and `bootstrap_root` refuses once any account exists. Locked
 out? `python manage_accounts.py list|create|passwd|level|enable|disable`.
 
+After first run, the sign-in page can submit an enrolment request. The chosen
+password is scrypt-hashed immediately and the pending record lives in
+`account_requests.json`; plaintext is never stored or returned. Root sees the
+request under **Accounts**, selects `basic`, `support`, or `root`, and approves
+or declines it. Repeat submissions are no-ops so they cannot replace a pending
+password, and the public response does not reveal whether an account already
+exists. Root-only backups carry pending requests with `accounts.json`.
+
 Passwords use `hashlib.scrypt` — a real KDF, and stdlib, so no new dependency
 (the `unit` CI job installs an explicit package list, not requirements.txt).
 
@@ -308,6 +316,12 @@ when the admin surface had one shared password; it now has real accounts, so
 opening it is reasonable but stays deliberate. The allowlist sits in FRONT of
 authentication — an allowlisted caller still signs in and still gets level
 checks. `STAGING.md` is the runbook.
+
+`GET /admin/network` advertises the exact origin that already reached the
+console when it is a non-loopback IP, then the OS-routed LAN interface; it no
+longer invents port 8000 for a normal port-80/443 request. Set
+`ADMIN_NETWORK_URL` when a VPN, proxy, or multi-adapter host needs an explicit
+advertised address.
 
 **First-run root creation is protected in two layers.**
 `POST /admin/auth/bootstrap` cannot require authentication (there is no

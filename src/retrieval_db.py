@@ -106,7 +106,14 @@ def _matches_scope(meta: dict, source_filter: str | None,
         return False
     if scope:
         if "product" in scope:
-            return meta.get("product") == scope["product"]
+            key = scope["product"]
+            # A document can be tagged to several products, stored as a flag
+            # per key. The comma-split covers the same thing for chunks
+            # indexed before the flags existed, so neither needs a reindex.
+            if meta.get("prod_" + key):
+                return True
+            tagged = (meta.get("products") or meta.get("product") or "")
+            return key in [t.strip() for t in tagged.split(",") if t.strip()]
         if "category" in scope:
             return meta.get("category") == scope["category"]
     return True
@@ -142,7 +149,11 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
     if source_filter:
         where = {"source": source_filter}
     elif scope and "product" in scope:
-        where = {"product": scope["product"]}
+        # Either the flag (a document tagged to this product, possibly among
+        # others) or the old single-value field, so chunks written before the
+        # flags still match without a rebuild.
+        where = {"$or": [{"prod_" + scope["product"]: True},
+                         {"product": scope["product"]}]}
     elif scope and "category" in scope:
         where = {"category": scope["category"]}
     if where:

@@ -8,6 +8,7 @@ actually catch a regression that matters.
 """
 import _harness
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 import accounts
 
@@ -101,6 +102,18 @@ check(client.get("/admin/users", headers=SUPPORT).status_code == 403,
 check(client.get("/admin/users", headers=BASIC).status_code == 403,
       "basic is refused account management")
 
+print("\n== console network address ==")
+r = client.get("http://10.23.45.67:9123/admin/network", headers=ROOT)
+check(r.status_code == 200 and
+      r.json().get("primary_url") == "http://10.23.45.67:9123",
+      "an address that already reached the console is advertised as primary")
+
+print("\n== sign-in failure wording ==")
+admin_html = (Path(__file__).parent.parent / "admin.html").read_text(encoding="utf-8")
+check('if (path === "/admin/login")' in admin_html and
+      'That email and password were not accepted' in admin_html,
+      "a login 401 reports rejected credentials rather than an expired session")
+
 print("\n== account management ==")
 r = client.post("/admin/users", headers=ROOT,
                 json={"email": "new@test.local", "password": "a-good-password",
@@ -132,6 +145,49 @@ r = client.post("/admin/users", headers=SUPPORT,
                       "level": "root"})
 check(r.status_code == 403,
       f"support cannot create an account, root or otherwise ({r.status_code})")
+
+print("\n== self-enrolment requests ==")
+r = client.post("/admin/auth/request",
+                json={"email": "applicant@test.local",
+                      "password": "applicant-password", "name": "Applicant"})
+check(r.status_code == 200 and r.json().get("submitted") is True,
+      "a visitor can submit account details for approval")
+r2 = client.post("/admin/auth/request",
+                 json={"email": "applicant@test.local",
+                       "password": "different-password", "name": "Impostor"})
+check(r2.status_code == 200 and len(accounts.list_access_requests()) == 1,
+      "a repeat submission neither duplicates nor replaces a pending request")
+raw_requests = accounts._load_requests()
+check("applicant-password" not in str(raw_requests) and
+      "different-password" not in str(raw_requests),
+      "pending requests never store a plaintext password")
+r = client.get("/admin/users", headers=ROOT)
+request_rows = r.json().get("requests", [])
+check(len(request_rows) == 1 and request_rows[0]["email"] == "applicant@test.local"
+      and "password" not in request_rows[0],
+      "root sees the pending request without password material")
+request_id = request_rows[0]["id"]
+check(client.post(f"/admin/account-requests/{request_id}/approve",
+                  headers=SUPPORT, json={"level": "basic"}).status_code == 403,
+      "support cannot approve account requests")
+r = client.post(f"/admin/account-requests/{request_id}/approve",
+                headers=ROOT, json={"level": "basic"})
+check(r.status_code == 200 and r.json()["user"]["level"] == "basic",
+      "root can approve a request at the chosen access level")
+check(not accounts.list_access_requests(),
+      "approval removes the pending request")
+check(client.post("/admin/login", json={"email": "applicant@test.local",
+                                        "password": "applicant-password"}).status_code == 200,
+      "the approved applicant can sign in with the password they chose")
+
+r = client.post("/admin/auth/request",
+                json={"email": "declined@test.local",
+                      "password": "declined-password"})
+decline_id = accounts.list_access_requests()[0]["id"]
+check(client.delete(f"/admin/account-requests/{decline_id}",
+                    headers=ROOT).status_code == 200 and
+      not accounts.list_access_requests(),
+      "root can decline and remove a request")
 
 r = client.post(f"/admin/users/{new_id}/level", headers=ROOT,
                 json={"level": "basic"})

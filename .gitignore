@@ -76,6 +76,10 @@ widget_leads.json
 # account, so it needs a real backup (see accounts.py).
 accounts.json
 accounts.json.tmp
+# Pending enrolment requests contain staff email addresses and scrypt password
+# hashes. Treat them exactly like the account store.
+account_requests.json
+account_requests.json.tmp
 # Access limits an operator has changed from the defaults (policy.py).
 # Safe to lose -- it falls back to the env/installed defaults.
 policy.json
@@ -117,3 +121,11 @@ documents/
 # Derived FAQ question vectors: rebuildable from faq_store.json in ~2 minutes,
 # ~600KB of binary, and invalidated by its own mtime key.
 src/*.vectors.npz
+
+# PyInstaller output. `build/` is intermediate, `dist/` is the product; both
+# are regenerable and both are large -- 290MB of them reached a commit once,
+# on a public repo, because neither was listed here.
+build/
+dist/
+# Per-developer editor/agent settings, not project configuration.
+.claude/

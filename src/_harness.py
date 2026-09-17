@@ -20,6 +20,7 @@ os.environ.setdefault("WIDGET_CONFIG_PATH", "/tmp/apitest/data/widget_config.jso
 os.environ.setdefault("WIDGET_LEADS_PATH", "/tmp/apitest/data/widget_leads.json")
 os.environ.setdefault("CATALOG_CONFIG", "/tmp/apitest/data/catalog.json")
 os.environ.setdefault("ACCOUNTS_PATH", "/tmp/apitest/data/accounts.json")
+os.environ.setdefault("ACCOUNT_REQUESTS_PATH", "/tmp/apitest/data/account_requests.json")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
 # keystore.set_key/clear_key write to a real file — point that at a scratch
 # path so a key-management test can never touch the real src/.env.
@@ -61,6 +62,19 @@ os.environ["BACKUP_ALLOW_PLAINTEXT"] = ""
 # Found exactly that way: the setup instructions were followed, and this
 # suite started failing on a passing tree.
 os.environ["BACKUP_PASSPHRASE"] = ""
+# Provider keys and their role assignments need the same forcing, and the
+# reason is the same: ENV_FILE_PATH above only redirects what keystore
+# WRITES. main.py still loads the developer's real src/.env into os.environ
+# at import, so a key present there made "an unset provider masks to None"
+# fail on their machine while passing in CI.
+#
+# Blanked, not popped — _load_env_file skips keys already in os.environ, and
+# popping would let the real value back in when main is imported below. Every
+# keystore read strips before testing, so "" is indistinguishable from unset.
+for _leaky in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+               "PROVIDER_ROLE_DEFAULT", "PROVIDER_ROLE_ADVANCED",
+               "PROVIDER_ROLE_BACKUP"):
+    os.environ[_leaky] = ""
 # main.py's LAN-only gate checks request.client.host against this prefix
 # list and 404s anything that doesn't match (see PRIVATE_NETWORKS in
 # main.py) — a real, intended security control, not something to weaken.
@@ -179,6 +193,7 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
 # object stays valid afterwards.
 from text_utils import stem as _real_stem  # noqa: E402
 from text_utils import is_more_request as _real_is_more  # noqa: E402
+from text_utils import normalize_markdown_tables as _real_normalize_markdown  # noqa: E402
 
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
@@ -186,7 +201,8 @@ stub("text_utils",
      is_refusal=lambda a: False, is_followup_turn=lambda *a: False,
      has_domain_vocabulary=lambda q: False, has_reference_markers=lambda q: False,
      is_template_leak=lambda a: False, build_clarification_options=lambda *a: [],
-     stem=_real_stem, is_more_request=_real_is_more)
+     stem=_real_stem, is_more_request=_real_is_more,
+     normalize_markdown_tables=_real_normalize_markdown)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],
      get_conversation=lambda *a: None, delete_conversation=lambda *a: True)

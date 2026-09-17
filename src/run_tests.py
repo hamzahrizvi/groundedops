@@ -16,6 +16,7 @@ import traceback
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).parent / "tests"
+ISOLATED_RUNNER = TESTS_DIR / "_run_isolated.py"
 
 
 class SkipTest(Exception):
@@ -58,7 +59,33 @@ def discover_and_run():
         # A process is the honest isolation boundary for a test that rewrites
         # the module registry. These files exit non-zero on failure, so the
         # return code is the result.
-        if "import _harness" in path.read_text(encoding="utf-8", errors="ignore"):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        # These modules eventually load native ML packages. Removing them
+        # from sys.modules and importing them again in this interpreter can
+        # raise "cannot load module more than once per process". Harness tests
+        # also replace whole application modules. Both need a real process
+        # boundary, and the isolated helper CALLS test_* functions (executing
+        # the file directly did not, so function-style tests falsely passed).
+        needs_process = (
+            "import _harness" in source
+            or "import grounding" in source
+            or "from grounding import" in source
+            or "import router" in source
+            or "from router import" in source
+            # ingest pulls the PDF and embedding stack, which is the same
+            # "cannot load module more than once per process" case.
+            or "import ingest" in source
+            or "from ingest import" in source
+            # main imports the whole application -- llm, keystore, quota, the
+            # widget router -- and loads the real .env. A file that imports it
+            # WITHOUT the harness leaves all of that in sys.modules for
+            # whatever runs next in the same process. Caught when a test that
+            # only inspected main's source made test_llm, test_keystore and
+            # test_widget_export start failing, all three of which pass alone.
+            or "import main" in source
+            or "from main import" in source
+        )
+        if needs_process:
             total += 1
             # PYTHONPATH, because a subprocess puts sys.path[0] at the
             # SCRIPT's directory (tests/), not this one -- _harness.py lives
@@ -66,13 +93,18 @@ def discover_and_run():
             _env = dict(os.environ)
             _here = str(Path(__file__).parent)
             _env["PYTHONPATH"] = _here + os.pathsep + _env.get("PYTHONPATH", "")
-            proc = subprocess.run([sys.executable, str(path)],
+            proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
+                                   str(path)],
                                   cwd=_here, env=_env,
                                   capture_output=True, text=True)
             out = (proc.stdout or "") + (proc.stderr or "")
             if proc.returncode == 0:
-                passed += 1
-                print(f"  PASS  {path.stem}  (own process)")
+                if re.search(r"^SKIP(?::| )", out, re.MULTILINE):
+                    skipped += 1
+                    print(f"  SKIP  {path.stem}  (own process)")
+                else:
+                    passed += 1
+                    print(f"  PASS  {path.stem}  (own process)")
             else:
                 # A missing OPTIONAL dependency is a skip here too. The
                 # in-process branch below has said so since it was written,

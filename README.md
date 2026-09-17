@@ -98,7 +98,7 @@ Query → query condensation (Rewrite-Retrieve-Read, session-scoped)
 | `main.py` | FastAPI app, CORS, `/api` prefix rewrite, static frontend serving, async startup warmup, query orchestration, clarifying-question and rethink logic |
 | `db.py` | Shared persistent ChromaDB client, per-source deletion, chunk-by-id lookup |
 | `parsing.py` | Page-preserving text extraction (PDF / DOCX / TXT) |
-| `ingest.py` | Per-page parsing → chunking → breadcrumb enrichment → embedding → storage; retains original files for download |
+| `ingest.py` | Per-page parsing → chunking → breadcrumb enrichment → embedding → versioned storage; retains original files for download |
 | `chunking.py` | Step-boundary-aware chunking (prevents unrelated sections merging into one chunk) |
 | `retrieval_db.py` | Hybrid full-corpus BM25 + dense retrieval (RRF-merged), optional source/product scoping |
 | `reranker.py` | Sigmoid-calibrated cross-encoder reranking |
@@ -409,6 +409,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `BACKUP_MAX_BYTES` | `4294967296` | Ceiling on what an uploaded archive may expand to. |
 | `BACKUP_SNAPSHOT_DIR` | `backup_snapshots` | Where the automatic pre-restore snapshot is written. |
 | `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
+| `ADMIN_NETWORK_URL` | *(auto-detected)* | Exact console origin to advertise in the sidebar, e.g. `http://192.168.1.50:8000`. Set this when VPNs, proxies, or multiple adapters make automatic LAN-address selection ambiguous. |
 | `BOOTSTRAP_TOKEN` | *(empty)* | Required in an `X-Bootstrap-Token` header for first-run root creation **over the network**. Unproxied/LAN setup needs no token. Clear it once the root account exists. |
 | `TRUST_PROXY` | *(unset)* | Honour `X-Forwarded-For`. Set only with a proxy you control in front — otherwise the header is forgeable and anonymous quotas can be bypassed. |
 | `ENABLE_HSTS` | *(unset)* | Ask browsers to stay on HTTPS. TLS terminates at the proxy; this app does not serve TLS. |
@@ -422,6 +423,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `ALLOWED_EMAIL_DOMAIN` | `innovative-technology.com` | Accounts may only be created for this domain. Blank allows any. |
 | `SESSION_TTL_SECONDS` | `43200` | How long a signed-in session lasts (12h). |
 | `ACCOUNTS_PATH` | `accounts.json` | Account store. Gitignored, **not regenerable** — back it up. |
+| `ACCOUNT_REQUESTS_PATH` | `account_requests.json` | Pending self-enrolment requests. Contains staff email addresses and scrypt password hashes; root backups include it with the account store. |
 | `GENERATION_MODE` | `api` | `api` (Online) or `local` (Free) at boot |
 | `ONLINE_PROVIDER` | `deepseek` | `deepseek` / `openai` / `anthropic` |
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |
@@ -518,6 +520,15 @@ table lookup, fixed with a narrow lexical-containment rescue.
   This is the one remaining automatic escalation path and is slated for
   removal for consistency with the `llm.py` change.
 - **Ingest is single-worker**, and re-ingesting a large corpus is slow.
+- **Document versions are content-addressed.** Every chunk carries the source
+  SHA-256 and indexed timestamp. Replacing a same-name source writes the new
+  version before retiring the old chunks, and the document manifest retains a
+  compact version history. The Documents page flags missing, changed, or
+  stale sources as needing re-indexing.
+- **Full re-index has automatic rollback.** `reindex.py` captures the live
+  collection before resetting it and restores that snapshot if any retained
+  source cannot produce chunks. Keep the backend stopped while rebuilding;
+  rollback protects processing failures, not a machine-level power loss.
 - **Page-crossing passages are split** at the boundary, since chunking is
   per page. Retrieval usually returns both halves.
 - **Table-heavy PDF sections** can still produce an occasional truncated

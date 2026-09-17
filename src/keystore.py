@@ -151,6 +151,93 @@ def clear_key(provider: str) -> None:
     logger.info(f"API key cleared for provider '{provider}' (via console)")
 
 
+# ── which key does which job ────────────────────────────────────────────
+# A provider key and the job it does are different questions. The console
+# could say WHICH providers had a key but not which one answers a normal
+# question, which one answers a "deep" one, and which one picks up when the
+# first fails — so a second key was configured and then did nothing.
+#
+# Three jobs, one provider each, and the SAME provider may hold more than
+# one: a single-key install assigns it to all three and nothing changes.
+# Stored in .env through the same writer as the keys, so an assignment
+# survives a restart and takes effect without one.
+_ROLE_ENV = {
+    "default": "PROVIDER_ROLE_DEFAULT",
+    "advanced": "PROVIDER_ROLE_ADVANCED",
+    "backup": "PROVIDER_ROLE_BACKUP",
+}
+
+_ROLE_LABEL = {
+    "default": "Default",
+    "advanced": "Advanced",
+    "backup": "Backup",
+}
+
+_ROLE_HINT = {
+    "default": "Answers a normal question, and condenses follow-ups.",
+    "advanced": "Answers a 'deep' question, where reasoning is worth the cost.",
+    "backup": "Tried only when the provider above fails on a request.",
+}
+
+
+class UnknownRoleError(ValueError):
+    def __init__(self, role: str):
+        super().__init__(f"unknown role '{role}'")
+
+
+def roles() -> list[str]:
+    return list(_ROLE_ENV)
+
+
+def role_label(role: str) -> str:
+    return _ROLE_LABEL.get(role, role)
+
+
+def role_hint(role: str) -> str:
+    return _ROLE_HINT.get(role, "")
+
+
+def get_role_assignment(role: str) -> str | None:
+    """What is WRITTEN for this job, whether or not that provider still has
+    a key. The console shows this so an assignment left dangling by a
+    removed key is visible rather than silently absent."""
+    env = _ROLE_ENV.get(role)
+    if not env:
+        raise UnknownRoleError(role)
+    val = (os.getenv(env) or "").strip().lower()
+    return val if val in _PROVIDER_KEY_ENV else None
+
+
+def get_role(role: str) -> str | None:
+    """What this job will ACTUALLY use: the assignment, masked to None when
+    that provider has no key. Removing a key must not leave generation
+    routed at a provider that is certain to 401 — callers fall back to their
+    own default when this is None."""
+    provider = get_role_assignment(role)
+    if provider and not has_key(provider):
+        return None
+    return provider
+
+
+def set_role(role: str, provider: str | None) -> None:
+    """`provider=None` clears the assignment, which is not the same as a
+    blank key — it means "no preference", and the caller falls back."""
+    env = _ROLE_ENV.get(role)
+    if not env:
+        raise UnknownRoleError(role)
+    if provider is None or not str(provider).strip():
+        _rewrite_env_line(env, None)
+        os.environ.pop(env, None)
+        logger.info(f"provider for role '{role}' cleared (via console)")
+        return
+    provider = str(provider).strip().lower()
+    if provider not in _PROVIDER_KEY_ENV:
+        raise UnknownProviderError(provider)
+    _rewrite_env_line(env, provider)
+    os.environ[env] = provider
+    logger.info(f"role '{role}' now served by provider '{provider}' (via console)")
+
+
 # ADMIN_PASSWORD is gone: admin access is real accounts now (accounts.py).
 # The session-signing secret lives here because it is a secret, even though
 # it is not a provider key.

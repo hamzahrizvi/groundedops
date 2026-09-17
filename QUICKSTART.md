@@ -66,7 +66,9 @@ README.md's "Native install" section for the direct command).
    every attempt; generate one with
    `python -c "import secrets;print(secrets.token_hex(32))"`.
    Add colleagues later under **Accounts**: `support` for anyone doing this
-   work, `basic` for someone who only needs the test chat.
+   work, `basic` for someone who only needs the test chat. Colleagues can also
+   choose **Request an account** on the sign-in page; a root account reviews
+   the request and chooses its access level before it can sign in.
 2. Under **Documents**, pick a **Category** and **Product** — create them
    in the Categories/Products tabs first if the lists are empty.
 3. Drop in `.pdf`, `.docx`, or `.txt` files.

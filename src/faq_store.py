@@ -293,10 +293,15 @@ def add_entry(question: str, answer: str, products: str = "",
 
 
 def update_entry(faq_id: str, question: str | None = None,
-                 answer: str | None = None) -> dict | None:
-    """Edit the question text and/or the answer. update_answer() could
-    only change the answer, so a badly-worded generated question could
-    only be deleted and retyped."""
+                 answer: str | None = None,
+                 products: str | None = None) -> dict | None:
+    """Edit the question text, the answer, and/or which products it applies to.
+
+    `products` is a comma-joined list because that is how this store has
+    always held it -- every reader here already splits on commas, so an
+    answer covering three products needed no migration, only a way to say so.
+    An empty string is meaningful and different from None: it means "all
+    products", which is what an answer with no scope has always meant."""
     with _lock:
         items = _load()
         for it in items:
@@ -311,6 +316,9 @@ def update_entry(faq_id: str, question: str | None = None,
                     it["question"] = new_q
                 if answer is not None:
                     it["answer"] = answer
+                if products is not None:
+                    it["products"] = ",".join(
+                        _norm_key(p) for p in products.split(",") if p.strip())
                 it["edited"] = True
                 _save(items)
                 _invalidate_cache()

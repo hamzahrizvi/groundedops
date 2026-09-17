@@ -6,8 +6,25 @@ what "done" looks like. Move an item to **Resolved** with the commit/PR that
 closed it — don't delete history, since the Monday report reads this file to
 know what changed since last week.
 
-Last hand-updated: 2026-08-28 — RRF retrieval bug fixed and A/B verified,
-code scan and NV9 eval added; widget plugin export shipped.
+**Friday review.** Once a week this file gets a pass, not just additions:
+
+1. Tick off anything now done — strike it through, name the commit or PR,
+   and move it to **Resolved**.
+2. Delete anything OBSOLETED rather than completed, saying what superseded
+   it. An item that a better fix made irrelevant is worse than no item: it
+   sends the next session to do work that would now be wrong. Two in this
+   file already went that way — an absolute score floor and a largest-gap
+   context cut, both measured and rejected (see `ea4320a`).
+3. Add whatever was found-but-not-done that week, WITH the measurement that
+   justifies it. An item with no evidence behind it cannot be triaged later
+   and will be rediscovered from scratch.
+
+Every item should be actionable by someone who was not in the session that
+found it. If it needs a transcript to understand, it is not written yet.
+
+Last hand-updated: 2026-09-17 — v16.5 pipeline-hardening deferrals recorded
+(see the dated section below); clarify gate moved off retrieval confidence,
+running page footers stripped at ingest.
 
 ---
 
@@ -451,6 +468,143 @@ code scan and NV9 eval added; widget plugin export shipped.
   **Not yet clicked in a browser** — the card is DOM-driven like the rest of
   the console, and the download path (blob + synthetic `<a download>`) is
   covered only by backend tests.
+
+## Deferred from the v16.5 pipeline-hardening run (opened 2026-09-17)
+
+Everything below was found while fixing something else, measured, and then
+NOT done — either because it was out of scope for the change in hand or
+because the evidence said a different fix was better. Each carries the
+measurement that justifies it, so a future session can act without redoing
+the work. Branch `experimental/pipeline-hardening`, PR #13.
+
+**Conversation**
+
+- **Neither client reads `clarification_options`.** Zero references in
+  `src/widget/groundedops-widget.js` and `src/admin.html`; the public
+  endpoint forwards only the boolean (`widget_api.py:514`). So since
+  `de5a37f` the assistant ASKS its clarifying question — both clients render
+  `answer` — but the tappable options are built, returned and dropped. Done
+  looks like: chips in both clients, and the reply resolved against the
+  question that was asked.
+- **The refusal's suggestion list is unranked and scope-blind.**
+  `_friendly_refusal` (`main.py:912`) appends a static "Here are some things
+  I can answer:" list. Observed in `logs.jsonl:1969`: a visitor asking about
+  RMS on a coin hopper was offered three MyCheckr questions. Done looks like:
+  the list ranked against the query and filtered to the product in scope.
+- **No answerability turn type.** The clarify decision is still "did
+  retrieval fail", never "is this question answerable as asked". A
+  recommendation ("I want to run a SCS with a note recycler, what do you
+  recommend?") retrieves fine and cannot be answered from any single manual.
+  Needs slot-typed pending state; memory holds only `{q, a}` strings. Large.
+- **`_SHORT_ONLY_PATTERNS = {6}` is off by one.** It gates index 6, the
+  SENTENCE-INITIAL pronoun pattern, while the comment beside it describes
+  gating the ANYWHERE-pronoun pattern at index 7. Net effect: a long
+  standalone question containing "it" is treated as a follow-up, which is
+  exactly what the gate was written to prevent. Left alone in `de5a37f`
+  rather than fold an unrequested behaviour change into that diff.
+
+**Retrieval and ingest**
+
+- **Condensation can destroy a working query, and is gated by the wrong
+  thing.** Two faults in one mechanism (`llm.condense_query`, the
+  Rewrite-Retrieve-Read step over the last 2 turns). Fixing them together is
+  the single highest-value retrieval change on this list.
+
+  *It replaces rather than augments.* Measured on "what are the power
+  requirements for this setup?": as typed it put the PSU page at #1 (0.9348)
+  with a clean cliff to 0.0843; resolved to name both products, the PSU page
+  was **not retrieved at all** and a firmware-programming page entered
+  context instead. A good query can be rewritten into a worse one with no way
+  back.
+
+  *It is gated behind a regex.* `has_reference_markers()` must match or the
+  rewrite is skipped entirely and the raw fragment hits retrieval. That gate
+  is the non-standard part: the canonical pattern calls the rewriter
+  unconditionally and lets the prompt decide, which
+  `CONDENSE_PROMPT_TEMPLATE` already instructs ("if already self-contained,
+  return it EXACTLY AS-IS"). The regex is a second, brittle classifier doing
+  a job the model was already asked to do — it is what killed "what is the
+  power required to run both at once", where no marker matched so no rewrite
+  ran. `de5a37f` added set-anaphora markers, which patches the list rather
+  than fixing the design.
+
+  Done looks like: retrieve on the raw AND rewritten query and fuse (RRF is
+  already there to do it), then drop the regex gate — safe only in that
+  order, because fusing is what stops a bad rewrite losing the original's
+  hits. Verify against `eval_cases_retrieval.json`, which needs no provider.
+- **Multi-entity questions are not decomposed.** "NV9 Spectral with Note
+  Float" is two entities; one embedding blends them and favours chunks that
+  weakly mention both over the best chunk for each. `sales.py` already does
+  per-product decomposition for comparisons — same shape.
+- **Nested product names collapse.** "Note Float" and "Multi Note Float" are
+  different products (p25 of the NV9 manual lists them at 1.04 kg and
+  1.2 kg) and the system blurs them. Same class as the MyCheckr / MyCheckr
+  Mini item already recorded above.
+- **50 duplicate chunks (2.9%).** Exact-body repeats — a liability notice
+  5x, a command acknowledgement 5x, the Supply Voltage table 4x. Two of the
+  eight context slots for a BV30 question went to the same escrow text.
+- **7 heading-list chunks.** Bodies that are a page's own table of contents
+  ("Additional Features / Typical Applications / Component Overview").
+  Small, and harder to detect than the footers fixed in `9c138d3`.
+- **A BV30 coverage miss.** "does the BV30 support polymer notes?" returns
+  cashbox and escrow text in the top 3 — nothing about note handling. BV30
+  also has the highest share of content-free chunks (15%), so this may be an
+  extraction gap rather than a ranking one.
+- **`nv9_spectral,biometrics_general` tagging.** Every chunk of the NV9
+  Spectral manual carries a biometrics tag. A note validator is not a
+  biometrics device; if this is wrong it widens retrieval into unrelated
+  material.
+- **Existing documents still carry running footers.** `9c138d3` strips them
+  at ingest, so this only takes effect on a reindex
+  (`python reindex.py --from-store`, ~40 min for 11 docs).
+
+**Measurement**
+
+- **`eval_baseline_retrieval.json` does not exist.** The 19-case
+  retrieval-only suite from `e93a547` is built and never armed —
+  `eval.py --selfcheck` reports "baseline absent", so no RAG change can be
+  proven. One command, and it is the single highest-value item on this list:
+  `eval.py --cases eval_cases_retrieval.json --baseline
+  eval_baseline_retrieval.json --repeats 3 --update-baseline`. Run it on a
+  working provider, or it will record an outage as a capability.
+- **No conversational layer in the eval suite.** Every case is a well-formed
+  standalone question, so the failure this whole run was about — a follow-up
+  that dies — cannot be caught. Wants cases for follow-ups, anaphora, and
+  the refusal path.
+- **Nothing since `ea4320a` is verified end to end.** The numbered context
+  passages, the prompt changes and the clarify gate are all unit-tested and
+  none has seen a real generation, because the provider is unreachable.
+
+**Serving**
+
+- **The widget does not stream.** `/query/stream` exists with sentence-level
+  `StreamGrounder` verification; `groundedops-widget.js:1610` posts to the
+  blocking `/widget/ask`. The 260 chars/second reveal added in `152b960` is
+  presentation only. Real token streaming needs the generation call pushed
+  below the quota gates, which `widget_api.py` warns is not a change to make
+  unverified.
+- **`escalated_to_deepseek` is now a misleading field name.** `f51727c`
+  moved escalation onto the assigned backup role; the response key still
+  says DeepSeek. Kept for client compatibility.
+- **A 0.0009-grounding answer was served.** `logs.jsonl:1970` — correct, and
+  rescued by lexical containment, which is the rescue working as designed.
+  Worth one look at how far that rescue can carry an answer the NLI model
+  scored at essentially zero.
+
+**Infrastructure**
+
+- **The LiteLLM gateway is gone from DNS.**
+  `ukman-hsp-litellm.local.innovative-technology.co.uk` returns NXDOMAIN from
+  both domain controllers (10.10.3.7, 10.10.3.9) while other internal names
+  resolve; a cache flush changed nothing. The machine is domain-joined and on
+  the LAN, so this is not VPN. Recorded working on 2026-09-14, so the record
+  disappeared within three days — consistent with AD DNS scavenging a stale
+  dynamic registration. Needs someone who owns that host. Workaround: set
+  `OPENAI_BASE_URL` to its IP.
+- **`backup/pre-build-drop` still pins 290MB in `.git`.** The safety net for
+  the `f33b22b` rebase. Once the rebase is trusted:
+  `git branch -D backup/pre-build-drop && git reflog expire --expire=now
+  --all && git gc --prune=now`.
 
 ## Lower priority
 

@@ -75,6 +75,8 @@ def log_interaction(
     sources: list[str] | None = None,
     grounding_score: float | None = None,
     flagged: bool = False,
+    request_id: str | None = None,
+    timing: dict[str, float] | None = None,
 ) -> None:
     entry = {
         "timestamp":        datetime.utcnow().isoformat(),
@@ -86,6 +88,9 @@ def log_interaction(
         "sources":          sources or [],
         "grounding_score":  grounding_score,
         "flagged":          flagged,
+        "request_id":       request_id,
+        "timing":           {k: round(float(v), 3)
+                               for k, v in (timing or {}).items()},
     }
 
     line = json.dumps(entry)

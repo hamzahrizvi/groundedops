@@ -10,6 +10,22 @@ logger = logging.getLogger(__name__)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
+# The OpenAI-compatible endpoint, overridable. It was hardcoded at both call
+# sites, which meant the "openai" provider could only ever mean OpenAI's own
+# servers -- and an OpenAI-compatible gateway is how most on-prem model
+# hosting is exposed, ITL's LiteLLM included. Pointing this at one keeps every
+# customer question inside the building and off a metered API, with no other
+# change: same request shape, same auth header, same streaming format.
+#
+#   OPENAI_BASE_URL=http://ukman-hsp-litellm.local.innovative-technology.co.uk:4000/v1
+#   OPENAI_API_KEY=innovative
+#   ONLINE_PROVIDER=openai
+#   ONLINE_OPENAI_MODEL=itl-gpt-pro
+#
+# Default unchanged, so an install that sets nothing still talks to OpenAI.
+OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+OPENAI_URL = OPENAI_BASE + "/chat/completions"
+
 MODEL_LOCKS = {
     "phi": threading.Lock(),
     "mistral": threading.Lock(),
@@ -35,13 +51,31 @@ FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
 }
 
 
-def _online_provider_model() -> tuple[str, str]:
-    """The single (provider, model) used in Online (api) mode. The provider
-    is user-selectable in Settings (deepseek default / openai / anthropic);
-    default models are env-overridable. Shared by the answering path
-    (_chain_for) and query condensation so both honour the same choice."""
-    from runtime_config import get_online_provider
-    provider = get_online_provider()
+def _provider_for_job(job: str) -> str:
+    """Which provider serves one job (default / advanced / backup), falling
+    back the way the console promises: an unassigned job uses the default
+    assignment, and an install that has assigned nothing at all keeps the
+    old behaviour — the provider picked in Settings.
+
+    keystore.get_role masks an assignment whose key has since been removed,
+    so this never names a provider that is certain to fail auth."""
+    import keystore
+    provider = keystore.get_role(job)
+    if not provider and job != "default":
+        provider = keystore.get_role("default")
+    if not provider:
+        from runtime_config import get_online_provider
+        provider = get_online_provider()
+    return provider
+
+
+def _online_provider_model(job: str = "default") -> tuple[str, str]:
+    """The (provider, model) used in Online (api) mode for one job. The
+    provider comes from the API keys page's role assignment, or — with
+    nothing assigned — from the Settings picker as before. Default models
+    are env-overridable. Shared by the answering path (_chain_for) and query
+    condensation so both honour the same choice."""
+    provider = _provider_for_job(job)
     # The FALLBACK defaults matter as much as the env vars: "deepseek-chat"
     # was the default here, so any deployment that had not set
     # ONLINE_DEEPSEEK_MODEL silently used an alias DeepSeek retired on
@@ -54,16 +88,32 @@ def _online_provider_model() -> tuple[str, str]:
     return provider, model
 
 
+# Which key-role answers which generation role. Only "reasoning" — what
+# quota.py's "deep" effort level maps to — is worth a different provider;
+# everything else is the everyday path and takes the default.
+_JOB_FOR_ROLE = {"reasoning": "advanced"}
+
+
 def _chain_for(role: str) -> list[tuple[str, str]]:
     """v8.6.1: API-mode enforcement moved HERE — the single choke point
     the answering path actually goes through. The v8.6 override lived in
     router.route_model(), whose output generate_with_fallback ignores;
     observed result: mode=api still logged 'Attempt 1: local/phi' and
-    cold-loaded Ollama. In api mode every role answers via DeepSeek and
-    Ollama is never touched."""
+    cold-loaded Ollama. In api mode every role answers via an online
+    provider and Ollama is never touched.
+
+    The chain is one entry unless a BACKUP provider is assigned and differs
+    from the one leading — assigning a backup is what makes api mode
+    survive a provider outage instead of returning "unable to generate"."""
     from runtime_config import get_generation_mode
     if get_generation_mode() == "api":
-        return [_online_provider_model()]
+        import keystore
+        chain = [_online_provider_model(_JOB_FOR_ROLE.get(role, "default"))]
+        if keystore.get_role("backup"):
+            backup = _online_provider_model("backup")
+            if backup[0] != chain[0][0]:
+                chain.append(backup)
+        return chain
     return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
 
 # Models offered for the manual "rethink with a different model" feature.
@@ -256,7 +306,7 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         return None
     try:
         res = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+            OPENAI_URL,
             headers={"Authorization": f"Bearer {key}"},
             json={"model": model, "temperature": 0,
                   "messages": [{"role": "user", "content": prompt}]},
@@ -491,7 +541,7 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
         url = DEEPSEEK_URL
         key = keys.get("deepseek") or os.getenv("DEEPSEEK_API_KEY")
     elif provider == "openai":
-        url = "https://api.openai.com/v1/chat/completions"
+        url = OPENAI_URL
         key = keys.get("openai") or os.getenv("OPENAI_API_KEY")
     else:
         logger.warning(f"stream_generate: provider {provider!r} cannot stream")
