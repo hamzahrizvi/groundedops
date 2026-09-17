@@ -227,6 +227,34 @@ try:
     _m._product_aliases = lambda: {"nv9_spectral": ["nv9"], "nv9usb": []}
     check(_m._products_named_in("how much does the NV9USB+ weigh?", _cands)
           == ["nv9usb"], "a stem contained in a longer alias is still dropped")
+
+    # The widget already sends its selected product on every turn. A question
+    # such as "power requirements for this product" therefore needs no chat
+    # history rewrite, but retrieval still needs the manual's full product
+    # name. This was accidentally gated on `_named` being non-empty, so typing
+    # "SCS" worked while "this product" failed in the same selected chat.
+    _m._product_names = lambda: {"sku_scs": "SMART Coin System",
+                                 "nv9usb": "NV9USB+"}
+    check(_m._add_selected_product_context(
+              "operating temperatures and power requirements for this product",
+              [], {"product": "sku_scs"})
+          == ("operating temperatures and power requirements for this product "
+              "(SMART Coin System)"),
+          "the selected product supplies context when the question says this product")
+    check(_m._add_selected_product_context(
+              "what about the NV9USB+?", ["nv9usb"],
+              {"product": "sku_scs"}) == "what about the NV9USB+?",
+          "an explicitly named product overrides the selected product")
+    check(_m._add_selected_product_context(
+              "compare SCS and NV9USB+", ["sku_scs", "nv9usb"],
+              {"product": "sku_scs"}) == "compare SCS and NV9USB+",
+          "a multi-product comparison is not collapsed to the selected product")
+    check(_m._resolve_question_scope("sku_scs", "coin_hoppers", [])
+          == ({"product": "sku_scs"}, "sku_scs"),
+          "the picker remains the default scope when no product is named")
+    check(_m._resolve_question_scope("sku_scs", "coin_hoppers", ["nv9usb"])
+          == ({"product": "nv9usb"}, "nv9usb"),
+          "one explicitly named product overrides the picker for this turn")
 finally:
     _m._product_names, _m._product_aliases = _names, _aliases
 

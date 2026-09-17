@@ -1638,6 +1638,47 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     return sorted(kept)
 
 
+def _add_selected_product_context(query: str, named_products: list[str],
+                                  scope: dict | None) -> str:
+    """Append the catalogue name that retrieval should understand.
+
+    An explicit product in the question wins over the selected chat product.
+    When the question only says "this product", the selected product supplies
+    the missing subject. Two explicitly named products are a comparison and
+    must not be collapsed back to the selected product.
+    """
+    if len(named_products) == 1:
+        key = named_products[0]
+    elif not named_products:
+        key = (scope or {}).get("product")
+    else:
+        return query
+
+    full_name = (_product_names().get(key) or "").strip()
+    if full_name and full_name.lower() not in query.lower():
+        return f"{query} ({full_name})"
+    return query
+
+
+def _resolve_question_scope(selected_product: str | None,
+                            category: str | None,
+                            named_products: list[str]
+                            ) -> tuple[dict | None, str | None]:
+    """Return the retrieval scope and effective product for this turn.
+
+    The product picker is the default context. One product explicitly named
+    in the question overrides that default for this turn; multiple names stay
+    available to the comparison path instead of being collapsed to one.
+    """
+    effective_product = (named_products[0] if len(named_products) == 1
+                         else selected_product)
+    if effective_product:
+        return {"product": effective_product}, effective_product
+    if category:
+        return {"category": category}, None
+    return None, None
+
+
 def _build_sources(results: list[dict]) -> list[dict]:
     """
     Build clickable source objects: one entry per unique source filename,
@@ -4197,12 +4238,6 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # (SMART Coin System)" and scored 0.998; the SAME question with
     # product=sku_scs was not expanded, scored 0.341, and refused. Being
     # already in the right manual made the answer WORSE.
-    _scope = None
-    if payload.product:
-        _scope = {"product": payload.product}
-    elif payload.category:
-        _scope = {"category": payload.category}
-
     # Which products the question itself names, aliases resolved. Computed
     # unconditionally now, because both jobs below need it.
     _named: list[str] = []
@@ -4212,13 +4247,15 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
 
-    # (1) SCOPE, only when nothing set one already. Exactly one hit is the
-    # whole condition: two or more means the visitor really did name several
-    # products, and asking which is the right behaviour.
-    if _scope is None and len(_named) == 1:
-        _scope = {"product": _named[0]}
-        logger.info(f"Auto-scoped to {_named[0]!r} — named in the question "
-                    f"via the catalogue's own aliases")
+    # (1) SCOPE. The picker supplies the default product even on the first
+    # question (no conversation-history rewrite is required). One product
+    # explicitly named in the question overrides that default for this turn.
+    _scope, _effective_product = _resolve_question_scope(
+        payload.product, payload.category, _named)
+    if _effective_product and _effective_product != payload.product:
+        logger.info(f"Using question-named product {_effective_product!r} "
+                    f"instead of selected product {payload.product!r}")
+        payload.product = _effective_product
 
     # (2) EXPAND, however the scope was arrived at. The catalogue knows
     # "SCS" is the SMART Coin System and "NV9S" the NV9 Spectral, but the
@@ -4230,13 +4267,11 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # Preference order matters: expand the product the question NAMED when it
     # named exactly one, otherwise the product being discussed. That way
     # "what is scs" expands correctly inside an nv9usb chat too.
-    _expand_key = _named[0] if len(_named) == 1 else (
-        (_scope or {}).get("product") if _named else None)
-    if _expand_key:
-        _full = (_product_names().get(_expand_key) or "").strip()
-        if _full and _full.lower() not in resolved_query.lower():
-            resolved_query = f"{resolved_query} ({_full})"
-            logger.info(f"Expanded alias -> {resolved_query!r}")
+    _contextual_query = _add_selected_product_context(
+        resolved_query, _named, _scope)
+    if _contextual_query != resolved_query:
+        resolved_query = _contextual_query
+        logger.info(f"Added product context -> {resolved_query!r}")
 
     # ── Curated FAQ (v12.0: ask, don't guess) ─────────────────────────
     # Earlier versions DECIDED whether the user's question was equivalent to
