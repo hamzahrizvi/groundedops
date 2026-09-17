@@ -1097,6 +1097,29 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         return None
 
 
+# Fragments unique to the clarifying questions this file emits. Used only to
+# stop the assistant asking twice in a row: there is no turn-type stored in
+# memory (it holds {q, a} strings and nothing else), so the previous turn's
+# TEXT is the only evidence available that it was a question back.
+#
+# Matching our own templates, not "does it end in a question mark" — a real
+# answer can legitimately end in one ("...which is the IF5, see page 12?"),
+# and treating that as a clarify would suppress a genuine follow-up question.
+_CLARIFY_MARKERS = (
+    "could you tell me more concretely",
+    "could you say which one you're asking about",
+    "could you clarify which part you mean",
+)
+
+
+def _asked_to_clarify_last_turn(history: list[dict] | None) -> bool:
+    if not history:
+        return False
+    last = (history[-1] or {}).get("a") or ""
+    low = last.lower()
+    return any(m in low for m in _CLARIFY_MARKERS)
+
+
 def _provider_reachable(provider: str | None,
                         timeout: float = 4.0) -> tuple[bool, str]:
     """Can the configured provider actually be talked to right now?
@@ -5111,6 +5134,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # Bound before the try: the except below only resets offer_support, and
     # the response dict reads system_refusal unconditionally.
     system_refusal = False
+    needs_clarification = False
+    clarification_options = []
     try:
         from text_utils import is_refusal as _is_refusal
         offer_support = bool(_is_refusal(answer)) or verifier_unavailable
@@ -5127,9 +5152,51 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         system_refusal = verifier_unavailable or (
             generation_failed and output.get("provider") == "none")
         if offer_support and not system_refusal:
-            answer = _friendly_refusal(
-                payload.product or payload.category,
-                _product_names().get(payload.product or "", ""))
+            # THE CLARIFY GATE, MOVED. Every clarify branch in this file used
+            # to sit inside `if confidence == "none"` — and with
+            # RETRIEVAL_GATE_THRESHOLD at 0.0001 retrieval essentially never
+            # reports "none", so all of them were unreachable in normal
+            # operation. The system could ask a question only when retrieval
+            # had failed outright, which is the one case where asking helps
+            # least. Real failures happen AFTER retrieval succeeds, here.
+            #
+            # A FOLLOW-UP that ends in a refusal is a conversation that lost
+            # its thread, not a corpus gap: the visitor said "how about RMS"
+            # and got told the documentation does not cover it, while the
+            # figures sat in the manual that was retrieved and cited. Ask.
+            #
+            # Three guards, each load-bearing:
+            #  * not system_refusal — during a provider outage EVERY turn ends
+            #    in a refusal, and a bot that responds to an outage by asking
+            #    the visitor to rephrase is worse than one that says it is
+            #    broken. This discriminator did not exist when this change was
+            #    first proposed; `service_degraded` is what makes it safe.
+            #  * is_followup_turn — a standalone miss ("capital of France")
+            #    still gets the flat refusal. Asking someone to rephrase a
+            #    question the corpus genuinely cannot answer is a loop with no
+            #    exit, which is the failure mode eval.py already guards.
+            #  * not _asked_to_clarify_last_turn — never twice in a row. Two
+            #    consecutive questions back reads as an assistant that cannot
+            #    answer anything, and the visitor leaves.
+            if (history and is_followup_turn(q, history, resolved_query)
+                    and not _asked_to_clarify_last_turn(history)):
+                _last_topic = history[-1].get("q", "")
+                answer = (
+                    f"I don't have more detail beyond what we already covered "
+                    f'for "{_last_topic}" — could you tell me more concretely '
+                    f"what you'd like me to check or expand on?")
+                role = "clarify"
+                needs_clarification = True
+                clarification_options = build_clarification_options(
+                    "followup", history, results)
+                # A clarify is a working conversation, not a dead end, so it
+                # does not offer support and is not recorded as a gap — the
+                # same rule the original clarify branches follow.
+                offer_support = False
+            else:
+                answer = _friendly_refusal(
+                    payload.product or payload.category,
+                    _product_names().get(payload.product or "", ""))
         elif generation_failed and output.get("provider") == "none":
             # NOT the verifier-unavailable case — that one already has its
             # own wording upstream ("could not verify an answer"), and
@@ -5208,6 +5275,12 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # the corpus does not cover the question. A client should say so, and
         # must not file it as an unanswered question.
         "service_degraded": bool(system_refusal),
+        # Present on THIS path now, not only on the early-return branches.
+        # The post-generation clarify above sets them, and a client that read
+        # them only from the confidence=="none" response would never see a
+        # clarify raised here.
+        "needs_clarification": needs_clarification,
+        "clarification_options": clarification_options,
         "retrieval_score": round(top_score, 4),
         "resolved_query": resolved_query if resolved_query != q else None,
         "timing": {

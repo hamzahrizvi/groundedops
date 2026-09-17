@@ -575,6 +575,22 @@ _REFERENCE_PATTERNS = [
     re.compile(r"^\s*(it|they|them|those|these)\b", re.IGNORECASE),
     re.compile(r"\b(it|its|they|them|those|these|that one)\b", re.IGNORECASE),  # gated by length below
     re.compile(r"\bi need more context\b", re.IGNORECASE),
+    # Set anaphora: a quantifier standing in for two things named EARLIER.
+    # "What is the power required to run both at once" matched nothing here,
+    # so condensation short-circuited, the raw fragment hit retrieval with no
+    # product in it, and the turn died. Appended rather than inserted because
+    # _SHORT_ONLY_PATTERNS indexes into this list by position.
+    #
+    # Deliberately NOT length-gated: the query that prompted this is nine
+    # words, over _SHORT_QUERY_MAX_WORDS, so gating it would exclude the
+    # exact case it exists for. The cost of a false positive is one extra
+    # condensation call that returns the query unchanged.
+    #
+    # "together" is deliberately absent: "screw it together", "put it
+    # together" are assembly instructions all over these manuals, not
+    # references to a previous turn.
+    re.compile(r"\b(both|the two|the pair|either of them|each of them)\b",
+               re.IGNORECASE),
 ]
 
 # Patterns in this list only count for short queries (see gate below):
