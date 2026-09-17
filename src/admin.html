@@ -5124,7 +5124,8 @@ function viewTest() {
       const r = await api("/query", { method: "POST", body: JSON.stringify({
         q, session_id: sid, product: sel.value || null,
         force_provider: provider, force_model: model,
-        faq_id: opts.faqId || null, skip_faq: !!opts.skipFaq }) });
+        faq_id: opts.faqId || null, skip_faq: !!opts.skipFaq,
+        reanswer: !!opts.reanswer }) });
       wait._row.remove();
       const bub = aiTurn();
       // The console chat had no reveal at all -- only the widget did -- so
@@ -5179,6 +5180,25 @@ function viewTest() {
           } }, "Start a new chat")));
         log.append(note);
       }
+      // "That didn't answer it." Re-reads the passages this question already
+      // retrieved and asks a model which of them actually answer it —
+      // measured, the right passage is in the context 100% of the time and
+      // ranks first only 68%, so the second look is usually all that is
+      // needed. Not offered on a curated FAQ answer (nothing to re-read) or
+      // on a service outage (nothing is reaching a model at all).
+      if (!r.from_faq && !r.service_degraded && !opts.reanswer) {
+        bub.append(el("div", { style: "margin-top:10px" },
+          el("button", { class: "btn btn-ghost", style: BTN, onclick: () => {
+            send(q, { silent: true, reanswer: true, skipFaq: true });
+          } }, "That didn't answer it — read the sources again")));
+      }
+      if (r.reanswer_mode) {
+        bub.append(el("div", { class: "tag tag-outline", style: "margin-top:8px" },
+          r.reanswer_mode === "selected"
+            ? "re-read: answered from the passages the model picked"
+            : "re-read: answered from the top 3 passages merged"));
+      }
+
       // A refusal with no next step is a dead end. Offer the human.
       if (r.offer_support) {
         bub.append(el("div", { style: "margin-top:10px" },

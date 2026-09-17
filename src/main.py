@@ -781,6 +781,11 @@ class QueryRequest(BaseModel):
     # v12.0: the user said "I'm asking something else". Skip the FAQ and
     # answer from the documents.
     skip_faq: bool = False
+    # "That didn't answer it — try again." Re-reads the passages this
+    # question already retrieved: a model is asked which of them actually
+    # answer it, and the answer is written from those alone. See reanswer.py
+    # for why this beats swapping the reranker.
+    reanswer: bool = False
 
 
 class DeleteSourceRequest(BaseModel):
@@ -4925,6 +4930,35 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # top hits score 0.000-0.32 on some questions), and a largest-gap cut
     # would re-create the documented pinout regression above, where the
     # chunks holding the answer scored 0.066 and 0.050 behind a 0.771 top.
+    # ── "That didn't answer it" — re-read before re-answering ────────────
+    # Measured (tools/bench_reranker.py, 19 cases): the relevant chunk is in
+    # the context 100% of the time and ranks FIRST only 68% of the time, and
+    # no reranker fixes that cheaply — the best tested buys 5 points of r@1
+    # for 8.5x the latency on this CPU-only box. So the retry does not
+    # re-retrieve or re-rank. It asks a model which of the passages it
+    # ALREADY has actually answer the question, and writes the answer from
+    # those alone; if that returns nothing usable it merges the top three,
+    # where the answer sits 94% of the time.
+    #
+    # This targets the observed failure directly: for "can I use an nv9
+    # spectral with note float?" the passage that answers it ranked #1 at
+    # 0.9992 and the served answer was built from #2.
+    reanswer_mode = None
+    if payload.reanswer and top_chunks:
+        import reanswer as _re
+        _cands = _retrieved[:_re.SELECT_FROM_N] or top_chunks
+        _sel_prompt = _re.build_selection_prompt(
+            resolved_query, [c.get("text", "") for c in _cands])
+        _sel_out = generate_with_fallback(
+            "fast", _sel_prompt, deepseek_api_key=deepseek_api_key,
+            api_keys=api_keys)
+        _picked = _re.parse_selection((_sel_out or {}).get("text", ""),
+                                      len(_cands))
+        top_chunks, reanswer_mode = _re.chosen_passages(_picked, _cands)
+        top_chunks = [_strip_breadcrumb(dict(c)) for c in top_chunks]
+        logger.info("reanswer: %s -> %d passage(s) for %r",
+                    reanswer_mode, len(top_chunks), resolved_query[:60])
+
     context = "\n\n".join(
         f"[Passage {i} of {len(top_chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
         for i, r in enumerate(top_chunks, 1))
@@ -5426,6 +5460,10 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # the corpus does not cover the question. A client should say so, and
         # must not file it as an unanswered question.
         "service_degraded": bool(system_refusal),
+        # null normally; "selected" or "merged_top_3" when the visitor asked
+        # for a re-read, so the console can show WHICH strategy produced the
+        # second answer rather than leaving the two indistinguishable.
+        "reanswer_mode": reanswer_mode,
         # Present on THIS path now, not only on the early-return branches.
         # The post-generation clarify above sets them, and a client that read
         # them only from the confidence=="none" response would never see a

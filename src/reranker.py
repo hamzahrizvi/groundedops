@@ -1,16 +1,36 @@
 import logging
+import os
 import torch
 from sentence_transformers import CrossEncoder
 
 logger = logging.getLogger(__name__)
 
+# The reranker decides the final order, and everything downstream gates on
+# its score: CONTEXT_FLOOR_RATIO, the retrieval band, the ambiguity guard.
+# It was the one stage never upgraded while the embedder moved twice
+# (all-MiniLM -> bge-small -> gte-modernbert), so it is now the oldest model
+# in the pipeline. Env-overridable so a replacement can be A/B'd against the
+# retrieval suite without a code change -- see tools/bench_reranker.py.
+#
+# Anything CrossEncoder can load works. Measured alternatives and their cost
+# on this CPU-only box are in tools/bench_reranker.py's output; pick on that
+# evidence rather than on parameter count.
+RERANKER_MODEL = os.getenv("RERANKER_MODEL",
+                           "cross-encoder/ms-marco-MiniLM-L-6-v2")
+
 _model = None
+_loaded = None
 
 
-def _get():
-    global _model
-    if _model is None:
-        _model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+def _get(name: str | None = None):
+    """Load (and cache) the cross-encoder. Passing `name` swaps the model,
+    which is how the benchmark compares several in one process."""
+    global _model, _loaded
+    want = name or RERANKER_MODEL
+    if _model is None or _loaded != want:
+        logger.info(f"Loading reranker: {want}")
+        _model = CrossEncoder(want)
+        _loaded = want
     return _model
 
 
