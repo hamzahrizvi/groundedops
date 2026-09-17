@@ -505,12 +505,33 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
 
 **Retrieval and ingest**
 
-- **Condensation can destroy a working query.** Measured on "what are the
-  power requirements for this setup?": as typed it put the PSU page at #1
-  (0.9348) with a clean cliff to 0.0843; resolved to name both products, the
-  PSU page was **not retrieved at all** and a firmware-programming page
-  entered context instead. Done looks like: retrieve on the raw AND resolved
-  query and fuse, so a good query cannot be rewritten into a worse one.
+- **Condensation can destroy a working query, and is gated by the wrong
+  thing.** Two faults in one mechanism (`llm.condense_query`, the
+  Rewrite-Retrieve-Read step over the last 2 turns). Fixing them together is
+  the single highest-value retrieval change on this list.
+
+  *It replaces rather than augments.* Measured on "what are the power
+  requirements for this setup?": as typed it put the PSU page at #1 (0.9348)
+  with a clean cliff to 0.0843; resolved to name both products, the PSU page
+  was **not retrieved at all** and a firmware-programming page entered
+  context instead. A good query can be rewritten into a worse one with no way
+  back.
+
+  *It is gated behind a regex.* `has_reference_markers()` must match or the
+  rewrite is skipped entirely and the raw fragment hits retrieval. That gate
+  is the non-standard part: the canonical pattern calls the rewriter
+  unconditionally and lets the prompt decide, which
+  `CONDENSE_PROMPT_TEMPLATE` already instructs ("if already self-contained,
+  return it EXACTLY AS-IS"). The regex is a second, brittle classifier doing
+  a job the model was already asked to do — it is what killed "what is the
+  power required to run both at once", where no marker matched so no rewrite
+  ran. `de5a37f` added set-anaphora markers, which patches the list rather
+  than fixing the design.
+
+  Done looks like: retrieve on the raw AND rewritten query and fuse (RRF is
+  already there to do it), then drop the regex gate — safe only in that
+  order, because fusing is what stops a bad rewrite losing the original's
+  hits. Verify against `eval_cases_retrieval.json`, which needs no provider.
 - **Multi-entity questions are not decomposed.** "NV9 Spectral with Note
   Float" is two entities; one embedding blends them and favours chunks that
   weakly mention both over the best chunk for each. `sales.py` already does
