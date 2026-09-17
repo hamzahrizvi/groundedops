@@ -409,6 +409,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `BACKUP_MAX_BYTES` | `4294967296` | Ceiling on what an uploaded archive may expand to. |
 | `BACKUP_SNAPSHOT_DIR` | `backup_snapshots` | Where the automatic pre-restore snapshot is written. |
 | `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
+| `ADMIN_NETWORK_URL` | *(auto-detected)* | Exact console origin to advertise in the sidebar, e.g. `http://192.168.1.50:8000`. Set this when VPNs, proxies, or multiple adapters make automatic LAN-address selection ambiguous. |
 | `BOOTSTRAP_TOKEN` | *(empty)* | Required in an `X-Bootstrap-Token` header for first-run root creation **over the network**. Unproxied/LAN setup needs no token. Clear it once the root account exists. |
 | `TRUST_PROXY` | *(unset)* | Honour `X-Forwarded-For`. Set only with a proxy you control in front — otherwise the header is forgeable and anonymous quotas can be bypassed. |
 | `ENABLE_HSTS` | *(unset)* | Ask browsers to stay on HTTPS. TLS terminates at the proxy; this app does not serve TLS. |
@@ -422,6 +423,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `ALLOWED_EMAIL_DOMAIN` | `innovative-technology.com` | Accounts may only be created for this domain. Blank allows any. |
 | `SESSION_TTL_SECONDS` | `43200` | How long a signed-in session lasts (12h). |
 | `ACCOUNTS_PATH` | `accounts.json` | Account store. Gitignored, **not regenerable** — back it up. |
+| `ACCOUNT_REQUESTS_PATH` | `account_requests.json` | Pending self-enrolment requests. Contains staff email addresses and scrypt password hashes; root backups include it with the account store. |
 | `GENERATION_MODE` | `api` | `api` (Online) or `local` (Free) at boot |
 | `ONLINE_PROVIDER` | `deepseek` | `deepseek` / `openai` / `anthropic` |
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |

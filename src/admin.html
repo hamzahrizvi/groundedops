@@ -949,7 +949,16 @@ async function api(path, opts = {}) {
   // "your session is gone" (sign in again), 403 is "your account is fine
   // but this level may not do that" (signing in again changes nothing, and
   // bouncing to the gate would look like a broken login).
-  if (r.status === 401) { signOut(); throw new Error("Session expired"); }
+  if (r.status === 401) {
+    let d; try { d = (await r.json()).detail; } catch (e) { d = "Sign-in failed"; }
+    // /admin/login has no session to expire. Its 401 means the submitted
+    // credentials were rejected; clearing state and calling that an expired
+    // session sent people debugging the wrong problem.
+    if (path === "/admin/login")
+      throw new Error(typeof d === "string" ? d : "That email and password were not accepted");
+    signOut();
+    throw new Error("Session expired");
+  }
   if (r.status === 403) {
     let d; try { d = (await r.json()).detail; } catch (e) { d = "Not permitted"; }
     throw new Error(typeof d === "string" ? d : "Not permitted");
@@ -1176,7 +1185,7 @@ function lanBox() {
   const draw = () => {
     box.innerHTML = "";
     if (!lanInfo || !lanInfo.urls || !lanInfo.urls.length) return;
-    const url = lanInfo.urls[0];
+    const url = lanInfo.primary_url || lanInfo.urls[0];
     box.append(
       el("div", { class: "lan-lbl" }, "Reachable on the network at"),
       el("button", { class: "lan-url mono", title: "Copy " + url + "/admin",
@@ -1860,6 +1869,14 @@ function gate() {
   const heading = el("h2", {}, "Sign in");
   const nameIn = el("input", { class: "input", placeholder: "Your name (optional)" });
   const nameField = el("div", { class: "field", style: "display:none" }, nameIn);
+  const confirmIn = el("input", { class: "input", type: "password",
+                                   placeholder: "Confirm password" });
+  const confirmField = el("div", { class: "field", style: "display:none" }, confirmIn);
+  const switchBtn = el("button", { class: "btn btn-ghost",
+                                    style: "display:none;margin-top:8px" },
+                       "Request an account");
+  let gateMode = "signin";
+  let requestSent = false;
 
   // Every failure here used to surface as "that password was not accepted" --
   // a wrong password, a server that was not running, a proxy swallowing the
@@ -1908,6 +1925,56 @@ function gate() {
     } catch (e) { fail(e, "Sign-in"); busy(false); }
   };
 
+  const requestAccess = async () => {
+    if (!emailIn.value.trim() || !pwIn.value)
+      return toast("Email and a password, please", true);
+    if (pwIn.value.length < 12)
+      return toast("Use a password of at least 12 characters", true);
+    if (pwIn.value !== confirmIn.value)
+      return toast("Those passwords did not match", true);
+    busy(true);
+    try {
+      const r = await api("/admin/auth/request", { method: "POST",
+        body: JSON.stringify({ email: emailIn.value.trim(), password: pwIn.value,
+                               name: nameIn.value.trim() }) });
+      requestSent = true;
+      pwIn.value = ""; confirmIn.value = "";
+      showSignIn();
+      toast(r.message || "Request sent for approval");
+    } catch (e) { fail(e, "Request"); }
+    busy(false);
+  };
+
+  const showSignIn = () => {
+    gateMode = "signin";
+    heading.textContent = "Sign in";
+    status.textContent = requestSent
+      ? "Request sent. You can sign in after a root user approves it."
+      : (gateDomain ? "Sign in with your @" + gateDomain + " account."
+                    : "Sign in to manage the documents and answers behind the support widget.");
+    nameField.style.display = "none";
+    confirmField.style.display = "none";
+    pwIn.placeholder = "Password";
+    btn.textContent = "Sign in";
+    btn.onclick = signIn;
+    switchBtn.textContent = "Request an account";
+  };
+
+  const showRequest = () => {
+    gateMode = "request";
+    heading.textContent = "Request an account";
+    status.textContent = "Choose your sign-in details. A root user must approve "
+      + "the request before the account can be used.";
+    nameField.style.display = "";
+    confirmField.style.display = "";
+    pwIn.placeholder = "Password (at least 12 characters)";
+    btn.textContent = "Send request";
+    btn.onclick = requestAccess;
+    switchBtn.textContent = "Back to sign in";
+  };
+
+  switchBtn.onclick = () => gateMode === "signin" ? showRequest() : showSignIn();
+
   const createRoot = async () => {
     if (!emailIn.value.trim() || !pwIn.value) return toast("Email and password, please", true);
     if (pwIn.value.length < 12)
@@ -1942,16 +2009,16 @@ function gate() {
       nameField.style.display = "";
       pwIn.placeholder = "Password (at least 12 characters)";
     } else {
-      status.textContent = gateDomain
-        ? "Sign in with your @" + gateDomain + " account."
-        : "Sign in to manage the documents and answers behind the support widget.";
-      btn.onclick = signIn;
+      switchBtn.style.display = "inline-flex";
+      showSignIn();
     }
   })();
 
   const onEnter = e => { if (e.key === "Enter" && !btn.disabled) btn.onclick(); };
   emailIn.addEventListener("keydown", onEnter);
   pwIn.addEventListener("keydown", onEnter);
+  nameIn.addEventListener("keydown", onEnter);
+  confirmIn.addEventListener("keydown", onEnter);
 
   return el("div", { class: "gate" },
     el("div", { class: "card elev-md", style: "padding:22px" },
@@ -1968,7 +2035,8 @@ function gate() {
       el("div", { class: "field" }, emailIn),
       nameField,
       el("div", { class: "field" }, pwIn),
-      el("div", { style: "margin-top:14px" }, btn, signingIn)));
+      confirmField,
+      el("div", { style: "margin-top:14px" }, btn, signingIn, switchBtn)));
 }
 
 /* ---------------- accounts (root only) ---------------- */
@@ -2003,6 +2071,38 @@ function viewAccounts() {
     try { await fn(); acctCache = null; toast(okMsg); await loadAccounts(); }
     catch (e) { toast(e.message, true); }
   };
+
+  // ── pending self-enrolment requests ──
+  const pending = acctCache.requests || [];
+  const requestRows = pending.length ? pending.map(req => {
+    const level = el("select", { class: "input",
+      style: "font-size:12.5px;padding:4px 8px" },
+      el("option", { value: "basic", selected: "true" }, "Basic — test chat only"),
+      el("option", { value: "support" }, "Support — console access"),
+      el("option", { value: "root" }, "Root — manage accounts too"));
+    return el("div", { class: "card elev-sm",
+                       style: "padding:14px 18px;gap:0;margin-bottom:10px" },
+      el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+        el("b", {}, req.name || req.email),
+        el("span", { class: "tag tag-accent" }, "awaiting approval"),
+        el("span", { style: "flex:1" }),
+        el("span", { class: "row-hint" },
+          req.created_at ? "requested " + shortDate(req.created_at) : "")),
+      req.name ? el("div", { class: "mono row-hint" }, req.email) : null,
+      el("div", { class: "row", style: "margin-top:10px" },
+        el("div", { style: "flex:1 1 220px" }, level),
+        el("button", { class: "btn btn-primary",
+          onclick: () => after(() => api("/admin/account-requests/" + req.id + "/approve",
+            { method: "POST", body: JSON.stringify({ level: level.value }) }),
+            "Account approved") }, "Approve"),
+        el("button", { class: "btn btn-ghost",
+          onclick: () => {
+            if (!confirm("Decline the account request from " + req.email + "?")) return;
+            after(() => api("/admin/account-requests/" + req.id,
+              { method: "DELETE" }), "Request declined");
+          } }, "Decline")));
+  }) : [el("div", { class: "card elev-sm" },
+          el("div", { class: "empty" }, "No account requests are waiting."))];
 
   // ── new account form ──
   const nEmail = el("input", { class: "input", type: "email", placeholder: "person@company.com" });
@@ -2100,7 +2200,16 @@ function viewAccounts() {
       el("div", {}, el("div", { class: "lbl" }, "Basic"), el("b", {}, String(byLevel("basic")))),
       el("div", { class: acctCache.users.some(u => u.disabled) ? "warn" : "" },
         el("div", { class: "lbl" }, "Disabled"),
-        el("b", {}, String(acctCache.users.filter(u => u.disabled).length)))),
+        el("b", {}, String(acctCache.users.filter(u => u.disabled).length))),
+      el("div", { class: pending.length ? "warn" : "" },
+        el("div", { class: "lbl" }, "Requests"),
+        el("b", {}, String(pending.length)))),
+    el("div", { "data-sec": "Requests" },
+      el("h3", {}, "Account requests"),
+      el("p", { class: "sec-hint" },
+        "People choose their password before submitting. Only its secure hash is stored; "
+        + "choose their access level before approving."),
+      requestRows),
     newCard,
     el("div", { "data-sec": "Everyone", "data-tour": "accounts-list" }, rows),
   ];

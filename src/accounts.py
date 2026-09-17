@@ -50,6 +50,7 @@ import jsonstore
 logger = logging.getLogger(__name__)
 
 _PATH = os.getenv("ACCOUNTS_PATH", "accounts.json")
+_REQUESTS_PATH = os.getenv("ACCOUNT_REQUESTS_PATH", "account_requests.json")
 _lock = threading.Lock()
 
 LEVELS = ("basic", "support", "root")
@@ -102,6 +103,18 @@ def _save(users: list[dict]) -> None:
     back deletes every account but the one just added. These are scrypt
     hashes with no other copy."""
     jsonstore.save(_PATH, {"users": users}, label="accounts")
+
+
+def _load_requests() -> list[dict]:
+    data = jsonstore.load(_REQUESTS_PATH, [], label="account requests")
+    if isinstance(data, dict):
+        return data.get("requests", [])
+    return data if isinstance(data, list) else []
+
+
+def _save_requests(requests: list[dict]) -> None:
+    jsonstore.save(_REQUESTS_PATH, {"requests": requests},
+                   label="account requests")
 
 
 # ── passwords ─────────────────────────────────────────────────────────
@@ -167,6 +180,18 @@ def _public(u: dict) -> dict:
 
 def list_users() -> list[dict]:
     return [_public(u) for u in sorted(_load(), key=lambda u: u["email"])]
+
+
+def _public_request(req: dict) -> dict:
+    """A pending request as root may see it — never its password hash."""
+    return {"id": req["id"], "email": req["email"],
+            "name": req.get("name", ""),
+            "created_at": req.get("created_at", "")}
+
+
+def list_access_requests() -> list[dict]:
+    return [_public_request(r) for r in sorted(
+        _load_requests(), key=lambda r: r.get("created_at", ""))]
 
 
 def find_by_email(email: str) -> dict | None:
@@ -243,6 +268,92 @@ def bootstrap_root(email: str, password: str, name: str = "") -> dict:
     return create_user(email, password, "root", name=name,
                        created_by="bootstrap", must_change_password=False,
                        _only_if_empty=True)
+
+
+def submit_access_request(email: str, password: str,
+                          name: str = "") -> dict | None:
+    """Store an enrolment request without ever storing the plaintext password.
+
+    Existing accounts and repeat submissions are deliberately accepted as a
+    no-op by the public endpoint, so it cannot be used to enumerate which
+    company email addresses already have access. A repeat also cannot replace
+    the password hash on a request root is about to approve.
+    """
+    email = _validate_email(email)
+    validate_password(password)
+    with _lock:
+        if any(u.get("email") == email for u in _load()):
+            logger.info(f"access request ignored (account exists): {email}")
+            return None
+        requests = _load_requests()
+        existing = next((r for r in requests if r.get("email") == email), None)
+        if existing:
+            logger.info(f"access request ignored (already pending): {email}")
+            return _public_request(existing)
+        req = {
+            "id": uuid.uuid4().hex[:12],
+            "email": email,
+            "name": (name or "").strip(),
+            "password": _hash_password(password),
+            "created_at": _now(),
+        }
+        requests.append(req)
+        _save_requests(requests)
+    logger.info(f"access requested: {email}")
+    return _public_request(req)
+
+
+def approve_access_request(request_id: str, level: str,
+                           actor_id: str = "") -> dict:
+    """Turn a pending request into an account using its stored scrypt hash."""
+    if level not in LEVELS:
+        raise AccountError(f"level must be one of {', '.join(LEVELS)}")
+    with _lock:
+        requests = _load_requests()
+        req = next((r for r in requests if r.get("id") == request_id), None)
+        if not req:
+            raise AccountError("no such access request")
+        users = _load()
+        existing = next((u for u in users
+                         if u.get("email") == req.get("email")), None)
+        if existing:
+            # A root may have manually created the account while this request
+            # was open. Resolve the stale request without replacing credentials.
+            requests = [r for r in requests if r.get("id") != request_id]
+            _save_requests(requests)
+            return _public(existing)
+        rec = {
+            "id": uuid.uuid4().hex[:12],
+            "email": req["email"],
+            "name": req.get("name", ""),
+            "level": level,
+            "password": req["password"],
+            "token_epoch": 1,
+            "disabled": False,
+            "created_at": _now(),
+            "created_by": actor_id or "approved request",
+            "last_login": "",
+            "must_change_password": False,
+        }
+        users.append(rec)
+        _save(users)
+        requests = [r for r in requests if r.get("id") != request_id]
+        _save_requests(requests)
+    logger.info(f"access request approved: {rec['email']} ({level}) by "
+                f"{actor_id or 'root'}")
+    return _public(rec)
+
+
+def reject_access_request(request_id: str, actor_id: str = "") -> None:
+    with _lock:
+        requests = _load_requests()
+        target = next((r for r in requests if r.get("id") == request_id), None)
+        if not target:
+            raise AccountError("no such access request")
+        requests = [r for r in requests if r.get("id") != request_id]
+        _save_requests(requests)
+    logger.info(f"access request declined: {target['email']} by "
+                f"{actor_id or 'root'}")
 
 
 def set_level(user_id: str, level: str, actor_id: str = "") -> dict:

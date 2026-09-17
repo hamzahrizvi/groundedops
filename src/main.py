@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import logging
 import os
 import re
@@ -7,7 +8,7 @@ import threading
 import time
 import uuid
 
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 
 # ── Load .env (v12.0) ────────────────────────────────────────────────
@@ -2617,8 +2618,60 @@ def admin_network(request: Request, x_admin_password: str | None = Header(defaul
     embed without anyone running ipconfig.
     """
     _require_admin(x_admin_password)
-    port = request.url.port or 8000
-    addrs = []
+    scheme = request.url.scheme or "http"
+    default_port = 443 if scheme == "https" else 80
+    # `URL.port` is None on ordinary :80/:443 requests. Falling back to 8000
+    # there advertised a URL different from the one that had just worked.
+    port = request.url.port or default_port
+
+    def origin(host: str, port_: int = port, scheme_: str = scheme) -> str:
+        shown = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        suffix = "" if ((scheme_ == "http" and port_ == 80)
+                        or (scheme_ == "https" and port_ == 443)) else f":{port_}"
+        return f"{scheme_}://{shown}{suffix}"
+
+    urls: list[str] = []
+    addresses: list[str] = []
+
+    def add(host: str, *, url: str | None = None) -> None:
+        host = (host or "").strip(" []")
+        if not host or host.startswith(("127.", "169.254.")) or host == "::1":
+            return
+        if host not in addresses:
+            addresses.append(host)
+        candidate = url or origin(host)
+        if candidate not in urls:
+            urls.append(candidate.rstrip("/"))
+
+    # Explicit deployment configuration wins. It covers VPNs, reverse
+    # proxies and hosts with several real adapters where no OS heuristic can
+    # know which address colleagues are meant to use.
+    configured = (os.getenv("ADMIN_NETWORK_URL") or "").strip()
+    if configured:
+        try:
+            raw = configured if "://" in configured else "http://" + configured
+            parsed = urlsplit(raw)
+            if parsed.hostname:
+                cfg_scheme = (parsed.scheme
+                              if parsed.scheme in ("http", "https") else "http")
+                cfg_port = parsed.port or (443 if cfg_scheme == "https" else 80)
+                add(parsed.hostname,
+                    url=origin(parsed.hostname, cfg_port, cfg_scheme))
+        except ValueError as exc:
+            logger.warning(f"Ignoring invalid ADMIN_NETWORK_URL: {exc}")
+
+    # If this request already arrived using a non-loopback IP, that is the
+    # strongest possible evidence: it is a working console address. Put it
+    # ahead of guessed adapter addresses.
+    request_host = request.url.hostname or ""
+    try:
+        request_ip = ipaddress.ip_address(request_host)
+        if not request_ip.is_loopback and not request_ip.is_link_local:
+            add(request_host)
+    except ValueError:
+        pass
+
+    routed = ""
     try:
         s_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s_.settimeout(0.4)
@@ -2626,7 +2679,8 @@ def admin_network(request: Request, x_admin_password: str | None = Header(defaul
             # Nothing is sent; this just makes the OS choose the interface it
             # would really route over, which is the one a colleague reaches.
             s_.connect(("8.8.8.8", 80))
-            addrs.append(s_.getsockname()[0])
+            routed = s_.getsockname()[0]
+            add(routed)
         finally:
             s_.close()
     except Exception:
@@ -2638,20 +2692,20 @@ def admin_network(request: Request, x_admin_password: str | None = Header(defaul
     # is by subnet: keep an address only if it shares a /16 with the one the
     # OS actually routes over, which is how a second real NIC on the same
     # site looks and how a host-only switch does not.
-    routed = addrs[0] if addrs else ""
     site = ".".join(routed.split(".")[:2]) if routed else ""
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             ip = info[4][0]
-            if ip.startswith(("127.", "169.254.")) or ip in addrs:
+            if ip.startswith(("127.", "169.254.")) or ip in addresses:
                 continue
             if site and ".".join(ip.split(".")[:2]) != site:
                 continue
-            addrs.append(ip)
+            add(ip)
     except Exception:
         pass
-    return {"port": port, "addresses": addrs,
-            "urls": [f"http://{a}:{port}" for a in addrs]}
+    return {"port": port, "addresses": addresses, "urls": urls,
+            "primary_url": urls[0] if urls else None,
+            "configured": bool(configured)}
 
 
 @app.get("/admin", include_in_schema=False)
@@ -3499,6 +3553,27 @@ def admin_login(payload: LoginReq):
     return {"token": token, "user": _public_self(user)}
 
 
+@app.post("/admin/auth/request")
+def admin_auth_request(payload: BootstrapReq):
+    """Submit an account request for root approval.
+
+    The password is scrypt-hashed before the request is persisted. The reply
+    is intentionally identical for an existing account and an already-pending
+    request, so this unauthenticated route cannot enumerate staff accounts.
+    """
+    if accounts.is_uninitialised():
+        raise HTTPException(status_code=409,
+                            detail="Create the first root account before "
+                                   "requesting additional access")
+    try:
+        accounts.submit_access_request(payload.email, payload.password,
+                                       payload.name or "")
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"submitted": True,
+            "message": "Your request was sent to a root account for approval."}
+
+
 @app.get("/admin/auth/me")
 def admin_auth_me(x_admin_password: str | None = Header(default=None)):
     """Any level. The console calls this on load to re-establish who it is
@@ -3531,7 +3606,9 @@ def admin_auth_change_password(payload: SelfPasswordReq,
 @app.get("/admin/users")
 def admin_users_list(x_admin_password: str | None = Header(default=None)):
     _require_root(x_admin_password)
-    return {"users": accounts.list_users(), "levels": list(accounts.LEVELS)}
+    return {"users": accounts.list_users(),
+            "requests": accounts.list_access_requests(),
+            "levels": list(accounts.LEVELS)}
 
 
 @app.post("/admin/users")
@@ -3544,6 +3621,28 @@ def admin_users_create(payload: NewUserReq,
             name=payload.name or "", created_by=me["email"])}
     except accounts.AccountError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/admin/account-requests/{request_id}/approve")
+def admin_access_request_approve(request_id: str, payload: LevelReq,
+                                 x_admin_password: str | None = Header(default=None)):
+    me = _require_root(x_admin_password)
+    try:
+        return {"user": accounts.approve_access_request(
+            request_id, payload.level, me["email"])}
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/admin/account-requests/{request_id}")
+def admin_access_request_reject(request_id: str,
+                                x_admin_password: str | None = Header(default=None)):
+    me = _require_root(x_admin_password)
+    try:
+        accounts.reject_access_request(request_id, me["email"])
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
 
 
 @app.post("/admin/users/{user_id}/level")

@@ -20,6 +20,7 @@ os.environ.setdefault("WIDGET_CONFIG_PATH", "/tmp/apitest/data/widget_config.jso
 os.environ.setdefault("WIDGET_LEADS_PATH", "/tmp/apitest/data/widget_leads.json")
 os.environ.setdefault("CATALOG_CONFIG", "/tmp/apitest/data/catalog.json")
 os.environ.setdefault("ACCOUNTS_PATH", "/tmp/apitest/data/accounts.json")
+os.environ.setdefault("ACCOUNT_REQUESTS_PATH", "/tmp/apitest/data/account_requests.json")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
 # keystore.set_key/clear_key write to a real file — point that at a scratch
 # path so a key-management test can never touch the real src/.env.

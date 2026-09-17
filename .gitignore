@@ -76,6 +76,10 @@ widget_leads.json
 # account, so it needs a real backup (see accounts.py).
 accounts.json
 accounts.json.tmp
+# Pending enrolment requests contain staff email addresses and scrypt password
+# hashes. Treat them exactly like the account store.
+account_requests.json
+account_requests.json.tmp
 # Access limits an operator has changed from the defaults (policy.py).
 # Safe to lose -- it falls back to the env/installed defaults.
 policy.json
