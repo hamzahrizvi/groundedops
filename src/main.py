@@ -891,6 +891,72 @@ def _capability_reply(query: str, chunks: list[dict]) -> dict | None:
     return answerability.capability_evidence(query, chunks)
 
 
+# ── "Would you like the steps?" — and then actually having them ─────────
+#
+# The capability reply used to end "Would you like me to walk through the
+# steps?" and NOTHING implemented the answer. From the widget transcript of
+# 2026-09-22: the visitor said "yes", which went through ordinary retrieval
+# -- which has no idea what it refers to -- and refused. Then "yes take me
+# through the steps" hit the clarify gate and was asked to rephrase. An
+# offer nothing can honour is worse than no offer: it spends the visitor's
+# trust and then tells them to go away.
+#
+# So the offer is remembered. One entry per session holding the document it
+# was about, consumed by the next affirmative turn. Bounded and in-process:
+# losing it on a restart costs one re-asked question, which is not worth a
+# store.
+_PENDING_STEPS: dict[str, str] = {}
+_PENDING_STEPS_MAX = 500
+
+# An affirmative with no content of its own. Deliberately NOT a general
+# yes-detector: it is consulted only when an offer is outstanding for this
+# session, so a false positive serves steps to someone who said "yes" about
+# something else, and a false negative is the dead end above.
+_AFFIRMATIVE = re.compile(
+    r"^\W*(?:yes|yep|yeah|yup|ok(?:ay)?|sure|please|go\s+on|go\s+ahead"
+    r"|do\s+it|walk\s+me|take\s+me|show\s+me|step)", re.I)
+
+
+def _remember_steps_offer(session_id: str | None, source: str) -> None:
+    if not session_id or not source:
+        return
+    if len(_PENDING_STEPS) >= _PENDING_STEPS_MAX:
+        _PENDING_STEPS.clear()      # cheap bound; an offer is cheap to lose
+    _PENDING_STEPS[session_id] = source
+
+
+def _format_steps(steps: list[dict]) -> str:
+    """The steps as the document wrote them, verbatim.
+
+    Verbatim rather than summarised, deliberately: these are shell commands
+    and file paths, the reader is going to type them, and a model
+    paraphrasing `sudo touch /etc/udev/rules.d/80-local.rules` is a support
+    call. No model is involved, so there is nothing to ground.
+    """
+    out = []
+    for st in steps:
+        section = (st.get("section") or "").split("›")[-1].strip()
+        body = st.get("text") or ""
+        if "]" in body[:400]:
+            body = body[body.index("]") + 1:]
+        body = " ".join(body.split())
+        out.append(f"**{section}**" + "\n" + body if section else body)
+    return "\n\n".join(out)
+
+
+def _steps_answer(source: str) -> str | None:
+    """The steps of one document, or None when it has none to give."""
+    try:
+        from retrieval_db import steps_for_source
+        steps = steps_for_source(source)
+    except Exception as exc:
+        logger.warning(f"steps lookup failed for {source}: {exc}")
+        return None
+    if not steps:
+        return None
+    return _format_steps(steps)
+
+
 def _refusal_suggestions(scope_key: str | None, query: str = "",
                          sources: list | None = None,
                          limit: int = 3) -> list[str]:
@@ -4632,6 +4698,40 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
 
     q = payload.q
     session_id = payload.session_id or DEFAULT_SESSION_ID
+
+    # "YES" TO AN OFFER WE MADE, answered before anything else runs.
+    #
+    # It has to be first. "yes" carries no content, so retrieval scores it
+    # against the corpus and gets noise, and every branch downstream then
+    # treats that noise as the question. Observed in the widget transcript
+    # of 2026-09-22: the capability reply offered to walk through the Linux
+    # steps, the visitor said "yes", and the pipeline answered with an
+    # unrelated sentence about age estimation; "yes take me through the
+    # steps" was then asked to rephrase.
+    #
+    # Only fires when THIS session has an offer outstanding, so it cannot
+    # hijack a "yes" in any other conversation, and the offer is consumed
+    # either way -- a second "yes" is a new question, not the same steps
+    # again.
+    _pending_src = _PENDING_STEPS.pop(session_id, None)
+    if _pending_src and _AFFIRMATIVE.match((q or "").strip()):
+        _steps = _steps_answer(_pending_src)
+        if _steps:
+            logger.info("serving the offered steps for %s", _pending_src)
+            add_to_memory(session_id, q, _steps)
+            return {
+                "answer": _steps,
+                "sources": _build_sources(
+                    [{"source": _pending_src, "page": 1, "text": ""}]),
+                "role": "steps",
+                "answerability": "stated",
+                "model": None, "provider": "documents",
+                "grounding_score": None, "flagged": False,
+                "offer_support": False, "system_refusal": False,
+                "needs_clarification": False, "clarification_options": [],
+                "retrieval_score": 1.0, "resolved_query": None,
+            }
+
     deepseek_api_key = payload.deepseek_api_key
     api_keys = {"deepseek": payload.deepseek_api_key,
                 "openai": payload.openai_api_key,
@@ -5836,15 +5936,27 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             _t = _capability["target"]
             _hits = _capability["documented"] or _capability["procedural"]
             _where = _hits[0]
-            _doc = _where["source"].rsplit(".", 1)[0]
-            if _capability["documented"]:
-                answer = (f"Yes — that is documented. **{_doc}** covers "
-                          f"{_t} (page {_where['page']}). Would you like me "
-                          f"to walk through the steps?")
+            # NO FILENAME. This used to read "**Accessing my device in Linux
+            # Environment-v2-20250224_144232 2** covers linux (page 1)" --
+            # an internal filename, version suffix, ingest timestamp and a
+            # stray " 2" from a duplicate upload, in front of a customer.
+            # The cited sources are attached to the response separately and
+            # the console shows them, so naming the file in the prose buys
+            # nothing and reads like the assistant is talking about its own
+            # filesystem.
+            #
+            # Whether the steps can actually be produced is decided HERE,
+            # before the offer is made, rather than hoped for afterwards.
+            _steps_src = _where["source"]
+            _has_steps = bool(_steps_answer(_steps_src))
+            if _has_steps:
+                _remember_steps_offer(session_id, _steps_src)
+                answer = (f"Yes — that is documented. I can take you through "
+                          f"the steps for {_t}. Would you like them?")
             else:
-                answer = (f"Yes — the documentation includes a procedure for "
-                          f"{_t}: **{_doc}**, page {_where['page']}. Would "
-                          f"you like the steps?")
+                # Nothing step-structured to give, so nothing is promised.
+                answer = (f"Yes — {_t} is covered in the documentation. Our "
+                          f"support team can talk you through the detail.")
             role = "capability"
             offer_support = False
             flagged = False

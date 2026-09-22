@@ -867,8 +867,15 @@ def _product_terms() -> tuple[str, ...]:
 # no procedure exists is a different and much riskier feature.
 #
 # A closed set of frames, and the answer is whatever follows the verb.
+# "how can I connect to MyCheckr using linux?" matched NOTHING, because the
+# frame was anchored on the closed-question openers only. So "can I connect
+# to X using Y" was recognised and answered while "HOW can I connect to X
+# using Y" -- the phrasing that actually wants the steps -- was refused.
+# Seen in the widget transcript of 2026-09-22, one turn after the closed
+# form had just been answered, which is the worst possible way to meet it.
 _CAPABILITY = re.compile(
-    r"^\W*(?:does|do|is|are|can|could|will|would|has|have)\b[^?]{0,60}?"
+    r"^\W*(?:how\s+(?:can|do|would)\s+\w+\s+|"
+    r"(?:does|do|is|are|can|could|will|would|has|have)\b)[^?]{0,60}?"
     r"\b(?:work|works|run|runs|runnable|compatible|compatibility|integrate"
     r"|integrates|integrated|use|used|usable|support|supports|supported"
     r"|talk|talks|connect|connects)\b(?P<tail>[^?]*)\??$",

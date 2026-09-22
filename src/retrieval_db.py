@@ -694,3 +694,42 @@ def sources_titled_for(words: list[str], product: str) -> list[str]:
         if _matches_scope(c, None, {"product": product}):
             out.append(src)
     return out
+
+
+def steps_for_source(source: str, budget: int = PROCEDURE_COMPLETION_CHARS
+                     ) -> list[dict]:
+    """Every numbered STEP of one document, in document order.
+
+    The other half of complete_procedures. That one adds steps a retrieved
+    chunk points at; this one is asked for a document's steps directly,
+    which is what "walk me through it" needs -- the visitor has already
+    been told the procedure exists, so there is nothing left to rank.
+
+    Returns [] when the document has no step-structured headings, which is
+    the caller's cue not to offer steps it cannot produce. Offering and
+    then failing is the specific fault this exists to stop: the capability
+    reply used to end "Would you like me to walk through the steps?" and
+    nothing implemented the answer, so "yes" fell through to ordinary
+    retrieval and refused.
+    """
+    if not source:
+        return []
+    try:
+        got = get_collection().get(where={"source": source})
+    except Exception as exc:
+        logger.warning(f"steps_for_source unavailable for {source}: {exc}")
+        return []
+    rows = sorted(zip(got.get("ids") or [], got.get("documents") or [],
+                      got.get("metadatas") or []),
+                  key=lambda r: _order_key(r[0]))
+    out, spent = [], 0
+    for cid, text, meta in rows:
+        section = (meta.get("section") or "").strip()
+        if not _STEP_HEADING.search(section):
+            continue
+        if spent + len(text or "") > budget:
+            break
+        spent += len(text or "")
+        out.append({"id": cid, "text": text, "source": source,
+                    "page": meta.get("page"), "section": section})
+    return out
