@@ -3307,8 +3307,23 @@ def _verbatim_faq_pairs(source: str) -> list[dict]:
     try:
         import docstore
         import structures
-        path = os.path.join(docstore.store_dir(), source)
-        if not os.path.exists(path):
+        # docstore.find, NOT os.path.join(store_dir(), source). `source`
+        # arrives from a request body, and join() treats an absolute path
+        # or a "../" prefix as an instruction rather than a filename -- so
+        # this handed any readable file on the host to pdfplumber and put
+        # whatever it could parse into drafted FAQ text. CodeQL reported it
+        # as py/path-injection (alert 123) along with the four sinks in
+        # structures.py it flows into.
+        #
+        # find() was written for exactly this and already satisfies the
+        # analyser: it reduces the name to a bare basename (handling the
+        # Windows-backslash case that basename() alone misses on POSIX),
+        # then returns a path built from a matching os.listdir ENTRY, so no
+        # caller-supplied text ever reaches the filesystem. It also covers
+        # the legacy store directory, which the join did not -- a document
+        # retained before v15 was previously invisible here.
+        path = docstore.find(source)
+        if not path:
             return []
         return [{"question": p["question"], "answer": p["answer"]}
                 for p in structures.faq_pairs_for_document(path, source)]
