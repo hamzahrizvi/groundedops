@@ -4120,9 +4120,19 @@ def admin_keys_list_models(provider: str,
         return {"provider": provider, "models": names, "current": current,
                 "source": "listed", "endpoint": OPENAI_BASE}
     except Exception as exc:
-        logger.info(f"model list unavailable for {provider}: {exc}")
+        # The TYPE, not the message. This endpoint is root-only, so the
+        # first version returned `str(exc)[:200]` on the grounds that an
+        # operator debugging a gateway needs to see what went wrong --
+        # but a requests exception stringifies to the full URL, and for
+        # an auth failure that URL can carry a query parameter nobody
+        # meant to put on screen. The class name already separates the
+        # cases an operator acts on differently (ConnectionError = wrong
+        # host or DNS, Timeout = reachable but slow, HTTPError = reached
+        # and refused), and the full text is one line above in the log.
+        logger.info(f"model list unavailable for {provider}: {exc}",
+                    exc_info=True)
         return {"provider": provider, "models": [], "current": current,
-                "source": "typed", "error": str(exc)[:200]}
+                "source": "typed", "error": type(exc).__name__}
 
 
 @app.post("/admin/keys/models/{provider}")
