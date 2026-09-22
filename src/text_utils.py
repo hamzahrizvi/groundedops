@@ -871,8 +871,21 @@ _CAPABILITY = re.compile(
     r"^\W*(?:does|do|is|are|can|could|will|would|has|have)\b[^?]{0,60}?"
     r"\b(?:work|works|run|runs|runnable|compatible|compatibility|integrate"
     r"|integrates|integrated|use|used|usable|support|supports|supported"
-    r"|talk|talks|connect|connects)\b(?P<tail>[^?]*)\??\s*$",
+    r"|talk|talks|connect|connects)\b(?P<tail>[^?]*)\??$",
     re.IGNORECASE)
+# The tail used to end `(?P<tail>[^?]*)\??\s*$`, and `[^?]*` matches spaces
+# too -- so on a question with a long run of spaces and no "?" the two
+# could split that run every possible way before failing. Quadratic, on a
+# string a visitor types.
+#
+# The first attempt at this collapsed whitespace at the CALL SITE, which
+# removes the attack but not the ambiguity: CodeQL still saw a
+# user-provided value reaching an ambiguous pattern, and was right to --
+# the next caller would not know to collapse first. Fixing the PATTERN is
+# the durable half. `\s*$` is gone, and nothing is lost: `[^?]*` already
+# absorbs any trailing spaces, and capability_target strips the tail
+# immediately below. `[^?]*` and `\??` cannot overlap, because the one
+# character `\??` matches is the one `[^?]*` cannot.
 
 # The companion preposition, taken as the PIVOT: in "can I use MyCheckr
 # with linux" the product sits between the verb and the preposition, so
@@ -909,14 +922,11 @@ def capability_target(query: str) -> str | None:
     question, and a target it cannot resolve is the caller's cue to fall
     through to ordinary retrieval rather than to claim anything.
     """
-    # Whitespace collapsed BEFORE matching, not after. _CAPABILITY ends
-    # `(?P<tail>[^?]*)\??\s*$`, and `[^?]*` matches spaces too -- so on a
-    # question carrying a long run of spaces and no "?", the two can split
-    # that run in every possible way and the engine tries all of them
-    # before failing. Quadratic, on a string typed by a visitor. CodeQL
-    # flagged it; collapsing first means there is no run to split, and the
-    # function normalised whitespace a few lines further down anyway, so
-    # this only moves work earlier.
+    # Whitespace collapsed before matching. Not the ReDoS fix -- that is in
+    # the pattern itself, see _CAPABILITY -- but it is what lets the
+    # pattern end at `$` with no `\s*` in front of it, and the function
+    # normalised whitespace a few lines further down anyway, so this only
+    # moves work earlier.
     m = _CAPABILITY.match(" ".join((query or "").split()))
     if not m:
         return None
