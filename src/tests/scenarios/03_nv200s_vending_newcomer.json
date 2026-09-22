@@ -1,0 +1,48 @@
+{
+  "id": "03_nv200s_vending_newcomer",
+  "product": "NV200S",
+  "product_key": "nv200s",
+  "source": "NV200S Range User Manual-v1.pdf",
+  "persona": "Vending operator, has never installed a validator.",
+  "expect_labels": [
+    "NV200S"
+  ],
+  "turns": [
+    {
+      "q": "I am putting these in coffee machines, will the NV200S fit",
+      "followup": false,
+      "commercial": false,
+      "note": "'these' but the subject is named -- opening turn"
+    },
+    {
+      "q": "how long does it take to check a note",
+      "followup": false,
+      "commercial": false,
+      "note": "'it' buried in a short question about the machine"
+    },
+    {
+      "q": "what happens if someone feeds it a torn fiver",
+      "followup": false,
+      "commercial": false,
+      "note": "'it' = the machine, self-contained"
+    },
+    {
+      "q": "does it need cleaning very often",
+      "followup": true,
+      "commercial": false,
+      "note": "short, pronoun, follows on"
+    },
+    {
+      "q": "and the cashbox, how big is that",
+      "followup": true,
+      "commercial": false,
+      "note": "'and' opener plus 'that'"
+    },
+    {
+      "q": "where can I buy one and how soon can you deliver",
+      "followup": false,
+      "commercial": true,
+      "note": "availability -> deflect"
+    }
+  ]
+}

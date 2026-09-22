@@ -2786,6 +2786,48 @@ function viewAdvanced() {
       + "question after a switch waits for the new model to load, and the "
       + "very first one downloads it."));
 
+  // Whether an answer may draw a conclusion the documents do not state.
+  // OFF by default and the hint says why in the operator's terms: this is
+  // the switch that decides whether the assistant is allowed to reason,
+  // and the honest framing is a trade, not a feature.
+  const infSel = el("select", { class: "input", onchange: e => {
+    p.inference_mode = e.target.value;
+    infHint.textContent = INF_HINT[e.target.value] || "";
+  } },
+    el("option", { value: "off" }, "Only what the documents say (default)"),
+    el("option", { value: "on" }, "Allow a marked conclusion"));
+  infSel.value = p.inference_mode || "off";
+  const INF_HINT = {
+    off: "Every sentence of every answer has to be backed by a passage in "
+       + "your documents. If the manuals do not settle a question, the "
+       + "assistant says so.",
+    on: "The assistant may add ONE sentence drawing a conclusion from facts "
+      + "that ARE documented — “the documentation doesn’t "
+      + "cover Windows, but it says the unit is reachable over HTTP on a "
+      + "fixed address, so a Windows machine on that network should reach "
+      + "it”. It must hedge that sentence, label it as a reading rather "
+      + "than documentation, and use no term your passages do not contain. "
+      + "Useful, and the point at which a wrong answer stops looking wrong.",
+  };
+  const infHint = el("p", { class: "sec-hint" }, INF_HINT[infSel.value]);
+  const inferCard = el("div", { class: "card elev-sm",
+                                style: "padding:18px 20px;gap:0;margin-bottom:14px",
+                                "data-sec": "Answering from inference" },
+    el("h3", {}, "Answering from inference"),
+    el("p", { class: "sec-hint" },
+      "Customers ask questions the manuals answer indirectly — "
+      + "“does it work with Windows?” when the manual documents "
+      + "the network interface but never names an operating system. This "
+      + "decides whether the assistant may join those dots or must decline."),
+    el("div", { style: "margin-top:12px;max-width:340px" }, infSel),
+    infHint,
+    el("p", { class: "sec-hint", style: "margin-top:8px" },
+      "Safe to change whenever — it affects only how an answer is "
+      + "checked, so nothing is reindexed and no stored data changes. Leave "
+      + "it off until the answer-quality benchmark has been run with it on: "
+      + "an inference mode nobody has measured cannot be told apart from a "
+      + "guessing mode that has been lucky."));
+
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
     saveBtn.disabled = true; saveBtn.textContent = "Saving…";
     try {
@@ -2802,7 +2844,7 @@ function viewAdvanced() {
     el("p", { class: "lede" },
       "How answers are produced and checked. Changes apply to the next "
       + "question — no restart. Only root accounts see this page."),
-    verifyCard, rerankCard, salesCard, indexCard, saveBtn,
+    verifyCard, rerankCard, inferCard, salesCard, indexCard, saveBtn,
   ];
 }
 
@@ -2893,6 +2935,65 @@ function keyRolesCard() {
     p => p.key === keysCache.fallback_provider) || {}).label
     || keysCache.fallback_provider || "the Settings provider";
 
+  // MODEL, beside the provider it qualifies. Providers were settable per
+  // job and models were not settable at all -- they came from env vars read
+  // at call time, so choosing which model answers meant editing .env and
+  // restarting, and nothing here showed what was in force. On 2026-09-22
+  // that left the default job answering from DeepSeek while the on-prem
+  // gateway sat idle on the advanced job: nothing was wrong, half the
+  // config had simply never been written.
+  //
+  // The list is the provider's own where it can report one (any
+  // OpenAI-compatible endpoint, the on-prem gateway included); otherwise a
+  // typed box, because a provider that cannot list its models must not
+  // become a provider whose model cannot be changed.
+  const modelPicker = (r) => {
+    const wrap = el("div", { style: "margin-top:6px" });
+    const prov = r.effective;
+    if (!prov) return wrap;
+    const box = el("select", { class: "input", style: "font-size:12.5px" },
+      el("option", { value: "" }, "Model: follow " + prov + " default"));
+    box.disabled = true;
+    api("/admin/keys/models/" + prov).then(info => {
+      const names = info.models || [];
+      wrap.textContent = "";
+      let control;
+      if (names.length) {
+        control = el("select", { class: "input", style: "font-size:12.5px" },
+          el("option", { value: "" },
+            "Model: follow default (" + (info.current || "unset") + ")"),
+          names.map(n => el("option", { value: n }, n)));
+        control.value = r.model_override || "";
+      } else {
+        // Typed fallback. Blank means inherit, so an operator who clears
+        // the box gets the baseline back rather than an empty model name.
+        control = el("input", { class: "input", style: "font-size:12.5px",
+          placeholder: "Model: follow default (" + (info.current || "unset") + ")",
+          value: r.model_override || "" });
+      }
+      const save = async () => {
+        const v = (control.value || "").trim();
+        try {
+          const res = await api("/admin/keys/roles/" + r.role + "/model", {
+            method: "POST", body: JSON.stringify({ model: v || null }) });
+          keysCache.roles = res.roles;
+          toast(r.label + ": " + (v ? v : "follows the " + prov + " default")
+            + " — in effect from the next question");
+        } catch (e) { toast(e.message, true); }
+      };
+      control.addEventListener("change", save);
+      wrap.appendChild(control);
+      // What this job will ACTUALLY send, which is the thing an operator
+      // is really asking when they look at this page.
+      wrap.appendChild(el("div", { style: "font-size:11.5px;margin-top:3px;"
+        + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+        "Sends: " + (r.model_effective || "—")
+        + (info.source === "typed" ? " (type a name; this provider does not "
+           + "publish a model list)" : "")));
+    }).catch(() => { wrap.textContent = ""; wrap.appendChild(box); });
+    return wrap;
+  };
+
   const rows = (keysCache.roles || []).map(r => {
     const sel = el("select", { class: "input" },
       el("option", { value: "" },
@@ -2931,7 +3032,8 @@ function keyRolesCard() {
           ? el("div", { style: "font-size:12.5px;margin-top:4px;color:var(--color-warn,#c47f00)" },
               "The key for this provider has been removed — falling back.")
           : null),
-      el("div", { style: "flex:0 1 240px;min-width:0" }, sel));
+      el("div", { style: "flex:0 1 240px;min-width:0" }, sel,
+        modelPicker(r)));
   });
 
   return el("div", { class: "card elev-sm", "data-sec": "Which key does what",
@@ -2942,6 +3044,12 @@ function keyRolesCard() {
       + "one only when you want deep questions answered elsewhere, or a "
       + "different provider to pick up when the first fails. Applies in "
       + "Online mode."),
+    el("p", { class: "sec-hint", style: "margin-top:-4px" },
+      "Each job also picks a model. Leave it on “follow default” and "
+      + "the job uses whatever that provider is set to, so choosing a model "
+      + "once configures every job that follows it — set one explicitly "
+      + "only where you want that job to differ, such as a cheaper model for "
+      + "extraction and a stronger one for deep questions."),
     configured.length
       ? el("div", {}, rows)
       : el("div", { class: "empty" }, el("b", {}, "No keys configured yet"),
@@ -5240,6 +5348,20 @@ function viewTest() {
           el("button", { class: "btn btn-secondary", style: BTN, onclick: () => {
             view = "leads"; render();
           } }, "Contact support about this")));
+      }
+
+      // The assistant asked a question back and sent the answers it would
+      // accept. Same reason the widget now shows these: without them the
+      // test chat does not match what a customer sees, which is the one
+      // thing this page exists to show. Clicking sends the option as the
+      // next message, exactly as typing it would.
+      if (r.needs_clarification) {
+        (r.clarification_options || []).forEach(o => {
+          bub.append(el("div", { style: "margin-top:6px" },
+            el("button", { class: "btn btn-secondary", style: BTN, onclick: () => {
+              send(o);
+            } }, o)));
+        });
       }
 
       // Unscoped question spanning several products: let them pick, then

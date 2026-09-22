@@ -248,3 +248,127 @@ def get_session_secret() -> str:
 
 def session_secret_is_set() -> bool:
     return bool(get_session_secret())
+
+
+# ── Model selection ──────────────────────────────────────────────────────
+#
+# Providers were console-settable per role; MODELS were not settable at all.
+# `ONLINE_OPENAI_MODEL` and friends were read straight from the environment
+# at call time, so choosing which model answers meant hand-editing .env and
+# restarting -- and nothing in the console showed what was in force.
+#
+# That gap had a visible cost. On 2026-09-22, with the on-prem gateway back
+# on the network, the ADVANCED role was pointed at it (itl-gpt-flash) while
+# the DEFAULT role was still routed at DeepSeek, so nearly every customer
+# question went off-site to a metered API while the local gateway sat idle.
+# Nothing was wrong; nobody had edited the other half of the config.
+#
+# TWO LEVELS, and the cascade is the point:
+#
+#   baseline   one model per provider (ONLINE_<PROVIDER>_MODEL). Picking a
+#              model in the console writes this, and EVERY role using that
+#              provider picks it up -- which is what "configure all the
+#              routes" means.
+#   override   an optional per-role model (MODEL_ROLE_<ROLE>). Empty means
+#              inherit the baseline. This is what keeps the deliberate
+#              split available: extraction on a fast model while the
+#              inference contract runs on a reasoning one.
+#
+# Same storage as the role assignments (.env via _rewrite_env_line, plus
+# os.environ in the same call), so a change applies to the next question
+# without a restart and survives one. Deliberately NOT policy.json: this is
+# LLM routing, it belongs beside the provider assignment it qualifies, and
+# splitting the two across separate stores is how they drift apart.
+
+_PROVIDER_MODEL_ENV = {
+    "deepseek": "ONLINE_DEEPSEEK_MODEL",
+    "openai": "ONLINE_OPENAI_MODEL",
+    "anthropic": "ONLINE_ANTHROPIC_MODEL",
+}
+
+_ROLE_MODEL_ENV = {
+    "default": "MODEL_ROLE_DEFAULT",
+    "advanced": "MODEL_ROLE_ADVANCED",
+    "backup": "MODEL_ROLE_BACKUP",
+}
+
+# Used only when a provider has never been configured at all. The console
+# shows the live list where the provider can report one, so these are a
+# floor, not a recommendation.
+_PROVIDER_MODEL_FALLBACK = {
+    "deepseek": "deepseek-v4-flash",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-6",
+}
+
+
+def providers() -> list[str]:
+    return list(_PROVIDER_KEY_ENV)
+
+
+def get_model(provider: str) -> str:
+    """The baseline model for one provider."""
+    provider = (provider or "").strip().lower()
+    env = _PROVIDER_MODEL_ENV.get(provider)
+    if not env:
+        raise UnknownProviderError(provider)
+    return ((os.getenv(env) or "").strip()
+            or _PROVIDER_MODEL_FALLBACK.get(provider, ""))
+
+
+def set_model(provider: str, model: str | None) -> None:
+    """Set the baseline model for a provider. Every role using that
+    provider and carrying no override of its own follows immediately --
+    this is the 'configures all the routes' half."""
+    provider = (provider or "").strip().lower()
+    env = _PROVIDER_MODEL_ENV.get(provider)
+    if not env:
+        raise UnknownProviderError(provider)
+    if model is None or not str(model).strip():
+        _rewrite_env_line(env, None)
+        os.environ.pop(env, None)
+        logger.info(f"model for provider '{provider}' cleared (via console)")
+        return
+    model = str(model).strip()
+    _rewrite_env_line(env, model)
+    os.environ[env] = model
+    logger.info(f"model for provider '{provider}' set to {model!r} "
+                f"(via console)")
+
+
+def get_role_model(role: str) -> str | None:
+    """A role's model OVERRIDE, or None when it inherits the baseline."""
+    env = _ROLE_MODEL_ENV.get(role)
+    if not env:
+        raise UnknownRoleError(role)
+    return (os.getenv(env) or "").strip() or None
+
+
+def set_role_model(role: str, model: str | None) -> None:
+    """`model=None` clears the override, returning the role to the
+    provider's baseline -- which is not the same as setting it to the
+    baseline's current value, because it keeps following later changes."""
+    env = _ROLE_MODEL_ENV.get(role)
+    if not env:
+        raise UnknownRoleError(role)
+    if model is None or not str(model).strip():
+        _rewrite_env_line(env, None)
+        os.environ.pop(env, None)
+        logger.info(f"model override for role '{role}' cleared (via console)")
+        return
+    model = str(model).strip()
+    _rewrite_env_line(env, model)
+    os.environ[env] = model
+    logger.info(f"model override for role '{role}' set to {model!r} "
+                f"(via console)")
+
+
+def model_for_role(role: str, provider: str) -> str:
+    """What this role will ACTUALLY send as the model name: its override
+    when it has one, otherwise the provider's baseline. The single answer
+    llm.py and the console must agree on."""
+    try:
+        override = get_role_model(role)
+    except UnknownRoleError:
+        override = None
+    return override or get_model(provider)

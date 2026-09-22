@@ -237,6 +237,11 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
             "passages": [], "label": "Contact support for more information",
         },
         "needs_clarification": clarify,
+        # Always present so a client can read it unconditionally. The FAQ
+        # path disambiguates through faq_candidates, which carry ids; these
+        # are the free-text options the generation path builds, and there
+        # are none here.
+        "clarification_options": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
         "effort": "faq_only",
@@ -512,6 +517,16 @@ def register(app, answer_query, draft_enquiry=None):
             # with _public_sources; the passages carry the text instead.
             "more_context": _public_more_context(result.get("more_context")),
             "needs_clarification": bool(result.get("needs_clarification")),
+            # The options themselves, not just the boolean. They have been
+            # built on every clarify turn since v12 and dropped here ever
+            # since -- so the widget rendered "which did you mean?" as prose
+            # and the visitor had to type the answer to a question we had
+            # already enumerated. Strings only, and short ones: they are
+            # product labels or the visitor's own earlier questions, so
+            # nothing here is new information leaving the backend.
+            "clarification_options": [
+                str(o)[:120] for o in
+                (result.get("clarification_options") or [])[:5]],
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
@@ -567,6 +582,7 @@ def register(app, answer_query, draft_enquiry=None):
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_candidates",
                                 "offer_support", "needs_clarification",
+                                "clarification_options",
                                 "flagged", "quota", "session")})
 
             # Whole sentences, not tokens: a sentence is the unit the

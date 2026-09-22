@@ -89,15 +89,66 @@ def is_sales_question(q: str) -> bool:
 #   "warranty"             -- warranty TERMS may genuinely be documented;
 #                             needs checking against the corpus before it is
 #                             treated as a question only sales can take
+# REWRITTEN 2026-09-19 from a list of observed words into the semantic
+# field, matched on STEMS. The list version missed "are there any recurring
+# fees for using it" -- found by a scripted customer conversation -- and a
+# fees question reaching the model is the same failure "price" was added to
+# stop, through a word nobody had typed yet. Listing words customers have
+# already used cannot cover the next one; listing the field, with
+# morphology, comes much closer.
+#
+# Four groups, because they are four different questions a visitor asks and
+# each is one the documentation cannot answer at ANY scope:
+#
+#   MONEY    what does it cost me      price, fee, subscription, licence
+#   COMMERCE how do I buy it           buy, purchase, order, quote
+#   SUPPLY   when can I have it        lead time, stock, delivery
+#   CHANNEL  who do I buy it from      reseller, distributor, dealer
+#
+# Stems rather than whole words: "fee" covers fees, "licen" covers licence /
+# license / licensing, "subscri" covers subscribe / subscription. The cost
+# of a prefix is a false positive, so anything ambiguous IN THIS CORPUS is
+# excluded below and only admitted in a phrase that pins the money sense.
+# "fee" is spelled out rather than given the \w* treatment the others get:
+# the prefix matched "FEEDs it a torn fiver", which is a note-handling
+# question, not a commercial one. Found by scenario 03 on 2026-09-19.
+# "deposit" is left out for the same class of reason -- in a coin hopper's
+# manual it is what the customer does with a coin.
+_MONEY = (r"\bfees?\b"
+          r"|\b(?:pric|cost|quot|tariff|rebate|discount|surcharg"
+          r"|subscri|licen[cs]|rental|renting|leas(?:e|ing)|hire\s+charge"
+          r"|invoic|budget|afford|expensive|cheap)\w*"
+          r"|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will)\b"
+          r"|[£$€]\s*\d|\bex\s+vat\b|\bplus\s+vat\b"
+          r"|\bper\s+(?:unit|device|licence|license|seat|month|year)\b")
+
+_COMMERCE = (r"\b(?:buy|buying|purchas|reorder)\w*"
+             r"|\bplace\s+an?\s+order\b|\bminimum\s+order\b|\bmoq\b"
+             r"|\border\s+(?:one|some|them|a\s+few|\d+)\b")
+
+_SUPPLY = (r"\blead[\s-]?time\b|\bin\s+stock\b|\bout\s+of\s+stock\b"
+           r"|\bstock\s+levels?\b|\bavailabilit\w*"
+           r"|\bhow\s+soon\s+can\s+(?:you|we|i)\b"
+           r"|\b(?:when|how\s+quickly)\s+can\s+you\s+(?:deliver|ship|send)\b"
+           r"|\bdelivery\s+(?:time|date|lead|cost|charge)\w*")
+
+_CHANNEL = r"\b(?:reseller|distributor|dealer|stockist|supplier)s?\b"
+
+# AMBIGUOUS IN THIS CORPUS, so admitted only in a phrase that fixes the
+# money sense. Each of these appears in the manuals meaning something else:
+#   charge   battery/capacitor charging
+#   rate     baud rate, error rate, acceptance rate
+#   pay      "pay out" is what a coin hopper does
+#   free     "free of debris", "free-running"
+#   order    "in order to", covered above by its money phrasings only
+_MONEY_SENSE_ONLY = (r"\b(?:extra|additional|service|monthly|annual|any|hidden)"
+                     r"\s+charges?\b|\bcharges?\s+for\s+(?:the\s+)?(?:use|using"
+                     r"|support|service|licen[cs]e)\b"
+                     r"|\bpay(?:ment|able)\b|\bpay\s+for\b"
+                     r"|\brate\s+card\b|\bday\s+rate\b")
+
 _COMMERCIAL = re.compile(
-    r"\b(price|prices|priced|pricing|cost|costs|quote|quotation)\b"
-    r"|\bhow\s+much\s+(is|are)\b"
-    r"|\b(buy|buying|purchase|purchasing)\b"
-    r"|\blead[\s-]?time\b|\bin\s+stock\b"
-    r"|\bdiscount\b|\bmoq\b|\bminimum\s+order\b"
-    r"|\b(reseller|distributor|dealer)\b"
-    r"|\bplace\s+an\s+order\b",
-    re.I)
+    "|".join((_MONEY, _COMMERCE, _SUPPLY, _CHANNEL, _MONEY_SENSE_ONLY)), re.I)
 
 
 def is_commercial_question(q: str) -> bool:

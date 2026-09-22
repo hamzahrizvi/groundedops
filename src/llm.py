@@ -3,7 +3,7 @@ import os
 import threading
 import requests
 
-from text_utils import truncate_after_refusal, build_condense_prompt, parse_condense_output, has_reference_markers
+from text_utils import truncate_after_refusal, build_condense_prompt, parse_condense_output
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +80,21 @@ def _online_provider_model(job: str = "default") -> tuple[str, str]:
     # was the default here, so any deployment that had not set
     # ONLINE_DEEPSEEK_MODEL silently used an alias DeepSeek retired on
     # 24 July 2026. src/.env sets it, which is the only reason this worked.
-    model = {
-        "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"),
-        "openai": os.getenv("ONLINE_OPENAI_MODEL", "gpt-4o-mini"),
-        "anthropic": os.getenv("ONLINE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-    }.get(provider, os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
+    # keystore.model_for_role is the single answer the console and this
+    # path must agree on: the role's own override when it has one, else
+    # the provider's baseline. It reads the same ONLINE_<PROVIDER>_MODEL
+    # variables this used to read directly, so an install that configures
+    # nothing through the console behaves exactly as before -- the console
+    # now WRITES those variables instead of an operator hand-editing them.
+    #
+    # Guarded: keystore raises on a provider it does not know, and a
+    # routing lookup must not be the thing that takes answering down.
+    import keystore
+    try:
+        model = keystore.model_for_role(job, provider)
+    except Exception as exc:
+        logger.warning(f"model lookup failed for {job}/{provider}: {exc}")
+        model = os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
     return provider, model
 
 
@@ -438,20 +448,33 @@ def condense_query(current_query: str, history: list[dict], model: str = CONDENS
     standalone query using a fast local model. If the query is already
     self-contained, it is returned unchanged with no model call.
 
-    TWO GUARDS before calling the model:
-      1. No history — nothing to resolve against, skip immediately.
-      2. No reference markers — the query is clearly self-contained
-         (checked via text_utils.has_reference_markers). This prevents
-         phi from incorrectly rewriting standalone queries like "post
-         installation verification installer sign off" into whatever
-         topic happened to appear in the previous turn.
+    ONE GUARD before calling the model: no history, nothing to resolve
+    against, skip immediately.
+
+    There used to be a second guard -- `has_reference_markers` had to match
+    or the rewrite was skipped -- added to stop phi rewriting a standalone
+    query like "post installation verification installer sign off" into
+    whatever topic the previous turn was about. REMOVED 2026-09-22, because
+    it was a second, brittle classifier doing a job already asked of the
+    model: CONDENSE_PROMPT_TEMPLATE ends "If the latest message is ALREADY a
+    complete, self-contained question ... return it EXACTLY AS-IS". The
+    canonical Rewrite-Retrieve-Read step calls the rewriter unconditionally
+    and lets the prompt decide; the regex was the non-standard part, and a
+    list of surface markers can only ever be extended. It is what killed
+    "what is the power required to run both at once" -- no marker matched,
+    no rewrite ran, and the raw fragment hit retrieval.
+
+    What makes dropping it safe is that retrieval now fuses the raw and
+    rewritten phrasings (`retrieval_db.retrieve_fused`), so an unnecessary
+    or clumsy rewrite can no longer cost the original's hits. Order matters:
+    the fusion had to land first. `has_reference_markers` still exists and
+    still earns its keep elsewhere -- gating the deterministic combined-query
+    fallback in main.py, and feeding `is_followup_turn` -- where being wrong
+    costs a phrasing rather than the whole rewrite.
 
     Falls back to `current_query` unchanged on any model failure.
     """
     if not history:
-        return current_query
-
-    if not has_reference_markers(current_query):
         return current_query
 
     prompt = build_condense_prompt(current_query, history)

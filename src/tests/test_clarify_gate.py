@@ -45,12 +45,63 @@ def test_the_gate_is_guarded_on_all_three_conditions():
     code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
     assert "if offer_support and not system_refusal:" in code, \
         "an outage must never be answered with a clarifying question"
-    assert "is_followup_turn(q, history, resolved_query)" in code, \
+    assert "is_followup_turn(q, history, condensed_query)" in code, \
         "a standalone miss must still get the flat refusal"
+    assert "is_followup_turn(q, history, resolved_query)" not in code, \
+        ("NOT resolved_query -- by the time the clarify gate runs, "
+         "_add_selected_product_context has appended the scoped product to "
+         "it, so `resolved != raw` is true on nearly every scoped turn and "
+         "every fresh question reads as a follow-up. Observed 2026-09-17 "
+         "14:01: 'how sturdy are nv9 st' was answered with a clarifying "
+         "question about the previous turn's pricing question.")
     assert "_asked_to_clarify_last_turn(history)" in code, \
         "the assistant must not ask twice in a row"
     assert "offer_support = False" in code, \
         "a clarify is a working conversation, not a dead end"
+
+
+def test_the_frozen_query_is_taken_before_product_context_is_added():
+    """The ORDER is the whole fix. condensed_query has to be captured after
+    condensation (and the follow-up fallback, which is a genuine history
+    signal) but before the retrieval rewrite appends the selected product.
+    Captured on the wrong side of that line, it is just resolved_query under
+    another name and the bug comes straight back."""
+    import inspect
+    src = inspect.getsource(main.query)
+    freeze = src.index("condensed_query = resolved_query")
+    inject = src.index("_contextual_query = _add_selected_product_context")
+    assert freeze < inject, \
+        "condensed_query must be frozen BEFORE product context is appended"
+    assert src.count("condensed_query = ") == 1, \
+        "condensed_query is frozen once and never reassigned"
+
+
+def test_the_clarify_question_quotes_this_turn_not_the_last_one():
+    """It used to name history[-1]["q"], which is only right when the
+    follow-up happens to be about the previous topic. When it is not, the
+    visitor is asked to expand on something they have moved on from."""
+    import inspect
+    src = inspect.getsource(main.query)
+    assert '_asked = (q or "").strip() or history[-1].get("q", "")' in src, \
+        "the question just asked is the subject; the previous one is a fallback"
+    assert '_last_topic = history[-1].get("q", "")' not in src, \
+        "the previous topic must not be what the clarify question names"
+
+
+def test_the_reworded_clarify_is_still_recognised_as_our_own():
+    """The 'never ask twice in a row' guard works by matching our own
+    wording. Reword the question without keeping a marker phrase and the
+    guard silently stops firing -- the visitor gets two questions back and
+    leaves. This pins the coupling so the next reword cannot miss it."""
+    import re as _re
+    import inspect
+    src = inspect.getsource(main.query)
+    # The literal the clarify branch builds, with the f-string holes removed.
+    text = _re.search(r'f\'I could not pin down.*?\?"\)', src, _re.S)
+    assert text, "the clarify wording moved -- update this test with it"
+    spoken = _re.sub(r'\{[^}]*\}|f?[\'"]|\s*\+?\s*\n\s*', " ", text.group(0))
+    assert main._asked_to_clarify_last_turn([{"q": "x", "a": spoken}]) is True, \
+        f"no _CLARIFY_MARKERS phrase survives in: {spoken!r}"
 
 
 def test_main_response_carries_the_clarify_fields():

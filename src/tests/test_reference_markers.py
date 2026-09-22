@@ -4,10 +4,17 @@ Deliberately does NOT import _harness: the harness stubs text_utils, so a
 test that loaded it would be asserting against the stub, not the patterns.
 
 The case: "What is the power required to run both at once" matched no
-reference marker, so condense_query short-circuited (llm.py returns the
-query unchanged when has_reference_markers is False), a product-less
+reference marker, so condense_query short-circuited (llm.py returned the
+query unchanged when has_reference_markers was False), a product-less
 fragment hit retrieval, and the turn died. "both" referred to two products
 named in the PREVIOUS turn.
+
+That short-circuit is gone as of 2026-09-22 -- the rewriter now runs on
+every turn with history and the prompt decides -- which is the real fix for
+this class of miss, since a marker list can only ever be extended. These
+rules still gate the deterministic combined-query fallback and feed
+is_followup_turn, so set anaphora still has to be recognised; it just no
+longer decides whether the rewrite happens at all.
 """
 from text_utils import has_reference_markers
 
@@ -43,14 +50,32 @@ def test_standalone_questions_are_untouched():
         assert not has_reference_markers(q), q
 
 
-def test_appended_so_the_short_only_index_still_points_where_it_did():
-    """_SHORT_ONLY_PATTERNS indexes _REFERENCE_PATTERNS by POSITION, so a
-    marker inserted mid-list would silently re-target the length gate onto
-    a different pattern."""
+def test_the_positional_index_is_gone():
+    """This used to assert that _SHORT_ONLY_PATTERNS still indexed the right
+    entry of _REFERENCE_PATTERNS -- a test that existed only because the
+    classifier was a LIST addressed by position, which is fragile enough to
+    need guarding and was wrong twice anyway (off by one on 17 Sep, and the
+    length gate itself was the wrong idea).
+
+    Both are gone as of 2026-09-19: the classifier is four named rules over
+    closed word classes, and length is not consulted at all. Kept as a
+    tombstone so nobody reintroduces the index.
+    """
     import text_utils
-    assert max(text_utils._SHORT_ONLY_PATTERNS) < len(text_utils._REFERENCE_PATTERNS) - 1
-    last = text_utils._REFERENCE_PATTERNS[-1].pattern
-    assert "both" in last, "the new marker must be last"
+    assert not hasattr(text_utils, "_REFERENCE_PATTERNS")
+    assert not hasattr(text_utils, "_SHORT_ONLY_PATTERNS")
+    assert not hasattr(text_utils, "_SHORT_QUERY_MAX_WORDS")
+
+
+def test_length_is_not_what_decides():
+    """The old gate said a pronoun counted in eight words and not in nine.
+    The same question, padded, must not change its answer."""
+    from text_utils import has_reference_markers as h
+    assert h("does it need its own supply")
+    assert h("does it need its own supply from the host board in a wall unit")
+    assert not h("does the NV9 Spectral need its own supply")
+    assert not h(
+        "does the NV9 Spectral need its own supply from the host board too")
 
 
 if __name__ == "__main__":

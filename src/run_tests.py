@@ -76,6 +76,20 @@ def discover_and_run():
             # "cannot load module more than once per process" case.
             or "import ingest" in source
             or "from ingest import" in source
+            # retrieval_db pulls chromadb (via db) and sentence-transformers
+            # (via embeddings) -- the same native-module case as the others
+            # in this list, not a new rule.
+            or "import retrieval_db" in source
+            or "from retrieval_db import" in source
+            # Explicit opt-in, for a file that needs a process boundary for
+            # a reason the import list cannot see. test_model_routing sets
+            # ENV_FILE_PATH at import so it can never write to the real
+            # src/.env -- and in-process that leaked, because own-process
+            # tests are spawned with env=dict(os.environ) and _harness sets
+            # its own scratch path with setdefault, which then declines to
+            # override the leaked one. Five unrelated files failed on
+            # "Sign-in required" before this was added.
+            or "# run-in-own-process" in source
             # main imports the whole application -- llm, keystore, quota, the
             # widget router -- and loads the real .env. A file that imports it
             # WITHOUT the harness leaves all of that in sys.modules for

@@ -183,7 +183,20 @@ stub("runtime_config", get_settings=lambda: {"mode": "free"},
 stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s: None,
      get_history=lambda s: [], get_last_query=lambda s: None)
 stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0})
+# complete_procedures is a PASS-THROUGH, not a no-op returning []. It is
+# additive by contract -- it hands back the chunks it was given plus any
+# steps they point at -- so a stub that dropped them would empty the
+# context of every API test that feeds chunks in, and the tests would
+# fail somewhere far from here. Added 2026-09-22 with the function; a
+# stub missing a new name fails at IMPORT ("unknown location", because a
+# types.ModuleType has no __file__), which took out nine files at once.
 stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
+     retrieve_fused=lambda *a, **k: [],
+     fuse_ranked_results=lambda result_sets, *a, **k: (
+         list(result_sets[0]) if result_sets else []),
+     apply_arm_guarantee=lambda ranked_ids, keep_n, *a, **k: list(
+         ranked_ids[:keep_n]),
+     complete_procedures=lambda chunks, *a, **k: chunks,
      _invalidate_bm25_cache=lambda: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
@@ -194,6 +207,10 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
 from text_utils import stem as _real_stem  # noqa: E402
 from text_utils import is_more_request as _real_is_more  # noqa: E402
 from text_utils import normalize_markdown_tables as _real_normalize_markdown  # noqa: E402
+# Handed through for the same reason as stem(): _capability_reply asks it
+# which entity a "does X work with Y" question is about, and a lambda here
+# would silently answer None, making every capability test pass vacuously.
+from text_utils import capability_target as _real_capability_target  # noqa: E402
 
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
@@ -202,6 +219,7 @@ stub("text_utils",
      has_domain_vocabulary=lambda q: False, has_reference_markers=lambda q: False,
      is_template_leak=lambda a: False, build_clarification_options=lambda *a: [],
      stem=_real_stem, is_more_request=_real_is_more,
+     capability_target=_real_capability_target,
      normalize_markdown_tables=_real_normalize_markdown)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],

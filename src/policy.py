@@ -114,6 +114,32 @@ _DEFAULTS = {
     # reindex is needed and nothing stored changes. The first query after a
     # switch pays the model load (a download, the very first time).
     "reranker_profile": os.getenv("RERANKER_PROFILE", "fast"),
+    # ── The inference contract (contract 2) ────────────────────────────
+    #
+    #   off    every answer must be ENTAILED by a retrieved passage. The
+    #          behaviour this system was built on and the reason it can be
+    #          trusted on a fact lookup.
+    #   on     an answer may additionally draw ONE hedged, attributed
+    #          conclusion from premises that are all themselves entailed,
+    #          using no word the passages do not contain.
+    #
+    # OFF by default, and this default is not a formality. Contract 2 is
+    # the point at which a grounded system starts being able to be
+    # confidently wrong: "the documentation doesn't cover Windows, but it
+    # is reachable over HTTP on a static IP, so a Windows host should
+    # manage it" is genuinely useful and is not in any manual. Whether
+    # that trade is worth making is an operator's call about their own
+    # liability, not a default we can pick for them.
+    #
+    # It is also UNMEASURED. eval_baseline_retrieval.json is not armed and
+    # the gateway does not resolve, so no one has yet shown that this
+    # helps more than it hurts on real questions. Turning it on before
+    # that is a decision to ship an inference mode that cannot be told
+    # apart from a hallucination mode that has been lucky.
+    #
+    # Safe to change at any time: it affects only how an answer is
+    # verified, so nothing is reindexed and no stored data changes.
+    "inference_mode": os.getenv("INFERENCE_MODE", "off"),
 }
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
@@ -125,7 +151,8 @@ _TEXT_FIELDS = ("anon_notice", "sales_reply")
 # keeps a typo out of the request path: an unrecognised sales_mode would
 # otherwise silently fall through to whichever branch the code checked last.
 _CHOICE_FIELDS = {"sales_mode": ("answer", "deflect", "documents"),
-                  "reranker_profile": ("fast", "accurate")}
+                  "reranker_profile": ("fast", "accurate"),
+                  "inference_mode": ("off", "on")}
 
 MAX_NOTICE_CHARS = 400
 # Ceilings on what an operator can set through the console. Not security --

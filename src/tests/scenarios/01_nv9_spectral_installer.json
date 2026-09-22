@@ -1,0 +1,48 @@
+{
+  "id": "01_nv9_spectral_installer",
+  "product": "NV9 Spectral",
+  "product_key": "nv9_spectral",
+  "source": "NV9 Spectral Range User Manual-v1.pdf",
+  "persona": "Integrator speccing a kiosk build. Names parts.",
+  "expect_labels": [
+    "NV9 Spectral"
+  ],
+  "turns": [
+    {
+      "q": "what note denominations does the NV9 Spectral accept",
+      "followup": false,
+      "commercial": false,
+      "note": "opening, fully self-contained"
+    },
+    {
+      "q": "what is the current draw on the 12V rail during a stacking cycle",
+      "followup": false,
+      "commercial": false,
+      "note": "technical, no reference to the prior turn"
+    },
+    {
+      "q": "does it need a separate supply from the host board",
+      "followup": true,
+      "commercial": false,
+      "note": "short, 'it' is doing referential work"
+    },
+    {
+      "q": "how much does the NV9S validator weigh on its own",
+      "followup": false,
+      "commercial": false,
+      "note": "the RRF case from Aug -- still standalone"
+    },
+    {
+      "q": "and what about the bezel options",
+      "followup": true,
+      "commercial": false,
+      "note": "'what about' opener"
+    },
+    {
+      "q": "what would one of these cost us at fifty units",
+      "followup": true,
+      "commercial": true,
+      "note": "price -> operator deflect; also a follow-up, since 'these' needs the previous turn (labelled standalone at first, and the rule was right)"
+    }
+  ]
+}

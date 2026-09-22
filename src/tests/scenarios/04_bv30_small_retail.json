@@ -1,0 +1,48 @@
+{
+  "id": "04_bv30_small_retail",
+  "product": "BV30",
+  "product_key": "bv30",
+  "source": "BV30 User Manual-v1.pdf",
+  "persona": "Shop owner, first note validator, plain language.",
+  "expect_labels": [
+    "BV30"
+  ],
+  "turns": [
+    {
+      "q": "is the BV30 any good with the new polymer notes",
+      "followup": false,
+      "commercial": false,
+      "note": "opening, names the product"
+    },
+    {
+      "q": "will it take really crumpled ones",
+      "followup": true,
+      "commercial": false,
+      "note": "short, 'it' + 'ones' referring back"
+    },
+    {
+      "q": "how do I empty the cash out of it at the end of the day",
+      "followup": false,
+      "commercial": false,
+      "note": "'it' buried in a long self-contained question"
+    },
+    {
+      "q": "is it noisy",
+      "followup": true,
+      "commercial": false,
+      "note": "three words, pronoun -- unmistakably a follow-up"
+    },
+    {
+      "q": "are there other bezel options for the BV30",
+      "followup": false,
+      "commercial": false,
+      "note": "names the product again, standalone"
+    },
+    {
+      "q": "what sort of price are we talking about",
+      "followup": false,
+      "commercial": true,
+      "note": "price -> deflect"
+    }
+  ]
+}

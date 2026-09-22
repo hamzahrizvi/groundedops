@@ -1926,6 +1926,28 @@
           badge: d.from_faq ? "Reviewed answer" : null,
         });
 
+        // The assistant asked a question back. It has always ALSO sent the
+        // answers it would accept -- product labels drawn from the documents
+        // it just searched -- and this client dropped them, so "which model
+        // did you mean?" arrived as prose and the visitor had to type a name
+        // they may not know. Tapping one sends it as the next message, which
+        // is the same path as typing it: the backend resolves a short
+        // fragment against the previous turn.
+        var clarifyOpts = d.needs_clarification ? (d.clarification_options || []) : [];
+        if (clarifyOpts.length) {
+          chips(
+            clarifyOpts.map(function (opt) {
+              return {
+                label: opt,
+                style: "q",
+                onClick: function () { ask(opt); },
+              };
+            }),
+            "Which did you mean?"
+          );
+          return;
+        }
+
         // A refusal with no next step leaves the visitor stuck: the
         // documentation genuinely does not cover it, and the widget just says
         // so and stops. Offer a person. The backend sets offer_support on any
