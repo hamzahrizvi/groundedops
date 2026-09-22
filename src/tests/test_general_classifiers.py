@@ -16,9 +16,55 @@ commercial or referential and are not. Each one here was a real miss during
 the rewrite, not a hypothetical.
 
 Does NOT import _harness: the harness stubs both of these.
+
+R2 asks the CATALOGUE whether a question names a product, and
+`catalog_config.json` is gitignored -- it exists on a developer's machine
+and nowhere else. So this file used to pass locally, where the real
+catalogue happens to hold a BV30, and fail in CI, where the product list
+is empty and every question looks like a follow-up. It supplies its own
+two-product catalogue below rather than inheriting whatever the machine
+has, which is the only way the assertion means the same thing in both
+places.
 """
-from text_utils import has_reference_markers as ref, why_reference_markers as why
-from sales import is_commercial_question as commercial
+# run-in-own-process -- this file sets CATALOG_CONFIG at import so R2 is
+# measured against a fixed two-product catalogue. In the shared interpreter
+# that leaks into every own-process test spawned afterwards (run_tests
+# passes env=dict(os.environ), and _harness sets its own scratch catalogue
+# with setdefault, which will not override a value already there).
+import json
+import os
+
+# Set BEFORE text_utils is imported: catalog resolves CATALOG_CONFIG at
+# import time, and text_utils caches the derived term list on first use.
+_FIXTURE_DIR = "/tmp/classifier-catalog"
+os.makedirs(_FIXTURE_DIR, exist_ok=True)
+_FIXTURE = os.path.join(_FIXTURE_DIR, "catalog_config.json")
+with open(_FIXTURE, "w", encoding="utf-8") as _fh:
+    json.dump({"categories": [{"key": "note", "name": "Note validators",
+                               "products": [
+                                   {"key": "bv30", "name": "BV30",
+                                    "sources": []},
+                                   {"key": "nv9_spectral",
+                                    "name": "NV9 Spectral", "sources": []},
+                                   {"key": "note_general",
+                                    "name": "General (shared docs)",
+                                    "sources": []}]}]}, _fh)
+os.environ["CATALOG_CONFIG"] = _FIXTURE
+
+from text_utils import has_reference_markers as ref, why_reference_markers as why  # noqa: E402
+from sales import is_commercial_question as commercial  # noqa: E402
+import text_utils as _tu  # noqa: E402
+
+_tu._PRODUCT_TERMS = None   # drop anything cached before the fixture landed
+
+
+def test_the_fixture_catalogue_is_the_one_in_force():
+    """If this fails, every R2 assertion below is measuring the machine
+    rather than the rule -- which is exactly how this file passed locally
+    and failed in CI."""
+    terms = _tu._product_terms()
+    assert "bv30" in terms, terms
+    assert not any(t.startswith("general") for t in terms), terms
 
 
 # ── the four rules, each on wording that no earlier version had seen ──
