@@ -15,6 +15,7 @@ because it is written to the file, not just the process.
 import logging
 import os
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,24 @@ def _rewrite_env_line(key: str, value: str | None) -> None:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.writelines(out)
+        # os.replace is atomic, but on Windows it is not always PERMITTED:
+        # it fails with PermissionError (WinError 5) while any other handle
+        # is open on the target, and a virus scanner or the search indexer
+        # opens a file it has just seen written. Observed intermittently
+        # here in a burst of saves -- the same file rewritten dozens of
+        # times in a second -- and the same burst an operator can produce
+        # by changing several settings quickly, where the cost is a 500 on
+        # a save that then half-applied (os.environ updated, file not).
+        #
+        # A handful of short retries covers a scanner's window. The final
+        # attempt is left unguarded so a genuine permissions problem still
+        # raises rather than being silently swallowed.
+        for delay in (0.05, 0.1, 0.2, 0.4):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                time.sleep(delay)
         os.replace(tmp, path)
 
 

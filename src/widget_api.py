@@ -574,8 +574,13 @@ def register(app, answer_query, draft_enquiry=None):
                                     "detail": e.detail})
                 return
             except Exception as e:
+                # This one is the PUBLIC surface, so the rule matters most
+                # here: an anonymous visitor gets a status and nothing else.
+                # The traceback is already in the log via logger.exception.
                 logger.exception("widget ask/stream failed")
-                yield sse("error", {"status": 503, "detail": str(e)[:160]})
+                yield sse("error", {"status": 503, "detail":
+                                    "The assistant is temporarily "
+                                    "unavailable. Please try again."})
                 return
 
             answer = (result.get("answer") or "").strip()

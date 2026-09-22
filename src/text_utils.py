@@ -909,7 +909,15 @@ def capability_target(query: str) -> str | None:
     question, and a target it cannot resolve is the caller's cue to fall
     through to ordinary retrieval rather than to claim anything.
     """
-    m = _CAPABILITY.match((query or "").strip())
+    # Whitespace collapsed BEFORE matching, not after. _CAPABILITY ends
+    # `(?P<tail>[^?]*)\??\s*$`, and `[^?]*` matches spaces too -- so on a
+    # question carrying a long run of spaces and no "?", the two can split
+    # that run in every possible way and the engine tries all of them
+    # before failing. Quadratic, on a string typed by a visitor. CodeQL
+    # flagged it; collapsing first means there is no run to split, and the
+    # function normalised whitespace a few lines further down anyway, so
+    # this only moves work earlier.
+    m = _CAPABILITY.match(" ".join((query or "").split()))
     if not m:
         return None
     tail = m.group("tail") or ""

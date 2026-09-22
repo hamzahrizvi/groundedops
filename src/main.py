@@ -3345,8 +3345,15 @@ def admin_faq_draft_stream(payload: FaqAutoReq,
                 raw.append(delta)
                 yield sse({"type": "delta", "text": delta})
         except Exception as exc:
-            logger.warning(f"FAQ draft stream failed: {exc}")
-            yield sse({"type": "error", "message": str(exc)[:200]})
+            # The DETAIL goes to the log, not down the wire. It used to be
+            # `str(exc)[:200]`, which hands whatever the exception carries
+            # to whoever is on the other end of the stream -- a provider
+            # URL, a key fragment, a filesystem path, a driver stack. The
+            # operator loses nothing: the same text is one line above, with
+            # a request id around it, in a place only the operator reads.
+            logger.warning(f"FAQ draft stream failed: {exc}", exc_info=True)
+            yield sse({"type": "error", "message":
+                       "The draft could not be generated. Please try again."})
             return
 
         pairs = _parse_qa_json("".join(raw))
@@ -6382,8 +6389,11 @@ def query_stream(payload: StreamQueryRequest,
             yield sse("done", {"grounding_score": round(grounder.min_score, 4),
                                "streamed": True})
         except Exception as e:
+            # Detail to the log only — same rule as the FAQ draft stream
+            # above. logger.exception already records the traceback.
             logger.exception("stream failed")
-            yield sse("error", {"message": str(e)[:200]})
+            yield sse("error", {"message":
+                                "The answer stream failed. Please try again."})
 
     return StreamingResponse(run(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",

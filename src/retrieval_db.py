@@ -92,14 +92,34 @@ def _invalidate_bm25_cache():
 # "nv9usb+" must not collapse into "nv9usb" (they are different products),
 # "192.168.137.8" must stay one token, and "linux-based" must not become
 # two. Stripping to \w+ would do all three.
-_BM25_EDGE = re.compile(r"^[^\w+]+|[^\w+]+$")
+# Kept, but not as a regex over the token. The first version was
+#   _BM25_EDGE = re.compile(r"^[^\w+]+|[^\w+]+$")
+# and CodeQL was right about it: the `[^\w+]+$` alternative is anchored at
+# the END, so on a token that is a long run of punctuation and never
+# matches, the engine retries from every start position -- quadratic in the
+# token length, on a string that comes straight from the visitor's query.
+# Nobody would type it, which is exactly why it is worth fixing: this
+# parses UNCONTROLLED input, and "nobody would type it" is not a property
+# of an attacker.
+#
+# A two-ended scan is linear, has no backtracking to reason about, and says
+# plainly what it keeps: alphanumerics, "_" and "+" at the edges, and
+# anything at all in the middle (see the token tests -- "nv9usb+",
+# "192.168.137.8" and "linux-based" all have to survive whole).
+def _strip_token_edges(word: str) -> str:
+    i, j = 0, len(word)
+    while i < j and not (word[i].isalnum() or word[i] in "_+"):
+        i += 1
+    while j > i and not (word[j - 1].isalnum() or word[j - 1] in "_+"):
+        j -= 1
+    return word[i:j]
 
 
 def _bm25_tokens(text: str) -> list[str]:
     """Lowercase whitespace tokens with edge punctuation removed."""
     out = []
     for word in (text or "").lower().split():
-        word = _BM25_EDGE.sub("", word)
+        word = _strip_token_edges(word)
         if word:
             out.append(word)
     return out
