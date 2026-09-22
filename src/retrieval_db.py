@@ -163,6 +163,32 @@ def _get_bm25_index(collection):
         return index, chunks
 
 
+_PRODUCT_CATEGORY: dict[str, str] | None = None
+
+
+def _category_of(product_key: str) -> str:
+    """Which category a product belongs to, from the catalogue.
+
+    Cached: this is consulted once per chunk per query, and the catalogue
+    is a small file that only an operator changes.
+    """
+    global _PRODUCT_CATEGORY
+    if _PRODUCT_CATEGORY is None:
+        mapping: dict[str, str] = {}
+        try:
+            import catalog
+            for cat in catalog.catalog().get("categories", []):
+                ckey = (cat.get("key") or "").strip()
+                for prod in cat.get("products", []):
+                    pkey = (prod.get("key") or "").strip()
+                    if pkey and ckey:
+                        mapping[pkey] = ckey
+        except Exception as exc:
+            logger.warning(f"category map unavailable: {exc}")
+        _PRODUCT_CATEGORY = mapping
+    return _PRODUCT_CATEGORY.get(product_key, "")
+
+
 def _matches_scope(meta: dict, source_filter: str | None,
                    scope: dict | None) -> bool:
     """v10.5: scope by EXPLICIT tags set at upload — no filename guessing.
@@ -180,8 +206,26 @@ def _matches_scope(meta: dict, source_filter: str | None,
             # indexed before the flags existed, so neither needs a reindex.
             if meta.get("prod_" + key):
                 return True
-            tagged = (meta.get("products") or meta.get("product") or "")
-            return key in [t.strip() for t in tagged.split(",") if t.strip()]
+            tagged = [t.strip() for t in
+                      (meta.get("products") or meta.get("product") or ""
+                       ).split(",") if t.strip()]
+            if key in tagged:
+                return True
+            # SHARED DOCUMENTS BELONG TO EVERY PRODUCT IN THEIR CATEGORY.
+            #
+            # A "<category>_general" tag is a bucket for documents that are
+            # not about one product -- an API quick guide, a shared
+            # installation checklist. It was selectable as if it were a
+            # product, which is how a customer ended up being offered a
+            # button labelled "General (shared docs)", and how
+            # ICU_Age_Result_Quick_Guide (tagged ONLY biometrics_general)
+            # became reachable ONLY by choosing that button. Scoped to any
+            # real product it was invisible.
+            #
+            # So the bucket stops being a choice and becomes what it always
+            # meant: in scope for every product in the same category.
+            cat = _category_of(key)
+            return bool(cat) and f"{cat}_general" in tagged
         if "category" in scope:
             return meta.get("category") == scope["category"]
     return True
@@ -220,8 +264,19 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
         # Either the flag (a document tagged to this product, possibly among
         # others) or the old single-value field, so chunks written before the
         # flags still match without a rebuild.
-        where = {"$or": [{"prod_" + scope["product"]: True},
-                         {"product": scope["product"]}]}
+        # The THIRD arm is the shared-documents bucket. Chroma filters
+        # server-side, so this clause has to say the same thing
+        # _matches_scope does or the two arms of the hybrid disagree: BM25
+        # would surface a shared document and the dense arm would never see
+        # it. Found exactly that way -- ICU_Age_Result_Quick_Guide stayed
+        # unreachable under a product scope after _matches_scope had been
+        # widened, because this clause had not.
+        _cat = _category_of(scope["product"])
+        _arms = [{"prod_" + scope["product"]: True},
+                 {"product": scope["product"]}]
+        if _cat:
+            _arms.append({"prod_" + _cat + "_general": True})
+        where = {"$or": _arms}
     elif scope and "category" in scope:
         where = {"category": scope["category"]}
     if where:

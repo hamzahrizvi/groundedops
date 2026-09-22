@@ -4706,6 +4706,38 @@ def admin_attach_source(payload: AttachReq, x_admin_password: str | None = Heade
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _product_keys_in(results, limit: int) -> list[str]:
+    """The individual products a result set spans, as KEYS.
+
+    Was `{r.get("product") for r in ...}`, which reads the tag field RAW --
+    and that field is a comma-joined list when a document belongs to more
+    than one product. So the span could contain the string
+    "myconnect,biometrics_general", which is not a product, has no display
+    name, and fell back to being shown to the customer verbatim:
+
+        That could apply to more than one product - which did you mean?
+          [ myconnect,biometrics_general ]      <- a database tag
+          [ NV200S ]
+
+    The first button was also unusable: clicking it sent that whole string
+    back as the scope, which matches no product, so the next turn asked the
+    same question again. Observed doing exactly that three times in a row.
+
+    Split, so a multi-product document offers one button per product it
+    actually belongs to. "<category>_general" is dropped: it is a bucket
+    for shared documents, not something a customer can mean, and those
+    documents are now in scope for every product in their category anyway
+    (see retrieval_db._matches_scope).
+    """
+    keys = set()
+    for r in (results or [])[:limit]:
+        for k in (r.get("product") or "").split(","):
+            k = k.strip()
+            if k and not k.endswith("_general"):
+                keys.add(k)
+    return sorted(keys)
+
+
 @app.post("/query")
 def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     if not APP_STATE["ready"]:
@@ -5282,8 +5314,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # precision-first design exists to avoid. High confidence does not help
     # here: each chunk is individually a good match, just for a different
     # product.
-    _span = sorted({(r.get("product") or "") for r in results[:CONTEXT_K]
-                    if (r.get("product") or "")})
+    _span = _product_keys_in(results, CONTEXT_K)
 
     # v15.2: before asking, try to ANSWER the question ourselves from what the
     # visitor already said. Asking "which product?" when they just typed
@@ -5311,8 +5342,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                                             source_filter=payload.source_filter,
                                             scope=_scope),
                              top_k=CONTEXT_K)
-            _span = sorted({(r.get("product") or "") for r in results[:CONTEXT_K]
-                            if (r.get("product") or "")})
+            _span = _product_keys_in(results, CONTEXT_K)
             confidence = retrieval_confidence_band(
                 results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
 
