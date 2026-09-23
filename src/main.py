@@ -1997,6 +1997,16 @@ def _add_selected_product_context(query: str, named_products: list[str],
     return query
 
 
+def _category_keys() -> set[str]:
+    """Every category key in the catalog; empty when it cannot be read."""
+    try:
+        import catalog as _cat
+        return {c.get("key") for c in _cat.catalog().get("categories", [])}
+    except Exception as exc:
+        logger.warning(f"category keys unavailable: {exc}")
+        return set()
+
+
 def _resolve_question_scope(selected_product: str | None,
                             category: str | None,
                             named_products: list[str]
@@ -2006,7 +2016,18 @@ def _resolve_question_scope(selected_product: str | None,
     The product picker is the default context. One product explicitly named
     in the question overrides that default for this turn; multiple names stay
     available to the comparison path instead of being collapsed to one.
+
+    A CATEGORY KEY IN THE PRODUCT SLOT IS A CATEGORY SCOPE. The widget's
+    "Not sure — ask across the whole range" button sends the category key
+    as `product`, and a visitor's saved widget state can carry it for the
+    rest of the session. Taken literally it became {"product": "biometrics"},
+    which no chunk is tagged with, so every question retrieved nothing and
+    was refused -- while the FAQ suggestions, which do understand category
+    keys, offered the very question that had just been refused.
     """
+    if selected_product and selected_product in _category_keys():
+        category = category or selected_product
+        selected_product = None
     effective_product = (named_products[0] if len(named_products) == 1
                          else selected_product)
     if effective_product:

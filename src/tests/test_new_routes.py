@@ -207,6 +207,7 @@ print("\n== a product short code scopes the question instead of asking ==")
 import main as _m
 _cands = ["nv9_spectral", "nv9usb"]
 _names, _aliases = _m._product_names, _m._product_aliases
+_cat_keys = _m._category_keys
 _m._product_names = lambda: {"nv9_spectral": "NV9 Spectral", "nv9usb": "NV9USB+"}
 _m._product_aliases = lambda: {"nv9_spectral": ["NV9S", "NV22"],
                                "nv9usb": ["NV11+"]}
@@ -255,8 +256,25 @@ try:
     check(_m._resolve_question_scope("sku_scs", "coin_hoppers", ["nv9usb"])
           == ({"product": "nv9usb"}, "nv9usb"),
           "one explicitly named product overrides the picker for this turn")
+    # "Not sure — ask across the whole range" sends the CATEGORY key as the
+    # product. Scoping {"product": "biometrics"} matched no chunk and
+    # refused everything asked after that button.
+    _m._category_keys = lambda: {"biometrics", "coin_hoppers"}
+    check(_m._resolve_question_scope("biometrics", None, [])
+          == ({"category": "biometrics"}, None),
+          "a category key sent as the product scopes by category")
+    check(_m._resolve_question_scope("biometrics", "biometrics", [])
+          == ({"category": "biometrics"}, None),
+          "a category key in both slots scopes by category")
+    check(_m._resolve_question_scope("biometrics", None, ["mycheckr"])
+          == ({"product": "mycheckr"}, "mycheckr"),
+          "a product named in the question still narrows a whole-range scope")
+    check(_m._resolve_question_scope("sku_scs", "coin_hoppers", [])
+          == ({"product": "sku_scs"}, "sku_scs"),
+          "a real product key is not mistaken for a category")
 finally:
     _m._product_names, _m._product_aliases = _names, _aliases
+    _m._category_keys = _cat_keys
 
 print("\n" + "=" * 52)
 if fails:
