@@ -272,6 +272,30 @@ try:
     check(_m._resolve_question_scope("sku_scs", "coin_hoppers", [])
           == ({"product": "sku_scs"}, "sku_scs"),
           "a real product key is not mistaken for a category")
+    # "Can you give me the MyCheckr manual?" answers with the file's link,
+    # built only from documents that can actually be downloaded.
+    import docstore as _ds
+    _docs_in, _find = _m._documents_in_scope, _ds.find
+    _m._product_names = lambda: {"mycheckr": "MyCheckr"}
+    _m._documents_in_scope = lambda scope: [
+        "MyCheckr User Manual-v7.pdf", "Not On Disk Manual.pdf"]
+    _ds.find = lambda name: None if name.startswith("Not On Disk") else name
+    try:
+        _d = _m._document_answer("can you give me the MyCheckr manual?",
+                                 {"product": "mycheckr"}, "mycheckr")
+        check(_d and [x["source"] for x in _d["sources"]]
+              == ["MyCheckr User Manual-v7.pdf"],
+              "a manual request links only the manuals held on disk")
+        check(_d and _d["sources"][0]["download_url"]
+              == "/source_file/MyCheckr%20User%20Manual-v7.pdf",
+              "the link is the token-gated /source_file URL")
+        check(_m._document_answer("what does the manual say about LEDs?",
+                                  {"product": "mycheckr"}, "mycheckr") is None,
+              "a question about the manual's content goes to the pipeline")
+        check(_m._document_answer("can you give me the manual", None, None)
+              is None, "no scope: the pipeline asks which product")
+    finally:
+        _m._documents_in_scope, _ds.find = _docs_in, _find
 finally:
     _m._product_names, _m._product_aliases = _names, _aliases
     _m._category_keys = _cat_keys

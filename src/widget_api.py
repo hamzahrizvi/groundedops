@@ -427,6 +427,17 @@ def register(app, answer_query, draft_enquiry=None):
                 return _faq_response(faq["entry"]["answer"], caller,
                                      matched=faq["entry"]["question"])
 
+            # "Can I have the MyCheckr manual?" -- the file is member-only
+            # (/source_file is token gated), so say that plainly rather than
+            # the generic "no reviewed answer", which reads as "we have no
+            # manual". A curated FAQ about manuals still wins, above.
+            import doc_request
+            if doc_request.document_request(payload.q):
+                return _faq_response(
+                    "Product manuals and documents are available to account "
+                    "holders. Sign in and I can give you the download link.",
+                    caller, needs_sign_in=True)
+
             if faq["mode"] == "disambiguate":
                 return _faq_response(
                     "These FAQs match your query - please select the one you meant:",

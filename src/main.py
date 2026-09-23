@@ -1997,6 +1997,54 @@ def _add_selected_product_context(query: str, named_products: list[str],
     return query
 
 
+def _documents_in_scope(scope: dict | None) -> list[str]:
+    """Every source filename filed under `scope`, judged by the same matcher
+    retrieval uses -- so a shared "<category>_general" document belongs to
+    each product in its category here exactly as it does for answers."""
+    if not scope:
+        return []
+    from db import get_collection
+    from retrieval_db import _matches_scope
+    got = get_collection().get(include=["metadatas"])
+    return sorted({m.get("source") for m in (got.get("metadatas") or [])
+                   if m and m.get("source") and _matches_scope(m, None, scope)})
+
+
+def _document_answer(q: str, scope: dict | None,
+                     product_key: str | None) -> dict | None:
+    """The reply to "give me the <product> manual", or None to carry on.
+
+    None whenever there is no scope to read documents from (the pipeline
+    then asks which product, as it would for any other question) and
+    whenever nothing held can be downloaded. Offering a link that 404s is
+    worse than answering from the passages.
+    """
+    try:
+        import doc_request, docstore
+        ask = doc_request.document_request(q)
+        if not ask or not scope:
+            return None
+        held = [s for s in _documents_in_scope(scope) if docstore.find(s)]
+        docs, matched = doc_request.pick_documents(ask["kind"], held)
+        if not docs:
+            return None
+        label = _product_names().get(product_key or "", "")
+        if not label and scope.get("category"):
+            import catalog as _cat
+            _c = _cat._find_category(_cat.catalog(), scope["category"])
+            label = f"{_c['name']} range" if _c and _c.get("name") else ""
+        return {
+            "answer": doc_request.reply(label, ask["kind"], docs, matched),
+            "sources": [{"source": d, "page_label": None, "snippet": "",
+                         "chunk_ids": [], "pages": [],
+                         "download_url": f"/source_file/{quote(d)}"}
+                        for d in docs],
+        }
+    except Exception as exc:
+        logger.warning(f"document request skipped: {exc}")
+        return None
+
+
 def _category_keys() -> set[str]:
     """Every category key in the catalog; empty when it cannot be read."""
     try:
@@ -5070,6 +5118,25 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # cannot produce it and every question of that shape was refused. It is
     # answered from the catalogue and the spec index, both verbatim, so
     # nothing here can invent a product or a specification.
+    # A REQUEST FOR THE DOCUMENT ITSELF. "Can you give me the MyCheckr
+    # manual?" wants the file, not a summary of passages from it. Answered
+    # from what is filed under the scope, with the same download links a
+    # cited source carries -- no retrieval, no model. See doc_request.py.
+    _doc = _document_answer(payload.q, _scope, _effective_product)
+    if _doc:
+        total_time = time.time() - start_total
+        add_to_memory(session_id, q, _doc["answer"])
+        return {
+            "answer": _doc["answer"],
+            "response_time_ms": int(total_time * 1000),
+            "role": "document",
+            "model": None, "provider": "catalogue",
+            "grounding_score": None, "flagged": False,
+            "from_faq": False, "sources": _doc["sources"],
+            "retrieval_score": None,
+            "timing": {"total_time": round(total_time, 3)},
+        }
+
     _sales = _sales_answer(payload.q, resolved_query, payload.product)
     if _sales:
         total_time = time.time() - start_total
