@@ -775,9 +775,15 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
 GAP_CLUSTER_THRESHOLD = float(os.getenv("GAP_CLUSTER_THRESHOLD", "0.90"))
 
 _gap_cache_lock = threading.Lock()
-_gap_cache_mtime = None
-_gap_cache_vecs = None
-_gap_cache_texts: list[str] = []
+# question text -> vector. Keyed by the QUESTION, not by the list and its
+# mtime, because /faq/gaps is called with a product filter as often as
+# without one, and the arrival of a single new gap must not invalidate the
+# other three hundred.
+_gap_vec_by_text: dict | None = None
+# Above this many remembered questions the cache is pruned to the set last
+# asked for. Gaps get resolved and stop being asked, and without a bound the
+# file would carry every question the widget has ever failed to answer.
+_GAP_VEC_MAX = 5000
 
 
 def _gap_store_mtime() -> float:
@@ -787,23 +793,93 @@ def _gap_store_mtime() -> float:
         return 0.0
 
 
+def _gap_vector_cache_file() -> str:
+    return os.getenv("FAQ_GAP_VECTOR_CACHE") or (_GAP_PATH + ".vectors.npz")
+
+
+def _load_gap_vectors() -> dict:
+    """question -> vector, from disk. {} when there is nothing usable, which
+    is a cache miss and never an error."""
+    path = _gap_vector_cache_file()
+    if not os.path.exists(path):
+        return {}
+    try:
+        import numpy as np
+        from embeddings import EMBED_MODEL
+        with np.load(path, allow_pickle=False) as z:
+            if str(z["model"]) != EMBED_MODEL:
+                return {}          # different embedder, different vectors
+            texts, vecs = list(z["texts"]), z["vecs"]
+        return {t: vecs[i] for i, t in enumerate(texts)}
+    except Exception as exc:
+        logger.warning(f"gap vector cache unreadable ({exc}); rebuilding")
+        return {}
+
+
+def _save_gap_vectors(by_text: dict) -> None:
+    path = _gap_vector_cache_file()
+    try:
+        import numpy as np
+        from embeddings import EMBED_MODEL
+        texts = list(by_text)
+        tmp = path + ".tmp"
+        # Through a FILE OBJECT, not a path: np.savez appends ".npz" to a
+        # path that lacks it, and the os.replace would then look for a file
+        # that does not exist. Same trap as the FAQ vector cache above.
+        with open(tmp, "wb") as fh:
+            np.savez(fh,
+                     vecs=np.array([by_text[t] for t in texts]),
+                     texts=np.array(texts, dtype="U"),
+                     model=np.array(EMBED_MODEL, dtype="U"))
+        os.replace(tmp, path)
+    except Exception as exc:
+        # Non-fatal: without it the next cold start pays the embeddings again.
+        logger.warning(f"could not write the gap vector cache: {exc}")
+
+
 def _gap_vectors(questions: list[str]):
-    """Embeddings for the gap questions, cached on the gap file's mtime -
-    same pattern as _build_cache above. Returns None if embeddings are
-    unavailable, and the caller falls back to lexical grouping."""
-    global _gap_cache_mtime, _gap_cache_vecs, _gap_cache_texts
+    """Embeddings for the gap questions. Returns None if embeddings are
+    unavailable, and the caller falls back to lexical grouping.
+
+    WHY THIS IS PER-QUESTION AND ON DISK. It was neither, and both cost the
+    same two minutes. GET /faq/gaps runs on EVERY console sign-in (it is one
+    of the seven reads the console opens with), clustering is on by default,
+    and the cache lived only in this process -- so the first sign-in after a
+    restart embedded all 344 gap questions through gte-modernbert-base on
+    CPU. Measured: 121.6 seconds, during which the sign-in appeared to hang
+    and the first question of the day queued behind it for the same model.
+
+    The old key made it worse than once per restart: it compared the WHOLE
+    question list, so one visitor asking one new unanswered question threw
+    away the other 343 vectors and re-embedded them on the next sign-in.
+
+    Keyed on the question text, a question is embedded once, ever. A new gap
+    costs one embedding; a restart costs a file read.
+    """
+    global _gap_vec_by_text
     if _semantic_available is False:
         return None
     try:
+        import numpy as np
         from embeddings import embed_texts
         with _gap_cache_lock:
-            mt = _gap_store_mtime()
-            if (_gap_cache_vecs is None or _gap_cache_mtime != mt
-                    or _gap_cache_texts != questions):
-                _gap_cache_vecs = embed_texts(questions)
-                _gap_cache_texts = list(questions)
-                _gap_cache_mtime = mt
-            return _gap_cache_vecs
+            if _gap_vec_by_text is None:
+                _gap_vec_by_text = _load_gap_vectors()
+            # dict.fromkeys, not set: embedding order has to match `missing`,
+            # and duplicates would be embedded twice for nothing.
+            missing = [q for q in dict.fromkeys(questions)
+                       if q not in _gap_vec_by_text]
+            if missing:
+                for q, v in zip(missing, embed_texts(missing)):
+                    _gap_vec_by_text[q] = v
+                if len(_gap_vec_by_text) > _GAP_VEC_MAX:
+                    keep = set(questions)
+                    _gap_vec_by_text = {t: v for t, v in
+                                        _gap_vec_by_text.items() if t in keep}
+                _save_gap_vectors(_gap_vec_by_text)
+                logger.info("gap vectors: %d embedded, %d cached",
+                            len(missing), len(_gap_vec_by_text))
+            return np.array([_gap_vec_by_text[q] for q in questions])
     except Exception as e:
         logger.warning(f"gap clustering: embeddings unavailable, "
                        f"falling back to lexical ({e})")
@@ -1337,10 +1413,16 @@ def warm_cache() -> int:
     visitor never pays for it. Returns the number of cached questions."""
     try:
         _semantic_scores("warm up", _load())
-        return len(_cache_ids)
     except Exception as exc:
         logger.warning(f"FAQ cache warmup skipped: {exc}")
-        return 0
+    # The gap vectors too, for the same reason and in the same place: the
+    # console's own sign-in reads /faq/gaps, so leaving this cold just moves
+    # the bill from a visitor to whoever opens the console.
+    try:
+        _gap_vectors([g.get("question", "") for g in list_gaps(None)])
+    except Exception as exc:
+        logger.warning(f"gap vector warmup skipped: {exc}")
+    return len(_cache_ids)
 
 
 def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:

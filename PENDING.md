@@ -312,6 +312,20 @@ dated section below).
   bound a determined caller; the session caps stop an honest runaway thread.
   Worth knowing before relying on them for anything adversarial.
 
+  **2026-09-24: the per-IP ceiling did not exist in the default guest mode.**
+  Checking the claim above found it false for FAQ-only guests, the mode that
+  ships. `quota.consume_faq_lookup` counted every lookup against the IP, but
+  `check_faq_lookup` read only the per-visitor count, and the visitor id
+  comes from the browser too, so clearing site data reset everything. It now
+  enforces `anon_ip_daily` on FAQ lookups as well (reason `ip_faq_quota`;
+  the widget still shows its usual daily-limit message). `reset_visitor` also
+  missed the per-IP credit counter, so a guest blocked on `ip_quota` stayed
+  blocked after a console reset; fixed. Pinned by
+  `tests/test_quota_ceilings.py`. The session caps are still a cost guard by
+  design. No server-issued session id would change that, because a caller
+  can just ask for a new one. What bounds a caller is identity: the IP for
+  guests, the account for members.
+
 - **~50s of a 113s answered query is unattributed.** Measured breakdown:
   DeepSeek call 47.8s, NLI grounding 8.4s, reranker 3.9s, retrieval 3.0s — sums
   to ~63s, wall clock was 113s. Needs per-stage timing instrumentation around

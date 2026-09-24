@@ -59,6 +59,9 @@ faq_store.json
 faq_gaps.json
 gaps_store.json
 catalog_config.json
+# The spec index, rebuilt from the PDFs whenever they or their filing
+# change (sales.get_index). Pure cache, and ~640KB of churn if tracked.
+spec_index.json
 ingest_stamp.txt
 conversations.db
 # sqlite runtime DBs and their write-ahead/shared-memory siblings. The -wal
@@ -76,6 +79,9 @@ widget_leads.json
 # account, so it needs a real backup (see accounts.py).
 accounts.json
 accounts.json.tmp
+# Pending reset / sign-in links and low-credit alert state (runtime)
+auth_tokens.json
+credit_alerts.json
 # Pending enrolment requests contain staff email addresses and scrypt password
 # hashes. Treat them exactly like the account store.
 account_requests.json
@@ -129,3 +135,8 @@ build/
 dist/
 # Per-developer editor/agent settings, not project configuration.
 .claude/
+# Video/promo renders and demo media (hyperframes output, node_modules, mp4s).
+brag-output/
+promo-output/
+demo/
+scratchpad/

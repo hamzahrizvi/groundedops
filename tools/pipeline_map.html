@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GroundedOps Pipeline Map</title>
+<style>
+:root{
+  --bg:#eef1f5; --panel:#ffffff; --ink:#12161c; --muted:#5a636e;
+  --line:#dde2e8; --rail:#c9d0d9;
+  --main:#2f6feb; --main-soft:#e8f0ff;
+  --stop:#c93a2b; --stop-soft:#fdeceb;
+  --ask:#a8750d; --ask-soft:#fdf4e3;
+  --ok:#15805a; --ok-soft:#e6f6ef;
+  --taken:#15805a; --taken-soft:#e6f6ef;
+  --code:#eff2f6; --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 12px rgba(16,24,40,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1015; --panel:#171b22; --ink:#e8ebef; --muted:#98a1ac;
+    --line:#282e37; --rail:#39414c;
+    --main:#5b9bff; --main-soft:#16223a;
+    --stop:#ff8272; --stop-soft:#2c1917;
+    --ask:#e5b544; --ask-soft:#2b2312;
+    --ok:#46d19a; --ok-soft:#10271e;
+    --taken:#46d19a; --taken-soft:#10271e;
+    --code:#1b2027; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1015; --panel:#171b22; --ink:#e8ebef; --muted:#98a1ac;
+  --line:#282e37; --rail:#39414c;
+  --main:#5b9bff; --main-soft:#16223a;
+  --stop:#ff8272; --stop-soft:#2c1917;
+  --ask:#e5b544; --ask-soft:#2b2312;
+  --ok:#46d19a; --ok-soft:#10271e;
+  --taken:#46d19a; --taken-soft:#10271e;
+  --code:#1b2027; --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+  font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+
+/* ── chrome ─────────────────────────────────────────────────────────── */
+header{background:var(--panel);border-bottom:1px solid var(--line);
+  padding:10px 18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.brand{display:flex;flex-direction:column;margin-right:6px}
+.brand b{font-size:16px;letter-spacing:-.2px}
+.brand span{font-size:12px;color:var(--muted)}
+.spacer{flex:1}
+.pillbar{display:flex;gap:6px;align-items:center;background:var(--bg);
+  border:1px solid var(--line);border-radius:99px;padding:3px}
+.pillbar button{border:0;background:transparent;color:var(--muted);
+  padding:5px 11px;border-radius:99px;font:inherit;font-size:13px;cursor:pointer}
+.pillbar button.on{background:var(--panel);color:var(--ink);font-weight:650;box-shadow:var(--shadow)}
+input,button{font:inherit;color:var(--ink)}
+input{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 11px}
+input:focus{outline:2px solid var(--main);outline-offset:1px}
+.btn{cursor:pointer;background:var(--main);color:#fff;border:0;border-radius:8px;
+  padding:8px 14px;font-weight:650}
+.btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
+.btn:disabled{opacity:.5;cursor:default}
+.tracebar{background:var(--panel);border-bottom:1px solid var(--line);
+  padding:9px 18px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+#q{flex:1 1 300px;min-width:160px}
+#base{width:190px}#product{width:130px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:12px;border:1px solid var(--line);background:var(--bg);color:var(--muted);
+  border-radius:99px;padding:4px 10px;cursor:pointer}
+.chip:hover{border-color:var(--main);color:var(--main)}
+#status{font-size:13px;color:var(--muted);flex-basis:100%;min-height:19px}
+#status b{color:var(--ink)}
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:minmax(0,1fr) 400px;height:calc(100vh - 116px)}
+#viewport{overflow:auto;position:relative;padding:26px 0 80px}
+#sizer{position:relative;margin:0 auto}
+#stage{position:absolute;top:0;left:0;transform-origin:0 0}
+aside{background:var(--panel);border-left:1px solid var(--line);overflow:auto;padding:18px 20px}
+@media (max-width:1050px){.shell{grid-template-columns:1fr}aside{display:none}}
+
+/* ── nodes ──────────────────────────────────────────────────────────── */
+svg#wires{position:absolute;inset:0;overflow:visible;pointer-events:none}
+.phaseband{position:absolute;pointer-events:none}
+.phaseband .pnum{font-size:34px;font-weight:800;color:var(--rail);line-height:1}
+.phaseband .ptitle{font-size:13.5px;font-weight:700;margin-top:2px;letter-spacing:.01em}
+.phaseband .pblurb{font-size:12px;color:var(--muted);margin-top:6px}
+.railbar{position:absolute;width:4px;border-radius:99px;background:var(--rail);opacity:.5}
+
+.node{position:absolute;background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;box-shadow:var(--shadow);padding:12px 14px;cursor:pointer;
+  transition:border-color .12s, box-shadow .12s, opacity .18s}
+.node:hover{border-color:var(--main)}
+.node.sel{border-color:var(--main);box-shadow:0 0 0 3px var(--main-soft),var(--shadow)}
+.node .top{display:flex;gap:9px;align-items:center}
+.badge{width:26px;height:26px;border-radius:8px;flex:none;display:grid;place-items:center;
+  background:var(--main-soft);color:var(--main);font-size:12px;font-weight:800;
+  font-variant-numeric:tabular-nums}
+.node.decision .badge{border-radius:50%}
+.node .nm{font-weight:670;font-size:14.5px;letter-spacing:-.1px}
+.node .src{margin-left:auto;font:11px ui-monospace,Consolas,monospace;color:var(--muted);flex:none}
+.node .wh{font-size:12.5px;color:var(--muted);margin:7px 0 0 35px}
+.node .meta{margin:8px 0 0 35px;display:flex;gap:5px;flex-wrap:wrap}
+.tag{font-size:10.5px;border:1px solid var(--line);border-radius:99px;padding:1px 7px;color:var(--muted)}
+body.compact .node .wh,body.compact .node .meta,
+body.compact .node .src{display:none}
+body.compact .node{padding:14px}
+body.compact .node .nm{font-size:15.5px}
+/* plain-English / technical wording swap */
+.easy{display:none}
+body.compact .tech{display:none}
+body.compact .easy{display:inline}
+body.compact .phaseband .pblurb .easy,body.compact .phaseband .ptitle .easy{display:inline}
+
+.exit{position:absolute;border-radius:99px;padding:9px 15px;cursor:pointer;
+  border:1.5px solid;font-size:12.5px;transition:opacity .18s, box-shadow .12s}
+.exit b{display:block;font-size:12.5px;font-weight:700}
+.exit span{color:var(--muted);font-size:11.5px}
+.exit.stop{border-color:var(--stop);background:var(--stop-soft)}
+.exit.stop b{color:var(--stop)}
+.exit.ask{border-color:var(--ask);background:var(--ask-soft)}
+.exit.ask b{color:var(--ask)}
+.exit.ok{border-color:var(--ok);background:var(--ok-soft)}
+.exit.ok b{color:var(--ok)}
+.exit.sel{box-shadow:0 0 0 3px var(--main-soft)}
+
+.node.taken{border-color:var(--taken);box-shadow:0 0 0 3px var(--taken-soft),var(--shadow)}
+.node.taken .badge{background:var(--taken-soft);color:var(--taken)}
+.exit.taken{box-shadow:0 0 0 3px var(--taken-soft)}
+.dim{opacity:.22}
+.wire{fill:none;stroke:var(--rail);stroke-width:2}
+.wire.branch{stroke-dasharray:5 4}
+.wire.taken{stroke:var(--taken);stroke-width:3.5;stroke-dasharray:none}
+
+/* ── side panel ─────────────────────────────────────────────────────── */
+aside h2{font-size:17px;margin:0 0 3px;letter-spacing:-.2px}
+aside .where{font:11.5px ui-monospace,Consolas,monospace;color:var(--muted);margin-bottom:12px}
+aside p{font-size:13.5px}
+aside .lead{font-size:14px;font-weight:550}
+.why{border-left:3px solid var(--main);background:var(--main-soft);
+  border-radius:0 10px 10px 0;padding:10px 12px;font-size:13px;margin:12px 0}
+.why b{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--main);margin-bottom:4px}
+.kv{font-size:12.5px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:12px 0}
+.kv span:nth-child(odd){color:var(--muted)}
+pre{background:var(--code);border-radius:10px;padding:11px;overflow:auto;
+  font-size:11.5px;line-height:1.5;max-height:300px;white-space:pre-wrap}
+code{background:var(--code);padding:1px 5px;border-radius:5px;font-size:12.5px}
+.exitrow{display:flex;gap:8px;align-items:baseline;font-size:12.5px;margin:6px 0}
+.sw{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px}
+
+/* ── footer / legend ────────────────────────────────────────────────── */
+.legend{position:fixed;bottom:0;left:0;right:400px;background:var(--panel);
+  border-top:1px solid var(--line);padding:8px 18px;display:flex;gap:16px;
+  flex-wrap:wrap;font-size:12px;color:var(--muted);align-items:center}
+@media (max-width:1050px){.legend{right:0}}
+.legend .sw{width:10px;height:10px;margin:0 5px 0 0;display:inline-block}
+.legend .k{display:flex;align-items:center}
+.zoom{margin-left:auto;display:flex;gap:6px;align-items:center}
+.zoom button{width:28px;height:26px;border-radius:7px;border:1px solid var(--line);
+  background:var(--bg);cursor:pointer;color:var(--muted);font-weight:700}
+@media print{
+  body{overflow:visible}header,.tracebar,.legend,aside{display:none}
+  .shell{display:block;height:auto}#viewport{overflow:visible}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <b>GroundedOps — how an answer is produced</b>
+    <span><span class="tech">Every step of <code>POST /query</code>, in the order it runs</span><span
+      class="easy">What happens between a question being asked and an answer coming back</span>
+      · <span id="stat-steps"></span></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="pillbar">
+    <button id="m-full" class="on">Technical</button>
+    <button id="m-compact">Plain English</button>
+  </div>
+  <button class="btn ghost" id="present">▶ Present</button>
+  <button class="btn ghost" id="theme" title="Light / dark">◐</button>
+</header>
+
+<div class="tracebar">
+  <input id="base" value="http://localhost:8000" title="Backend base URL">
+  <input id="q" placeholder="Ask a question and watch the path light up…"
+         value="what is the pinout for nv9?">
+  <input id="product" placeholder="product (optional)">
+  <button class="btn" id="run">Trace</button>
+  <button class="btn ghost" id="clear">Reset</button>
+  <div class="chips" id="examples"></div>
+  <div id="status"></div>
+</div>
+
+<div class="shell">
+  <div id="viewport">
+    <div id="sizer"><div id="stage"><svg id="wires"></svg></div></div>
+  </div>
+  <aside id="panel"></aside>
+</div>
+
+<div class="legend">
+  <span class="k"><i class="sw" style="background:var(--main)"></i>step on the main path</span>
+  <span class="k"><i class="sw" style="background:var(--ok)"></i>leaves here with an answer</span>
+  <span class="k"><i class="sw" style="background:var(--ask)"></i>leaves here asking the user something</span>
+  <span class="k"><i class="sw" style="background:var(--stop)"></i>leaves here refusing</span>
+  <span class="k"><i class="sw" style="background:var(--taken)"></i>path taken by the last traced question</span>
+  <div class="zoom">
+    <button id="zout">−</button><span id="zlvl" style="min-width:42px;text-align:center"></span>
+    <button id="zin">+</button><button id="zfit" style="width:auto;padding:0 9px">Fit</button>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   THE PIPELINE, as implemented in src/main.py — query() begins at :4839
+   Each step carries: what it does, why it exists (the failure it fixes),
+   and its real constants. Ids are stable and drive the live tracer.
+   ═══════════════════════════════════════════════════════════════════ */
+const PHASES = [
+{n:1, phase:"Understand the request",
+ blurb:"Work out what was actually asked, before searching anything.",
+ steps:[
+ {id:"entry",n:"00",name:"Request accepted",where:"main.py:4839",
+  what:"Refuses with 503 until the answering models have finished warming up.",
+  detail:"<code>capability(\"ask\")</code> gates the whole route — retrieval, reranker and generator must all be loaded. The spec index is deliberately not required here; cross-product questions build it lazily further down.",
+  facts:[["guard","capability('ask')"],["if not ready","503 — models still loading"]]},
+
+ {id:"pending",n:"01",name:"“Yes” to an offer we made",where:"main.py:4865",
+  what:"If this session has an outstanding offer of steps and the reply is affirmative, serve those steps and stop.",
+  why:"“yes” carries no content, so retrieval scores it against the corpus and returns noise — and every branch downstream then treats that noise as the question. In the widget transcript of 2026-09-22 the assistant offered to walk through the Linux steps, the visitor said “yes”, and the pipeline answered with an unrelated sentence about age estimation.",
+  detail:"Runs before everything else for that reason. Scoped to this session's own pending offer, so it cannot hijack a “yes” elsewhere, and the offer is consumed either way — a second “yes” is a new question, not the same steps again.",
+  facts:[["state","_PENDING_STEPS[session_id]"],["matcher","_AFFIRMATIVE"]],
+  exits:[{id:"x-steps",kind:"ok",label:"Steps served",text:"verbatim procedure from the offered document"}]},
+
+ {id:"keys",n:"02",name:"API keys reconciled",where:"main.py:4884",
+  what:"A key sent by the browser overrides the server's. Which one is in play is logged — never the key itself.",
+  why:"<code>llm.generate</code> does <code>api_key or os.getenv(...)</code>, so a stale key in one browser's localStorage silently wins. The symptom was “only the PC I uploaded from can ask questions”, with nothing anywhere to say why.",
+  detail:"Only a boolean is logged. An earlier version logged an 8-char hash to tell two keys apart; CodeQL flagged it twice and was right to — the diagnostic question is just “is this client using the configured key?”"},
+
+ {id:"condense",n:"03",name:"Query condensation",where:"main.py:4938",
+  what:"History and the new message go to a fast model, which returns the question unchanged if it already stands alone, or rewritten if it depends on earlier turns.",
+  why:"Earlier versions guessed whether something was a follow-up from surface heuristics (word count, a pronoun list). That reliably misfired — most self-contained questions are also short: “how to connect tablet to hub” is six words.",
+  detail:"The query is normalised first: “DEFAULT LOGIN???” retrieves fine, because embeddings are case-tolerant, but derails the small local generator into a not-found template. <b>resolved_query</b> drives everything downstream; the raw question is what gets stored in memory and logs, so future rewrites see the conversation as the user actually typed it.",
+  facts:[["pattern","Rewrite-Retrieve-Read"],["reference","Ma et al. 2023 · arXiv:2305.14283"],["fn","llm.condense_query"],["timeout","20s → falls back to the raw text"]]},
+
+ {id:"followup",n:"04",name:"Follow-up fallback",where:"main.py:4945",
+  what:"If the message clearly refers to earlier context but condensation left it unchanged, retrieve on the fragment plus the last question instead.",
+  why:"Condensation runs on a 20s timeout and silently returns the raw fragment on failure. A fragment like “how is it powered” then retrieves at ~0.005 and is rejected — the visitor experiences a bot that cannot hold a conversation.",
+  detail:"Deterministic, zero-latency, no LLM dependency. <b>Fragment first</b>: the older “last question — fragment” order let the previous entity dominate ranking, so “what about the MyCheckr?” after a run of Mini questions retrieved Mini chunks and answered about the Mini. A fragment that names a domain entity is treated as an entity switch, and history is weighted less.",
+  facts:[["fires only when","history AND reference markers AND unchanged"],["entity switch","fragment (last question)"],["otherwise","fragment — last question"]]},
+
+ {id:"scope",n:"05",name:"Sticky product scope",where:"main.py:4982",
+  what:"A product chosen earlier in the chat sticks for the session; an explicit scope on the request always wins and updates the memory.",
+  why:"Every later question used to arrive unscoped unless the visitor named the product again, so “what is the pinout?” searched the whole corpus, found nothing confidently and refused — while “what is the pinout for nv9?” worked.",
+  facts:[["store","memory.remember_scope / recall_scope"]]},
+
+ {id:"alias",n:"06",name:"Scope resolution + alias expansion",where:"main.py:5007",
+  what:"Work out which products the question names, then append the catalogue name so retrieval searches the words the manuals actually use.",
+  why:"Two separate jobs that were once conflated: expansion lived inside the “no scope yet” branch, so inside a product chat the query kept the bare acronym and retrieval failed. Being already in the right manual made the answer worse.",
+  detail:"Measured: “what is scs” unscoped expanded to “what is scs (SMART Coin System)” and scored <b>0.998</b>; the same question with <code>product=sku_scs</code> was not expanded, scored <b>0.341</b>, and refused. The acronym is kept alongside the expansion rather than replaced — it may be the more specific term.",
+  facts:[["scope","_resolve_question_scope"],["one named product","overrides the picker for this turn"],["careful","product context must not feed is_followup_turn"]]},
+
+ {id:"phrasings",n:"07",name:"Retrieval phrasings chosen",where:"main.py:5064",
+  what:"Search on the rewritten query and, when condensation changed it, on the query as typed — fusing both.",
+  why:"The conversational rewrite is lossy in both directions. Resolving “what are the power requirements for this setup?” into a version naming both products lost the PSU page entirely.",
+  detail:"Only the conversational rewrite earns a second retrieval. Product context is not a rewrite of the question — it is the catalogue name the documents use — so the as-typed phrasing gets the same product context, and the only variable between the two searches is whether history was folded in.",
+  facts:[["queries","at most 2"],["fusion","Reciprocal Rank Fusion"]]},
+]},
+
+{n:2, phase:"Answer without searching, where that is honest",
+ blurb:"Four kinds of question are answered without retrieval at all — cheaper, faster, and with no model able to invent anything.",
+ steps:[
+ {id:"faqid",n:"08",name:"Curated FAQ picked by the user",where:"main.py:5085",
+  what:"If the request carries a FAQ id, serve that human-written answer verbatim.",
+  detail:"The grounding score is reported as <i>null</i>, not 1.0 as the old code asserted. No grounding ran, and none is needed: a human wrote this answer and a human chose it.",
+  exits:[{id:"x-faqid",kind:"ok",label:"Curated answer",text:"human-written, no model call"}]},
+
+ {id:"more",n:"09",name:"“Tell me more”",where:"main.py:5125",
+  what:"Expands the previous answer from passages already retrieved, instead of re-answering.",
+  why:"Broken twice over: retrieval on the literal words scored 0.0001 and refused, having just answered the same topic; once history was recorded it instead re-served the previous answer word for word, which is not “more”.",
+  detail:"Both failures are the same mistake — treating a request to expand as a new question — so it is answered from the previous turn. This is the typed form of the “show more” button.",
+  exits:[{id:"x-more",kind:"ok",label:"Expanded",text:"unused passages from the same document"}]},
+
+ {id:"sales",n:"10",name:"Catalogue & spec lookup",where:"main.py:5185",
+  what:"“Which of your validators run on 24V?” is answered from the catalogue and the spec index.",
+  why:"The answer is a list of product names that appears in no single chunk, so product-scoped retrieval structurally cannot produce it and every question of that shape was refused.",
+  detail:"Both sources are read verbatim, so nothing on this path can invent a product or a specification. The sales_mode setting does not apply here: it governs only price and buying questions, which get the operator's fixed reply. Since the answer is assembled across several products there is no single document to open — the follow-on offer is a person.",
+  facts:[["module","sales.py"],["runs before","the FAQ and retrieval"]],
+  exits:[{id:"x-sales",kind:"ok",label:"Catalogue answer",text:"product list, no generation"},{id:"x-deflect",kind:"ok",label:"Price / buying question",text:"operator's fixed sales reply"}]},
+
+ {id:"faq",n:"11",name:"Curated FAQ — suggest, don't guess",where:"main.py:5191",
+  what:"A near-verbatim match is served; a merely plausible match is offered back as a choice; nothing close falls through to retrieval.",
+  why:"Earlier versions decided for themselves whether the question was equivalent to a curated one. In production, “does the MyCheckr have WiFi or Ethernet ports?” was served the curated answer to “does MyCheckr require an internet connection?” — semantically adjacent, factually opposite.",
+  detail:"Judging equivalence is the hard part and the part a human does effortlessly, so the system suggests and lets the user choose. A comparison naming two catalogue products skips this entirely: offering single-product FAQs to “what is the difference between A and B” ends the conversation with a menu instead of an answer.",
+  facts:[["fn","faq_store.suggest_candidates"],["modes","answer · disambiguate · none"],["rejected suggestions","logged as a gap, then answered from docs"]],
+  exits:[
+   {id:"x-faq",kind:"ok",label:"Curated answer",text:"near-verbatim match, served as written"},
+   {id:"x-faqask",kind:"ask",label:"Which did you mean?",text:"candidate questions offered as buttons"}]},
+]},
+
+{n:3, phase:"Find the evidence",
+ blurb:"Search the corpus two ways at once, re-score with a slower and more accurate model, then decide honestly whether anything was found.",
+ steps:[
+ {id:"retrieve",n:"12",name:"Hybrid retrieval",where:"main.py:5264",
+  what:"Keyword (BM25) and meaning (dense vectors) search over the whole corpus, rank-fused, scoped by product or category, run once per phrasing.",
+  detail:"Chunks carry explicit product and category tags from upload — no filename matching. A turn with a single phrasing collapses to a plain retrieve, so no extra retrieval is paid for.",
+  facts:[["RETRIEVE_K","16 candidates"],["fn","retrieval_db.retrieve_fused"],["scope","product tag, else category tag"]]},
+
+ {id:"exclude",n:"13",name:"Internal-only sources removed",where:"main.py:5268",
+  what:"Documents on the exclusion list are dropped unless the caller explicitly asked for that source.",
+  why:"Adding the ICU Network API document to the corpus polluted public answers — compliance boilerplate bled into product definitions, and its password-policy section powered a confident answer to “reset my Cisco router password”.",
+  facts:[["env","EXCLUDED_SOURCES (substrings, case-insensitive)"]]},
+
+ {id:"rerank",n:"14",name:"Cross-encoder rerank",where:"main.py:5297",
+  what:"Every candidate is re-scored by a slower, more accurate model, then the list is truncated — so chunks below the cut keep their score.",
+  why:"Those scores were already being computed and thrown away, and the “is there more on this?” offer after an answer needs them to tell “more on this topic” from “more, on something else”.",
+  detail:"The fused retrieval score cannot substitute: it is rank-derived and far too flat to discriminate. Measured on “how do I install and mount the NV9USB+”, the relevant section scored 0.0164 and an irrelevant cleaning section 0.0156.",
+  facts:[["CONTEXT_K","top 8 kept for the prompt"],["model","sigmoid-calibrated cross-encoder"]]},
+
+ {id:"band",n:"15",name:"Confidence band",where:"main.py:5303",
+  what:"Classify what was retrieved as confident, ambiguous, or nothing — from the best score and how scattered the top sources are.",
+  why:"Weak <i>and</i> scattered is <b>absence</b>, not ambiguity: when nothing matches, results scatter precisely because nothing matches. “How do I reset the password on my Cisco router” scored 0.204 and was offered a choice of four products — a loop with no exit.",
+  detail:"The ambiguity floor is the reranker's own decision boundary: it sigmoids its logits, so 0.5 is exactly where the model stops calling a passage relevant. To be worth disambiguating, the best candidate should at least be more likely relevant than not.",
+  facts:[["gate","0.0001 — essentially “literally nothing”"],["ambiguous","0.5 ≤ best < 0.65 AND ≥3 distinct sources"],["confident","everything else that passes the gate"]]},
+
+ {id:"none",n:"16",name:"Nothing relevant found",where:"main.py:5306",
+  what:"Three different endings, depending on what kind of miss this was.",
+  why:"Treating every miss as out-of-domain produced the flat, conversation-breaking “I could not find that”. A follow-up that misses is usually a rewrite that did not land; a question with domain vocabulary but no named product is underspecified, not off-topic.",
+  detail:"Only a genuine miss is recorded as an unanswered question for the admin console — asking which product was meant is a working conversation, not a gap. Only a genuine miss offers support, too.",
+  facts:[["gap recorded","only on a flat rejection"],["support offered","only on a flat rejection"]],
+  exits:[
+   {id:"x-none-follow",kind:"ask",label:"Follow-up missed",text:"“what would you like me to expand on?”"},
+   {id:"x-none-vague",kind:"ask",label:"Vague but in-domain",text:"“which device?” + the closest sources found"},
+   {id:"x-none-reject",kind:"stop",label:"Genuine miss",text:"refusal · gap recorded · route to a person"}]},
+
+ {id:"span",n:"17",name:"Evidence spans several products",where:"main.py:5419",
+  what:"Resolve the product from the question's own wording and search again scoped; only ask when the wording genuinely does not pick one out.",
+  why:"Unscoped, “what is the pinout for nv9?” answered from the NV9 Spectral <i>and</i> the NV9USB+ manuals at once — different products, different pinouts. A confidently wrong answer, which is the exact failure the whole design exists to avoid.",
+  detail:"High confidence does not help here: each chunk is individually a good match, just for a different product. But asking “which product?” when they already typed it is insulting, and it looped — the reply is chat text, not a product selection, so the next turn asked again. A comparison is exempt: the visitor named both on purpose.",
+  facts:[["re-retrieval","scoped, still fused"],["exempt","comparisons naming ≥2 products"]],
+  exits:[{id:"x-span",kind:"ask",label:"Which product?",text:"product buttons drawn from the evidence"}]},
+]},
+
+{n:4, phase:"Build the context and write the answer",
+ blurb:"Choose the model for the job, assemble only the passages that earn their place, and generate. Some answers are copied out of the document instead of written.",
+ steps:[
+ {id:"route",n:"18",name:"Semantic routing",where:"main.py:5518",
+  what:"The question is classified — extract, fast, accurate, or reasoning — by nearest-neighbour similarity to canonical examples, using the embedding model retrieval already loaded.",
+  why:"This used to be keyword matching, which misclassified anything not containing a listed word: “list the steps to power on the hub” matched none of the checklist keywords despite obviously being one.",
+  detail:"No extra model and no extra LLM call. Falls back to “accurate” rather than crashing if the embedder cannot load. A model forced through the Rethink control bypasses routing entirely.",
+  facts:[["module","router.py"],["in API mode","routing still drives extraction; answering goes online"]]},
+
+ {id:"extract",n:"19",name:"Structured extraction shortcut",where:"main.py:5523",
+  what:"For a checklist-shaped question, the procedure is pulled straight out of the chunks and served without calling a model at all.",
+  detail:"No grounding verdict is needed, because the text is the source rather than a paraphrase of it.",
+  facts:[["module","structure.py"]],
+  exits:[{id:"x-extract",kind:"ok",label:"Checklist",text:"copied out of the document"}]},
+
+ {id:"context",n:"20",name:"Context selection",where:"main.py:5592",
+  what:"Strip ingest-time breadcrumbs, drop passages far weaker than the best one, never go below a floor of four, then number them in rank order.",
+  why:"The relative floor exists because a strong hit dragged noise in with it — “what is MyCheckr” retrieved the General Description at 0.9996 and a WEEE waste-disposal paragraph rode in behind it, and the model stitched both into one answer.",
+  detail:"But being relative, a peaky distribution starved the prompt: “Do you have the nv9 pinout info?” scored its top chunk 0.771 — putting the floor at 0.385 — while the two chunks actually containing the pinout table scored 0.066 and 0.050 and were cut. The same question phrased differently kept three chunks and answered perfectly. That is the whole of the “it works for me but not for my colleague” report. Passages are numbered because eight passages scoring 0.91–0.999 gave the model nothing to tell the answer from its neighbours.",
+  facts:[["floor","50% of the best score"],["minimum kept","4 passages"],["per-passage cap","1600 characters"]]},
+
+ {id:"reanswer",n:"21",name:"Re-read (only on “that didn't answer it”)",where:"main.py:5628",
+  what:"Ask a model which of the passages it already has actually answer the question, and write from those alone.",
+  why:"Measured over 19 cases: the relevant chunk is in the context 100% of the time, and ranks first only 68% of the time. No reranker fixes that cheaply — the best tested bought 5 points for 8.5× the latency on this hardware.",
+  detail:"So the retry deliberately does not search again. If selection returns nothing usable it merges the top three, where the answer sits 94% of the time.",
+  facts:[["triggered by","the “didn't answer it” control"],["module","reanswer.py"]]},
+
+ {id:"procedures",n:"22",name:"Fetch the steps a passage points at",where:"main.py:5660",
+  what:"When a retrieved passage announces a procedure, its numbered steps are fetched by structure rather than found by ranking.",
+  why:"“How to get RNDIS working with linux?” retrieved the sentence announcing the procedure and its notes, and none of steps 1–4 — not ranked low, but outside the top sixteen, because a step reading <code>sudo touch /etc/udev/rules.d/80-local.rules</code> matches neither keyword nor meaning search. The model was handed a pointer to a procedure and correctly said it could not find the answer.",
+  detail:"Placed after selection on purpose — fetched because something already chosen points at them — and merged into the same passage list the verifier sees, so an answer built from them cannot be refused as ungrounded.",
+  facts:[["fn","complete_procedures"]]},
+
+ {id:"prompt",n:"23",name:"Prompt assembled",where:"main.py:5680",
+  what:"Numbered passages, the last few turns of the conversation, and the resolved question.",
+  why:"History used to reach the rewriter but never the answering prompt, so the model could not see what it had just said — “is the pinout above for spectral or usb?” was unanswerable, being a question about the previous turn rather than about the documents.",
+  detail:"The prompt forbids referring to the source material at all — no “as indicated by the WiFi Config section”, no “the context does not specify”. The reader cannot see the retrieval context, so describing it is meaningless to them and undercuts the answer.",
+  facts:[["history","last 4 turns, answers clipped to 400 chars"]]},
+
+ {id:"llm",n:"24",name:"Generation",where:"main.py:5690",
+  what:"The routed role generates with a fallback chain, or the exact model the user forced through Rethink.",
+  facts:[["offline","Ollama — mistral / phi"],["online","DeepSeek · OpenAI · Anthropic"]]},
+
+ {id:"sanitize",n:"25",name:"Answer cleanup",where:"main.py:5694",
+  what:"Preamble and meta-commentary stripped, markdown tables normalised.",
+  detail:"The deterministic pass that catches whatever slips past the prompt's ban on describing the source material."},
+]},
+
+{n:5, phase:"Refuse anything that cannot be verified",
+ blurb:"The answer is checked against the passages it was supposed to come from. What cannot be verified is retried, escalated, replaced by the source document — or refused. Never shown.",
+ steps:[
+ {id:"ground",n:"26",name:"Grounding check",where:"main.py:5751",
+  what:"Natural-language inference: does the retrieved text actually entail this answer? With two rescues before it is allowed to fail.",
+  why:"Three cases short-circuit first. A total generation failure is treated as ungrounded up front — the generic non-answer scored <b>0.993</b> entailment in production, a meaningless verdict. A chat-template leak is caught deterministically, because it makes no factual claim for the verifier to contradict and scored <b>0.934</b>. A clean refusal needs no verdict at all.",
+  detail:"The rescues exist because the verifier cannot read a flattened table row, and these manuals keep their facts in tables. Short numeric answers get a lexical containment check; anything else gets a second opinion from a model that can read a table.",
+  facts:[["threshold","0.55"],["rescue 1","lexical containment"],["rescue 2","LLM verifier"]]},
+
+ {id:"escalate",n:"27",name:"Escalate to the backup provider",where:"main.py:5794",
+  what:"A flagged local answer is retried on whichever provider holds the “backup” role — and not at all when no provider holds it.",
+  why:"This used to call DeepSeek directly, ignoring the configured provider, and fired hardest where it helped least: with the provider unreachable, every question fails generation and every one then escalates onto that key. Five queries against a gateway whose hostname had stopped resolving meant five billed calls, none of which could help — the answer was never the problem.",
+  detail:"Leaving the backup role unassigned is now how an operator says “never bill this provider automatically”, and they can see that they have.",
+  facts:[["role","assigned on the API keys page"],["re-verified","yes — same two rescues"]]},
+
+ {id:"retry",n:"28",name:"Regenerate and re-verify",where:"main.py:5860",
+  what:"Generate again and check again, up to the configured retry count; the first answer that verifies is served.",
+  why:"The grounding check is the single biggest source of lost <i>correct</i> answers, and it is not deterministic. Over 30 runs, the same question on the same index with the same model passed at 0.9088 and 0.9936, then failed at 0.2074 — whether the model phrases a fact in one clause or two decides which premise it is scored against.",
+  detail:"A model that declines on its own is taken as-is and never retried into a hallucination. If three attempts cannot produce something verifiable, the refusal is probably honest.",
+  facts:[["bounded by","the grounding_retries policy setting"],["not gated on","the retrieval score — it points the wrong way"]]},
+
+ {id:"verbatim",n:"29",name:"Serve the document instead of the prose",where:"main.py:5941",
+  what:"If the written answer cannot be stood behind but a verbatim table or checklist answers the question, serve that.",
+  why:"Refusing while holding the exact table the visitor asked to see is the worst of both worlds: “I could not find that”, displayed above a Sources list naming the page it is printed on.",
+  detail:"Keyed on the model's own refusal as well as on a failed check — the model follows its instruction to decline when the context is “not enough”, and a multi-row spec table reads as not enough. So “what is the weight?” was refused with the weights table sitting at rank 1 in its own context.",
+  facts:[["module","structures.py — read back out of the PDF"]],
+  exits:[{id:"x-verbatim",kind:"ok",label:"Verbatim block",text:"the table or checklist itself"}]},
+
+ {id:"suppress",n:"30",name:"Suppress what could not be verified",where:"main.py:5951",
+  what:"An unverified answer is replaced by a refusal — and an outage is worded as an outage, not as a gap in the documents.",
+  why:"An ungrounded answer used to be flagged, logged, and shown anyway: an off-domain “reset my Cisco router password” retrieved a stray password-policy chunk, generated a confident walkthrough, scored 0.055, and was displayed. A verdict the check is not allowed to enforce is theatre.",
+  detail:"“No model was reachable” gets its own wording, because otherwise an outage is indistinguishable from a knowledge gap — which sends someone re-uploading documents that were never the problem. Outages are never recorded as unanswered questions: nobody failed to answer, the service was down.",
+  facts:[["recorded as","ungrounded · template leak · generation failed"]],
+  exits:[{id:"x-suppress",kind:"stop",label:"Suppressed",text:"refusal instead of an unverifiable answer"}]},
+]},
+
+{n:6, phase:"Decide what a refusal should become",
+ blurb:"A refusal is a dead end, so ask what kind of failure this was: something documented after all, something worth one clarifying question, or an honest gap that needs a person.",
+ steps:[
+ {id:"switchboard",n:"31",name:"Answerability switchboard",where:"main.py:6059",
+  what:"One classification of the question — stated, documented elsewhere, inferable, advisory, or unanswerable — read by every branch below it.",
+  why:"Before this, the capability scan ran here and again inside the refusal builder, cross-references ran inside the refusal builder, and the clarify gate decided independently of both: four features sniffing the same question at four points, with nothing saying which one wins.",
+  detail:"Skipped entirely during a service outage. A provider being unreachable is not a fact about the question, and classifying one would put the switchboard in the business of explaining infrastructure.",
+  facts:[["module","answerability.py"]]},
+
+ {id:"capability",n:"32",name:"“Does X work with Y” — and we document Y",where:"main.py:6065",
+  what:"Offer the documented steps rather than a summary, and only when those steps can actually be produced.",
+  why:"“Does ICU work with linux?” was refused while retrieval had returned “Accessing my device in Linux Environment” at rank one, and the refusal helpfully suggested asking about exactly that.",
+  detail:"The sentence is composed, not generated, and claims only that a procedure exists in this document on this page. It does not claim the product is compatible, which is not ours to say and is what a wrong answer here would cost a site visit. No filename appears in the prose — it once read “<b>Accessing my device…-v2-20250224_144232 2</b> covers linux”, an internal filename with an ingest timestamp, in front of a customer. Whether the steps exist is checked before the offer is made, and remembered so step 01 can honour the “yes”.",
+  exits:[{id:"x-cap",kind:"ok",label:"Offer the steps",text:"“Yes — that is documented. Would you like them?”"}]},
+
+ {id:"inference",n:"33",name:"Inference contract",where:"main.py:6133",
+  what:"Answer by inference only when the switchboard says the question is inferable, the operator has switched the contract on, a provider answered, and the result passed its own check.",
+  detail:"Off by default — with default settings this is a no-op. Not flagged when it does fire: a flag means “served despite failing the grounding gate”, and this passed a different and stricter one. Flagging it would bury real ungrounded answers under every inference the operator asked for.",
+  exits:[{id:"x-inf",kind:"ok",label:"Inferred answer",text:"under the explicit, opt-in contract"}]},
+
+ {id:"clarify",n:"34",name:"The clarify gate",where:"main.py:6160",
+  what:"A follow-up that ends in a refusal gets one question back instead — never twice in a row, and never during an outage.",
+  why:"Every clarifying branch used to sit behind “retrieval found nothing”, a band that is essentially never reached in normal operation — so the system could ask a question only in the one case where asking helps least. Real failures happen after retrieval succeeds.",
+  detail:"It quotes <i>this</i> turn's question, not the previous topic. The first version named the previous topic on the assumption that a follow-up is always about it: on 2026-09-17 a question about ruggedness was answered with an invitation to say more about pricing, because pricing was simply the last thing typed.",
+  facts:[["guard 1","not during a service outage"],["guard 2","only for genuine follow-ups"],["guard 3","never two turns running"]],
+  exits:[{id:"x-clarify",kind:"ask",label:"One question back",text:"“which model do you mean?” + product buttons"}]},
+
+ {id:"refusal",n:"35",name:"Friendly refusal",where:"main.py:6193",
+  what:"The honest ending: what the documentation does cover, and a route to a person.",
+  exits:[{id:"x-refuse",kind:"stop",label:"Refused",text:"suggestions + offer of support"}]},
+]},
+
+{n:7, phase:"Record and reply",
+ blurb:"Return the answer with its sources and confidence, record the turn, and log what went unanswered so the gaps are visible to the operator.",
+ steps:[
+ {id:"log",n:"36",name:"Memory, gaps and the interaction log",where:"main.py:6226",
+  what:"The turn is added to session memory, per-stage timings are logged, and unanswered questions are recorded for the admin console.",
+  detail:"Refusals are dropped from memory automatically. Verification time is reported separately from regeneration time — a single combined figure once reported 15.85s on a turn where the verifier had done a fraction of that, and anyone tuning on it would have gone after the verifier instead of the model.",
+  facts:[["timings","condense · retrieval · rerank · extraction · generation · verification · escalation · total"]]},
+
+ {id:"respond",n:"37",name:"Response",where:"main.py:6248",
+  what:"Answer, sources with page numbers and download links, the role and model used, the scores, and what to offer next.",
+  detail:"What to offer after the answer is decided by relevance and novelty: genuinely unused passages if there are any, otherwise the document open at its page, otherwise a person. Signed-in users also get the turn persisted server-side.",
+  facts:[["modules","more_context.py · conversations.py"]]},
+]},
+];
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PLAIN ENGLISH. The same 38 steps and 17 exits, named the way you would
+   describe them to somebody who has never seen the code. Shown in Overview;
+   the engineering names come back in Detailed. Nothing here is a different
+   step — it is the same step, said in words that need no explaining.
+   ═══════════════════════════════════════════════════════════════════════ */
+const PLAIN = {
+  // 1 — understand the request
+  entry:"Is the system ready to answer?",
+  pending:"Did they just say yes to something we offered?",
+  keys:"Whose account pays for this answer",
+  condense:"Turn a follow-up into a full question",
+  followup:"If that failed, piece the question together ourselves",
+  scope:"Remember which product we are talking about",
+  alias:"Swap nicknames for the names used in the manuals",
+  phrasings:"Decide which wordings to search for",
+  "x-steps":"Walk them through the steps",
+  // 2 — answer without searching
+  faqid:"They picked a ready-made answer",
+  more:"They asked for more of the last answer",
+  sales:"A question about the whole product range",
+  faq:"Is there already a hand-written answer for this?",
+  "x-faqid":"A person's answer, word for word",
+  "x-more":"More detail on the same thing",
+  "x-sales":"A list of the products that match",
+  "x-faq":"A person's answer, word for word",
+  "x-faqask":"Ask which of these they meant",
+  // 3 — find the evidence
+  retrieve:"Search the manuals",
+  exclude:"Drop documents customers should not see",
+  rerank:"Sort the results more carefully",
+  band:"How good are these results, honestly?",
+  none:"We found nothing useful",
+  span:"The answer is different for each product",
+  "x-none-follow":"Ask what they want expanded",
+  "x-none-vague":"Ask which device they mean",
+  "x-none-reject":"Say we do not cover it",
+  "x-span":"Ask which product they mean",
+  // 4 — write the answer
+  route:"Pick the right model for this kind of question",
+  extract:"Copy the checklist straight out of the manual",
+  context:"Choose which pages to answer from",
+  reanswer:"They said that did not answer it",
+  procedures:"Go and fetch the steps that were missed",
+  prompt:"Hand it all to the model",
+  llm:"Write the answer",
+  sanitize:"Tidy up the wording",
+  "x-extract":"The checklist itself",
+  // 5 — check before anyone sees it
+  ground:"Does the manual actually say this?",
+  escalate:"Try a second, stronger model",
+  retry:"Write it again and re-check",
+  verbatim:"Show the table itself instead",
+  suppress:"Hold back anything we cannot prove",
+  "x-verbatim":"The table straight from the manual",
+  "x-suppress":"Withheld — and we say so",
+  // 6 — turn a dead end into something useful
+  switchboard:"What kind of question was this really?",
+  capability:"It turns out we do document this",
+  inference:"Work it out — only if we are allowed to",
+  clarify:"Ask one question back",
+  refusal:"Say no honestly, and offer a person",
+  "x-cap":"Offer to walk them through it",
+  "x-inf":"An answer we worked out",
+  "x-clarify":"One question back",
+  "x-refuse":"An honest no, plus a person to ask",
+  // 7 — reply and record
+  log:"Remember the conversation, log what we missed",
+  respond:"Send the answer and the pages it came from",
+};
+
+const PLAIN_PHASE = {
+ 1:["Work out what was actually asked",
+    "Before searching anything, understand the question — including whatever it leans on from earlier in the chat."],
+ 2:["Answer straight away where we safely can",
+    "Some questions need no search: a ready-made answer someone wrote, a request for more of the last one, or a question about the product range."],
+ 3:["Find the evidence in the manuals",
+    "Search the manuals two ways at once, sort the results with a more careful second pass, then judge honestly whether anything was found."],
+ 4:["Write the answer",
+    "Pick the right model for the question, give it only the pages that earn their place, and write. Some answers are copied out of the manual instead."],
+ 5:["Check it before anyone sees it",
+    "Every written answer is checked against the pages it came from. Anything we cannot stand behind is retried, tried elsewhere, replaced by the document itself — or held back."],
+ 6:["Turn a dead end into something useful",
+    "If we are about to say no, work out what kind of no it is: something we do document after all, something worth one question back, or an honest gap that needs a person."],
+ 7:["Reply, and record what happened",
+    "Send the answer with the pages it came from, remember the conversation, and log anything unanswered so it can be fixed."],
+};
+const P = (id,fallback) =>
+  `<span class="tech">${fallback}</span><span class="easy">${PLAIN[id]||fallback}</span>`;
+
+const EXAMPLES = [
+  ["what is the pinout for nv9?","ambiguity across two products"],
+  ["which of your validators run on 24V?","catalogue path, no retrieval"],
+  ["how do I reset the password on my Cisco router","honest refusal"],
+  ["does ICU work with linux?","documented-after-all offer"],
+  ["yes","the pending-offer shortcut"],
+];
+
+/* ═══════════════ layout ═══════════════════════════════════════════════ */
+const RAIL_W=170, NODE_X=205, NODE_W=430, EXIT_X=705, EXIT_W=400, STAGE_W=1130;
+const GAP=30, PHASE_PAD=30, BAND_H=78;
+
+const stage=document.getElementById("stage"), wires=document.getElementById("wires"),
+      sizer=document.getElementById("sizer"), viewport=document.getElementById("viewport"),
+      panel=document.getElementById("panel"), $=id=>document.getElementById(id);
+const byId={}, order=[]; let zoom=1;
+
+PHASES.forEach(p=>{
+  const band=document.createElement("div");
+  band.className="phaseband"; band.style.left="0px"; band.style.width=(RAIL_W-14)+"px";
+  const pp=PLAIN_PHASE[p.n]||[p.phase,p.blurb];
+  band.innerHTML=`<div class="pnum">${p.n}</div>
+    <div class="ptitle"><span class="tech">${p.phase}</span><span class="easy">${pp[0]}</span></div>
+    <div class="pblurb"><span class="tech">${p.blurb}</span><span class="easy">${pp[1]}</span></div>`;
+  stage.appendChild(band);
+  const bar=document.createElement("div"); bar.className="railbar";
+  bar.style.left=(RAIL_W-10)+"px"; stage.appendChild(bar);
+  p.band=band; p.bar=bar;
+
+  p.steps.forEach(s=>{
+    const el=document.createElement("div");
+    el.className="node"+(s.exits?" decision":"");
+    el.style.left=NODE_X+"px"; el.style.width=NODE_W+"px";
+    el.innerHTML=`<div class="top"><div class="badge">${s.n}</div>
+        <div class="nm">${P(s.id,s.name)}</div><div class="src">${s.where}</div></div>
+      <div class="wh">${s.what}</div>
+      ${s.facts?`<div class="meta">${s.facts.slice(0,3).map(f=>
+          `<span class="tag">${f[0]}: ${f[1]}</span>`).join("")}</div>`:""}`;
+    el.onclick=()=>select(s.id);
+    stage.appendChild(el);
+    byId[s.id]={step:s,el,phase:p}; order.push(s.id);
+    (s.exits||[]).forEach(x=>{
+      const e=document.createElement("div");
+      e.className="exit "+x.kind; e.style.left=EXIT_X+"px"; e.style.width=EXIT_W+"px";
+      e.innerHTML=`<b>${P(x.id,x.label)}</b><span class="tech">${x.text}</span>`;
+      e.onclick=ev=>{ev.stopPropagation();select(s.id);};
+      stage.appendChild(e);
+      byId[x.id]={exit:x,el:e,parent:s.id};
+    });
+  });
+});
+
+function layout(){
+  let y=0;
+  PHASES.forEach((p,pi)=>{
+    const top=y;
+    p.band.style.top=y+"px";
+    y+=Math.max(BAND_H, p.band.offsetHeight)-46;
+    p.steps.forEach(s=>{
+      const {el}=byId[s.id];
+      el.style.top=y+"px";
+      const h=el.offsetHeight;
+      let eh=0;
+      (s.exits||[]).forEach((x,i)=>{
+        const ee=byId[x.id].el;
+        ee.style.top=(y+8+eh)+"px";
+        eh+=ee.offsetHeight+10;
+      });
+      byId[s.id].y=y; byId[s.id].h=h;
+      y+=Math.max(h, eh?eh-10:0)+GAP;
+    });
+    y+=PHASE_PAD;
+    p.bar.style.top=(top+8)+"px";
+    p.bar.style.height=(y-top-PHASE_PAD-GAP+14)+"px";
+  });
+  const H=y;
+  stage.style.width=STAGE_W+"px"; stage.style.height=H+"px";
+  wires.setAttribute("width",STAGE_W); wires.setAttribute("height",H);
+  wires.setAttribute("viewBox",`0 0 ${STAGE_W} ${H}`);
+  drawWires();
+  applyZoom(H);
+}
+
+function drawWires(){
+  const cx=NODE_X+NODE_W/2;
+  let d=`<defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="var(--rail)"/></marker>
+    <marker id="at" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="var(--taken)"/></marker></defs>`;
+  for(let i=0;i<order.length-1;i++){
+    const a=byId[order[i]], b=byId[order[i+1]];
+    const y1=a.y+a.h, y2=b.y-9;
+    d+=`<path class="wire" id="w-${order[i]}--${order[i+1]}" marker-end="url(#a)"
+         d="M${cx},${y1} L${cx},${y2}"/>`;
+  }
+  order.forEach(id=>{
+    const s=byId[id].step; if(!s.exits) return;
+    const nx=NODE_X+NODE_W, ny=byId[id].y+Math.min(byId[id].h/2,30);
+    s.exits.forEach(x=>{
+      const e=byId[x.id], ey=parseFloat(e.el.style.top)+e.el.offsetHeight/2;
+      const mid=nx+34;
+      d+=`<path class="wire branch" id="w-${x.id}" marker-end="url(#a)"
+           d="M${nx},${ny} L${mid},${ny} L${mid},${ey} L${EXIT_X-9},${ey}"/>`;
+    });
+  });
+  wires.innerHTML=d;
+}
+
+function applyZoom(H){
+  const avail=viewport.clientWidth-40;
+  stage.style.transform=`scale(${zoom})`;
+  sizer.style.width=(STAGE_W*zoom)+"px";
+  sizer.style.height=((H||stage.offsetHeight)*zoom)+"px";
+  sizer.style.maxWidth="100%";
+  $("zlvl").textContent=Math.round(zoom*100)+"%";
+}
+function fit(){ zoom=Math.min(1.25,Math.max(.42,(viewport.clientWidth-52)/STAGE_W)); layout(); }
+
+/* ═══════════════ side panel ═══════════════════════════════════════════ */
+function select(id){
+  document.querySelectorAll(".sel").forEach(e=>e.classList.remove("sel"));
+  const {step,el,phase}=byId[id]; el.classList.add("sel");
+  panel.innerHTML=`
+    <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">
+      Phase ${phase.n} · ${phase.phase}</div>
+    <h2>${step.n} · ${PLAIN[step.id]||step.name}</h2>
+    <div class="where">${step.name} · ${step.where}</div>
+    <p class="lead">${step.what}</p>
+    ${step.why?`<div class="why"><b>Why it exists</b>${step.why}</div>`:""}
+    ${step.detail?`<p>${step.detail}</p>`:""}
+    ${step.facts?`<div class="kv">${step.facts.map(([k,v])=>
+        `<span>${k}</span><span>${v}</span>`).join("")}</div>`:""}
+    ${step.exits?`<p style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+        color:var(--muted);margin-bottom:2px">Leaves the pipeline here</p>
+      ${step.exits.map(x=>`<div class="exitrow">
+        <i class="sw" style="background:var(--${x.kind==="stop"?"stop":x.kind==="ask"?"ask":"ok"})"></i>
+        <div><b>${PLAIN[x.id]||x.label}</b> — ${x.text}</div></div>`).join("")}`:""}`;
+  panel.scrollTop=0;
+  el.scrollIntoView({block:"nearest",behavior:"smooth"});
+}
+
+/* ═══════════════ live trace ═══════════════════════════════════════════ */
+const ALWAYS=["entry","condense","scope","alias","phrasings"];
+const RETRIEVAL=["retrieve","exclude","rerank","band"];
+const GENERATION=["route","context","procedures","prompt","llm","sanitize","ground"];
+
+/* The server now reports the stages it actually ran (src/pipeline_trace.py),
+   so when a response carries one we light THAT rather than reconstructing
+   the path from the role and the flags. The reconstruction below stays as
+   the fallback for an older backend. */
+const SERVER_TO_MAP = {
+  entry:["entry"], condense:["condense"], followup:["followup"],
+  scope:["scope"], alias:["alias"], phrasings:["phrasings"],
+  steps:["pending","x-steps"], "faq.picked":["faqid","x-faqid"],
+  "faq.answer":["faq","x-faq"], "faq.ask":["faq","x-faqask"],
+  more:["more","x-more"], sales:["sales","x-sales"],
+  retrieve:["retrieve"], exclude:["exclude"], rerank:["rerank"], band:["band"],
+  "none.follow":["none","x-none-follow"], "none.vague":["none","x-none-vague"],
+  "none.reject":["none","x-none-reject"], "span.ask":["span","x-span"],
+  route:["route"], extract:["extract","x-extract"], context:["context"],
+  reanswer:["reanswer"], procedures:["procedures"],
+  generate:["prompt","llm","sanitize"], ground:["ground"],
+  escalate:["escalate"], retry:["retry"],
+  verbatim:["verbatim","x-verbatim"], suppress:["suppress","x-suppress"],
+  switchboard:["switchboard"], capability:["capability","x-cap"],
+  inference:["inference","x-inf"], clarify:["clarify","x-clarify"],
+  refusal:["refusal","x-refuse"], respond:["log","respond"],
+};
+function pathFromServer(trace){
+  const on=new Set();
+  trace.stages.forEach(s=>(SERVER_TO_MAP[s.id]||[]).forEach(id=>on.add(id)));
+  // The intermediate steps a stage implies but does not itself mark.
+  if(on.has("retrieve")) ["entry","condense","scope","alias","phrasings","faq"]
+    .forEach(id=>on.add(id));
+  if(on.has("llm")) ["route","context"].forEach(id=>on.add(id));
+  return on;
+}
+
+function pathFor(r){
+  const on=new Set(ALWAYS), role=r.role, prov=r.provider, reason=r.reason||"";
+  if(r.resolved_query) on.add("followup");
+  if(role==="steps"){ on.add("pending").add("x-steps"); return on; }
+  if(role==="expand"){ on.add("more").add("x-more"); return on; }
+  if(role==="catalogue"){ on.add("sales").add("x-sales"); return on; }
+  if(role==="sales"){ on.add("sales").add("x-deflect"); return on; }
+  if(r.from_faq){ on.add(r.faq_exact?"faq":"faqid").add(r.faq_exact?"x-faq":"x-faqid"); return on; }
+  if(prov==="faq"&&r.needs_clarification){ on.add("faq").add("x-faqask"); return on; }
+  on.add("faq");
+  RETRIEVAL.forEach(s=>on.add(s));
+  if(reason.startsWith("low_retrieval_confidence")||reason==="ambiguous_in_domain_query"){
+    on.add("none").add(reason==="low_retrieval_confidence_followup"?"x-none-follow"
+      :reason==="ambiguous_in_domain_query"?"x-none-vague":"x-none-reject");
+    on.add("switchboard").add("log").add("respond"); return on;
+  }
+  on.add("span");
+  if(role==="clarify"&&(r.product_options?.length||r.candidate_sources)){
+    on.add("x-span").add("log").add("respond"); return on;
+  }
+  on.add("route");
+  if(role==="extract"&&r.model==="structured"){
+    on.add("extract").add("x-extract").add("log").add("respond"); return on; }
+  GENERATION.forEach(s=>on.add(s));
+  if((r.timing||{}).escalation_time>0) on.add("escalate").add("retry");
+  on.add("switchboard");
+  if(role==="capability") on.add("capability").add("x-cap");
+  else if(role==="inference") on.add("inference").add("x-inf");
+  else if(role==="clarify") on.add("clarify").add("x-clarify");
+  else if(r.offer_support||r.system_refusal)
+    on.add("suppress").add("x-suppress").add("refusal").add("x-refuse");
+  if(r.answerability==="stated"&&role!=="capability") on.add("verbatim");
+  on.add("log").add("respond");
+  return on;
+}
+
+function paint(on){
+  Object.entries(byId).forEach(([id,o])=>{
+    o.el.classList.toggle("taken",on.has(id));
+    o.el.classList.toggle("dim",!on.has(id));
+  });
+  wires.querySelectorAll("path.wire").forEach(p=>{
+    const id=p.id.slice(2);
+    let lit;
+    if(id.includes("--")){ const [a,b]=id.split("--"); lit=on.has(a)&&on.has(b); }
+    else lit=on.has(id);
+    p.classList.toggle("taken",lit);
+    p.setAttribute("marker-end",lit?"url(#at)":"url(#a)");
+    p.style.opacity=lit?1:.18;
+  });
+}
+function clearPaint(){
+  Object.values(byId).forEach(o=>o.el.classList.remove("taken","dim"));
+  wires.querySelectorAll("path.wire").forEach(p=>{
+    p.classList.remove("taken"); p.style.opacity=1; p.setAttribute("marker-end","url(#a)");
+  });
+}
+
+$("run").onclick=async()=>{
+  const base=$("base").value.replace(/\/+$/,""), q=$("q").value.trim(); if(!q) return;
+  $("run").disabled=true; $("status").textContent="asking "+base+"/query …";
+  const body={q,session_id:sessionStorage.gomap||(sessionStorage.gomap=
+    "map-"+Math.random().toString(36).slice(2))};
+  if($("product").value.trim()) body.product=$("product").value.trim();
+  const t0=performance.now();
+  try{
+    const res=await fetch(base+"/query",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.detail||res.status);
+    const srv=data.pipeline&&data.pipeline.stages&&data.pipeline.stages.length
+      ? data.pipeline : null;
+    paint(srv?pathFromServer(srv):pathFor(data));
+    if(srv&&srv.exit) $("q").title="ended at: "+srv.exit.label;
+    $("status").innerHTML=(srv&&srv.exit
+        ? `ended at <b>${srv.exit.label}</b>${srv.exit.note?" — "+esc(srv.exit.note):""} · `
+        : "") +
+      `<b>${data.role}</b> via <b>${data.provider??"—"}</b>` +
+      ` · retrieval <b>${data.retrieval_score??"—"}</b> · grounding <b>${data.grounding_score??"—"}</b>` +
+      ` · ${Math.round(performance.now()-t0)} ms round trip`;
+    panel.innerHTML=`<h2>Trace</h2><div class="where">${esc(q)}</div>
+      <div class="kv">
+        <span>role</span><span>${data.role}</span>
+        <span>provider</span><span>${data.provider??"—"}</span>
+        <span>model</span><span>${data.model??"—"}</span>
+        <span>retrieval score</span><span>${data.retrieval_score??"—"}</span>
+        <span>grounding score</span><span>${data.grounding_score??"—"}</span>
+        <span>flagged</span><span>${!!data.flagged}</span>
+        <span>answerability</span><span>${data.answerability??"—"}</span>
+        <span>reason</span><span>${data.reason??"—"}</span>
+        <span>rewritten to</span><span>${esc(data.resolved_query??"(unchanged)")}</span>
+      </div>
+      <p class="lead">Answer</p><pre>${esc(data.answer||"")}</pre>
+      <p class="lead">Full response</p><pre>${esc(JSON.stringify(data,null,2))}</pre>`;
+  }catch(err){
+    $("status").textContent="failed: "+err.message+
+      " — is the backend running at that address?";
+  }finally{ $("run").disabled=false; }
+};
+$("q").addEventListener("keydown",e=>{ if(e.key==="Enter") $("run").click(); });
+$("clear").onclick=()=>{ clearPaint(); $("status").textContent=""; select("entry"); };
+EXAMPLES.forEach(([text,note])=>{
+  const c=document.createElement("button");
+  c.className="chip"; c.textContent=text; c.title=note;
+  c.onclick=()=>{ $("q").value=text; $("run").click(); };
+  $("examples").appendChild(c);
+});
+
+/* ═══════════════ present mode ═════════════════════════════════════════ */
+let presenting=-1;
+$("present").onclick=()=>{
+  presenting=(presenting+1)%(PHASES.length+1);
+  if(presenting===PHASES.length){ presenting=-1; clearPaint();
+    $("present").textContent="▶ Present"; select("entry"); return; }
+  const p=PHASES[presenting];
+  const ids=new Set(); p.steps.forEach(s=>{ids.add(s.id);(s.exits||[]).forEach(x=>ids.add(x.id));});
+  Object.entries(byId).forEach(([id,o])=>{
+    o.el.classList.remove("taken"); o.el.classList.toggle("dim",!ids.has(id));
+  });
+  $("present").textContent=`Phase ${p.n}/${PHASES.length} ▶`;
+  panel.innerHTML=`<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+      color:var(--muted)">Phase ${p.n} of ${PHASES.length}</div>
+    <h2>${(PLAIN_PHASE[p.n]||[p.phase])[0]}</h2>
+    <p class="lead">${(PLAIN_PHASE[p.n]||[0,p.blurb])[1]}</p>
+    <div class="kv">${p.steps.map(s=>
+        `<span>${s.n}</span><span>${PLAIN[s.id]||s.name}</span>`).join("")}</div>
+    <p style="font-size:12.5px;color:var(--muted)">Click any step for the detail behind it,
+       or press Present again for the next phase.</p>`;
+  byId[p.steps[0].id].el.scrollIntoView({block:"center",behavior:"smooth"});
+};
+
+/* ═══════════════ chrome wiring ════════════════════════════════════════ */
+$("m-full").onclick=()=>{ document.body.classList.remove("compact");
+  $("m-full").classList.add("on"); $("m-compact").classList.remove("on"); layout(); };
+$("m-compact").onclick=()=>{ document.body.classList.add("compact");
+  $("m-compact").classList.add("on"); $("m-full").classList.remove("on"); layout(); };
+$("zin").onclick=()=>{ zoom=Math.min(1.6,zoom+.1); layout(); };
+$("zout").onclick=()=>{ zoom=Math.max(.35,zoom-.1); layout(); };
+$("zfit").onclick=fit;
+$("theme").onclick=()=>{
+  const cur=document.documentElement.getAttribute("data-theme");
+  const dark=matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme",
+    cur ? (cur==="dark"?"light":"dark") : (dark?"light":"dark"));
+};
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+const nSteps=PHASES.reduce((a,p)=>a+p.steps.length,0);
+const nExits=Object.values(byId).filter(o=>o.exit).length;
+$("stat-steps").textContent=`${nSteps} steps · ${PHASES.length} phases · ${nExits} ways out`;
+
+addEventListener("load",fit);
+let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(fit,150);});
+fit(); select("entry");
+</script>
+</body>
+</html>

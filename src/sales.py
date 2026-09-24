@@ -160,7 +160,14 @@ def is_commercial_question(q: str) -> bool:
 # ── spec index ────────────────────────────────────────────────────────────
 
 _INDEX: list[dict] | None = None
-_INDEX_KEY: tuple | None = None
+_INDEX_KEY: str | None = None
+
+# The built index, persisted. Same reasoning as the FAQ vector cache in
+# faq_store: building it is the slowest single thing in a cold process --
+# 151s measured, 832 pages of pdfplumber table extraction across 14 manuals
+# -- and it was being paid on EVERY start, because the cache above is a
+# module global and dies with the process. Warm, loading it is milliseconds.
+_INDEX_CACHE = os.getenv("SPEC_INDEX_CACHE", "spec_index.json")
 
 
 def _rows_from_markdown(md: str) -> list[tuple[str, list[str]]]:
@@ -197,39 +204,93 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
         if not key:
             continue
         path = os.path.join(doc_dir, fname)
+        # Opened ONCE for the whole document and handed to tables_on_page,
+        # which would otherwise reopen it for every page -- this used to be
+        # one open to count the pages plus one per page after it.
         try:
             import pdfplumber
-            with pdfplumber.open(path) as pdf:
-                npages = len(pdf.pages)
+            pdf = pdfplumber.open(path)
         except Exception:
             continue
-        for pno in range(1, npages + 1):
-            for b in structures.tables_on_page(path, pno):
-                title = b.get("title") or ""
-                for label, cells in _rows_from_markdown(b.get("markdown", "")):
-                    rows.append({
-                        "product": key, "product_name": name,
-                        "category": cat,
-                        "table": title, "attribute": label,
-                        "values": cells, "source": fname, "page": pno,
-                    })
+        try:
+            for pno in range(1, len(pdf.pages) + 1):
+                for b in structures.tables_on_page(path, pno, pdf=pdf):
+                    title = b.get("title") or ""
+                    for label, cells in _rows_from_markdown(b.get("markdown", "")):
+                        rows.append({
+                            "product": key, "product_name": name,
+                            "category": cat,
+                            "table": title, "attribute": label,
+                            "values": cells, "source": fname, "page": pno,
+                        })
+        finally:
+            pdf.close()
     logger.info("spec index: %d rows across %d products",
                 len(rows), len({r["product"] for r in rows}))
     return rows
 
 
-def get_index(doc_dir: str, source_to_product: dict) -> list[dict]:
-    """Cached index, rebuilt when the document set changes."""
-    global _INDEX, _INDEX_KEY
+def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
+    """What the index was built FROM, as one comparable string.
+
+    The document set, and also the filename -> product mapping: filing a
+    manual under a different product rewrites every row it contributed. The
+    in-process cache could ignore that and usually get away with it, since a
+    reassignment in the console was followed by a restart soon enough. A
+    cache that SURVIVES the restart cannot, so the mapping is in the key.
+    """
+    import hashlib
+    import json as _json
     try:
-        key = tuple(sorted(
-            (f, os.path.getmtime(os.path.join(doc_dir, f)))
-            for f in os.listdir(doc_dir) if f.lower().endswith(".pdf")))
+        files = sorted((f, os.path.getmtime(os.path.join(doc_dir, f)))
+                       for f in os.listdir(doc_dir) if f.lower().endswith(".pdf"))
     except OSError:
-        key = ()
-    if _INDEX is None or key != _INDEX_KEY:
-        _INDEX = build_index(doc_dir, source_to_product)
-        _INDEX_KEY = key
+        files = []
+    mapping = sorted((k, list(v)) for k, v in (source_to_product or {}).items())
+    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping},
+                       sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _load_index_from_disk(key: str) -> list[dict] | None:
+    """The cached index if it was built from exactly this input, else None.
+
+    A missing, stale or unreadable cache is a miss, never an error: the
+    worst case is paying the build once, which is what happened every time
+    before this existed.
+    """
+    import jsonstore
+    data = jsonstore.load(_INDEX_CACHE, None, label="spec index cache")
+    if not isinstance(data, dict) or data.get("key") != key:
+        return None
+    rows = data.get("rows")
+    return rows if isinstance(rows, list) else None
+
+
+def _save_index_to_disk(key: str, rows: list[dict]) -> None:
+    import jsonstore
+    try:
+        jsonstore.save(_INDEX_CACHE, {"key": key, "rows": rows},
+                       label="spec index cache", indent=None)
+    except Exception as exc:
+        # Non-fatal by design: without it the next start pays the build.
+        logger.warning("could not write the spec index cache: %s", exc)
+
+
+def get_index(doc_dir: str, source_to_product: dict) -> list[dict]:
+    """Cached index, rebuilt when the documents or their filing change."""
+    global _INDEX, _INDEX_KEY
+    key = _fingerprint(doc_dir, source_to_product)
+    if _INDEX is not None and key == _INDEX_KEY:
+        return _INDEX
+
+    rows = _load_index_from_disk(key)
+    if rows is None:
+        rows = build_index(doc_dir, source_to_product)
+        _save_index_to_disk(key, rows)
+    else:
+        logger.info("spec index loaded from disk: %d rows", len(rows))
+    _INDEX, _INDEX_KEY = rows, key
     return _INDEX
 
 
@@ -282,9 +343,15 @@ def find_by_spec(question: str, index: list[dict]) -> list[dict]:
     wanted = _quantities(question)
     if not wanted:
         return []
+    from catalog import is_shared_product
     hits: dict[str, dict] = {}
     for r in index:
-        blob = " ".join(r["values"]) + " " + r["attribute"] + " " + r["table"]
+        # A shared document's table is real, but its "product" is the
+        # category's document bucket, and an answer that names products
+        # cannot recommend "General (shared docs)".
+        if is_shared_product(r.get("product")):
+            continue
+        blob =" ".join(r["values"]) + " " + r["attribute"] + " " + r["table"]
         for num, unit in wanted:
             for cnum, cunit in _quantities(blob):
                 if cnum == num and cunit == unit:
@@ -653,10 +720,11 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
 
     # 3. Plain "what do you sell?".
     if _LISTING.search(question) and catalog_tree:
+        from catalog import is_shared_product
         lines = ["Our product ranges:", ""]
         for c in catalog_tree.get("categories", []):
             prods = [p["name"] for p in c.get("products", [])
-                     if p.get("name")]
+                     if p.get("name") and not is_shared_product(p.get("key"))]
             if prods:
                 lines.append(f"- **{c['name']}**: " + ", ".join(prods))
         if len(lines) > 2:

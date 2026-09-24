@@ -31,13 +31,26 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Under /tmp, the same place _harness.py puts its scratch env, NOT
-# tempfile.mkdtemp(): keystore writes atomically via os.replace, and on
-# Windows that raised PermissionError intermittently against a directory
-# under the system TEMP. /tmp resolves to C:\tmp here and the harness has
-# been writing its own test.env there all along.
-_SCRATCH_DIR = "/tmp/modelrouting"
-os.makedirs(_SCRATCH_DIR, exist_ok=True)
+# Under /tmp, the same place _harness.py puts its scratch env, NOT the
+# system TEMP that tempfile would pick on its own: keystore writes
+# atomically via os.replace, and on Windows that raised PermissionError
+# intermittently against a directory under the system TEMP. /tmp resolves
+# to C:\tmp here and the harness has been writing its own test.env there
+# all along.
+#
+# mkdtemp UNDER that directory, though, rather than one fixed path. It was
+# "/tmp/modelrouting/test.env" for every process at once, so two suites
+# running together raced on the os.replace above and the loser died with
+# FileNotFoundError [WinError 2] -- its .tmp file had been consumed by the
+# other process. Same shared-scratch bug _harness.py had, one level up.
+import shutil
+import tempfile
+import atexit
+
+os.makedirs("/tmp", exist_ok=True)
+_SCRATCH_DIR = tempfile.mkdtemp(prefix="modelrouting-%d-" % os.getpid(),
+                                dir="/tmp")
+atexit.register(shutil.rmtree, _SCRATCH_DIR, ignore_errors=True)
 _SCRATCH = os.path.join(_SCRATCH_DIR, "test.env")
 os.environ["ENV_FILE_PATH"] = _SCRATCH
 # Blanked, not popped: keystore reads os.environ, and a developer's real

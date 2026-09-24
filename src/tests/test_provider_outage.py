@@ -71,6 +71,36 @@ def test_timing_separates_verification_from_regeneration():
         "regeneration and the full span must be reported separately"
 
 
+def test_a_forced_model_that_returns_nothing_is_not_a_documentation_gap():
+    """Observed 2026-09-24. The console's Pipeline check was set to
+    gpt-4o-mini, which the on-prem gateway rejects with 400 Bad Request.
+    Every question came back "I don't have that in the product
+    documentation about the MyCheckr" -- under Sources listing the four
+    manuals that do cover it -- while the same question through the widget
+    answered correctly on deepseek.
+
+    A forced model never reaches the fallback chain, so `provider` is the
+    one that was chosen rather than the "none" sentinel, and the honest
+    wording was skipped on exactly the path an operator uses to diagnose."""
+    from unittest.mock import patch
+    chunk = {"id": "u1", "text": "Connect the device with a USB-B cable.",
+             "source": "MyCheckr User Manual-v7.pdf", "page": 9,
+             "product": "mycheckr", "category": "", "rerank_score": 0.97}
+    main.APP_STATE["ready"] = True
+
+    with patch.object(main, "retrieve_from_db", return_value=[chunk]),          patch.object(main, "rerank", return_value=[chunk]),          patch.object(main.faq_store, "suggest_candidates",
+                      return_value={"mode": "none"}),          patch.object(main, "generate", return_value=None),          patch.object(main, "_structures_for", return_value=[]),          patch.object(main.more_context, "build", return_value={"kind": "support"}),          patch.object(main.faq_store, "record_gap") as gap,          patch.object(main, "log_interaction"):
+        r = main.query(main.QueryRequest(
+            q="I can't see my MyCheckr on IMS local?",
+            force_provider="openai", force_model="gpt-4o-mini"))
+
+    low = r["answer"].lower()
+    assert "product documentation" not in low,         "a model that returned nothing must not be reported as a corpus gap"
+    assert "gpt-4o-mini" in r["answer"], "say WHICH model failed"
+    assert r["service_degraded"] is True,         "a failed generation is degraded service, not a missing answer"
+    gap.assert_not_called()  # nobody failed to answer it; the model never ran
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

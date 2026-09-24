@@ -14,6 +14,7 @@ because it is written to the file, not just the process.
 """
 import logging
 import os
+import re
 import threading
 import time
 
@@ -59,8 +60,51 @@ def providers() -> list[str]:
     return list(_PROVIDER_KEY_ENV)
 
 
-def label_for(provider: str) -> str:
+def kind_label(provider: str) -> str:
+    """What the key actually IS - the API it speaks - regardless of what the
+    operator has named it. Shown beside a custom name so "Company keys" is
+    still recognisably the OpenAI-compatible slot."""
+    if provider == "openai":
+        base = (os.getenv("OPENAI_BASE_URL") or "").strip()
+        if base and "api.openai.com" not in base:
+            return "OpenAI-compatible"
     return _PROVIDER_LABEL.get(provider, provider)
+
+
+# ── operator-chosen names ───────────────────────────────────────────────
+# The slots are fixed by the API a key speaks, but "OpenAI" is the wrong name
+# for a key that goes to the on-prem gateway, and every picker in the console
+# showing it made the routing look off-site when it was not. The name is
+# display-only: routing, env var names and logs keep the provider id.
+_PROVIDER_NAME_ENV = {p: f"PROVIDER_NAME_{p.upper()}" for p in _PROVIDER_KEY_ENV}
+_NAME_MAX = 40
+_NAME_RE = re.compile(r"^[A-Za-z0-9 _.\-()&/+]+$")
+
+
+def label_for(provider: str) -> str:
+    env = _PROVIDER_NAME_ENV.get(provider)
+    custom = (os.getenv(env) or "").strip() if env else ""
+    return custom or kind_label(provider)
+
+
+def set_label(provider: str, name: str | None) -> None:
+    """`name=None` or blank returns the slot to its built-in name."""
+    env = _PROVIDER_NAME_ENV.get(provider)
+    if not env:
+        raise UnknownProviderError(provider)
+    name = " ".join((name or "").split())
+    if not name:
+        _rewrite_env_line(env, None)
+        os.environ.pop(env, None)
+        logger.info(f"name for provider '{provider}' reset (via console)")
+        return
+    if len(name) > _NAME_MAX:
+        raise ValueError(f"name must be {_NAME_MAX} characters or fewer")
+    if not _NAME_RE.match(name):
+        raise ValueError("name may use letters, numbers, spaces and - _ . ( ) & / +")
+    _rewrite_env_line(env, name)
+    os.environ[env] = name
+    logger.info(f"provider '{provider}' renamed to {name!r} (via console)")
 
 
 def has_key(provider: str) -> bool:
@@ -100,6 +144,12 @@ def _rewrite_env_line(key: str, value: str | None) -> None:
     Locked because two admins saving different keys at once must not race
     on read-modify-write of the same file.
     """
+    # One line per setting is the whole format (main.py's _load_env_file). A
+    # line break inside a value would write a SECOND setting of the value's
+    # choosing -- e.g. a pasted "key\nOPENAI_BASE_URL=https://attacker"
+    # redirecting every provider call, key attached.
+    if value is not None and any(c in value for c in "\r\n\0"):
+        raise ValueError("value cannot contain line breaks")
     path = _env_path()
     with _write_lock:
         lines = []
@@ -267,6 +317,140 @@ def get_session_secret() -> str:
 
 def session_secret_is_set() -> bool:
     return bool(get_session_secret())
+
+
+# ── outgoing mail ───────────────────────────────────────────────────────
+# Same store and same writer as the provider keys. The password is a secret
+# and gets the same treatment as a key: write-only from the console, never
+# returned, only reported as set or not.
+_SMTP_ENV = {
+    "host": "SMTP_HOST",
+    "port": "SMTP_PORT",
+    "user": "SMTP_USER",
+    "sender": "SMTP_FROM",
+    "security": "SMTP_SECURITY",     # starttls | ssl | none
+}
+_SMTP_PASSWORD_ENV = "SMTP_PASSWORD"
+SMTP_SECURITY_MODES = ("starttls", "ssl", "none")
+
+
+def get_smtp_settings() -> dict:
+    """Everything except the password, which only mailer.py reads."""
+    out = {k: (os.getenv(env) or "").strip() for k, env in _SMTP_ENV.items()}
+    out["security"] = out["security"].lower() or "starttls"
+    out["port"] = out["port"] or ("465" if out["security"] == "ssl" else "587")
+    out["password_set"] = bool((os.getenv(_SMTP_PASSWORD_ENV) or "").strip())
+    return out
+
+
+def get_smtp_password() -> str:
+    return (os.getenv(_SMTP_PASSWORD_ENV) or "").strip()
+
+
+def set_smtp_settings(changes: dict) -> None:
+    """Apply only the fields present. A blank value clears that field; the
+    password is changed only when a non-blank value is supplied, or cleared
+    with `clear_password`."""
+    for field, env in _SMTP_ENV.items():
+        if field not in changes:
+            continue
+        val = str(changes[field] if changes[field] is not None else "").strip()
+        if field == "security" and val and val.lower() not in SMTP_SECURITY_MODES:
+            raise ValueError("security must be starttls, ssl or none")
+        if field == "port" and val and not (val.isdigit() and 0 < int(val) < 65536):
+            raise ValueError("port must be a number between 1 and 65535")
+        if field == "security":
+            val = val.lower()
+        _rewrite_env_line(env, val or None)
+        if val:
+            os.environ[env] = val
+        else:
+            os.environ.pop(env, None)
+    pw = changes.get("password")
+    if pw and str(pw).strip():
+        _rewrite_env_line(_SMTP_PASSWORD_ENV, str(pw).strip())
+        os.environ[_SMTP_PASSWORD_ENV] = str(pw).strip()
+    elif changes.get("clear_password"):
+        _rewrite_env_line(_SMTP_PASSWORD_ENV, None)
+        os.environ.pop(_SMTP_PASSWORD_ENV, None)
+    logger.info("SMTP settings updated (via console)")
+
+
+# ── work-account sign-in (sso.py) ───────────────────────────────────────
+# Client ID and tenant/domain are configuration; the client secret is a
+# secret and is write-only from the console, exactly like the SMTP password.
+_SSO_ENV = {
+    "microsoft": {"client_id": "SSO_MICROSOFT_CLIENT_ID",
+                  "tenant": "SSO_MICROSOFT_TENANT"},
+    "google": {"client_id": "SSO_GOOGLE_CLIENT_ID",
+               "domain": "SSO_GOOGLE_DOMAIN"},
+}
+_SSO_SECRET_ENV = {"microsoft": "SSO_MICROSOFT_CLIENT_SECRET",
+                   "google": "SSO_GOOGLE_CLIENT_SECRET"}
+
+
+def get_sso_settings(provider: str) -> dict:
+    fields = _SSO_ENV.get(provider)
+    if fields is None:
+        raise UnknownProviderError(provider)
+    out = {k: (os.getenv(env) or "").strip() for k, env in fields.items()}
+    out["secret_set"] = bool(get_sso_secret(provider))
+    return out
+
+
+def get_sso_secret(provider: str) -> str:
+    return (os.getenv(_SSO_SECRET_ENV.get(provider, "")) or "").strip()
+
+
+def set_sso_settings(provider: str, changes: dict) -> None:
+    fields = _SSO_ENV.get(provider)
+    if fields is None:
+        raise UnknownProviderError(provider)
+    for field, env in fields.items():
+        if field not in changes:
+            continue
+        val = str(changes[field] or "").strip()
+        if val and not re.match(r"^[A-Za-z0-9._\-]+$", val):
+            raise ValueError(f"{field} contains characters it cannot have")
+        _rewrite_env_line(env, val or None)
+        if val:
+            os.environ[env] = val
+        else:
+            os.environ.pop(env, None)
+    secret_env = _SSO_SECRET_ENV[provider]
+    if changes.get("secret") and str(changes["secret"]).strip():
+        val = str(changes["secret"]).strip()
+        _rewrite_env_line(secret_env, val)
+        os.environ[secret_env] = val
+    elif changes.get("clear_secret"):
+        _rewrite_env_line(secret_env, None)
+        os.environ.pop(secret_env, None)
+    logger.info(f"SSO settings for {provider} updated (via console)")
+
+
+# ── low-credit alerts ───────────────────────────────────────────────────
+_CREDIT_THRESHOLD_ENV = "CREDIT_ALERT_THRESHOLD"
+CREDIT_THRESHOLD_DEFAULT = 5.0
+
+
+def get_credit_threshold() -> float:
+    try:
+        return float((os.getenv(_CREDIT_THRESHOLD_ENV) or "").strip())
+    except ValueError:
+        return CREDIT_THRESHOLD_DEFAULT
+
+
+def set_credit_threshold(value: float | None) -> None:
+    if value is None:
+        _rewrite_env_line(_CREDIT_THRESHOLD_ENV, None)
+        os.environ.pop(_CREDIT_THRESHOLD_ENV, None)
+        return
+    value = float(value)
+    if value < 0:
+        raise ValueError("threshold cannot be negative")
+    text = f"{value:g}"
+    _rewrite_env_line(_CREDIT_THRESHOLD_ENV, text)
+    os.environ[_CREDIT_THRESHOLD_ENV] = text
 
 
 # ── Model selection ──────────────────────────────────────────────────────

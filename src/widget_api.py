@@ -242,6 +242,7 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         # are the free-text options the generation path builds, and there
         # are none here.
         "clarification_options": [],
+        "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
         "effort": "faq_only",
@@ -538,6 +539,11 @@ def register(app, answer_query, draft_enquiry=None):
             "clarification_options": [
                 str(o)[:120] for o in
                 (result.get("clarification_options") or [])[:5]],
+            # Replies the answer asked for ("Would you like them?"), shown as
+            # buttons and as the composer's right-arrow suggestion.
+            "suggested_replies": [
+                str(o)[:80] for o in
+                (result.get("suggested_replies") or [])[:3]],
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
@@ -598,7 +604,7 @@ def register(app, answer_query, draft_enquiry=None):
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_candidates",
                                 "offer_support", "needs_clarification",
-                                "clarification_options",
+                                "clarification_options", "suggested_replies",
                                 "flagged", "quota", "session")})
 
             # Whole sentences, not tokens: a sentence is the unit the

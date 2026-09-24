@@ -1,0 +1,44 @@
+# Read by Docker because src/ is the build context (docker-compose.yml:
+# `context: ../src`). docker/.dockerignore was never read -- Docker only
+# looks at the context root -- so `COPY . .` was baking src/.env (every
+# provider key, SESSION_SECRET, WIDGET_TOKEN_SECRET) into the image, along
+# with accounts, conversations and backups. Anyone who could pull the image
+# had all of it.
+#
+# Runtime state lives on the /data volume in compose, so none of these are
+# needed inside the image.
+
+# secrets
+.env
+.env.*
+*.enc
+deepseek_key
+deepseek_env_*
+
+# personal data and runtime state
+accounts.json
+conversations.db
+quota.db
+widget_leads.json
+credit_alerts.json
+auth_tokens.json
+faq_gaps.json
+logs.json
+logs.jsonl
+*.log
+*.tmp
+*.corrupt
+
+# backups (full copies of the above)
+*.zip
+backup_snapshots/
+
+# build noise
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/dist
+chroma_db/
+eval_results.json
+legacy/
+uploads/

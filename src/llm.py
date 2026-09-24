@@ -18,13 +18,30 @@ DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 # change: same request shape, same auth header, same streaming format.
 #
 #   OPENAI_BASE_URL=http://ukman-hsp-litellm.local.innovative-technology.co.uk:4000/v1
-#   OPENAI_API_KEY=innovative
+#   OPENAI_API_KEY=<the gateway key -- set it on the API keys page>
 #   ONLINE_PROVIDER=openai
 #   ONLINE_OPENAI_MODEL=itl-gpt-pro
 #
 # Default unchanged, so an install that sets nothing still talks to OpenAI.
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_URL = OPENAI_BASE + "/chat/completions"
+
+def _note_credit_failure(provider: str, res) -> None:
+    """Tell credit_watch when a provider refuses for lack of credit, so a
+    root admin hears about it now rather than at the next periodic check.
+    DeepSeek says 402 Insufficient Balance; LiteLLM says budget exceeded,
+    on a 400 or 429 depending on version. Never raises into the answer."""
+    try:
+        exhausted = res.status_code == 402
+        if not exhausted and res.status_code in (400, 429):
+            text = (res.text or "")[:2000].lower()
+            exhausted = "budget" in text and "exceed" in text
+        if exhausted:
+            import credit_watch
+            credit_watch.report_exhausted(provider)
+    except Exception as e:
+        logger.debug(f"credit failure check skipped: {e}")
+
 
 MODEL_LOCKS = {
     "phi": threading.Lock(),
@@ -290,6 +307,7 @@ def _call_deepseek(
 
         if res.status_code != 200:
             logger.warning(f"DeepSeek HTTP {res.status_code}")
+            _note_credit_failure("deepseek", res)
             return None
 
         body = res.json()
@@ -322,6 +340,8 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
+        if res.status_code != 200:
+            _note_credit_failure("openai", res)
         res.raise_for_status()
         body = res.json()
         text = body["choices"][0]["message"]["content"]
@@ -588,6 +608,7 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
         ) as res:
             if res.status_code != 200:
                 logger.warning(f"{provider} stream HTTP {res.status_code}")
+                _note_credit_failure(provider, res)
                 return
             for raw in res.iter_lines(decode_unicode=True):
                 if not raw or not raw.startswith("data:"):

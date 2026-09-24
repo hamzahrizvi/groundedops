@@ -81,6 +81,7 @@ import conversations as convo_store
 from memory import add_to_memory, clear_memory, get_history, get_last_query
 from ingest import ingest_file
 from retrieval_db import retrieve_from_db, retrieve_fused, complete_procedures
+import pipeline_trace as ptrace
 from text_utils import (
     passes_retrieval_gate,
     retrieval_confidence_band,
@@ -578,15 +579,22 @@ def grounding_retries() -> int:
     except (TypeError, ValueError):
         return 1
 
-_VERIFY_PROMPT = """You are checking whether an ANSWER is fully supported by SOURCE text extracted from a product manual.
+_VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send to a customer. The SOURCE is text extracted from product manuals.
 
 The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
 
-Reply with exactly one word on the first line:
-SUPPORTED   - every factual claim in the ANSWER appears in the SOURCE
-UNSUPPORTED - any claim is absent from the SOURCE, or pairs values that the SOURCE does not pair together
+Judge two things separately.
 
-Then one short line saying why.
+SUPPORT - Does every factual claim in the ANSWER appear in the SOURCE, without pairing values the SOURCE does not pair together? When the ANSWER tells the reader to DO something, the SOURCE must give that step for that purpose. A sentence that only describes what a port or feature can do is not an instruction; an ANSWER that turns one into a step is not supported.
+
+RELEVANCE - What problem is the customer asking about? Does the ANSWER give them something that helps with THAT problem: a cause, a check, or a step? True background that does not help with it (how first-time setup works, where things appear on a screen) does not count.
+
+Reply with exactly these two lines, then one short line saying why:
+SUPPORT: YES or NO
+RELEVANCE: YES or NO
+
+QUESTION:
+{q}
 
 SOURCE:
 {ctx}
@@ -597,7 +605,8 @@ ANSWER:
 
 
 def _llm_verified(answer: str, chunks: list[dict],
-                  deepseek_api_key: str | None = None) -> bool:
+                  deepseek_api_key: str | None = None,
+                  question: str = "") -> bool:
     """Last-resort check for an answer the NLI model could not verify.
 
     WHY A SECOND VERIFIER. The cross-encoder cannot read a table. These
@@ -622,6 +631,22 @@ def _llm_verified(answer: str, chunks: list[dict],
     Fails CLOSED, unlike check_grounding: a verifier that errors must not
     wave an unverified answer through, because everything upstream has
     already failed by the time we reach this.
+
+    SEES THE QUESTION, AND JUDGES RELEVANCE SEPARATELY. Without the question,
+    "is every claim in the source" is the only test, and an answer stitched
+    from true but irrelevant sentences passes. Observed 2026-09-24: "my
+    MyCheckr is on Ethernet but I can't see it in IMS" got three manual
+    sentences about USB setup -- one of them a port description restated as
+    a fix step -- NLI scored it 0.209, and this rescued it.
+
+    Passing the question with a single verdict word was not enough: it still
+    said SUPPORTED 3/3, reasoning only about the claims. Two separate
+    judgments, both required, measured 3 runs x 6 cases on deepseek-v4-flash:
+    correct table answers (flash code, button press) and an on-topic answer
+    3/3 pass; a mispaired flash code and a true-but-irrelevant answer 3/3
+    rejected. The MyCheckr answer itself was rejected only 1/3 -- its bad
+    step paraphrases a garbled manual sentence closely enough to argue
+    either way. That one needs the manual (p.29) or an FAQ fixed.
     """
     if not (llm_verify_enabled() and answer and chunks):
         return False
@@ -630,17 +655,41 @@ def _llm_verified(answer: str, chunks: list[dict],
         if not ctx.strip():
             return False
         out = generate_with_fallback(
-            "accurate", _VERIFY_PROMPT.format(ctx=ctx, ans=answer),
+            "accurate", _VERIFY_PROMPT.format(
+                q=(question or "").strip() or "(not given)",
+                ctx=ctx, ans=answer),
             deepseek_api_key=deepseek_api_key)
         verdict = ((out or {}).get("text") or "").strip()
-        ok = bool(re.match(r"^\W*SUPPORTED\b", verdict, re.I))
+        # Both judgments must be present and YES; anything else fails closed.
+        sup = re.search(r"SUPPORT\W*\s*(YES|NO)\b", verdict, re.I)
+        rel = re.search(r"RELEVANCE\W*\s*(YES|NO)\b", verdict, re.I)
+        ok = bool(sup and rel and sup.group(1).upper() == "YES"
+                  and rel.group(1).upper() == "YES")
         logger.info("LLM verify: %s (%s)",
-                    "SUPPORTED" if ok else "UNSUPPORTED",
+                    "SUPPORTED" if ok else "REJECTED",
                     verdict[:120].replace("\n", " "))
         return ok
     except Exception as exc:
         logger.warning(f"LLM verify failed, keeping the refusal: {exc}")
         return False
+
+
+_RESCUE_NAMES = {"lexical": "number match", "llm": "LLM verifier"}
+
+
+def _ground_note(unavailable: bool, flagged: bool, score, via: str) -> str:
+    """The trace line for the grounding step. A rescue says so and shows the
+    NLI score against its bar, so a 0.209 that an override let through is not
+    read as a clean pass."""
+    if unavailable:
+        return "could not run"
+    s = f"{score:.3f}" if isinstance(score, float) else None
+    if flagged:
+        return f"failed at {s} (needs {GROUNDING_THRESHOLD:g})" if s else "failed"
+    if via in _RESCUE_NAMES:
+        bar = f" (NLI {s}, needs {GROUNDING_THRESHOLD:g})" if s else ""
+        return f"passed by {_RESCUE_NAMES[via]}{bar}"
+    return f"passed at {s}" if s else "passed"
 
 
 def _normalize_query(q: str) -> str:
@@ -677,11 +726,45 @@ def _strip_breadcrumb(result: dict) -> dict:
 # generates and sends its own id.
 DEFAULT_SESSION_ID = "default"
 
+# The startup stages, in the order _warmup_stack runs them.
+_WARMUP_STAGES = (
+    ("database",   "Document database"),
+    ("embeddings", "Search model"),
+    ("reranker",   "Ranking model"),
+    ("grounding",  "Grounding model"),
+    ("faq",        "FAQ search"),
+    ("specs",      "Product specifications"),
+)
+
+# What each capability needs before it can honestly be offered.
+#
+# WHY THIS IS NOT ONE "ready" FLAG. It was, and everything -- upload, query,
+# the whole console -- waited behind the SLOWEST stage. That was the spec
+# index: two minutes of PDF table extraction that only cross-product spec
+# questions use. Filing a document or editing an FAQ needs none of it.
+#
+# The console greys a page until its capability is true and the endpoints
+# below refuse on exactly the same condition, so what the UI offers and what
+# the server accepts cannot drift apart.
+_CAPABILITY_NEEDS = {
+    "search": ("database", "embeddings"),
+    "ask":    ("database", "embeddings", "reranker", "grounding"),
+    "faq":    ("faq",),
+    "specs":  ("specs",),
+}
+
 APP_STATE = {
+    # Everything warm. Means exactly what it meant before, because /health
+    # reports it and an unattended assessment reads that.
     "ready": False,
     "progress": 0,
     "message": "Starting",
     "error": None,
+    # Per-stage detail, so the console can say WHAT it is waiting for
+    # instead of showing a bar that means nothing to the person watching it.
+    "stages": [{"key": k, "label": l, "state": "pending", "seconds": None}
+               for k, l in _WARMUP_STAGES],
+    "capabilities": {c: False for c in _CAPABILITY_NEEDS},
 }
 APP_STATE_LOCK = threading.Lock()
 
@@ -813,69 +896,128 @@ def _set_app_state(*, ready=None, progress=None, message=None, error=None):
             APP_STATE["error"] = error
 
 
-def _warmup_stack():
+def _recompute_capabilities() -> None:
+    """Caller holds APP_STATE_LOCK."""
+    done = {st["key"] for st in APP_STATE["stages"] if st["state"] == "done"}
+    for cap, needs in _CAPABILITY_NEEDS.items():
+        APP_STATE["capabilities"][cap] = all(n in done for n in needs)
+
+
+def _set_stage(key: str, state: str, seconds=None, error=None) -> None:
+    with APP_STATE_LOCK:
+        for st in APP_STATE["stages"]:
+            if st["key"] == key:
+                st["state"] = state
+                if seconds is not None:
+                    st["seconds"] = round(seconds, 1)
+                if error:
+                    st["error"] = error
+                break
+        _recompute_capabilities()
+        settled = sum(1 for st in APP_STATE["stages"]
+                      if st["state"] in ("done", "error"))
+        APP_STATE["progress"] = int(settled * 100 / len(APP_STATE["stages"]))
+
+
+def capability(name: str) -> bool:
+    """Whether a capability is up. Endpoints gate on this rather than on
+    `ready`, so one slow stage does not hold back work that does not need
+    it."""
+    with APP_STATE_LOCK:
+        # `ready` implies all of them -- it is only set once every stage is
+        # done -- and stating that here keeps the two from disagreeing for
+        # anything that flips the flag directly, the test harness included.
+        return bool(APP_STATE["ready"]
+                    or APP_STATE["capabilities"].get(name))
+
+
+def _run_stage(key: str, label: str, fn) -> bool:
+    """Run one warmup stage, recording how it went.
+
+    A stage that fails no longer aborts the ones after it. The reranker
+    failing used to leave the FAQ cache and the spec index unbuilt as well,
+    so one missing model took out every capability instead of the one it
+    belongs to.
+    """
+    _set_app_state(message="Loading " + label.lower())
+    _set_stage(key, "working")
+    t0 = time.perf_counter()
     try:
-        _set_app_state(progress=5, message="Initializing database")
-        get_collection()
+        fn()
+    except Exception as exc:
+        logger.exception("startup stage '%s' failed" % key)
+        _set_stage(key, "error", time.perf_counter() - t0, str(exc))
+        _set_app_state(error="%s: %s" % (label, exc))
+        return False
+    took = time.perf_counter() - t0
+    _set_stage(key, "done", took)
+    logger.info("warmup: %s ready in %.1fs", label, took)
+    return True
 
-        _set_app_state(progress=20, message="Loading embeddings")
-        _get_embedding_model()
 
-        _set_app_state(progress=45, message="Loading reranker")
-        _get_reranker_model()
+def _warmup_stack():
+    _set_app_state(progress=0, message="Starting", ready=False, error=None)
+    ok = True
 
-        _set_app_state(progress=70, message="Loading grounding model")
-        _get_nli_model()
+    ok &= _run_stage("database", "Document database", get_collection)
+    ok &= _run_stage("embeddings", "Search model", _get_embedding_model)
+    ok &= _run_stage("reranker", "Ranking model", _get_reranker_model)
+    ok &= _run_stage("grounding", "Grounding model", _get_nli_model)
 
-        # v8.6: local LLMs are NO LONGER auto-warmed at startup. They cost
-        # significant RAM and load time, and in api mode they're not used
-        # at all. The UI's settings panel loads them on demand via
-        # POST /models/warmup (and unloads via POST /models/unload when
-        # switching to online mode). First local-mode query without a
-        # manual warmup still works — it just pays cold-load on that call.
-        # Build the cross-product spec index here rather than on the first
-        # sales question: it walks every table in every manual and took 52s
-        # on the first such query, which the visitor paid for.
-        # The FAQ ranking cache. Embedding every curated question is the
-        # slowest single thing in a cold process -- 354 questions measured
-        # 117.6s on CPU -- and it was landing on whoever asked the FIRST
-        # question after a restart, on the FAQ path, which is meant to be
-        # the fast one. Built here instead, and persisted to disk, so a
-        # restart usually loads it in milliseconds.
-        _set_app_state(progress=75, message="Preparing FAQ search")
-        try:
-            import faq_store as _fq
-            _n = _fq.warm_cache()
-            logger.info(f"FAQ ranking cache warm: {_n} questions")
-        except Exception as exc:
-            logger.warning(f"FAQ cache warmup skipped: {exc}")
+    # The FAQ ranking cache. Embedding every curated question is the slowest
+    # single thing in a cold process -- 354 questions measured 117.6s on CPU
+    # -- and it was landing on whoever asked the FIRST question after a
+    # restart, on the FAQ path, which is meant to be the fast one. Built
+    # here instead, and persisted to disk, so a restart loads it in
+    # milliseconds.
+    def _warm_faq():
+        import faq_store as _fq
+        logger.info("FAQ ranking cache warm: %d questions", _fq.warm_cache())
+    ok &= _run_stage("faq", "FAQ search", _warm_faq)
 
-        _set_app_state(progress=80, message="Indexing product specifications")
-        try:
-            import sales as _sales, docstore as _ds
-            _sales.get_index(_ds.store_dir(), _source_to_product())
-        except Exception as exc:
-            logger.warning(f"spec index warmup skipped: {exc}")
+    # The cross-product spec index, built here rather than on the first
+    # sales question, which the visitor would otherwise pay for. It is
+    # persisted too (sales._INDEX_CACHE), so this is a disk read on every
+    # start but the first after the documents or their filing change.
+    def _warm_specs():
+        import sales as _sales, docstore as _ds
+        _sales.get_index(_ds.store_dir(), _source_to_product())
+    ok &= _run_stage("specs", "Product specifications", _warm_specs)
 
-        _set_app_state(progress=85, message="Local LLMs available (load via settings)")
-
+    # v8.6: local LLMs are NOT auto-warmed. They cost significant RAM and
+    # load time, and in api mode they are not used at all. The settings
+    # panel loads them on demand via POST /models/warmup (and unloads via
+    # POST /models/unload when switching to online mode). A first local-mode
+    # query without a manual warmup still works -- it pays cold-load once.
+    if ok:
         _set_app_state(progress=100, message="Ready", ready=True, error=None)
         logger.info("System warmup complete")
-    except Exception as e:
-        logger.exception("Startup warmup failed")
-        _set_app_state(ready=False, progress=100, message="Startup failed", error=str(e))
+    else:
+        _set_app_state(progress=100, message="Started with errors", ready=False)
+        logger.warning("System warmup finished with at least one failed stage")
 
 
 @app.on_event("startup")
 def startup_event():
     thread = threading.Thread(target=_warmup_stack, daemon=True)
     thread.start()
+    import credit_watch
+    credit_watch.start()
 
 
 @app.get("/status")
 def status():
+    """What is loaded, what is still loading, and what can be used already.
+
+    Deliberately unauthenticated (LAN-gated like the rest of the private
+    surface): the sign-in page has to be able to say "still starting" before
+    anyone has a session to ask with.
+    """
     with APP_STATE_LOCK:
-        return dict(APP_STATE)
+        state = dict(APP_STATE)
+        state["stages"] = [dict(st) for st in APP_STATE["stages"]]
+        state["capabilities"] = dict(APP_STATE["capabilities"])
+        return state
 
 
 
@@ -915,6 +1057,15 @@ _PENDING_STEPS_MAX = 500
 _AFFIRMATIVE = re.compile(
     r"^\W*(?:yes|yep|yeah|yup|ok(?:ay)?|sure|please|go\s+on|go\s+ahead"
     r"|do\s+it|walk\s+me|take\s+me|show\s+me|step)", re.I)
+
+# The declining half of the same offer. Without it "no thanks" goes through
+# retrieval exactly as "yes" used to, and comes back as noise.
+_NEGATIVE = re.compile(
+    r"^\W*(?:no|nope|nah|not\s+now|no\s+thanks?|skip|never\s*mind)\b", re.I)
+
+# What the offer's buttons send. Each must match _AFFIRMATIVE / _NEGATIVE,
+# since tapping one is the same path as typing it.
+_STEPS_OFFER_REPLIES = ("Yes, show me the steps", "No thanks")
 
 
 def _remember_steps_offer(session_id: str | None, source: str) -> None:
@@ -1405,18 +1556,28 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
                 or commercial):
             return None
 
-        mode = (policy.value("sales_mode") or "answer").strip().lower()
-        if mode == "documents":
-            # An explicit "let the manuals answer it", including for price.
-            # Honoured as set -- but see the note in sales.is_commercial_
-            # question about what the manuals actually say about pricing.
-            return None
-        # `deflect` deflects everything. The default `answer` mode deflects a
-        # COMMERCIAL question too, because the catalogue answer it would
-        # otherwise produce is assembled from manuals that contain no prices:
-        # the mode chooses who answers catalogue questions, and there is no
-        # setting that can put a price in a document that has none.
-        if mode == "deflect" or commercial:
+        # sales_mode governs COMMERCIAL questions only -- price, fees, buying,
+        # stock, resellers -- which no manual can answer at any scope.
+        #
+        # It used to govern every question this function admits, because the
+        # module is called `sales`. But "which of your validators run on
+        # 24V?" is a technical question whose answer is a spec-table cell;
+        # it only SOUNDS pre-purchase. With sales_mode=deflect every such
+        # question got the "I can only answer technical questions" reply --
+        # a technical question refused as not technical. An operator who
+        # sets deflect means "don't let the assistant talk money", so
+        # catalogue, spec and comparison questions are always answered.
+        if commercial:
+            mode = (policy.value("sales_mode") or "answer").strip().lower()
+            if mode == "documents":
+                # An explicit "let the manuals answer it", including for
+                # price. Honoured as set -- but see the note in
+                # sales.is_commercial_question about what the manuals
+                # actually say about pricing.
+                return None
+            # `answer` and `deflect` both deflect a commercial question: the
+            # catalogue answer is assembled from manuals that contain no
+            # prices, and no setting can put a price in a document.
             reply = (policy.value("sales_reply") or "").strip()
             if not reply:
                 return None
@@ -1785,8 +1946,14 @@ async def upload(request: Request,
     _ingest_worker was skipped silently, and the document then appeared in
     the "needs assignment" list despite a category having been chosen.
     """
-    if not APP_STATE["ready"]:
-        raise HTTPException(status_code=503, detail="System is still loading")
+    # Indexing needs the database and the embedding model. It does NOT need
+    # the reranker, the grounding model or the spec index, and waiting for
+    # those put a two-minute 503 in front of the first upload after a
+    # restart.
+    if not capability("search"):
+        raise HTTPException(status_code=503,
+                            detail="The search model is still loading - try "
+                                   "again in a few seconds")
 
     _h = request.headers
     category_key = _h.get("category-key") or _h.get("category_key")
@@ -3233,7 +3400,9 @@ def _available_providers() -> list[dict]:
                     "default_model": _default_model_for("local")})
     for key in ("deepseek", "openai", "anthropic"):
         if keystore.has_key(key):
-            out.append({"key": key, "label": _PROVIDER_LABEL[key],
+            # The operator's name for the key (keystore.label_for), so the
+            # Test chat picker says "Company keys", not "OpenAI".
+            out.append({"key": key, "label": keystore.label_for(key),
                         "default_model": _default_model_for(key)})
     return out
 
@@ -3931,8 +4100,17 @@ def admin_auth_state():
     show a sign-in form or a first-run "create the root account" form, and
     it cannot know that without asking. Leaks only whether this install has
     been set up, which an installer already knows."""
+    import mailer
+    import sso
+    providers = sso.enabled()
     return {"initialised": not accounts.is_uninitialised(),
-            "sso": False,
+            "sso": bool(providers),
+            # Which "Sign in with ..." buttons to draw: only fully configured
+            # providers, so a button never leads to an error page.
+            "sso_providers": providers,
+            # Whether "forgot password" and "email me a link" can work, so the
+            # sign-in page only offers them when they will.
+            "email_links": mailer.is_configured(),
             "email_domain": accounts.ALLOWED_EMAIL_DOMAIN,
             # Whether first-run setup will be accepted from where the caller
             # is, so the gate can say "set this up on the server" instead of
@@ -4027,6 +4205,289 @@ def admin_auth_request(payload: BootstrapReq):
         raise HTTPException(status_code=400, detail=str(e))
     return {"submitted": True,
             "message": "Your request was sent to a root account for approval."}
+
+
+# ── emailed links: "forgot password" and "email me a sign-in link" ───────
+# Both are unauthenticated by nature, so three rules hold throughout:
+#
+#   * The reply never says whether the address has an account. It is the
+#     same wording, and the mail is sent on a thread so the response time
+#     does not say it either.
+#   * The link is built from a CONFIGURED console address when there is
+#     one, never from the request's Host header on an exposed install --
+#     otherwise anyone could ask for a reset of a colleague's account with
+#     `Host: attacker.example` and the real email would carry the token to
+#     the attacker's server the moment it was clicked.
+#   * The token rides in the URL fragment (#...), which browsers never send
+#     to a server, and is only spent by a deliberate click on the page.
+#     Mail scanners that pre-open links therefore cannot use it up.
+
+class EmailLinkReq(BaseModel):
+    email: str
+    purpose: str   # "reset" | "login"
+
+
+class EmailTokenReq(BaseModel):
+    token: str
+
+
+class ResetReq(BaseModel):
+    token: str
+    password: str
+
+
+_LINK_WINDOW = 15 * 60
+_LINK_PER_EMAIL = 3
+_LINK_PER_IP = 10
+_link_hits: dict[str, list[float]] = {}
+_link_lock = threading.Lock()
+
+
+def _link_rate_ok(*keys: str) -> bool:
+    now = time.time()
+    limits = {"e": _LINK_PER_EMAIL, "i": _LINK_PER_IP}
+    with _link_lock:
+        if len(_link_hits) > 5000:   # junk addresses must not grow this forever
+            for k in [k for k, v in _link_hits.items()
+                      if not v or now - v[-1] >= _LINK_WINDOW]:
+                _link_hits.pop(k, None)
+        for k in keys:
+            hits = [t for t in _link_hits.get(k, []) if now - t < _LINK_WINDOW]
+            _link_hits[k] = hits
+            if len(hits) >= limits[k[0]]:
+                return False
+        for k in keys:
+            _link_hits[k].append(now)
+    return True
+
+
+def _local_hostnames() -> set[str]:
+    names = {"localhost", "127.0.0.1", "::1"}
+    try:
+        host = socket.gethostname()
+        names.update({host.lower(), socket.getfqdn().lower()})
+        for info in socket.getaddrinfo(host, None):
+            names.add(info[4][0].lower())
+    except OSError:
+        pass
+    return names
+
+
+def _console_base_url(request: Request) -> str | None:
+    """Where an emailed link should point, or None when it cannot be known
+    safely. ADMIN_PUBLIC_URL (or ADMIN_NETWORK_URL, which already says where
+    colleagues reach the console) wins. Without either, the request's own
+    origin is used only when its host is this machine -- a direct LAN or
+    localhost visit -- because only then is the Host header not the
+    caller's to choose."""
+    configured = ((os.getenv("ADMIN_PUBLIC_URL") or "").strip()
+                  or (os.getenv("ADMIN_NETWORK_URL") or "").strip())
+    if configured:
+        if "://" not in configured:
+            configured = "http://" + configured
+        return configured.rstrip("/")
+    if any(h in request.headers for h in _PROXY_HEADERS):
+        return None
+    host = (request.url.hostname or "").lower()
+    if host in _local_hostnames():
+        return str(request.base_url).rstrip("/")
+    return None
+
+
+def _send_link_email(purpose: str, token: str, user: dict, base: str) -> None:
+    import mailer
+    link = f"{base}/admin#{'reset' if purpose == 'reset' else 'login'}={token}"
+    mins = accounts.EMAIL_TOKEN_TTL[purpose] // 60
+    who = user.get("name") or user["email"]
+    if purpose == "reset":
+        subject = "[GroundedOps] Reset your password"
+        body = (f"Hi {who},\n\nSomeone asked to reset the password for your "
+                f"GroundedOps console account. To choose a new one, open:\n\n"
+                f"{link}\n\nThe link works once and expires in {mins} minutes. "
+                f"Using it signs out every other session on your account.\n\n"
+                f"If this wasn't you, ignore this email; your password has not "
+                f"changed.\n")
+    else:
+        subject = "[GroundedOps] Your sign-in link"
+        body = (f"Hi {who},\n\nUse this link to sign in to the GroundedOps "
+                f"console without a password:\n\n{link}\n\nIt works once and "
+                f"expires in {mins} minutes.\n\nIf you didn't ask for it, ignore "
+                f"this email; nobody can use it without access to your inbox.\n")
+    try:
+        mailer.send([user["email"]], subject, body)
+    except Exception as e:
+        logger.warning(f"{purpose} link for {user['email']} not sent: {e}")
+
+
+@app.post("/admin/auth/email-link")
+def admin_auth_email_link(payload: EmailLinkReq, request: Request):
+    import mailer
+    if payload.purpose not in accounts.EMAIL_LINK_PURPOSES:
+        raise HTTPException(status_code=400, detail="unknown link type")
+    if not mailer.is_configured():
+        raise HTTPException(status_code=503,
+                            detail="Email is not set up on this server. Ask a root "
+                                   "admin to reset your password from Accounts.")
+    base = _console_base_url(request)
+    if not base:
+        logger.warning("email link refused: set ADMIN_PUBLIC_URL so links can "
+                       "be addressed safely from behind a proxy")
+        raise HTTPException(status_code=503,
+                            detail="Email links are not available from this address. "
+                                   "Ask a root admin to set ADMIN_PUBLIC_URL.")
+    email = accounts.normalise_email(payload.email or "")
+    ip = _external_ip(request) or (request.client.host if request.client else "")
+    generic = {"sent": True,
+               "message": "If that address has an account, an email is on its "
+                          "way. Check your inbox (and junk folder)."}
+    if not email or not _link_rate_ok("e:" + email, "i:" + ip):
+        return generic   # rate-limited requests look the same as any other
+    issued = accounts.create_email_token(email, payload.purpose)
+    if issued:
+        token, user = issued
+        threading.Thread(target=_send_link_email,
+                         args=(payload.purpose, token, user, base),
+                         daemon=True).start()
+    return generic
+
+
+def _session_reply(user: dict) -> dict:
+    try:
+        token = accounts.issue_session(user)
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    accounts.record_login(user["id"])
+    return {"token": token, "user": _public_self(user)}
+
+
+@app.post("/admin/auth/email-login")
+def admin_auth_email_login(payload: EmailTokenReq):
+    user = accounts.consume_email_token(payload.token, "login")
+    if not user:
+        raise HTTPException(status_code=400,
+                            detail="This sign-in link has expired or has already "
+                                   "been used. Request a new one.")
+    logger.info(f"signed in by email link: {user['email']}")
+    return _session_reply(user)
+
+
+@app.post("/admin/auth/reset")
+def admin_auth_reset(payload: ResetReq):
+    """Choose a new password from a reset link, and be signed in with it."""
+    try:
+        user = accounts.reset_password_with_token(payload.token, payload.password)
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _session_reply(user)
+
+
+# ── work-account sign-in: Microsoft / Google (sso.py) ─────────────────────
+
+@app.get("/admin/auth/sso/{provider}/start", include_in_schema=False)
+def admin_sso_start(provider: str, request: Request):
+    import sso
+    base = _console_base_url(request)
+    if not base:
+        return RedirectResponse("/admin#sso_error=no_address", status_code=302)
+    try:
+        url, binding = sso.start(provider, base)
+    except sso.SsoError as e:
+        logger.warning(f"SSO start refused for {provider}: {e}")
+        return RedirectResponse(f"/admin#sso_error={e.code}", status_code=302)
+    except Exception as e:
+        logger.warning(f"SSO start failed for {provider}: {e}")
+        return RedirectResponse("/admin#sso_error=provider_error", status_code=302)
+    res = RedirectResponse(url, status_code=302)
+    # Lax, not Strict: the provider sends the browser back with a top-level
+    # GET, which Lax allows and Strict would drop.
+    res.set_cookie(sso.STATE_COOKIE, binding, max_age=sso.STATE_TTL, httponly=True,
+                   samesite="lax", secure=base.startswith("https://"),
+                   path="/admin/auth/sso")
+    return res
+
+
+@app.get("/admin/auth/sso/{provider}/callback", include_in_schema=False)
+def admin_sso_callback(provider: str, request: Request, code: str = "",
+                       state: str = "", error: str = ""):
+    import sso
+    def back(fragment: str):
+        res = RedirectResponse(f"/admin#{fragment}", status_code=302)
+        res.delete_cookie(sso.STATE_COOKIE, path="/admin/auth/sso")
+        return res
+    if error:
+        # access_denied is the person pressing Cancel -- not worth a warning.
+        logger.info(f"SSO {provider} returned error={error!r}")
+        return back("sso_error=cancelled")
+    try:
+        email = sso.finish(provider, code, state,
+                           request.cookies.get(sso.STATE_COOKIE))
+    except sso.SsoError as e:
+        logger.warning(f"SSO {provider} sign-in refused: {e}")
+        return back(f"sso_error={e.code}")
+    except Exception as e:
+        logger.warning(f"SSO {provider} sign-in failed: {e}")
+        return back("sso_error=provider_error")
+    handoff = accounts.create_sso_handoff(email)
+    if not handoff:
+        # The provider vouched for them, but nobody here has given them an
+        # account. Said plainly: they are who they say, and the fix is a
+        # root admin, not trying again.
+        logger.info(f"SSO {provider} sign-in with no account: {email}")
+        return back("sso_error=no_account")
+    logger.info(f"SSO {provider} sign-in verified for {email}")
+    return back(f"sso={handoff}")
+
+
+@app.post("/admin/auth/sso/finish")
+def admin_sso_finish(payload: EmailTokenReq):
+    user = accounts.consume_email_token(payload.token, "sso")
+    if not user:
+        raise HTTPException(status_code=400,
+                            detail="That sign-in has expired. Please try again.")
+    return _session_reply(user)
+
+
+class SsoSettingsReq(BaseModel):
+    client_id: str | None = None
+    tenant: str | None = None
+    domain: str | None = None
+    secret: str | None = None
+    clear_secret: bool = False
+
+
+def _sso_status(request: Request) -> dict:
+    import sso
+    base = _console_base_url(request)
+    out = {"console_url": base, "providers": {}}
+    for p, meta in sso.PROVIDERS.items():
+        out["providers"][p] = dict(
+            keystore.get_sso_settings(p), label=meta["label"],
+            problem=sso.config_problem(p),
+            redirect_uri=sso.redirect_uri(base, p) if base else None)
+    return out
+
+
+@app.get("/admin/sso")
+def admin_sso_settings(request: Request,
+                       x_admin_password: str | None = Header(default=None)):
+    """Root only. Includes the exact redirect URI to register with each
+    provider, since a mismatch there is the usual first-time failure."""
+    _require_root(x_admin_password)
+    return _sso_status(request)
+
+
+@app.post("/admin/sso/{provider}")
+def admin_sso_save(provider: str, payload: SsoSettingsReq, request: Request,
+                   x_admin_password: str | None = Header(default=None)):
+    me = _require_root(x_admin_password)
+    try:
+        keystore.set_sso_settings(provider, payload.model_dump(exclude_unset=True))
+    except keystore.UnknownProviderError:
+        raise HTTPException(status_code=404, detail="unknown provider")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"SSO settings for {provider} saved by {me['email']}")
+    return _sso_status(request)
 
 
 @app.get("/admin/auth/me")
@@ -4225,6 +4686,7 @@ def admin_keys_list(x_admin_password: str | None = Header(default=None)):
     return {
         "providers": [
             {"key": p, "label": keystore.label_for(p),
+             "kind": keystore.kind_label(p),
              "configured": keystore.has_key(p), "masked": keystore.masked_key(p)}
             for p in keystore.providers()
         ],
@@ -4348,6 +4810,113 @@ def admin_keys_set_role(role: str, payload: KeyRoleReq,
             pass
     logger.info(f"key role '{role}' set to {provider or 'none'} by {me['email']}")
     return {"ok": True, "roles": _key_roles()}
+
+
+class KeyNameReq(BaseModel):
+    name: str | None = None
+
+
+@app.post("/admin/keys/{provider}/name")
+def admin_keys_set_name(provider: str, payload: KeyNameReq,
+                        x_admin_password: str | None = Header(default=None)):
+    """Rename a key slot. Display only: routing, env var names and logs keep
+    the provider id, so a rename can never change which API is called.
+    Blank returns it to the built-in name."""
+    me = _require_root(x_admin_password)
+    try:
+        keystore.set_label(provider, payload.name)
+    except keystore.UnknownProviderError:
+        raise HTTPException(status_code=404, detail=f"unknown provider '{provider}'")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"key slot '{provider}' renamed by {me['email']}")
+    return {"ok": True, "label": keystore.label_for(provider)}
+
+
+# ── low-credit alerts ───────────────────────────────────────────────────
+# Root only, like the keys themselves: the balance of the company's
+# provider accounts and the mail server's settings are both root's business.
+
+class SmtpReq(BaseModel):
+    host: str | None = None
+    port: str | None = None
+    user: str | None = None
+    sender: str | None = None
+    security: str | None = None
+    password: str | None = None
+    clear_password: bool = False
+
+
+class ThresholdReq(BaseModel):
+    value: float | None = None
+
+
+def _credits_status() -> dict:
+    import credit_watch
+    import mailer
+    results, checked = credit_watch.last_results()
+    return {"results": results, "checked_at": checked,
+            "threshold": keystore.get_credit_threshold(),
+            "recipients": credit_watch.recipients(),
+            "smtp": keystore.get_smtp_settings(),
+            "smtp_configured": mailer.is_configured()}
+
+
+@app.get("/admin/credits")
+def admin_credits(x_admin_password: str | None = Header(default=None)):
+    _require_root(x_admin_password)
+    return _credits_status()
+
+
+@app.post("/admin/credits/check")
+def admin_credits_check(x_admin_password: str | None = Header(default=None)):
+    """Check every balance now, and email if anything is low -- the same
+    thing the periodic check does, on demand."""
+    _require_root(x_admin_password)
+    import credit_watch
+    alerted = credit_watch.maybe_alert(credit_watch.check_all())
+    return dict(_credits_status(), alerted=alerted)
+
+
+@app.post("/admin/credits/threshold")
+def admin_credits_threshold(payload: ThresholdReq,
+                            x_admin_password: str | None = Header(default=None)):
+    _require_root(x_admin_password)
+    try:
+        keystore.set_credit_threshold(payload.value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _credits_status()
+
+
+@app.post("/admin/credits/smtp")
+def admin_credits_smtp(payload: SmtpReq,
+                       x_admin_password: str | None = Header(default=None)):
+    """Save mail settings. The password is write-only: it is never returned,
+    only reported as set or not."""
+    me = _require_root(x_admin_password)
+    try:
+        keystore.set_smtp_settings(payload.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"SMTP settings saved by {me['email']}")
+    return _credits_status()
+
+
+@app.post("/admin/credits/test-email")
+def admin_credits_test_email(x_admin_password: str | None = Header(default=None)):
+    me = _require_root(x_admin_password)
+    import credit_watch
+    import mailer
+    to = credit_watch.recipients()
+    try:
+        mailer.send(to, "[GroundedOps] Test email",
+                    "This is a test from the GroundedOps console, sent by "
+                    f"{me['email']}.\n\nLow-credit alerts will arrive at "
+                    "this address.\n")
+    except mailer.MailError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "sent_to": to}
 
 
 @app.post("/admin/keys/{provider}")
@@ -4812,9 +5381,37 @@ def _product_keys_in(results, limit: int) -> list[str]:
 
 
 @app.post("/query")
-def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
-    if not APP_STATE["ready"]:
-        raise HTTPException(status_code=503, detail="System is still loading")
+def query_route(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
+    """Answer a question, and record where the answering went.
+
+    The body is `_answer_query`; this wrapper exists only to open a trace
+    around it and attach the result. Every terminal branch in there marks
+    itself before returning, so `pipeline.exit` is where the turn actually
+    stopped rather than something reconstructed afterwards from the role
+    and the flags -- which is what the console used to have to do, and
+    could not distinguish "nothing matched" from "the model declined".
+    """
+    _tok = ptrace.start()
+    try:
+        result = query(payload, x_user_id)
+        try:
+            if isinstance(result, dict):
+                result["pipeline"] = ptrace.snapshot()
+        except Exception:
+            pass          # a diagnostic must never cost an answer
+        return result
+    finally:
+        ptrace.reset(_tok)
+
+
+def query(payload: QueryRequest, x_user_id: str | None = None):
+    # Answering needs the whole retrieval pipeline, but not the spec index:
+    # sales.get_index is consulted lazily further down and builds itself if
+    # a cross-product question arrives before the warmup reaches it.
+    if not capability("ask"):
+        raise HTTPException(status_code=503,
+                            detail="The answering models are still loading - "
+                                   "try again in a few seconds")
 
     q = payload.q
     session_id = payload.session_id or DEFAULT_SESSION_ID
@@ -4838,6 +5435,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         _steps = _steps_answer(_pending_src)
         if _steps:
             logger.info("serving the offered steps for %s", _pending_src)
+            ptrace.mark("steps", _pending_src)
             add_to_memory(session_id, q, _steps)
             return {
                 "answer": _steps,
@@ -4851,6 +5449,18 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 "needs_clarification": False, "clarification_options": [],
                 "retrieval_score": 1.0, "resolved_query": None,
             }
+    if _pending_src and _NEGATIVE.match((q or "").strip()):
+        _ack = "No problem. What else can I help you with?"
+        add_to_memory(session_id, q, _ack)
+        return {
+            "answer": _ack, "sources": [], "role": "acknowledgement",
+            "answerability": None, "model": None, "provider": None,
+            "grounding_score": None, "flagged": False,
+            "offer_support": False, "system_refusal": False,
+            "needs_clarification": False, "clarification_options": [],
+            "suggested_replies": [],
+            "retrieval_score": None, "resolved_query": None,
+        }
 
     deepseek_api_key = payload.deepseek_api_key
     api_keys = {"deepseek": payload.deepseek_api_key,
@@ -4891,6 +5501,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                         _prov)
     start_total = time.time()
     request_id = uuid.uuid4().hex[:12]
+    ptrace.mark("entry", f"session {session_id[:8]}")
 
     # ── Conversational query resolution (Rewrite-Retrieve-Read) ──
     # Resolves pronoun/ellipsis-dependent follow-ups ("give me that from
@@ -4914,6 +5525,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     t_condense = time.time()
     resolved_query = condense_query(_normalize_query(q), history)
     condense_time = time.time() - t_condense
+    ptrace.mark("condense", "rewritten" if resolved_query.strip().lower()
+            != _normalize_query(q).strip().lower() else "already standalone")
 
     # CONVERSATIONAL FALLBACK (v8.4.3). Follow-ups were systematically
     # dying: condense_query runs phi on a 20s timeout (half its normal
@@ -4945,6 +5558,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             else:
                 resolved_query = f"{frag} — {last_q}"
             logger.info(f"Follow-up fallback combined query: {resolved_query[:80]}")
+            ptrace.mark("followup", resolved_query[:80])
 
     # ── Retrieval ────────────────────────────
     t1 = time.time()
@@ -5106,6 +5720,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         if _expanded:
             total_time = time.time() - start_total
             add_to_memory(session_id, q, _expanded["answer"])
+            ptrace.mark("more", "expanded the previous answer")
             return {
                 "answer": _expanded["answer"],
                 "response_time_ms": round(total_time * 1000),
@@ -5149,6 +5764,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
 
     _sales = _sales_answer(payload.q, resolved_query, payload.product)
     if _sales:
+        ptrace.mark("sales", "answered from the catalogue, no search")
         total_time = time.time() - start_total
         # Same omission as the FAQ path above: a catalogue answer lists
         # products, so "tell me more about the second one" is the obvious
@@ -5157,7 +5773,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         return {
             "answer": _sales["answer"],
             "response_time_ms": int(total_time * 1000),
-            "role": "sales",
+            # "catalogue", not "sales": these are cross-product lookups from
+            # the documents. Only a deflected commercial question is sales.
+            "role": "sales" if _sales.get("kind") == "deflected" else "catalogue",
             "model": None, "provider": "catalogue",
             "grounding_score": None, "flagged": False,
             "from_faq": False, "sources": [],
@@ -5187,6 +5805,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         _faq = faq_store.suggest_candidates(resolved_query, _faq_scope)
 
         if _faq["mode"] == "answer":
+            ptrace.mark("faq.answer", _faq["entry"]["question"][:60])
             _entry = _faq["entry"]
             total_time = time.time() - start_total
             # Conversational memory, which this path used to skip. Only the
@@ -5228,6 +5847,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             }
 
         if _faq["mode"] == "disambiguate":
+            ptrace.mark("faq.ask", f"{len(_faq['candidates'])} candidate(s)")
             total_time = time.time() - start_total
             _n = len(_faq["candidates"])
             _msg = ("These FAQs match your query — please select the one you "
@@ -5261,6 +5881,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                              source_filter=payload.source_filter,
                              scope=_scope)
     retrieval_db_time = time.time() - t_retrieval_db
+    ptrace.mark("retrieve", f"{len(results)} candidates"
+            + (f" within {_scope}" if _scope else " across everything"))
     # CORPUS SCOPING (v8.4): internal-only documents are excluded from
     # answering unless the caller explicitly filters to a source. Adding
     # the ICU Network API doc to the corpus polluted public answers
@@ -5292,11 +5914,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     t_rerank = time.time()
     _retrieved = rerank(resolved_query, results, top_k=len(results))
     rerank_time = time.time() - t_rerank
+    ptrace.mark("rerank", f"best {(_retrieved[0].get('rerank_score', 0.0) if _retrieved else 0.0):.3f}")
     results = _retrieved[:CONTEXT_K]
     retrieval_time = time.time() - t1
 
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
     confidence = retrieval_confidence_band(results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
+    ptrace.mark("band", f"{confidence} (best {top_score:.3f}, gate "
+            f"{RETRIEVAL_GATE_THRESHOLD}, clear at {AMBIGUOUS_CEILING})")
 
     # ── No relevant content at all ───────────
     if confidence == "none":
@@ -5339,6 +5964,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             )
             role_out = "clarify"
             reason = "low_retrieval_confidence_followup"
+            ptrace.mark("none.follow", f"best {top_score:.3f} on a follow-up")
             needs_clarification = True
             clarification_options = build_clarification_options("followup", history, results)
         elif is_vague_in_domain:
@@ -5350,6 +5976,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             )
             role_out = "clarify"
             reason = "ambiguous_in_domain_query"
+            ptrace.mark("none.vague", f"best {top_score:.3f}, no product named")
             needs_clarification = True
             clarification_options = build_clarification_options("ambiguous_in_domain", history, results)
         else:
@@ -5361,6 +5988,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 query=q, sources=results)
             role_out = "rejected"
             reason = "low_retrieval_confidence"
+            ptrace.mark("none.reject", f"best {top_score:.3f} — nothing matched closely enough")
             needs_clarification = False
             clarification_options = []
             # This is a genuine miss — the visitor asked something the
@@ -5518,6 +6146,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         t2 = time.time()
         extracted = extract_structured_block(results[:5], query=resolved_query)
         extraction_time = time.time() - t2
+        ptrace.mark("route", role)
 
         if extracted and role == "extract":
             total_time = time.time() - start_total
@@ -5526,6 +6155,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                             [s["source"] for s in sources],
                             grounding_score=None, flagged=False)
             add_to_memory(session_id, q, extracted)
+            ptrace.mark("extract", "checklist copied from the document")
             return {
                 "answer": extracted,
             "response_time_ms": round(total_time * 1000),
@@ -5654,6 +6284,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # against top_chunks, and an answer built from steps the verifier
     # cannot see would be refused as ungrounded.
     top_chunks = complete_procedures(top_chunks)
+    ptrace.mark("procedures", f"{len(top_chunks)} passage(s) in hand")
 
     context = "\n\n".join(
         f"[Passage {i} of {len(top_chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
@@ -5685,6 +6316,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     else:
         output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
     llm_time = time.time() - t3
+    ptrace.mark("generate", f"{output.get('provider')} / {output.get('model')}")
 
     raw_text = output.get("text", "").strip()
     generation_failed = (output.get("model") == "none") or not raw_text
@@ -5714,6 +6346,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             _spent[bucket] += time.time() - _start
 
     verifier_unavailable = False
+    # Which check let the answer through, for the trace: a rescue must not
+    # read as an NLI pass ("passed at 0.209" when the bar is 0.55).
+    ground_via = "nli"
     refusal = is_refusal(answer)
     template_leak = is_template_leak(answer)
 
@@ -5753,7 +6388,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # lexical second chance (see _lexically_supported docstring).
         if (not is_grounded and not verifier_unavailable
                 and _timed("verify", _lexically_supported, answer, top_chunks)):
-            is_grounded = True
+            is_grounded, ground_via = True, "lexical"
             logger.info("Grounding rescued by lexical containment "
                         f"(nli={grounding_score}) for: {resolved_query[:60]}")
         # The NLI model cannot read a flattened table row, and these manuals
@@ -5761,8 +6396,9 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # correct answer away. See _llm_verified.
         elif (not is_grounded and not verifier_unavailable
               and _timed("verify", _llm_verified,
-                         answer, top_chunks, deepseek_api_key)):
-            is_grounded = True
+                         answer, top_chunks, deepseek_api_key,
+                         resolved_query)):
+            is_grounded, ground_via = True, "llm"
             logger.info("Grounding rescued by LLM verifier "
                         f"(nli={grounding_score}) for: {resolved_query[:60]}")
         flagged = not is_grounded
@@ -5806,6 +6442,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             answer = normalize_markdown_tables(
                 _strip_meta(_strip_preamble(output["text"].strip())))
             escalated = True
+            ptrace.mark("escalate", _backup_provider)
             template_leak = is_template_leak(answer)
             if template_leak:
                 is_grounded, grounding_score, flagged = False, 0.0, True
@@ -5818,13 +6455,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 if (not is_grounded and not verifier_unavailable
                         and _timed("verify", _lexically_supported,
                                    answer, top_chunks)):
-                    is_grounded = True
+                    is_grounded, ground_via = True, "lexical"
                     logger.info("Escalated answer rescued by lexical "
                                 f"containment (nli={grounding_score})")
                 elif (not is_grounded and not verifier_unavailable
                       and _timed("verify", _llm_verified,
-                                 answer, top_chunks, deepseek_api_key)):
-                    is_grounded = True
+                                 answer, top_chunks, deepseek_api_key,
+                                 resolved_query)):
+                    is_grounded, ground_via = True, "llm"
                     logger.info("Escalated answer rescued by LLM verifier "
                                 f"(nli={grounding_score})")
                 flagged = not is_grounded
@@ -5877,15 +6515,18 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             if _score is None:
                 verifier_unavailable = True
                 break
+            _via = "nli"
             if not _ok and _timed("verify", _lexically_supported,
                                   _text, top_chunks):
-                _ok = True
+                _ok, _via = True, "lexical"
             elif not _ok and _timed("verify", _llm_verified,
-                                    _text, top_chunks, deepseek_api_key):
-                _ok = True
+                                    _text, top_chunks, deepseek_api_key,
+                                    resolved_query):
+                _ok, _via = True, "llm"
             if _ok:
                 answer, output = _text, _retry
                 is_grounded, grounding_score, flagged = True, _score, False
+                ground_via = _via
                 logger.info(f"Grounding retry {_attempt} succeeded "
                             f"(score={_score})")
                 break
@@ -5903,6 +6544,8 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     grounding_time = _spent["verify"]
     escalation_time = _spent["regen"]
     verify_stage_time = time.time() - t_grounding
+    ptrace.mark("ground", _ground_note(
+        verifier_unavailable, flagged, grounding_score, ground_via))
 
     # ── Suppress an answer we could not verify ──
     # PRECISION-FIRST ENFORCEMENT (v8.4): suppress on ANY unresolved flag,
@@ -5940,24 +6583,59 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     if (template_leak or generation_failed or flagged or _model_refused) \
             and _verbatim:
         answer = _render_structures(_verbatim)
+        ptrace.mark("verbatim", f"{len(_verbatim)} block(s) from the document")
         flagged = False
         template_leak = False
         generation_failed = False
 
     if template_leak or generation_failed or flagged:
+        ptrace.mark("suppress",
+                    "the verifier was unreachable" if verifier_unavailable
+                    else "no model was reachable" if (generation_failed
+                         and output.get("provider") == "none")
+                    else "the manual does not support what was written")
         # "No model was reachable" is not "the documents do not cover this",
         # but both produced the same refusal -- so an outage was indistinguish-
         # able from a knowledge gap, while the details panel showed
         # retrieval_score 0.99 and the right manual under Sources. That is the
         # combination that sends someone re-uploading documents that were never
         # the problem, or hunting a per-machine issue that does not exist.
-        no_model = generation_failed and output.get("provider") == "none"
+        # NOTHING GENERATED IS NEVER A DOCUMENTATION GAP, whatever the
+        # provider field happens to say.
+        #
+        # This used to require `provider == "none"` -- the sentinel the
+        # fallback chain sets when every provider in it failed. A FORCED
+        # model (the console's Pipeline check, or Rethink) never reaches
+        # that chain: main.py fills in `{"text": "", "provider": <chosen>}`
+        # when generate returns nothing, so the provider is "openai" and the
+        # honest wording below was skipped. Observed 2026-09-24: the console
+        # was set to gpt-4o-mini, which the on-prem gateway rejects with 400
+        # Bad Request; every question came back "I don't have that in the
+        # product documentation about the MyCheckr", under Sources listing
+        # the four manuals that DO cover it, while the same question through
+        # the widget answered correctly on deepseek. That sends somebody
+        # hunting a missing manual for what is a model name that does not
+        # exist on this gateway.
+        #
+        # So: if no text was produced, we cannot say anything about what the
+        # documents contain, because nothing ever read them.
+        no_model = generation_failed
+        _forced = (role == "rethink" and output.get("provider") not in (None, "none"))
 
         if verifier_unavailable:
             answer = ("I could not verify an answer just now. Your documents "
                       "were searched, but the verification service is unavailable. "
                       "Please try again shortly.")
             grounding_score = None
+        elif _forced:
+            # Names what was asked for, because the operator CHOSE it here
+            # and the fix is theirs: pick another model, or correct the name.
+            answer = (f"The model you selected ({output.get('provider')} / "
+                      f"{output.get('model')}) did not return anything, so there "
+                      f"is no answer to show. Your documents were searched fine "
+                      f"\u2014 this is a problem with that model or provider, not a "
+                      f"gap in the documentation. Try another model, or leave the "
+                      f"choice to the server.")
         elif no_model:
             answer = ("I could not answer that just now \u2014 no language model is "
                       "reachable. Your documents were searched fine; this is a "
@@ -6018,6 +6696,10 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     system_refusal = False
     needs_clarification = False
     clarification_options = []
+    # Replies the assistant expects next, offered as one-tap buttons and as
+    # the composer's accept-with-right-arrow suggestion. Set only where the
+    # answer asked a yes/no question that something can actually honour.
+    suggested_replies: list[str] = []
     # Same rule as system_refusal: bound here because the response dict
     # reads it unconditionally and the except below does not set it.
     answerability_kind = None
@@ -6034,8 +6716,14 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # for it, the sanitiser protects it, is_refusal matches it); only
         # what the reader sees changes, and the friendly form is itself a
         # recognised variant so nothing downstream stops working.
-        system_refusal = verifier_unavailable or (
-            generation_failed and output.get("provider") == "none")
+        # Same rule as the wording above, and for the same reason: a turn
+        # where nothing was generated is a service problem, not a fact about
+        # the question. Keeping the narrow `provider == "none"` test here
+        # meant a failing FORCED model was not counted as degraded -- so it
+        # was recorded as an unanswered customer question, offered a
+        # clarifying question, and told the reader the documents were at
+        # fault. All three follow from this flag.
+        system_refusal = verifier_unavailable or generation_failed
         # THE SWITCHBOARD. Asked once, here, and read by every branch
         # below. Before this, the capability scan ran in query() AND again
         # inside _friendly_refusal, crossrefs ran inside _friendly_refusal,
@@ -6056,6 +6744,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                     answerability.classify(q, results, refused=offer_support,
                                            product=payload.product))
         answerability_kind = (decision or {}).get("kind")
+        ptrace.mark("switchboard", answerability_kind or "not classified")
         _capability = (decision or {}).get("capability")
         if (offer_support and not system_refusal and _capability
                 and (_capability["documented"] or _capability["procedural"])):
@@ -6096,11 +6785,13 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                 _remember_steps_offer(session_id, _steps_src)
                 answer = (f"Yes — that is documented. I can take you through "
                           f"the steps for {_t}. Would you like them?")
+                suggested_replies = list(_STEPS_OFFER_REPLIES)
             else:
                 # Nothing step-structured to give, so nothing is promised.
                 answer = (f"Yes — {_t} is covered in the documentation. Our "
                           f"support team can talk you through the detail.")
             role = "capability"
+            ptrace.mark("capability", _t)
             offer_support = False
             flagged = False
             logger.info(f"capability question answered from the corpus: "
@@ -6120,6 +6811,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
             if _inferred:
                 answer = _inferred
                 role = "inference"
+                ptrace.mark("inference")
                 offer_support = False
                 # NOT flagged. flagged means "served despite failing the
                 # grounding gate, review this" -- and this answer did not
@@ -6170,6 +6862,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
                     f"have here — could you tell me more concretely what "
                     f"you'd like me to check, or which model you mean?")
                 role = "clarify"
+                ptrace.mark("clarify", _asked[:60])
                 needs_clarification = True
                 # PRODUCT LABELS, not the visitor's own earlier questions.
                 # The question this branch now asks ends "...or which model
@@ -6219,6 +6912,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # total_time did not exist yet at the point the line was written.
     total_time = time.time() - start_total
 
+    ptrace.mark("respond", f"{len(sources)} source(s), role {role}")
     log_interaction(q, answer, role, output.get("model"),
                     [s["source"] for s in sources],
                     grounding_score=grounding_score, flagged=flagged,
@@ -6281,6 +6975,7 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
         # clarify raised here.
         "needs_clarification": needs_clarification,
         "clarification_options": clarification_options,
+        "suggested_replies": suggested_replies,
         # WHY this turn ended the way it did, in one word: stated,
         # documented_elsewhere, inferable, advisory, unanswerable. Every
         # refusal used to look identical from outside, so the console

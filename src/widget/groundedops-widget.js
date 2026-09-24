@@ -65,8 +65,22 @@
     return script.getAttribute(name) !== null;
   }
 
+  // On an HTTPS page an http:// URL is either blocked outright (fetch: mixed
+  // content, no message on screen) or, for a navigation, lands the visitor
+  // on a different origin whose localStorage does not have their
+  // conversation — so the sign-in round trip would lose the question it
+  // exists to answer. Upgrading cannot make either case worse. Loopback is
+  // left alone: browsers allow it, and a local test backend has no TLS.
+  var LOCAL_HOST_RE = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])([:/?#]|$)/i;
+  function secureUrl(url) {
+    if (!url || location.protocol !== "https:" || !/^http:\/\//i.test(url) || LOCAL_HOST_RE.test(url))
+      return url;
+    if (window.console) console.warn("GroundedOps widget: upgraded http URL to https on an https page:", url);
+    return "https://" + url.slice(7);
+  }
+
   var cfg = {
-    api: attr("data-api", "").replace(/\/+$/, ""),
+    api: secureUrl(attr("data-api", "").replace(/\/+$/, "")),
     title: attr("data-title", "Support"),
     agent: attr("data-agent-name", "Assistant"),
     avatar: attr("data-avatar-url", ""),
@@ -76,7 +90,7 @@
     // Signed by the website server-side for logged-in users. Absent for
     // anonymous visitors, who get curated FAQ answers only.
     token: attr("data-token", ""),
-    signInUrl: attr("data-sign-in-url", ""),
+    signInUrl: secureUrl(attr("data-sign-in-url", "")),
     supportEmail: attr("data-support-email", ""),
     welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
     prompt: attr("data-prompt", "How can I help today?"),
@@ -115,7 +129,7 @@
       serverCfg.intro_options = d.intro_options;
     if (d.sales_form) serverCfg.sales_form = d.sales_form;
     if (d.support_form) serverCfg.support_form = d.support_form;
-    if (d.sign_in_url && !hasAttr("data-sign-in-url")) cfg.signInUrl = d.sign_in_url;
+    if (d.sign_in_url && !hasAttr("data-sign-in-url")) cfg.signInUrl = secureUrl(d.sign_in_url);
   }
 
   var configLoaded = null;   // a promise, so the panel can await it once
@@ -215,6 +229,48 @@
     try {
       localStorage.removeItem(STORE_KEY);
     } catch (e) {}
+  }
+
+  // ── sign-in round trip ────────────────────────────────────────────────
+  // Sign-in navigates this tab away (it used to open a new one, which left
+  // the original tab holding a guest token forever). The question that hit
+  // the wall is parked here so the page the visitor lands back on — now
+  // rendered with a data-token — can answer it without being asked twice.
+  // Keyed to the session so it can only replay into the same conversation,
+  // and short-lived so an abandoned sign-in does not fire days later.
+  var PENDING_KEY = "groundedops_pending_ask";
+  var PENDING_MAX_AGE_MS = 30 * 60 * 1000;
+
+  function goSignIn(url, q) {
+    try {
+      if (q) {
+        localStorage.setItem(PENDING_KEY, JSON.stringify({
+          q: q, sessionId: state.sessionId, at: Date.now(),
+        }));
+      }
+    } catch (e) {
+      /* storage blocked: sign-in still works, the question just isn't replayed */
+    }
+    window.location.href = url;
+  }
+
+  /** Read and remove the parked question. Removed on read either way, so a
+   *  failed replay can never loop. */
+  function takePendingAsk() {
+    try {
+      var raw = localStorage.getItem(PENDING_KEY);
+      if (!raw) return null;
+      localStorage.removeItem(PENDING_KEY);
+      var p = JSON.parse(raw);
+      if (!p || !p.q || Date.now() - (p.at || 0) > PENDING_MAX_AGE_MS) return null;
+      return p;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function hasPendingAsk() {
+    try { return !!localStorage.getItem(PENDING_KEY); } catch (e) { return false; }
   }
 
   // ── styles ────────────────────────────────────────────────────────────
@@ -1023,6 +1079,21 @@
     Array.prototype.forEach.call($log.querySelectorAll("[data-chips]"), function (n) {
       n.remove();
     });
+    clearGhost();
+  }
+
+  /** The reply the assistant expects next, shown in the empty composer.
+   *  Right arrow accepts it into the field and Enter sends it, so answering
+   *  "Would you like them?" is two keys. Lives and dies with the chips. */
+  var ghostReply = null;
+  function setGhost(text) {
+    ghostReply = text;
+    $in.placeholder = text + "  (→ to accept)";
+  }
+  function clearGhost() {
+    if (ghostReply === null) return;
+    ghostReply = null;
+    if (!$in.disabled) unlockComposer();
   }
 
   function renderScopeBar() {
@@ -1109,7 +1180,7 @@
       if (cfg.signInUrl) {
         chips([{
           label: "Sign in for full AI support",
-          onClick: function () { window.open(cfg.signInUrl, "_blank"); },
+          onClick: function () { goSignIn(cfg.signInUrl); },
         }], null);
       }
     };
@@ -1744,6 +1815,26 @@
     );
   }
 
+  /** Back from sign-in with a question parked: restore the conversation
+   *  without the "carry on or start again?" prompt — they obviously want to
+   *  carry on — and ask it again with the token this page now has. Returns
+   *  false when there is nothing valid to replay, so the normal open runs. */
+  function resumeAfterSignIn() {
+    var p = takePendingAsk();
+    var saved = loadSaved();
+    if (!p || !saved || !saved.product || saved.sessionId !== p.sessionId) return false;
+    state = saved;
+    state.stage = "chat";
+    renderLog();
+    renderScopeBar();
+    save();
+    say("You're signed in now, so here's the full answer.");
+    // Quota first: ask() picks faq_only vs standard from it, and on a fresh
+    // page it has not been fetched yet.
+    refreshQuota().then(function () { ask(p.q, { silent: true }); });
+    return true;
+  }
+
   // ── query ─────────────────────────────────────────────────────────────
   /** Ask, but explicitly skip the curated FAQ short-circuit. Used when the
    *  visitor rejects a "did you mean" suggestion — at that point they've
@@ -1883,10 +1974,15 @@
         // Backend says a full answer needs an account.
         if (d.needs_sign_in) {
           say(d.answer, { flagged: false });
-          if (d.sign_in_url || cfg.signInUrl) {
+          // The page's own URL first: WordPress builds it with redirect_to
+          // pointing back at this page, which is where the replay has to
+          // happen. The backend's WIDGET_SIGN_IN_URL has no idea which page
+          // the visitor was on.
+          var signIn = cfg.signInUrl || secureUrl(d.sign_in_url);
+          if (signIn) {
             chips([{
               label: "Sign in for a full answer",
-              onClick: function () { window.open(d.sign_in_url || cfg.signInUrl, "_blank"); },
+              onClick: function () { goSignIn(signIn, q); },
             }], null);
           }
           return;
@@ -1925,6 +2021,21 @@
           flagged: !!d.flagged,
           badge: d.from_faq ? "Reviewed answer" : null,
         });
+
+        // The answer asked a yes/no question ("Would you like them?") and
+        // sent the replies it can honour. Tap one, or right arrow + Enter.
+        var replies = d.suggested_replies || [];
+        if (replies.length) {
+          chips(replies.map(function (opt, i) {
+            return {
+              label: opt,
+              style: i ? "alt" : null,
+              onClick: function () { ask(opt); },
+            };
+          }), null);
+          setGhost(replies[0]);
+          return;
+        }
 
         // The assistant asked a question back. It has always ALSO sent the
         // answers it would accept -- product labels drawn from the documents
@@ -2015,7 +2126,7 @@
   }
 
   // ── events ────────────────────────────────────────────────────────────
-  $launch.addEventListener("click", function () {
+  function openPanel(firstScreen) {
     root.classList.add("go-open");
     $launch.setAttribute("aria-expanded", "true");
     if (!opened) {
@@ -2025,17 +2136,25 @@
       // built-in ones first would show a flash of the wrong wording. The
       // fetch resolves even on failure, so this cannot leave the panel blank.
       loadConfig().then(function () {
+        if (firstScreen && firstScreen()) return;
         var saved = loadSaved();
         if (saved) offerResume(saved);
         else startFresh();
       });
     }
-  });
+  }
+  $launch.addEventListener("click", function () { openPanel(); });
 
   // Warm the config as soon as the script runs rather than on first open, so
   // the panel is usually ready instantly. Harmless if never opened: one
   // small GET.
   loadConfig();
+
+  // Landed back from sign-in: open straight onto the answer. Only with a
+  // token — without one the sign-in did not complete, and replaying would
+  // just show the same "sign in" wall again. The parked question is left
+  // for a later signed-in page load until it expires.
+  if (cfg.token && hasPendingAsk()) openPanel(resumeAfterSignIn);
 
   function close() {
     root.classList.remove("go-open");
@@ -2060,6 +2179,12 @@
     $send.disabled = !$in.value.trim() || busy || $in.disabled;
   });
   $in.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowRight" && ghostReply && !$in.value) {
+      e.preventDefault();
+      $in.value = ghostReply;
+      $send.disabled = busy || $in.disabled;
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       $form.requestSubmit();

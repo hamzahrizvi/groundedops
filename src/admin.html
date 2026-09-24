@@ -442,7 +442,31 @@
   /* ---------- login gate ---------- */
   .gate{height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
         background:var(--color-bg);color:var(--color-text)}
-  .gate .card{max-width:380px;width:100%}
+  .gate .card{max-width:400px;width:100%}
+  /* Sign-in card: labelled fields, one solid primary action, full-width
+     "Continue with ..." alternatives, and the account request as a footer. */
+  .gate-label{display:block;font-size:13px;font-weight:600;margin:0 0 6px}
+  .gate .field{margin-bottom:14px}
+  .gate-link{background:none;border:0;padding:0;font:inherit;font-size:13px;cursor:pointer;
+    color:var(--color-text);text-decoration:underline;text-underline-offset:3px;
+    text-decoration-color:color-mix(in srgb,var(--color-text) 40%,transparent)}
+  .gate-link:hover{color:var(--a, var(--color-accent))}
+  .gate-primary{width:100%;justify-content:center;padding:11px 14px;font-weight:600;
+    font-size:14.5px;border-radius:8px;background:var(--color-accent);
+    color:var(--color-bg, #16181f);border-color:var(--color-accent)}
+  .gate-primary:hover{background:color-mix(in srgb,var(--color-accent) 88%,#fff)}
+  .gate-alt{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;
+    padding:10px 14px;border-radius:8px;font:inherit;font-weight:600;font-size:14px;cursor:pointer;
+    color:var(--color-text);background:color-mix(in srgb,var(--color-text) 4%,transparent);
+    border:1px solid color-mix(in srgb,var(--color-text) 16%,transparent)}
+  .gate-alt:hover{background:color-mix(in srgb,var(--color-text) 9%,transparent)}
+  .gate-alt:disabled{opacity:.55;cursor:default}
+  .gate-alt svg{flex:0 0 18px}
+  .gate-or{display:flex;align-items:center;gap:12px;margin:20px 0 14px;font-size:12px;
+    color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+  .gate-or::before,.gate-or::after{content:"";flex:1;height:1px;
+    background:color-mix(in srgb,var(--color-text) 18%,transparent)}
+  .gate-foot{text-align:center;font-size:13.5px}
 
   .md{min-width:0}
   .md p{margin:0 0 7px}
@@ -498,6 +522,25 @@
   @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
     .topbar{background:var(--color-bg)}
   }
+  .acct-wrap{position:relative}
+  .acct-btn{width:30px;height:30px;border-radius:50%;cursor:pointer;font:inherit;
+    font-size:11.5px;font-weight:700;letter-spacing:.02em;color:var(--color-bg);
+    background:var(--color-accent);border:0;display:inline-flex;align-items:center;justify-content:center}
+  .acct-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+  .acct-pop{position:absolute;right:0;top:calc(100% + 8px);z-index:60;width:260px;
+    background:var(--color-surface, var(--color-bg));border-radius:10px;padding:12px;
+    border:1px solid color-mix(in srgb,var(--color-text) 14%,transparent);
+    box-shadow:0 12px 32px rgba(0,0,0,.35)}
+  .acct-pop[hidden]{display:none}
+  .acct-pop .who, .acct-pop .lan{margin:0;padding:0;border:0;position:static;display:block}
+  /* The narrow-screen rules that collapse the rail also hid these; in the
+     menu there is room for them at any width. */
+  .acct-pop .who-id{display:flex}
+  .acct-pop .who-mail{display:block}
+  .acct-sep{height:1px;margin:10px -12px;background:color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .acct-item{display:block;width:100%;text-align:left;background:none;border:0;cursor:pointer;
+    font:inherit;font-size:13.5px;color:var(--color-text);padding:7px 8px;border-radius:6px}
+  .acct-item:hover{background:color-mix(in srgb,var(--color-text) 8%,transparent)}
   .topbar-tabs{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
   /* Scoped to the tabs, NOT ".topbar button". Once the page controls moved
      into this bar, a rule on every button in it also styled them -- and
@@ -620,6 +663,35 @@
     .topbar{margin:0 -18px 14px;padding:10px 18px 6px}
   }
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  /* Startup panel, bottom LEFT so it never sits on top of .bgtasks. The
+     console used to show nothing at all while the server loaded its models:
+     pages half-worked, uploads answered 503, and the only signal was that
+     things felt broken for two minutes. */
+  .bootbar{position:fixed;left:16px;bottom:16px;z-index:60;width:274px;
+           background:var(--color-surface);border-radius:var(--radius-md);
+           padding:11px 13px;box-shadow:var(--shadow-lg),
+           inset 0 0 0 1px var(--color-divider);animation:rise .18s ease both;
+           font-size:12px}
+  .bootbar b{font-size:12.5px;font-weight:500}
+  .bootbar .boot-msg{margin-top:1px;
+      color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+  .bootbar .boot-stage{display:flex;gap:7px;margin-top:5px;align-items:baseline}
+  .bootbar .boot-stage .g{width:11px;flex:0 0 auto;text-align:center}
+  .bootbar .boot-stage .t{flex:1}
+  .bootbar .boot-stage .s{
+      color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .bootbar .boot-stage.pending{
+      color:color-mix(in srgb, var(--color-text) 45%, transparent)}
+  .bootbar .boot-stage.error{color:var(--color-accent)}
+  .bootbar .boot-foot{margin-top:9px;padding-top:8px;
+      border-top:1px solid var(--color-divider);
+      color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+  @media (max-width:820px){ .bootbar{left:8px;right:8px;width:auto} }
+
+  /* A control whose capability is still loading. Greyed, not hidden: a row
+     that disappears and comes back looks like a bug, and seeing it greyed
+     tells you it exists and is on its way. */
+  .not-ready{opacity:.45;pointer-events:none;filter:saturate(.4)}
 </style>
 </head>
 <body>
@@ -647,6 +719,36 @@ let tok = sessionStorage.getItem("go_admin_token") || "";
 // `level` decides which nav rows exist, so it is held rather than re-fetched.
 let me = JSON.parse(sessionStorage.getItem("go_admin_me") || "null");
 
+// An emailed link lands here as /admin#reset=<token> or /admin#login=<token>.
+// The fragment never reaches a server, and it is cleared from the address bar
+// straight away so the token is not left in history or on a shared screen.
+// Nothing is spent until the person presses the button on the gate.
+// A Microsoft/Google sign-in comes back the same way, as #sso=<handoff> (a
+// two-minute single-use code, spent automatically: it came from our own
+// redirect, not an email a scanner could open) or #sso_error=<reason>.
+let pendingLink = null;
+let ssoError = null;
+(() => {
+  const h = location.hash || "";
+  const m = /^#(reset|login|sso)=([A-Za-z0-9_-]{20,})$/.exec(h);
+  const e = /^#sso_error=([a-z_]{1,40})$/.exec(h);
+  if (m) pendingLink = { kind: m[1], token: m[2] };
+  else if (e) ssoError = e[1];
+  else return;
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (x) {}
+})();
+
+const SSO_ERRORS = {
+  no_account: "You signed in, but that address has no account here. Ask a root "
+    + "admin to add you, or use Request an account.",
+  cancelled: "Sign-in was cancelled.",
+  expired: "That sign-in took too long or was started in another browser. Please try again.",
+  wrong_tenant: "That account is not from this organisation's directory.",
+  unverified: "The provider has not verified that email address.",
+  not_configured: "That sign-in option is not set up yet.",
+  no_address: "Work sign-in is not available from this address. Ask a root admin to set ADMIN_PUBLIC_URL.",
+};
+
 const LEVEL_LABEL = { root: "Root", support: "Support", basic: "Basic" };
 const isRoot = () => me && me.level === "root";
 const isStaff = () => me && (me.level === "root" || me.level === "support");
@@ -668,6 +770,127 @@ let view = "documents";
 let pendingAnswer = null;
 let cache = { catalog: null, sources: [], faq: [], gaps: [], providers: [],
               widget: null, leads: [], leadStats: {} };
+
+/* ---------------- startup state ---------------- */
+// The server warms six things at boot (see main.py's _WARMUP_STAGES) and
+// reports each one on /status. Two things are done with that here: the panel
+// bottom-left says what is loading, and the few controls that genuinely need
+// a model are greyed until it is up.
+//
+// `null` until /status answers, and null means PERMISSIVE: an unreachable or
+// older server should leave the console fully usable rather than greying
+// everything out on no evidence.
+let boot = null;
+let bootTimer = null;
+
+// A page and the capability it needs. Everything NOT listed works from the
+// moment the console loads -- filing documents, editing answers, products,
+// enquiries, the widget design and accounts are plain reads and writes that
+// touch no model at all, and holding them back was the actual complaint.
+const PAGE_CAP = { test: "ask" };
+const CAP_WAIT = {
+  ask: "The answering models are still loading",
+  search: "The search model is still loading",
+  faq: "FAQ search is still loading",
+  specs: "The product specifications are still being indexed",
+};
+
+const can = cap => !boot || boot.ready || boot.capabilities[cap] === true;
+const bootFailed = () =>
+  !!boot && (boot.stages || []).some(st => st.state === "error");
+
+async function pollBoot() {
+  try {
+    const r = await fetch(API + "/status");
+    boot = r.ok ? await r.json() : null;
+  } catch (e) {
+    // Unreachable: hold no opinion. The gate already reports a server it
+    // cannot reach, and a second panel saying so is noise.
+    boot = null;
+  }
+  // NOT render(): a stage landing mid-typing must not wipe the email someone
+  // is halfway through entering at the sign-in card. Only the panel and the
+  // locks are touched, both of which are idempotent.
+  afterRender();
+  clearTimeout(bootTimer);
+  if (!boot || !boot.ready || bootFailed()) bootTimer = setTimeout(pollBoot, 1500);
+}
+
+function afterRender() {
+  applyCapabilityLocks();
+  paintBoot();
+}
+
+// Applied to whatever is on screen after every render, and again whenever a
+// stage lands. Views opt in by tagging an element data-cap="<capability>";
+// nothing else has to know this exists.
+function applyCapabilityLocks() {
+  document.querySelectorAll("[data-cap]").forEach(n => {
+    const cap = n.getAttribute("data-cap");
+    const ok = can(cap);
+    n.classList.toggle("not-ready", !ok);
+    n.setAttribute("aria-disabled", ok ? "false" : "true");
+    if ("disabled" in n) n.disabled = !ok;
+    if (!ok) {
+      if (n.dataset.capTitle === undefined) n.dataset.capTitle = n.title || "";
+      n.title = (CAP_WAIT[cap] || "Still loading") + " \u2014 a few seconds";
+    } else if (n.dataset.capTitle !== undefined) {
+      n.title = n.dataset.capTitle;
+      delete n.dataset.capTitle;
+    }
+  });
+}
+
+const BOOT_GLYPH = { done: "\u2713", working: "\u25cf", error: "\u2715",
+                     pending: "\u00b7" };
+
+function paintBoot() {
+  let box = document.getElementById("bootbar");
+  if (!boot) return;                       // nothing known: say nothing
+
+  if (boot.ready && !bootFailed()) {
+    // Say it finished, once, then get out of the way. A panel that vanishes
+    // without a word leaves you wondering whether it finished or died.
+    if (box && !box.dataset.finished) {
+      box.dataset.finished = "1";
+      box.innerHTML = "";
+      box.append(el("div", {}, el("b", {}, "Everything is ready")));
+      setTimeout(() => box.remove(), 2600);
+    }
+    return;
+  }
+
+  if (!box) {
+    box = el("div", { id: "bootbar", class: "bootbar", role: "status",
+                      "aria-live": "polite" });
+    document.body.append(box);
+  }
+  const stages = boot.stages || [];
+  const pct = typeof boot.progress === "number" ? boot.progress : 0;
+  const waiting = stages.filter(st => st.state !== "done" && st.state !== "error")
+                        .map(st => st.label);
+  box.innerHTML = "";
+  box.append(
+    el("div", {}, el("b", {}, bootFailed() ? "Started with a problem"
+                                           : "Starting up")),
+    el("div", { class: "boot-msg" }, boot.message || ""),
+    el("div", { class: "bar" }, el("i", { style: "width:" + pct + "%" })),
+    // Wrapped, not spread into append(): Node.append stringifies an array
+    // argument, which put "[object HTMLDivElement]" on screen. el() flattens.
+    el("div", {}, stages.map(st => el("div", { class: "boot-stage " + st.state },
+      el("span", { class: "g" }, BOOT_GLYPH[st.state] || "\u00b7"),
+      el("span", { class: "t" }, st.label),
+      el("span", { class: "s" },
+         st.state === "done" && st.seconds != null ? st.seconds + "s"
+       : st.state === "error" ? "failed" : "")))),
+    el("div", { class: "boot-foot" },
+       bootFailed()
+         ? "Check backend.log \u2014 what did load is usable."
+         : (waiting.length
+            ? "Documents, answers and settings work now. Anything greyed is "
+              + "waiting on the models."
+            : "Nearly there\u2026")));
+}
 
 // Sentinel for "answers carrying no product tag at all" in the answers-page
 // picker, kept distinct from "" which means nothing chosen yet.
@@ -1010,6 +1233,10 @@ const answered = () => cache.faq.filter(f => (f.answer || "").trim());
 /* ---------------- shell ---------------- */
 function render() {
   const app = document.getElementById("app");
+  // After the synchronous body of this function, whichever of its several
+  // return paths was taken -- the gate, the basic shell or the full console
+  // all need the same treatment, and none of them should have to remember.
+  queueMicrotask(afterRender);
   // The popover lives on <body>, so it outlives app.innerHTML and has to be
   // taken down by hand. A GUIDED run is the one case where the page changing
   // is the tour doing its job rather than the reader leaving it, so its state
@@ -1017,7 +1244,7 @@ function render() {
   // first step.
   if (guidedOn) clearTourUI(); else endTour();
   app.innerHTML = "";
-  if (!tok) return app.append(gate());
+  if (!tok || pendingLink) return app.append(gate());
 
   // A basic account has no admin surface at all — every admin endpoint
   // refuses it with a 403 — so it gets the test chat and nothing else
@@ -1031,6 +1258,8 @@ function render() {
     const b = el("button", {
       onclick: () => { view = id; render(); },
       "aria-current": view === id ? "page" : null,
+      // Greyed until the model this page needs has loaded; see PAGE_CAP.
+      "data-cap": PAGE_CAP[id] || null,
       // The label is also the tooltip: collapsed, the icon is all there is,
       // and an icon nobody can name is a guessing game.
       title: label,
@@ -1080,14 +1309,11 @@ function render() {
         // Root only. Support deliberately cannot see this: being able to
         // grant yourself or anyone else access is the one thing that level
         // does not get.
-        isRoot() ? nav("accounts", "Accounts") : null,
         isRoot() ? nav("keys", "API keys") : null,
         isRoot() ? nav("policy", "Access & limits") : null,
         isRoot() ? nav("advanced", "Advanced") : null,
         nav("backup", "Backup"),
       ),
-      lanBox(),
-      whoBox(),
     ),
     el("main", { class: "main" },
       // Filled by buildSubnav() after the view renders; it removes itself
@@ -1099,7 +1325,8 @@ function render() {
         el("div", { class: "chrome-btns" },
           themeToggle(),
           el("button", { class: "help-btn", onclick: startTour,
-                         title: "How to use this page", "aria-label": "How to use this page" }, "?"))),
+                         title: "How to use this page", "aria-label": "How to use this page" }, "?"),
+          accountMenu())),
       el("div", { class: "wrap" }, body()))
   ));
 
@@ -1207,6 +1434,46 @@ function lanBox() {
   return box;
 }
 
+// Top-right account menu: who you are, your password, Accounts (root), the
+// console's network address, and the way out. These used to sit at the foot
+// of the rail, where they pushed the page list around and were the last
+// thing anyone looked at.
+let acctClose = null, acctListening = false;
+function accountMenu() {
+  const initials = (me.name || me.email).split(/[\s@.]+/).filter(Boolean)
+    .slice(0, 2).map(w => w[0].toUpperCase()).join("");
+  const panel = el("div", { class: "acct-pop", role: "menu", hidden: "true" });
+  const btn = el("button", { class: "acct-btn", title: me.email,
+    "aria-label": "Account menu", "aria-haspopup": "menu", "aria-expanded": "false" }, initials);
+  const close = () => { panel.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+  const item = (label, fn) => el("button", { class: "acct-item", role: "menuitem",
+    onclick: () => { close(); fn(); } }, label);
+  panel.append(
+    whoBox(),
+    el("div", { class: "acct-sep" }),
+    isRoot() ? item("Accounts", () => { view = "accounts"; render(); }) : null,
+    item("Change password", changeOwnPassword),
+    item("Sign out", () => signOut("Signed out")),
+    el("div", { class: "acct-sep" }),
+    lanBox());
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const open = panel.hidden;
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  };
+  panel.addEventListener("click", e => e.stopPropagation());
+  // One document listener for the page's life, pointed at the current menu:
+  // render() rebuilds this on every change and must not stack listeners.
+  acctClose = close;
+  if (!acctListening) {
+    acctListening = true;
+    document.addEventListener("click", () => acctClose && acctClose());
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && acctClose) acctClose(); });
+  }
+  return el("div", { class: "acct-wrap" }, btn, panel);
+}
+
 // Who you are signed in as, and the way out. Worth showing permanently:
 // with levels, "why can't I see that page" is answered by reading this.
 function whoBox() {
@@ -1214,12 +1481,7 @@ function whoBox() {
     el("div", { class: "who-id" },
       el("b", {}, me.name || me.email),
       el("span", { class: "who-lvl" }, LEVEL_LABEL[me.level] || me.level)),
-    me.name ? el("div", { class: "who-mail mono" }, me.email) : null,
-    el("div", { class: "who-acts" },
-      el("button", { class: "btn btn-ghost", onclick: changeOwnPassword },
-        "Change password"),
-      el("button", { class: "btn btn-ghost",
-                     onclick: () => signOut("Signed out") }, "Sign out")));
+    me.name ? el("div", { class: "who-mail mono" }, me.email) : null);
 }
 
 // The whole console for a basic account: the test chat, and no rail. There
@@ -1855,7 +2117,7 @@ function gate() {
   const pwIn = el("input", { class: "input", type: "password", placeholder: "Password" });
   const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
                     "Checking this install\u2026");
-  const btn = el("button", { class: "btn btn-primary", disabled: "true" }, "Sign in");
+  const btn = el("button", { class: "btn btn-primary gate-primary", disabled: "true" }, "Sign in");
   // Signing in checks a password hash and then loads every cache the console
   // renders from, which is long enough that a button doing nothing reads as a
   // button that did not register the press.
@@ -1868,13 +2130,20 @@ function gate() {
   // Set once the server says whether any account exists.
   const heading = el("h2", {}, "Sign in");
   const nameIn = el("input", { class: "input", placeholder: "Your name (optional)" });
-  const nameField = el("div", { class: "field", style: "display:none" }, nameIn);
+  const nameField = el("div", { class: "field", style: "display:none" },
+    el("label", { class: "gate-label" }, "Name"), nameIn);
   const confirmIn = el("input", { class: "input", type: "password",
                                    placeholder: "Confirm password" });
-  const confirmField = el("div", { class: "field", style: "display:none" }, confirmIn);
-  const switchBtn = el("button", { class: "btn btn-ghost",
-                                    style: "display:none;margin-top:8px" },
-                       "Request an account");
+  const confirmField = el("div", { class: "field", style: "display:none" },
+    el("label", { class: "gate-label" }, "Confirm password"), confirmIn);
+  const switchBtn = el("button", { class: "gate-link", style: "display:none" },
+                       "Request one");
+  const footPrefix = el("span", {}, "");
+  // Hidden on first run and on a link landing, where there is no account
+  // to request and no alternative to offer.
+  const footWrap = el("div", { style: "display:none" },
+    el("div", { class: "gate-or" }, "OR"),
+    el("div", { class: "gate-foot" }, footPrefix, switchBtn));
   let gateMode = "signin";
   let requestSent = false;
 
@@ -1895,6 +2164,7 @@ function gate() {
   };
 
   const enter = async (r) => {
+    pendingLink = null;
     tok = r.token;
     me = r.user;
     sessionStorage.setItem("go_admin_token", tok);
@@ -1945,8 +2215,111 @@ function gate() {
     busy(false);
   };
 
+  // Emailed links. Offered only when the server can send mail
+  // (/admin/auth/state says so); the reply never says whether the address
+  // has an account, so neither does this page.
+  let emailLinks = false;
+  const linkRow = el("div", { style: "display:none;flex-direction:column;gap:10px;margin-top:12px" });
+  const askLink = async (purpose) => {
+    const email = emailIn.value.trim();
+    if (!email) { emailIn.focus(); return toast("Enter your email address first", true); }
+    busy(true);
+    try {
+      const r = await api("/admin/auth/email-link", { method: "POST",
+        body: JSON.stringify({ email, purpose }) });
+      status.textContent = r.message;
+      toast(purpose === "reset" ? "Reset email requested" : "Sign-in link requested");
+    } catch (e) { fail(e, "Request"); }
+    busy(false);
+  };
+  const icon = (svg) => { const i = el("span", { style: "display:inline-flex" }); i.innerHTML = svg; return i; };
+  const ICONS = {
+    microsoft: '<svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>',
+    google: '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>',
+    email: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+  };
+  const forgotLink = el("button", { class: "gate-link", style: "margin-top:8px",
+    onclick: () => askLink("reset") }, "Forgot your password?");
+  const emailLinkBtn = el("button", { class: "gate-alt", onclick: () => askLink("login") },
+    icon(ICONS.email), "Email me a sign-in link");
+  const pwLabel = el("label", { class: "gate-label" }, "Password");
+  const pwField = el("div", { class: "field" }, pwLabel, pwIn, forgotLink);
+  const emailField = el("div", { class: "field" },
+    el("label", { class: "gate-label" }, "Email"), emailIn);
+
+  // "Sign in with Microsoft / Google": a plain navigation, because the
+  // provider's page cannot run inside this one. Drawn only for providers
+  // the server says are fully configured.
+  const ssoRow = el("div", { style: "display:none;flex-direction:column;gap:10px" });
+  const drawSso = (list) => {
+    ssoRow.textContent = "";
+    list.forEach(p => ssoRow.append(el("button", { class: "gate-alt",
+      onclick: () => { busy(true); location.href = API + "/admin/auth/sso/" + p.key + "/start"; } },
+      ICONS[p.key] ? icon(ICONS[p.key]) : null, "Continue with " + p.label)));
+  };
+  linkRow.append(ssoRow, emailLinkBtn);
+  let ssoList = [];
+
+  // Arrived from an emailed link. The token is spent only by this button,
+  // never on page load, so a mail scanner opening the link first cannot use
+  // it up -- and cannot sign anyone in.
+  const showLink = () => {
+    const { kind, token } = pendingLink;
+    gateMode = "link";
+    switchBtn.style.display = "none";
+    footWrap.style.display = "none";
+    linkRow.style.display = "none";
+    forgotLink.style.display = "none";
+    pwLabel.textContent = "New password";
+    emailField.style.display = "none";
+    nameField.style.display = "none";
+    if (kind === "reset") {
+      heading.textContent = "Choose a new password";
+      status.textContent = "At least 12 characters. Saving it signs out every "
+        + "other session on your account.";
+      pwField.style.display = "";
+      confirmField.style.display = "";
+      pwIn.placeholder = "New password";
+      btn.textContent = "Set password and sign in";
+      btn.onclick = async () => {
+        if (pwIn.value.length < 12) return toast("Use at least 12 characters", true);
+        if (pwIn.value !== confirmIn.value) return toast("Those passwords did not match", true);
+        busy(true);
+        try {
+          const r = await api("/admin/auth/reset", { method: "POST",
+            body: JSON.stringify({ token, password: pwIn.value }) });
+          await enter(r);
+          toast("Password changed — you are signed in");
+        } catch (e) { fail(e, "Reset"); busy(false); }
+      };
+    } else {
+      heading.textContent = "Sign in with your email link";
+      status.textContent = "This link works once. Continue to sign in on this browser.";
+      pwField.style.display = "none";
+      confirmField.style.display = "none";
+      btn.textContent = "Continue";
+      btn.onclick = async () => {
+        busy(true);
+        try { await enter(await api("/admin/auth/email-login", { method: "POST",
+          body: JSON.stringify({ token }) })); }
+        catch (e) { fail(e, "Sign-in"); busy(false); }
+      };
+    }
+    const back = el("button", { class: "btn btn-ghost", style: "margin-top:8px",
+      onclick: () => { pendingLink = null; render(); } }, "Back to sign in");
+    btn.after(back);
+  };
+
   const showSignIn = () => {
     gateMode = "signin";
+    // Shown even before mail is set up: the server's reply then says who to
+    // ask, which beats an option that silently is not there.
+    linkRow.style.display = "flex";
+    ssoRow.style.display = ssoList.length ? "flex" : "none";
+    forgotLink.style.display = "";
+    footWrap.style.display = "";
+    pwLabel.textContent = "Password";
+    footPrefix.textContent = "Don't have an account? ";
     heading.textContent = "Sign in";
     status.textContent = requestSent
       ? "Request sent. You can sign in after a root user approves it."
@@ -1957,11 +2330,16 @@ function gate() {
     pwIn.placeholder = "Password";
     btn.textContent = "Sign in";
     btn.onclick = signIn;
-    switchBtn.textContent = "Request an account";
+    switchBtn.textContent = "Request one";
   };
 
   const showRequest = () => {
     gateMode = "request";
+    linkRow.style.display = "none";
+    ssoRow.style.display = "none";
+    forgotLink.style.display = "none";
+    footWrap.style.display = "";
+    footPrefix.textContent = "Already have an account? ";
     heading.textContent = "Request an account";
     status.textContent = "Choose your sign-in details. A root user must approve "
       + "the request before the account can be used.";
@@ -1970,7 +2348,7 @@ function gate() {
     pwIn.placeholder = "Password (at least 12 characters)";
     btn.textContent = "Send request";
     btn.onclick = requestAccess;
-    switchBtn.textContent = "Back to sign in";
+    switchBtn.textContent = "Sign in";
   };
 
   switchBtn.onclick = () => gateMode === "signin" ? showRequest() : showSignIn();
@@ -1995,12 +2373,30 @@ function gate() {
       const s = await (await fetch(API + "/admin/auth/state")).json();
       firstRun = !s.initialised;
       gateDomain = s.email_domain || "";
+      emailLinks = !!s.email_links;
+      ssoList = s.sso_providers || [];
+      drawSso(ssoList);
     } catch (e) {
       status.textContent = "Could not reach the server at " + API + ".";
       return;
     }
     btn.disabled = false;
-    if (firstRun) {
+    if (pendingLink && pendingLink.kind === "sso") {
+      // Back from Microsoft/Google: trade the handoff for a session at once.
+      const token = pendingLink.token;
+      showSignIn();
+      status.textContent = "Finishing sign-in…";
+      busy(true);
+      try {
+        await enter(await api("/admin/auth/sso/finish", { method: "POST",
+          body: JSON.stringify({ token }) }));
+      } catch (e) {
+        pendingLink = null; busy(false);
+        switchBtn.style.display = "inline-flex"; showSignIn(); fail(e, "Sign-in");
+      }
+    } else if (pendingLink && !firstRun) {
+      showLink();
+    } else if (firstRun) {
       status.textContent = "No accounts exist yet. Create the first one \u2014 it "
         + "will be the root account, the only level that can add others.";
       heading.textContent = "Create the first account";
@@ -2011,6 +2407,11 @@ function gate() {
     } else {
       switchBtn.style.display = "inline-flex";
       showSignIn();
+    }
+    if (ssoError) {
+      status.textContent = SSO_ERRORS[ssoError]
+        || "Work-account sign-in did not complete. Please try again.";
+      ssoError = null;
     }
   })();
 
@@ -2032,11 +2433,14 @@ function gate() {
         themeToggle()),
       heading,
       status,
-      el("div", { class: "field" }, emailIn),
+      emailField,
       nameField,
-      el("div", { class: "field" }, pwIn),
+      pwField,
       confirmField,
-      el("div", { style: "margin-top:14px" }, btn, signingIn, switchBtn)));
+      el("div", { style: "margin-top:18px;display:flex;flex-direction:column;gap:8px" },
+        btn, signingIn),
+      linkRow,
+      footWrap));
 }
 
 /* ---------------- accounts (root only) ---------------- */
@@ -2212,7 +2616,75 @@ function viewAccounts() {
       requestRows),
     newCard,
     el("div", { "data-sec": "Everyone", "data-tour": "accounts-list" }, rows),
+    ssoCard(),
   ];
+}
+
+// Work-account sign-in settings. Signing in this way never CREATES an
+// account: the provider proves the email, and it must already be listed above.
+let ssoCache = null;
+
+function ssoCard() {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Work sign-in",
+    style: "padding:14px 18px;margin-top:18px" });
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const draw = () => {
+    card.textContent = "";
+    card.append(el("b", {}, "Sign in with a work account"),
+      el("p", { style: "margin:4px 0 10px;font-size:13px" },
+        "Adds “Sign in with Microsoft” / “Sign in with Google” to the "
+        + "sign-in page. It only proves who someone is: their address must already "
+        + "have an account above, at the level you gave it."));
+    const c = ssoCache;
+    if (!c) return card.append(el("div", {}, "Loading…"));
+    if (c.error) return card.append(el("div", { class: "empty" }, c.error));
+    if (!c.console_url) card.append(el("div", { class: "empty", style: "margin-bottom:10px" },
+      "Set ADMIN_PUBLIC_URL to this console's address (e.g. https://support.company.com) "
+      + "so the providers know where to send people back."));
+
+    const spec = {
+      microsoft: { extra: "tenant", ph: "Directory (tenant) ID or domain, e.g. innovative-technology.com",
+        help: "Entra admin centre → App registrations → New registration "
+          + "(single tenant, Web). Add the redirect URI below, then create a client secret." },
+      google: { extra: "domain", ph: "Workspace domain (optional but recommended)",
+        help: "Google Cloud console → APIs & Services → Credentials → OAuth "
+          + "client ID (Web application). Add the redirect URI below." },
+    };
+    Object.entries(c.providers).forEach(([key, p]) => {
+      const s = spec[key];
+      const id = el("input", { class: "input", placeholder: "Client (application) ID", value: p.client_id || "" });
+      const extra = el("input", { class: "input", placeholder: s.ph, value: p[s.extra] || "" });
+      const secret = el("input", { class: "input", type: "password", autocomplete: "new-password",
+        placeholder: p.secret_set ? "Client secret saved (leave blank to keep)" : "Client secret" });
+      const save = el("button", { class: "btn btn-primary", onclick: async () => {
+        const body = { client_id: id.value, [s.extra]: extra.value };
+        if (secret.value) body.secret = secret.value;
+        try {
+          ssoCache = await api("/admin/sso/" + key, { method: "POST", body: JSON.stringify(body) });
+          toast(p.label + " sign-in settings saved"); draw();
+        } catch (e) { toast(e.message, true); }
+      } }, "Save");
+      card.append(el("div", { style: "border-top:1px solid color-mix(in srgb,var(--color-text) 10%,transparent);padding-top:10px;margin-top:10px" },
+        el("div", { style: "display:flex;gap:8px;align-items:center;margin-bottom:6px" },
+          el("b", {}, p.label),
+          el("span", { class: "tag " + (p.problem ? "tag-neutral" : "tag-accent") },
+            p.problem ? "off" : "on")),
+        p.problem && (p.client_id || p.secret_set)
+          ? el("div", { style: muted + ";margin-bottom:6px" }, "Not offered: " + p.problem) : null,
+        el("div", { style: muted + ";margin-bottom:6px" }, s.help),
+        p.redirect_uri ? el("div", { style: "margin-bottom:6px" },
+          el("span", { style: muted }, "Redirect URI: "),
+          el("code", { class: "mono", style: "font-size:12px;user-select:all" }, p.redirect_uri)) : null,
+        el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
+          el("div", { class: "grow" }, id), el("div", { class: "grow" }, extra)),
+        el("div", { class: "row", style: "gap:6px;margin-top:6px" },
+          el("div", { class: "grow" }, secret), save)));
+    });
+  };
+  if (!ssoCache) api("/admin/sso").then(d => { ssoCache = d; draw(); })
+    .catch(e => { ssoCache = { error: e.message }; draw(); });
+  draw();
+  return card;
 }
 
 /* ---------------- backup (export: support+, import: root) ---------------- */
@@ -2711,27 +3183,28 @@ function viewAdvanced() {
   const salesReply = el("textarea", { class: "input", rows: "3" },
                         p.sales_reply || "");
   salesReply.addEventListener("input", () => { p.sales_reply = salesReply.value; });
+  // "answer" and "deflect" now behave the same -- both give the fixed reply to
+  // a commercial question -- so the page offers the two choices that differ.
   const salesReplyWrap = el("div", { style: "margin-top:14px;display:"
-      + (p.sales_mode === "deflect" ? "" : "none") },
-    el("label", { class: "flabel" }, "What a sales question is answered with"),
+      + (p.sales_mode === "documents" ? "none" : "") },
+    el("label", { class: "flabel" }, "What a price or buying question is answered with"),
     salesReply,
     hintLine("Shown on its own, word for word, so put the phone number or "
       + "address you want people to use directly in the text."));
   const salesSel = el("select", { class: "input", onchange: e => {
       p.sales_mode = e.target.value;
-      salesReplyWrap.style.display = e.target.value === "deflect" ? "" : "none";
+      salesReplyWrap.style.display = e.target.value === "documents" ? "none" : "";
     } },
-    el("option", { value: "answer" }, "Answer them from the product list"),
     el("option", { value: "deflect" }, "Reply with a fixed message"),
-    el("option", { value: "documents" }, "Treat them as ordinary questions"));
-  salesSel.value = p.sales_mode || "answer";
+    el("option", { value: "documents" }, "Search the manuals anyway"));
+  salesSel.value = p.sales_mode === "documents" ? "documents" : "deflect";
 
-  const salesCard = card("Sales questions",
-    "Questions that span the whole range rather than one product — "
-    + "“which products run on 24V?”, “do you have anything "
-    + "that sorts coins?”. Answering from the product list is safe "
-    + "(every name and figure is copied, never invented), but a fixed reply "
-    + "hands every sales enquiry to a person instead.",
+  const salesCard = card("Price and buying questions",
+    "Price, fees, ordering, stock and resellers — things no manual "
+    + "contains, so a person is the honest answer. Questions across the "
+    + "range (“which validators run on 24V?”, “do you have "
+    + "anything that sorts coins?”) are technical and are always answered "
+    + "from the product list and spec tables; this setting does not affect them.",
     el("label", { class: "flabel", style: "margin-top:14px" }, "How to handle them"),
     salesSel, salesReplyWrap,
     hintLine("To answer from a brochure or price list instead, upload it on "
@@ -2896,10 +3369,32 @@ function viewKeys() {
 
     input.addEventListener("keydown", e => { if (e.key === "Enter") save(); });
 
+    // The name is the operator's; the slot's real API stays visible beside
+    // it, so "Company keys" is still recognisably the OpenAI-compatible one.
+    const nameBox = el("input", { class: "input", type: "text", value: p.label,
+      maxlength: "40", "aria-label": "Name for this key",
+      style: "width:auto;min-width:0;flex:0 1 220px;font-weight:600;padding:4px 8px" });
+    const rename = async () => {
+      const v = nameBox.value.trim();
+      if (v === p.label) return;
+      try {
+        const res = await api("/admin/keys/" + p.key + "/name", { method: "POST",
+          body: JSON.stringify({ name: v || null }) });
+        toast("Renamed to " + res.label);
+        keysCache = null;
+        await loadKeys();
+      } catch (e) { toast(e.message, true); nameBox.value = p.label; }
+    };
+    nameBox.addEventListener("change", rename);
+    nameBox.addEventListener("keydown", e => { if (e.key === "Enter") nameBox.blur(); });
+
     return el("div", { class: "card elev-sm",
                        style: "padding:14px 18px;gap:0;margin-bottom:10px" },
       el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
-        el("b", {}, p.label),
+        nameBox,
+        p.kind && p.kind !== p.label
+          ? el("span", { class: "tag tag-neutral", title: "The API this key speaks" }, p.kind)
+          : null,
         p.configured
           ? el("span", { class: "tag tag-accent" }, "configured")
           : el("span", { class: "tag tag-neutral" }, "not set"),
@@ -2920,10 +3415,132 @@ function viewKeys() {
       "Keys for the online answer providers. Saved keys take effect "
       + "immediately — no restart — and only root accounts can see this "
       + "page or the keys' status. A key is never shown again once saved, "
-      + "only a masked form for recognising it."),
+      + "only a masked form for recognising it. Click a key's name to rename it."),
     el("div", { "data-sec": "Providers", "data-tour": "keys-list" }, rows),
     keyRolesCard(),
+    creditsCard(),
   ];
+}
+
+// Low-credit alerts: balances, the threshold, and the mail settings the
+// alert goes out through. Its own cache so a check does not reload the page.
+let creditsCache = null;
+
+function creditsCard() {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Low-credit alerts",
+    style: "padding:14px 18px;margin-top:18px" });
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const draw = () => {
+    card.textContent = "";
+    const c = creditsCache;
+    card.append(el("b", {}, "Low-credit alerts"),
+      el("p", { style: "margin:4px 0 10px;font-size:13px" },
+        "Balances are checked every few hours. When one drops below the "
+        + "threshold, or a provider refuses a request for lack of credit, "
+        + "the root admins are emailed (once a day while it stays low)."));
+    if (!c) { card.append(el("div", {}, "Loading…")); return; }
+    if (c.error) { card.append(el("div", { class: "empty" }, c.error)); return; }
+
+    const statusTag = r => {
+      const bad = ["low", "empty", "exhausted", "error"].includes(r.status);
+      return el("span", { class: "tag " + (bad ? "tag-accent" : "tag-neutral") },
+        { ok: "ok", low: "low", empty: "empty", error: "check failed",
+          unsupported: "not reported", unlimited: "no budget", unknown: "unknown" }[r.status]
+          || r.status);
+    };
+    const results = c.results || [];
+    card.append(el("div", { style: "display:flex;flex-direction:column;gap:6px;margin-bottom:10px" },
+      results.length
+        ? results.map(r => el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" },
+            el("span", { style: "min-width:150px;font-weight:600" }, r.label),
+            statusTag(r),
+            r.balance != null ? el("span", { class: "mono" },
+              r.balance.toFixed(2) + " " + (r.currency || "")) : null,
+            r.detail ? el("span", { style: muted }, r.detail) : null))
+        : [el("div", { style: muted }, c.checked_at ? "No keys to check."
+            : "Not checked since the server started. Use Check now.")]));
+    if (c.checked_at) card.append(el("div", { style: muted + ";margin:-4px 0 10px" },
+      "Last checked " + new Date(c.checked_at).toLocaleString()));
+
+    const thr = el("input", { class: "input", type: "number", min: "0", step: "0.5",
+      value: String(c.threshold), style: "width:110px" });
+    thr.addEventListener("change", async () => {
+      try {
+        creditsCache = await api("/admin/credits/threshold", { method: "POST",
+          body: JSON.stringify({ value: thr.value === "" ? null : Number(thr.value) }) });
+        toast("Threshold saved"); draw();
+      } catch (e) { toast(e.message, true); }
+    });
+    const checkBtn = el("button", { class: "btn btn-ghost", onclick: async () => {
+      checkBtn.disabled = true; checkBtn.textContent = "Checking…";
+      try {
+        creditsCache = await api("/admin/credits/check", { method: "POST" });
+        toast(creditsCache.alerted && creditsCache.alerted.length
+          ? "Checked, alert emailed" : "Checked"); draw();
+      } catch (e) { toast(e.message, true); checkBtn.disabled = false; checkBtn.textContent = "Check now"; }
+    } }, "Check now");
+    card.append(el("div", { class: "row", style: "align-items:center;gap:8px;margin-bottom:12px" },
+      el("span", {}, "Alert below"), thr,
+      el("span", { style: muted }, "in the account's currency"), checkBtn));
+
+    card.append(el("div", { style: "margin-bottom:6px" },
+      el("span", { style: "font-weight:600" }, "Sent to: "),
+      (c.recipients || []).length ? c.recipients.join(", ")
+        : el("span", { style: muted }, "no active root account")));
+
+    // Mail settings. The password box is write-only: blank keeps the saved one.
+    const sm = c.smtp || {};
+    const f = {
+      host: el("input", { class: "input", placeholder: "smtp.office365.com", value: sm.host || "" }),
+      port: el("input", { class: "input", placeholder: "587", value: sm.port || "", style: "width:90px" }),
+      security: el("select", { class: "input", style: "width:auto" },
+        ["starttls", "ssl", "none"].map(v => el("option", { value: v }, v === "starttls"
+          ? "STARTTLS" : v === "ssl" ? "SSL/TLS" : "None (relay only)"))),
+      user: el("input", { class: "input", placeholder: "username", value: sm.user || "",
+        autocomplete: "off" }),
+      password: el("input", { class: "input", type: "password", autocomplete: "new-password",
+        placeholder: sm.password_set ? "saved (leave blank to keep)" : "password" }),
+      sender: el("input", { class: "input", placeholder: "From address (defaults to username)",
+        value: sm.sender || "" }),
+    };
+    f.security.value = sm.security || "starttls";
+    const saveSmtp = el("button", { class: "btn btn-primary", onclick: async () => {
+      const body = { host: f.host.value, port: f.port.value, security: f.security.value,
+        user: f.user.value, sender: f.sender.value };
+      if (f.password.value) body.password = f.password.value;
+      try {
+        creditsCache = await api("/admin/credits/smtp", { method: "POST",
+          body: JSON.stringify(body) });
+        toast("Mail settings saved"); draw();
+      } catch (e) { toast(e.message, true); }
+    } }, "Save mail settings");
+    const testBtn = el("button", { class: "btn btn-ghost", onclick: async () => {
+      testBtn.disabled = true;
+      try {
+        const r = await api("/admin/credits/test-email", { method: "POST" });
+        toast("Test email sent to " + r.sent_to.join(", "));
+      } catch (e) { toast(e.message, true); }
+      finally { testBtn.disabled = false; }
+    } }, "Send test email");
+    testBtn.disabled = !c.smtp_configured;
+
+    card.append(
+      el("div", { style: "font-weight:600;margin:12px 0 6px" }, "Mail server",
+        el("span", { class: "tag " + (c.smtp_configured ? "tag-accent" : "tag-neutral"),
+          style: "margin-left:8px" }, c.smtp_configured ? "configured" : "not set")),
+      el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
+        el("div", { class: "grow" }, f.host), f.port, f.security),
+      el("div", { class: "row", style: "gap:6px;flex-wrap:wrap;margin-top:6px" },
+        el("div", { class: "grow" }, f.user), el("div", { class: "grow" }, f.password)),
+      el("div", { style: "margin-top:6px" }, f.sender),
+      el("div", { style: "display:flex;gap:6px;margin-top:10px" }, saveSmtp, testBtn));
+  };
+  if (!creditsCache) {
+    api("/admin/credits").then(d => { creditsCache = d; draw(); })
+      .catch(e => { creditsCache = { error: e.message }; draw(); });
+  }
+  draw();
+  return card;
 }
 
 // Which key does which job. Saving a second key used to change nothing on
@@ -3588,7 +4205,10 @@ function viewDocuments() {
       el("div", { class: "row" },
         el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
         el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel)),
-      el("div", { style: "margin-top:14px" }, drop, file),
+      // Indexing a document needs the embedding model, so this is the one
+      // control on the page that has to wait for it. POST /upload refuses
+      // on the same capability, so the grey is never a lie.
+      el("div", { style: "margin-top:14px", "data-cap": "search" }, drop, file),
       progress),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0",
                 "data-tour": "doc-list", "data-sec": "All documents" },
@@ -5250,10 +5870,20 @@ function viewTest() {
   // the default chain. That default now comes from the server (see
   // providerBox) -- it was a hardcoded map here, holding a DeepSeek alias
   // that had been retired, so every forced DeepSeek call failed.
+  // The reply the last answer expects, accepted into the empty field with
+  // the right arrow. Cleared by the next send.
+  let ghostReply = null;
+  const basePlaceholder = input.placeholder;
+  function setGhost(text) {
+    ghostReply = text;
+    input.placeholder = text ? text + "  (→ to accept)" : basePlaceholder;
+  }
+
   async function send(q, opts = {}) {
     q = (q === undefined ? input.value : q).trim();
     if (!q) return;
     if (q === input.value.trim()) input.value = "";
+    setGhost(null);
 
     // Choosing or rejecting a suggestion re-asks a question the assistant
     // itself put on screen, so it is not a new turn from the visitor.
@@ -5296,6 +5926,55 @@ function viewTest() {
           if (s.page_label) {
             row.append(el("span", { style: "color:color-mix(in srgb, var(--color-text) 55%, transparent)" },
               "  \u2014 see " + s.page_label));
+          }
+          det.append(row);
+        });
+        bub.append(det);
+      }
+
+      // WHERE THIS ANSWER CAME FROM, and where it stopped.
+      //
+      // This panel could show that a question failed but never where: a
+      // refusal, a question back and a suppressed answer all arrive looking
+      // the same, and telling them apart meant reading backend.log against
+      // main.py. They are different problems -- nothing retrieved, evidence
+      // spanning two products, the model declining, the verifier unable to
+      // stand the answer up -- with different fixes. The server now reports
+      // the stages it went through (pipeline_trace.py); this renders them.
+      //
+      // Collapsed by default: the outcome line is the part you read, the
+      // stage list is what you open when the outcome is not what you wanted.
+      if (r.pipeline && r.pipeline.stages && r.pipeline.stages.length) {
+        const pl = r.pipeline, ex = pl.exit || {};
+        // Stages that mean the turn did NOT end with an answer. Colouring
+        // these is the whole point -- "Answered" and "Found nothing
+        // relevant and said so" should not look alike at a glance.
+        const FAILED = ["none.follow", "none.vague", "none.reject", "span.ask",
+                        "suppress", "clarify", "faq.ask"];
+        const bad = FAILED.indexOf(ex.id) >= 0;
+        const det = el("details", { style: "margin-top:9px" });
+        const sum = el("summary", { class: "lbl",
+          style: "cursor:pointer;user-select:none;color:"
+               + (bad ? "var(--color-warning, #a8750d)" : "inherit") },
+          (bad ? "Stopped at: " : "Path: ") + (ex.label || "unknown")
+          + (pl.ms != null ? "  — " + pl.ms + " ms" : ""));
+        det.append(sum);
+        if (ex.note) {
+          det.append(el("div", { style: "font-size:12px;margin:6px 0 8px;"
+            + "color:color-mix(in srgb, var(--color-text) 70%, transparent)" },
+            "Because: " + ex.note));
+        }
+        pl.stages.forEach(s => {
+          const isExit = s === ex;
+          const row = el("div", { style: "font-size:12px;margin-top:3px;display:flex;"
+            + "gap:8px;align-items:baseline" + (isExit ? ";font-weight:600" : "") });
+          row.append(el("span", { style: "min-width:52px;text-align:right;"
+            + "color:color-mix(in srgb, var(--color-text) 45%, transparent)" },
+            s.at_ms + " ms"));
+          row.append(el("span", {}, s.label));
+          if (s.note) {
+            row.append(el("span", { style: "color:color-mix(in srgb, "
+              + "var(--color-text) 55%, transparent)" }, "— " + s.note));
           }
           det.append(row);
         });
@@ -5364,6 +6043,18 @@ function viewTest() {
         });
       }
 
+      // The answer asked a yes/no question and sent the replies it can
+      // honour. Buttons, plus the composer's right-arrow suggestion, same as
+      // the widget.
+      const replies = r.suggested_replies || [];
+      replies.forEach(o => {
+        bub.append(el("div", { style: "margin-top:6px" },
+          el("button", { class: "btn btn-secondary", style: BTN, onclick: () => {
+            send(o);
+          } }, o)));
+      });
+      setGhost(replies[0] || null);
+
       // Unscoped question spanning several products: let them pick, then
       // re-ask scoped rather than retyping.
       (r.product_options || []).forEach(o => {
@@ -5395,7 +6086,12 @@ function viewTest() {
     } catch (e) { wait.textContent = "Failed: " + e.message; wait.classList.add("bub", "a"); }
     log.scrollTop = log.scrollHeight;
   }
-  input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight" && ghostReply && !input.value) {
+      e.preventDefault(); input.value = ghostReply; return;
+    }
+    if (e.key === "Enter") send();
+  });
 
   // One pill holding the field and the send control, the shape every current
   // chat uses. The button disables itself on an empty field rather than
@@ -5700,6 +6396,9 @@ function placeTour() {
 
 /* ---------------- boot ---------------- */
 (async () => {
+  // Before anything else, and not awaited: the sign-in card should be able
+  // to say "still starting" while the rest of this runs.
+  pollBoot();
   // Re-establish who the held token belongs to rather than trusting the
   // cached copy: a level change made by root while this tab sat open must
   // take effect on reload, not whenever the token expires.

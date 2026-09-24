@@ -548,6 +548,108 @@ def verify_session(token: str | None) -> dict | None:
         return None
 
 
+# ── emailed links: password reset and one-time sign-in ────────────────
+# Unlike sessions these are STATEFUL, because both must work exactly once: a
+# reset link that still works after use is a standing way into the account
+# for anyone who later reads that mailbox. Only a SHA-256 of each token is
+# stored, so the file itself does not hold a working link.
+#
+# A link is also dead if the account's token_epoch has moved since it was
+# issued -- a password change, from any route, voids every outstanding link.
+
+_TOKENS_PATH = os.getenv("AUTH_TOKENS_PATH", "auth_tokens.json")
+EMAIL_TOKEN_TTL = {"reset": 30 * 60, "login": 15 * 60,
+                   # handoff from a work-account (SSO) sign-in to the console
+                   "sso": 2 * 60}
+# The purposes a person may ask to have EMAILED. "sso" is minted only by
+# the SSO callback for an identity the provider has already proven.
+EMAIL_LINK_PURPOSES = ("reset", "login")
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _load_tokens() -> dict:
+    data = jsonstore.load(_TOKENS_PATH, {}, label="auth tokens")
+    return data if isinstance(data, dict) else {}
+
+
+def create_email_token(email: str, purpose: str) -> tuple[str, dict] | None:
+    """A fresh single-use token for this account, or None when there is no
+    usable account -- the caller must respond identically either way.
+
+    Issuing one voids any earlier unused link of the same kind for the same
+    account, so only the newest email works."""
+    if purpose not in EMAIL_TOKEN_TTL:
+        raise ValueError(f"unknown token purpose {purpose!r}")
+    user = find_by_email(normalise_email(email or ""))
+    if not user or user.get("disabled"):
+        return None
+    return _issue_token(user, purpose)
+
+
+def create_sso_handoff(email: str) -> str | None:
+    """A 2-minute single-use code for an account a provider has just
+    verified, or None when that address has no usable account."""
+    user = find_by_email(normalise_email(email or ""))
+    if not user or user.get("disabled"):
+        return None
+    return _issue_token(user, "sso")[0]
+
+
+def _issue_token(user: dict, purpose: str) -> tuple[str, dict]:
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with _lock:
+        tokens = {h: t for h, t in _load_tokens().items()
+                  if t.get("exp", 0) > now
+                  and not (t.get("uid") == user["id"] and t.get("purpose") == purpose)}
+        tokens[_token_hash(token)] = {
+            "uid": user["id"], "purpose": purpose,
+            "ep": int(user.get("token_epoch", 1)),
+            "exp": int(now + EMAIL_TOKEN_TTL[purpose])}
+        jsonstore.save(_TOKENS_PATH, tokens, label="auth tokens")
+    logger.info(f"{purpose} link issued for {user['email']}")
+    return token, user
+
+
+def consume_email_token(token: str, purpose: str) -> dict | None:
+    """The account the token was issued for, or None. The token is removed
+    whether or not it turns out to be valid, so it can never be tried twice."""
+    if not token or purpose not in EMAIL_TOKEN_TTL:
+        return None
+    h = _token_hash(token.strip())
+    with _lock:
+        tokens = _load_tokens()
+        rec = tokens.pop(h, None)
+        if rec is None:
+            return None
+        jsonstore.save(_TOKENS_PATH, tokens, label="auth tokens")
+    if rec.get("purpose") != purpose or rec.get("exp", 0) < time.time():
+        return None
+    user = find_by_id(str(rec.get("uid", "")))
+    if not user or user.get("disabled"):
+        return None
+    if int(rec.get("ep", 0)) != int(user.get("token_epoch", 1)):
+        return None      # password changed since the link was sent
+    return user
+
+
+def reset_password_with_token(token: str, new_password: str) -> dict:
+    """Set a new password from a reset link and return the account.
+
+    The password is validated BEFORE the token is spent, so a too-short
+    password does not burn the link and send the person back to their inbox."""
+    validate_password(new_password)
+    user = consume_email_token(token, "reset")
+    if not user:
+        raise AccountError("This reset link has expired or has already been used. "
+                           "Request a new one from the sign-in page.")
+    set_password(user["id"], new_password, actor_id="reset link")
+    return find_by_id(user["id"])
+
+
 # ── authorisation ─────────────────────────────────────────────────────
 
 def has_level(user: dict | None, minimum: str) -> bool:

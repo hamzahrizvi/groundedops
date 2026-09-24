@@ -81,15 +81,15 @@ _DEFAULTS = {
     # upload, so changing this only affects documents indexed afterwards.
     "dedupe_shadowed_chunks": True,
 
-    # ── Sales questions ────────────────────────────────────────────────
-    # "which products run on 24V?" ranges across the catalogue, so no single
-    # manual answers it. sales.py can answer that shape from the catalogue
-    # and the spec tables, but an operator may not want the assistant
-    # speaking for the sales department at all.
+    # ── Commercial questions ───────────────────────────────────────────
+    # Governs COMMERCIAL questions only (price, fees, buying, stock,
+    # resellers -- sales.is_commercial_question). Cross-product catalogue and
+    # spec questions ("which products run on 24V?") are technical and always
+    # answered from the catalogue; see main._sales_answer for why.
     #
-    #   answer     build the answer from the catalogue (the default)
+    #   answer     say sales_reply (kept for old configs; same as deflect)
     #   deflect    say sales_reply and nothing else
-    #   documents  ignore the question's shape and search the manuals
+    #   documents  search the manuals anyway
     "sales_mode": os.getenv("WIDGET_SALES_MODE", "answer"),
     "sales_reply": (
         "I can only answer technical questions from our product "
