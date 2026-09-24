@@ -336,7 +336,19 @@ def classify(query: str, chunks: list[dict] | None = None, *,
     except Exception as exc:
         logger.debug(f"answerability deferral check skipped: {exc}")
 
-    if deferral:
+    # Only a deferral ABOUT the question. crossrefs returns the best
+    # reference in the retrieved chunks even when none is on topic, and an
+    # NV200S manual page that refers jam recovery to the Service Guide sits
+    # in the top chunks of many NV200S refusals; each of them then said
+    # "the manual refers that to the Service Guide, which I don't hold" and
+    # dropped the suggested questions -- about bezel colours.
+    #
+    # "About" is word overlap with the reference's own topic phrase, OR the
+    # reference sits in the best-ranked passage: "screen size" shares no
+    # word with "the dimensions of the device", and retrieval has already
+    # judged that passage the closest thing we hold to the question.
+    if deferral and (deferral.get("on_topic", True)
+                     or deferral.get("rank", 0) == 0):
         return {"kind": DOCUMENTED_ELSEWHERE, "target": target,
                 "capability": capability, "deferral": deferral,
                 "why": f"deferred to {deferral.get('title')!r}"}

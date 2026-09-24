@@ -27,6 +27,7 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 import faq_store
@@ -379,7 +380,11 @@ def register(app, answer_query, draft_enquiry=None):
         # allowance there is no point resolving effort or touching the FAQ.
         # A 429 with a distinct reason, so the widget can say "this chat has
         # reached its limit, start a new one" rather than the daily wording.
-        sess = quota.session_check(payload.session_id)
+        # This handler is `async`, so anything that blocks here blocks EVERY
+        # other request on the event loop: the quota sqlite calls (a new
+        # connection each), and the FAQ lookup, which embeds the question
+        # and can rebuild the FAQ vector cache after an edit. Threadpool.
+        sess = await run_in_threadpool(quota.session_check, payload.session_id)
         if not sess["allowed"]:
             raise HTTPException(status_code=429, detail={
                 "error": "quota_exceeded",
@@ -400,7 +405,7 @@ def register(app, answer_query, draft_enquiry=None):
         # anon_llm_enabled) — a deliberate choice with a bill attached, which
         # is why it is off until someone turns it on.
         if tier == "anonymous" and not quota.anon_llm_enabled():
-            gate = quota.check_faq_lookup(caller)
+            gate = await run_in_threadpool(quota.check_faq_lookup, caller)
             if not gate["allowed"]:
                 raise HTTPException(status_code=429, detail={
                     "error": "quota_exceeded",
@@ -411,7 +416,7 @@ def register(app, answer_query, draft_enquiry=None):
                     "message": "You have reached today's limit for FAQ lookups.",
                 })
 
-            quota.consume_faq_lookup(caller)
+            await run_in_threadpool(quota.consume_faq_lookup, caller)
 
             # Selecting a specific curated question is served by id.
             if payload.faq_id:
@@ -422,7 +427,9 @@ def register(app, answer_query, draft_enquiry=None):
                 raise HTTPException(status_code=404, detail={
                     "error": "not_found", "message": "That answer is no longer available."})
 
-            faq = faq_store.suggest_candidates(payload.q, payload.product or payload.category)
+            faq = await run_in_threadpool(
+                faq_store.suggest_candidates, payload.q,
+                payload.product or payload.category)
 
             if faq["mode"] == "answer":
                 return _faq_response(faq["entry"]["answer"], caller,
@@ -492,7 +499,11 @@ def register(app, answer_query, draft_enquiry=None):
         # Curated answers and disambiguation prompts involve no LLM call,
         # so they cost nothing - cheap for us, and it steers people towards
         # the reviewed answers.
-        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")) \
+        # ...and neither is our own outage: service_degraded means no
+        # provider answered, and quota.py promises a failed request does not
+        # burn the visitor's allowance.
+        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
+                        or result.get("service_degraded")) \
                   else spec["credits"]
         state = quota.consume(caller, charged) if charged else quota.status(caller)
 

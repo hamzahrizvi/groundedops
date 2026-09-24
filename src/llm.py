@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+import time
 import requests
 
 from text_utils import truncate_after_refusal, build_condense_prompt, parse_condense_output
@@ -8,7 +9,62 @@ from text_utils import truncate_after_refusal, build_condense_prompt, parse_cond
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+
+# One connection pool for every provider call. A bare requests.post opens a
+# fresh TCP+TLS connection each time, and a turn makes three to five calls
+# (condense, answer, verifier, retries) to the same two hosts. urllib3's
+# pool is thread-safe; the Session object is shared read-only.
+_HTTP = requests.Session()
+_HTTP.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16))
+_HTTP.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16))
+
+# A provider that just failed to CONNECT, or answered 5xx, is skipped for a
+# short while when the chain has another entry -- the role "reasoning" leads
+# with the on-prem gateway, and while that gateway is down every such
+# question (and every grounding retry of it) paid the failure before the
+# backup answered. A 4xx is not an outage and is never cooled.
+PROVIDER_COOLDOWN_SECONDS = float(os.getenv("PROVIDER_COOLDOWN_SECONDS", "60") or 0)
+_provider_down: dict[str, float] = {}
+
+
+def _note_unreachable(provider: str) -> None:
+    _provider_down[provider] = time.time()
+
+
+def _note_reachable(provider: str) -> None:
+    _provider_down.pop(provider, None)
+
+
+def provider_cooling(provider: str) -> bool:
+    """True while `provider` is inside its cooldown after an outage."""
+    ts = _provider_down.get(provider)
+    return ts is not None and (time.time() - ts) < PROVIDER_COOLDOWN_SECONDS
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+
+def _deepseek_extra() -> dict:
+    """Request fields every DeepSeek call carries beyond model and messages.
+
+    DeepSeek V4 (`deepseek-v4-flash`, `deepseek-v4-pro`) THINKS BY DEFAULT:
+    it writes a hidden chain of thought before the answer, bills it as
+    completion tokens, and only then streams the text. Measured 2026-09-25
+    on a 1.3k-token manual prompt, three runs each:
+
+        thinking on   3.15s   completion 365-700 tokens, 334-669 of them reasoning
+        thinking off  0.94s   completion  30-66 tokens
+
+    Same answer, a third of the time, a tenth of the tokens -- and the
+    reasoning tokens were being charged to the customer's quota. This
+    pipeline does its own reasoning (retrieval, reranking, grounding, a
+    verifier), so the model's private deliberation adds latency to every
+    call that uses it: the answer, the condensation, the verifier's second
+    opinion, the clarify draft. It is off unless DEEPSEEK_THINKING is set
+    to 1/on/true. The field is ignored by models that cannot think, so it
+    is safe to send unconditionally."""
+    want = os.getenv("DEEPSEEK_THINKING", "").strip().lower()
+    if want in ("1", "on", "true", "yes"):
+        return {"thinking": {"type": "enabled"}}
+    return {"thinking": {"type": "disabled"}}
 
 # The OpenAI-compatible endpoint, overridable. It was hardcoded at both call
 # sites, which meant the "openai" provider could only ever mean OpenAI's own
@@ -291,7 +347,7 @@ def _call_deepseek(
         return None
 
     try:
-        res = requests.post(
+        res = _HTTP.post(
             DEEPSEEK_URL,
             headers={
                 "Authorization": f"Bearer {key}",
@@ -301,6 +357,7 @@ def _call_deepseek(
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,
+                **_deepseek_extra(),
             },
             timeout=timeout,
         )
@@ -308,8 +365,11 @@ def _call_deepseek(
         if res.status_code != 200:
             logger.warning(f"DeepSeek HTTP {res.status_code}")
             _note_credit_failure("deepseek", res)
+            if res.status_code >= 500:
+                _note_unreachable("deepseek")
             return None
 
+        _note_reachable("deepseek")
         body = res.json()
         text = body["choices"][0]["message"]["content"].strip()
         if not text:
@@ -320,6 +380,10 @@ def _call_deepseek(
         return {"text": text, "model": model, "provider": "deepseek",
                 "tokens": _usage_tokens(body, "deepseek")}
 
+    except (requests.ConnectionError, requests.Timeout) as e:
+        logger.warning(f"DeepSeek unreachable ({model}): {e}")
+        _note_unreachable("deepseek")
+        return None
     except Exception as e:
         logger.warning(f"DeepSeek failed ({model}): {e}")
         return None
@@ -333,7 +397,7 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         logger.warning("OpenAI call attempted without an API key")
         return None
     try:
-        res = requests.post(
+        res = _HTTP.post(
             OPENAI_URL,
             headers={"Authorization": f"Bearer {key}"},
             json={"model": model, "temperature": 0,
@@ -342,10 +406,17 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         )
         if res.status_code != 200:
             _note_credit_failure("openai", res)
+            if res.status_code >= 500:
+                _note_unreachable("openai")
         res.raise_for_status()
+        _note_reachable("openai")
         body = res.json()
         text = body["choices"][0]["message"]["content"]
         return {"text": text, "tokens": _usage_tokens(body, "openai")} if text else None
+    except (requests.ConnectionError, requests.Timeout) as e:
+        logger.warning(f"OpenAI unreachable ({model}): {e}")
+        _note_unreachable("openai")
+        return None
     except Exception as e:
         logger.warning(f"OpenAI failed ({model}): {e}")
         return None
@@ -359,7 +430,7 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
         logger.warning("Anthropic call attempted without an API key")
         return None
     try:
-        res = requests.post(
+        res = _HTTP.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
@@ -367,11 +438,18 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
+        if res.status_code >= 500:
+            _note_unreachable("anthropic")
         res.raise_for_status()
+        _note_reachable("anthropic")
         body = res.json()
         blocks = body.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         return {"text": text, "tokens": _usage_tokens(body, "anthropic")} if text else None
+    except (requests.ConnectionError, requests.Timeout) as e:
+        logger.warning(f"Anthropic unreachable ({model}): {e}")
+        _note_unreachable("anthropic")
+        return None
     except Exception as e:
         logger.warning(f"Anthropic failed ({model}): {e}")
         return None
@@ -399,19 +477,6 @@ def generate(
     return None
 
 
-def safe_generate(
-    provider: str,
-    prompt: str,
-    model: str,
-    deepseek_api_key: str | None = None,
-) -> dict | None:
-    for attempt in range(2):
-        result = generate(provider, prompt, model, deepseek_api_key, api_keys=api_keys)
-        if result and result.get("text"):
-            return result
-        logger.warning(f"Retry {attempt + 1} failed for {provider}/{model}")
-    return None
-
 
 def generate_with_fallback(
     role: str,
@@ -433,6 +498,15 @@ def generate_with_fallback(
     chain = _chain_for(role)  # v8.6.1: honors GENERATION_MODE=api
     tried = set()
 
+    # Skip a provider inside its outage cooldown -- but only when something
+    # else in the chain is not. The only option is always tried.
+    cooling = [(p, m) for p, m in chain if p != "local" and provider_cooling(p)]
+    if cooling and len(cooling) < len(chain):
+        for p, m in cooling:
+            logger.info(f"[{role}] skipping {p}/{m}: unreachable "
+                        f"{int(time.time() - _provider_down[p])}s ago")
+        chain = [pm for pm in chain if pm not in cooling]
+
     for i, (provider, model) in enumerate(chain):
         tried.add((provider, model))
         logger.info(f"Attempt {i+1}: {provider}/{model}")
@@ -445,7 +519,12 @@ def generate_with_fallback(
 
         logger.warning(f"[{role}] {provider}/{model} failed")
 
-    if ("local", "mistral") not in tried:
+    # The forced local attempt is a LOCAL-mode safety net. In api mode the
+    # chain never names Ollama (see _chain_for), and on a host without it
+    # the attempt is a 240s wait for a connection that will never come --
+    # after every online provider has already failed.
+    from runtime_config import get_generation_mode
+    if ("local", "mistral") not in tried and get_generation_mode() != "api":
         logger.warning("Forcing mistral final attempt")
         forced = generate("local", prompt, "mistral", deepseek_api_key)
         if forced and forced.get("text"):
@@ -595,14 +674,15 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
 
     import json as _json
     try:
-        with requests.post(
+        with _HTTP.post(
             url,
             headers={"Authorization": f"Bearer {key}",
                      "Content-Type": "application/json"},
             json={"model": model,
                   "messages": [{"role": "user", "content": prompt}],
                   "temperature": 0,
-                  "stream": True},
+                  "stream": True,
+                  **(_deepseek_extra() if provider == "deepseek" else {})},
             stream=True,
             timeout=timeout,
         ) as res:

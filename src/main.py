@@ -547,8 +547,16 @@ def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
         return False
     if answer.count(".") > 3 or len(answer) > 400:
         return False
+    # A table is many claims in one shape, and its numbers are legion (a
+    # pin number, a voltage); the LLM verifier reads tables, this does not.
+    if re.search(r"^\s*\|", answer, re.M):
+        return False
     context = " ".join(c.get("text", "") for c in chunks)
-    return all(n in context for n in set(numbers))
+    # Whole numbers only. Plain containment let "30 notes" be supported by
+    # "300 notes", "12V" by "2012", and "1.2 kg" by "1.25 Kg" -- the exact
+    # contradictions the grounding gate exists to catch.
+    return all(re.search(rf"(?<![\d.]){re.escape(n)}(?![\d.])", context)
+               for n in set(numbers))
 
 
 # Both of these are operator-facing switches on the console's Advanced page,
@@ -984,6 +992,15 @@ def _warmup_stack():
         _sales.get_index(_ds.store_dir(), _source_to_product())
     ok &= _run_stage("specs", "Product specifications", _warm_specs)
 
+    # The router's category vectors: 30 example questions embedded once
+    # per process. Lazily, that landed on the first question after every
+    # restart -- three encode batches before "Attempt 1" in backend.log --
+    # and none of it showed in any timing figure.
+    def _warm_router():
+        import router as _router
+        _router._get_category_vectors()
+    ok &= _run_stage("router", "Question routing", _warm_router)
+
     # v8.6: local LLMs are NOT auto-warmed. They cost significant RAM and
     # load time, and in api mode they are not used at all. The settings
     # panel loads them on demand via POST /models/warmup (and unloads via
@@ -1056,7 +1073,21 @@ _PENDING_STEPS_MAX = 500
 # something else, and a false negative is the dead end above.
 _AFFIRMATIVE = re.compile(
     r"^\W*(?:yes|yep|yeah|yup|ok(?:ay)?|sure|please|go\s+on|go\s+ahead"
-    r"|do\s+it|walk\s+me|take\s+me|show\s+me|step)", re.I)
+    r"|do\s+it|walk\s+me|take\s+me|show\s+me|steps?)\b", re.I)
+
+# A reply that starts like a yes but carries a question of its own is a new
+# question: "okay so what about android then?", "sure, but what does the
+# BV30 weigh?", "please tell me the weight". The offer is consumed either
+# way; only the steps are withheld.
+_AFFIRMATIVE_CONTENT = re.compile(
+    r"\?|\b(?:what|how|why|when|where|which|who|tell|explain|but|instead"
+    r"|rather|about)\b", re.I)
+
+
+def _is_bare_affirmative(text: str) -> bool:
+    text = (text or "").strip()
+    return bool(_AFFIRMATIVE.match(text)) and len(text.split()) <= 8 \
+        and not _AFFIRMATIVE_CONTENT.search(text)
 
 # The declining half of the same offer. Without it "no thanks" goes through
 # retrieval exactly as "yes" used to, and comes back as noise.
@@ -5431,7 +5462,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # either way -- a second "yes" is a new question, not the same steps
     # again.
     _pending_src = _PENDING_STEPS.pop(session_id, None)
-    if _pending_src and _AFFIRMATIVE.match((q or "").strip()):
+    if _pending_src and _is_bare_affirmative(q):
         _steps = _steps_answer(_pending_src)
         if _steps:
             logger.info("serving the offered steps for %s", _pending_src)
@@ -5594,17 +5625,29 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # Which products the question itself names, aliases resolved. Computed
     # unconditionally now, because both jobs below need it.
     _named: list[str] = []
+    _named_typed: list[str] = []
     try:
-        _named = _products_named_in(resolved_query,
-                                    list(_product_names().keys()))
+        _keys = list(_product_names().keys())
+        _named = _products_named_in(resolved_query, _keys)
+        _named_typed = _products_named_in(_normalize_query(q), _keys)
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
 
     # (1) SCOPE. The picker supplies the default product even on the first
     # question (no conversation-history rewrite is required). One product
     # explicitly named in the question overrides that default for this turn.
+    #
+    # "Named in the question" means TYPED. The condensed rewrite is told to
+    # carry the product over from history, so with a picker set it was the
+    # previous product overriding the new one: pick NV9USB+, ask about its
+    # supply voltage, change the picker to BV30, ask "and the current
+    # draw?" -- the rewrite says NV9USB+, and the BV30 chat answered for the
+    # NV9USB+ while its scope bar said BV30. Without a picker there is no
+    # selection to protect, and the rewrite is the only product signal a
+    # follow-up has, so it still counts there.
     _scope, _effective_product = _resolve_question_scope(
-        payload.product, payload.category, _named)
+        payload.product, payload.category,
+        _named_typed if payload.product else _named)
     if _effective_product and _effective_product != payload.product:
         logger.info(f"Using question-named product {_effective_product!r} "
                     f"instead of selected product {payload.product!r}")
@@ -6335,7 +6378,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     t_grounding = time.time()
     # A dict, not two floats with `nonlocal`: the helper only mutates it, so
     # it needs no scope declaration and cannot shadow.
-    _spent = {"verify": 0.0, "regen": 0.0}
+    _spent = {"verify": 0.0, "regen": 0.0, "llm_verify": 0.0}
 
     def _timed(bucket: str, fn, *a, **kw):
         """Run one step and bill its wall time to `bucket`."""
@@ -6395,7 +6438,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # keep their facts in tables. Ask a model that can, before throwing a
         # correct answer away. See _llm_verified.
         elif (not is_grounded and not verifier_unavailable
-              and _timed("verify", _llm_verified,
+              and _timed("llm_verify", _llm_verified,
                          answer, top_chunks, deepseek_api_key,
                          resolved_query)):
             is_grounded, ground_via = True, "llm"
@@ -6541,7 +6584,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # backup provider and the retry loop did. verify_stage_time is the whole
     # span the old grounding_time reported, kept so the three can be
     # reconciled: verify + escalation + overhead == stage.
-    grounding_time = _spent["verify"]
+    # grounding_time keeps its meaning (everything the verify stage spent)
+    # so the log stays comparable; verifier_llm_time is the part of it that
+    # was a second full-context model call. On this corpus most answers
+    # reach the LLM verifier -- NLI cannot read a flattened table row -- so
+    # without the split an 8s "grounding" figure read as a slow NLI model.
+    grounding_time = _spent["verify"] + _spent["llm_verify"]
+    verifier_llm_time = _spent["llm_verify"]
     escalation_time = _spent["regen"]
     verify_stage_time = time.time() - t_grounding
     ptrace.mark("ground", _ground_note(
@@ -6918,11 +6967,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                     grounding_score=grounding_score, flagged=flagged,
                     request_id=request_id,
                     timing={"condense_time": condense_time,
+                            # retrieval_time covers scope, sales, FAQ and
+                            # retrieval; minus the DB and rerank figures it
+                            # is the pre-retrieval work, which was the one
+                            # slice nothing logged.
+                            "retrieval_time": retrieval_time,
                             "retrieval_db_time": retrieval_db_time,
                             "rerank_time": rerank_time,
                             "extraction_time": extraction_time,
                             "llm_time": llm_time,
                             "grounding_time": grounding_time,
+                            "verifier_llm_time": verifier_llm_time,
                             "escalation_time": escalation_time,
                             "verify_stage_time": verify_stage_time,
                             "total_time": total_time})
@@ -6996,6 +7051,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # grounding-retry loop is escalation_time; verify_stage_time is
             # the whole span, so the three reconcile.
             "grounding_time": round(grounding_time, 3),
+            "verifier_llm_time": round(verifier_llm_time, 3),
             "escalation_time": round(escalation_time, 3),
             "verify_stage_time": round(verify_stage_time, 3),
             "total_time": round(total_time, 3),

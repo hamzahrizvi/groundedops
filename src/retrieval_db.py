@@ -242,6 +242,13 @@ def _bm25_ranking(query: str, collection, limit: int, source_filter: str | None,
 
     ids = []
     for i in order:
+        # A chunk sharing no term scores exactly 0, and the stable sort
+        # then lists every such chunk in corpus order. Padding the arm to
+        # `limit` with them handed RRF credit to noise: a zero-score chunk at
+        # BM25 #5 plus dense #20 outscored dense #1 on its own. The arm is
+        # as long as the lexical hits, and no longer.
+        if scores[i] <= 0:
+            break
         if not _matches_scope(chunks[i], source_filter, scope):
             continue
         ids.append(chunks[i]["id"])

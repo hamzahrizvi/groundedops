@@ -238,7 +238,7 @@ def deferral_for(query: str, chunks: list[dict]) -> dict | None:
     ingested = _ingested_titles()
     q_words = set(re.findall(r"[a-z]{3,}", (query or "").lower()))
     best = None
-    for c in chunks:
+    for rank, c in enumerate(chunks):
         text = c.get("text") or c.get("document") or ""
         for m in _DEFERRAL.finditer(text):
             if not _is_reference_to_a_document(text, m, c.get("source")):
@@ -253,7 +253,11 @@ def deferral_for(query: str, chunks: list[dict]) -> dict | None:
                                                      topic.lower())))
             hit = {"title": title, "topic": topic,
                    "source": c.get("source") or "?", "page": c.get("page"),
-                   "on_topic": on_topic}
+                   "on_topic": on_topic,
+                   # Where the deferring passage sat in the retrieval order,
+                   # so the caller can tell a reference in the best passage
+                   # from one buried further down.
+                   "rank": rank}
             # An on-topic deferral beats an incidental one.
             if best is None or (on_topic and not best["on_topic"]):
                 best = hit

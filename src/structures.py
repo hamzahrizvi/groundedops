@@ -144,6 +144,39 @@ def _caption_above(page, bbox) -> str:
 
 
 _VOCAB_CACHE: dict[tuple, set] = {}
+_VOCAB_CACHE_MAX = 64
+# On disk too: keyed by "basename|mtime", so a re-uploaded document gets a
+# fresh entry and a restart does not re-read every page of every manual.
+# One full text pass per document is ~7s for a 100-page manual, and this
+# used to run INSIDE a customer's request whenever the model refused --
+# 200s gaps in the logs were three manuals being read cover to cover.
+_VOCAB_PATH = os.getenv("DOC_VOCAB_CACHE", "doc_vocab.json")
+_VOCAB_DISK: dict[str, list] | None = None
+_VOCAB_DISK_MAX = 256
+
+
+def _vocab_disk() -> dict[str, list]:
+    global _VOCAB_DISK
+    if _VOCAB_DISK is None:
+        try:
+            import jsonstore
+            data = jsonstore.load(_VOCAB_PATH, {}, label="document vocabulary")
+            _VOCAB_DISK = data if isinstance(data, dict) else {}
+        except Exception:
+            _VOCAB_DISK = {}
+    return _VOCAB_DISK
+
+
+def _vocab_disk_put(key: str, words: set) -> None:
+    disk = _vocab_disk()
+    disk[key] = sorted(words)
+    while len(disk) > _VOCAB_DISK_MAX:
+        disk.pop(next(iter(disk)))
+    try:
+        import jsonstore
+        jsonstore.save(_VOCAB_PATH, disk, label="document vocabulary", indent=None)
+    except Exception as exc:
+        logger.debug(f"vocabulary cache not saved: {exc}")
 
 
 def _doc_vocab(path: str, pdf) -> set:
@@ -161,13 +194,18 @@ def _doc_vocab(path: str, pdf) -> set:
     except OSError:
         return set()
     if key not in _VOCAB_CACHE:
-        if len(_VOCAB_CACHE) > 16:
-            _VOCAB_CACHE.clear()
-        try:
-            text = " ".join((p.extract_text() or "") for p in pdf.pages)
-        except Exception:
-            text = ""
-        _VOCAB_CACHE[key] = {w.lower() for w in re.findall(r"\w+", text)}
+        while len(_VOCAB_CACHE) >= _VOCAB_CACHE_MAX:
+            _VOCAB_CACHE.pop(next(iter(_VOCAB_CACHE)))   # oldest, not all
+        disk_key = f"{os.path.basename(path)}|{int(key[1])}"
+        words = _vocab_disk().get(disk_key)
+        if words is None:
+            try:
+                text = " ".join((p.extract_text() or "") for p in pdf.pages)
+            except Exception:
+                text = ""
+            words = {w.lower() for w in re.findall(r"\w+", text)}
+            _vocab_disk_put(disk_key, words)
+        _VOCAB_CACHE[key] = set(words)
     return _VOCAB_CACHE[key]
 
 

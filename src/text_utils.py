@@ -302,7 +302,17 @@ def split_units(answer: str, min_len: int = MIN_UNIT_LEN) -> list[str]:
 
     units = []
     for line in lines:
-        cleaned = re.sub(r"^(\d+[\.\)]|\-|\*)\s*", "", line)
+        # The answer prompt asks for markdown: "### Heading", "**bold**",
+        # and tables with a "|---|---|" separator row. A separator row or a
+        # bare heading makes no claim, and NLI scores it near zero -- and
+        # since the gate takes the MINIMUM over units, every table answer
+        # failed verification on its punctuation, whatever its facts said.
+        if re.fullmatch(r"\|?[\s:|\-]+\|?", line):
+            continue
+        cleaned = re.sub(r"^(#{1,6}\s+|\d+[\.\)]|\-|\*)\s*", "", line)
+        cleaned = cleaned.replace("**", "")
+        if not re.search(r"[A-Za-z]{2}", cleaned):
+            continue
         sentences = re.split(r"(?<=[.!?])\s+", cleaned)
         for s in sentences:
             s = s.strip().rstrip(".")

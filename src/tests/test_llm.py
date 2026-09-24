@@ -52,15 +52,17 @@ def test_fallback_chain_tries_each_entry_exactly_once_on_failure():
     with patch.object(llm, "generate", side_effect=fake_generate):
         result = llm.generate_with_fallback("reasoning", "some prompt")
 
-    # In api mode the online provider leads and local/mistral follows as the
-    # forced final attempt. What this guards is unchanged: each model is tried
-    # EXACTLY once, never twice (the old safe_generate behaviour that let one
-    # model burn the whole time budget).
+    # In api mode the online provider is the whole chain: the forced
+    # local/mistral attempt is a LOCAL-mode safety net and no longer runs
+    # here (it was a 240s connect to an Ollama that api-mode hosts do not
+    # have). What this guards is unchanged: each model is tried EXACTLY
+    # once, never twice (the old safe_generate behaviour that let one model
+    # burn the whole time budget).
     #
-    # The expected pair is derived, not literal -- the online model comes from
-    # ONLINE_DEEPSEEK_MODEL, and a hardcoded "deepseek-chat" here broke the
-    # moment that retired alias was replaced.
-    assert calls == [llm._online_provider_model(), ("local", "mistral")]
+    # The expected entry is derived, not literal -- the online model comes
+    # from ONLINE_DEEPSEEK_MODEL, and a hardcoded "deepseek-chat" here broke
+    # the moment that retired alias was replaced.
+    assert calls == [llm._online_provider_model()]
     assert len(calls) == len(set(calls)), "a model was attempted twice"
     assert result["model"] == "none"
 
@@ -236,3 +238,114 @@ def test_local_mode_ignores_key_roles_entirely():
             assert llm._chain_for("accurate") == llm.FALLBACK_CHAIN["accurate"]
         finally:
             runtime_config.set_generation_mode("api")
+
+
+def test_deepseek_calls_disable_thinking_unless_asked(monkeypatch=None):
+    """DeepSeek V4 thinks by default and bills the thought. Every DeepSeek
+    request -- answer and stream alike -- must say so explicitly, and the
+    env switch must be able to turn it back on."""
+    import os
+    import llm
+
+    seen = []
+
+    class _Res:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}],
+                    "usage": {"total_tokens": 3}}
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def iter_lines(self, decode_unicode=True):
+            return iter(["data: [DONE]"])
+
+    def fake_post(url, headers=None, json=None, timeout=None, stream=False):
+        seen.append(json)
+        return _Res()
+
+    real_post = llm._HTTP.post
+    llm._HTTP.post = fake_post
+    saved = os.environ.pop("DEEPSEEK_THINKING", None)
+    try:
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        list(llm.stream_generate("deepseek", "q", "deepseek-v4-flash",
+                                 api_keys={"deepseek": "k"}))
+        assert [j["thinking"] for j in seen] == [{"type": "disabled"}] * 2
+        # An OpenAI-compatible gateway is not sent a DeepSeek field.
+        list(llm.stream_generate("openai", "q", "itl-gpt-flash",
+                                 api_keys={"openai": "k"}))
+        assert "thinking" not in seen[-1]
+        os.environ["DEEPSEEK_THINKING"] = "on"
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        assert seen[-1]["thinking"] == {"type": "enabled"}
+    finally:
+        llm._HTTP.post = real_post
+        os.environ.pop("DEEPSEEK_THINKING", None)
+        if saved is not None:
+            os.environ["DEEPSEEK_THINKING"] = saved
+
+
+def test_a_provider_in_cooldown_is_skipped_when_the_chain_has_another():
+    """The gateway that answered 5xx a moment ago is not asked again on the
+    very next question -- unless it is the only provider there is."""
+    import runtime_config, keystore, llm
+
+    calls = []
+
+    def fake_generate(provider, prompt, model, deepseek_api_key=None, api_keys=None):
+        calls.append(provider)
+        return {"text": "ok", "model": model, "provider": provider}
+
+    real_generate, real_chain = llm.generate, llm._chain_for
+    llm.generate = fake_generate
+    llm._provider_down.clear()
+    try:
+        llm._chain_for = lambda role: [("openai", "itl-gpt-pro"), ("deepseek", "deepseek-v4-flash")]
+        llm._note_unreachable("openai")
+        out = llm.generate_with_fallback("reasoning", "q")
+        assert calls == ["deepseek"] and out["provider"] == "deepseek"
+        # The only entry is always tried, cooldown or not.
+        calls.clear()
+        llm._chain_for = lambda role: [("openai", "itl-gpt-pro")]
+        llm.generate_with_fallback("reasoning", "q")
+        assert calls == ["openai"]
+        # A success clears it.
+        llm._note_reachable("openai")
+        assert not llm.provider_cooling("openai")
+    finally:
+        llm.generate, llm._chain_for = real_generate, real_chain
+        llm._provider_down.clear()
+
+
+def test_api_mode_never_forces_a_local_attempt():
+    """In api mode a total online failure ends the chain; it does not fall
+    through to a 240s Ollama connect on a host that has no Ollama."""
+    import runtime_config, llm
+
+    calls = []
+
+    def fake_generate(provider, prompt, model, deepseek_api_key=None, api_keys=None):
+        calls.append((provider, model))
+        return None
+
+    real_generate, real_chain = llm.generate, llm._chain_for
+    saved_mode = runtime_config.get_generation_mode()
+    llm.generate = fake_generate
+    llm._provider_down.clear()
+    try:
+        runtime_config.set_generation_mode("api")
+        llm._chain_for = lambda role: [("deepseek", "deepseek-v4-flash")]
+        out = llm.generate_with_fallback("accurate", "q")
+        assert calls == [("deepseek", "deepseek-v4-flash")]
+        assert out["provider"] == "none"
+        runtime_config.set_generation_mode("local")
+        calls.clear()
+        llm.generate_with_fallback("accurate", "q")
+        assert ("local", "mistral") in calls
+    finally:
+        llm.generate, llm._chain_for = real_generate, real_chain
+        runtime_config.set_generation_mode(saved_mode)
+        llm._provider_down.clear()

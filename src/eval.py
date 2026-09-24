@@ -45,7 +45,7 @@ from pathlib import Path
 import requests
 
 HERE = Path(__file__).parent
-URL = "http://127.0.0.1:8000/query"
+URL = os.getenv("EVAL_URL", "http://127.0.0.1:8000/query")
 CASES_FILE = HERE / "eval_cases.json"
 BASELINE_FILE = HERE / "eval_baseline.json"
 RESULTS_FILE = HERE / "eval_results.json"

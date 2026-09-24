@@ -1479,6 +1479,14 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
 
     sem = _semantic_scores(question, pool)
 
+    # In a product chat the pipeline hands us the question with the product
+    # name appended -- "what is the weight of the NV9S? (NV9 Spectral)" --
+    # which is right for retrieval and wrong for a verbatim comparison: the
+    # curated question typed word for word scored 0.50 against itself and
+    # was offered back as "is this what you meant?" instead of answered.
+    # Every widget chat is scoped, so that was every customer.
+    bare = re.sub(r"\s*\([^()]{1,60}\)\s*$", "", question).strip()
+
     scored = []
     for it in pool:
         s_lex = lexical_score(question, it["question"])
@@ -1488,6 +1496,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
         # question" -- see verbatim_score for what went wrong when it did
         # not. s_lex keeps its recall-oriented job of shortlisting.
         s_verb = verbatim_score(question, it["question"])
+        if bare and bare != question:
+            s_verb = max(s_verb, verbatim_score(bare, it["question"]))
         # (a) the same string, or (b) a paraphrase the semantic model is
         # near-certain about AND that shares most of its words. See the
         # AUTO_SERVE_* block above for why both halves of (b) are required.

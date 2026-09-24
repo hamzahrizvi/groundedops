@@ -1,3 +1,4 @@
+import functools
 import os
 
 from sentence_transformers import SentenceTransformer
@@ -70,8 +71,20 @@ def embed_texts(texts: list[str]) -> np.ndarray:
 
 
 def embed_query(query: str) -> np.ndarray:
+    """The query vector, memoised on the exact text.
+
+    One turn embeds the same resolved query three times -- FAQ ranking,
+    retrieval and routing -- and the console's Pipeline check repeats a
+    question verbatim. The model is a process-level constant (EMBED_MODEL),
+    so a cached vector can never go stale. A copy is returned because a
+    caller may normalise or slice in place."""
+    return _embed_query_cached(_query_prefix() + query).copy()
+
+
+@functools.lru_cache(maxsize=512)
+def _embed_query_cached(text: str) -> np.ndarray:
     return _get_model().encode(
-        [_query_prefix() + query],
+        [text],
         convert_to_numpy=True,
         normalize_embeddings=True
     )[0]

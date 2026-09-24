@@ -114,9 +114,16 @@ def is_sales_question(q: str) -> bool:
 # question, not a commercial one. Found by scenario 03 on 2026-09-19.
 # "deposit" is left out for the same class of reason -- in a coin hopper's
 # manual it is what the customer does with a coin.
+# `quot\w*` matched "the quotes around the value" and `subscri\w*` matched
+# "subscribe to age result events" -- both API questions this corpus really
+# gets. A quote is commercial when it is a thing you get or ask for; a
+# subscription is, a subscribe verb is not.
 _MONEY = (r"\bfees?\b"
-          r"|\b(?:pric|cost|quot|tariff|rebate|discount|surcharg"
-          r"|subscri|licen[cs]|rental|renting|leas(?:e|ing)|hire\s+charge"
+          r"|\bquotations?\b|\b(?:a|another|for\s+a|get\s+a|request\s+a"
+          r"|send\s+(?:me\s+)?a|provide\s+a|give\s+(?:me\s+)?a)\s+quote\b"
+          r"|\bquote\s+(?:for|on)\b"
+          r"|\b(?:pric|cost|tariff|rebate|discount|surcharg"
+          r"|subscription|licen[cs]|rental|renting|leas(?:e|ing)|hire\s+charge"
           r"|invoic|budget|afford|expensive|cheap)\w*"
           r"|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will)\b"
           r"|[£$€]\s*\d|\bex\s+vat\b|\bplus\s+vat\b"
@@ -126,13 +133,23 @@ _COMMERCE = (r"\b(?:buy|buying|purchas|reorder)\w*"
              r"|\bplace\s+an?\s+order\b|\bminimum\s+order\b|\bmoq\b"
              r"|\border\s+(?:one|some|them|a\s+few|\d+)\b")
 
+# "availability" alone matched "the availability of the RS232 port"; it is
+# commercial only next to stock, delivery or ordering.
 _SUPPLY = (r"\blead[\s-]?time\b|\bin\s+stock\b|\bout\s+of\s+stock\b"
-           r"|\bstock\s+levels?\b|\bavailabilit\w*"
+           r"|\bstock\s+levels?\b"
+           r"|\b(?:stock|product|unit|order|purchase)\s+availability\b"
+           r"|\bavailability\s+(?:of\s+stock|to\s+(?:order|buy|purchase)"
+           r"|for\s+(?:order|purchase|sale))\b"
+           r"|\bavailable\s+to\s+(?:buy|order|purchase)\b"
            r"|\bhow\s+soon\s+can\s+(?:you|we|i)\b"
            r"|\b(?:when|how\s+quickly)\s+can\s+you\s+(?:deliver|ship|send)\b"
            r"|\bdelivery\s+(?:time|date|lead|cost|charge)\w*")
 
-_CHANNEL = r"\b(?:reseller|distributor|dealer|stockist|supplier)s?\b"
+# "supplier" on its own is a power supplier in an installation question;
+# the channel sense is "your/a/local supplier", "who supplies".
+_CHANNEL = (r"\b(?:reseller|distributor|dealer|stockist)s?\b"
+            r"|\b(?:your|a|an|local|nearest|authori[sz]ed|official|approved"
+            r"|uk|find\s+a)\s+suppliers?\b|\bwho\s+(?:supplies|sells|stocks)\b")
 
 # AMBIGUOUS IN THIS CORPUS, so admitted only in a phrase that fixes the
 # money sense. Each of these appears in the manuals meaning something else:
