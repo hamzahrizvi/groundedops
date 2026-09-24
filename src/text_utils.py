@@ -69,7 +69,11 @@ _MORE_RE = re.compile(
     r"|elaborate|go\s+on|continue|expand(?:\s+on\s+(?:this|that|it))?"
     r"|anything\s+else|what\s+else|say\s+more)"
     r"(?:\s+(?:about|on)\s+(?:it|this|that|the\s+above))?"
-    r"\s*[.?!]*\s*$", re.I)
+    # ONE class for the tail, not `\s*[.?!]*\s*`: two whitespace runs either
+    # side of an optional one can split a long run of spaces n^2 ways before
+    # failing, so "go on" + 10k spaces + "x" was quadratic (CodeQL
+    # py/polynomial-redos). Same strings accepted.
+    r"[\s.?!]*$", re.I)
 
 
 def is_more_request(q: str) -> bool:

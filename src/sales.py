@@ -236,8 +236,15 @@ def get_index(doc_dir: str, source_to_product: dict) -> list[dict]:
 # ── matching a question against the index ─────────────────────────────────
 
 # "24V", "24 volt", "12 VDC", "1.5A", "50°C", "300 notes"
-_QTY = re.compile(
-    r"(\d+(?:\.\d+)?)\s*"
+#
+# Number and unit are matched in two steps, not one `(\d+...)\s*(unit)`
+# pattern under findall. That one restarted at every digit of a run and
+# re-scanned the rest of it before failing, so a long unit-less digit string
+# was quadratic (CodeQL py/polynomial-redos) -- and `text` includes whole spec
+# table rows, not just the question. A number match here never fails once
+# started, so finditer walks each digit run once.
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+_UNIT = re.compile(
     r"(v\b|volts?\b|vdc\b|a\b|amps?\b|ma\b|kg\b|g\b|mm\b|°?c\b|notes?\b|%)",
     re.I)
 
@@ -250,10 +257,18 @@ _UNIT_ALIASES = {
 
 
 def _quantities(text: str) -> list[tuple[str, str]]:
+    text = text or ""
     out = []
-    for num, unit in _QTY.findall(text or ""):
+    for m in _NUM.finditer(text):
+        j = m.end()
+        while j < len(text) and text[j].isspace():
+            j += 1
+        um = _UNIT.match(text, j)
+        if not um:
+            continue
+        unit = um.group(1)
         u = _UNIT_ALIASES.get(unit.lower().strip("."), unit.lower())
-        out.append((num, u))
+        out.append((m.group(0), u))
     return out
 
 

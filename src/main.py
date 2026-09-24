@@ -2197,8 +2197,12 @@ def models_status():
                      for m in ("mistral", "phi")}
         return {"ollama_up": True, "installed": installed, **get_settings()}
     except Exception as e:
+        # The exception text stays in the server log. Returned to the caller
+        # it exposed internals -- the Ollama URL, and whatever requests put in
+        # the message (CodeQL py/stack-trace-exposure); no UI reads it.
+        logger.warning("Ollama status check failed: %s", e)
         return {"ollama_up": False, "installed": {"mistral": False, "phi": False},
-                "error": str(e), **get_settings()}
+                "error": "Ollama is not reachable", **get_settings()}
 
 
 def _pull_worker(model: str):
@@ -4860,7 +4864,13 @@ def query(payload: QueryRequest, x_user_id: str | None = Header(default=None)):
     # anywhere to say why. Log which key is in play so the next divergence is
     # one grep, not an afternoon. Never log the key itself, only its origin and
     # a short fingerprint good enough to tell two keys apart.
-    for _prov, _sent in api_keys.items():
+    #
+    # The provider name logged below comes from this literal, NOT from
+    # iterating api_keys: CodeQL follows the dict's values (the keys
+    # themselves) onto its names via .items() and flagged logging `_prov` as
+    # clear-text password logging, twice. It is only ever a provider name.
+    for _prov in ("deepseek", "openai", "anthropic"):
+        _sent = api_keys.get(_prov)
         if not (_sent or "").strip():
             continue
         _env = (os.getenv(f"{_prov.upper()}_API_KEY") or "").strip()
