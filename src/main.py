@@ -861,6 +861,12 @@ def _warmup_stack():
 
 @app.on_event("startup")
 def startup_event():
+    # sentence_transformers (torch underneath) is imported on first use --
+    # see embeddings.py -- and that first use has to happen HERE, on the
+    # main thread, not inside the warmup thread. Initialised from a worker
+    # thread, torch took the process down with an access violation when
+    # that thread exited: three of four starts on this box (2026-09-25).
+    import sentence_transformers  # noqa: F401
     thread = threading.Thread(target=_warmup_stack, daemon=True)
     thread.start()
     import credit_watch
