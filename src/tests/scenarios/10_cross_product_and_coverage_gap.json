@@ -1,0 +1,53 @@
+{
+  "id": "10_cross_product_and_coverage_gap",
+  "product": "SCS + NV9 (and NV22S, which has no documents)",
+  "product_key": null,
+  "source": null,
+  "persona": "Operator running two machines, then asking about one we hold nothing on.",
+  "expect_labels": [
+    "SMART Coin System",
+    "NV9 Spectral"
+  ],
+  "expect_labels_sources": [
+    "SMART Coin System Range User Manual-v1.pdf",
+    "NV9 Spectral Range User Manual-v1.pdf"
+  ],
+  "turns": [
+    {
+      "q": "I run a SCS and an NV9 Spectral on the same counter",
+      "followup": false,
+      "commercial": false,
+      "note": "statement of context, no markers"
+    },
+    {
+      "q": "what is the power required to run both at once",
+      "followup": true,
+      "commercial": false,
+      "note": "'both' -- the case that died before de5a37f"
+    },
+    {
+      "q": "can the two of them share one earth",
+      "followup": true,
+      "commercial": false,
+      "note": "'the two' set anaphora"
+    },
+    {
+      "q": "what is the combined footprint on the bench",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone, though unanswerable from either manual alone"
+    },
+    {
+      "q": "do you do anything for the NV22S as well",
+      "followup": false,
+      "commercial": false,
+      "note": "a product with NO documents -- must refuse honestly"
+    },
+    {
+      "q": "and what about it in a damp cellar",
+      "followup": true,
+      "commercial": false,
+      "note": "stacked opener plus pronoun"
+    }
+  ]
+}

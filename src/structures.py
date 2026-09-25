@@ -171,8 +171,34 @@ def _doc_vocab(path: str, pdf) -> set:
     return _VOCAB_CACHE[key]
 
 
-def tables_on_page(path: str, page_no: int) -> list[dict]:
-    """Every table on one page, verbatim. [] if the page has none."""
+def _tables_from(pdf, path: str, page_no: int) -> list[dict]:
+    """The table blocks of one page of an ALREADY-OPEN document."""
+    if not (1 <= page_no <= len(pdf.pages)):
+        return []
+    page = pdf.pages[page_no - 1]
+    vocab = _doc_vocab(path, pdf)
+    out: list[dict] = []
+    for t in page.find_tables():
+        md = _render_markdown(t.extract(), vocab)
+        if not md:
+            continue
+        out.append({"kind": "table", "page": page_no,
+                    "title": _caption_above(page, t.bbox),
+                    "markdown": md})
+    return out
+
+
+def tables_on_page(path: str, page_no: int, pdf=None) -> list[dict]:
+    """Every table on one page, verbatim. [] if the page has none.
+
+    `pdf` is an already-open pdfplumber document for `path`, passed by a
+    caller sweeping every page of one file. Opening is NOT the ~0.02s the
+    module docstring quotes when you do it 832 times: pdfplumber re-parses
+    the document structure on each open, and the spec-index build was
+    paying that once PER PAGE. Left None, the file is opened and closed
+    here exactly as before, which is what the on-demand callers want --
+    they read one cited page and are done with the file.
+    """
     if pdfplumber is None or not os.path.exists(path):
         return []
     try:
@@ -182,20 +208,12 @@ def tables_on_page(path: str, page_no: int) -> list[dict]:
     if key in _CACHE:
         return _CACHE[key]
 
-    out: list[dict] = []
     try:
-        with pdfplumber.open(path) as pdf:
-            if not (1 <= page_no <= len(pdf.pages)):
-                return []
-            page = pdf.pages[page_no - 1]
-            vocab = _doc_vocab(path, pdf)
-            for t in page.find_tables():
-                md = _render_markdown(t.extract(), vocab)
-                if not md:
-                    continue
-                out.append({"kind": "table", "page": page_no,
-                            "title": _caption_above(page, t.bbox),
-                            "markdown": md})
+        if pdf is not None:
+            out = _tables_from(pdf, path, page_no)
+        else:
+            with pdfplumber.open(path) as doc:
+                out = _tables_from(doc, path, page_no)
     except Exception as exc:
         logger.warning(f"table extraction failed for {path} p{page_no}: {exc}")
         return []

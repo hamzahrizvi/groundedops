@@ -1,0 +1,48 @@
+{
+  "id": "08_myconnect_installer",
+  "product": "MyConnect",
+  "product_key": "myconnect",
+  "source": "MyConnect Environment-v4.pdf",
+  "persona": "Field installer working through prerequisites on site.",
+  "expect_labels": [
+    "MyConnect"
+  ],
+  "turns": [
+    {
+      "q": "what are the prerequisites for the MyConnect app",
+      "followup": false,
+      "commercial": false,
+      "note": "opening"
+    },
+    {
+      "q": "which ports need opening on the customer firewall",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone, technical"
+    },
+    {
+      "q": "do those need to be open both ways",
+      "followup": true,
+      "commercial": false,
+      "note": "'those' sentence-initial"
+    },
+    {
+      "q": "the device registration keeps failing after a factory reset",
+      "followup": false,
+      "commercial": false,
+      "note": "long, no pronoun -- a fresh problem statement"
+    },
+    {
+      "q": "it keeps failing even after I rebooted the tablet",
+      "followup": true,
+      "commercial": false,
+      "note": "sentence-initial pronoun, 9 words -- was missed before 19 Sep"
+    },
+    {
+      "q": "is there a checklist I can print for the engineer",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone"
+    }
+  ]
+}

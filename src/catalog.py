@@ -151,6 +151,14 @@ def product_for_source(source: str) -> list[str]:
     return keys
 
 
+def is_shared_product(key: str | None) -> bool:
+    """True for a category's synthetic shared-documents entry ("General
+    (shared docs)"), which holds documents rather than naming something we
+    make. It must never be listed or offered as a product."""
+    k = (key or "").lower()
+    return k.endswith("_general") or k.endswith("_shared")
+
+
 # ── Admin mutations (guarded by the password gate in main.py) ──────────
 
 def add_category(key: str, name: str) -> dict:

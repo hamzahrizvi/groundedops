@@ -74,6 +74,15 @@ services:
       WIDGET_CONFIG_PATH: /data/widget_config.json
       WIDGET_LEADS_PATH: /data/widget_leads.json
       INGEST_STAMP_PATH: /data/ingest_stamp.txt
+      # When each provider was last emailed about low credit, so a restart
+      # does not re-send every alert.
+      CREDIT_ALERT_STATE_PATH: /data/credit_alerts.json
+      # Outstanding password-reset and sign-in links (hashed, single use).
+      AUTH_TOKENS_PATH: /data/auth_tokens.json
+      # The console address emailed links point at, e.g.
+      # https://staging.yourcompany.com. Required behind a proxy: without it
+      # the request's Host header is not trusted and links are refused.
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
       # The document store (docstore.py). Bind-mounted below so the
       # originals live on the host and survive the container entirely.
       SOURCE_FILE_DIR: /data/documents

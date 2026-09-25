@@ -237,6 +237,12 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
             "passages": [], "label": "Contact support for more information",
         },
         "needs_clarification": clarify,
+        # Always present so a client can read it unconditionally. The FAQ
+        # path disambiguates through faq_candidates, which carry ids; these
+        # are the free-text options the generation path builds, and there
+        # are none here.
+        "clarification_options": [],
+        "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
         "effort": "faq_only",
@@ -422,6 +428,17 @@ def register(app, answer_query, draft_enquiry=None):
                 return _faq_response(faq["entry"]["answer"], caller,
                                      matched=faq["entry"]["question"])
 
+            # "Can I have the MyCheckr manual?" -- the file is member-only
+            # (/source_file is token gated), so say that plainly rather than
+            # the generic "no reviewed answer", which reads as "we have no
+            # manual". A curated FAQ about manuals still wins, above.
+            import doc_request
+            if doc_request.document_request(payload.q):
+                return _faq_response(
+                    "Product manuals and documents are available to account "
+                    "holders. Sign in and I can give you the download link.",
+                    caller, needs_sign_in=True)
+
             if faq["mode"] == "disambiguate":
                 return _faq_response(
                     "These FAQs match your query - please select the one you meant:",
@@ -512,6 +529,21 @@ def register(app, answer_query, draft_enquiry=None):
             # with _public_sources; the passages carry the text instead.
             "more_context": _public_more_context(result.get("more_context")),
             "needs_clarification": bool(result.get("needs_clarification")),
+            # The options themselves, not just the boolean. They have been
+            # built on every clarify turn since v12 and dropped here ever
+            # since -- so the widget rendered "which did you mean?" as prose
+            # and the visitor had to type the answer to a question we had
+            # already enumerated. Strings only, and short ones: they are
+            # product labels or the visitor's own earlier questions, so
+            # nothing here is new information leaving the backend.
+            "clarification_options": [
+                str(o)[:120] for o in
+                (result.get("clarification_options") or [])[:5]],
+            # Replies the answer asked for ("Would you like them?"), shown as
+            # buttons and as the composer's right-arrow suggestion.
+            "suggested_replies": [
+                str(o)[:80] for o in
+                (result.get("suggested_replies") or [])[:3]],
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
@@ -559,14 +591,20 @@ def register(app, answer_query, draft_enquiry=None):
                                     "detail": e.detail})
                 return
             except Exception as e:
+                # This one is the PUBLIC surface, so the rule matters most
+                # here: an anonymous visitor gets a status and nothing else.
+                # The traceback is already in the log via logger.exception.
                 logger.exception("widget ask/stream failed")
-                yield sse("error", {"status": 503, "detail": str(e)[:160]})
+                yield sse("error", {"status": 503, "detail":
+                                    "The assistant is temporarily "
+                                    "unavailable. Please try again."})
                 return
 
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_candidates",
                                 "offer_support", "needs_clarification",
+                                "clarification_options", "suggested_replies",
                                 "flagged", "quota", "session")})
 
             # Whole sentences, not tokens: a sentence is the unit the

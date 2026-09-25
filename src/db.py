@@ -31,6 +31,17 @@ _CHECK_SECS = float(os.getenv("CHROMA_HANDLE_CHECK_SECS", "5"))
 _checked_at = 0.0
 
 
+def invalidate_retrieval_cache() -> None:
+    """Invalidate derived in-process search state after any index mutation."""
+    try:
+        from retrieval_db import _invalidate_bm25_cache
+        _invalidate_bm25_cache()
+    except Exception as exc:
+        # During startup retrieval_db may still be importing db. Count-based
+        # invalidation remains the fallback for inserts/deletes in that case.
+        logger.debug("retrieval cache invalidation deferred: %s", exc)
+
+
 def get_collection() -> chromadb.Collection:
     """The shared 'docs' collection, re-acquired if it was reset elsewhere.
 
@@ -86,6 +97,7 @@ def reset_collection() -> chromadb.Collection:
     except Exception:
         pass
     _collection = client.create_collection(COLLECTION_NAME)
+    invalidate_retrieval_cache()
     logger.info("Collection recreated")
     return _collection
 
@@ -111,6 +123,7 @@ def delete_source(source: str) -> int:
     ids = result.get("ids", []) if result else []
     if ids:
         col.delete(ids=ids)
+        invalidate_retrieval_cache()
         logger.info(f"Deleted source '{source}' ({len(ids)} chunks)")
     return len(ids)
 
@@ -170,6 +183,7 @@ def retag_product(old_key: str, new_key: str | None) -> int:
 
     if change_ids:
         col.update(ids=change_ids, metadatas=change_metas)
+        invalidate_retrieval_cache()
         logger.info(f"Retagged {len(change_ids)} chunk(s): "
                     f"{old_key!r} -> {new_key!r}")
     return len(change_ids)
@@ -208,6 +222,8 @@ def delete_by_product(product_key: str) -> int:
         col.update(ids=shared_ids, metadatas=shared_metas)
     if doomed:
         col.delete(ids=doomed)
+    if shared_ids or doomed:
+        invalidate_retrieval_cache()
     logger.info(f"delete_by_product {product_key!r}: removed {len(doomed)} "
                 f"chunk(s), kept {len(shared_ids)} shared with other products")
     return len(doomed)

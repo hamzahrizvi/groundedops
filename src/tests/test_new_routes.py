@@ -207,6 +207,7 @@ print("\n== a product short code scopes the question instead of asking ==")
 import main as _m
 _cands = ["nv9_spectral", "nv9usb"]
 _names, _aliases = _m._product_names, _m._product_aliases
+_cat_keys = _m._category_keys
 _m._product_names = lambda: {"nv9_spectral": "NV9 Spectral", "nv9usb": "NV9USB+"}
 _m._product_aliases = lambda: {"nv9_spectral": ["NV9S", "NV22"],
                                "nv9usb": ["NV11+"]}
@@ -227,8 +228,77 @@ try:
     _m._product_aliases = lambda: {"nv9_spectral": ["nv9"], "nv9usb": []}
     check(_m._products_named_in("how much does the NV9USB+ weigh?", _cands)
           == ["nv9usb"], "a stem contained in a longer alias is still dropped")
+
+    # The widget already sends its selected product on every turn. A question
+    # such as "power requirements for this product" therefore needs no chat
+    # history rewrite, but retrieval still needs the manual's full product
+    # name. This was accidentally gated on `_named` being non-empty, so typing
+    # "SCS" worked while "this product" failed in the same selected chat.
+    _m._product_names = lambda: {"sku_scs": "SMART Coin System",
+                                 "nv9usb": "NV9USB+"}
+    check(_m._add_selected_product_context(
+              "operating temperatures and power requirements for this product",
+              [], {"product": "sku_scs"})
+          == ("operating temperatures and power requirements for this product "
+              "(SMART Coin System)"),
+          "the selected product supplies context when the question says this product")
+    check(_m._add_selected_product_context(
+              "what about the NV9USB+?", ["nv9usb"],
+              {"product": "sku_scs"}) == "what about the NV9USB+?",
+          "an explicitly named product overrides the selected product")
+    check(_m._add_selected_product_context(
+              "compare SCS and NV9USB+", ["sku_scs", "nv9usb"],
+              {"product": "sku_scs"}) == "compare SCS and NV9USB+",
+          "a multi-product comparison is not collapsed to the selected product")
+    check(_m._resolve_question_scope("sku_scs", "coin_hoppers", [])
+          == ({"product": "sku_scs"}, "sku_scs"),
+          "the picker remains the default scope when no product is named")
+    check(_m._resolve_question_scope("sku_scs", "coin_hoppers", ["nv9usb"])
+          == ({"product": "nv9usb"}, "nv9usb"),
+          "one explicitly named product overrides the picker for this turn")
+    # "Not sure — ask across the whole range" sends the CATEGORY key as the
+    # product. Scoping {"product": "biometrics"} matched no chunk and
+    # refused everything asked after that button.
+    _m._category_keys = lambda: {"biometrics", "coin_hoppers"}
+    check(_m._resolve_question_scope("biometrics", None, [])
+          == ({"category": "biometrics"}, None),
+          "a category key sent as the product scopes by category")
+    check(_m._resolve_question_scope("biometrics", "biometrics", [])
+          == ({"category": "biometrics"}, None),
+          "a category key in both slots scopes by category")
+    check(_m._resolve_question_scope("biometrics", None, ["mycheckr"])
+          == ({"product": "mycheckr"}, "mycheckr"),
+          "a product named in the question still narrows a whole-range scope")
+    check(_m._resolve_question_scope("sku_scs", "coin_hoppers", [])
+          == ({"product": "sku_scs"}, "sku_scs"),
+          "a real product key is not mistaken for a category")
+    # "Can you give me the MyCheckr manual?" answers with the file's link,
+    # built only from documents that can actually be downloaded.
+    import docstore as _ds
+    _docs_in, _find = _m._documents_in_scope, _ds.find
+    _m._product_names = lambda: {"mycheckr": "MyCheckr"}
+    _m._documents_in_scope = lambda scope: [
+        "MyCheckr User Manual-v7.pdf", "Not On Disk Manual.pdf"]
+    _ds.find = lambda name: None if name.startswith("Not On Disk") else name
+    try:
+        _d = _m._document_answer("can you give me the MyCheckr manual?",
+                                 {"product": "mycheckr"}, "mycheckr")
+        check(_d and [x["source"] for x in _d["sources"]]
+              == ["MyCheckr User Manual-v7.pdf"],
+              "a manual request links only the manuals held on disk")
+        check(_d and _d["sources"][0]["download_url"]
+              == "/source_file/MyCheckr%20User%20Manual-v7.pdf",
+              "the link is the token-gated /source_file URL")
+        check(_m._document_answer("what does the manual say about LEDs?",
+                                  {"product": "mycheckr"}, "mycheckr") is None,
+              "a question about the manual's content goes to the pipeline")
+        check(_m._document_answer("can you give me the manual", None, None)
+              is None, "no scope: the pipeline asks which product")
+    finally:
+        _m._documents_in_scope, _ds.find = _docs_in, _find
 finally:
     _m._product_names, _m._product_aliases = _names, _aliases
+    _m._category_keys = _cat_keys
 
 print("\n" + "=" * 52)
 if fails:

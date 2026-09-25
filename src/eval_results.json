@@ -1,100 +1,1525 @@
 {
-  "pass_rate": 0.2857142857142857,
+  "pass_rate": 0.8777777777777778,
+  "stable_pass_rate": 0.8666666666666667,
+  "repeats": 3,
   "results": [
     {
-      "q": "what is <YOUR PRODUCT> and what is it used for",
-      "outcome": "rejected",
-      "grounding": null,
-      "retrieval": 0.0007,
-      "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "q": "What size screws do I need to mount the MyCheckr, and how many mounting holes are there?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9855,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "The MyCheckr mounts using 4mm screws and has 4 mounting holes. Alternatively, you can use a \u00bc\u201d 20 thread screw in the bottom centre of the device.",
       "checks": {
-        "outcome": false,
-        "keywords_all": false
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
       },
-      "passed": false,
-      "skipped": false
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
     },
     {
-      "q": "<a question whose answer has a near-identical WRONG twin in your docs \u00e2\u20ac\u201d e.g. two credential sets, two ports, two versions>",
-      "outcome": "rejected",
+      "q": "What options are available in Ads mode?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0526,
+      "retrieval": 0.9981,
+      "provider": "deepseek",
+      "answer": "MyCheckr\u2019s Ads mode is available only when the device is configured in Age Only mode; it is not available in Face Only or Age & Face Recognition modes. The options are:\n- Gender Filter: filters advertisements assigned to Male, Female, or Both Genders.\n- Screen Filter: filters available advertising screens.\n- Advertising Carousel: displays all currently assigned advertising assets.\n- Restore: reverts advertising screens back to the default configuration.\n- Display Time (s): sets how long each advertisement is displayed before rotating to the next advertisement.\n- Age Bands: defines which advertisements are shown for each age and gender group.\n- Smooth Scrolling: changes how advertisements are presented when the device is waiting for and processing users.\n- Enable: advertisements continuously scroll through the configured advertising playlist; when a face is detected and age/gender is estimated, MyCheckr automatically moves the most relevant advertisement toward the user, letting the current advertisement finish its scroll cycle first.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "I need to reset the API credentials, how do I do that?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0097,
+      "retrieval": 0.9839,
+      "provider": "deepseek",
+      "answer": "To reset the API credentials on MyCheckr, open the Manage Device Login Details page and enter a new API username, confirm the username, enter a new API password, and confirm the password. Store the updated credentials securely before applying the changes. After this, all future API token requests must use the new credentials. The default credentials on new devices are Username: apiuser and Password: apipassword; losing these credentials may prevent API access to the device.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "I need to mount a Twin SMART Coin System baseplate into our cabinet - how many screws does it take?",
+      "layer": "retrieval",
+      "outcome": "answered",
       "grounding": null,
-      "retrieval": 0.0001,
+      "retrieval": 0.9852,
+      "provider": "deepseek",
+      "answer": "I don't have that in the product documentation about the SMART Coin System.\n\nHere are some things I can answer:\n- What is the SMART Coin System and what does it do?\n- What is the SMART Coin System?\n- What is the Twin SMART Coin System and what does it do?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": false,
+        "sources_any": true
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "I need to clean the coin path in the feeder - how do I do that and how often?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.7775,
+      "retrieval": 0.997,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, clean the Coin Feeder coin path monthly. - Lift the Coin Feeder Path Insert with a flat screwdriver at the marked position.\n- Clean the coin path area with a paintbrush, compressed air, or a cloth with mild detergent to remove coin dust, foreign objects, or dirt.\n- Do not polish the area.\n- Do not use solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit, or PCB cleaner; use only a mild detergent.\n- After cleaning the Coin Feeder, renew the coated surface with Silicone Lubricant. Use Ambersil AMS4 Silicone Grease. Renew the coated surface every 50,000 coins to guarantee the best Coin Feeder performance.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What options are available for the pay-in chute on the SMART Coin System?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0683,
+      "retrieval": 0.9998,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, the available pay-in chute options are: - PM01106 \u2013 Funnel (standard)\n- PA04138 \u2013 Chute with Debris Collection",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "Which settings does the SD card need to be formatted with?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0025,
+      "retrieval": 0.9385,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, the SD card must meet these requirements: - Partition style: MBR\n- Format: FAT32\n- Capacity: 4 GB minimum to 32 GB maximum; larger capacity is acceptable if formatted as FAT32/MBR\n- Speed class: 4 minimum to 10 maximum",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What size coins will the unit take - is there a minimum and maximum diameter?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0011,
+      "retrieval": 0.9924,
+      "provider": "deepseek",
+      "answer": "The SMART Coin System accepts coin diameters from a minimum of 18 mm to a maximum of 28.5 mm. Coins below 18 mm require special considerations.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "How much does the SMART Coin System weigh empty and when it's full?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9858,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "The SMART Coin System weighs 4 kg empty and approximately 18 kg when full.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "The status LED is flashing red four times - what does that mean?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9619,
+      "retrieval": 0.9862,
       "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "answer": "Red four flashes on the SMART Coin System indicates a Feeder Calibration Error. Remove power and check the SMART Hopper and Coin Feeder connection. If the failure persists, the unit may need to be returned to ITL for service.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "Can I plug the USB straight into my host PC to talk to the machine?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.014,
+      "retrieval": 0.9881,
+      "provider": "deepseek",
+      "answer": "No. Direct USB should not be used for host communications with the SMART Coin System. If USB is required, use an IF17 (TTL to USB). The USB socket is intended for programming and bench testing.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "Which pins on the 16-way connector do I have to wire for power?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": null,
+      "retrieval": null,
+      "provider": "local",
+      "answer": "- 13: USB power (+5V)\n- 16: GND (0V ground connection)\n- Power is always required on pins 15 and 16 of the 16-way connector.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What is the peak current draw of the NV9 Spectral?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0109,
+      "retrieval": 0.9867,
+      "provider": "deepseek",
+      "answer": "The NV9 Spectral has a peak current draw of 2.5 A at 12 V and 2 A at 24 V.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "My bezel is flashing one long flash then one short flash - what's wrong?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0081,
+      "retrieval": 0.9634,
+      "provider": null,
+      "answer": "The NV9 Spectral is indicating a note path open. Ensure the upper assembly is closed.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "How often should the belts be changed and the lenses cleaned?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.983,
+      "retrieval": 0.9999,
+      "provider": "deepseek",
+      "answer": "For the NV9 Spectral, change the drive belts every 6\u201312 months, or sooner if dirt builds up or the belts show excessive use and wear. Clean the optical lenses every 6 months, and more often if the unit is in a particularly harsh environment.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What note sizes will the NV9 Spectral take?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0542,
+      "retrieval": 0.9989,
+      "provider": null,
+      "answer": "The NV9 Spectral accepts notes within the following size ranges:\n| Configuration | Length (mm) | Width (mm) |\n| --- | --- | --- |\n| Standard | 115 \u2013 167 | 60 \u2013 82 |\n| Multi Note Float recycler | 115 \u2013 160 | 62 \u2013 80 |",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "Can I connect the NV9USB+ directly to an MDB vending machine?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0087,
+      "retrieval": 0.9975,
+      "provider": "deepseek",
+      "answer": "No. The NV9USB+ cannot be connected directly to an MDB vending machine. You must use an IF5 MDB Voltage Converter, part number PA02061 (IF5 KIT), between the validator and the machine.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What cleaner is safe to use on the NV9USB+?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9892,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "For the NV9USB+, only a mild detergent is safe to use. Do not use solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit, or PCB cleaner.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "How do I put the validator into SSP programming mode?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0011,
+      "retrieval": 0.9993,
+      "provider": "deepseek",
+      "answer": "For the NV9 Spectral, switch it to SSP programming mode using the configuration button while the unit is powered on: - Press and hold the button for more than 3 seconds, until the bezel illuminates, then release.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What power supply does the NV200 Spectral need when docked with the SMART Coin System?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0088,
+      "retrieval": 0.9969,
+      "provider": "deepseek",
+      "answer": "The NV200 Spectral requires a stable 24 VDC / 3.5 A power supply when docked with the SMART Coin System. The SMART Coin System requires 24 VDC / 7.5 A.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "what is the power required to run both at once",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0067,
+      "retrieval": 0.9944,
+      "provider": "deepseek",
+      "answer": "The NV200 Spectral requires a stable 24 VDC / 3.5 A power supply, and the SMART Coin System requires 24 VDC / 7.5 A.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What does the NV9 Spectral validator do?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9151,
+      "retrieval": 0.9997,
+      "provider": null,
+      "answer": "The NV9 Spectral is a banknote validator that authenticates the validity of notes using state-of-the-art spectral sensors and high-resolution imaging, scanning 1.28 million data points. It offers casino-level security at a mid-range price.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "how much does it weigh on its own?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0103,
+      "retrieval": 0.999,
+      "provider": null,
+      "answer": "The NV9 Spectral validator weighs 1.05 kg on its own.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "Does the NV9USB+ support the MDB interface?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9508,
+      "retrieval": 0.9978,
+      "provider": "deepseek",
+      "answer": "Yes. The NV9USB+ supports MDB when connected through an IF5 MDB Voltage Converter (PA02061). The IF5 is required to connect an NV9USB+ to an MDB machine, reducing the machine\u2019s higher supply voltage to the validator\u2019s required level and opto-isolating the communication lines.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "what are the pin assignments for that interface",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0229,
+      "retrieval": 0.9908,
+      "provider": "deepseek",
+      "answer": "For an NV9USB+ connected to an MDB machine through the IF5 MDB Voltage Converter (PA02061), the pin assignments are:\n| Pin | Name | Type | Description |\n| --- | --- | --- | --- |\n| 1 | Vend1 | Output | Serial Data Out (Tx) |\n| 2-4 | Not Used |  |  |\n| 5 | Inhibit 1 | Input | Serial Data In (Rx) |\n| 6-14 | Not Used |  |  |\n| 15 | +Vin | Power | +12VDC Supply |\n| 16 | 0V | Power | 0V Supply (GND) |",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What does the MyCheckr Mini weigh?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9857,
+      "retrieval": 0.9986,
+      "provider": "deepseek",
+      "answer": "The MyCheckr Mini weighs 186 g; an alternate specification lists 152 g.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "ok and what about the full size one?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0106,
+      "retrieval": 0.9739,
+      "provider": "deepseek",
+      "answer": "The full size MyCheckr weighs 586 g.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true,
+        "grade": false,
+        "_grade_reason": "grader returned nothing"
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "How do I mount the MyCheckr?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9629,
+      "retrieval": 0.9998,
+      "provider": "deepseek",
+      "answer": "Mount the MyCheckr securely to a flat surface using either of the following options: - 4mm screws through the 4 mounting holes provided\n- A \u00bc\u201d 20 thread screw in the bottom centre of the device",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "how do I reset the password on my Cisco router",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": null,
+      "retrieval": 0.9641,
+      "provider": null,
+      "answer": "I don't have that in the product documentation about the MyCheckr.\n\nHere are some things I can answer:\n- Does MyCheckr need an internet connection to operate?\n- How can MyCheckr be mounted?\n- How do I find a device in ICU Management System?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
+      "checks": {
+        "outcome": false
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "what is the recommended operating temperature range for the MyCheckr",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0021,
+      "retrieval": 0.9964,
+      "provider": "deepseek",
+      "answer": "The MyCheckr operating temperature range is +5\u00b0C to +50\u00b0C, within 5% to 95% non-condensing humidity. For comparison, the separate storage range is -20\u00b0C to +70\u00b0C at 0% to 70% humidity \u2014 that figure applies to storage, not operation.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 1
+    },
+    {
+      "q": "What size screws do I need to mount the MyCheckr, and how many mounting holes are there?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9843,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "The MyCheckr uses 4mm screws in the four mounting holes provided, or a \u00bc\u201d 20 thread screw in the bottom centre. There are four mounting holes.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What options are available in Ads mode?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0571,
+      "retrieval": 0.9981,
+      "provider": "deepseek",
+      "answer": "On MyCheckr, Ads mode provides the following options and is available only when the device is configured in Age Only mode, not in Face Only or Age & Face Recognition modes. | Option | Description |\n| --- | --- |\n| Gender Filter | Filters advertisements assigned to Male, Female, or Both Genders. |\n| Screen Filter | Filters available advertising screens. |\n| Advertising Carousel | Displays all currently assigned advertising assets. |\n| Restore | Reverts advertising screens back to the default configuration. |\n| Display Time (s) | Sets how long each advertisement is displayed before rotating to the next advertisement. |\n| Age Bands | Defines which advertisements are shown for each age and gender group. |\n| Smooth Scrolling | Changes how advertisements are presented when the device is waiting for and processing users. |\n| Enable | Advertisements continuously scroll through the configured advertising playlist; when a face is detected and age/gender has been estimated, MyCheckr moves the most relevant advertisement toward the user, allowing the current advertisement to finish its scroll cycle before the targeted advertisement is shown. |",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "I need to reset the API credentials, how do I do that?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0067,
+      "retrieval": 0.9839,
+      "provider": "deepseek",
+      "answer": "Reset the API credentials from the Manage Device Login Details page, which allows the credentials stored on the device to be changed. - Username: New API username\n- Confirm Username: Confirm username entry\n- Password: New API password\n- Confirm Password: Confirm password entry These credentials are used for API authentication. Once changed, all future API token requests must use the new credentials, and losing them may prevent API access to the device. Store the updated credentials securely before applying the changes. On new devices the defaults are Username: apiuser and Password: apipassword.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "I need to mount a Twin SMART Coin System baseplate into our cabinet - how many screws does it take?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": null,
+      "retrieval": 0.9852,
+      "provider": "deepseek",
+      "answer": "I don't have that in the product documentation about the SMART Coin System.\n\nHere are some things I can answer:\n- What is the SMART Coin System and what does it do?\n- What is the SMART Coin System?\n- What is the Twin SMART Coin System and what does it do?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": false,
+        "sources_any": true
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "I need to clean the coin path in the feeder - how do I do that and how often?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.007,
+      "retrieval": 0.997,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, clean the Coin Feeder coin path monthly. Remove coin dust, foreign objects, or dirt with a paintbrush, compressed air, or a cloth with mild detergent. Clean the area but do not polish it. Do not use solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit, or PCB cleaner, as these will permanently damage the system. Use only a mild detergent. After cleaning the Coin Feeder, renew the coated surface with Silicone Lubricant every 50,000 coins. This prevents coins sticking and dirt or grease building up on the plastic path surface. The recommended and tested lubricant is Ambersil AMS4 Silicone Grease.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What options are available for the pay-in chute on the SMART Coin System?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0486,
+      "retrieval": 0.9998,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, the available pay-in chute options are: - PM01106 - Funnel (standard)\n- PA04138 - Chute with Debris Collection These are selected based on the host machine requirements.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "Which settings does the SD card need to be formatted with?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.293,
+      "retrieval": 0.9385,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, prepare the SD card as follows: | Setting | Requirement |\n| --- | --- |\n| Partition style | MBR |\n| Format | FAT32 |\n| Capacity | 4 GB minimum; 32 GB maximum |\n| Speed class | 4 minimum; 10 maximum |\n\nA larger capacity should not be an issue provided the card is formatted as FAT32/MBR.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What size coins will the unit take - is there a minimum and maximum diameter?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0011,
+      "retrieval": 0.9924,
+      "provider": "deepseek",
+      "answer": "The SMART Coin System accepts coins with a minimum diameter of 18 mm and a maximum diameter of 28.5 mm. Coins below 18 mm diameter require special considerations.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "How much does the SMART Coin System weigh empty and when it's full?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9847,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "The SMART Coin System weighs 4 kg empty and approximately 18 kg full.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "The status LED is flashing red four times - what does that mean?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9619,
+      "retrieval": 0.9862,
+      "provider": null,
+      "answer": "Red flashing four times on the SMART Coin System indicates a Feeder Calibration Error. Remove power and check the SMART Hopper and Coin Feeder connection. If the failure persists, the unit may need to be returned to ITL for service.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "Can I plug the USB straight into my host PC to talk to the machine?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.977,
+      "retrieval": 0.9881,
+      "provider": "deepseek",
+      "answer": "No. For the SMART Coin System, direct USB should not be used for host communications. If USB is required, use an IF17 (TTL to USB).",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "Which pins on the 16-way connector do I have to wire for power?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": null,
+      "retrieval": null,
+      "provider": "local",
+      "answer": "- 13: USB power (+5V)\n- 16: GND (0V ground connection)\n- Power is always required on pins 15 and 16 of the 16-way connector.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What is the peak current draw of the NV9 Spectral?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0163,
+      "retrieval": 0.9867,
+      "provider": "deepseek",
+      "answer": "The NV9 Spectral peak current draw is:\n| Voltage | Peak Current |\n| --- | --- |\n| 12 V | 2.5 A |\n| 24 V | 2 A |",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "My bezel is flashing one long flash then one short flash - what's wrong?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0081,
+      "retrieval": 0.9634,
+      "provider": null,
+      "answer": "The NV9 Spectral is indicating a note path open. Ensure the upper assembling is closed.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "How often should the belts be changed and the lenses cleaned?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.4089,
+      "retrieval": 0.9999,
+      "provider": "deepseek",
+      "answer": "For the NV9 Spectral, change the drive belts every 6\u201312 months, or sooner if dirt builds up or the belts show excessive wear. Clean the optical lenses every 6 months, and more often in a particularly harsh environment. In challenging conditions, belt changes, cleaning, or note path clearing may be needed more frequently.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What note sizes will the NV9 Spectral take?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0533,
+      "retrieval": 0.9989,
+      "provider": null,
+      "answer": "The NV9 Spectral accepts notes within the following size ranges:\n| Dimension | Minimum | Maximum |\n| --- | --- | --- |\n| Length | 115 mm | 167 mm |\n| Width | 60 mm | 82 mm |\n\nFor the Multi Note Float recycler, the limits are: | Dimension | Minimum | Maximum\n| --- | --- | --- |\n| Length | 115 mm | 160 mm |\n| Width | 62 mm | 80 mm |",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "Can I connect the NV9USB+ directly to an MDB vending machine?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.8545,
+      "retrieval": 0.9975,
+      "provider": "deepseek",
+      "answer": "No. You must use an IF5 MDB voltage converter to connect an NV9USB+ to an MDB vending machine. The IF5 regulates the power supply and opto-isolates the communication lines, dropping the machine\u2019s higher voltage to the validator\u2019s required level. The applicable kit is PA02061, the IF5 KIT - MDB Voltage Converter.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What cleaner is safe to use on the NV9USB+?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0157,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "Only a mild detergent is safe to use on the NV9USB+. Solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit or PCB cleaner will cause permanent damage.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "How do I put the validator into SSP programming mode?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0165,
+      "retrieval": 0.9993,
+      "provider": "deepseek",
+      "answer": "On an NV9 Spectral, power the unit on, then press and hold the configuration button for more than 3 seconds until the bezel illuminates, then release. This switches it from the selected main protocol to SSP. If you also need to set the SSP address to 0 and baud rate to 9600, press and hold the button while the validator is powering up.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What power supply does the NV200 Spectral need when docked with the SMART Coin System?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0015,
+      "retrieval": 0.9969,
+      "provider": "deepseek",
+      "answer": "The NV200 Spectral requires a stable 24 VDC / 3.5 A power supply when docked with the SMART Coin System. The SMART Coin System itself requires 24 VDC / 7.5 A.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "what is the power required to run both at once",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0017,
+      "retrieval": 0.9772,
+      "provider": "deepseek",
+      "answer": "Running both at once when docked requires:\n- NV200 Spectral: stable 24 VDC / 3.5 A\n- SMART Coin System: 24 VDC / 7.5 A",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "What does the NV9 Spectral validator do?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9151,
+      "retrieval": 0.9997,
+      "provider": null,
+      "answer": "The NV9 Spectral is a banknote validator that authenticates the validity of notes using state-of-the-art spectral sensors and high-resolution imaging, scanning 1.28 million data points. It offers casino-level security at a mid-range price.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "how much does it weigh on its own?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0103,
+      "retrieval": 0.999,
+      "provider": null,
+      "answer": "The NV9 Spectral validator weighs 1.05 kg on its own.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "Does the NV9USB+ support the MDB interface?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9774,
+      "retrieval": 0.9978,
+      "provider": "deepseek",
+      "answer": "Yes. The NV9USB+ supports MDB, and an IF5 MDB Voltage Converter (ITL part number PA02061) must be used to connect it to an MDB machine.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "what are the pin assignments for that interface",
+      "layer": "retrieval",
+      "outcome": "clarify",
+      "grounding": null,
+      "retrieval": 0.9952,
+      "provider": "deepseek",
+      "answer": "I could not pin down \"what are the pin assignments for that interface\" in the documentation I have here \u2014 could you tell me more concretely what you'd like me to check, or which model you mean?",
       "checks": {
         "outcome": false,
         "keywords_all": false,
-        "keywords_absent": true
+        "sources_any": true
       },
       "passed": false,
-      "skipped": false
+      "skipped": false,
+      "repeat": 2
     },
     {
-      "q": "<an underspecified question that could apply to several products in your corpus>",
-      "outcome": "rejected",
+      "q": "What does the MyCheckr Mini weigh?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0091,
+      "retrieval": 0.9986,
+      "provider": "deepseek",
+      "answer": "The MyCheckr Mini weighs 152 g. One other weight listing shows it at 186 g, but the value specific to the MyCheckr Mini is 152 g (the full-size MyCheckr weighs 586 g).",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "ok and what about the full size one?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0073,
+      "retrieval": 0.9607,
+      "provider": "deepseek",
+      "answer": "The full-size MyCheckr weighs 586 g.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true,
+        "grade": false,
+        "_grade_reason": "grader returned nothing"
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "How do I mount the MyCheckr?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9517,
+      "retrieval": 0.9998,
+      "provider": "deepseek",
+      "answer": "For the MyCheckr, mount it securely to a flat surface using either:\n- 4 mm screws and the four mounting holes provided (marked red).\n- A \u00bc\u201d 20 thread screw in the bottom centre of the device (marked blue). For correct placement and positioning, refer to https://www.youtube.com/watch?v=0030s-d57dI&pp=ygUJbXljaGVja3Ig",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 2
+    },
+    {
+      "q": "how do I reset the password on my Cisco router",
+      "layer": "retrieval",
+      "outcome": "answered",
       "grounding": null,
-      "retrieval": 0.0001,
+      "retrieval": 0.9641,
       "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "answer": "I don't have that in the product documentation about the MyCheckr.\n\nHere are some things I can answer:\n- Does MyCheckr need an internet connection to operate?\n- How can MyCheckr be mounted?\n- How do I find a device in ICU Management System?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
       "checks": {
         "outcome": false
       },
       "passed": false,
-      "skipped": false
+      "skipped": false,
+      "repeat": 2
     },
     {
-      "q": "what is the capital of france",
-      "outcome": "rejected",
-      "grounding": null,
-      "retrieval": 0.0,
-      "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "q": "what is the recommended operating temperature range for the MyCheckr",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0052,
+      "retrieval": 0.9964,
+      "provider": "deepseek",
+      "answer": "The MyCheckr operating temperature range is +5\u00b0C to +50\u00b0C.",
       "checks": {
-        "outcome": true
+        "outcome": true,
+        "sources_any": true
       },
       "passed": true,
-      "skipped": false
+      "skipped": false,
+      "repeat": 2
     },
     {
-      "q": "<an off-domain question that SHARES VOCABULARY with your docs \u00e2\u20ac\u201d e.g. mentions passwords/reset/network but about an unrelated product>",
-      "outcome": "rejected",
-      "grounding": null,
-      "retrieval": 0.0,
-      "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "q": "What size screws do I need to mount the MyCheckr, and how many mounting holes are there?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9964,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "Use 4 mm screws with the four mounting holes provided, or a \u00bc\u2033-20 thread screw in the bottom centre of the MyCheckr.",
       "checks": {
-        "outcome": true
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
       },
       "passed": true,
-      "skipped": false
+      "skipped": false,
+      "repeat": 3
     },
     {
-      "q": "<a fact question about your corpus>",
-      "outcome": "rejected",
+      "q": "What options are available in Ads mode?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0571,
+      "retrieval": 0.9981,
+      "provider": "deepseek",
+      "answer": "On MyCheckr, Ads mode is available only when the device is configured in Age Only mode; it is not available in Face Only or Age & Face Recognition modes. | Control | Description |\n| --- | --- |\n| Gender Filter | Filters advertisements assigned to Male, Female or Both Genders |\n| Screen Filter | Filters available advertising screens |\n| Advertising Carousel | Displays all currently assigned advertising assets |\n| Restore | Reverts advertising screens back to the default configuration |\n| Display Time (s) | Sets how long each advertisement is displayed before rotating to the next advertisement |\n| Age Bands | Defines which advertisements are shown for each age and gender group |\n| Smooth Scrolling | Changes how advertisements are presented while the device is waiting for and processing users |\n### Smooth Scrolling behaviour When enabled, advertisements continuously scroll through the configured advertising playlist. When a face is detected and age/gender has been estimated, MyCheckr automatically moves the most relevant advertisement towards the user. The currently displayed advertisement is allowed to finish its scroll cycle before the targeted advertisement is shown, providing a smoother and less abrupt user experience.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "I need to reset the API credentials, how do I do that?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0018,
+      "retrieval": 0.9839,
+      "provider": "deepseek",
+      "answer": "For MyCheckr, change the API credentials on the Manage Device Login Details page. Enter the new API username and confirm it, enter the new API password and confirm it, then apply the changes. These credentials are used for API authentication, and once changed, all future API token requests must use the new credentials. Store them securely before applying changes, as losing them may prevent API access. Default credentials on new devices: - Username: apiuser\n- Password: apipassword",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "I need to mount a Twin SMART Coin System baseplate into our cabinet - how many screws does it take?",
+      "layer": "retrieval",
+      "outcome": "answered",
       "grounding": null,
-      "retrieval": 0.0,
+      "retrieval": 0.9852,
+      "provider": "deepseek",
+      "answer": "I don't have that in the product documentation about the SMART Coin System.\n\nHere are some things I can answer:\n- What is the SMART Coin System and what does it do?\n- What is the SMART Coin System?\n- What is the Twin SMART Coin System and what does it do?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": false,
+        "sources_any": true
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "I need to clean the coin path in the feeder - how do I do that and how often?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.39,
+      "retrieval": 0.997,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, clean the Coin Feeder coin path monthly. Remove coin dust, foreign objects, or dirt with a paintbrush, compressed air, or a cloth with mild detergent. To access it, lift the Coin Feeder Path Insert with a flat screwdriver at the marked position. The area can be cleaned but not polished. Do not use solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit, or PCB cleaner, as these cause permanent damage; use only a mild detergent. Renew the coated surface with Ambersil AMS4 Silicone Grease every 50,000 coins, or 50,000 cycles.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What options are available for the pay-in chute on the SMART Coin System?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.7508,
+      "retrieval": 0.9998,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, two pay-in chute options are available: - PM01106 - Funnel (standard)\n- PA04138 - Chute with Debris Collection",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "Which settings does the SD card need to be formatted with?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.293,
+      "retrieval": 0.9385,
+      "provider": "deepseek",
+      "answer": "For the SMART Coin System, format the SD card with these requirements: | Setting | Requirement |\n| --- | --- |\n| Partition style | MBR |\n| Format | FAT32 |\n| Capacity | Minimum 4 GB; maximum 32 GB |\n| Speed class | Minimum 4; maximum 10 |\n\nA larger capacity should not be an issue provided the card is formatted as FAT32/MBR.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What size coins will the unit take - is there a minimum and maximum diameter?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0013,
+      "retrieval": 0.9924,
+      "provider": "deepseek",
+      "answer": "The SMART Coin System accepts coins from 18 mm to 28.5 mm in diameter. Coins below 18 mm require special considerations.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "How much does the SMART Coin System weigh empty and when it's full?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9847,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "The SMART Coin System weighs 4 kg empty and approximately 18 kg full.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "The status LED is flashing red four times - what does that mean?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.2161,
+      "retrieval": 0.9862,
       "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "answer": "The SMART Coin System is indicating a Feeder Calibration Error. Remove power and check the SMART Hopper and Coin Feeder connection. If the fault persists, the unit may need to be returned to ITL for service.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "Can I plug the USB straight into my host PC to talk to the machine?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0979,
+      "retrieval": 0.9881,
+      "provider": "deepseek",
+      "answer": "No. Direct USB must not be used for host communications with the SMART Coin System. If USB host communication is required, use an IF17 (TTL to USB) interface instead. The USB socket is intended for programming and bench testing.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "Which pins on the 16-way connector do I have to wire for power?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": null,
+      "retrieval": null,
+      "provider": "local",
+      "answer": "- 13: USB power (+5V)\n- 16: GND (0V ground connection)\n- Power is always required on pins 15 and 16 of the 16-way connector.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What is the peak current draw of the NV9 Spectral?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0109,
+      "retrieval": 0.9867,
+      "provider": "deepseek",
+      "answer": "The NV9 Spectral has a peak current draw of 2.5 A at 12 V and 2 A at 24 V.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "My bezel is flashing one long flash then one short flash - what's wrong?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0021,
+      "retrieval": 0.9634,
+      "provider": null,
+      "answer": "One long flash followed by one short flash on the NV9 Spectral indicates the note path is open. Ensure the upper assembly is closed.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "How often should the belts be changed and the lenses cleaned?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.983,
+      "retrieval": 0.9999,
+      "provider": "deepseek",
+      "answer": "For the NV9 Spectral, change the drive belts every 6\u201312 months or as required, depending on environmental factors. Swap them sooner if dirt is building up or the belts show excessive wear. Clean the optical lenses every 6 months, and more often if the unit is in a particularly harsh environment.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What note sizes will the NV9 Spectral take?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0022,
+      "retrieval": 0.9989,
+      "provider": null,
+      "answer": "The NV9 Spectral accepts notes with a length between 115 mm and 167 mm, and a width between 60 mm and 82 mm. When using the Multi Note Float recycler, the limits are 115\u2013160 mm in length and 62\u201380 mm in width.\n| Model | Dimension | Minimum | Maximum |\n| --- | --- | --- | --- |\n| NV9 Spectral | Length | 115 mm | 167 mm |\n| NV9 Spectral | Width | 60 mm | 82 mm |\n| Multi Note Float | Length | 115 mm | 160 mm |\n| Multi Note Float | Width | 62 mm | 80 mm |",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "Can I connect the NV9USB+ directly to an MDB vending machine?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0278,
+      "retrieval": 0.9975,
+      "provider": "deepseek",
+      "answer": "No. The NV9USB+ cannot be connected directly to an MDB vending machine. An IF5 MDB Voltage Converter is required; it regulates the higher vending-machine supply voltage down to the validator\u2019s required level and opto-isolates the communication lines. The IF5 KIT part number is PA02061.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What cleaner is safe to use on the NV9USB+?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0106,
+      "retrieval": 0.9995,
+      "provider": "deepseek",
+      "answer": "Use only a mild detergent on the NV9USB+. Solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit, or PCB cleaner will cause permanent damage.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "How do I put the validator into SSP programming mode?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0068,
+      "retrieval": 0.9993,
+      "provider": "deepseek",
+      "answer": "For the NV9 Spectral, power the unit on, then press and hold the configuration button for more than 3 seconds until the bezel illuminates, then release. This switches the selected main protocol to SSP. After that, open Validator Manager and click Detect Devices. If it fails to connect, confirm the correct drivers are installed and that the unit is in SSP.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What power supply does the NV200 Spectral need when docked with the SMART Coin System?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0088,
+      "retrieval": 0.9969,
+      "provider": "deepseek",
+      "answer": "For the NV200 Spectral docked with the SMART Coin System, the NV200 Spectral requires a stable 24 VDC / 3.5 A power supply. The SMART Coin System requires 24 VDC / 7.5 A.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "what is the power required to run both at once",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9381,
+      "retrieval": 0.9838,
+      "provider": "deepseek",
+      "answer": "For the NV200 Spectral docked with the SMART Coin System, both units run on 24 VDC: - NV200 Spectral: 24 VDC / 3.5 A stable power supply\n- SMART Coin System: 24 VDC / 7.5 A Check the power requirements of the host machine and other peripherals so the overall power environment is dimensioned correctly for the full setup.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "What does the NV9 Spectral validator do?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9151,
+      "retrieval": 0.9997,
+      "provider": null,
+      "answer": "The NV9 Spectral is a banknote validator that authenticates the validity of notes using state-of-the-art spectral sensors and high-resolution imaging, scanning 1.28 million data points.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "how much does it weigh on its own?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0103,
+      "retrieval": 0.999,
+      "provider": null,
+      "answer": "The NV9 Spectral validator weighs 1.05 kg on its own.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "Does the NV9USB+ support the MDB interface?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.1337,
+      "retrieval": 0.9978,
+      "provider": "deepseek",
+      "answer": "Yes. The NV9USB+ can connect to an MDB machine, but you must use an IF5 MDB Voltage Converter (IF5 KIT) between the validator and the machine. The IF5 regulates the vending machine\u2019s higher supply voltage down to the level required by the validator and opto-isolates the communication lines.",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "what are the pin assignments for that interface",
+      "layer": "retrieval",
+      "outcome": "clarify",
+      "grounding": null,
+      "retrieval": 0.9952,
+      "provider": "deepseek",
+      "answer": "I could not pin down \"what are the pin assignments for that interface\" in the documentation I have here \u2014 could you tell me more concretely what you'd like me to check, or which model you mean?",
       "checks": {
         "outcome": false,
-        "keywords_all": false
+        "keywords_all": false,
+        "sources_any": true
       },
       "passed": false,
-      "skipped": false
+      "skipped": false,
+      "repeat": 3
     },
     {
-      "q": "how is it powered",
-      "outcome": "rejected",
+      "q": "What does the MyCheckr Mini weigh?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9898,
+      "retrieval": 0.9986,
+      "provider": "deepseek",
+      "answer": "The MyCheckr Mini weighs 152 g.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "ok and what about the full size one?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.995,
+      "retrieval": 0.9739,
+      "provider": "deepseek",
+      "answer": "The MyCheckr weighs 586 g.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true,
+        "grade": false,
+        "_grade_reason": "grader returned nothing"
+      },
+      "passed": false,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "How do I mount the MyCheckr?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.9331,
+      "retrieval": 0.9998,
+      "provider": "deepseek",
+      "answer": "Mount the MyCheckr securely to a flat surface using either: - 4 mm screws through the four mounting holes provided, marked in red\n- A \u00bc\u201d 20 thread screw in the bottom centre of the device, marked in blue",
+      "checks": {
+        "outcome": true,
+        "keywords_all": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "how do I reset the password on my Cisco router",
+      "layer": "retrieval",
+      "outcome": "answered",
       "grounding": null,
-      "retrieval": 0.0049,
+      "retrieval": 0.9641,
       "provider": null,
-      "answer": "I could not find that in the knowledge base.",
+      "answer": "I don't have that in the product documentation about the MyCheckr.\n\nHere are some things I can answer:\n- Does MyCheckr need an internet connection to operate?\n- How can MyCheckr be mounted?\n- How do I find a device in ICU Management System?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
       "checks": {
         "outcome": false
       },
       "passed": false,
-      "skipped": false
+      "skipped": false,
+      "repeat": 3
+    },
+    {
+      "q": "what is the recommended operating temperature range for the MyCheckr",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "grounding": 0.0071,
+      "retrieval": 0.9964,
+      "provider": "deepseek",
+      "answer": "For MyCheckr, the operating temperature range is +5\u00b0C to +50\u00b0C.",
+      "checks": {
+        "outcome": true,
+        "sources_any": true
+      },
+      "passed": true,
+      "skipped": false,
+      "repeat": 3
     }
   ]
 }

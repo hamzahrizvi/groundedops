@@ -104,6 +104,50 @@ with open(env_path, encoding="utf-8") as f:
 check("OPENAI_API_KEY" not in body and "ANTHROPIC_API_KEY=sk-anthropic" in body,
       "clearing one provider's key removes only its own line")
 
+print("\n== which key does which job ==")
+# State arriving here: anthropic set, openai and deepseek cleared above.
+# What an assignment DOES to the generation chain is tested in test_llm.py —
+# _harness stubs llm and runtime_config, so it cannot be tested from here.
+r = client.post("/admin/keys/roles/default", headers=ROOT,
+                json={"provider": "openai"})
+check(r.status_code == 400,
+      f"a provider with no key cannot be given a job ({r.status_code})")
+check(keystore.get_role_assignment("default") is None,
+      "the refused assignment was not written anyway")
+
+check(client.post("/admin/keys/roles/default", headers=SUPPORT,
+                  json={"provider": "anthropic"}).status_code == 403,
+      "support cannot assign a job")
+check(client.post("/admin/keys/roles/not-a-job", headers=ROOT,
+                  json={"provider": "anthropic"}).status_code == 404,
+      "an unknown job is a 404")
+
+r = client.post("/admin/keys/roles/default", headers=ROOT,
+                json={"provider": "anthropic"})
+check(r.status_code == 200, f"root can assign a job ({r.status_code})")
+check(keystore.get_role("default") == "anthropic",
+      "the assignment is live immediately, no restart")
+with open(env_path, encoding="utf-8") as f:
+    body = f.read()
+check("PROVIDER_ROLE_DEFAULT=anthropic" in body,
+      "the assignment is written to .env, so it survives a restart")
+
+keystore.clear_key("anthropic")
+check(keystore.get_role_assignment("default") == "anthropic"
+      and keystore.get_role("default") is None,
+      "removing a key masks its job to None without losing the assignment")
+r = client.get("/admin/keys", headers=ROOT).json()
+d = [x for x in r["roles"] if x["role"] == "default"][0]
+check(d["assigned"] == "anthropic" and d["effective"] is None,
+      "the console is told the assignment is dangling, not just that it is unset")
+
+client.post("/admin/keys/roles/default", headers=ROOT, json={"provider": None})
+check(keystore.get_role_assignment("default") is None,
+      "a null provider clears the assignment")
+with open(env_path, encoding="utf-8") as f:
+    check("PROVIDER_ROLE_DEFAULT" not in f.read(),
+          "clearing removes the line rather than writing an empty one")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")
