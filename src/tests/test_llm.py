@@ -349,3 +349,40 @@ def test_api_mode_never_forces_a_local_attempt():
         llm.generate, llm._chain_for = real_generate, real_chain
         runtime_config.set_generation_mode(saved_mode)
         llm._provider_down.clear()
+
+
+def test_judgement_calls_think_even_with_thinking_off():
+    """The verifier inverted with thinking off (accepted a mispaired fault
+    code 4/4, rejected the right one 2/2). Calls inside llm.judging() send
+    thinking enabled; answer calls outside it do not."""
+    import os
+    import llm
+
+    seen = []
+
+    class _Res:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 1}}
+
+    real_post = llm._HTTP.post
+    llm._HTTP.post = lambda url, **kw: (seen.append(kw.get("json")), _Res())[1]
+    saved = os.environ.pop("DEEPSEEK_THINKING", None)
+    try:
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        with llm.judging():
+            llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        assert [j["thinking"]["type"] for j in seen] == ["disabled", "enabled", "disabled"]
+    finally:
+        llm._HTTP.post = real_post
+        if saved is not None:
+            os.environ["DEEPSEEK_THINKING"] = saved
+
+
+def test_the_verifier_and_selection_calls_are_judgements():
+    import inspect
+    import main
+    assert "with judging():" in inspect.getsource(main._llm_verified)
+    assert inspect.getsource(main.query).count("with judging():") >= 1

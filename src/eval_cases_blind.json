@@ -1,0 +1,378 @@
+{
+  "_README": "Written blind: the author read only the nine product PDFs under documents/ (via pdfplumber, page by page) and never opened eval_cases*.json, eval_baseline*.json, eval_results*.json, tests/, faq_store.json, faq_gaps.json, logs.jsonl, PENDING.md, docs/, or any .py source file, and ran no git log/diff, so these 34 cases are independent of whatever the assistant was tuned or graded against before. Each answerable fact was verified by reading the cited page directly (tables, procedure steps, LED/flash-code and reject-reason tables, default-settings tables); each rejected case was confirmed absent by grepping the full extracted text of that product's manual(s) for the relevant terms (price, warranty, fingerprint, coin acceptance, etc.). The 23 answerable questions are spread across all nine products (2-3 each) and mix specs, install/mounting, troubleshooting/fault codes, protocols/interfaces, and defaults; 4 follow-ups continue the prior turn on the same product; 4 rejected cases are plausible near-misses that the manuals genuinely do not cover; 3 clarify cases are product-less and under-specified on purpose.",
+  "cases": [
+    {
+      "q": "how many coins a second can the smart coin system pay out",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "12"
+      ],
+      "reference": "The SMART Coin System operates at a market leading 12 coins per second (SMART Coin System Range User Manual-v1.pdf p.4).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "whats the smallest coin diameter it will take",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "18mm"
+      ],
+      "reference": "Coin media requirements: diameter minimum 18mm, maximum 28.5mm (SMART Coin System Range User Manual-v1.pdf p.23).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "the hopper led is flashing red twice, any idea what that means?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "calibration"
+      ],
+      "reference": "Red, 2 flashes = Calibration Fault, usually the optical sensor is contaminated; clean the exit sensor light pipe (SMART Coin System Range User Manual-v1.pdf p.85).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "What is the default age threshold on a MyCheckr fresh out of the box?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "25"
+      ],
+      "reference": "Default Configuration table: Settings - Age Threshold = 25 (MyCheckr User Manual-v7.pdf p.25).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "how much current does mycheckr pull on 24v when its just standing by scanning for faces",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "280"
+      ],
+      "reference": "Stand Alone (Scanning for faces), no peripherals: 24VDC Input RMS current draw is 280mA (MyCheckr User Manual-v7.pdf p.37).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "screen keeps rejecting with pose_angle, what do we tell the customer to do",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "straight"
+      ],
+      "reference": "pose_angle reject reason: cause is face angle too large; suggested action is to ask the customer to look straight at the device (MyCheckr User Manual-v7.pdf p.18).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "does mycheckr mini do ethernet or only wifi",
+      "product": "mycheckr_mini",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "USB"
+      ],
+      "reference": "MyCheckr Mini does not support Ethernet or Wi-Fi configuration through IMS; it communicates primarily through USB, and network configuration sections are shown as unavailable (MyCheckr Mini User Manual-v5.pdf p.21).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "How much does the Mini unit weigh?",
+      "product": "mycheckr_mini",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "152"
+      ],
+      "reference": "Weights: MyCheckr Mini: 152 g (MyCheckr Mini User Manual-v5.pdf p.29).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "default login for the myconnect app pls",
+      "product": "myconnect",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "user1"
+      ],
+      "reference": "Default credentials for the MyConnect/ITL Connect App login are Username: user1, Password: password1 (CS-MyConnect Quick Start Guide – Installer Edition.pdf p.7; also MyConnect Environment-v4.pdf p.19).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "what GPIO duration should we set for the door relay",
+      "product": "myconnect",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "1 second"
+      ],
+      "reference": "Set GPIO duration (recommended: 1 second) from the Hub settings menu (CS-MyConnect Quick Start Guide – Installer Edition.pdf p.10; MyConnect Environment-v4.pdf p.36).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "what happens if I just set the GPIO duration longer than that, does it matter?",
+      "product": "myconnect",
+      "outcome": "answered",
+      "keywords_all": [
+        "adverse"
+      ],
+      "reference": "Setting the relay to anything other than 1 second can cause adverse effects on the relay (MyConnect Environment-v4.pdf p.36).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "if an alert on the tablet just sits there and nobody answers it, when does it disappear",
+      "product": "myconnect",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "10 minutes"
+      ],
+      "reference": "If an alert is left for 10 minutes (can be changed to a custom time) it will automatically disappear, logged as \"Left pending for more than 10 minutes\" (MyConnect Environment-v4.pdf p.24).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "What HTTPS port does the ICU device's local REST API run on?",
+      "product": "biometrics_general",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "44345"
+      ],
+      "reference": "ICU device HTTPS API port: 44345, BASE_URL https://192.168.137.8:44345 (ICU_Network_API-v1.0.50.pdf p.6).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "and what username/password do i need to actually get that token",
+      "product": "biometrics_general",
+      "outcome": "answered",
+      "keywords_all": [
+        "apiuser"
+      ],
+      "reference": "Default API credentials are Username: apiuser, Password: apipassword (ICU_Network_API-v1.0.50.pdf p.6).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "how long is the bearer token good for before i need a new one",
+      "product": "biometrics_general",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "3600"
+      ],
+      "reference": "Token expires_in is fixed at 3600 seconds by default (ICU_Network_API-v1.0.50.pdf p.9; also ICU_Age_Result_Quick_Guide_v1_1.pdf p.1).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "what static ip does the ICU Lite interface get on linux after setting up the udev rule",
+      "product": "biometrics_general",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "192.168.137.8"
+      ],
+      "reference": "The ICU Lite interface's IP address is static at 192.168.137.8 (Accessing my device in Linux Environment.pdf p.2).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "min and max note length the NV9USB+ will accept?",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "90mm"
+      ],
+      "reference": "Media requirements: note length minimum 90mm, maximum 170mm (NV9USB+ Range User Manual-v1.pdf p.17).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "bezel is doing 1 long flash then 2 short flashes on the nv9usb, whats that",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "jam"
+      ],
+      "reference": "1 long flash, 2 short flashes = Note Path Jam (NV9USB+ Range User Manual-v1.pdf p.56).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "okay so how do i actually clear that jam",
+      "product": "nv9usb",
+      "outcome": "answered",
+      "keywords_all": [
+        "power"
+      ],
+      "reference": "Clearing a Jam procedure: power off (unplug interface cable or switch off power), slide the red catch left, lift the upper housing, remove the jammed note (lift the lozenge if it's in the lower path), then re-apply power (NV9USB+ Range User Manual-v1.pdf p.58).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "How many data points does the NV9 Spectral scan per note?",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "1.28"
+      ],
+      "reference": "State of the art spectral sensors provide high resolution imaging, scanning 1.28 million data points (NV9 Spectral Range User Manual-v1.pdf p.4).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "what format does the sd card need to be for the nv9 spectral",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "FAT32"
+      ],
+      "reference": "MicroSD card requirements: MBR partition style, FAT32 format, minimum 4GB, maximum 32GB, speed class 10 minimum (NV9 Spectral Range User Manual-v1.pdf p.19).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "Max note width for the BV30?",
+      "product": "bv30",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "72mm"
+      ],
+      "reference": "Media requirements: note width maximum 72mm, matching the BV30's 72mm bezel (BV30 User Manual-v1.pdf p.9).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "bv30 bezel is showing 4 red flashes then 1 blue flash, what does that indicate",
+      "product": "bv30",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "low"
+      ],
+      "reference": "4 Red Flashes, 1 Blue Flash = PSU Voltage too Low; check the power supply against Power Requirements (BV30 User Manual-v1.pdf p.32).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "What's the payout module capacity on the NV200 Spectral?",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "80"
+      ],
+      "reference": "Payout module capacity up to 80 mixed banknotes (NV200S Range User Manual-v1.pdf p.4).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "how many data points does it scan to check a note is genuine",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "4.8"
+      ],
+      "reference": "100% note image capture, scanning over 4.8 million data points (NV200S Range User Manual-v1.pdf p.4).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "so realistically how often does it read a note right first time",
+      "product": "nv200s",
+      "outcome": "answered",
+      "keywords_all": [
+        "99"
+      ],
+      "reference": "99%+ first time acceptance of new and street grade notes (NV200S Range User Manual-v1.pdf p.4).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "does the bunch note feeder run off 12v or 24v",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "24V"
+      ],
+      "reference": "Bunch Note Feeder requires 24V (NV200S Range User Manual-v1.pdf p.20).",
+      "grade": true,
+      "layer": "blind"
+    },
+    {
+      "q": "How much does the SMART Coin System cost?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "No pricing, cost, or discount information appears anywhere in the SMART Coin System Range User Manual-v1.pdf; the document covers specs, installation and protocols only.",
+      "layer": "blind"
+    },
+    {
+      "q": "can mycheckr also recognise someone by their fingerprint as well as their face",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "MyCheckr User Manual-v7.pdf only documents Age Only, Face Only, and Age & Face Recognition running modes; fingerprint, iris, or any other biometric modality is never mentioned in the document.",
+      "layer": "blind"
+    },
+    {
+      "q": "can the NV9USB+ take coins as well as notes",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "NV9USB+ Range User Manual-v1.pdf describes the NV9USB+ exclusively as a banknote validator; the word \"coin\" does not appear anywhere in the document and no coin-handling capability is described.",
+      "layer": "blind"
+    },
+    {
+      "q": "whats the warranty period on the NV200 Spectral",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "NV200S Range User Manual-v1.pdf's Product Compliance section lists RoHS, EN Directives, UL, REACH, WEEE and Central Bank Approvals but contains no warranty term or coverage information anywhere in the document.",
+      "layer": "blind"
+    },
+    {
+      "q": "what voltage does it need",
+      "new_session": true,
+      "outcome": "clarify",
+      "reference": "No product is selected or named, and multiple products in the catalogue (MyCheckr at 12-24VDC, BV30 at 12VDC, NV200 Spectral at 12V or 24V, SMART Coin System at 24VDC, etc.) have different supply voltage specs, so the question cannot be answered without knowing which device is meant.",
+      "layer": "blind"
+    },
+    {
+      "q": "how do i install it",
+      "new_session": true,
+      "outcome": "clarify",
+      "reference": "No product is selected or named; installation steps (mounting, bezel fitting, cashbox fitting, mechanical vs. network setup) differ completely between, for example, a banknote validator like the BV30 and a networked device like MyConnect/MyCheckr, so the request is too vague to answer.",
+      "layer": "blind"
+    },
+    {
+      "q": "it keeps flashing red, whats wrong with it",
+      "new_session": true,
+      "outcome": "clarify",
+      "reference": "No product is named or selected, and red flash-code tables differ by device (e.g. BV30 bezel codes, NV9USB+ bezel codes, SMART Coin System status LED codes all assign different meanings to red flashes), so the specific fault cannot be identified without knowing which unit is flashing.",
+      "layer": "blind"
+    }
+  ]
+}

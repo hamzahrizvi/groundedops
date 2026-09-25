@@ -92,9 +92,39 @@ def _deepseek_extra() -> dict:
     to 1/on/true. The field is ignored by models that cannot think, so it
     is safe to send unconditionally."""
     want = os.getenv("DEEPSEEK_THINKING", "").strip().lower()
-    if want in ("1", "on", "true", "yes"):
+    if want in ("1", "on", "true", "yes") or _judging.get():
         return {"thinking": {"type": "enabled"}}
     return {"thinking": {"type": "disabled"}}
+
+
+# JUDGEMENT CALLS THINK. Turning thinking off everywhere was measured on
+# answer latency and on eval outcomes -- never on the verifier's judgement,
+# and that is where it broke. Measured 2026-09-25 on the NV9USB+ flash-code
+# table (p.56), the case the verifier was introduced for in v16.2:
+#
+#                      wrong code accepted   right code accepted
+#     thinking off            4/4                   0/2
+#     thinking on             0/4                   2/2
+#
+# Without its reasoning pass the verifier INVERTED: it approved "1 long, 2
+# short = Note Path Open" (the manual says Note Path Jam) and rejected the
+# correct answer. So the answer is written fast and checked carefully: a
+# call made inside judging() thinks, whatever DEEPSEEK_THINKING says. The
+# verifier, the inference contract and the re-answer passage selection
+# are judgements; writing the answer is not.
+import contextvars as _cv
+_judging: "_cv.ContextVar[bool]" = _cv.ContextVar("llm_judging", default=False)
+
+
+class judging:
+    """Context manager: DeepSeek calls made inside it keep thinking on."""
+    def __enter__(self):
+        self._tok = _judging.set(True)
+        return self
+
+    def __exit__(self, *exc):
+        _judging.reset(self._tok)
+        return False
 
 # The OpenAI-compatible endpoint, overridable. It was hardcoded at both call
 # sites, which meant the "openai" provider could only ever mean OpenAI's own

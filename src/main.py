@@ -632,11 +632,13 @@ def _llm_verified(answer: str, chunks: list[dict],
         ctx = "\n\n".join(c.get("text", "")[:CHUNK_CHAR_CAP] for c in chunks)
         if not ctx.strip():
             return False
-        out = generate_with_fallback(
-            "accurate", _VERIFY_PROMPT.format(
-                q=(question or "").strip() or "(not given)",
-                ctx=ctx, ans=answer),
-            deepseek_api_key=deepseek_api_key)
+        from llm import judging
+        with judging():   # the verifier must think -- see llm.judging
+            out = generate_with_fallback(
+                "accurate", _VERIFY_PROMPT.format(
+                    q=(question or "").strip() or "(not given)",
+                    ctx=ctx, ans=answer),
+                deepseek_api_key=deepseek_api_key)
         verdict = ((out or {}).get("text") or "").strip()
         # Both judgments must be present and YES; anything else fails closed.
         sup = re.search(r"SUPPORT\W*\s*(YES|NO)\b", verdict, re.I)
@@ -1162,9 +1164,11 @@ def _inference_answer(query: str, chunks: list[dict],
         context = "\n\n".join(
             f"[Passage {i} of {len(chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
             for i, r in enumerate(chunks, 1))
-        out = generate_with_fallback(
-            "reasoning", build_inference_prompt(context, query),
-            deepseek_api_key=deepseek_api_key, api_keys=api_keys or {})
+        from llm import judging
+        with judging():
+            out = generate_with_fallback(
+                "reasoning", build_inference_prompt(context, query),
+                deepseek_api_key=deepseek_api_key, api_keys=api_keys or {})
         text = (out or {}).get("text", "").strip()
         if not text or is_refusal(text):
             return None
@@ -2991,9 +2995,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _cands = _retrieved[:_re.SELECT_FROM_N] or top_chunks
         _sel_prompt = _re.build_selection_prompt(
             resolved_query, [c.get("text", "") for c in _cands])
-        _sel_out = generate_with_fallback(
-            "fast", _sel_prompt, deepseek_api_key=deepseek_api_key,
-            api_keys=api_keys)
+        from llm import judging
+        with judging():
+            _sel_out = generate_with_fallback(
+                "fast", _sel_prompt, deepseek_api_key=deepseek_api_key,
+                api_keys=api_keys)
         _picked = _re.parse_selection((_sel_out or {}).get("text", ""),
                                       len(_cands))
         top_chunks, reanswer_mode = _re.chosen_passages(_picked, _cands)
