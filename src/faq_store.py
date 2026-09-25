@@ -1250,6 +1250,20 @@ def lexical_score(a: str, b: str) -> float:
     return inter / smaller
 
 
+def _strip_trailing_scope(question: str) -> str:
+    """Drop a trailing "(Product Name)" of 1-60 chars, e.g. the scope the
+    pipeline appends. Plain string ops, not a regex: the old
+    `\\s*\\([^()]{1,60}\\)\\s*$` backtracked quadratically on long runs of
+    spaces in customer input (CodeQL polynomial-ReDoS)."""
+    s = (question or "").rstrip()
+    if s.endswith(")"):
+        i = s.rfind("(")
+        inner = s[i + 1:-1] if i >= 0 else ""
+        if i >= 0 and 1 <= len(inner) <= 60 and "(" not in inner and ")" not in inner:
+            return s[:i].strip()
+    return s.strip()
+
+
 def verbatim_score(a: str, b: str) -> float:
     """Symmetric overlap, for deciding two questions are THE SAME question.
 
@@ -1486,7 +1500,7 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # curated question typed word for word scored 0.50 against itself and
     # was offered back as "is this what you meant?" instead of answered.
     # Every widget chat is scoped, so that was every customer.
-    bare = re.sub(r"\s*\([^()]{1,60}\)\s*$", "", question).strip()
+    bare = _strip_trailing_scope(question)
 
     scored = []
     for it in pool:
