@@ -3555,6 +3555,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 # when there is something to offer.
                 clarification_options = build_clarification_options(
                     "ambiguous_in_domain", history, results)
+                # Drop a chip naming the product already in scope: it narrows
+                # nothing, and clicking it asks the bare name (2026-09-25).
+                _here = (_product_names().get(payload.product or "", "") or "").strip().lower()
+                clarification_options = [
+                    o for o in clarification_options if o.strip().lower() != _here]
                 if not clarification_options:
                     clarification_options = build_clarification_options(
                         "followup", history, results)

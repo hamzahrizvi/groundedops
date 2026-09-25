@@ -1112,8 +1112,7 @@
       state.stage = "category";
       renderScopeBar();
       lockComposer();
-      say("No problem — which product range would you like to ask about?");
-      askCategory();
+      askCategory("No problem — which product range would you like to ask about?");
     });
   }
 
@@ -1197,8 +1196,7 @@
         onClick: function () {
           heard("Request technical support");
           state.intent = "support";
-          say("I can answer technical questions from our product documentation. First, which product range?");
-          askCategory();
+          askCategory("I can answer technical questions from our product documentation. First, which product range?");
         },
       },
       {
@@ -1206,8 +1204,7 @@
         onClick: function () {
           heard("Find a product");
           state.intent = "product";
-          say("Let's find the right one. Which range are you interested in?");
-          askCategory();
+          askCategory("Let's find the right one. Which range are you interested in?");
         },
       },
       {
@@ -1215,8 +1212,7 @@
         onClick: function () {
           heard("Get spare parts & accessories");
           state.intent = "parts";
-          say("I can look up parts and accessories referenced in the documentation. Which product is it for?");
-          askCategory();
+          askCategory("I can look up parts and accessories referenced in the documentation. Which product is it for?");
         },
       },
       {
@@ -1266,8 +1262,7 @@
     // "product" and anything unrecognised: the safe path is the one that
     // asks which product, since every answer is scoped to one.
     state.intent = "product";
-    say("Which product range is this about?");
-    askCategory();
+    askCategory("Which product range is this about?");
   }
 
   // ── contact forms (sales / support) ───────────────────────────────────
@@ -1632,7 +1627,11 @@
       });
   }
 
-  function askCategory() {
+  // `prompt` is the "which range?" line. It is only said when there is a
+  // real choice: a deployment with ONE documented range picks it silently,
+  // rather than asking a question with one possible answer (askProduct
+  // already does the same for a range with one product).
+  function askCategory(prompt) {
     state.stage = "category";
     lockComposer();
     save();
@@ -1649,6 +1648,17 @@
           say("I don't have any product documentation loaded yet, so I can't answer questions right now. Please contact us directly and we'll help.", { flagged: true });
           return;
         }
+        // Only when that range has a documented product: askProduct sends an
+        // empty range back here, and skipping again would loop forever.
+        if (usable.length === 1 && (usable[0].products || []).some(function (p) {
+          return (p.doc_count || 0) > 0;
+        })) {
+          state.category = { key: usable[0].key, name: usable[0].name };
+          renderScopeBar();
+          askProduct(usable[0]);
+          return;
+        }
+        if (prompt) say(prompt);
         chips(
           usable.map(function (c) {
             return {
@@ -1803,8 +1813,7 @@
               unlockComposer();
               scrollDown();
             } else {
-              say("Before we continue — which product range is this about?");
-              askCategory();
+              askCategory("Before we continue — which product range is this about?");
             }
             save();
           },
@@ -1915,8 +1924,7 @@
     // Belt-and-braces: the composer is disabled without a scope, but a
     // chip callback or a future code path could still get here.
     if (!state.product) {
-      say("Let me get the right documentation first — which product range?");
-      askCategory();
+      askCategory("Let me get the right documentation first — which product range?");
       return;
     }
     busy = true;
