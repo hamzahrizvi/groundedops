@@ -51,6 +51,62 @@ RETRIEVAL_CANDIDATE_MARGIN = float(os.getenv("RETRIEVAL_CANDIDATE_MARGIN", "1.0"
 # End to end: no regressions on either suite, grounding and latency flat.
 RETRIEVAL_ARM_GUARANTEE = int(os.getenv("RETRIEVAL_ARM_GUARANTEE", "3"))
 
+# THE PHRASE ARM. BM25 ignores word order and the dense model blurs it, so
+# a chunk that contains the question's own words IN ORDER can still lose.
+# "What's the payout module capacity on the NV200 Spectral?" -- the NV200S
+# feature list says "Payout module capacity up to 80 mixed banknotes",
+# verbatim, and ranked 10th on BM25 and 40th dense, because a hundred
+# chunks mention payout modules. RRF dropped it before the reranker (which
+# would have scored it top) ever saw it. A contiguous run of three content
+# words is rare enough to be evidence; chunks that contain one are
+# guaranteed a candidate slot, longest match first.
+PHRASE_ARM_GUARANTEE = int(os.getenv("RETRIEVAL_PHRASE_GUARANTEE", "2"))
+_PHRASE_STOP = frozenset("""
+a an the of for to in on at by with and or is are was be it its this that
+what whats which how do does can could should would will my your our me i
+you we they there any some much many s
+""".split())
+
+
+def _phrase_runs(query: str) -> list[list[str]]:
+    """Maximal runs of consecutive content words in the query, length >= 3."""
+    words = re.findall(r"[a-z0-9]+", (query or "").lower())
+    runs, cur = [], []
+    for w in words:
+        if w in _PHRASE_STOP:
+            if len(cur) >= 3:
+                runs.append(cur)
+            cur = []
+        else:
+            cur.append(w)
+    if len(cur) >= 3:
+        runs.append(cur)
+    return runs
+
+
+def _phrase_ranking(query: str, collection, limit: int,
+                    source_filter: str | None, scope: dict | None) -> list[str]:
+    """Chunk ids containing a >= 3-word run of the query verbatim."""
+    runs = _phrase_runs(query)
+    if not runs:
+        return []
+    grams = set()
+    for r in runs:
+        for n in range(len(r), 2, -1):
+            for i in range(len(r) - n + 1):
+                grams.add(" ".join(r[i:i + n]))
+    _, chunks = _get_bm25_index(collection)
+    hits = []
+    for c in chunks:
+        if not _matches_scope(c, source_filter, scope):
+            continue
+        flat = " ".join(re.findall(r"[a-z0-9]+", (c.get("text") or "").lower()))
+        best = max((len(g.split()) for g in grams if g in flat), default=0)
+        if best:
+            hits.append((best, c["id"]))
+    hits.sort(key=lambda t: -t[0])
+    return [cid for _, cid in hits[:limit]]
+
 _bm25_lock = threading.Lock()
 _bm25_cache = {"count": -1, "index": None, "chunks": None}
 
@@ -354,6 +410,13 @@ def retrieve_from_db(
         return []
 
     # Keep a margin of candidates (top_k*2) so the downstream reranker has
+    try:
+        phrase_ids = (_phrase_ranking(query, collection, PHRASE_ARM_GUARANTEE,
+                                      source_filter, scope)
+                      if PHRASE_ARM_GUARANTEE > 0 else [])
+    except Exception as exc:
+        logger.debug(f"phrase arm skipped: {exc}")
+        phrase_ids = []
     # room to reorder before the answering pipeline trims to top_k.
     #
     # 2026-08-28: the margin built here was thrown away again by the
@@ -404,6 +467,14 @@ def retrieve_from_db(
 
     # v10.16: with doc2query gone, every ranked id maps directly to a real
     # chunk (no question->parent indirection, no dedupe needed). Any id the
+    # Phrase hits are added, never substituted: they only widen what the
+    # reranker is shown, and it decides.
+    _extra = [i for i in phrase_ids if i not in ranked_ids]
+    if _extra:
+        ranked_ids = list(ranked_ids) + _extra
+        keep_n = len(ranked_ids)
+        for i in _extra:
+            scores.setdefault(i, 0.0)
     # dense query returns that isn't in by_id — e.g. a stale kind="query"
     # entry filtered out above — is skipped by the `if not entry` guard.
     results = []
@@ -723,6 +794,62 @@ def sources_titled_for(words: list[str], product: str) -> list[str]:
     already in memory.
 
     It exists because ranking cannot be fixed into covering one case.
+TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))
+
+
+def complete_tables(chunks: list[dict],
+                    budget: int = TABLE_COMPLETION_CHARS) -> list[dict]:
+    """Add the continuation of a table that a retrieved chunk begins.
+
+    The BV30 flash-code table starts on page 31 and its last five rows are
+    on page 32; the question "4 red flashes then 1 blue" retrieves the
+    first part (0.995) and the answer is in the second. The next chunk of
+    the same document is a continuation when its body opens with table
+    rows under the same section (tables.carry_table_context sets that).
+    Appended after, like procedure completion, and marked
+    fetched_by="table_completion". Never raises.
+    """
+    if not chunks:
+        return chunks
+    try:
+        import tables as _tables
+        collection = get_collection()
+        _, all_chunks = _get_bm25_index(collection)
+        by_id = {c["id"]: c for c in all_chunks}
+        have = {c.get("id") for c in chunks}
+        out, spent = list(chunks), 0
+        for c in chunks:
+            cid, text = c.get("id") or "", c.get("text") or ""
+            if "|" not in text or "_" not in cid:
+                continue
+            base, _, n = cid.rpartition("_")
+            if not n.isdigit():
+                continue
+            nxt = by_id.get(f"{base}_{int(n) + 1}")
+            if not nxt or nxt["id"] in have:
+                continue
+            _, body = _tables.split_prefix(nxt.get("text") or "")
+            same = ((nxt.get("section") or "") == (c.get("section") or "")
+                    or not (nxt.get("section") or ""))
+            if not (same and _tables._starts_with_rows(body)):
+                continue
+            if spent + len(nxt.get("text") or "") > budget:
+                break
+            have.add(nxt["id"])
+            spent += len(nxt.get("text") or "")
+            out.append({"id": nxt["id"], "text": nxt["text"],
+                        "source": nxt.get("source"), "page": nxt.get("page"),
+                        "section": nxt.get("section", ""),
+                        "retrieval_score": 0.0,
+                        "fetched_by": "table_completion"})
+        if spent:
+            logger.info("table completion added %d chunk(s)", len(out) - len(chunks))
+        return out
+    except Exception as exc:
+        logger.warning(f"table completion skipped: {exc}")
+        return chunks
+
+
     "Can I use MyCheckr with linux?" should find "Accessing my device in
     Linux Environment", which the operator tagged to MyCheckr at upload.
     The document never uses the word "MyCheckr", so the cross-encoder

@@ -1,0 +1,287 @@
+{
+  "_README": "Second blind eval set, written cold from the source PDFs in documents/ (pdfplumber text + table extraction only) without reading any prior eval files, test files, or PENDING.md/docs, so it tests generalisation rather than fitting known cases; every fact was independently verified against a specific page (and, for table facts, a specific non-headline table row, including two facts whose table spans a page break) before being written down, and the four near-miss/rejected facts were confirmed absent by grepping every document for that product.",
+  "cases": [
+    {
+      "q": "On the smart coin system, the status light is red and it flashed 3 times, what does that mean?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Fraud"],
+      "reference": "SMART Coin System Range User Manual-v1.pdf, p.83, Status LED Flash Codes table: RED Flashes x 3 = Fraud Attempt.",
+      "grade": true
+    },
+    {
+      "q": "What percentage of Thai 50 Satang coins can the SMART Coin System hold before it needs to dump them to cashbox?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["15%"],
+      "reference": "SMART Coin System Range User Manual-v1.pdf, p.65, Small Coins table: THB (Thai baht) 50 Satang, 15% of all coins, max 20 coins if no other coins in device.",
+      "grade": true
+    },
+    {
+      "q": "And what's the limit for Euro 1 cent coins?",
+      "product": "sku_scs",
+      "outcome": "answered",
+      "keywords_all": ["25%"],
+      "reference": "SMART Coin System Range User Manual-v1.pdf, p.65, Small Coins table: EUR (Euro) 0.01€, 25% of all coins, max 20.",
+      "grade": true
+    },
+    {
+      "q": "whats the MCBF rating on the smart coin system",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["100,000"],
+      "reference": "SMART Coin System Range User Manual-v1.pdf, p.23, Reliability Data: \"MCBF: 100,000\".",
+      "grade": true
+    },
+    {
+      "q": "If the MyCheckr's LED turns solid yellow after someone scans, what's happening?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Spoof"],
+      "reference": "MyCheckr User Manual-v7.pdf, p.32, Default reactions to face table: Yellow / Solid colour / Spoof.",
+      "grade": true
+    },
+    {
+      "q": "Out of the box, what age threshold does a new MyCheckr ship with?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["25"],
+      "reference": "MyCheckr User Manual-v7.pdf, p.26, Default Configuration table: Settings - Age Threshold = 25.",
+      "grade": true
+    },
+    {
+      "q": "Could I set it to something other than 25 instead?",
+      "product": "mycheckr",
+      "outcome": "answered",
+      "keywords_all": ["18", "21"],
+      "reference": "MyCheckr User Manual-v7.pdf, p.11, Age Threshold setting description: \"Typical values are 18, 21, or 25 depending on application requirements.\"",
+      "grade": true
+    },
+    {
+      "q": "When enrolling someone on the MyCheckr, what user groups can I assign them to?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Temporary"],
+      "reference": "MyCheckr User Manual-v7.pdf, p.22, Group Selection: available groups Enrolled, Employee, Premium, Temporary, Excluded.",
+      "grade": true
+    },
+    {
+      "q": "Does the MyCheckr have a backup battery so it keeps working if the power goes out?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "Not documented — the MyCheckr manual specifies mains-style DC power/current draw (pp.36-38) but never mentions a battery or battery backup anywhere in the document."
+    },
+    {
+      "q": "When the MyCheckr Mini is actively analysing a face, how much RMS current does it draw?",
+      "product": "mycheckr_mini",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["445"],
+      "reference": "MyCheckr Mini User Manual-v5.pdf, p.30, Supply Currents table: Stand Alone (Analysing a face) RMS Current 445mA.",
+      "grade": true
+    },
+    {
+      "q": "how much does the mycheckr mini itself weigh",
+      "product": "mycheckr_mini",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["152"],
+      "reference": "MyCheckr Mini User Manual-v5.pdf, p.29, Weights: \"MyCheckr Mini: 152 g\".",
+      "grade": true
+    },
+    {
+      "q": "On the ITL Connect Hub terminal strip, which pin is the common terminal for Relay 2?",
+      "product": "myconnect",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["9"],
+      "reference": "MyConnect Environment-v4.pdf, p.13 (Terminal Strip Overview table continues from p.12): Pin 9, Terminal Block J4, Label RELAY 2 COM.",
+      "grade": true
+    },
+    {
+      "q": "In the installer checklist, what's the default relay activation duration I should expect to see?",
+      "product": "myconnect",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["1s"],
+      "reference": "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf, p.11, Basic verification table: \"Relay duration behaves correctly (default ~1s)\".",
+      "grade": true
+    },
+    {
+      "q": "If nobody responds to a live alert in the MyConnect app, how long before it disappears on its own?",
+      "product": "myconnect",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["10 minutes"],
+      "reference": "MyConnect Environment-v4.pdf, p.24: \"If an alert is left for 10 minutes (can be changed to custom time) it will automatically disappear.\"",
+      "grade": true
+    },
+    {
+      "q": "For the static image age-check endpoint, what's the max resolution the face image can be?",
+      "product": "biometrics_general",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["640"],
+      "reference": "ICU_Age_Result_Quick_Guide_v1_1.pdf, p.2: \"one base64-encoded JPG or PNG face image, no larger than 640 × 480.\"",
+      "grade": true
+    },
+    {
+      "q": "before I can call the age endpoint on my ICU device, what do I need to authenticate with?",
+      "product": "biometrics_general",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Bearer token"],
+      "reference": "ICU_Age_Result_Quick_Guide_v1_1.pdf, p.1: \"AUTHENTICATION: Bearer token from POST /token\".",
+      "grade": true
+    },
+    {
+      "q": "how long until that token expires?",
+      "product": "biometrics_general",
+      "outcome": "answered",
+      "keywords_all": ["3600"],
+      "reference": "ICU_Age_Result_Quick_Guide_v1_1.pdf, p.1: \"Token is valid for 3600 seconds; request a fresh token whenever a call returns 401.\"",
+      "grade": true
+    },
+    {
+      "q": "In the MyCheckr ad screen addressing scheme, which age band is group index 2?",
+      "product": "biometrics_general",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["25-60"],
+      "reference": "ICU_Network_API-v1.0.50.pdf, p.80, Female/Male Ad Group Image table: groupIndex 2 = Group 25-60.",
+      "grade": true
+    },
+    {
+      "q": "the DA3 error LED did 4 short flashes during a firmware download, what does that mean?",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Download fail"],
+      "reference": "NV9USB+ Range User Manual-v1.pdf, p.34, error code table: 4 SHORT flashes = Download fail.",
+      "grade": true
+    },
+    {
+      "q": "and 5 flashes?",
+      "product": "nv9usb",
+      "outcome": "answered",
+      "keywords_all": ["Memory card"],
+      "reference": "NV9USB+ Range User Manual-v1.pdf, p.34, error code table: 5 SHORT flashes = Memory card fail.",
+      "grade": true
+    },
+    {
+      "q": "My NV9USB+ bezel is flashing 2 long flashes then 2 short flashes, what's wrong?",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Cashbox Jam"],
+      "reference": "NV9USB+ Range User Manual-v1.pdf, p.56, Bezel LED Error Flash Codes table: 2 Long / 2 Short = Cashbox Jam.",
+      "grade": true
+    },
+    {
+      "q": "what are the RAM requirement to run DA3 programing software",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["256"],
+      "reference": "NV9USB+ Range User Manual-v1.pdf, p.33, DA3 System Requirements: \"256mb ram\".",
+      "grade": true
+    },
+    {
+      "q": "Is there a mobile app I can use to configure the NV200S dip switches from my phone?",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "Not documented — the NV200S manual describes configuration via physical DIP switches and desktop Validator Manager software only; no mobile app is mentioned anywhere in the manual."
+    },
+    {
+      "q": "The NV9 Spectral bezel just did 2 long flashes and 2 short flashes, whats that fault?",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Cashbox jam"],
+      "reference": "NV9 Spectral Range User Manual-v1.pdf, p.61, Flash Codes table: 2 Long / 2 Short = Cashbox jam.",
+      "grade": true
+    },
+    {
+      "q": "how much does the standard bezel on the NV9 Spectral weigh",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["0.10"],
+      "reference": "NV9 Spectral Range User Manual-v1.pdf, p.25, Weights table: Bezel (standard) 0.10 Kg.",
+      "grade": true
+    },
+    {
+      "q": "On the BV30, one red flash and four blue flashes on the bezel - what's it telling me?",
+      "product": "bv30",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Sensor Covered"],
+      "reference": "BV30 User Manual-v1.pdf, p.31, Bezel Flash Codes table: Red Flashes 1 / Blue Flashes 4 = Sensor Covered.",
+      "grade": true
+    },
+    {
+      "q": "what's the widest banknote the BV30 can accept",
+      "product": "bv30",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["72mm"],
+      "reference": "BV30 User Manual-v1.pdf, p.9, note dimensions table: Note Width Minimum 57mm, Maximum 72mm.",
+      "grade": true
+    },
+    {
+      "q": "Can the BV30 connect to a phone over Bluetooth for diagnostics?",
+      "product": "bv30",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "Not documented — the BV30 manual only covers SSP/ccTalk/pulse-type serial interfaces and a front configuration button; Bluetooth is never mentioned."
+    },
+    {
+      "q": "On the NV200 Spectral dip switch bank, what does switch 6 control and what's its default?",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["Channel 5"],
+      "reference": "NV200S Range User Manual-v1.pdf, p.63 (DIP switch table continues from p.62): Switch 6 = Channel 5 Inhibit, Default OFF.",
+      "grade": true
+    },
+    {
+      "q": "whats the MCBF figure quoted for the nv200 spectral",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": ["200,000"],
+      "reference": "NV200S Range User Manual-v1.pdf, p.22: \"The MCBF for the NV200 Spectral is 200,000 cycles.\"",
+      "grade": true
+    },
+    {
+      "q": "What's the warranty period on a SMART Coin System?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "rejected",
+      "reference": "Not documented — the manual's Reliability Data section (p.23) gives MCBF/MCBI figures and says lifetime info is \"available on request\", but no warranty duration is stated anywhere in the manual."
+    },
+    {
+      "q": "My machine's showing an error, can you tell me what it means?",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "How do I set the age limit?",
+      "new_session": true,
+      "outcome": "clarify"
+    },
+    {
+      "q": "It won't turn on, help?",
+      "new_session": true,
+      "outcome": "clarify"
+    }
+  ]
+}

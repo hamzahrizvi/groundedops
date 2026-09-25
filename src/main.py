@@ -3051,6 +3051,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     t3 = time.time()
     if role == "rethink":
         output = generate(payload.force_provider, prompt, payload.force_model, deepseek_api_key, api_keys=api_keys)
+    try:
+        from retrieval_db import complete_tables
+        import tables as _tables
+        top_chunks = complete_tables(top_chunks)
+        # Merged cells filled and matrices read out, for the model AND the
+        # verifiers -- both read top_chunks. Idempotent, so an index already
+        # migrated by backfill_table_context.py is left as it is.
+        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or ""))
+                      for c in top_chunks]
+    except Exception as _exc:
+        logger.warning(f"table completion skipped: {_exc}")
         if not output:
             output = {"text": "", "model": payload.force_model, "provider": payload.force_provider}
         output["fallback_used"] = False
