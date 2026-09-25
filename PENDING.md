@@ -22,8 +22,11 @@ know what changed since last week.
 Every item should be actionable by someone who was not in the session that
 found it. If it needs a transcript to understand, it is not written yet.
 
-Last hand-updated: 2026-09-25 — **v16.3 is tagged and published as
-GO_v3.2**; the work after it is on `experimental/v16.4-logic-and-latency`.
+Last hand-updated: 2026-09-25 (evening) — the conversation stress test
+landed: 14 live scripted conversations, 46/59 -> 53/59 turns as expected,
+five fixes and a ranked gap list in `docs/stress-test-2026-09-25.md`; see
+**Shipped — conversation stress test** below. Earlier that day: **v16.3 is
+tagged and published as GO_v3.2**; the work after it is on `experimental/v16.4-logic-and-latency`.
 Two audits of the answer path (a latency map, and a logic review that
 confirmed each finding against the code) landed together; see the dated
 section **2026-09-25** below for what was fixed, what was measured, and the
@@ -93,6 +96,87 @@ Two read-only audits of the answer path, run in parallel, then fixes. Every
 logic fix is pinned in `src/tests/test_logic_holes.py`; every latency claim
 below was measured on this box (12 cores, CPU inference) with nothing else
 running unless stated.
+
+### Shipped — conversation stress test (later still on 2026-09-25)
+
+Fourteen new scripted customer conversations (59 turns,
+`src/tests/scenarios/11_*`..`24_*`, driver `src/tests/run_live.py`) were run
+through the LIVE `/query` on DeepSeek V4 Flash — the gateway was NXDOMAIN
+again — classified, and used to drive fixes. Full report with the ranked
+gap list against Intercom Fin / Zendesk / Ada / Sierra-class agents:
+`docs/stress-test-2026-09-25.md`; verbatim transcripts before and after
+sit beside it. Numbers, same scorer both sides: live turns as expected
+**46/59 (78.0%) -> 53/59 (89.8%)**; tests 249 -> **250/250**, 1 skipped;
+`run_scenarios.py` original ten 79/79, all 24 files 142/160 (the 18
+misses are `followup` labels on the new files, all pronoun/short turns
+the classifier calls standalone — left as the engineer wrote them).
+
+- **"I want to talk to a person" / "open a support ticket" / "call me
+  back" were answered with "could you tell me more concretely what you'd
+  like me to check"** (19 T4, 21 T3/T4). `src/intents.py` recognises the
+  request before any search; the turn returns `role: handoff` with
+  `offer_support`, and the widget's existing support form is the ticket.
+  The widget no longer says "not in my knowledge base" under it. 0.6-0.8s.
+  A bare greeting ("hello, how are you today") got a refusal with three
+  FAQ links; it is now a greeting. Regression caught in the run: the first
+  regex matched "how do I connect **it** to my machine" — pinned.
+- **Warranty reached retrieval and was refused** (15 T1; 0 corpus hits for
+  "warrant"). `sales._MONEY` now takes `warranty`/`warranties` and the noun
+  `guarantee` (the manuals use the verb: "to guarantee the best
+  performance"). `test_new_routes` had used the warranty question as one of
+  three corpus misses; its third miss is now the operating altitude.
+- **A comparison's follow-ups asked "which did you mean?" with both
+  products named** (18 T2-T4, 14 T2), and after the switch the next
+  pronoun resolved to the OLD product (14 T3, cashbox answered for the NV9
+  Spectral). `_COMPARISON` now covers "which one / of the two", "both /
+  either", "the same", "faster ... or"; scenario 14 is 4/4. Scenario 18
+  now reaches generation, where the model declines to synthesise two specs
+  (below, deferred).
+- **Second-document requests were summarised or refused** (17 T2 "and the
+  pre-requisites checklist too", 17 T3 "send me the NV200 Spectral SSP
+  manual as well"): `_OBJECT` rejected trailing "too / as well", `checklist`
+  was not a document noun, and the rewrite was never tried. All three
+  fixed; both now return download links in <1s.
+- **The model refused follow-ups whose standalone form it answered** (16 T6
+  "what interfaces does it support then" with the NV9USB+ interface pages
+  cited; 11 T5; 23 T3). The only difference between the two prompts is the
+  `<conversation>` block, so a refusal on a follow-up with confident
+  retrieval is retried once without it. Recovered all three; costs one
+  model call only on that shape.
+
+### Deferred from the stress test, with the evidence
+
+- **Comparison synthesis.** With the gate fixed, "which validates notes
+  faster, the NV9 Spectral or the NV9USB+" and "do they both use the same
+  SSP interface" reach the model and are refused (18 T2/T3 after-run):
+  both manuals hold the figure, in different passages. A comparison prompt
+  presenting the two products' passages side by side is the next path.
+- **"and step 3?"** re-serves the whole procedure (13 T2, before and
+  after). Wants the previous answer's numbered list, not retrieval —
+  `_expand_previous`-style on `is_more_request`.
+- **Non-English questions are refused at the retrieval gate** (24 T1/T2,
+  Spanish and German); French price question answered in French by the
+  model instead of deflecting (24 T3; `_COMMERCIAL` is English-only).
+  Route: condense-to-English on a non-English first turn, "answer in the
+  language of the question" in the answer prompt.
+- **"Does the MyCheckr support Bluetooth" -> "No."** at grounding 0.002,
+  unflagged (15 T2): inferred from the USB/Ethernet list; "bluetooth" has 0
+  corpus hits. Inference-contract territory; no path today produces "the
+  manual does not mention it".
+- **Answer consistency.** The same resolved question was refused in one run
+  and answered in the next (11 T5, 12 T1, 13 T4, 18 T1, 19 T2 each flipped
+  across four runs) at temperature 0. Single-turn deltas are within this
+  noise; the report only claims the reproducible ones.
+- **No per-answer feedback from the widget** (thumbs), so "answered but
+  wrong" is invisible unless a visitor writes in; no ticket ID shown on a
+  handoff; no push to an external desk.
+- **Freshly started backends crash after warm-up.** Four launches (nohup
+  with `/status` polling, `Start-Process`, WMI, sandbox off) died seconds
+  after "System warmup complete": WER logs `python.exe` APPCRASH in
+  `RPCRT4.dll`, `0xc0000005`, no Python traceback, 2.9 GB free. `nohup
+  python -X faulthandler -m uvicorn` with readiness read from the log
+  survived twice. Suspect: today's "models imported on first use" moving
+  a torch import off the main thread. Unresolved.
 
 ### Shipped — cleanup and compaction (later on 2026-09-25)
 
@@ -1262,6 +1346,12 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
 
 ## Resolved (kept for the Monday diff, trim periodically)
 
+- **2026-09-25 — conversation stress test: handoff, greeting, warranty,
+  comparison follow-ups, second-document requests, follow-up refusal
+  retry.** 14 live scenarios 46/59 -> 53/59; tests 250/250. Report
+  `docs/stress-test-2026-09-25.md`. Commits: scenarios + runner + report,
+  and the fixes, both on `experimental/v16.4-logic-and-latency` (see
+  `git log --since=2026-09-25T09:00`).
 - **2026-09-22 — the gateway came back, and contract 2 met a real model for
   the first time.** DNS was fixed by whoever owns the host (see
   **Infrastructure**); nothing here caused or fixed it. What it unblocked
