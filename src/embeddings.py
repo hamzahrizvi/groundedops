@@ -1,7 +1,6 @@
 import functools
 import os
 
-from sentence_transformers import SentenceTransformer
 import numpy as np
 
 # v15: was all-MiniLM-L6-v2, whose 256-token limit was the binding constraint
@@ -40,6 +39,10 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
+        # Imported here, not at the top: sentence_transformers brings torch
+        # and transformers with it (~8s), which nothing needs until the
+        # first encode -- and every CLI tool and test imports this module.
+        from sentence_transformers import SentenceTransformer
         # trust_remote_code is required by gte-modernbert and harmless for
         # models that ship no custom code.
         _model = SentenceTransformer(EMBED_MODEL, trust_remote_code=True)

@@ -15,10 +15,11 @@ Persisted to policy.json (gitignored like the other runtime stores). Losing
 it falls back to the env/default values, so it is not catastrophic to lose,
 unlike accounts.json.
 """
-import json
 import logging
 import os
 import threading
+
+import jsonstore
 
 logger = logging.getLogger(__name__)
 
@@ -173,16 +174,11 @@ _MAX = {
 
 def _load() -> dict:
     out = dict(_DEFAULTS)
-    if os.path.exists(_PATH):
-        try:
-            with open(_PATH, encoding="utf-8") as f:
-                saved = json.load(f)
-            if isinstance(saved, dict):
-                for k, v in saved.items():
-                    if k in out:
-                        out[k] = v
-        except Exception as e:
-            logger.warning(f"policy read failed, using defaults: {e}")
+    saved = jsonstore.load(_PATH, {}, label="access policy")
+    if isinstance(saved, dict):
+        for k, v in saved.items():
+            if k in out:
+                out[k] = v
     return out
 
 
@@ -242,10 +238,7 @@ def update(changes: dict, actor: str = "") -> dict:
     with _lock:
         current = _load()
         current.update(clean)
-        tmp = _PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(current, f, indent=2)
-        os.replace(tmp, _PATH)
+        jsonstore.save(_PATH, current, label="access policy")
     for k, v in clean.items():
         logger.info(f"policy: {k} -> {v!r} by {actor or 'unknown'}")
     return current

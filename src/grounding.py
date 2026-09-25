@@ -21,14 +21,12 @@ import logging
 import os
 import re
 
-from sentence_transformers import CrossEncoder
-
 from text_utils import split_units
 
 logger = logging.getLogger(__name__)
 
 NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-small"
-_nli_model: CrossEncoder | None = None
+_nli_model = None   # a sentence_transformers CrossEncoder, loaded on first use
 
 # This model's head is {0: contradiction, 1: entailment, 2: neutral}.
 #
@@ -71,9 +69,10 @@ def _entailment_index() -> int:
     return _ENTAIL_IDX
 
 
-def _get_nli_model() -> CrossEncoder:
+def _get_nli_model():
     global _nli_model
     if _nli_model is None:
+        from sentence_transformers import CrossEncoder   # see embeddings.py
         logger.info(f"Loading NLI model: {NLI_MODEL_NAME}")
         _nli_model = CrossEncoder(NLI_MODEL_NAME)
     return _nli_model

@@ -327,24 +327,9 @@ def admin_source_sample(source: str, x_admin_password: str | None = Header(defau
     can generate FAQ questions from real content (browser calls the LLM,
     no backend key needed)."""
     _require_admin(x_admin_password)
-    from db import get_collection
-    col = get_collection()
-    got = col.get(where={"source": source}, include=["documents", "metadatas"])
-    docs = got.get("documents", []) or []
-    # prefer real chunks (kind chunk); strip breadcrumb prefixes
-    metas = got.get("metadatas", []) or []
-    texts = []
-    for d, m in zip(docs, metas):
-        if m.get("kind") == "query":
-            continue
-        t = d
-        if t.startswith("["):
-            nl = t.find("\n")
-            if nl != -1:
-                t = t[nl + 1:]
-        texts.append(t)
-    sample = "\n\n".join(texts[:8])[:6000]
-    return {"source": source, "sample": sample, "chunks": len(texts)}
+    from docindex import source_text
+    sample, chunks = source_text(source, max_chunks=8, cap=6000)
+    return {"source": source, "sample": sample, "chunks": chunks}
 
 
 @router.get("/source_file/{filename}")
@@ -425,10 +410,10 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
         for k in keys:
             m["prod_" + k] = True
     col.update(ids=ids, metadatas=metas)
-    # bust the BM25 cache so the new tags take effect
+    # BM25 and the source inventory both carry the old tags until told.
     try:
-        from retrieval_db import _invalidate_bm25_cache
-        _invalidate_bm25_cache()
+        from db import invalidate_retrieval_cache
+        invalidate_retrieval_cache()
     except Exception:
         pass
     return {"reassigned": len(ids), "source": payload.source,
@@ -469,23 +454,14 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     metadata row is walked anyway to find sources, so counting them is free.
     """
     _require_admin(x_admin_password)
-    from db import get_collection
-    col = get_collection()
-    got = col.get(include=["metadatas"])
-    seen = {}
-    indexed_versions = {}
-    for m in got.get("metadatas", []):
-        src = m.get("source", "unknown")
-        if src not in seen:
-            seen[src] = {"source": src, "category": m.get("category", ""),
-                         "product": m.get("product", ""), "chunks": 0}
-            indexed_versions[src] = (m.get("document_version") or
-                                     m.get("content_sha256"))
-        seen[src]["chunks"] += 1
+    from docindex import source_index
+    rows = source_index()
+    out = [{"source": r["source"], "category": r["category"],
+            "product": r["product"], "chunks": r["chunks"]} for r in rows]
     try:
         import docstore as _ds
-        for src, item in seen.items():
-            item["freshness"] = _ds.freshness(src, indexed_versions.get(src))
+        for item, r in zip(out, rows):
+            item["freshness"] = _ds.freshness(r["source"], r["version"])
     except Exception as exc:
         logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
-    return {"sources": list(seen.values())}
+    return {"sources": out}

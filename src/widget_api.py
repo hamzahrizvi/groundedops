@@ -121,36 +121,22 @@ def widget_catalog():
             "message": "Product list is temporarily unavailable.",
         })
 
-    # Count distinct ingested sources per product/category.
-    #
-    # Reads BOTH "products" and "product" metadata keys: ingest.py writes
-    # the plural, while the admin catalog endpoint reads the singular, so
-    # doc_count there is 0 for everything ingested normally. Accepting both
-    # keeps this correct regardless of which path wrote the document.
-    prod_sources, cat_sources = {}, {}
+    # Distinct ingested sources per product/category, from the shared
+    # inventory (docindex) -- the same numbers the admin /catalog shows.
     try:
-        from db import get_collection
-        got = get_collection().get(include=["metadatas"])
-        for m in (got.get("metadatas") or []):
-            src = m.get("source")
-            if not src:
-                continue
-            raw = m.get("products") or m.get("product") or ""
-            for key in [k.strip() for k in str(raw).split(",") if k.strip()]:
-                prod_sources.setdefault(key, set()).add(src)
-            ckey = (m.get("category") or "").strip()
-            if ckey:
-                cat_sources.setdefault(ckey, set()).add(src)
+        from docindex import doc_counts
+        prod_counts, cat_counts = doc_counts()
     except Exception as e:
         logger.warning(f"widget catalog doc_count failed (non-fatal): {e}")
+        prod_counts, cat_counts = {}, {}
 
     cats = []
     for c in (cat.get("categories") or []):
         prods = [{"key": p["key"], "name": p["name"],
-                  "doc_count": len(prod_sources.get(p["key"], set()))}
+                  "doc_count": prod_counts.get(p["key"], 0)}
                  for p in (c.get("products") or [])]
         prods = [p for p in prods if p["doc_count"] > 0]
-        ccount = len(cat_sources.get(c["key"], set()))
+        ccount = cat_counts.get(c["key"], 0)
         # Keep a range if either it or any of its products has documents -
         # a document tagged only at category level still makes the range
         # answerable.

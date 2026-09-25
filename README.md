@@ -95,7 +95,10 @@ Query → query condensation (Rewrite-Retrieve-Read, session-scoped)
 
 | File | Role |
 |---|---|
-| `main.py` | FastAPI app, CORS, `/api` prefix rewrite, static frontend serving, async startup warmup, query orchestration, clarifying-question and rethink logic |
+| `main.py` | FastAPI app: CORS and security-header middleware, the LAN-only surface guard, `/api` prefix rewrite, async startup warmup, `/health`, and the answer pipeline (`/query`, `/query/stream`) with its clarifying-question and rethink logic |
+| `routes_*.py` | The route groups, one `APIRouter` each: console, documents, settings, faq, widget, catalog, admin_auth, admin_keys, admin_data. Registered by `main.py`; paths unchanged |
+| `guards.py`, `app_state.py`, `providers.py` | What `main.py` and the routers share: the credential guards and proxy-aware client IP, the startup/capability state, and per-provider default models |
+| `docindex.py` | The source inventory — one cached metadata walk that feeds `/catalog`, `/widget/catalog`, `/admin/sources` and `/stats` |
 | `db.py` | Shared persistent ChromaDB client, per-source deletion, chunk-by-id lookup |
 | `parsing.py` | Page-preserving text extraction (PDF / DOCX / TXT) |
 | `ingest.py` | Per-page parsing → chunking → breadcrumb enrichment → embedding → versioned storage; retains original files for download |

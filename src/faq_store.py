@@ -138,8 +138,28 @@ _STOP = {
 # UnicodeDecodeError, the bare except swallowed it, and the FAQ store silently
 # read as EMPTY -- every curated answer gone with no error surfaced anywhere.
 
+# Parsed once and served from memory until the file changes (mtime and
+# size), which every writer here does through _save. Each caller gets its
+# own copies: entries are flat, so a per-entry dict() is enough, and it
+# costs a third of the parse it replaces on every query and console load.
+_store_cache: dict = {"key": None, "items": []}
+
+
+def _store_key():
+    try:
+        st = os.stat(_PATH)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
 def _load() -> list[dict]:
-    return jsonstore.load(_PATH, [], label="FAQ store")
+    key = _store_key()
+    if key is None or key != _store_cache["key"]:
+        _store_cache["items"] = jsonstore.load(_PATH, [], label="FAQ store")
+        _store_cache["key"] = key
+    return [dict(it) if isinstance(it, dict) else it
+            for it in _store_cache["items"]]
 
 
 def _save(items: list[dict]) -> None:
@@ -147,6 +167,7 @@ def _save(items: list[dict]) -> None:
     jsonstore. This store is the one that nearly proved why: read it as
     cp1252, get [], write it back, and every curated answer is gone."""
     jsonstore.save(_PATH, items, label="FAQ store")
+    _store_cache["key"] = None
 
 
 def record_questions(source: str, products: str, qa_pairs: list[dict],

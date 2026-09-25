@@ -27,28 +27,12 @@ def get_catalog():
     for a product that has no documents."""
     cat = catalog_mod.catalog()
     try:
-        from db import get_collection
-        col = get_collection()
-        got = col.get(include=["metadatas"])
-        prod_sources, cat_sources = {}, {}
-        for m in got.get("metadatas", []) or []:
-            src = m.get("source")
-            if not src:
-                continue
-            p, c = m.get("product", ""), m.get("category", "")
-            # A document tagged to several products counts under EACH of them.
-            # Counting the comma-joined value as one key filed a shared manual
-            # under a product nobody has, and showed 0 against the products
-            # that actually carry it.
-            for key in [k.strip() for k in (p or "").split(",") if k.strip()]:
-                prod_sources.setdefault(key, set()).add(src)
-            if c:
-                cat_sources.setdefault(c, set()).add(src)
+        from docindex import doc_counts
+        prod_counts, cat_counts = doc_counts()
         for category in cat["categories"]:
-            ccount = len(cat_sources.get(category["key"], set()))
-            category["doc_count"] = ccount
+            category["doc_count"] = cat_counts.get(category["key"], 0)
             for prod in category["products"]:
-                prod["doc_count"] = len(prod_sources.get(prod["key"], set()))
+                prod["doc_count"] = prod_counts.get(prod["key"], 0)
     except Exception as e:
         logger.warning(f"catalog doc_count enrichment failed (non-fatal): {e}")
     return cat

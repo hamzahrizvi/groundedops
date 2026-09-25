@@ -329,28 +329,6 @@ class FaqAutoReq(BaseModel):
     model: str | None = None
 
 
-def _source_text(source: str, max_chunks: int = 12, cap: int = 8000) -> str:
-    """Pull real chunk text for a source, breadcrumbs and synthetic
-    doc2query chunks stripped — autogenerate drafts from what the document
-    actually says, not from questions already generated about it."""
-    from db import get_collection
-    col = get_collection()
-    got = col.get(where={"source": source}, include=["documents", "metadatas"])
-    docs = got.get("documents", []) or []
-    metas = got.get("metadatas", []) or []
-    texts = []
-    for d, m in zip(docs, metas):
-        if m.get("kind") == "query":
-            continue
-        t = d
-        if t.startswith("["):
-            nl = t.find("\n")
-            if nl != -1:
-                t = t[nl + 1:]
-        texts.append(t)
-    return "\n\n".join(texts[:max_chunks])[:cap]
-
-
 def _parse_qa_json(raw: str) -> list[dict]:
     """Extract [{question, answer}] from a model response.
 
@@ -515,7 +493,8 @@ def _faq_prompt(sample: str, n: int) -> str:
 
 
 def _draft_sample(source: str) -> str:
-    sample = _source_text(source)
+    from docindex import source_text
+    sample, _ = source_text(source, max_chunks=12, cap=8000)
     if not sample.strip():
         raise HTTPException(
             status_code=404,

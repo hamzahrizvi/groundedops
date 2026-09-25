@@ -9,6 +9,8 @@ import logging
 import chromadb
 from typing import Optional
 
+from docindex import product_keys
+
 logger = logging.getLogger(__name__)
 
 CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
@@ -33,6 +35,8 @@ _checked_at = 0.0
 
 def invalidate_retrieval_cache() -> None:
     """Invalidate derived in-process search state after any index mutation."""
+    import docindex
+    docindex.invalidate()
     try:
         from retrieval_db import _invalidate_bm25_cache
         _invalidate_bm25_cache()
@@ -103,15 +107,10 @@ def reset_collection() -> chromadb.Collection:
 
 
 def get_stats() -> dict:
-    col = get_collection()
-    count = col.count()
+    from docindex import source_index
+    count = get_collection().count()
     try:
-        result = col.get(include=["metadatas"])
-        sources = sorted({
-            m.get("source", "unknown")
-            for m in result["metadatas"]
-            if m.get("source")
-        })
+        sources = sorted(row["source"] for row in source_index())
     except Exception:
         sources = []
     return {"total_chunks": count, "sources": sources}
@@ -128,25 +127,13 @@ def delete_source(source: str) -> int:
     return len(ids)
 
 
-def _product_keys(meta: dict) -> list[str]:
-    """The product tags on a chunk.
-
-    Reads BOTH "products" and "product": ingest.py writes the plural and
-    older paths wrote the singular, so anything that only checks one key
-    silently misses half the corpus. That mismatch has bitten this project
-    before (see PROJECT_MAP's note on the product-metadata key).
-    """
-    raw = meta.get("products") or meta.get("product") or ""
-    return [k.strip() for k in str(raw).split(",") if k.strip()]
-
-
 def count_by_product(product_key: str) -> int:
     """How many chunks are tagged to this product. Used to tell an operator
     what a deletion is about to affect BEFORE they confirm it."""
     col = get_collection()
     got = col.get(include=["metadatas"])
     return sum(1 for m in (got.get("metadatas") or [])
-               if product_key in _product_keys(m))
+               if product_key in product_keys(m))
 
 
 def retag_product(old_key: str, new_key: str | None) -> int:
@@ -169,7 +156,7 @@ def retag_product(old_key: str, new_key: str | None) -> int:
 
     change_ids, change_metas = [], []
     for cid, meta in zip(ids, metas):
-        keys = _product_keys(meta)
+        keys = product_keys(meta)
         if old_key not in keys:
             continue
         keys = [k for k in keys if k != old_key]
@@ -205,7 +192,7 @@ def delete_by_product(product_key: str) -> int:
 
     doomed, shared_ids, shared_metas = [], [], []
     for cid, meta in zip(ids, metas):
-        keys = _product_keys(meta)
+        keys = product_keys(meta)
         if product_key not in keys:
             continue
         remaining = [k for k in keys if k != product_key]

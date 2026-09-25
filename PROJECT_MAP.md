@@ -76,7 +76,16 @@ groundedops/
 └── src/                          backend lives here; uvicorn runs with src as cwd
     ├── .claude/
     ├── .env                                    secrets, gitignored
-    ├── main.py                   FastAPI app, every route, /query orchestration (2297)
+    ├── main.py                   FastAPI app: middleware, startup warmup, /health,
+    │                             /status, and the answer pipeline (/query, /query/stream)
+    ├── routes_*.py               the route groups main.py used to hold, one APIRouter
+    │                             each (2026-09-25): console, documents, settings, faq,
+    │                             widget, catalog, admin_auth, admin_keys, admin_data
+    ├── app_state.py  guards.py  providers.py
+    │                             startup state, the credential guards and the provider
+    │                             defaults that main.py and the routers share
+    ├── docindex.py               the source inventory: ONE cached metadata walk feeding
+    │                             /catalog, /widget/catalog, /admin/sources and /stats
     ├── db.py                     shared persistent ChromaDB client
     ├── parsing.py                page-preserving text extraction (PDF/DOCX/TXT),
     │                             tables fenced, headings found by FONT SIZE/WEIGHT
@@ -91,7 +100,7 @@ groundedops/
     │                             (extract / fast / accurate / reasoning)
     ├── structure.py              checklist / procedure extraction
     ├── structures.py             verbatim tables/checklists read back out of the
-    │                             source PDF, and the FAQ harvest built from them
+    │                             source PDF
     ├── sales.py                  cross-product questions ("which run on 24V?")
     │                             from the catalogue + a spec index, no generation
     ├── more_context.py           what to offer AFTER an answer: genuinely unused
@@ -114,7 +123,7 @@ groundedops/
     │                             persisted over good data. Used by every store
     ├── widget_api.py             public /widget/* router (v12.0), registered by main.py
     ├── quota.py                  tiers, per-caller quota, signed tokens
-    ├── widget_config.py          widget branding + lead capture, imported by main.py —
+    ├── widget_config.py          widget branding + lead capture, used by routes_widget.py —
     │                             GET/PUT /admin/widget/config, POST /widget/lead,
     │                             GET /admin/leads
     ├── mint_token.py             mint a widget token for testing
@@ -126,9 +135,9 @@ groundedops/
     ├── _harness.py               imports main.py with ML modules stubbed, so the v13
     │                             routes can be tested without Chroma/Ollama
     ├── eval.py                   regression harness, gates changes on a baseline diff
-    ├── eval_cases.json  eval_cases_16.json  eval_cases_api.json
-    ├── eval_cases_extensive.json
-    ├── eval_baseline.json  eval_baseline_16.json    committed on purpose (eval.py:11)
+    ├── eval_cases.json  eval_cases_api.json  eval_cases_extensive.json
+    ├── eval_cases_retrieval.json  eval_baseline_retrieval.json
+    ├── eval_baseline.json                            committed on purpose (eval.py:11)
     ├── eval_results.json                             gitignored
     ├── run_tests.py              runs tests/ without pytest
     ├── test_queries.py           end-to-end smoke test against a running server
@@ -242,7 +251,7 @@ token**; the header name is kept only because 31 endpoints declare it.
 | `support` | Everything except account management. The day-to-day level. |
 | `basic` | Sign in and use the test chat. No admin surface (403 everywhere). |
 
-Three guards in `main.py`: `_require_session` (any level), `_require_admin`
+Three guards in `guards.py`: `_require_session` (any level), `_require_admin`
 (`support`+, what all pre-existing admin endpoints use), `_require_root`
 (account management only). Sessions are HMAC tokens signed with
 `SESSION_SECRET`; each carries the account's `token_epoch`, so disabling an

@@ -1485,6 +1485,43 @@ _CLARIFY_MARKERS = (
 )
 
 
+def _curated_faq_reply(entry: dict, asked: str, payload, x_user_id,
+                       started: float, **extra) -> dict:
+    """The reply for a human-written FAQ entry served as-is, whether the
+    visitor picked it from the suggestions or typed it near-verbatim.
+
+    No grounding ran, so none is claimed -- rather than asserting 1.0 as the
+    old code did. It does not need it: a human wrote this answer AND a human
+    chose it. `asked` is what the saved conversation records: the entry's own
+    wording when it was picked from a list, the visitor's when it matched."""
+    total_time = time.time() - started
+    _uid = convo_store.resolve_user_id(x_user_id)
+    _convo_id = None
+    if _uid:
+        try:
+            _convo_id = convo_store.save_turn(
+                _uid, payload.session_id, payload.product, asked,
+                entry["answer"], [])
+        except Exception:
+            pass
+    reply = {
+        "answer": entry["answer"],
+        "response_time_ms": round(total_time * 1000),
+        "response_time": round(total_time, 3),
+        "conversation_id": _convo_id,
+        "role": "answered",
+        "model": "faq-curated",
+        "provider": "faq",
+        "grounding_score": None,
+        "flagged": False,
+        "from_faq": True,
+        "faq_matched_question": entry["question"],
+        "sources": [],
+    }
+    reply.update(extra)
+    return reply
+
+
 def _asked_to_clarify_last_turn(history: list[dict] | None) -> bool:
     if not history:
         return False
@@ -1786,11 +1823,10 @@ def _documents_in_scope(scope: dict | None) -> list[str]:
     each product in its category here exactly as it does for answers."""
     if not scope:
         return []
-    from db import get_collection
+    from docindex import source_index
     from retrieval_db import _matches_scope
-    got = get_collection().get(include=["metadatas"])
-    return sorted({m.get("source") for m in (got.get("metadatas") or [])
-                   if m and m.get("source") and _matches_scope(m, None, scope)})
+    return sorted({r["source"] for r in source_index()
+                   if _matches_scope(r["meta"], None, scope)})
 
 
 def _document_answer(q: str, scope: dict | None,
@@ -2253,33 +2289,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if payload.faq_id:
         _entry = faq_store.get_by_id(payload.faq_id)
         if _entry:
-            total_time = time.time() - start_total
-            _uid = convo_store.resolve_user_id(x_user_id)
-            _convo_id = None
-            if _uid:
-                try:
-                    _convo_id = convo_store.save_turn(
-                        _uid, payload.session_id, payload.product,
-                        _entry["question"], _entry["answer"], [])
-                except Exception:
-                    pass
-            return {
-                "answer": _entry["answer"],
-                "response_time_ms": round(total_time * 1000),
-                "response_time": round(total_time, 3),
-                "conversation_id": _convo_id,
-                "role": "answered",
-                "model": "faq-curated",
-                "provider": "faq",
-                # No grounding was performed, so report that honestly rather
-                # than asserting 1.0 as the old code did. It doesn't need it:
-                # a human wrote this answer AND a human chose it.
-                "grounding_score": None,
-                "flagged": False,
-                "from_faq": True,
-                "faq_matched_question": _entry["question"],
-                "sources": [],
-            }
+            return _curated_faq_reply(_entry, _entry["question"], payload,
+                                      x_user_id, start_total)
         logger.warning(f"faq_id {payload.faq_id} not found — falling through")
 
     # (a1b) "Tell me more" -- expand the LAST answer, do not re-answer.
@@ -2384,7 +2395,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _faq["mode"] == "answer":
             ptrace.mark("faq.answer", _faq["entry"]["question"][:60])
             _entry = _faq["entry"]
-            total_time = time.time() - start_total
             # Conversational memory, which this path used to skip. Only the
             # main answered path recorded a turn, so ANY follow-up after a
             # FAQ answer met an empty history: is_followup_turn requires a
@@ -2394,34 +2404,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # having just answered the same topic. add_to_memory drops
             # refusals itself, so this is safe to call unconditionally.
             add_to_memory(session_id, q, _entry["answer"])
-            _uid = convo_store.resolve_user_id(x_user_id)
-            _convo_id = None
-            if _uid:
-                try:
-                    _convo_id = convo_store.save_turn(
-                        _uid, payload.session_id, payload.product, q,
-                        _entry["answer"], [])
-                except Exception:
-                    pass
-            return {
-                "answer": _entry["answer"],
-                "response_time_ms": round(total_time * 1000),
-                "response_time": round(total_time, 3),
-                "conversation_id": _convo_id,
-                "role": "answered",
-                "model": "faq-curated",
-                "provider": "faq",
-                "grounding_score": None,
-                "flagged": False,
-                "from_faq": True,
-                "faq_matched_question": _entry["question"],
-                "faq_exact": True,
-                "sources": [],
+            return _curated_faq_reply(
+                _entry, q, payload, x_user_id, start_total, faq_exact=True,
                 # No retrieval ran, so there is no spare material and
                 # claiming otherwise would be a lie -- but a curated answer
                 # still knows which manual it was written from.
-                "more_context": more_context.for_source(_entry.get("source")),
-            }
+                more_context=more_context.for_source(_entry.get("source")))
 
         if _faq["mode"] == "disambiguate":
             ptrace.mark("faq.ask", f"{len(_faq['candidates'])} candidate(s)")
