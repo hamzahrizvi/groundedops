@@ -63,6 +63,8 @@ catalog_config.json
 # The spec index, rebuilt from the PDFs whenever they or their filing
 # change (sales.get_index). Pure cache, and ~640KB of churn if tracked.
 spec_index.json
+# Per-document word lists for the verbatim-table fallback (structures._doc_vocab). Cache.
+doc_vocab.json
 ingest_stamp.txt
 conversations.db
 # sqlite runtime DBs and their write-ahead/shared-memory siblings. The -wal
