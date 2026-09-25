@@ -1754,7 +1754,16 @@ _COMPARISON = re.compile(
     r"\b(difference|differences|differ|differs|compare|comparison|compared)\b"
     r"|\bvs\.?\b|\bversus\b"
     r"|\bwhich\s+(one\s+)?is\s+(better|best|faster|cheaper|bigger|smaller)\b"
-    r"|\bbetter\s+than\b", re.I)
+    r"|\bbetter\s+than\b"
+    # Scenario 18 (2026-09-25): "which one validates notes faster", "do
+    # they both use the same SSP interface", "which should I pick" --
+    # every follow-up of a comparison was answered "which did you mean?"
+    # although the rewrite named both products. Any of these, WITH two
+    # products named (the caller's condition), is comparative work.
+    r"|\bwhich\s+(?:one|of\s+(?:the\s+two|them|these|those))\b"
+    r"|\b(?:both|either|the\s+two|the\s+pair)\b|\bthe\s+same\b"
+    r"|\b(?:faster|slower|quicker|bigger|smaller|larger|lighter|heavier"
+    r"|cheaper|newer|older|more|fewer|less)\b.{0,40}\bor\b", re.I)
 
 
 def _is_comparison(query: str) -> bool:
@@ -2341,7 +2350,20 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # manual?" wants the file, not a summary of passages from it. Answered
     # from what is filed under the scope, with the same download links a
     # cited source carries -- no retrieval, no model. See doc_request.py.
-    _doc = _document_answer(payload.q, _scope, _effective_product)
+    # Raw wording first; the rewrite second. "and the pre-requisites
+    # checklist too" has no request phrase of its own, but its rewrite
+    # ("can I download the MyConnect pre-requisites checklist") does.
+    _doc = (_document_answer(payload.q, _scope, _effective_product)
+            or (resolved_query != payload.q
+                and _document_answer(resolved_query, _scope, _effective_product))
+            # "and the pre-requisites checklist too", straight after a list of
+            # documents: the rewrite drops the request phrase entirely
+            # ("MyConnect pre-requisites checklist"), so lend it one. Only
+            # when the previous turn WAS a document list -- anywhere else a
+            # bare document name is a question about its contents.
+            or (history and "Download link" in (history[-1].get("a") or "")
+                and _document_answer("send me the " + payload.q, _scope,
+                                     _effective_product)))
     if _doc:
         total_time = time.time() - start_total
         add_to_memory(session_id, q, _doc["answer"])
@@ -2354,6 +2376,50 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "from_faq": False, "sources": _doc["sources"],
             "retrieval_score": None,
             "timing": {"total_time": round(total_time, 3)},
+        }
+
+    # (a1c) A PERSON, NOT AN ANSWER. "I want to talk to a person", "open a
+    # support ticket", "call me back on ..." (scenarios 19 and 21,
+    # 2026-09-25) went through retrieval and came back as "could you tell
+    # me more concretely what you'd like me to check". The widget already
+    # renders the support form on offer_support; this turn only has to set
+    # it and say so, before any search. A bare greeting is the same kind of
+    # turn: not a question, so not a refusal with three FAQ suggestions.
+    import intents as _intents
+    if _intents.is_handoff_request(payload.q) or _intents.is_greeting(payload.q):
+        _handoff = _intents.is_handoff_request(payload.q)
+        _label = _product_names().get(payload.product or "", "")
+        if _handoff:
+            _reply = ("Of course — I'll hand this over to a person. Use the "
+                      "support button below to leave your details and a short "
+                      "note of what you need, and our support team will pick "
+                      "it up from there.")
+        else:
+            _what = f"the {_label}" if _label else "our products"
+            _reply = (f"Hello! I can help with technical questions about {_what} "
+                      "— setup, connections, settings, error codes — "
+                      "answered from the product documentation. What would you "
+                      "like to know?")
+        total_time = time.time() - start_total
+        add_to_memory(session_id, q, _reply)
+        _role = "handoff" if _handoff else "greeting"
+        log_interaction(q, _reply, _role, "none", [], grounding_score=None,
+                        flagged=False)
+        ptrace.mark(_role, "no search")
+        return {
+            "answer": _reply,
+            "response_time_ms": int(total_time * 1000),
+            "role": _role,
+            "model": None, "provider": "intent",
+            "grounding_score": None, "flagged": False,
+            "from_faq": False, "sources": [],
+            "retrieval_score": None,
+            "timing": {"total_time": round(total_time, 3)},
+            "offer_support": _handoff,
+            "needs_clarification": False,
+            "clarification_options": [],
+            "reason": "handoff_requested" if _handoff else "greeting",
+            "response_time": round(total_time, 3),
         }
 
     _sales = _sales_answer(payload.q, resolved_query, payload.product)
@@ -2885,13 +2951,36 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         output["fallback_used"] = False
     else:
         output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
-    llm_time = time.time() - t3
     ptrace.mark("generate", f"{output.get('provider')} / {output.get('model')}")
 
     raw_text = output.get("text", "").strip()
     generation_failed = (output.get("model") == "none") or not raw_text
     answer = normalize_markdown_tables(
         _strip_meta(_strip_preamble(raw_text))) if raw_text else "I could not generate a response."
+
+    # A REFUSAL ON A FOLLOW-UP, WITH CONFIDENT RETRIEVAL: ask once more
+    # without the conversation block. Scenarios 11, 16 and 20 (2026-09-25):
+    # "what interfaces does it support then" was refused with the NV9USB+
+    # interface pages cited, and the identical resolved question asked
+    # standalone was answered from the same pages -- three times out of
+    # three. The <conversation> block is the only difference between the two
+    # prompts, so it is the thing to drop. One retry, only on this shape,
+    # only when the retrieval band was not "none"; a refusal that survives
+    # it is taken as honest and reaches the clarify gate as before.
+    if (_hist and top_chunks and role != "rethink" and not generation_failed
+            and is_refusal(answer) and confidence != "none"):
+        _bare = build_answer_prompt("", context, resolved_query)
+        _again = generate_with_fallback(role, _bare, deepseek_api_key=deepseek_api_key,
+                                        api_keys=api_keys)
+        _again_text = ((_again or {}).get("text") or "").strip()
+        if _again_text and (_again or {}).get("model") != "none" \
+                and not is_refusal(_again_text):
+            logger.info("follow-up refusal retried without history: answered %r",
+                        resolved_query[:60])
+            ptrace.mark("regen.nohist", "refused with history, answered without")
+            output, raw_text = _again, _again_text
+            answer = normalize_markdown_tables(_strip_meta(_strip_preamble(raw_text)))
+    llm_time = time.time() - t3
 
     # ── Grounding check ──────────────────────
     # Two clocks, because one was measuring the wrong thing. `t_grounding`

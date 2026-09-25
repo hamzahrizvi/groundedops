@@ -38,6 +38,8 @@ _NOUNS = {
     "guide": "guide", "guides": "guide", "quick start guide": "guide",
     "installation guide": "guide",
     # No particular kind: every document for the product.
+    "checklist": "guide", "quick start": "guide", "quickstart": "guide",
+    "pre-requisites": "guide", "prerequisites": "guide",
     "documentation": None, "document": None, "documents": None,
     "docs": None, "pdf": None, "pdfs": None, "brochure": None,
 }
@@ -69,7 +71,9 @@ _CONTENT_WORDS = re.compile(
 _OBJECT = re.compile(
     rf"^(?P<pre>(?:[\w+.\-']+\s+){{0,6}}?)(?P<noun>{_NOUN_RE})\b"
     rf"(?:\s+(?:for|of|on|about)\s+(?P<post>[\w+.\-' ]{{1,40}}?))?"
-    rf"(?:\s+please)?[\s?.!]*$",
+    # "...the SSP manual as well" / "...checklist too": a second document
+    # asked for in the same breath as the first (scenario 17).
+    rf"(?:\s+(?:please|too|as\s+well|also|thanks|thank\s+you|cheers))*[\s?.!]*$",
     re.I)
 
 

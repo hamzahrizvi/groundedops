@@ -2070,15 +2070,19 @@
           // knows. The backend's refusal text is accurate but bare, and
           // "I cannot answer that" with no route onward reads as a brush-off.
           var sForm = formFor("support");
-          var offer = "That is not something I have in my knowledge base, so I "
+          // A handoff turn ("I want to talk to a person") has already said
+          // what happens next; repeating "that is not in my knowledge base"
+          // under it would contradict the answer. Only the route is added.
+          var offer = d.role === "handoff" ? ""
+            : "That is not something I have in my knowledge base, so I "
             + "would rather point you at someone than guess.";
           if (sForm.phone) {
-            offer += " You can email our support team, or call them on "
+            offer += (offer ? " You" : "You") + " can email our support team, or call them on "
                    + sForm.phone + ".";
-          } else {
+          } else if (offer) {
             offer += " I can pass it to our support team by email.";
           }
-          say(offer);
+          if (offer) say(offer);
 
           var supportChips = [{
             // The support form, not a mailto: — it collects the configured

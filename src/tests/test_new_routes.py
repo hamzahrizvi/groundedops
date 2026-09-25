@@ -72,7 +72,10 @@ print("\n== gaps: recorded from real misses ==")
 main.APP_STATE["ready"] = True
 for q in ["Does the hopper support Bluetooth pairing?",
           "does the hopper support BLUETOOTH pairing???",
-          "What is the warranty period?"]:
+          # Not "What is the warranty period?": since 2026-09-25 warranty is
+          # a commercial question and reaches the sales deflect, which is
+          # not a corpus miss and records no gap.
+          "What is the maximum operating altitude?"]:
     client.post("/query", json={"q": q, "session_id": "s1", "product": "mycheckr"})
 
 g = client.get("/faq/gaps", headers=ADMIN).json()

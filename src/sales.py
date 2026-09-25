@@ -119,6 +119,13 @@ def is_sales_question(q: str) -> bool:
 # gets. A quote is commercial when it is a thing you get or ask for; a
 # subscription is, a subscribe verb is not.
 _MONEY = (r"\bfees?\b"
+          # Warranty: no manual in the corpus states one (0 hits for
+          # "warrant" on 2026-09-25), so it was refused with FAQ
+          # suggestions instead of reaching the operator. "guarantee"
+          # is a VERB in the manuals ("to guarantee the best
+          # performance"), admitted only as the noun.
+          r"|\bwarrant(?:y|ies)\b|\bguarantee\s+(?:period|terms?|cover)\b"
+          r"|\b(?:a|any|the|with|under|what)\s+guarantee\b"
           r"|\bquotations?\b|\b(?:a|another|for\s+a|get\s+a|request\s+a"
           r"|send\s+(?:me\s+)?a|provide\s+a|give\s+(?:me\s+)?a)\s+quote\b"
           r"|\bquote\s+(?:for|on)\b"
