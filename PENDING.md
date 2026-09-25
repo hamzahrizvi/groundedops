@@ -94,6 +94,69 @@ logic fix is pinned in `src/tests/test_logic_holes.py`; every latency claim
 below was measured on this box (12 cores, CPU inference) with nothing else
 running unless stated.
 
+### Shipped — cleanup and compaction (later on 2026-09-25)
+
+An autonomous cleanup run; its commits on this branch are `5c7a2ef` (files),
+`a5deca0` (split), `eac0699` (dead code), `3462559` (performance),
+`153851e` (untrack the logs for real) and `ccc84cb` (the torch fix below).
+Tests **249/249, 1 skipped** before and after every stage; `import main`
+still works; the OpenAPI document has the same 118 operations and identical
+component schemas before and after.
+
+- **main.py 7,443 → 3,960 lines.** The route groups moved verbatim into
+  nine `routes_*.py` modules (one `APIRouter` each), with `app_state.py`,
+  `guards.py` and `providers.py` holding what they share. Nothing in the
+  widget or console changed; two tests were repointed (one reads source text
+  that now lives in `routes_faq.py`, one clears the emailed-link rate limit
+  in `routes_admin_auth`). The answer pipeline (`query`, `query_stream` and
+  ~2,900 lines of helpers) stays in main.py because seventeen test files
+  patch its collaborators through `main.*`; moving it means moving those
+  patches with it, in one change.
+- **One source inventory, `docindex.py`.** `/catalog`, `/widget/catalog`,
+  `/admin/sources`, `/stats` and the "give me the manual" path each fetched
+  every chunk's metadata from Chroma per call. Measured `/catalog`, 30 runs
+  over one keep-alive connection on an idle box: **45.4 ms → 2.0 ms** median.
+  Every other timed route is within 0.5 ms of before. The two copies of the
+  doc-count logic and the two read-a-source's-text loops are one each now.
+- **`import main` 11 s → 3 s** for every test run and CLI tool:
+  sentence_transformers is imported when the first model loads. Server
+  time-to-ready is unchanged (15 s here, stage times identical) because the
+  startup hook imports it before spawning the warmup thread -- and it MUST:
+  imported first from the warmup thread, torch took the process down with an
+  access violation when that thread exited, three of four starts.
+- **Stores.** `faq_store.json` is parsed once per change (mtime+size key,
+  callers get per-entry copies) instead of once per query and console load;
+  `policy.py` now reads and writes through `jsonstore` like every other
+  store -- the one deliberate behaviour change: a corrupt `policy.json` is
+  refused with a 500 rather than overwritten. In-process FAQ-hit query
+  9 → 8 ms; the rest of that path is the embedding forward pass.
+- **Dead code removed** (each confirmed unreferenced across src, tests,
+  tools, packaging): `embeddings.embedding_dim`, `faq_store.update_answer`,
+  `match_answer`, `_gap_store_mtime`, logger's unused readers,
+  `structures.harvest_into_faq` and `CHECKLIST_RE`, `answerability.ALL_KINDS`,
+  `main._stamp_ingest` and its `SOURCE_FILE_DIR` copy, a second identical
+  `keystore.providers()`, and every unused import and variable pyflakes
+  reported. Fixed on the way: replacing a document under a NEW filename
+  never removed the old chunks (`db.delete_source` with no `db` bound, the
+  NameError swallowed by its own except).
+- **Files.** Deleted: `brag-output/`, `promo-output/`, `demo/`, `scratchpad/`
+  (renders and their node_modules), every `__pycache__`, the stale
+  `HANDOFF_console_ux.md`. Untracked, kept on disk: `logs.json`, `logs.jsonl`,
+  `eval_results.json`. Removed from git: `before.json`, `after.json`,
+  `after_bge.json`, `minilm18.json` (August embedding comparison), and
+  `eval_cases_16.json` + `eval_baseline_16.json` (a July superset copy of the
+  extensive suite that nothing runs). Moved to `backups/`: `backup_snapshots/`,
+  `before-nv9st-retag.zip`, the August full backup.
+- **Left alone, deliberately:** `src/legacy/` (release.py writes its drops
+  there, CodeQL excludes it); `sweep_grounding.json` and its two logs (a
+  saved measurement); root `backend.log`/`tunnel.log`/`testpage.log` (open by
+  the running launcher); `handover.txt` (run.ps1 output); the widget JS/PHP
+  and `admin.html` (no repeated region of 8+ lines inside either -- sharing
+  helpers between them would need a build step); `catalog_config.json`
+  caching (3 KB, 0.18 ms a parse, six parses a query -- not worth the copy
+  semantics); `widget_api._client_ip` vs `guards._external_ip` (different
+  proxy-trust rules, not a duplicate).
+
 ### Shipped — latency
 
 - **DeepSeek V4 thinks by default, and nothing turned it off.** `llm.py`
