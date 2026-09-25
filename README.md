@@ -430,6 +430,8 @@ See [.env.example](.env.example) for the annotated full list.
 | `GENERATION_MODE` | `api` | `api` (Online) or `local` (Free) at boot |
 | `ONLINE_PROVIDER` | `deepseek` | `deepseek` / `openai` / `anthropic` |
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |
+| `DEEPSEEK_THINKING` | off | DeepSeek V4 thinks by default and bills the hidden reasoning tokens; every call sends `thinking: disabled`. Set `on` to restore it (3x the latency per call, measured). |
+| `PROVIDER_COOLDOWN_SECONDS` | `60` | A provider that failed to connect or answered 5xx is skipped for this long when the chain has another entry; `0` disables. |
 | `ONLINE_OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI answering model |
 | `ONLINE_ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Override the Anthropic answering model |
 | `WIDGET_ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins for the widget |
