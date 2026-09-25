@@ -66,10 +66,15 @@ def test_a_commercial_question_deflects_under_the_default_mode():
     import main
     src = inspect.getsource(main._sales_answer)
     code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
-    assert 'if mode == "deflect" or commercial:' in code
     assert "sales.is_commercial_question(q)" in code
-    # "documents" is still an explicit opt-out and must be checked first.
-    assert code.index('mode == "documents"') < code.index('mode == "deflect"')
+    # sales_mode governs COMMERCIAL questions only: the mode is read inside
+    # the `if commercial:` block, never before it, so a technical question
+    # that merely sounds pre-purchase is answered under every mode.
+    assert "if commercial:" in code
+    assert code.index("if commercial:") < code.index('policy.value("sales_mode")')
+    # "documents" is still an explicit opt-out and must be checked before the
+    # deflect reply is assembled; `answer` and `deflect` both deflect.
+    assert code.index('mode == "documents"') < code.index('policy.value("sales_reply")')
 
 
 if __name__ == "__main__":

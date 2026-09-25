@@ -143,3 +143,72 @@ def migrate_legacy_plaintext(legacy_path: str = ".deepseek_key.json") -> bool:
         return bool(legacy_key.strip())
     except Exception:
         return False
+
+
+# ── Named secrets ───────────────────────────────────────────────────────
+#
+# The console saves an SMTP password and the SSO client secrets. They used
+# to go into .env in clear text, like the API keys -- which CodeQL flagged
+# (py/clear-text-storage-sensitive-data) and which the threat model above
+# says this file exists to avoid. One encrypted JSON document holds them
+# all, under the same machine-derived Fernet key as the DeepSeek key, with
+# the same guarantees and the same limits.
+#
+# Overridable so tests point it at a scratch file (see _harness.py).
+
+def _secrets_path() -> str:
+    return os.getenv(
+        "SECRETS_VAULT_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".secrets.enc"))
+
+
+def _load_secrets() -> dict:
+    path = _secrets_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "rb") as f:
+            raw = _fernet().decrypt(f.read()).decode("utf-8")
+        import json
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except (InvalidToken, ValueError, OSError):
+        return {}
+
+
+def _save_secrets(data: dict) -> None:
+    import json
+    path = _secrets_path()
+    if not data:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    token = _fernet().encrypt(json.dumps(data).encode("utf-8"))
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(token)
+    os.replace(tmp, path)
+    try:
+        os.chmod(path, 0o600)
+    except (OSError, NotImplementedError):
+        pass
+
+
+def save_secret(name: str, value: str) -> None:
+    """Encrypt and persist one named secret. Blank clears it."""
+    value = (value or "").strip()
+    data = _load_secrets()
+    if value:
+        data[name] = value
+    else:
+        data.pop(name, None)
+    _save_secrets(data)
+
+
+def load_secret(name: str) -> str | None:
+    """The stored secret, or None when unset or undecryptable."""
+    return _load_secrets().get(name) or None
+
+
+def clear_secret(name: str) -> None:
+    save_secret(name, "")

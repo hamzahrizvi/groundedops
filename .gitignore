@@ -17,6 +17,7 @@ logs.jsonl
 .deepseek_key.json
 .deepseek_key.enc
 *.enc
+.secrets.enc.tmp
 .env
 *.env
 # run.ps1's summary of the last run — includes the member token and the

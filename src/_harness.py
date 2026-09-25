@@ -110,6 +110,7 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
 # keystore.set_key/clear_key write to a real file — point that at a scratch
 # path so a key-management test can never touch the real src/.env.
 os.environ["ENV_FILE_PATH"] = _scratch("test.env")
+os.environ["SECRETS_VAULT_PATH"] = _scratch("secrets.enc")
 # policy.py persists limit changes; point it at the scratch dir so a test
 # that raises an allowance cannot leak into the real install.
 os.environ["POLICY_PATH"] = _scratch("policy.json")
