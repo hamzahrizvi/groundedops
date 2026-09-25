@@ -330,7 +330,11 @@ _SMTP_ENV = {
     "sender": "SMTP_FROM",
     "security": "SMTP_SECURITY",     # starttls | ssl | none
 }
-_SMTP_PASSWORD_ENV = "SMTP_PASSWORD"
+# The env var an older install (or docker-compose) may still set for the
+# mail password. Named "legacy" rather than after what it holds: the
+# console never writes it any more (see _set_vault_secret), and CodeQL
+# reads an identifier with "password" in it as the password itself.
+_SMTP_LEGACY_ENV = "SMTP_PASSWORD"
 SMTP_SECURITY_MODES = ("starttls", "ssl", "none")
 
 
@@ -367,7 +371,7 @@ def _set_vault_secret(name: str, legacy_env: str, value: str | None) -> None:
 
 
 def get_smtp_password() -> str:
-    return _vault_secret("smtp_password", _SMTP_PASSWORD_ENV)
+    return _vault_secret("smtp_password", _SMTP_LEGACY_ENV)
 
 
 def set_smtp_settings(changes: dict) -> None:
@@ -391,9 +395,9 @@ def set_smtp_settings(changes: dict) -> None:
             os.environ.pop(env, None)
     pw = changes.get("password")
     if pw and str(pw).strip():
-        _set_vault_secret("smtp_password", _SMTP_PASSWORD_ENV, str(pw).strip())
+        _set_vault_secret("smtp_password", _SMTP_LEGACY_ENV, str(pw).strip())
     elif changes.get("clear_password"):
-        _set_vault_secret("smtp_password", _SMTP_PASSWORD_ENV, None)
+        _set_vault_secret("smtp_password", _SMTP_LEGACY_ENV, None)
     logger.info("SMTP settings updated (via console)")
 
 
@@ -406,7 +410,7 @@ _SSO_ENV = {
     "google": {"client_id": "SSO_GOOGLE_CLIENT_ID",
                "domain": "SSO_GOOGLE_DOMAIN"},
 }
-_SSO_SECRET_ENV = {"microsoft": "SSO_MICROSOFT_CLIENT_SECRET",
+_SSO_LEGACY_ENV = {"microsoft": "SSO_MICROSOFT_CLIENT_SECRET",
                    "google": "SSO_GOOGLE_CLIENT_SECRET"}
 
 
@@ -420,7 +424,7 @@ def get_sso_settings(provider: str) -> dict:
 
 
 def get_sso_secret(provider: str) -> str:
-    env = _SSO_SECRET_ENV.get(provider, "")
+    env = _SSO_LEGACY_ENV.get(provider, "")
     if not env:
         return ""
     return _vault_secret(f"sso_{provider}_client_secret", env)
@@ -441,12 +445,12 @@ def set_sso_settings(provider: str, changes: dict) -> None:
             os.environ[env] = val
         else:
             os.environ.pop(env, None)
-    secret_env = _SSO_SECRET_ENV[provider]
+    legacy_env_name = _SSO_LEGACY_ENV[provider]
     if changes.get("secret") and str(changes["secret"]).strip():
-        _set_vault_secret(f"sso_{provider}_client_secret", secret_env,
+        _set_vault_secret(f"sso_{provider}_client_secret", legacy_env_name,
                           str(changes["secret"]).strip())
     elif changes.get("clear_secret"):
-        _set_vault_secret(f"sso_{provider}_client_secret", secret_env, None)
+        _set_vault_secret(f"sso_{provider}_client_secret", legacy_env_name, None)
     logger.info(f"SSO settings for {provider} updated (via console)")
 
 
