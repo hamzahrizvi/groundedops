@@ -1463,7 +1463,57 @@ def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:
 
 # ── the entry point ───────────────────────────────────────────────────
 
-def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
+_CONTENT_STOP = frozenset("""
+what which does the for with can how are is a an of and to in on it its this
+that do i my be there any have has you your use used using range system
+please me we our about will would could should may might tell give not
+""".split())
+
+
+def _norm_word(w: str) -> str:
+    """Enough stemming for two phrasings of one question to meet: "notes"
+    and "note" both become "not", "recycle" and "recycling" "recycl".
+    text_utils.stem keeps the final "e", which is exactly the case that
+    kept them apart."""
+    w = w.lower()
+    for suf in ("ings", "ing", "ers", "er", "ies", "es", "ed", "s", "e"):
+        if len(w) - len(suf) >= 3 and w.endswith(suf):
+            return w[:-len(suf)]
+    return w
+
+
+def _product_terms() -> set[str]:
+    """Stemmed words of every product and category name, key and alias in
+    the catalogue: the words two questions about the same product share
+    without being about the same thing. Read per call; the catalogue is a
+    small file and its cache is invalidated on save."""
+    out: set[str] = set()
+    try:
+        import catalog
+        stem = _norm_word
+        for c in (catalog.catalog().get("categories") or []):
+            names = [c.get("key") or "", c.get("name") or ""]
+            for p in (c.get("products") or []):
+                names += [p.get("key") or "", p.get("name") or ""]
+                names += list(p.get("aliases") or [])
+            for n in names:
+                out |= {stem(w) for w in re.findall(r"[a-z0-9]+", n.lower())}
+    except Exception as exc:
+        logger.debug(f"product terms unavailable: {exc}")
+    return out
+
+
+def _content_stems(text: str) -> set[str]:
+    """The stemmed content words of a question: no stopwords, no product or
+    category names. What is left is what the question is ABOUT."""
+    stem = _norm_word
+    terms = _product_terms()
+    return {stem(w) for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+            if len(w) >= 3 and w not in _CONTENT_STOP and stem(w) not in terms}
+
+
+def suggest_candidates(question: str, scope_key: str | None = None,
+                       record: bool = True) -> dict:
     """Decide what to do with an incoming question.
 
     Returns one of:
@@ -1492,7 +1542,6 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     if not pool:
         return {"mode": "none"}
 
-    sem = _semantic_scores(question, pool)
 
     # In a product chat the pipeline hands us the question with the product
     # name appended -- "what is the weight of the NV9S? (NV9 Spectral)" --
@@ -1501,6 +1550,10 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # was offered back as "is this what you meant?" instead of answered.
     # Every widget chat is scoped, so that was every customer.
     bare = _strip_trailing_scope(question)
+    # Both scores see the question the visitor typed: the pool is already
+    # scoped to the product, so the appended name adds nothing and cost the
+    # paraphrase auto-serve (0.996 bare, under the 0.98 bar with the suffix).
+    sem = _semantic_scores(bare or question, pool)
 
     scored = []
     for it in pool:
@@ -1547,7 +1600,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
             scored.append((max(s_sem, s_verb), it, s_sem, s_lex))
 
     if not scored:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: no candidates for {question!r} — going to retrieval")
         return {"mode": "none"}
 
@@ -1622,7 +1676,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     scored = _curated + _harvest
 
     if not scored:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: only weak harvested matches for {question!r} "
                     f"- going to retrieval")
         return {"mode": "none"}
@@ -1646,7 +1701,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     _best_score, _, _best_sem, _best_lex = scored[0]
     _sem_only_min = float(os.getenv("FAQ_SEMANTIC_ONLY_MIN", "0.85"))
     if _best_lex <= 0.0 and _best_sem < _sem_only_min:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: top match {_best_sem:.3f} semantic with no lexical "
                     f"overlap for {question!r} - going to retrieval")
         return {"mode": "none"}
@@ -1670,7 +1726,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # choice, for a question whose answer is not in the corpus at all.
     _floor = float(os.getenv("FAQ_CANDIDATE_MIN_SCORE", "0.92"))
     if scored[0][0] < _floor:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: best candidate {scored[0][0]:.3f} < {_floor} for "
                     f"{question!r} - going to retrieval")
         return {"mode": "none"}
@@ -1678,6 +1735,64 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # Relative cut: keep only what's competitive with the best match.
     _best = scored[0][0]
     scored = [t for t in scored if t[0] >= _best - CANDIDATE_RELATIVE_MARGIN]
+
+    # SAME PRODUCT, DIFFERENT QUESTION -- per candidate this time. The
+    # lexical check above looks only at the best match, and lexical_score
+    # counts the product's own name as overlap, so "How does the NV9USB+
+    # communicate with a host?" was offered "What are typical applications
+    # for the NV9USB+?" (0.930), "What is the NV9USB+ Range?" (0.911) and
+    # "What is the NV9 USB+ Range and what does it do?" (0.899): three
+    # entries that share nothing with the question but the product, and a
+    # menu instead of the answer retrieval had. Measured on the 34-case
+    # eval, 2026-09-25: every wrong candidate shared no stemmed content
+    # word with its question once product and category names were
+    # excluded; every right one did, except a paraphrase at 0.974
+    # ("operating speed" for "coins per second"), which the semantic
+    # exemption keeps.
+    _q_content = _content_stems(question)
+    _sole_min = float(os.getenv("FAQ_SEMANTIC_SOLE_MIN", "0.95"))
+    if _q_content:
+        _kept = []
+        _top_sem = max(t[2] for t in scored)
+        for t in scored:
+            _shared = _content_stems(t[1].get("question") or "") & _q_content
+            # The exemption is for a close PARAPHRASE that happens to use
+            # other words ("operating speed" for "coins per second"), so it
+            # is for the entry at the top and never for a product overview
+            # -- "What is the MyCheckr Mini and what does it do?" scores
+            # 0.96 against anything that names the Mini.
+            _paraphrase = (t[2] >= _sole_min and t[2] >= _top_sem - 0.02
+                           and not _is_definitional(t[1]))
+            if _shared or _paraphrase:
+                _kept.append(t)
+            else:
+                logger.info(f"FAQ: dropped {(t[1].get('question') or '')[:40]!r} "
+                            f"({t[2]:.3f}): no content word shared with {question!r}")
+        if not _kept:
+            if record:
+                record_gap(question, scope_key, [])
+            logger.info(f"FAQ: every candidate shared only the product name "
+                        f"for {question!r} - going to retrieval")
+            return {"mode": "none"}
+        scored = _kept
+
+    # ONE candidate left, close, and about the same thing: serve it. The
+    # menu exists to let the visitor choose between candidates; with one,
+    # "These FAQs match your query - please select the one you meant" is a
+    # click that only ever has one answer. "Can the NV9USB+ recycle
+    # notes?" -> "Can the NV9USB+ Range provide note recycling?" (0.927,
+    # shares recycl/note) is that case. Harvested reference material is
+    # excluded: it earns a place as a fallback, never a confident answer.
+    _sole_serve = float(os.getenv("FAQ_AUTO_SERVE_SOLE", "0.92"))
+    if (len(scored) == 1 and scored[0][2] >= _sole_serve
+            and scored[0][1].get("origin") != "harvested"
+            and (not _q_content
+                 or _content_stems(scored[0][1].get("question") or "") & _q_content
+                 or scored[0][2] >= _sole_min)):
+        _s, _it, _sem_s, _ = scored[0]
+        logger.info(f"FAQ auto-serve (sole candidate sem={_sem_s:.3f}) for "
+                    f"{question!r}: {(_it.get('question') or '')[:50]!r}")
+        return {"mode": "answer", "entry": _it, "score": round(_s, 3)}
 
     # Only question-shaped entries may be OFFERED. A harvested table caption
     # is a good match key and an unusable menu item, so the two roles split

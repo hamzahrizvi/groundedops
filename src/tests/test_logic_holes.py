@@ -129,6 +129,28 @@ def test_a_curated_question_typed_in_a_product_chat_is_served():
         faq_store.list_for_product, faq_store._semantic_scores = real_list, real_sem
 
 
+def test_a_product_form_matches_whole_words_only():
+    """"nv9s" is the NV9 Spectral's alias and also the start of "NV9ST";
+    "nv9 usb" and "NV9USB+" are both the NV9USB+."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    main._product_names = lambda: {"nv9_spectral": "NV9 Spectral", "nv9usb": "NV9USB+",
+                                   "sku_scs": "SMART Coin System"}
+    main._product_aliases = lambda: {"nv9_spectral": ["NV9S", "NV22"], "nv9usb": ["NV9 USB", "NV9USB"],
+                                     "sku_scs": ["SCS"]}
+    keys = ["nv9_spectral", "nv9usb", "sku_scs"]
+    try:
+        assert main._products_named_in("What voltage is supported on the NV9ST?", keys) == []
+        assert main._products_named_in("how much does the NV9S weigh", keys) == ["nv9_spectral"]
+        assert main._products_named_in("what is the weight of the nv9 usb", keys) == ["nv9usb"]
+        assert main._products_named_in("is the NV9USB+ 12V?", keys) == ["nv9usb"]
+        assert main._products_named_in("compare NV9S and NV9USB+", keys) == ["nv9_spectral", "nv9usb"]
+        assert main._products_named_in("how fast is the smart coin system", keys) == ["sku_scs"]
+        assert main._products_named_in("the scs", keys) == ["sku_scs"]
+        assert main._products_named_in("discs are not products", keys) == []
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

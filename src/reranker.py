@@ -91,4 +91,12 @@ def rerank(query, chunks, top_k=3):
 
     except Exception as e:
         logger.error(f"Reranker failed: {e}")
-        return chunks[:top_k]
+        # Say so on the chunks themselves: without rerank_score the caller
+        # read every passage as scoring 0.0 and refused as "nothing
+        # relevant", recording a gap. main.py checks rerank_failed.
+        out = []
+        for c in chunks[:top_k]:
+            c = dict(c)
+            c["rerank_failed"] = True
+            out.append(c)
+        return out

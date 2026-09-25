@@ -77,9 +77,28 @@ _OBJECT = re.compile(
     re.I)
 
 
-def document_request(q: str) -> dict | None:
+# A capitalised code that is not a product ("MDB", "RS232", "SSP") names
+# a topic inside a document, not the document.
+_TOPIC_CODE = re.compile(r"\b[A-Z][A-Z0-9]{1,7}\b")
+
+
+def _names_in(text: str, known_names) -> bool:
+    flat = re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+    for n in known_names or ():
+        k = re.sub(r"[^a-z0-9]+", "", str(n).lower())
+        if len(k) >= 3 and k in flat:
+            return True
+    return False
+
+
+def document_request(q: str, known_names=None) -> dict | None:
     """{"kind": "manual"|"datasheet"|"guide"|None} when `q` asks for a
-    document itself, else None. kind None means "whatever you hold"."""
+    document itself, else None. kind None means "whatever you hold".
+
+    `known_names` (product and category names, keys and aliases) lets the
+    object of the request be told from a topic: "the manual for the NV9"
+    is a download, "documentation on the MDB pinout" is a question about
+    the manual's contents and used to return the whole file list."""
     text = " ".join((q or "").strip().split())
     if not text or len(text) > 160:
         return None
@@ -91,6 +110,15 @@ def document_request(q: str) -> dict | None:
         return None
     if _CONTENT_WORDS.search(obj.group("pre")):
         return None
+    post = obj.group("post") or ""
+    if post:
+        if _CONTENT_WORDS.search(post):
+            return None
+        if known_names and not _names_in(post, known_names):
+            codes = [c for c in _TOPIC_CODE.findall(post)
+                     if not _names_in(c, known_names)]
+            if codes:
+                return None
     return {"kind": _NOUNS[obj.group("noun").lower()]}
 
 

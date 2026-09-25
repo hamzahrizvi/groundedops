@@ -98,6 +98,15 @@ def classify_outcome(data: dict) -> str:
         return "clarify"
     if role == "rejected":
         return "rejected"
+    # The operator's commercial deflect answers nothing from the documents,
+    # and a friendly refusal keeps the model's role ("fast") while the
+    # pipeline's own classification says the question was unanswerable.
+    # Both used to count as "answered", so a refusal case could never pass
+    # and an unwanted deflect could never fail.
+    if role == "sales":
+        return "rejected"
+    if (data.get("answerability") or "") in ("unanswerable", "documented_elsewhere"):
+        return "rejected"
     if role in ANSWERED_ROLES or (role not in ("none", "") and data.get("answer")):
         return "answered"
     # Fallback: a "not found" answer with no role is effectively a rejection.
@@ -393,7 +402,7 @@ def main():
         baseline_path.write_text(json.dumps({"pass_rate": stable_rate,
                                              "repeats": repeats,
                                              "cases": stable_cases}, indent=2))
-        print(f"\nBaseline updated → {baseline_path.name}  (stable pass_rate {stable_rate:.0%})")
+        print(f"\nBaseline updated -> {baseline_path.name}  (stable pass_rate {stable_rate:.0%})")
         return 0
 
     # Diff against baseline.
@@ -416,7 +425,7 @@ def main():
             fixes.append(key)
 
     print("\nvs baseline:")
-    print(f"  stable pass_rate {baseline.get('pass_rate', 0):.0%} → {stable_rate:.0%}")
+    print(f"  stable pass_rate {baseline.get('pass_rate', 0):.0%} -> {stable_rate:.0%}")
     for q in fixes:
         print(f"  ✔ FIXED: {q}")
     for q in regressions:

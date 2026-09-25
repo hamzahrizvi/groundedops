@@ -22,7 +22,14 @@ know what changed since last week.
 Every item should be actionable by someone who was not in the session that
 found it. If it needs a transcript to understand, it is not written yet.
 
-Last hand-updated: 2026-09-25 (evening) — the conversation stress test
+Last hand-updated: 2026-09-25 (night) — the four follow-ups from the
+v16.3 rating are done: graded eval **20/34 -> 32/34 (94%)** with the answer
+baseline re-armed, the gateway models measured (like-for-like on quality,
+7x on latency, thinking cannot be switched off), NLI kept on the evidence
+of 792 logged turns, and the five deferred findings closed. See **Shipped
+— the four follow-ups** below.
+
+Previously 2026-09-25 (evening) — the conversation stress test
 landed: 14 live scripted conversations, 46/59 -> 53/59 turns as expected,
 five fixes and a ranked gap list in `docs/stress-test-2026-09-25.md`; see
 **Shipped — conversation stress test** below. Earlier that day: **v16.3 is
@@ -96,6 +103,112 @@ Two read-only audits of the answer path, run in parallel, then fixes. Every
 logic fix is pinned in `src/tests/test_logic_holes.py`; every latency claim
 below was measured on this box (12 cores, CPU inference) with nothing else
 running unless stated.
+
+### Shipped — the four follow-ups (night of 2026-09-25)
+
+The rating of v16.3 named four things; all four were done, and the graded
+eval moved **20/34 -> 32/34 (94%)** on the way. Tests **252/252**, 1 skipped.
+
+**1. The graded eval was rerun, and the answer baseline was stale.**
+`eval_baseline.json` held 14 case keys with ZERO overlap with the 34 cases
+in `eval_cases.json` -- its 81% described a suite that no longer exists.
+The grader also silently did nothing: `eval.py` reads `DEEPSEEK_API_KEY`
+from the environment and never loads `.env`, so every graded check
+reported "grader returned nothing". Export the key (or run from a shell
+that has it) -- the preflight does not catch this. Graded, on DeepSeek
+Flash with the DeepSeek grader: **20/34**. Of the 14 failures, three were
+the instrument (`classify_outcome` counted the sales deflect and a
+friendly refusal as "answered"), three were stale expectations (keyword
+lists, and a "must refuse" for a question the manual answers with a
+grounded "No"), one was a mis-ordered follow-up case, and **seven were
+real**:
+
+- *The commercial deflect ran before the curated FAQ.* "Are there
+  recurring fees for MyCheckr?" has a curated answer and got "I can only
+  answer technical questions". `_sales_answer` now asks the FAQ first
+  (`suggest_candidates(..., record=False)`, no gap recorded).
+- *FAQ candidates that share only the product name.* "How does the
+  NV9USB+ communicate with a host?" was offered "What are typical
+  applications for the NV9USB+?" (0.930), "What is the NV9USB+ Range?"
+  (0.911) and "What is the NV9 USB+ Range and what does it do?" (0.899)
+  -- a menu of three dead ends where retrieval had the answer. Measured
+  over the eval: every wrong candidate shared no stemmed content word with
+  its question once product and category names were excluded; every right
+  one did, bar one close paraphrase at 0.974. Each candidate now needs a
+  shared content word, or to be the top entry at >= 0.95 and not a product
+  overview (`FAQ_SEMANTIC_SOLE_MIN`).
+- *One candidate is not a choice.* With the rule above, "Can the NV9USB+
+  recycle notes?" leaves exactly "Can the NV9USB+ Range provide note
+  recycling?" (0.927, shares recycl/note). It is served, not offered
+  (`FAQ_AUTO_SERVE_SOLE`, 0.92; harvested entries never).
+- *The FAQ scored the question with the product name appended.* In a
+  product chat the pipeline hands the FAQ "…? (MyCheckr mini)"; the pool
+  is already scoped so the suffix adds nothing, and it dragged the
+  paraphrase "What hardware components does MyCheckr include?" from 0.996
+  to under the 0.98 bar. Both scores now see the bare question.
+- *A family name overrode the picker.* "What hardware does MyCheckr
+  include?" in a MyCheckr Mini chat re-scoped to MyCheckr (whose pool lacks
+  the Mini's answer). A typed name that is a strict prefix of the selected
+  product's name or aliases no longer overrides (`_is_family_parent`).
+- *An alias matched inside a word.* Product forms were matched by
+  substring on the de-spaced question, so the Spectral's "nv9s" was found
+  inside "NV9ST" and the voltage question got the Spectral's table.
+  `_token_runs`: a form must equal a run of whole words ("nv9 usb",
+  "NV9USB+" and "nv9-usb" still all meet "NV9USB").
+- *The MyCheckr-family cases and the stemmer.* `text_utils.stem` keeps a
+  final "e", so "notes"/"note" and "recycle"/"recycling" never met; the
+  FAQ gate has its own `_norm_word`.
+
+The `run_scenarios.py` score moved 126/160 -> 142/160 on the same 24
+scenarios from these changes alone (measured against HEAD in a worktree).
+The baseline is re-armed from the final graded run (`--update-baseline`),
+so `eval.py` gates on it again. Two cases still fail: `how fast is it?`
+(the condenser sometimes rewrites the follow-up onto an older turn; the
+case now sits directly after its predecessor, which is what its own
+reference says it tests) and the NV9ST voltage question when the model
+refuses on a name the manual does not contain -- both vary run to run.
+
+**2. The gateway came back, and its models were measured.** `itl-gpt-pro`
+answers 500 (its vLLM host is down: "Cannot connect to host"). `itl-gpt-
+flash` works, at **6-9s per call** for a two-sentence answer against 0.9s
+for DeepSeek Flash, and it is a reasoning model whose thinking cannot be
+turned off: `reasoning_effort`, `thinking`, `chat_template_kwargs.enable_
+thinking` and `extra_body` were all tried; `reasoning_content` comes back
+every time. A full graded eval through it (default and advanced roles
+both on flash): **20/34, identical outcomes to DeepSeek** bar two cases
+that flipped one each way. So the gateway is a like-for-like fallback on
+quality and a 7x cost on latency until its models expose a thinking
+switch. The `reasoning` role still leads with `itl-gpt-pro`; while it is
+down the cooldown skips it after the first failure.
+
+**3. NLI on tables.** From `logs.jsonl`, 792 verified turns: NLI passed
+429 (54%), the LLM verifier rescued 284 (36%), 79 were flagged. So NLI is
+not a formality -- it settles half of all answers at ~0.14s -- and
+replacing it wholesale would add a model call to those. What v16.4 does
+(tables straight to the LLM verifier, early exit elsewhere) is the right
+split; no further change.
+
+**4. The five deferred findings, closed** (pinned in
+`src/tests/test_deferred_fixes.py`):
+- *"Deep" effort keeps its safety nets.* `QueryRequest.forced_by_effort`
+  marks a model forced by an effort level (set only by `_widget_answer`);
+  routing keeps the real role, the forced model answers first and falls
+  back to the role's chain, and extraction, the backup escalation and the
+  grounding retry all run. `top_k` from the effort spec is honoured
+  (capped at 2x `CONTEXT_K`).
+- *A reranker outage is a 503*, not a documentation gap: `rerank()` marks
+  its fallback chunks `rerank_failed` and `query()` refuses as a system
+  outage -- nothing charged, no gap recorded.
+- *A wall-clock deadline on every provider call*
+  (`PROVIDER_DEADLINE_SECONDS`, 120): the request runs on a worker and the
+  caller stops waiting; the stream path checks it between chunks. Past it
+  the provider counts as unreachable (cooldown).
+- *"is there documentation on the MDB pinout?"* is a question: the object
+  of a document request is checked for content words and for a
+  capitalised code that is not a catalogue name (`_catalogue_terms`).
+- *`/query/stream`* is left as the raw-path diagnostic it is: admin only,
+  single turn, and its value is showing what the model does WITHOUT the
+  pipeline. Documented rather than fixed.
 
 ### Shipped — conversation stress test (later still on 2026-09-25)
 
@@ -339,24 +452,25 @@ component schemas before and after.
 - **Thinking mode as a quality lever**: the old backend (thinking on) and
   the new (off) produced identical eval outcomes on all 34 cases.
 
-### Deferred, with the evidence
+### Deferred, with the evidence — **all closed on the night of 2026-09-25**,
+see *Shipped — the four follow-ups* above; kept for the record.
 
-- **"Deep" effort buys fewer safety nets.** `_widget_answer` maps deep to
+- ~~**"Deep" effort buys fewer safety nets.**~~ `_widget_answer` maps deep to
   `force_provider/force_model`, which makes `role="rethink"`, and that role
   skips extraction, backup escalation and the grounding retry
   (`main.py` ~6145, ~6427, ~6491). Its `role`/`top_k` parameters are never
   read. Map deep to a real role instead of the rethink path.
-- **A reranker outage reads as a documentation gap.** `reranker.py` returns
+- ~~**A reranker outage reads as a documentation gap.**~~ `reranker.py` returns
   chunks without `rerank_score` on failure -> confidence "none" ->
   "rejected" + `record_gap`. Should be a system refusal. Fail-closed, so no
   wrong answer, just a false gap.
-- **`/query/stream` skips** condensation, name scoping, sales deflect, the
+- ~~**`/query/stream` skips**~~ condensation, name scoping, sales deflect, the
   template-leak check, the LLM verifier and procedure completion. Admin
   only; noted.
-- **No overall deadline on a provider call.** `timeout=60` bounds connect
+- ~~**No overall deadline on a provider call.**~~ `timeout=60` bounds connect
   and each read, not the total; one logged turn has `escalation_time`
   16544s. A worker-thread `future.result(timeout)` or a streaming cap.
-- **`doc_request` on "is there documentation on the MDB pinout?"** returns
+- ~~**`doc_request` on "is there documentation on the MDB pinout?"**~~ returns
   the file list; `_CONTENT_WORDS` checks the prefix only. Needs the
   catalogue to tell a product from a topic in the object.
 - **rerank_time 1.2s on the new process vs 0.9s on the old** for the same

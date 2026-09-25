@@ -790,6 +790,15 @@ class QueryRequest(BaseModel):
     # and calls this exact (provider, model) directly.
     force_provider: str | None = None
     force_model: str | None = None
+    # The widget's "deep" effort also forces a model, but it wants MORE
+    # care, not less: the rethink role above skips extraction, the backup
+    # escalation and the grounding retries, because a person re-answering
+    # with a chosen model wants exactly that model's answer. Set by
+    # _widget_answer; never by a browser (widget_api builds the request).
+    forced_by_effort: bool = False
+    # Passages handed to the model, capped in query(); the effort spec's
+    # top_k used to arrive here and be ignored.
+    top_k: int | None = None
     # Scope retrieval to one previously-seen source (from a clickable
     # source link) — "ask more about this document".
     source_filter: str | None = None
@@ -1447,6 +1456,16 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         # sets deflect means "don't let the assistant talk money", so
         # catalogue, spec and comparison questions are always answered.
         if commercial:
+            # An operator who wrote a curated answer about fees or ordering
+            # has chosen to speak for the sales department on that point.
+            # "Are there recurring fees for MyCheckr?" had one and still got
+            # the deflect, because this ran first. The FAQ's own verdict,
+            # without recording a gap -- the FAQ path will run after this.
+            try:
+                if _fs.suggest_candidates(raw_q, scope_key, record=False).get("mode") == "answer":
+                    return None
+            except Exception as _exc:
+                logger.debug(f"FAQ check before deflect skipped: {_exc}")
             mode = (policy.value("sales_mode") or "answer").strip().lower()
             if mode == "documents":
                 # An explicit "let the manuals answer it", including for
@@ -1678,6 +1697,23 @@ def health(deep: int = 0):
     return JSONResponse(body, status_code=200 if ready else 503)
 
 
+def _catalogue_terms() -> list[str]:
+    """Every name a document request could be about: product and category
+    names, keys and aliases. For doc_request, which otherwise cannot tell
+    "the manual for the NV9" from "documentation on the MDB pinout"."""
+    out: list[str] = []
+    try:
+        import catalog
+        for c in (catalog.catalog().get("categories") or []):
+            out += [c.get("key") or "", c.get("name") or ""]
+            for p in (c.get("products") or []):
+                out += [p.get("key") or "", p.get("name") or ""]
+                out += list(p.get("aliases") or [])
+    except Exception as exc:
+        logger.warning(f"catalogue terms unavailable: {exc}")
+    return [t for t in out if t]
+
+
 def _product_names() -> dict[str, str]:
     """product key -> display name, from the catalogue.
 
@@ -1770,6 +1806,26 @@ def _is_comparison(query: str) -> bool:
     return bool(_COMPARISON.search(query or ""))
 
 
+def _token_runs(query: str, max_len: int = 8) -> set[str]:
+    """Every run of consecutive words in `query`, lowercased, joined with
+    nothing between them: "nv9 usb", "nv9-usb" and "NV9USB+" all yield
+    "nv9usb", so a product form is matched however the visitor spaced it.
+
+    Whole runs only. The previous test was `form in flat_question` on the
+    de-spaced string, which found the NV9 Spectral's alias "nv9s" INSIDE
+    "nv9st" and scoped "What voltage is supported on the NV9ST?" to the
+    Spectral; on the eval it answered with the Spectral's voltage table.
+    A form has to equal a run of whole words, never sit inside one."""
+    tokens = re.findall(r"[a-z0-9]+", (query or "").lower())
+    out: set[str] = set()
+    for i in range(len(tokens)):
+        acc = ""
+        for j in range(i, min(len(tokens), i + max_len)):
+            acc += tokens[j]
+            out.add(acc)
+    return out
+
+
 def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     """Which of `candidates` the question wording actually picks out.
 
@@ -1781,8 +1837,8 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     Longest form wins on overlap: "nv9usb" contains "nv9", so a bare "nv9"
     candidate must not swallow a question that clearly says "nv9 usb".
     """
-    flat_q = re.sub(r"[^a-z0-9]+", "", (query or "").lower())
-    if not flat_q:
+    runs = _token_runs(query)
+    if not runs:
         return []
 
     names = _product_names()
@@ -1791,7 +1847,7 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     for key in candidates:
         for form in _product_alias_tokens(key, names.get(key, ""),
                                           aliases.get(key, ())):
-            if form and form in flat_q:
+            if form and form in runs:
                 hits.append((len(form), key, form))
                 break
 
@@ -1855,7 +1911,7 @@ def _document_answer(q: str, scope: dict | None,
     """
     try:
         import doc_request, docstore
-        ask = doc_request.document_request(q)
+        ask = doc_request.document_request(q, known_names=_catalogue_terms())
         if not ask or not scope:
             return None
         held = [s for s in _documents_in_scope(scope) if docstore.find(s)]
@@ -1889,6 +1945,22 @@ def _category_keys() -> set[str]:
         return set()
 
 
+def _is_family_parent(named: str, selected: str) -> bool:
+    """True when `named` is the family `selected` belongs to: its display
+    name is a strict prefix of the selected product's name or an alias,
+    letter for letter ("MyCheckr" -> "MyCheckr mini")."""
+    names = _product_names()
+    flat = lambda t: re.sub(r"[^a-z0-9]+", "", (t or "").lower())  # noqa: E731
+    parent = flat(names.get(named, ""))
+    if not parent:
+        return False
+    for form in [names.get(selected, "")] + list(_product_aliases().get(selected) or []):
+        f = flat(form)
+        if f != parent and f.startswith(parent):
+            return True
+    return False
+
+
 def _resolve_question_scope(selected_product: str | None,
                             category: str | None,
                             named_products: list[str]
@@ -1910,6 +1982,16 @@ def _resolve_question_scope(selected_product: str | None,
     if selected_product and selected_product in _category_keys():
         category = category or selected_product
         selected_product = None
+    # A FAMILY NAME IS NOT AN OVERRIDE. "What hardware does MyCheckr
+    # include?" in a MyCheckr Mini chat names the family the Mini belongs
+    # to, not a different product; the override sent it to the MyCheckr
+    # pool, where the Mini's curated answer is not, and the visitor got a
+    # menu. The typed name overrides the picker only when it is not a
+    # prefix of the selected product's own name or aliases.
+    if (len(named_products) == 1 and selected_product
+            and named_products[0] != selected_product
+            and _is_family_parent(named_products[0], selected_product)):
+        named_products = []
     effective_product = (named_products[0] if len(named_products) == 1
                          else selected_product)
     if effective_product:
@@ -2551,8 +2633,25 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     t_rerank = time.time()
     _retrieved = rerank(resolved_query, results, top_k=len(results))
     rerank_time = time.time() - t_rerank
+    if _retrieved and _retrieved[0].get("rerank_failed"):
+        # The ranking model did not run (see reranker.rerank). Without its
+        # scores every passage looks like a miss, and this used to fall
+        # into the "nothing relevant" branch -- a refusal that recorded a
+        # documentation GAP for a question the documents may well answer.
+        # An outage says it is an outage: 503, nothing charged, no gap.
+        ptrace.mark("rerank", "ranking model failed")
+        logger.error("reranker unavailable; refusing as a system outage")
+        raise HTTPException(status_code=503,
+                            detail="The passage ranker isn't available just "
+                                   "now - try again in a moment")
     ptrace.mark("rerank", f"best {(_retrieved[0].get('rerank_score', 0.0) if _retrieved else 0.0):.3f}")
-    results = _retrieved[:CONTEXT_K]
+    # An effort level may ask for more passages than the default. Bounded:
+    # the prompt budget was sized for CONTEXT_K and the cap keeps a
+    # misconfigured spec from doubling every prompt.
+    _ctx_k = CONTEXT_K
+    if payload.top_k and payload.top_k > CONTEXT_K:
+        _ctx_k = min(int(payload.top_k), CONTEXT_K * 2, len(_retrieved))
+    results = _retrieved[:_ctx_k]
     retrieval_time = time.time() - t1
 
     top_score = results[0].get("rerank_score", 0.0) if results else 0.0
@@ -2772,7 +2871,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         }
 
     # ── Routing ──────────────────────────────
-    if payload.force_provider and payload.force_model:
+    if payload.force_provider and payload.force_model and not payload.forced_by_effort:
         role = "rethink"
     else:
         role, (provider, model) = route_model(resolved_query)
@@ -2949,6 +3048,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if not output:
             output = {"text": "", "model": payload.force_model, "provider": payload.force_provider}
         output["fallback_used"] = False
+    elif payload.force_provider and payload.force_model:
+        # Forced by an effort level: the chosen model answers first, and
+        # if it cannot, the role's normal chain does -- with the role kept,
+        # so the grounding retry and the backup escalation below still run.
+        output = generate(payload.force_provider, prompt, payload.force_model,
+                          deepseek_api_key, api_keys=api_keys)
+        if output and output.get("text"):
+            output["fallback_used"] = False
+        else:
+            logger.warning(f"effort model {payload.force_provider}/{payload.force_model} "
+                           "gave nothing; falling back to the role's chain")
+            output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
+            output["fallback_used"] = True
     else:
         output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
     ptrace.mark("generate", f"{output.get('provider')} / {output.get('model')}")
@@ -3829,6 +3941,11 @@ try:
             if forced:
                 req.force_provider = os.getenv("ONLINE_PROVIDER", "deepseek")
                 req.force_model = forced
+                # An effort level, not a console "Rethink": the pipeline
+                # keeps its retries and escalation (see QueryRequest).
+                req.forced_by_effort = True
+        if top_k:
+            req.top_k = int(top_k)
 
         # query() is a sync def, so run it in the threadpool. Without this
         # a single question would block the event loop for its whole

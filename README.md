@@ -432,6 +432,10 @@ See [.env.example](.env.example) for the annotated full list.
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |
 | `DEEPSEEK_THINKING` | off | DeepSeek V4 thinks by default and bills the hidden reasoning tokens; every call sends `thinking: disabled`. Set `on` to restore it (3x the latency per call, measured). |
 | `PROVIDER_COOLDOWN_SECONDS` | `60` | A provider that failed to connect or answered 5xx is skipped for this long when the chain has another entry; `0` disables. |
+| `PROVIDER_DEADLINE_SECONDS` | `120` | Wall-clock cap on one provider call (requests' timeout bounds connect and each read, not the total); past it the provider is treated as unreachable. `0` disables. |
+| `FAQ_AUTO_SERVE_SOLE` | `0.92` | When exactly one curated candidate survives the content-word check at or above this semantic score, it is served rather than offered as a one-item menu. |
+| `FAQ_SEMANTIC_SOLE_MIN` | `0.95` | A candidate sharing no content word with the question is kept only as the top entry at or above this score, and never a product overview. |
+| `DOC_VOCAB_CACHE` | `doc_vocab.json` | Per-document word lists for the verbatim-table fallback, persisted so a refusal never re-reads a manual cover to cover. |
 | `ONLINE_OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI answering model |
 | `ONLINE_ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Override the Anthropic answering model |
 | `WIDGET_ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins for the widget |

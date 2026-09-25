@@ -43,3 +43,10 @@ def test_run_case_forwards_skip_faq_and_checks_sources():
     assert result["layer"] == "retrieval"
     assert result["checks"] == {"outcome": True, "sources_any": True}
     assert result["passed"] is True
+
+
+def test_a_deflect_and_a_stated_non_answer_are_rejections():
+    assert rag_eval.classify_outcome({"role": "sales", "answer": "I can only answer technical questions"}) == "rejected"
+    assert rag_eval.classify_outcome({"role": "fast", "answer": "I don't have that", "answerability": "unanswerable"}) == "rejected"
+    assert rag_eval.classify_outcome({"role": "fast", "answer": "It weighs 1.05 kg", "answerability": "stated"}) == "answered"
+    assert rag_eval.classify_outcome({"role": "clarify", "needs_clarification": True}) == "clarify"

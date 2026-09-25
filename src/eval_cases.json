@@ -32,7 +32,8 @@
       "product": "mycheckr_mini",
       "outcome": "answered",
       "keywords_all": [
-        "no data stored"
+        "no data",
+        "stored"
       ],
       "reference": "No data is stored. MyCheckr is GDPR certified by the Age Check Certification Scheme (ACCS).",
       "grade": true
@@ -156,7 +157,7 @@
       "product": "nv9usb",
       "outcome": "answered",
       "keywords_all": [
-        "10-15"
+        "15%"
       ],
       "reference": "Some national currencies differ in thickness and circulation practices; depending on usage this can impact cashbox capacities by 10-15%. Consult an ITL representative for details.",
       "grade": true
@@ -204,6 +205,17 @@
       ],
       "reference": "The SMART Coin System operates at a market leading 12 coins per second.",
       "grade": true
+    },
+    {
+      "q": "how fast is it?",
+      "product": "sku_scs",
+      "outcome": "answered",
+      "keywords_all": [
+        "12"
+      ],
+      "reference": "Follow-up test, no new_session: 'it' must resolve to the SMART Coin System from the previous case, giving 12 coins per second.",
+      "grade": true,
+      "note": "2026-09-25: moved to sit directly after its predecessor; two MyConnect cases had been inserted between them, so 'it' resolved to the MyConnect Hub"
     },
     {
       "q": "What problem does the SMART Coin System eliminate?",
@@ -304,16 +316,6 @@
       "grade": true
     },
     {
-      "q": "how fast is it?",
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "12"
-      ],
-      "reference": "Follow-up test, no new_session: 'it' must resolve to the SMART Coin System from the previous case, giving 12 coins per second.",
-      "grade": true
-    },
-    {
       "q": "what voltage does it need",
       "new_session": true,
       "outcome": "clarify",
@@ -347,8 +349,16 @@
       "q": "does the SMART Coin System support facial recognition",
       "new_session": true,
       "product": "sku_scs",
-      "outcome": "rejected",
-      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System."
+      "outcome": "answered",
+      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System.",
+      "keywords_all": [
+        "coin"
+      ],
+      "note": "2026-09-25: a grounded 'No, it validates coins by ...' beats a refusal; the wording of the 'no' varies run to run, so the check is on what it must and must not say",
+      "keywords_absent": [
+        "yes, ",
+        "supports facial recognition"
+      ]
     },
     {
       "q": "what is the maximum coin capacity in litres of the SMART Coin System",

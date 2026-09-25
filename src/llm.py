@@ -24,6 +24,36 @@ _HTTP.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_ma
 # question (and every grounding retry of it) paid the failure before the
 # backup answered. A 4xx is not an outage and is never cooled.
 PROVIDER_COOLDOWN_SECONDS = float(os.getenv("PROVIDER_COOLDOWN_SECONDS", "60") or 0)
+
+# requests' timeout bounds the CONNECT and each READ, not the call: a
+# provider that keeps sending bytes (keep-alive whitespace, a slow stream)
+# can hold a request open indefinitely -- one logged turn spent 16544s in
+# escalation. This is the wall-clock cap on a single provider call; past
+# it the call counts as unreachable (cooldown) and the chain moves on.
+# The stream path checks it between chunks.
+PROVIDER_DEADLINE_SECONDS = float(os.getenv("PROVIDER_DEADLINE_SECONDS", "120") or 0)
+
+
+def _post(url: str, **kw):
+    """_HTTP.post under PROVIDER_DEADLINE_SECONDS of wall clock.
+
+    Runs the request on a worker so the caller can stop waiting; the
+    worker's own read timeout still ends the socket. Raises
+    requests.Timeout when the deadline passes, which the callers already
+    treat as "unreachable"."""
+    if PROVIDER_DEADLINE_SECONDS <= 0:
+        return _HTTP.post(url, **kw)
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = pool.submit(_HTTP.post, url, **kw)
+        try:
+            return fut.result(timeout=PROVIDER_DEADLINE_SECONDS)
+        except _FutTimeout:
+            raise requests.Timeout(
+                f"provider call exceeded {PROVIDER_DEADLINE_SECONDS:.0f}s deadline")
+    finally:
+        pool.shutdown(wait=False)
 _provider_down: dict[str, float] = {}
 
 
@@ -347,7 +377,7 @@ def _call_deepseek(
         return None
 
     try:
-        res = _HTTP.post(
+        res = _post(
             DEEPSEEK_URL,
             headers={
                 "Authorization": f"Bearer {key}",
@@ -397,7 +427,7 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         logger.warning("OpenAI call attempted without an API key")
         return None
     try:
-        res = _HTTP.post(
+        res = _post(
             OPENAI_URL,
             headers={"Authorization": f"Bearer {key}"},
             json={"model": model, "temperature": 0,
@@ -430,7 +460,7 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
         logger.warning("Anthropic call attempted without an API key")
         return None
     try:
-        res = _HTTP.post(
+        res = _post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
@@ -690,7 +720,14 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
                 logger.warning(f"{provider} stream HTTP {res.status_code}")
                 _note_credit_failure(provider, res)
                 return
+            _started = time.time()
             for raw in res.iter_lines(decode_unicode=True):
+                if (PROVIDER_DEADLINE_SECONDS > 0
+                        and time.time() - _started > PROVIDER_DEADLINE_SECONDS):
+                    logger.warning(f"{provider} stream exceeded "
+                                   f"{PROVIDER_DEADLINE_SECONDS:.0f}s deadline; stopping")
+                    _note_unreachable(provider)
+                    return
                 if not raw or not raw.startswith("data:"):
                     continue
                 payload = raw[5:].strip()
