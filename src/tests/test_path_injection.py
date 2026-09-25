@@ -126,18 +126,18 @@ def test_the_boundary_uses_find_rather_than_joining():
     find() was already correct -- it was one caller building the path
     itself, so the guard that matters is that this caller stops doing so.
 
-    Reads main.py as TEXT rather than importing it. Importing main loads
+    Reads the module as TEXT rather than importing it. Importing main loads
     the real src/.env into os.environ, and this file is collected in the
     shared interpreter, so those values then reach every own-process test
     spawned afterwards (run_tests passes env=dict(os.environ)). Measured,
     with this file present and importing main: test_widget_export failed,
     test_router could not load at all, and the suite read 173/175; without
     it, 178/179. Reading the source gives the same guarantee and imports
-    nothing.
+    nothing. The caller lives in routes_faq.py since the 2026-09-25 split.
     """
     import pathlib
     src = (pathlib.Path(__file__).resolve().parent.parent
-           / "main.py").read_text(encoding="utf-8", errors="ignore")
+           / "routes_faq.py").read_text(encoding="utf-8", errors="ignore")
     body = src[src.index("def _verbatim_faq_pairs("):][:2000]
     assert "docstore.find(source)" in body
     assert "os.path.join(docstore.store_dir(), source)" not in body, \

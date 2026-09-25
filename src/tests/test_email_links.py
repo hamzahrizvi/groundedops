@@ -14,6 +14,7 @@ import accounts
 import mailer
 
 import main
+import routes_admin_auth  # the emailed-link routes and their rate limit
 
 client = TestClient(_harness.app)
 fails = []
@@ -49,7 +50,7 @@ def last_token(kind, n_before):
 
 
 def reset_limits():
-    main._link_hits.clear()
+    routes_admin_auth._link_hits.clear()
 
 
 print("\n== state ==")
@@ -132,7 +133,7 @@ reset_limits(); n = len(sent)
 for _ in range(6):
     request_link("reset")
 time.sleep(0.3)
-check(len(sent) - n == main._LINK_PER_EMAIL, "requests per address are rate-limited")
+check(len(sent) - n == routes_admin_auth._LINK_PER_EMAIL, "requests per address are rate-limited")
 
 print("\n== link address ==")
 reset_limits()
