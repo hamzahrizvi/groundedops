@@ -1,0 +1,85 @@
+{
+  "id": "12_nv200s_vague_then_corrected",
+  "product": "NV200S",
+  "product_key": "nv200s",
+  "source": "NV200S Range User Manual-v1.pdf",
+  "persona": "Operator with a fault, vague at first, then corrects the symptom.",
+  "scoped": true,
+  "expect_labels": [
+    "NV200S"
+  ],
+  "turns": [
+    {
+      "q": "my note validator isn't taking notes any more",
+      "followup": false,
+      "commercial": false,
+      "note": "vague symptom; scoped to NV200S so it should answer or ask a narrowing question",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "note",
+          "clean",
+          "LED",
+          "flash",
+          "reject",
+          "check",
+          "power",
+          "jam"
+        ]
+      }
+    },
+    {
+      "q": "the light on the front is flashing",
+      "followup": true,
+      "commercial": false,
+      "note": "'the light' refers to the unit; still vague",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "flash",
+          "LED",
+          "bezel",
+          "error",
+          "code"
+        ]
+      }
+    },
+    {
+      "q": "sorry, I mean the bezel LED flashes red 3 times then pauses",
+      "followup": true,
+      "commercial": false,
+      "note": "self-correction with a concrete error code; should read the flash-code table",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV200S"
+        ],
+        "mention": [
+          "3",
+          "three"
+        ]
+      }
+    },
+    {
+      "q": "how do I clear that",
+      "followup": true,
+      "commercial": false,
+      "note": "'that' = the fault just identified",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV200S"
+        ]
+      }
+    },
+    {
+      "q": "and if it keeps happening?",
+      "followup": true,
+      "commercial": false,
+      "note": "'and' opener; escalation advice or further steps",
+      "live": {
+        "expect": "any"
+      }
+    }
+  ]
+}

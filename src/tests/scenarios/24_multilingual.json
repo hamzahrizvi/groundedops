@@ -1,0 +1,49 @@
+{
+  "id": "24_multilingual",
+  "product": "BV30 / NV9USB+",
+  "product_key": null,
+  "source": null,
+  "persona": "Non-English customers; no product picked.",
+  "scoped": false,
+  "expect_labels": [],
+  "turns": [
+    {
+      "q": "¿Cómo limpio el BV30?",
+      "followup": false,
+      "commercial": false,
+      "note": "Spanish: how do I clean the BV30; ideally answered in Spanish from the BV30 manual",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "limp",
+          "clean",
+          "BV30"
+        ]
+      }
+    },
+    {
+      "q": "Wie setze ich den NV9USB+ auf Werkseinstellungen zurück?",
+      "followup": false,
+      "commercial": false,
+      "note": "German: factory reset of NV9USB+",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "NV9USB",
+          "reset",
+          "zurück",
+          "Werks"
+        ]
+      }
+    },
+    {
+      "q": "Quel est le prix du NV9USB+ ?",
+      "followup": false,
+      "commercial": true,
+      "note": "French price question -> should still deflect to sales",
+      "live": {
+        "expect": "deflect"
+      }
+    }
+  ]
+}

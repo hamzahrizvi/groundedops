@@ -1,0 +1,56 @@
+{
+  "id": "17_manual_download",
+  "product": "MyConnect",
+  "product_key": "myconnect",
+  "source": "MyConnect Environment-v4.pdf",
+  "persona": "Installer who wants the documents themselves, not an answer.",
+  "scoped": true,
+  "expect_labels": [
+    "MyConnect"
+  ],
+  "turns": [
+    {
+      "q": "can I download the MyConnect quick start guide",
+      "followup": false,
+      "commercial": false,
+      "note": "manual request -> a download link, not a summary",
+      "live": {
+        "expect": "manual",
+        "mention": [
+          "Quick Start",
+          "download",
+          "guide"
+        ]
+      }
+    },
+    {
+      "q": "and the pre-requisites checklist too",
+      "followup": true,
+      "commercial": false,
+      "note": "'and' + 'too'; a second document",
+      "live": {
+        "expect": "manual",
+        "mention": [
+          "Checklist",
+          "Pre-Requisites",
+          "download",
+          "checklist"
+        ]
+      }
+    },
+    {
+      "q": "send me the NV200 Spectral SSP manual as well",
+      "followup": false,
+      "commercial": false,
+      "note": "a document from another product while scoped to MyConnect",
+      "live": {
+        "expect": "manual",
+        "mention": [
+          "NV200",
+          "SSP",
+          "download"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "id": "16_nv9usb_sales",
+  "product": "NV9USB+",
+  "product_key": "nv9usb",
+  "source": "NV9USB+ Range User Manual-v1.pdf",
+  "persona": "Purchasing manager: price, quote, discount, lead time, warranty.",
+  "scoped": true,
+  "expect_labels": [
+    "NV9USB+"
+  ],
+  "turns": [
+    {
+      "q": "how much does the NV9USB+ cost",
+      "followup": false,
+      "commercial": true,
+      "note": "price",
+      "live": {
+        "expect": "deflect"
+      }
+    },
+    {
+      "q": "can I get a quote for 20 units",
+      "followup": true,
+      "commercial": true,
+      "note": "quote; 'units' relies on the prior turn",
+      "live": {
+        "expect": "deflect"
+      }
+    },
+    {
+      "q": "is there a volume discount",
+      "followup": false,
+      "commercial": true,
+      "note": "discount",
+      "live": {
+        "expect": "deflect"
+      }
+    },
+    {
+      "q": "what is the lead time on an order",
+      "followup": false,
+      "commercial": true,
+      "note": "availability",
+      "live": {
+        "expect": "deflect"
+      }
+    },
+    {
+      "q": "does it come with a warranty",
+      "followup": true,
+      "commercial": true,
+      "note": "warranty; 'it'",
+      "live": {
+        "expect": "deflect"
+      }
+    },
+    {
+      "q": "fine. what interfaces does it support then",
+      "followup": true,
+      "commercial": false,
+      "note": "back to a technical question after four deflects; must still answer",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV9USB"
+        ],
+        "mention": [
+          "SSP",
+          "ccTalk",
+          "pulse",
+          "MDB",
+          "parallel",
+          "interface"
+        ]
+      }
+    }
+  ]
+}

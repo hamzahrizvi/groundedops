@@ -1,0 +1,81 @@
+{
+  "id": "23_nv200_spectral_ssp_developer",
+  "product": "NV200 Spectral (SSP)",
+  "product_key": "nv200s",
+  "source": "NV200 Spectral SSP Manual v.1.pdf",
+  "persona": "Firmware developer integrating over SSP.",
+  "scoped": true,
+  "expect_labels": [
+    "NV200S"
+  ],
+  "turns": [
+    {
+      "q": "how do I poll the NV200 Spectral over SSP",
+      "followup": false,
+      "commercial": false,
+      "note": "opening protocol question",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV200"
+        ],
+        "mention": [
+          "poll",
+          "SSP",
+          "0x07",
+          "command"
+        ]
+      }
+    },
+    {
+      "q": "what does the sync command do",
+      "followup": true,
+      "commercial": false,
+      "note": "'the' -- continuing SSP topic",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV200"
+        ],
+        "mention": [
+          "sync",
+          "0x11",
+          "sequence"
+        ]
+      }
+    },
+    {
+      "q": "and how does the encryption key exchange work",
+      "followup": true,
+      "commercial": false,
+      "note": "'and' opener; eSSP",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV200"
+        ],
+        "mention": [
+          "key",
+          "encrypt",
+          "generator",
+          "modulus",
+          "eSSP"
+        ]
+      }
+    },
+    {
+      "q": "is there example code in C#",
+      "followup": true,
+      "commercial": false,
+      "note": "code samples are not in the manual -> refuse, do not write code",
+      "live": {
+        "expect": "any",
+        "avoid": [
+          "using System",
+          "public class",
+          "namespace"
+        ]
+      }
+    }
+  ]
+}

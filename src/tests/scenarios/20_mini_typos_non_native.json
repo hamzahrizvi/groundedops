@@ -1,0 +1,77 @@
+{
+  "id": "20_mini_typos_non_native",
+  "product": "MyCheckr mini",
+  "product_key": "mycheckr_mini",
+  "source": "MyCheckr Mini User Manual-v5.pdf",
+  "persona": "Non-native speaker, typos throughout, on a MyCheckr Mini.",
+  "scoped": true,
+  "expect_labels": [
+    "MyCheckr mini"
+  ],
+  "turns": [
+    {
+      "q": "mycheckr mini no turn on wat i do",
+      "followup": false,
+      "commercial": false,
+      "note": "typos: power-on troubleshooting",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "power",
+          "cable",
+          "supply",
+          "plug",
+          "LED",
+          "button"
+        ]
+      }
+    },
+    {
+      "q": "how i conect the divice to wifi",
+      "followup": false,
+      "commercial": false,
+      "note": "typos: Wi-Fi setup",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "Wi-Fi",
+          "wifi",
+          "network",
+          "SSID",
+          "ethernet",
+          "MyConnect"
+        ]
+      }
+    },
+    {
+      "q": "were is power buton on it",
+      "followup": true,
+      "commercial": false,
+      "note": "'it'; typos",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "power",
+          "button",
+          "switch",
+          "rear",
+          "side",
+          "back"
+        ]
+      }
+    },
+    {
+      "q": "thank you very much you help me",
+      "followup": true,
+      "commercial": false,
+      "note": "closing pleasantry: should acknowledge, not retrieve",
+      "live": {
+        "expect": "any",
+        "avoid": [
+          "I couldn't find",
+          "documentation"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "id": "11_bv30_first_setup",
+  "product": "BV30",
+  "product_key": "bv30",
+  "source": "BV30 User Manual-v1.pdf",
+  "persona": "Shop owner unboxing a BV30 for the first time; wants a walk-through.",
+  "scoped": true,
+  "expect_labels": [
+    "BV30"
+  ],
+  "turns": [
+    {
+      "q": "I've just unboxed a BV30, where do I start with setting it up",
+      "followup": false,
+      "commercial": false,
+      "note": "opening: first-time setup walk-through",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "BV30"
+        ],
+        "mention": [
+          "mount",
+          "connect",
+          "install",
+          "power",
+          "fit"
+        ]
+      }
+    },
+    {
+      "q": "how do I connect it to my machine",
+      "followup": true,
+      "commercial": false,
+      "note": "'it' -> the BV30; interface/connection question",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "BV30"
+        ],
+        "mention": [
+          "interface",
+          "connector",
+          "cable",
+          "pin",
+          "SSP",
+          "pulse",
+          "MDB",
+          "ccTalk"
+        ]
+      }
+    },
+    {
+      "q": "what power supply does it need",
+      "followup": true,
+      "commercial": false,
+      "note": "'it' again; a spec question",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "BV30"
+        ],
+        "mention": [
+          "12",
+          "V"
+        ]
+      }
+    },
+    {
+      "q": "how do I tell it which notes to accept",
+      "followup": true,
+      "commercial": false,
+      "note": "configuration step; dataset/currency",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "BV30"
+        ],
+        "mention": [
+          "dataset",
+          "currency",
+          "program",
+          "firmware",
+          "software",
+          "validator manager"
+        ]
+      }
+    },
+    {
+      "q": "and how do I check it is working once it is in",
+      "followup": true,
+      "commercial": false,
+      "note": "'and' opener; test/verify step",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "BV30"
+        ]
+      }
+    }
+  ]
+}

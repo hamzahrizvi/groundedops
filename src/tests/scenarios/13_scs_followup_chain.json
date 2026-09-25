@@ -1,0 +1,79 @@
+{
+  "id": "13_scs_followup_chain",
+  "product": "SMART Coin System",
+  "product_key": "sku_scs",
+  "source": "SMART Coin System Range User Manual-v1.pdf",
+  "persona": "Technician following a procedure step by step, then asks about a platform the manual never mentions.",
+  "scoped": true,
+  "expect_labels": [
+    "SMART Coin System"
+  ],
+  "turns": [
+    {
+      "q": "how do I install the SMART Coin System in the machine",
+      "followup": false,
+      "commercial": false,
+      "note": "opening procedure",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "SMART Coin"
+        ],
+        "mention": [
+          "mount",
+          "fix",
+          "screw",
+          "connect",
+          "fit",
+          "install"
+        ]
+      }
+    },
+    {
+      "q": "and step 3?",
+      "followup": true,
+      "commercial": false,
+      "note": "step reference into the previous answer",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "3",
+          "step",
+          "three"
+        ]
+      }
+    },
+    {
+      "q": "what about on Linux?",
+      "followup": true,
+      "commercial": false,
+      "note": "'what about' opener; the SCS manual says nothing about Linux -- must not invent",
+      "live": {
+        "expect": "any",
+        "avoid": [
+          "sudo",
+          "apt",
+          "terminal command"
+        ]
+      }
+    },
+    {
+      "q": "ok, what do the LED colours on it mean",
+      "followup": true,
+      "commercial": false,
+      "note": "'ok' + 'it'; back to the manual",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "SMART Coin"
+        ],
+        "mention": [
+          "LED",
+          "red",
+          "green",
+          "flash"
+        ]
+      }
+    }
+  ]
+}
