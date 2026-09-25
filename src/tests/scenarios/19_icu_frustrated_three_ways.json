@@ -1,0 +1,80 @@
+{
+  "id": "19_icu_frustrated_three_ways",
+  "product": "Biometrics / ICU",
+  "product_key": "biometrics_general",
+  "source": "ICU_Age_Result_Quick_Guide_v1_1.pdf",
+  "persona": "Frustrated integrator asking the same thing three ways, then demanding a person.",
+  "scoped": true,
+  "expect_labels": [],
+  "expect_labels_note": "ICU docs sit under 'General (shared docs)', a bucket not a product, so no button",
+  "turns": [
+    {
+      "q": "how do I get the age result out of the ICU",
+      "followup": false,
+      "commercial": false,
+      "note": "first ask",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "ICU"
+        ],
+        "mention": [
+          "age",
+          "API",
+          "result",
+          "JSON",
+          "request",
+          "endpoint"
+        ]
+      }
+    },
+    {
+      "q": "you didn't answer me. how do I READ the age it estimated",
+      "followup": true,
+      "commercial": false,
+      "note": "second ask, sharper; same content expected",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "ICU"
+        ],
+        "mention": [
+          "age"
+        ]
+      }
+    },
+    {
+      "q": "for the third time: how do I get the age out of the device??",
+      "followup": true,
+      "commercial": false,
+      "note": "third ask; should not degrade into a refusal",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "ICU"
+        ],
+        "mention": [
+          "age"
+        ]
+      }
+    },
+    {
+      "q": "this is useless, I want to talk to a person",
+      "followup": true,
+      "commercial": false,
+      "note": "handoff request -> offer support contact, not another manual answer",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "support",
+          "contact",
+          "team",
+          "human",
+          "person",
+          "email",
+          "phone"
+        ]
+      }
+    }
+  ]
+}

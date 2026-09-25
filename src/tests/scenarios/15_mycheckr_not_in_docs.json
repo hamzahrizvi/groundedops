@@ -1,0 +1,68 @@
+{
+  "id": "15_mycheckr_not_in_docs",
+  "product": "MyCheckr",
+  "product_key": "mycheckr",
+  "source": "MyCheckr User Manual-v7.pdf",
+  "persona": "Compliance officer asking things the manual does not cover; the bot must not invent.",
+  "scoped": true,
+  "expect_labels": [
+    "MyCheckr"
+  ],
+  "turns": [
+    {
+      "q": "what is the warranty period on the MyCheckr",
+      "followup": false,
+      "commercial": true,
+      "note": "warranty is commercial and absent from every manual -> operator deflect",
+      "live": {
+        "expect": "deflect"
+      }
+    },
+    {
+      "q": "does the MyCheckr support Bluetooth",
+      "followup": false,
+      "commercial": false,
+      "note": "'Bluetooth' appears nowhere in the corpus -> refuse, do not guess",
+      "live": {
+        "expect": "refuse",
+        "avoid": [
+          "yes, the MyCheckr supports Bluetooth",
+          "Bluetooth 5",
+          "pair"
+        ]
+      }
+    },
+    {
+      "q": "how long does it keep the face images for",
+      "followup": false,
+      "commercial": false,
+      "note": "GDPR/retention IS in the manual; should answer from it",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "MyCheckr"
+        ],
+        "mention": [
+          "stor",
+          "retain",
+          "delet",
+          "image",
+          "not"
+        ]
+      }
+    },
+    {
+      "q": "what is the false-accept rate of the age estimation",
+      "followup": false,
+      "commercial": false,
+      "note": "an accuracy figure the manual does not give -> refuse honestly",
+      "live": {
+        "expect": "any",
+        "avoid": [
+          "%",
+          "percent"
+        ]
+      }
+    }
+  ]
+}

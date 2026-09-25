@@ -1,0 +1,64 @@
+{
+  "id": "18_compare_nv9s_vs_nv9usb",
+  "product": "NV9 Spectral vs NV9USB+",
+  "product_key": null,
+  "source": null,
+  "persona": "Buyer comparing two validators; no product picked.",
+  "scoped": false,
+  "expect_labels": [
+    "NV9 Spectral",
+    "NV9USB+"
+  ],
+  "expect_labels_sources": [
+    "NV9 Spectral Range User Manual-v1.pdf",
+    "NV9USB+ Range User Manual-v1.pdf"
+  ],
+  "turns": [
+    {
+      "q": "what is the difference between the NV9 Spectral and the NV9USB+",
+      "followup": false,
+      "commercial": false,
+      "note": "comparison; both named",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "NV9"
+        ]
+      }
+    },
+    {
+      "q": "which one validates notes faster",
+      "followup": true,
+      "commercial": false,
+      "note": "'which one' -- follow-up comparison",
+      "live": {
+        "expect": "any"
+      }
+    },
+    {
+      "q": "do they both use the same SSP interface",
+      "followup": true,
+      "commercial": false,
+      "note": "'they both'",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "SSP"
+        ]
+      }
+    },
+    {
+      "q": "which one should I pick for an arcade cabinet",
+      "followup": true,
+      "commercial": false,
+      "note": "advisory: a recommendation the manuals do not make",
+      "live": {
+        "expect": "any",
+        "avoid": [
+          "I recommend the NV9 Spectral",
+          "I recommend the NV9USB"
+        ]
+      }
+    }
+  ]
+}

@@ -138,8 +138,28 @@ _STOP = {
 # UnicodeDecodeError, the bare except swallowed it, and the FAQ store silently
 # read as EMPTY -- every curated answer gone with no error surfaced anywhere.
 
+# Parsed once and served from memory until the file changes (mtime and
+# size), which every writer here does through _save. Each caller gets its
+# own copies: entries are flat, so a per-entry dict() is enough, and it
+# costs a third of the parse it replaces on every query and console load.
+_store_cache: dict = {"key": None, "items": []}
+
+
+def _store_key():
+    try:
+        st = os.stat(_PATH)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
 def _load() -> list[dict]:
-    return jsonstore.load(_PATH, [], label="FAQ store")
+    key = _store_key()
+    if key is None or key != _store_cache["key"]:
+        _store_cache["items"] = jsonstore.load(_PATH, [], label="FAQ store")
+        _store_cache["key"] = key
+    return [dict(it) if isinstance(it, dict) else it
+            for it in _store_cache["items"]]
 
 
 def _save(items: list[dict]) -> None:
@@ -147,6 +167,7 @@ def _save(items: list[dict]) -> None:
     jsonstore. This store is the one that nearly proved why: read it as
     cp1252, get [], write it back, and every curated answer is gone."""
     jsonstore.save(_PATH, items, label="FAQ store")
+    _store_cache["key"] = None
 
 
 def record_questions(source: str, products: str, qa_pairs: list[dict],
@@ -293,10 +314,15 @@ def add_entry(question: str, answer: str, products: str = "",
 
 
 def update_entry(faq_id: str, question: str | None = None,
-                 answer: str | None = None) -> dict | None:
-    """Edit the question text and/or the answer. update_answer() could
-    only change the answer, so a badly-worded generated question could
-    only be deleted and retyped."""
+                 answer: str | None = None,
+                 products: str | None = None) -> dict | None:
+    """Edit the question text, the answer, and/or which products it applies to.
+
+    `products` is a comma-joined list because that is how this store has
+    always held it -- every reader here already splits on commas, so an
+    answer covering three products needed no migration, only a way to say so.
+    An empty string is meaningful and different from None: it means "all
+    products", which is what an answer with no scope has always meant."""
     with _lock:
         items = _load()
         for it in items:
@@ -311,6 +337,9 @@ def update_entry(faq_id: str, question: str | None = None,
                     it["question"] = new_q
                 if answer is not None:
                     it["answer"] = answer
+                if products is not None:
+                    it["products"] = ",".join(
+                        _norm_key(p) for p in products.split(",") if p.strip())
                 it["edited"] = True
                 _save(items)
                 _invalidate_cache()
@@ -507,19 +536,6 @@ def get_by_id(faq_id: str) -> dict | None:
     for it in _load():
         if it["id"] == faq_id and (it.get("answer") or "").strip():
             return it
-    return None
-
-
-def update_answer(faq_id: str, answer: str) -> dict | None:
-    with _lock:
-        items = _load()
-        for it in items:
-            if it["id"] == faq_id:
-                it["answer"] = answer
-                it["edited"] = True
-                _save(items)
-                _invalidate_cache()
-                return it
     return None
 
 
@@ -767,35 +783,104 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
 GAP_CLUSTER_THRESHOLD = float(os.getenv("GAP_CLUSTER_THRESHOLD", "0.90"))
 
 _gap_cache_lock = threading.Lock()
-_gap_cache_mtime = None
-_gap_cache_vecs = None
-_gap_cache_texts: list[str] = []
+# question text -> vector. Keyed by the QUESTION, not by the list and its
+# mtime, because /faq/gaps is called with a product filter as often as
+# without one, and the arrival of a single new gap must not invalidate the
+# other three hundred.
+_gap_vec_by_text: dict | None = None
+# Above this many remembered questions the cache is pruned to the set last
+# asked for. Gaps get resolved and stop being asked, and without a bound the
+# file would carry every question the widget has ever failed to answer.
+_GAP_VEC_MAX = 5000
 
 
-def _gap_store_mtime() -> float:
+def _gap_vector_cache_file() -> str:
+    return os.getenv("FAQ_GAP_VECTOR_CACHE") or (_GAP_PATH + ".vectors.npz")
+
+
+def _load_gap_vectors() -> dict:
+    """question -> vector, from disk. {} when there is nothing usable, which
+    is a cache miss and never an error."""
+    path = _gap_vector_cache_file()
+    if not os.path.exists(path):
+        return {}
     try:
-        return os.path.getmtime(_GAP_PATH)
-    except OSError:
-        return 0.0
+        import numpy as np
+        from embeddings import EMBED_MODEL
+        with np.load(path, allow_pickle=False) as z:
+            if str(z["model"]) != EMBED_MODEL:
+                return {}          # different embedder, different vectors
+            texts, vecs = list(z["texts"]), z["vecs"]
+        return {t: vecs[i] for i, t in enumerate(texts)}
+    except Exception as exc:
+        logger.warning(f"gap vector cache unreadable ({exc}); rebuilding")
+        return {}
+
+
+def _save_gap_vectors(by_text: dict) -> None:
+    path = _gap_vector_cache_file()
+    try:
+        import numpy as np
+        from embeddings import EMBED_MODEL
+        texts = list(by_text)
+        tmp = path + ".tmp"
+        # Through a FILE OBJECT, not a path: np.savez appends ".npz" to a
+        # path that lacks it, and the os.replace would then look for a file
+        # that does not exist. Same trap as the FAQ vector cache above.
+        with open(tmp, "wb") as fh:
+            np.savez(fh,
+                     vecs=np.array([by_text[t] for t in texts]),
+                     texts=np.array(texts, dtype="U"),
+                     model=np.array(EMBED_MODEL, dtype="U"))
+        os.replace(tmp, path)
+    except Exception as exc:
+        # Non-fatal: without it the next cold start pays the embeddings again.
+        logger.warning(f"could not write the gap vector cache: {exc}")
 
 
 def _gap_vectors(questions: list[str]):
-    """Embeddings for the gap questions, cached on the gap file's mtime -
-    same pattern as _build_cache above. Returns None if embeddings are
-    unavailable, and the caller falls back to lexical grouping."""
-    global _gap_cache_mtime, _gap_cache_vecs, _gap_cache_texts
+    """Embeddings for the gap questions. Returns None if embeddings are
+    unavailable, and the caller falls back to lexical grouping.
+
+    WHY THIS IS PER-QUESTION AND ON DISK. It was neither, and both cost the
+    same two minutes. GET /faq/gaps runs on EVERY console sign-in (it is one
+    of the seven reads the console opens with), clustering is on by default,
+    and the cache lived only in this process -- so the first sign-in after a
+    restart embedded all 344 gap questions through gte-modernbert-base on
+    CPU. Measured: 121.6 seconds, during which the sign-in appeared to hang
+    and the first question of the day queued behind it for the same model.
+
+    The old key made it worse than once per restart: it compared the WHOLE
+    question list, so one visitor asking one new unanswered question threw
+    away the other 343 vectors and re-embedded them on the next sign-in.
+
+    Keyed on the question text, a question is embedded once, ever. A new gap
+    costs one embedding; a restart costs a file read.
+    """
+    global _gap_vec_by_text
     if _semantic_available is False:
         return None
     try:
+        import numpy as np
         from embeddings import embed_texts
         with _gap_cache_lock:
-            mt = _gap_store_mtime()
-            if (_gap_cache_vecs is None or _gap_cache_mtime != mt
-                    or _gap_cache_texts != questions):
-                _gap_cache_vecs = embed_texts(questions)
-                _gap_cache_texts = list(questions)
-                _gap_cache_mtime = mt
-            return _gap_cache_vecs
+            if _gap_vec_by_text is None:
+                _gap_vec_by_text = _load_gap_vectors()
+            # dict.fromkeys, not set: embedding order has to match `missing`,
+            # and duplicates would be embedded twice for nothing.
+            missing = [q for q in dict.fromkeys(questions)
+                       if q not in _gap_vec_by_text]
+            if missing:
+                for q, v in zip(missing, embed_texts(missing)):
+                    _gap_vec_by_text[q] = v
+                if len(_gap_vec_by_text) > _GAP_VEC_MAX:
+                    keep = set(questions)
+                    _gap_vec_by_text = {t: v for t, v in
+                                        _gap_vec_by_text.items() if t in keep}
+                _save_gap_vectors(_gap_vec_by_text)
+                logger.info("gap vectors: %d embedded, %d cached",
+                            len(missing), len(_gap_vec_by_text))
+            return np.array([_gap_vec_by_text[q] for q in questions])
     except Exception as e:
         logger.warning(f"gap clustering: embeddings unavailable, "
                        f"falling back to lexical ({e})")
@@ -1165,6 +1250,20 @@ def lexical_score(a: str, b: str) -> float:
     return inter / smaller
 
 
+def _strip_trailing_scope(question: str) -> str:
+    """Drop a trailing "(Product Name)" of 1-60 chars, e.g. the scope the
+    pipeline appends. Plain string ops, not a regex: the old
+    `\\s*\\([^()]{1,60}\\)\\s*$` backtracked quadratically on long runs of
+    spaces in customer input (CodeQL polynomial-ReDoS)."""
+    s = (question or "").rstrip()
+    if s.endswith(")"):
+        i = s.rfind("(")
+        inner = s[i + 1:-1] if i >= 0 else ""
+        if i >= 0 and 1 <= len(inner) <= 60 and "(" not in inner and ")" not in inner:
+            return s[:i].strip()
+    return s.strip()
+
+
 def verbatim_score(a: str, b: str) -> float:
     """Symmetric overlap, for deciding two questions are THE SAME question.
 
@@ -1329,10 +1428,16 @@ def warm_cache() -> int:
     visitor never pays for it. Returns the number of cached questions."""
     try:
         _semantic_scores("warm up", _load())
-        return len(_cache_ids)
     except Exception as exc:
         logger.warning(f"FAQ cache warmup skipped: {exc}")
-        return 0
+    # The gap vectors too, for the same reason and in the same place: the
+    # console's own sign-in reads /faq/gaps, so leaving this cold just moves
+    # the bill from a visitor to whoever opens the console.
+    try:
+        _gap_vectors([g.get("question", "") for g in list_gaps(None)])
+    except Exception as exc:
+        logger.warning(f"gap vector warmup skipped: {exc}")
+    return len(_cache_ids)
 
 
 def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:
@@ -1358,7 +1463,57 @@ def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:
 
 # ── the entry point ───────────────────────────────────────────────────
 
-def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
+_CONTENT_STOP = frozenset("""
+what which does the for with can how are is a an of and to in on it its this
+that do i my be there any have has you your use used using range system
+please me we our about will would could should may might tell give not
+""".split())
+
+
+def _norm_word(w: str) -> str:
+    """Enough stemming for two phrasings of one question to meet: "notes"
+    and "note" both become "not", "recycle" and "recycling" "recycl".
+    text_utils.stem keeps the final "e", which is exactly the case that
+    kept them apart."""
+    w = w.lower()
+    for suf in ("ings", "ing", "ers", "er", "ies", "es", "ed", "s", "e"):
+        if len(w) - len(suf) >= 3 and w.endswith(suf):
+            return w[:-len(suf)]
+    return w
+
+
+def _product_terms() -> set[str]:
+    """Stemmed words of every product and category name, key and alias in
+    the catalogue: the words two questions about the same product share
+    without being about the same thing. Read per call; the catalogue is a
+    small file and its cache is invalidated on save."""
+    out: set[str] = set()
+    try:
+        import catalog
+        stem = _norm_word
+        for c in (catalog.catalog().get("categories") or []):
+            names = [c.get("key") or "", c.get("name") or ""]
+            for p in (c.get("products") or []):
+                names += [p.get("key") or "", p.get("name") or ""]
+                names += list(p.get("aliases") or [])
+            for n in names:
+                out |= {stem(w) for w in re.findall(r"[a-z0-9]+", n.lower())}
+    except Exception as exc:
+        logger.debug(f"product terms unavailable: {exc}")
+    return out
+
+
+def _content_stems(text: str) -> set[str]:
+    """The stemmed content words of a question: no stopwords, no product or
+    category names. What is left is what the question is ABOUT."""
+    stem = _norm_word
+    terms = _product_terms()
+    return {stem(w) for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+            if len(w) >= 3 and w not in _CONTENT_STOP and stem(w) not in terms}
+
+
+def suggest_candidates(question: str, scope_key: str | None = None,
+                       record: bool = True) -> dict:
     """Decide what to do with an incoming question.
 
     Returns one of:
@@ -1387,7 +1542,18 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     if not pool:
         return {"mode": "none"}
 
-    sem = _semantic_scores(question, pool)
+
+    # In a product chat the pipeline hands us the question with the product
+    # name appended -- "what is the weight of the NV9S? (NV9 Spectral)" --
+    # which is right for retrieval and wrong for a verbatim comparison: the
+    # curated question typed word for word scored 0.50 against itself and
+    # was offered back as "is this what you meant?" instead of answered.
+    # Every widget chat is scoped, so that was every customer.
+    bare = _strip_trailing_scope(question)
+    # Both scores see the question the visitor typed: the pool is already
+    # scoped to the product, so the appended name adds nothing and cost the
+    # paraphrase auto-serve (0.996 bare, under the 0.98 bar with the suffix).
+    sem = _semantic_scores(bare or question, pool)
 
     scored = []
     for it in pool:
@@ -1398,6 +1564,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
         # question" -- see verbatim_score for what went wrong when it did
         # not. s_lex keeps its recall-oriented job of shortlisting.
         s_verb = verbatim_score(question, it["question"])
+        if bare and bare != question:
+            s_verb = max(s_verb, verbatim_score(bare, it["question"]))
         # (a) the same string, or (b) a paraphrase the semantic model is
         # near-certain about AND that shares most of its words. See the
         # AUTO_SERVE_* block above for why both halves of (b) are required.
@@ -1432,7 +1600,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
             scored.append((max(s_sem, s_verb), it, s_sem, s_lex))
 
     if not scored:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: no candidates for {question!r} — going to retrieval")
         return {"mode": "none"}
 
@@ -1507,7 +1676,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     scored = _curated + _harvest
 
     if not scored:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: only weak harvested matches for {question!r} "
                     f"- going to retrieval")
         return {"mode": "none"}
@@ -1531,7 +1701,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     _best_score, _, _best_sem, _best_lex = scored[0]
     _sem_only_min = float(os.getenv("FAQ_SEMANTIC_ONLY_MIN", "0.85"))
     if _best_lex <= 0.0 and _best_sem < _sem_only_min:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: top match {_best_sem:.3f} semantic with no lexical "
                     f"overlap for {question!r} - going to retrieval")
         return {"mode": "none"}
@@ -1555,7 +1726,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # choice, for a question whose answer is not in the corpus at all.
     _floor = float(os.getenv("FAQ_CANDIDATE_MIN_SCORE", "0.92"))
     if scored[0][0] < _floor:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [])
         logger.info(f"FAQ: best candidate {scored[0][0]:.3f} < {_floor} for "
                     f"{question!r} - going to retrieval")
         return {"mode": "none"}
@@ -1563,6 +1735,64 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # Relative cut: keep only what's competitive with the best match.
     _best = scored[0][0]
     scored = [t for t in scored if t[0] >= _best - CANDIDATE_RELATIVE_MARGIN]
+
+    # SAME PRODUCT, DIFFERENT QUESTION -- per candidate this time. The
+    # lexical check above looks only at the best match, and lexical_score
+    # counts the product's own name as overlap, so "How does the NV9USB+
+    # communicate with a host?" was offered "What are typical applications
+    # for the NV9USB+?" (0.930), "What is the NV9USB+ Range?" (0.911) and
+    # "What is the NV9 USB+ Range and what does it do?" (0.899): three
+    # entries that share nothing with the question but the product, and a
+    # menu instead of the answer retrieval had. Measured on the 34-case
+    # eval, 2026-09-25: every wrong candidate shared no stemmed content
+    # word with its question once product and category names were
+    # excluded; every right one did, except a paraphrase at 0.974
+    # ("operating speed" for "coins per second"), which the semantic
+    # exemption keeps.
+    _q_content = _content_stems(question)
+    _sole_min = float(os.getenv("FAQ_SEMANTIC_SOLE_MIN", "0.95"))
+    if _q_content:
+        _kept = []
+        _top_sem = max(t[2] for t in scored)
+        for t in scored:
+            _shared = _content_stems(t[1].get("question") or "") & _q_content
+            # The exemption is for a close PARAPHRASE that happens to use
+            # other words ("operating speed" for "coins per second"), so it
+            # is for the entry at the top and never for a product overview
+            # -- "What is the MyCheckr Mini and what does it do?" scores
+            # 0.96 against anything that names the Mini.
+            _paraphrase = (t[2] >= _sole_min and t[2] >= _top_sem - 0.02
+                           and not _is_definitional(t[1]))
+            if _shared or _paraphrase:
+                _kept.append(t)
+            else:
+                logger.info(f"FAQ: dropped {(t[1].get('question') or '')[:40]!r} "
+                            f"({t[2]:.3f}): no content word shared with {question!r}")
+        if not _kept:
+            if record:
+                record_gap(question, scope_key, [])
+            logger.info(f"FAQ: every candidate shared only the product name "
+                        f"for {question!r} - going to retrieval")
+            return {"mode": "none"}
+        scored = _kept
+
+    # ONE candidate left, close, and about the same thing: serve it. The
+    # menu exists to let the visitor choose between candidates; with one,
+    # "These FAQs match your query - please select the one you meant" is a
+    # click that only ever has one answer. "Can the NV9USB+ recycle
+    # notes?" -> "Can the NV9USB+ Range provide note recycling?" (0.927,
+    # shares recycl/note) is that case. Harvested reference material is
+    # excluded: it earns a place as a fallback, never a confident answer.
+    _sole_serve = float(os.getenv("FAQ_AUTO_SERVE_SOLE", "0.92"))
+    if (len(scored) == 1 and scored[0][2] >= _sole_serve
+            and scored[0][1].get("origin") != "harvested"
+            and (not _q_content
+                 or _content_stems(scored[0][1].get("question") or "") & _q_content
+                 or scored[0][2] >= _sole_min)):
+        _s, _it, _sem_s, _ = scored[0]
+        logger.info(f"FAQ auto-serve (sole candidate sem={_sem_s:.3f}) for "
+                    f"{question!r}: {(_it.get('question') or '')[:50]!r}")
+        return {"mode": "answer", "entry": _it, "score": round(_s, 3)}
 
     # Only question-shaped entries may be OFFERED. A harvested table caption
     # is a good match key and an unusable menu item, so the two roles split
@@ -1589,16 +1819,3 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     logger.info(f"FAQ disambiguate {question!r} -> "
                 + "; ".join(f"{c['question'][:40]} ({c['score']})" for c in cands))
     return {"mode": "disambiguate", "candidates": cands}
-
-
-# Back-compat shim: older callers expect match_answer(). It now only ever
-# returns a NEAR-VERBATIM hit, never a guess — anything ambiguous returns
-# None so the caller falls through rather than silently asserting.
-def match_answer(question: str, scope_key: str | None = None,
-                 min_score: float | None = None) -> dict | None:
-    r = suggest_candidates(question, scope_key)
-    if r["mode"] == "answer":
-        e = r["entry"]
-        return {"answer": e["answer"], "question": e["question"],
-                "score": r["score"], "mode": "answer"}
-    return None

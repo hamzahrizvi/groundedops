@@ -1,14 +1,163 @@
 import logging
 import os
 import threading
+import time
 import requests
 
-from text_utils import truncate_after_refusal, build_condense_prompt, parse_condense_output, has_reference_markers
+from text_utils import truncate_after_refusal, build_condense_prompt, parse_condense_output
 
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+
+# One connection pool for every provider call. A bare requests.post opens a
+# fresh TCP+TLS connection each time, and a turn makes three to five calls
+# (condense, answer, verifier, retries) to the same two hosts. urllib3's
+# pool is thread-safe; the Session object is shared read-only.
+_HTTP = requests.Session()
+_HTTP.mount("https://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16))
+_HTTP.mount("http://", requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16))
+
+# A provider that just failed to CONNECT, or answered 5xx, is skipped for a
+# short while when the chain has another entry -- the role "reasoning" leads
+# with the on-prem gateway, and while that gateway is down every such
+# question (and every grounding retry of it) paid the failure before the
+# backup answered. A 4xx is not an outage and is never cooled.
+PROVIDER_COOLDOWN_SECONDS = float(os.getenv("PROVIDER_COOLDOWN_SECONDS", "60") or 0)
+
+# requests' timeout bounds the CONNECT and each READ, not the call: a
+# provider that keeps sending bytes (keep-alive whitespace, a slow stream)
+# can hold a request open indefinitely -- one logged turn spent 16544s in
+# escalation. This is the wall-clock cap on a single provider call; past
+# it the call counts as unreachable (cooldown) and the chain moves on.
+# The stream path checks it between chunks.
+PROVIDER_DEADLINE_SECONDS = float(os.getenv("PROVIDER_DEADLINE_SECONDS", "120") or 0)
+
+
+def _post(url: str, **kw):
+    """_HTTP.post under PROVIDER_DEADLINE_SECONDS of wall clock.
+
+    Runs the request on a worker so the caller can stop waiting; the
+    worker's own read timeout still ends the socket. Raises
+    requests.Timeout when the deadline passes, which the callers already
+    treat as "unreachable"."""
+    if PROVIDER_DEADLINE_SECONDS <= 0:
+        return _HTTP.post(url, **kw)
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = pool.submit(_HTTP.post, url, **kw)
+        try:
+            return fut.result(timeout=PROVIDER_DEADLINE_SECONDS)
+        except _FutTimeout:
+            raise requests.Timeout(
+                f"provider call exceeded {PROVIDER_DEADLINE_SECONDS:.0f}s deadline")
+    finally:
+        pool.shutdown(wait=False)
+_provider_down: dict[str, float] = {}
+
+
+def _note_unreachable(provider: str) -> None:
+    _provider_down[provider] = time.time()
+
+
+def _note_reachable(provider: str) -> None:
+    _provider_down.pop(provider, None)
+
+
+def provider_cooling(provider: str) -> bool:
+    """True while `provider` is inside its cooldown after an outage."""
+    ts = _provider_down.get(provider)
+    return ts is not None and (time.time() - ts) < PROVIDER_COOLDOWN_SECONDS
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+
+def _deepseek_extra() -> dict:
+    """Request fields every DeepSeek call carries beyond model and messages.
+
+    DeepSeek V4 (`deepseek-v4-flash`, `deepseek-v4-pro`) THINKS BY DEFAULT:
+    it writes a hidden chain of thought before the answer, bills it as
+    completion tokens, and only then streams the text. Measured 2026-09-25
+    on a 1.3k-token manual prompt, three runs each:
+
+        thinking on   3.15s   completion 365-700 tokens, 334-669 of them reasoning
+        thinking off  0.94s   completion  30-66 tokens
+
+    Same answer, a third of the time, a tenth of the tokens -- and the
+    reasoning tokens were being charged to the customer's quota. This
+    pipeline does its own reasoning (retrieval, reranking, grounding, a
+    verifier), so the model's private deliberation adds latency to every
+    call that uses it: the answer, the condensation, the verifier's second
+    opinion, the clarify draft. It is off unless DEEPSEEK_THINKING is set
+    to 1/on/true. The field is ignored by models that cannot think, so it
+    is safe to send unconditionally."""
+    want = os.getenv("DEEPSEEK_THINKING", "").strip().lower()
+    if want in ("1", "on", "true", "yes") or _judging.get():
+        return {"thinking": {"type": "enabled"}}
+    return {"thinking": {"type": "disabled"}}
+
+
+# JUDGEMENT CALLS THINK. Turning thinking off everywhere was measured on
+# answer latency and on eval outcomes -- never on the verifier's judgement,
+# and that is where it broke. Measured 2026-09-25 on the NV9USB+ flash-code
+# table (p.56), the case the verifier was introduced for in v16.2:
+#
+#                      wrong code accepted   right code accepted
+#     thinking off            4/4                   0/2
+#     thinking on             0/4                   2/2
+#
+# Without its reasoning pass the verifier INVERTED: it approved "1 long, 2
+# short = Note Path Open" (the manual says Note Path Jam) and rejected the
+# correct answer. So the answer is written fast and checked carefully: a
+# call made inside judging() thinks, whatever DEEPSEEK_THINKING says. The
+# verifier, the inference contract and the re-answer passage selection
+# are judgements; writing the answer is not.
+import contextvars as _cv
+_judging: "_cv.ContextVar[bool]" = _cv.ContextVar("llm_judging", default=False)
+
+
+class judging:
+    """Context manager: DeepSeek calls made inside it keep thinking on."""
+    def __enter__(self):
+        self._tok = _judging.set(True)
+        return self
+
+    def __exit__(self, *exc):
+        _judging.reset(self._tok)
+        return False
+
+# The OpenAI-compatible endpoint, overridable. It was hardcoded at both call
+# sites, which meant the "openai" provider could only ever mean OpenAI's own
+# servers -- and an OpenAI-compatible gateway is how most on-prem model
+# hosting is exposed, ITL's LiteLLM included. Pointing this at one keeps every
+# customer question inside the building and off a metered API, with no other
+# change: same request shape, same auth header, same streaming format.
+#
+#   OPENAI_BASE_URL=http://ukman-hsp-litellm.local.innovative-technology.co.uk:4000/v1
+#   OPENAI_API_KEY=<the gateway key -- set it on the API keys page>
+#   ONLINE_PROVIDER=openai
+#   ONLINE_OPENAI_MODEL=itl-gpt-pro
+#
+# Default unchanged, so an install that sets nothing still talks to OpenAI.
+OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+OPENAI_URL = OPENAI_BASE + "/chat/completions"
+
+def _note_credit_failure(provider: str, res) -> None:
+    """Tell credit_watch when a provider refuses for lack of credit, so a
+    root admin hears about it now rather than at the next periodic check.
+    DeepSeek says 402 Insufficient Balance; LiteLLM says budget exceeded,
+    on a 400 or 429 depending on version. Never raises into the answer."""
+    try:
+        exhausted = res.status_code == 402
+        if not exhausted and res.status_code in (400, 429):
+            text = (res.text or "")[:2000].lower()
+            exhausted = "budget" in text and "exceed" in text
+        if exhausted:
+            import credit_watch
+            credit_watch.report_exhausted(provider)
+    except Exception as e:
+        logger.debug(f"credit failure check skipped: {e}")
+
 
 MODEL_LOCKS = {
     "phi": threading.Lock(),
@@ -35,23 +184,57 @@ FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
 }
 
 
-def _online_provider_model() -> tuple[str, str]:
-    """The single (provider, model) used in Online (api) mode. The provider
-    is user-selectable in Settings (deepseek default / openai / anthropic);
-    default models are env-overridable. Shared by the answering path
-    (_chain_for) and query condensation so both honour the same choice."""
-    from runtime_config import get_online_provider
-    provider = get_online_provider()
+def _provider_for_job(job: str) -> str:
+    """Which provider serves one job (default / advanced / backup), falling
+    back the way the console promises: an unassigned job uses the default
+    assignment, and an install that has assigned nothing at all keeps the
+    old behaviour — the provider picked in Settings.
+
+    keystore.get_role masks an assignment whose key has since been removed,
+    so this never names a provider that is certain to fail auth."""
+    import keystore
+    provider = keystore.get_role(job)
+    if not provider and job != "default":
+        provider = keystore.get_role("default")
+    if not provider:
+        from runtime_config import get_online_provider
+        provider = get_online_provider()
+    return provider
+
+
+def _online_provider_model(job: str = "default") -> tuple[str, str]:
+    """The (provider, model) used in Online (api) mode for one job. The
+    provider comes from the API keys page's role assignment, or — with
+    nothing assigned — from the Settings picker as before. Default models
+    are env-overridable. Shared by the answering path (_chain_for) and query
+    condensation so both honour the same choice."""
+    provider = _provider_for_job(job)
     # The FALLBACK defaults matter as much as the env vars: "deepseek-chat"
     # was the default here, so any deployment that had not set
     # ONLINE_DEEPSEEK_MODEL silently used an alias DeepSeek retired on
     # 24 July 2026. src/.env sets it, which is the only reason this worked.
-    model = {
-        "deepseek": os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"),
-        "openai": os.getenv("ONLINE_OPENAI_MODEL", "gpt-4o-mini"),
-        "anthropic": os.getenv("ONLINE_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-    }.get(provider, os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
+    # keystore.model_for_role is the single answer the console and this
+    # path must agree on: the role's own override when it has one, else
+    # the provider's baseline. It reads the same ONLINE_<PROVIDER>_MODEL
+    # variables this used to read directly, so an install that configures
+    # nothing through the console behaves exactly as before -- the console
+    # now WRITES those variables instead of an operator hand-editing them.
+    #
+    # Guarded: keystore raises on a provider it does not know, and a
+    # routing lookup must not be the thing that takes answering down.
+    import keystore
+    try:
+        model = keystore.model_for_role(job, provider)
+    except Exception as exc:
+        logger.warning(f"model lookup failed for {job}/{provider}: {exc}")
+        model = os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
     return provider, model
+
+
+# Which key-role answers which generation role. Only "reasoning" — what
+# quota.py's "deep" effort level maps to — is worth a different provider;
+# everything else is the everyday path and takes the default.
+_JOB_FOR_ROLE = {"reasoning": "advanced"}
 
 
 def _chain_for(role: str) -> list[tuple[str, str]]:
@@ -59,11 +242,21 @@ def _chain_for(role: str) -> list[tuple[str, str]]:
     the answering path actually goes through. The v8.6 override lived in
     router.route_model(), whose output generate_with_fallback ignores;
     observed result: mode=api still logged 'Attempt 1: local/phi' and
-    cold-loaded Ollama. In api mode every role answers via DeepSeek and
-    Ollama is never touched."""
+    cold-loaded Ollama. In api mode every role answers via an online
+    provider and Ollama is never touched.
+
+    The chain is one entry unless a BACKUP provider is assigned and differs
+    from the one leading — assigning a backup is what makes api mode
+    survive a provider outage instead of returning "unable to generate"."""
     from runtime_config import get_generation_mode
     if get_generation_mode() == "api":
-        return [_online_provider_model()]
+        import keystore
+        chain = [_online_provider_model(_JOB_FOR_ROLE.get(role, "default"))]
+        if keystore.get_role("backup"):
+            backup = _online_provider_model("backup")
+            if backup[0] != chain[0][0]:
+                chain.append(backup)
+        return chain
     return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
 
 # Models offered for the manual "rethink with a different model" feature.
@@ -214,7 +407,7 @@ def _call_deepseek(
         return None
 
     try:
-        res = requests.post(
+        res = _post(
             DEEPSEEK_URL,
             headers={
                 "Authorization": f"Bearer {key}",
@@ -224,14 +417,19 @@ def _call_deepseek(
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,
+                **_deepseek_extra(),
             },
             timeout=timeout,
         )
 
         if res.status_code != 200:
             logger.warning(f"DeepSeek HTTP {res.status_code}")
+            _note_credit_failure("deepseek", res)
+            if res.status_code >= 500:
+                _note_unreachable("deepseek")
             return None
 
+        _note_reachable("deepseek")
         body = res.json()
         text = body["choices"][0]["message"]["content"].strip()
         if not text:
@@ -242,6 +440,10 @@ def _call_deepseek(
         return {"text": text, "model": model, "provider": "deepseek",
                 "tokens": _usage_tokens(body, "deepseek")}
 
+    except (requests.ConnectionError, requests.Timeout) as e:
+        logger.warning(f"DeepSeek unreachable ({model}): {e}")
+        _note_unreachable("deepseek")
+        return None
     except Exception as e:
         logger.warning(f"DeepSeek failed ({model}): {e}")
         return None
@@ -255,17 +457,26 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         logger.warning("OpenAI call attempted without an API key")
         return None
     try:
-        res = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+        res = _post(
+            OPENAI_URL,
             headers={"Authorization": f"Bearer {key}"},
             json={"model": model, "temperature": 0,
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
+        if res.status_code != 200:
+            _note_credit_failure("openai", res)
+            if res.status_code >= 500:
+                _note_unreachable("openai")
         res.raise_for_status()
+        _note_reachable("openai")
         body = res.json()
         text = body["choices"][0]["message"]["content"]
         return {"text": text, "tokens": _usage_tokens(body, "openai")} if text else None
+    except (requests.ConnectionError, requests.Timeout) as e:
+        logger.warning(f"OpenAI unreachable ({model}): {e}")
+        _note_unreachable("openai")
+        return None
     except Exception as e:
         logger.warning(f"OpenAI failed ({model}): {e}")
         return None
@@ -279,7 +490,7 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
         logger.warning("Anthropic call attempted without an API key")
         return None
     try:
-        res = requests.post(
+        res = _post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
@@ -287,11 +498,18 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
+        if res.status_code >= 500:
+            _note_unreachable("anthropic")
         res.raise_for_status()
+        _note_reachable("anthropic")
         body = res.json()
         blocks = body.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         return {"text": text, "tokens": _usage_tokens(body, "anthropic")} if text else None
+    except (requests.ConnectionError, requests.Timeout) as e:
+        logger.warning(f"Anthropic unreachable ({model}): {e}")
+        _note_unreachable("anthropic")
+        return None
     except Exception as e:
         logger.warning(f"Anthropic failed ({model}): {e}")
         return None
@@ -319,19 +537,6 @@ def generate(
     return None
 
 
-def safe_generate(
-    provider: str,
-    prompt: str,
-    model: str,
-    deepseek_api_key: str | None = None,
-) -> dict | None:
-    for attempt in range(2):
-        result = generate(provider, prompt, model, deepseek_api_key, api_keys=api_keys)
-        if result and result.get("text"):
-            return result
-        logger.warning(f"Retry {attempt + 1} failed for {provider}/{model}")
-    return None
-
 
 def generate_with_fallback(
     role: str,
@@ -353,6 +558,15 @@ def generate_with_fallback(
     chain = _chain_for(role)  # v8.6.1: honors GENERATION_MODE=api
     tried = set()
 
+    # Skip a provider inside its outage cooldown -- but only when something
+    # else in the chain is not. The only option is always tried.
+    cooling = [(p, m) for p, m in chain if p != "local" and provider_cooling(p)]
+    if cooling and len(cooling) < len(chain):
+        for p, m in cooling:
+            logger.info(f"[{role}] skipping {p}/{m}: unreachable "
+                        f"{int(time.time() - _provider_down[p])}s ago")
+        chain = [pm for pm in chain if pm not in cooling]
+
     for i, (provider, model) in enumerate(chain):
         tried.add((provider, model))
         logger.info(f"Attempt {i+1}: {provider}/{model}")
@@ -365,7 +579,12 @@ def generate_with_fallback(
 
         logger.warning(f"[{role}] {provider}/{model} failed")
 
-    if ("local", "mistral") not in tried:
+    # The forced local attempt is a LOCAL-mode safety net. In api mode the
+    # chain never names Ollama (see _chain_for), and on a host without it
+    # the attempt is a 240s wait for a connection that will never come --
+    # after every online provider has already failed.
+    from runtime_config import get_generation_mode
+    if ("local", "mistral") not in tried and get_generation_mode() != "api":
         logger.warning("Forcing mistral final attempt")
         forced = generate("local", prompt, "mistral", deepseek_api_key)
         if forced and forced.get("text"):
@@ -388,20 +607,33 @@ def condense_query(current_query: str, history: list[dict], model: str = CONDENS
     standalone query using a fast local model. If the query is already
     self-contained, it is returned unchanged with no model call.
 
-    TWO GUARDS before calling the model:
-      1. No history — nothing to resolve against, skip immediately.
-      2. No reference markers — the query is clearly self-contained
-         (checked via text_utils.has_reference_markers). This prevents
-         phi from incorrectly rewriting standalone queries like "post
-         installation verification installer sign off" into whatever
-         topic happened to appear in the previous turn.
+    ONE GUARD before calling the model: no history, nothing to resolve
+    against, skip immediately.
+
+    There used to be a second guard -- `has_reference_markers` had to match
+    or the rewrite was skipped -- added to stop phi rewriting a standalone
+    query like "post installation verification installer sign off" into
+    whatever topic the previous turn was about. REMOVED 2026-09-22, because
+    it was a second, brittle classifier doing a job already asked of the
+    model: CONDENSE_PROMPT_TEMPLATE ends "If the latest message is ALREADY a
+    complete, self-contained question ... return it EXACTLY AS-IS". The
+    canonical Rewrite-Retrieve-Read step calls the rewriter unconditionally
+    and lets the prompt decide; the regex was the non-standard part, and a
+    list of surface markers can only ever be extended. It is what killed
+    "what is the power required to run both at once" -- no marker matched,
+    no rewrite ran, and the raw fragment hit retrieval.
+
+    What makes dropping it safe is that retrieval now fuses the raw and
+    rewritten phrasings (`retrieval_db.retrieve_fused`), so an unnecessary
+    or clumsy rewrite can no longer cost the original's hits. Order matters:
+    the fusion had to land first. `has_reference_markers` still exists and
+    still earns its keep elsewhere -- gating the deterministic combined-query
+    fallback in main.py, and feeding `is_followup_turn` -- where being wrong
+    costs a phrasing rather than the whole rewrite.
 
     Falls back to `current_query` unchanged on any model failure.
     """
     if not history:
-        return current_query
-
-    if not has_reference_markers(current_query):
         return current_query
 
     prompt = build_condense_prompt(current_query, history)
@@ -491,7 +723,7 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
         url = DEEPSEEK_URL
         key = keys.get("deepseek") or os.getenv("DEEPSEEK_API_KEY")
     elif provider == "openai":
-        url = "https://api.openai.com/v1/chat/completions"
+        url = OPENAI_URL
         key = keys.get("openai") or os.getenv("OPENAI_API_KEY")
     else:
         logger.warning(f"stream_generate: provider {provider!r} cannot stream")
@@ -502,21 +734,30 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
 
     import json as _json
     try:
-        with requests.post(
+        with _HTTP.post(
             url,
             headers={"Authorization": f"Bearer {key}",
                      "Content-Type": "application/json"},
             json={"model": model,
                   "messages": [{"role": "user", "content": prompt}],
                   "temperature": 0,
-                  "stream": True},
+                  "stream": True,
+                  **(_deepseek_extra() if provider == "deepseek" else {})},
             stream=True,
             timeout=timeout,
         ) as res:
             if res.status_code != 200:
                 logger.warning(f"{provider} stream HTTP {res.status_code}")
+                _note_credit_failure(provider, res)
                 return
+            _started = time.time()
             for raw in res.iter_lines(decode_unicode=True):
+                if (PROVIDER_DEADLINE_SECONDS > 0
+                        and time.time() - _started > PROVIDER_DEADLINE_SECONDS):
+                    logger.warning(f"{provider} stream exceeded "
+                                   f"{PROVIDER_DEADLINE_SECONDS:.0f}s deadline; stopping")
+                    _note_unreachable(provider)
+                    return
                 if not raw or not raw.startswith("data:"):
                     continue
                 payload = raw[5:].strip()

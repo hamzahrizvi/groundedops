@@ -27,10 +27,10 @@ tell whether a chunk in the index was built at 500 chars or 1200, which makes
 "did the chunking change help?" unanswerable.
 """
 import hashlib
-import json
 import logging
 import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 
 import jsonstore
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 _HERE = os.path.dirname(os.path.abspath(__file__))
 LEGACY_DIR = "/data/source_files"
 MANIFEST_NAME = "manifest.json"
+_HASH_CACHE: dict[str, tuple[int, int, str]] = {}
 
 
 def store_dir() -> str:
@@ -105,17 +106,52 @@ def find(filename: str) -> str | None:
 
 
 def save(filename: str, content: bytes) -> str:
-    """Retain an original. Returns the path written."""
+    """Retain an original atomically. Returns the path written.
+
+    A process interruption must not turn the durable source document into a
+    truncated file.  Write beside the destination, fsync it, then replace the
+    old version in one filesystem operation.
+    """
     d = store_dir()
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, os.path.basename(filename))
-    with open(path, "wb") as fh:
-        fh.write(content)
-    return path
+    name = _safe_basename(filename)
+    if not name:
+        raise ValueError("document filename is empty")
+    path = os.path.join(d, name)
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=d, prefix=".upload-", delete=False) as fh:
+            staged = fh.name
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(staged, path)
+        _HASH_CACHE.pop(os.path.abspath(path), None)
+        return path
+    finally:
+        if staged and os.path.exists(staged):
+            os.remove(staged)
 
 
 def sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _file_sha256(path: str) -> str:
+    """Hash a retained file, caching by the filesystem's change identity."""
+    stat = os.stat(path)
+    key = os.path.abspath(path)
+    cached = _HASH_CACHE.get(key)
+    identity = (stat.st_mtime_ns, stat.st_size)
+    if cached and cached[:2] == identity:
+        return cached[2]
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(block)
+    value = digest.hexdigest()
+    _HASH_CACHE[key] = (identity[0], identity[1], value)
+    return value
 
 
 # ── manifest ──────────────────────────────────────────────────────────────
@@ -140,17 +176,34 @@ def load_manifest() -> dict:
 
 def record(filename: str, *, content: bytes | None = None,
            chunks: int | None = None, pages: int | None = None,
-           settings: dict | None = None) -> None:
+           settings: dict | None = None) -> dict:
     """Note how one document was ingested.
 
     Written after a successful ingest so the manifest describes what is
     actually in the index, not what was attempted.
     """
     data = load_manifest()
-    entry = data["documents"].get(os.path.basename(filename), {})
+    name = _safe_basename(filename)
+    entry = data["documents"].get(name, {})
+    new_hash = sha256(content) if content is not None else entry.get("sha256")
+
+    # Keep a compact audit trail when content changes. The version identifier
+    # is the content digest itself, so it is deterministic across machines and
+    # rebuilds rather than being an upload counter or timestamp.
+    old_hash = entry.get("sha256")
+    if old_hash and new_hash and old_hash != new_hash:
+        history = list(entry.get("history") or [])
+        previous = {k: entry.get(k) for k in (
+            "version", "sha256", "bytes", "chunks", "pages",
+            "ingested_at", "settings") if entry.get(k) is not None}
+        if not any(v.get("sha256") == old_hash for v in history):
+            history.append(previous)
+        entry["history"] = history[-20:]
+
     entry["ingested_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if content is not None:
-        entry["sha256"] = sha256(content)
+        entry["sha256"] = new_hash
+        entry["version"] = new_hash
         entry["bytes"] = len(content)
     if chunks is not None:
         entry["chunks"] = chunks
@@ -158,7 +211,8 @@ def record(filename: str, *, content: bytes | None = None,
         entry["pages"] = pages
     if settings:
         entry["settings"] = settings
-    data["documents"][os.path.basename(filename)] = entry
+    data["version"] = max(int(data.get("version") or 1), 2)
+    data["documents"][name] = entry
 
     try:
         os.makedirs(store_dir(), exist_ok=True)
@@ -172,6 +226,52 @@ def record(filename: str, *, content: bytes | None = None,
     except Exception as exc:
         # Never fail an ingest because bookkeeping failed.
         logger.warning(f"Could not write manifest ({exc})")
+    return entry
+
+
+def freshness(filename: str, indexed_version: str | None = None) -> dict:
+    """Describe whether a retained source, manifest and index still agree."""
+    name = _safe_basename(filename)
+    entry = load_manifest()["documents"].get(name) or {}
+    path = find(name)
+    reasons: list[str] = []
+    actual_hash = None
+
+    if not path:
+        reasons.append("original_missing")
+    else:
+        try:
+            actual_hash = _file_sha256(path)
+        except Exception:
+            reasons.append("original_unreadable")
+
+    recorded_hash = entry.get("sha256")
+    if not entry:
+        reasons.append("manifest_missing")
+    elif actual_hash and recorded_hash and actual_hash != recorded_hash:
+        reasons.append("original_changed")
+    if indexed_version and recorded_hash and indexed_version != recorded_hash:
+        reasons.append("index_version_mismatch")
+
+    was = entry.get("settings") or {}
+    now = current_settings()
+    settings_diff = {k: (was.get(k), now.get(k)) for k in now
+                     if was.get(k) is not None and was.get(k) != now.get(k)}
+    if not was:
+        reasons.append("settings_unknown")
+    elif settings_diff:
+        reasons.append("ingest_settings_changed")
+
+    return {
+        "status": "current" if not reasons else "stale",
+        "reasons": reasons,
+        "version": recorded_hash,
+        "indexed_version": indexed_version,
+        "ingested_at": entry.get("ingested_at"),
+        "bytes": entry.get("bytes"),
+        "original_present": bool(path),
+        "settings_diff": settings_diff,
+    }
 
 
 def current_settings() -> dict:

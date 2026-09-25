@@ -6,10 +6,476 @@ what "done" looks like. Move an item to **Resolved** with the commit/PR that
 closed it — don't delete history, since the Monday report reads this file to
 know what changed since last week.
 
-Last hand-updated: 2026-08-28 — RRF retrieval bug fixed and A/B verified,
-code scan and NV9 eval added; widget plugin export shipped.
+**Friday review.** Once a week this file gets a pass, not just additions:
+
+1. Tick off anything now done — strike it through, name the commit or PR,
+   and move it to **Resolved**.
+2. Delete anything OBSOLETED rather than completed, saying what superseded
+   it. An item that a better fix made irrelevant is worse than no item: it
+   sends the next session to do work that would now be wrong. Two in this
+   file already went that way — an absolute score floor and a largest-gap
+   context cut, both measured and rejected (see `ea4320a`).
+3. Add whatever was found-but-not-done that week, WITH the measurement that
+   justifies it. An item with no evidence behind it cannot be triaged later
+   and will be rediscovered from scratch.
+
+Every item should be actionable by someone who was not in the session that
+found it. If it needs a transcript to understand, it is not written yet.
+
+Last hand-updated: 2026-09-25 (night) — the four follow-ups from the
+v16.3 rating are done: graded eval **20/34 -> 32/34 (94%)** with the answer
+baseline re-armed, the gateway models measured (like-for-like on quality,
+7x on latency, thinking cannot be switched off), NLI kept on the evidence
+of 792 logged turns, and the five deferred findings closed. See **Shipped
+— the four follow-ups** below.
+
+Previously 2026-09-25 (evening) — the conversation stress test
+landed: 14 live scripted conversations, 46/59 -> 53/59 turns as expected,
+five fixes and a ranked gap list in `docs/stress-test-2026-09-25.md`; see
+**Shipped — conversation stress test** below. Earlier that day: **v16.3 is
+tagged and published as GO_v3.2**; the work after it is on `experimental/v16.4-logic-and-latency`.
+Two audits of the answer path (a latency map, and a logic review that
+confirmed each finding against the code) landed together; see the dated
+section **2026-09-25** below for what was fixed, what was measured, and the
+five findings deferred with their evidence. Headline numbers: DeepSeek V4
+was thinking by default on every call (3.15s -> 0.94s per call once
+disabled, a tenth of the completion tokens); the same seven questions on an
+idle box go 29.7s -> 30.9s end to end only because the new code ANSWERS
+three of them the old code refused (each answer costs an NLI pass the
+refusal skipped); the same short question repeated is 3.4s -> 2.6s. Tests
+**248/248**, 1 skipped. eval.py --no-grade: 34/34 identical outcomes old
+vs new; DeepSeek V4 Pro measured against Flash and rejected (below).
+
+Previously: 2026-09-21 — the answerability switchboard
+(`src/answerability.py`) and the second grounding contract
+(`grounding.check_inference`) both landed; see **Resolved**. The switchboard
+replaced four independent question-sniffs with one classification; the
+inference contract is **off by default** and, while its rules are tested
+(15 unit tests, plus 8/8 sound vs 0/8 invented across every product on the
+real index), no model has ever been asked its prompt — the gateway is still
+NXDOMAIN. The advisory route (#5) is now classified but still not routed.
+Tests 218/218, 1 skipped.
+
+Also 2026-09-22 (later) — **`eval_baseline_retrieval.json` is ARMED**, the
+single highest-value item on the measurement list: 79/90 runs passed (88%),
+26/30 cases stable across 3 repeats (87%). Recorded against DeepSeek, not
+the on-prem gateway — see the caveat in **Measurement**, and re-arm after
+any provider or model change.
+
+Also 2026-09-22 — three faults behind "I still can't get simple answers",
+diagnosed from the widget transcript by replaying each turn stage by stage:
+a typo defeating the capability match that retrieval had NOT been fooled by,
+five missing prepositions in the capability pivot, and — the real one — the
+steps of a procedure being the least retrievable part of it
+(`retrieval_db.complete_procedures`). The MyCheckr/Linux fault was then
+fixed too, and was not a ranking fault: BM25 tokenised the query and the
+corpus inconsistently, so `linux?` scored 0.0000 and the most specific
+term in the question was discarded. Reranked R@5 and R@8 0.880 → 0.920,
+MRR 0.830 → 0.843. Tests **218/218**, 1 skipped; scenarios 79/79. (The total moved 219 → 215
+→ 218 across the day: `test_rrf` gained a process boundary, where it runs
+16 functions instead of the 5 that were silently being collected, and
+`test_model_routing` added one more own-process entry. A falling total is
+not automatically a regression here.)
+
+Previously: 2026-09-19 (second pass) — the two remaining classifiers
+were rewritten from lists of observed phrasings into general rules after ten
+scripted customer conversations found four more gaps in an afternoon; those
+conversations now score 58.2% -> 100% and live at `src/tests/run_scenarios.py`
+as a standing check. Earlier the same day: the conversational deferrals from
+the v16.5 run were closed: the follow-up misclassification found in the post-`de5a37f`
+logs, the scope-blind refusal list, the off-by-one pronoun gate, and the
+clarify options neither client read. `fastapi`/`httpx` are now in `.venv`,
+so the 21 tests that used to skip run: **214/214 pass, 1 skipped** (the
+browser UI test, which needs a live backend). Still nothing verified against
+a real generation — the gateway is NXDOMAIN, re-checked today.
+
+Previously: 2026-09-18 (Friday review) — pricing-question deflect
+bug fixed (`15aae05`); reranker benchmarked and made an operator profile
+choice (`0015564`, `11ead6a`), which stays unverified end-to-end pending
+the LiteLLM gateway; v16.5 pipeline-hardening deferrals still open (see the
+dated section below).
 
 ---
+
+## 2026-09-25 — experimental/v16.4-logic-and-latency (opened after GO_v3.2)
+
+Two read-only audits of the answer path, run in parallel, then fixes. Every
+logic fix is pinned in `src/tests/test_logic_holes.py`; every latency claim
+below was measured on this box (12 cores, CPU inference) with nothing else
+running unless stated.
+
+### Shipped — the four follow-ups (night of 2026-09-25)
+
+The rating of v16.3 named four things; all four were done, and the graded
+eval moved **20/34 -> 32/34 (94%)** on the way. Tests **252/252**, 1 skipped.
+
+**1. The graded eval was rerun, and the answer baseline was stale.**
+`eval_baseline.json` held 14 case keys with ZERO overlap with the 34 cases
+in `eval_cases.json` -- its 81% described a suite that no longer exists.
+The grader also silently did nothing: `eval.py` reads `DEEPSEEK_API_KEY`
+from the environment and never loads `.env`, so every graded check
+reported "grader returned nothing". Export the key (or run from a shell
+that has it) -- the preflight does not catch this. Graded, on DeepSeek
+Flash with the DeepSeek grader: **20/34**. Of the 14 failures, three were
+the instrument (`classify_outcome` counted the sales deflect and a
+friendly refusal as "answered"), three were stale expectations (keyword
+lists, and a "must refuse" for a question the manual answers with a
+grounded "No"), one was a mis-ordered follow-up case, and **seven were
+real**:
+
+- *The commercial deflect ran before the curated FAQ.* "Are there
+  recurring fees for MyCheckr?" has a curated answer and got "I can only
+  answer technical questions". `_sales_answer` now asks the FAQ first
+  (`suggest_candidates(..., record=False)`, no gap recorded).
+- *FAQ candidates that share only the product name.* "How does the
+  NV9USB+ communicate with a host?" was offered "What are typical
+  applications for the NV9USB+?" (0.930), "What is the NV9USB+ Range?"
+  (0.911) and "What is the NV9 USB+ Range and what does it do?" (0.899)
+  -- a menu of three dead ends where retrieval had the answer. Measured
+  over the eval: every wrong candidate shared no stemmed content word with
+  its question once product and category names were excluded; every right
+  one did, bar one close paraphrase at 0.974. Each candidate now needs a
+  shared content word, or to be the top entry at >= 0.95 and not a product
+  overview (`FAQ_SEMANTIC_SOLE_MIN`).
+- *One candidate is not a choice.* With the rule above, "Can the NV9USB+
+  recycle notes?" leaves exactly "Can the NV9USB+ Range provide note
+  recycling?" (0.927, shares recycl/note). It is served, not offered
+  (`FAQ_AUTO_SERVE_SOLE`, 0.92; harvested entries never).
+- *The FAQ scored the question with the product name appended.* In a
+  product chat the pipeline hands the FAQ "…? (MyCheckr mini)"; the pool
+  is already scoped so the suffix adds nothing, and it dragged the
+  paraphrase "What hardware components does MyCheckr include?" from 0.996
+  to under the 0.98 bar. Both scores now see the bare question.
+- *A family name overrode the picker.* "What hardware does MyCheckr
+  include?" in a MyCheckr Mini chat re-scoped to MyCheckr (whose pool lacks
+  the Mini's answer). A typed name that is a strict prefix of the selected
+  product's name or aliases no longer overrides (`_is_family_parent`).
+- *An alias matched inside a word.* Product forms were matched by
+  substring on the de-spaced question, so the Spectral's "nv9s" was found
+  inside "NV9ST" and the voltage question got the Spectral's table.
+  `_token_runs`: a form must equal a run of whole words ("nv9 usb",
+  "NV9USB+" and "nv9-usb" still all meet "NV9USB").
+- *The MyCheckr-family cases and the stemmer.* `text_utils.stem` keeps a
+  final "e", so "notes"/"note" and "recycle"/"recycling" never met; the
+  FAQ gate has its own `_norm_word`.
+
+The `run_scenarios.py` score moved 126/160 -> 142/160 on the same 24
+scenarios from these changes alone (measured against HEAD in a worktree).
+The baseline is re-armed from the final graded run (`--update-baseline`),
+so `eval.py` gates on it again. Two cases still fail: `how fast is it?`
+(the condenser sometimes rewrites the follow-up onto an older turn; the
+case now sits directly after its predecessor, which is what its own
+reference says it tests) and the NV9ST voltage question when the model
+refuses on a name the manual does not contain -- both vary run to run.
+
+**2. The gateway came back, and its models were measured.** `itl-gpt-pro`
+answers 500 (its vLLM host is down: "Cannot connect to host"). `itl-gpt-
+flash` works, at **6-9s per call** for a two-sentence answer against 0.9s
+for DeepSeek Flash, and it is a reasoning model whose thinking cannot be
+turned off: `reasoning_effort`, `thinking`, `chat_template_kwargs.enable_
+thinking` and `extra_body` were all tried; `reasoning_content` comes back
+every time. A full graded eval through it (default and advanced roles
+both on flash): **20/34, identical outcomes to DeepSeek** bar two cases
+that flipped one each way. So the gateway is a like-for-like fallback on
+quality and a 7x cost on latency until its models expose a thinking
+switch. The `reasoning` role still leads with `itl-gpt-pro`; while it is
+down the cooldown skips it after the first failure.
+
+**3. NLI on tables.** From `logs.jsonl`, 792 verified turns: NLI passed
+429 (54%), the LLM verifier rescued 284 (36%), 79 were flagged. So NLI is
+not a formality -- it settles half of all answers at ~0.14s -- and
+replacing it wholesale would add a model call to those. What v16.4 does
+(tables straight to the LLM verifier, early exit elsewhere) is the right
+split; no further change.
+
+**4. The five deferred findings, closed** (pinned in
+`src/tests/test_deferred_fixes.py`):
+- *"Deep" effort keeps its safety nets.* `QueryRequest.forced_by_effort`
+  marks a model forced by an effort level (set only by `_widget_answer`);
+  routing keeps the real role, the forced model answers first and falls
+  back to the role's chain, and extraction, the backup escalation and the
+  grounding retry all run. `top_k` from the effort spec is honoured
+  (capped at 2x `CONTEXT_K`).
+- *A reranker outage is a 503*, not a documentation gap: `rerank()` marks
+  its fallback chunks `rerank_failed` and `query()` refuses as a system
+  outage -- nothing charged, no gap recorded.
+- *A wall-clock deadline on every provider call*
+  (`PROVIDER_DEADLINE_SECONDS`, 120): the request runs on a worker and the
+  caller stops waiting; the stream path checks it between chunks. Past it
+  the provider counts as unreachable (cooldown).
+- *"is there documentation on the MDB pinout?"* is a question: the object
+  of a document request is checked for content words and for a
+  capitalised code that is not a catalogue name (`_catalogue_terms`).
+- *`/query/stream`* is left as the raw-path diagnostic it is: admin only,
+  single turn, and its value is showing what the model does WITHOUT the
+  pipeline. Documented rather than fixed.
+
+### Shipped — conversation stress test (later still on 2026-09-25)
+
+Fourteen new scripted customer conversations (59 turns,
+`src/tests/scenarios/11_*`..`24_*`, driver `src/tests/run_live.py`) were run
+through the LIVE `/query` on DeepSeek V4 Flash — the gateway was NXDOMAIN
+again — classified, and used to drive fixes. Full report with the ranked
+gap list against Intercom Fin / Zendesk / Ada / Sierra-class agents:
+`docs/stress-test-2026-09-25.md`; verbatim transcripts before and after
+sit beside it. Numbers, same scorer both sides: live turns as expected
+**46/59 (78.0%) -> 53/59 (89.8%)**; tests 249 -> **250/250**, 1 skipped;
+`run_scenarios.py` original ten 79/79, all 24 files 142/160 (the 18
+misses are `followup` labels on the new files, all pronoun/short turns
+the classifier calls standalone — left as the engineer wrote them).
+
+- **"I want to talk to a person" / "open a support ticket" / "call me
+  back" were answered with "could you tell me more concretely what you'd
+  like me to check"** (19 T4, 21 T3/T4). `src/intents.py` recognises the
+  request before any search; the turn returns `role: handoff` with
+  `offer_support`, and the widget's existing support form is the ticket.
+  The widget no longer says "not in my knowledge base" under it. 0.6-0.8s.
+  A bare greeting ("hello, how are you today") got a refusal with three
+  FAQ links; it is now a greeting. Regression caught in the run: the first
+  regex matched "how do I connect **it** to my machine" — pinned.
+- **Warranty reached retrieval and was refused** (15 T1; 0 corpus hits for
+  "warrant"). `sales._MONEY` now takes `warranty`/`warranties` and the noun
+  `guarantee` (the manuals use the verb: "to guarantee the best
+  performance"). `test_new_routes` had used the warranty question as one of
+  three corpus misses; its third miss is now the operating altitude.
+- **A comparison's follow-ups asked "which did you mean?" with both
+  products named** (18 T2-T4, 14 T2), and after the switch the next
+  pronoun resolved to the OLD product (14 T3, cashbox answered for the NV9
+  Spectral). `_COMPARISON` now covers "which one / of the two", "both /
+  either", "the same", "faster ... or"; scenario 14 is 4/4. Scenario 18
+  now reaches generation, where the model declines to synthesise two specs
+  (below, deferred).
+- **Second-document requests were summarised or refused** (17 T2 "and the
+  pre-requisites checklist too", 17 T3 "send me the NV200 Spectral SSP
+  manual as well"): `_OBJECT` rejected trailing "too / as well", `checklist`
+  was not a document noun, and the rewrite was never tried. All three
+  fixed; both now return download links in <1s.
+- **The model refused follow-ups whose standalone form it answered** (16 T6
+  "what interfaces does it support then" with the NV9USB+ interface pages
+  cited; 11 T5; 23 T3). The only difference between the two prompts is the
+  `<conversation>` block, so a refusal on a follow-up with confident
+  retrieval is retried once without it. Recovered all three; costs one
+  model call only on that shape.
+
+### Deferred from the stress test, with the evidence
+
+- **Comparison synthesis.** With the gate fixed, "which validates notes
+  faster, the NV9 Spectral or the NV9USB+" and "do they both use the same
+  SSP interface" reach the model and are refused (18 T2/T3 after-run):
+  both manuals hold the figure, in different passages. A comparison prompt
+  presenting the two products' passages side by side is the next path.
+- **"and step 3?"** re-serves the whole procedure (13 T2, before and
+  after). Wants the previous answer's numbered list, not retrieval —
+  `_expand_previous`-style on `is_more_request`.
+- **Non-English questions are refused at the retrieval gate** (24 T1/T2,
+  Spanish and German); French price question answered in French by the
+  model instead of deflecting (24 T3; `_COMMERCIAL` is English-only).
+  Route: condense-to-English on a non-English first turn, "answer in the
+  language of the question" in the answer prompt.
+- **"Does the MyCheckr support Bluetooth" -> "No."** at grounding 0.002,
+  unflagged (15 T2): inferred from the USB/Ethernet list; "bluetooth" has 0
+  corpus hits. Inference-contract territory; no path today produces "the
+  manual does not mention it".
+- **Answer consistency.** The same resolved question was refused in one run
+  and answered in the next (11 T5, 12 T1, 13 T4, 18 T1, 19 T2 each flipped
+  across four runs) at temperature 0. Single-turn deltas are within this
+  noise; the report only claims the reproducible ones.
+- **No per-answer feedback from the widget** (thumbs), so "answered but
+  wrong" is invisible unless a visitor writes in; no ticket ID shown on a
+  handoff; no push to an external desk.
+- **Freshly started backends crash after warm-up.** Four launches (nohup
+  with `/status` polling, `Start-Process`, WMI, sandbox off) died seconds
+  after "System warmup complete": WER logs `python.exe` APPCRASH in
+  `RPCRT4.dll`, `0xc0000005`, no Python traceback, 2.9 GB free. `nohup
+  python -X faulthandler -m uvicorn` with readiness read from the log
+  survived twice. Suspect: today's "models imported on first use" moving
+  a torch import off the main thread. Unresolved.
+
+### Shipped — cleanup and compaction (later on 2026-09-25)
+
+An autonomous cleanup run; its commits on this branch are `5c7a2ef` (files),
+`a5deca0` (split), `eac0699` (dead code), `3462559` (performance),
+`153851e` (untrack the logs for real) and `ccc84cb` (the torch fix below).
+Tests **249/249, 1 skipped** before and after every stage; `import main`
+still works; the OpenAPI document has the same 118 operations and identical
+component schemas before and after.
+
+- **main.py 7,443 → 3,960 lines.** The route groups moved verbatim into
+  nine `routes_*.py` modules (one `APIRouter` each), with `app_state.py`,
+  `guards.py` and `providers.py` holding what they share. Nothing in the
+  widget or console changed; two tests were repointed (one reads source text
+  that now lives in `routes_faq.py`, one clears the emailed-link rate limit
+  in `routes_admin_auth`). The answer pipeline (`query`, `query_stream` and
+  ~2,900 lines of helpers) stays in main.py because seventeen test files
+  patch its collaborators through `main.*`; moving it means moving those
+  patches with it, in one change.
+- **One source inventory, `docindex.py`.** `/catalog`, `/widget/catalog`,
+  `/admin/sources`, `/stats` and the "give me the manual" path each fetched
+  every chunk's metadata from Chroma per call. Measured `/catalog`, 30 runs
+  over one keep-alive connection on an idle box: **45.4 ms → 2.0 ms** median.
+  Every other timed route is within 0.5 ms of before. The two copies of the
+  doc-count logic and the two read-a-source's-text loops are one each now.
+- **`import main` 11 s → 3 s** for every test run and CLI tool:
+  sentence_transformers is imported when the first model loads. Server
+  time-to-ready is unchanged (15 s here, stage times identical) because the
+  startup hook imports it before spawning the warmup thread -- and it MUST:
+  imported first from the warmup thread, torch took the process down with an
+  access violation when that thread exited, three of four starts.
+- **Stores.** `faq_store.json` is parsed once per change (mtime+size key,
+  callers get per-entry copies) instead of once per query and console load;
+  `policy.py` now reads and writes through `jsonstore` like every other
+  store -- the one deliberate behaviour change: a corrupt `policy.json` is
+  refused with a 500 rather than overwritten. In-process FAQ-hit query
+  9 → 8 ms; the rest of that path is the embedding forward pass.
+- **Dead code removed** (each confirmed unreferenced across src, tests,
+  tools, packaging): `embeddings.embedding_dim`, `faq_store.update_answer`,
+  `match_answer`, `_gap_store_mtime`, logger's unused readers,
+  `structures.harvest_into_faq` and `CHECKLIST_RE`, `answerability.ALL_KINDS`,
+  `main._stamp_ingest` and its `SOURCE_FILE_DIR` copy, a second identical
+  `keystore.providers()`, and every unused import and variable pyflakes
+  reported. Fixed on the way: replacing a document under a NEW filename
+  never removed the old chunks (`db.delete_source` with no `db` bound, the
+  NameError swallowed by its own except).
+- **Files.** Deleted: `brag-output/`, `promo-output/`, `demo/`, `scratchpad/`
+  (renders and their node_modules), every `__pycache__`, the stale
+  `HANDOFF_console_ux.md`. Untracked, kept on disk: `logs.json`, `logs.jsonl`,
+  `eval_results.json`. Removed from git: `before.json`, `after.json`,
+  `after_bge.json`, `minilm18.json` (August embedding comparison), and
+  `eval_cases_16.json` + `eval_baseline_16.json` (a July superset copy of the
+  extensive suite that nothing runs). Moved to `backups/`: `backup_snapshots/`,
+  `before-nv9st-retag.zip`, the August full backup.
+- **Left alone, deliberately:** `src/legacy/` (release.py writes its drops
+  there, CodeQL excludes it); `sweep_grounding.json` and its two logs (a
+  saved measurement); root `backend.log`/`tunnel.log`/`testpage.log` (open by
+  the running launcher); `handover.txt` (run.ps1 output); the widget JS/PHP
+  and `admin.html` (no repeated region of 8+ lines inside either -- sharing
+  helpers between them would need a build step); `catalog_config.json`
+  caching (3 KB, 0.18 ms a parse, six parses a query -- not worth the copy
+  semantics); `widget_api._client_ip` vs `guards._external_ip` (different
+  proxy-trust rules, not a duplicate).
+
+### Shipped — latency
+
+- **DeepSeek V4 thinks by default, and nothing turned it off.** `llm.py`
+  sent `model` + `messages` + `temperature`; V4 Flash then writes a hidden
+  chain of thought, bills it as completion tokens, and only then answers.
+  Measured on a 1.3k-token manual prompt, 3 runs each: thinking on 3.15s,
+  365-700 completion tokens of which 334-669 were reasoning; thinking off
+  0.94s, 30-66 tokens; same answer. Every DeepSeek call — answer, condense,
+  verifier, clarify draft, retries, the stream — now sends
+  `thinking: {type: disabled}`; `DEEPSEEK_THINKING=on` restores it.
+  End to end, `llm_time` per answer went 0.8-5.1s -> 0.6-0.9s and tokens
+  per turn 2726 -> 1981 on the worst question. **The reasoning tokens were
+  being charged to the visitor's quota.**
+- **Provider cooldown** (`PROVIDER_COOLDOWN_SECONDS`, 60): a provider that
+  failed to connect or answered 5xx is skipped while the chain has another
+  entry. The role `reasoning` leads with the on-prem gateway, which is
+  NXDOMAIN again today, so every such question and every grounding retry of
+  it paid that failure first.
+- **No forced Ollama in api mode.** `generate_with_fallback` appended a
+  local/mistral attempt whenever the chain lacked one — in api mode that is
+  always, and on a host without Ollama it is a 240s connect after every
+  online provider has already failed. Contradicted the "Ollama is never
+  touched" comment in `_chain_for`.
+- One `requests.Session` with a pool for every provider call (was a fresh
+  TCP+TLS per call, three to five calls a turn); query embeddings memoised
+  (the same resolved query was embedded three times a turn: FAQ, retrieval,
+  router); the router's 30 category examples embed at warmup instead of on
+  the first question after a restart; the widget's `async` handler runs the
+  quota sqlite calls and the FAQ lookup in the threadpool instead of on the
+  event loop.
+- **BM25 padded its arm with zero-score chunks** in corpus order up to
+  `fetch_n`, and RRF rewarded them: dense #20 + zero-pad BM25 #5 outscored
+  dense #1 alone. The arm now ends at the last lexical hit. (Logic and
+  latency both.)
+- **NLI grounding stops at the first failing unit.** Batching every pair
+  into one `predict()` was tried first and measured at no gain — 8.8s vs
+  10.2s on a 15-unit answer, noise; the cost is ~50ms per pair on CPU. Early
+  exit changes no verdict (the callers branch on the boolean; no rescue
+  reads the score). A markdown-table answer skips NLI entirely and goes to
+  the LLM verifier, which is where every table answer ended up anyway after
+  5-30s of scoring rows NLI cannot read.
+- `timing` now logs `retrieval_time` and `verifier_llm_time`, and the
+  response carries the verifier split too.
+
+### Shipped — logic (each with the input that used to go wrong)
+
+- **Table punctuation was a grounding unit.** `split_units` emitted
+  `|---|---|---|` and `### Heading` as claims; NLI scores them ~0 and the
+  gate takes the minimum, so every 3+-column table answer failed on its
+  punctuation. Stripped now.
+- **The number rescue used substring containment.** "30 notes" was
+  supported by "300 notes", "12V" by "revised 2012", "1.2 kg" by "1.25 Kg"
+  — the contradictions the gate exists for. Whole-number match now, and
+  never on a table.
+- **The picker was overridden by the rewrite, not the question.** With a
+  product selected, the override read `_products_named_in(resolved_query)`,
+  and the condense prompt tells the rewriter to carry the product over from
+  history. Pick NV9USB+, ask its supply voltage, change to BV30, ask "and
+  the current draw?" -> answered for the NV9USB+ under a BV30 scope bar.
+  Now the typed text decides when a picker is set; the rewrite still counts
+  when there is no picker (it is a follow-up's only product signal).
+- **`_AFFIRMATIVE` had no word boundary.** "Yesterday the NV9 stopped
+  accepting notes", "okay so what about android then?", "please tell me the
+  weight" all served the pending steps. `\b`, <= 8 words, no question word.
+- **Commercial classifier on technical vocabulary.** "quotes around the
+  value", "subscribe to age result events", "availability of the RS232
+  port", "third-party power supplier" all deflected to the sales reply.
+- **A customer-facing refusal was remembered**, so "tell me more" expanded
+  it into passages or "that is everything the documentation has" — the
+  memory filter only knew the model's own refusal string.
+- **An off-topic cross-reference claimed the refusal**: any NV200S refusal
+  that retrieved p84 said "the manual refers jam recovery to the Service
+  Guide, which I don't hold" and dropped the suggested questions. A
+  deferral now needs word overlap with the question OR to come from the
+  top-ranked passage ("screen size" vs "the dimensions of the device").
+- **The widget charged a credit for our own outage** (`service_degraded`).
+- **A curated question typed verbatim in a product chat was never
+  auto-served**: the FAQ matcher saw the retrieval-expanded "…? (NV9
+  Spectral)" and scored 0.50 against itself. Every widget chat is scoped,
+  so every customer got "is this what you meant?" instead. Two eval FAQ
+  cases flipped to pass on the backend that had this fix.
+- Catalogue-derived classifier caches (`text_utils._PRODUCT_TERMS`,
+  `retrieval_db._PRODUCT_CATEGORY`) reset on catalogue save; they lived
+  until restart.
+- `safe_generate` removed (dead; referenced an undefined name).
+
+### Measured and rejected
+
+- **DeepSeek V4 Pro as the default.** Same code, `ONLINE_DEEPSEEK_MODEL=
+  deepseek-v4-pro`: `llm_time` 1.2-4.0s vs 0.6-0.9s, and on the five
+  probe questions it refused three that Flash answered (bezel colour,
+  cashbox capacity, protocol steps). eval --no-grade 20/34 vs 18/34, but
+  both extra passes are the FAQ verbatim fix above, which only that backend
+  had. No quality gain to pay 2-3x latency for. The gateway models
+  (`itl-gpt-pro`, `itl-gpt-flash`) could not be tested: NXDOMAIN all day.
+- **Thinking mode as a quality lever**: the old backend (thinking on) and
+  the new (off) produced identical eval outcomes on all 34 cases.
+
+### Deferred, with the evidence — **all closed on the night of 2026-09-25**,
+see *Shipped — the four follow-ups* above; kept for the record.
+
+- ~~**"Deep" effort buys fewer safety nets.**~~ `_widget_answer` maps deep to
+  `force_provider/force_model`, which makes `role="rethink"`, and that role
+  skips extraction, backup escalation and the grounding retry
+  (`main.py` ~6145, ~6427, ~6491). Its `role`/`top_k` parameters are never
+  read. Map deep to a real role instead of the rethink path.
+- ~~**A reranker outage reads as a documentation gap.**~~ `reranker.py` returns
+  chunks without `rerank_score` on failure -> confidence "none" ->
+  "rejected" + `record_gap`. Should be a system refusal. Fail-closed, so no
+  wrong answer, just a false gap.
+- ~~**`/query/stream` skips**~~ condensation, name scoping, sales deflect, the
+  template-leak check, the LLM verifier and procedure completion. Admin
+  only; noted.
+- ~~**No overall deadline on a provider call.**~~ `timeout=60` bounds connect
+  and each read, not the total; one logged turn has `escalation_time`
+  16544s. A worker-thread `future.result(timeout)` or a streaming cap.
+- ~~**`doc_request` on "is there documentation on the MDB pinout?"**~~ returns
+  the file list; `_CONTENT_WORDS` checks the prefix only. Needs the
+  catalogue to tell a product from a topic in the object.
+- **rerank_time 1.2s on the new process vs 0.9s on the old** for the same
+  question, steady state. Not explained; same model, same candidates. Worth
+  one look at torch thread settings when two backends share a box.
 
 ## Blocking
 
@@ -88,6 +554,17 @@ code scan and NV9 eval added; widget plugin export shipped.
   end-to-end delta of that size means anything on its own. The evidence for
   this fix is the deterministic retrieval-layer measurement above, not the
   end-to-end tally.
+
+  **Pinned by tests 2026-09-22.** The rescue was inline in
+  `retrieve_from_db` and nothing asserted it, in a function whose own
+  comments record the candidate margin being silently thrown away by a
+  later edit *twice*. Extracted to the pure `apply_arm_guarantee` and
+  covered in `tests/test_rrf.py`: the rescue itself, that it extends rather
+  than reorders the RRF head, that it stays cheap (a few extras, not 2x the
+  window), the NV9S rank-20-of-46 case reconstructed from the measured arm
+  ranks, and the two knob defaults -- so a revert to `ARM_GUARANTEE=0` or a
+  raise to `CANDIDATE_MARGIN=2.0` fails the suite instead of quietly
+  restoring the refusal.
 
   **Correction:** an earlier version of this entry said this was "strongly
   suspected" to be the cause of the MyCheckr 0.0051 case below. That was
@@ -239,13 +716,32 @@ code scan and NV9 eval added; widget plugin export shipped.
   bound a determined caller; the session caps stop an honest runaway thread.
   Worth knowing before relying on them for anything adversarial.
 
-- **~50s of a 113s answered query is unattributed.** Measured breakdown:
-  DeepSeek call 47.8s, NLI grounding 8.4s, reranker 3.9s, retrieval 3.0s — sums
-  to ~63s, wall clock was 113s. Needs per-stage timing instrumentation around
-  the request path to close (today's `timing` dict only covers part of it).
-  `CONTEXT_K=5 CHUNK_CHAR_CAP=1200` roughly halves prompt size as a stopgap if
-  latency matters more than recall — untested trade-off, measure with
-  `eval_retrieval.py --compare`.
+  **2026-09-24: the per-IP ceiling did not exist in the default guest mode.**
+  Checking the claim above found it false for FAQ-only guests, the mode that
+  ships. `quota.consume_faq_lookup` counted every lookup against the IP, but
+  `check_faq_lookup` read only the per-visitor count, and the visitor id
+  comes from the browser too, so clearing site data reset everything. It now
+  enforces `anon_ip_daily` on FAQ lookups as well (reason `ip_faq_quota`;
+  the widget still shows its usual daily-limit message). `reset_visitor` also
+  missed the per-IP credit counter, so a guest blocked on `ip_quota` stayed
+  blocked after a console reset; fixed. Pinned by
+  `tests/test_quota_ceilings.py`. The session caps are still a cost guard by
+  design. No server-issued session id would change that, because a caller
+  can just ask for a new one. What bounds a caller is identity: the IP for
+  guests, the account for members.
+
+- ~~**~50s of a 113s answered query is unattributed.**~~ — **RESOLVED
+  2026-09-25, and the figure was stale.** It came from v15.1, when the
+  `timing` dict had four keys. Re-traced against the 52 timed entries in
+  `logs.jsonl`: on answered turns the gap between `total_time` and the
+  logged stages is now ~0.8s median. The big gaps (201.9s, 67.9s, 29.0s)
+  were all turns where the model refused or the answer was flagged, and the
+  time went into `_structures_for(force_kind="table")` reading every page
+  of each cited PDF for its vocabulary — untimed, per process, cache
+  cleared wholesale at 16 files. That vocabulary is now persisted
+  (`doc_vocab.json`, `DOC_VOCAB_CACHE`). And "NLI grounding 8.4s" was
+  mostly the LLM verifier's second full-context call, which `grounding_time`
+  hid; `verifier_llm_time` and `retrieval_time` are now logged separately.
 
 - **RESOLVED v15.2: markdown now renders in both surfaces.** The admin
   console's test chat and the widget both render lists, tables, bold and code.
@@ -425,10 +921,19 @@ code scan and NV9 eval added; widget plugin export shipped.
     1. A part-number lookup with one obvious answer arguably wants serving
        directly rather than as a one-item multiple choice — the menu earns
        its place when the question is genuinely ambiguous.
-    2. It intercepted a **pricing** question (no pricing anywhere in the
-       corpus) that should have been refused outright, so whatever a visitor
-       gets after picking a candidate there is untested and might imply the
-       corpus covers pricing.
+    2. ~~It intercepted a **pricing** question (no pricing anywhere in the
+       corpus) that should have been refused outright~~ — **FIXED
+       2026-09-17** via `15aae05`. Root cause was upstream of the FAQ store:
+       `is_sales_question`'s `_CROSS` regex carried only catalogue-navigation
+       vocabulary and missed 9/10 real commercial questions (price, cost,
+       quote, lead time, buy, purchasing, reseller), so `_sales_answer`
+       returned `None` before `sales_mode` was ever consulted and the
+       pipeline answered from the manual instead — "The NV9 Spectral is
+       offered at a mid-range price, delivering casino-level security", with
+       six pages cited behind it. New `sales.is_commercial_question`, kept
+       separate from `is_sales_question`, deflects commercial questions
+       under every `sales_mode` including the default. Tests 201/201 at the
+       time.
 
     Measurement consequence, and the more important point: **65% of the
     official suite (22/34) returns in under a second without touching
@@ -451,6 +956,476 @@ code scan and NV9 eval added; widget plugin export shipped.
   **Not yet clicked in a browser** — the card is DOM-driven like the rest of
   the console, and the download path (blob + synthetic `<a download>`) is
   covered only by backend tests.
+
+## Deferred from the v16.5 pipeline-hardening run (opened 2026-09-17)
+
+Everything below was found while fixing something else, measured, and then
+NOT done — either because it was out of scope for the change in hand or
+because the evidence said a different fix was better. Each carries the
+measurement that justifies it, so a future session can act without redoing
+the work. Branch `experimental/pipeline-hardening`, PR #13.
+
+**Conversation**
+
+- ~~Neither client reads `clarification_options`~~ — **FIXED 2026-09-19.**
+  Forwarded from `/widget/ask` and from the `/ask/stream` meta event (a
+  second, separate allowlist that would otherwise have disagreed with the
+  blocking path), rendered as chips in the widget through the existing
+  `chips()` helper and as buttons in the console through the same idiom as
+  `product_options`. Tapping one sends it as the next message, which is the
+  path a typed answer already takes. Verified in a browser against a stubbed
+  backend: the chip row renders "Which did you mean? / NV9 Spectral /
+  NV9USB+" and a tap fires a fresh `/widget/ask`.
+
+  Two things came out of doing it. The refusal-path clarify now builds
+  `ambiguous_in_domain` options (product labels) rather than `followup`
+  ones (the visitor's own earlier questions), because the question it asks
+  now ends "...or which model you mean?"; it falls back to `followup` when
+  nothing maps. And `_product_label_for_source` had a hardcoded list of four
+  products, so NV9, SMART Coin System and BV30 sources returned None and the
+  chips were silently EMPTY for most of the range — it now reads the
+  catalogue first, and every mapped manual now resolves — NV9 Spectral,
+  NV9USB+, NV200S, BV30, SMART Coin System, MyCheckr, MyCheckr mini,
+  MyConnect. (An earlier note here claimed BV30 still returned None. That was
+  wrong: the check had used an invented filename, "BV30 Range User
+  Manual-v1.pdf", where the real one is "BV30 User Manual-v1.pdf".) Two
+  deliberate blanks remain: `note_val_general` and `nv22s` have no sources
+  attached at all, and the shared-doc buckets are named "General …", which
+  the lookup skips because a bucket is not a choice to offer.
+- ~~The refusal's suggestion list is unranked and scope-blind~~ —
+  **FIXED 2026-09-19** via `_refusal_suggestions`. The real fault was
+  narrower than recorded: `list_for_product` filters correctly when a
+  product IS in scope and returns the whole file when one is not, which is
+  exactly the unscoped turn where the visitor has given us least. So an
+  unscoped refusal now derives its scope from the documents retrieval just
+  cited (`catalog.product_for_source`), then ranks what survives against the
+  question. Checked against the real FAQ store: the 1969 case ("what is RMS"
+  with the SCS manual cited) now offers three SMART Coin System questions.
+
+  The floor is deliberately soft, and that is a decision rather than an
+  oversight: by the time a refusal is being written, `suggest_candidates`
+  has already declined everything at its 0.70 floor, so reusing that bar
+  would empty the list on essentially every refusal. Ranking is lexical
+  only — `faq_store._semantic_scores` embeds against the WHOLE store
+  regardless of the pool it is passed (measured 10.7s cold, 2026-09-19),
+  which is not a cost to add to a refusal. The consequence is pinned in
+  `tests/test_refusal_suggestions.py`: a pure paraphrase ("works offline" vs
+  "internet connection") is NOT reordered, and scope filtering is what
+  protects that case.
+- ~~A fresh question was read as a follow-up~~ — **FIXED 2026-09-19.**
+  Found by reading the six turns logged after `de5a37f` shipped:
+  `logs.jsonl` 2026-09-17 14:01, "how sturdy are nv9 st", was answered with
+  a clarifying question about the PREVIOUS turn's pricing question.
+  `is_followup_turn` reads `resolved_query != raw_query` as evidence the
+  CONVERSATION rewrote the question — sound until `86d6728` started
+  appending the selected product for retrieval, after which the two differ
+  on nearly every scoped turn. `main.py` now freezes `condensed_query`
+  before that rewrite and hands the gate that instead. A second fault in the
+  same branch: the clarify text quoted `history[-1]["q"]`, so it named
+  whatever was asked last rather than the turn that failed; it now quotes
+  the question just asked, keeping a `_CLARIFY_MARKERS` phrase so the
+  "never twice in a row" guard still recognises its own wording.
+
+  Measured by replaying 19 turns — the logged failures plus unseen questions
+  in both registers, an installer naming parts and a newcomer describing a
+  fault: 11 turns newly classified correctly, 8 unchanged, 0 regressions.
+  Also fixed in passing, found by the unseen questions: the "what about X"
+  opener group was single-use, so "ok and what about the mini" matched
+  nothing while "ok what about the mini" matched. People stack those openers
+  constantly.
+
+- ~~The follow-up classifier was a list of phrasings customers had already
+  used~~ — **REPLACED 2026-09-19 with four general rules.** Ten scripted
+  customer conversations (one per product, `src/tests/run_scenarios.py`)
+  found four more gaps in an afternoon: bare "that" ("is THAT configurable
+  from the host"), bare "one" ("which ONE would you recommend"), and the
+  eight-word length gate failing in both directions — "does it need a
+  separate supply from the host board" is nine words and read as standalone,
+  "can my staff use it without any training" is eight and read as a
+  follow-up. Patching four more entries into the list would have bought a
+  fortnight.
+
+  `has_reference_markers` is now four rules over CLOSED word classes, with
+  `why_reference_markers` returning which one fired so a misjudgement can be
+  argued about without re-deriving it from regexes:
+
+    R1 opener            discourse connectives, stackable, plus the
+                         elliptical "what about" frame
+    R2 pro-form          a pro-form doing referential work, in a question
+                         that does not name a product of its own
+    R3 discourse deixis  "the above", "step 3" / "step three", "as mentioned"
+    R4 continuation      "tell me more"
+
+  R2 carries the work the word count was proxying for. A question that NAMES
+  ITS SUBJECT is self-contained whatever pro-forms it also holds, and the
+  product list comes from the catalogue, so adding a product in the console
+  teaches the classifier too. Three structural tests keep the false
+  positives down, each of which cost a debugging round: expletive "it" is
+  not referential ("how long does IT take to..."), an antecedent in the same
+  sentence resolves the pro-form ("...or does IT self-level", "IF the
+  machine rejects a note, does IT..."), and "one" is only a pro-form when it
+  heads an elided noun phrase ("which one", not "share one RS232 bus" and
+  not "day one").
+
+  Scored on the ten conversations, 79 checks: **58.2% → 100%**. Two of the
+  79 labels were revised after the rule disagreed with them and the rule
+  turned out to be right ("will this fit under a standard shop counter" and
+  "what would one of these cost us at fifty units" both need the previous
+  turn); both revisions are recorded in the files with their reasoning.
+  `tests/test_general_classifiers.py` pins the rules and, mostly, the false
+  positives.
+
+  **Their job narrowed on 2026-09-22.** These rules no longer decide whether
+  the rewriter runs — that gate is gone, and the prompt decides (see the
+  condensation item under *Retrieval and ingest*). They still gate the
+  deterministic combined-query fallback and feed `is_followup_turn`, where
+  being wrong costs one phrasing rather than the whole rewrite. Worth
+  knowing before extending them: a miss is no longer fatal, so the pressure
+  that produced `de5a37f`'s marker patch is off.
+
+- ~~`is_commercial_question` missed "fees"~~ — **FIXED 2026-09-19**, and
+  generalised for the same reason. It was a list of observed words, so "are
+  there any recurring fees for using it" went to the model — the same
+  failure `15aae05` was written to stop, through a word nobody had typed
+  yet. It is now the money/commerce field in four groups (what it costs, how
+  to buy, when it arrives, who from), matched on stems so "fee" covers fees
+  and "licen" covers licence/license/licensing.
+
+  Words this corpus uses in a NON-commercial sense are excluded and pinned
+  by test: a coin hopper PAYS OUT, a serial link has a baud RATE, a battery
+  takes a CHARGE, "in ORDER to" is throughout the manuals, and a validator
+  FEEDs notes — that last one is not hypothetical, the `fee` stem matched
+  "feeds" and routed a note-handling question to sales until scenario 03
+  caught it.
+
+- ~~A refusal could not tell "we never had this" from "the manual sent us
+  somewhere we do not hold"~~ — **FIXED 2026-09-21** (`crossrefs.py`,
+  `GET /admin/crossrefs`). Found in a real transcript: "what is the screen
+  size of the MyCheckr?" is refused, correctly, because MyCheckr User Manual
+  p5 says *"Refer to MyCheckr Range Technical Data for the dimensions of the
+  device"* and that sheet is not ingested — while "what is the weight?" is
+  answered. The refusal now names the document, read from the chunks
+  retrieval actually returned, so relevance is not guesswork.
+
+  The scan over the live index finds five referenced-but-absent documents:
+  **MyCheckr Range Technical Data** (both MyCheckr manuals, dimensions),
+  **Service Guide** (NV200S p84, jam recovery), **BNF Path Guide** (NV200S
+  p44), **Lock Specification** (NV200S p38), and one false positive,
+  "Action Data" (an ICU API section name). Each row carries the sentence it
+  came from so a false positive costs an operator seconds. Getting the
+  Technical Data sheet ingested is the single highest-value corpus action
+  on this list.
+
+  Three filters earned their place, each against a real false positive: the
+  title is matched CASE-SENSITIVELY (without that, "refer to the relevant
+  manual" was a document, four times), internal pointers are excluded ("see
+  the table below for screw specification"), and a reference that spells out
+  its own document's name is a section pointer, not a gap.
+
+- ~~"Does X work with Y" was refused with the answer on screen~~ — **FIXED
+  2026-09-21.** "does ICU work with linux?" was refused while retrieval
+  returned *Accessing my device in Linux Environment* at rank one, and the
+  refusal then offered "How do I access my ICU device in a Linux
+  environment?" as a suggestion.
+
+  `text_utils.capability_target` reads the target off a closed set of frames
+  (pivoting on the last companion preposition, so "can I use MyCheckr with
+  linux" yields "linux" and not "MyCheckr with linux"), and
+  `main._capability_reply` reports what the corpus holds about it in two
+  tiers: a document TITLED for the target, or a NUMBERED PROCEDURE whose
+  body names it — which is how Android is answered, since it appears only in
+  the body of `ICU_Network_API` p14. A passing mention is neither and is not
+  reported.
+
+  Answered before the clarify gate, because a question we can answer must
+  not be answered with a question. The sentence is composed rather than
+  generated and claims only that a procedure exists, in this document, on
+  this page — never that the product is compatible, which is not ours to say
+  and is what a wrong answer here would cost a site visit. Where nothing is
+  documented the refusal says so explicitly, as a gap rather than an answer
+  either way.
+
+  Deliberately NOT done: enumerating which platforms we do document ("I have
+  Linux and Android"). Deriving that needs either a hand-kept list of
+  platform names or a fuzzy guess at which documents are integration
+  documents, and both are the kind of thing this codebase has just spent two
+  days removing.
+
+- ~~**No answerability turn type.**~~ — **PARTLY DONE 2026-09-21**, see the
+  switchboard entry under **Resolved**. `src/answerability.py` now makes one
+  classification per turn (stated / documented_elsewhere / inferable /
+  advisory / unanswerable), `main.query` dispatches on it instead of four
+  features each sniffing the question, and the kind is on the response as
+  `answerability` so the console can tell a corpus gap from a question no
+  corpus answers.
+
+  **Still open: the ADVISORY route.** The outcome is classified and nothing
+  acts on it — a recommendation ("I want to run a SCS with a note recycler,
+  what do you recommend?") is now correctly *labelled* and still gets the
+  refusal. Routing it needs slot-filling ("waiting on: note/coin, depth,
+  cashless") resolved against the question that was asked, and memory holds
+  only `{q, a}` strings. `sales.py` already has `build_index`, `find_by_spec`
+  and `compare` over the spec tables, so the missing piece is the pending
+  state, not the matching. Large, and unchanged in size by the switchboard.
+- ~~`_SHORT_ONLY_PATTERNS = {6}` is off by one~~ — **FIXED 2026-09-19**
+  (`{6}` → `{7}`). It gated the sentence-initial pronoun pattern while the
+  comment beside it described gating the anywhere-pronoun one, so it was
+  wrong in both directions: a long standalone question containing "it" read
+  as a follow-up, and a sentence-initial pronoun stopped counting past eight
+  words — which is how people actually describe a fault ("it keeps rejecting
+  the same note even after I cleaned the note path").
+
+**Retrieval and ingest**
+
+- ~~**A document tagged to a product is not reached by that product's
+  questions.**~~ — **FIXED 2026-09-22**, see **Resolved**. Two causes, and
+  the first one was not about this case at all: BM25 was tokenising the
+  query and the corpus inconsistently, so `linux?` scored 0.0000. The
+  residue, after that fix, is that the cross-encoder still (correctly)
+  drops a document that never names the product being asked about, and
+  that is answered from the operator's own tagging rather than by forcing
+  candidates past the rerank cut.
+
+- ~~**Condensation can destroy a working query, and is gated by the wrong
+  thing.**~~ — **FIXED 2026-09-22**, both faults, in the prescribed order.
+  Two faults in one mechanism (`llm.condense_query`, the
+  Rewrite-Retrieve-Read step over the last 2 turns). Fixing them together is
+  the single highest-value retrieval change on this list.
+
+  *It replaces rather than augments.* Measured on "what are the power
+  requirements for this setup?": as typed it put the PSU page at #1 (0.9348)
+  with a clean cliff to 0.0843; resolved to name both products, the PSU page
+  was **not retrieved at all** and a firmware-programming page entered
+  context instead. A good query can be rewritten into a worse one with no way
+  back.
+
+  *It is gated behind a regex.* `has_reference_markers()` must match or the
+  rewrite is skipped entirely and the raw fragment hits retrieval. That gate
+  is the non-standard part: the canonical pattern calls the rewriter
+  unconditionally and lets the prompt decide, which
+  `CONDENSE_PROMPT_TEMPLATE` already instructs ("if already self-contained,
+  return it EXACTLY AS-IS"). The regex is a second, brittle classifier doing
+  a job the model was already asked to do — it is what killed "what is the
+  power required to run both at once", where no marker matched so no rewrite
+  ran. `de5a37f` added set-anaphora markers, which patches the list rather
+  than fixing the design.
+
+  Done looks like: retrieve on the raw AND rewritten query and fuse (RRF is
+  already there to do it), then drop the regex gate — safe only in that
+  order, because fusing is what stops a bad rewrite losing the original's
+  hits. Verify against `eval_cases_retrieval.json`, which needs no provider.
+
+  **What shipped.** `retrieval_db.retrieve_fused` retrieves on each distinct
+  phrasing and merges; `main.py` passes the rewritten query and the query as
+  typed, and the gate is gone from `condense_query` — the prompt decides, as
+  it was already asked to.
+
+  *RRF was the wrong tool for the merge, twice.* "Fuse with RRF" was the
+  plan and it loses the rewrite's hits, which is the same bug pointed the
+  other way. A rewrite drops **9–13 of the 16** candidates the question had
+  as typed (measured over the live index), so fusing two 16-lists into 16
+  slots evicts about half of each. On *"what is the power required to run
+  both at once"* that evicted the only chunk that answers it — NV200S p69,
+  `24VDC / 3.5A ... whilst the SCS requires 24V DC 7.5A`, reranked 0.9975 —
+  leaving generic power-supply boilerplate at 0.9936. Reserving an equal
+  share of the window per query failed the same way: the reranker's best
+  pick routinely sits at retrieval rank 9–16, outside any half-share.
+
+  *What works is strictly additive*, and it is the 2026-08-28 lesson again:
+  keep the primary query's candidates **in full** and add the top
+  `RETRIEVAL_ARM_GUARANTEE` of each other phrasing, through the same
+  `apply_arm_guarantee` helper as the bm25/dense arms. Ordering is not fused
+  at all — `main.py` reranks the full candidate list and only then truncates
+  to `CONTEXT_K`, so membership is the only thing that matters, and an
+  ordering pass's one real effect would be deciding who gets trimmed.
+
+  Deterministic measurement, 7 conversational queries over the live index:
+
+      candidates the rewrite had and fusion lost : 0  (was ~8 under RRF+trim)
+      candidates added                           : 0-3, avg 1.7 per query
+      queries where a rescued candidate reached the prompt : 2 / 7
+      queries where the reranked TOP changed     : 1 / 7  (0.9954 -> 0.9960)
+
+  *Removing the gate needed a third change, not in the original plan.*
+  `is_followup_turn` read `resolved_query != raw_query` as proof the
+  conversation was needed. That was survivable while a regex gated the
+  rewriter; with it running on every turn, any cosmetic difference — and
+  `_normalize_query` alone lowercases `DEFAULT LOGIN???` — makes a fresh
+  question read as a follow-up and earn a clarifying question about the
+  previous topic. That is the 2026-09-19 fault arriving through a different
+  door. The clause now asks whether the rewrite *added content words that
+  came from the history*, so reflowing and repunctuating are correctly
+  ignored. It also closes the trap in
+  `test_product_context_must_not_be_what_makes_a_turn_a_follow_up` for an
+  unrelated product — though **not** when the appended product is the one
+  already under discussion, which is the normal case in a product chat, so
+  freezing `condensed_query` remains the actual fix and the test now pins
+  that residue honestly.
+
+  **Not fixed by this, and worth separating out:** the cross-encoder still
+  prefers boilerplate that merely mentions a term over the table that
+  answers the question. `what is the pinout for the NV9USB+` ranks p18
+  ("pin to pin compatible", mounting prose) at 0.9931 above p44, which *is*
+  the MDB pin-assignment table. Fusion puts both in front of the reranker;
+  it cannot make the reranker choose. Same family as the heading-list and
+  content-free chunk items below.
+- **Multi-entity questions are not decomposed.** "NV9 Spectral with Note
+  Float" is two entities; one embedding blends them and favours chunks that
+  weakly mention both over the best chunk for each. `sales.py` already does
+  per-product decomposition for comparisons — same shape.
+- **Nested product names collapse.** "Note Float" and "Multi Note Float" are
+  different products (p25 of the NV9 manual lists them at 1.04 kg and
+  1.2 kg) and the system blurs them. Same class as the MyCheckr / MyCheckr
+  Mini item already recorded above.
+- **50 duplicate chunks (2.9%).** Exact-body repeats — a liability notice
+  5x, a command acknowledgement 5x, the Supply Voltage table 4x. Two of the
+  eight context slots for a BV30 question went to the same escrow text.
+- **7 heading-list chunks.** Bodies that are a page's own table of contents
+  ("Additional Features / Typical Applications / Component Overview").
+  Small, and harder to detect than the footers fixed in `9c138d3`.
+- **A BV30 coverage miss.** "does the BV30 support polymer notes?" returns
+  cashbox and escrow text in the top 3 — nothing about note handling. BV30
+  also has the highest share of content-free chunks (15%), so this may be an
+  extraction gap rather than a ranking one.
+- **`nv9_spectral,biometrics_general` tagging.** Every chunk of the NV9
+  Spectral manual carries a biometrics tag. A note validator is not a
+  biometrics device; if this is wrong it widens retrieval into unrelated
+  material.
+- **Existing documents still carry running footers.** `9c138d3` strips them
+  at ingest, so this only takes effect on a reindex
+  (`python reindex.py --from-store`, ~40 min for 11 docs).
+
+**Measurement**
+
+- ~~**`eval_baseline_retrieval.json` does not exist.**~~ — **ARMED
+  2026-09-22**, the first hour the LiteLLM gateway was reachable again.
+  30 cases x 3 repeats = 90 real generations:
+
+      79/90 individual runs passed (88%)
+      26/30 cases stable across 3 runs (87%)   <- the recorded pass_rate
+
+  It is a real capability and not an outage recorded as one: every case
+  returned a genuine answer with a retrieval score in the 0.96-0.99 band.
+
+  **THE BASELINE IS PROVIDER-SPECIFIC, and this is the caveat that matters.**
+  It was recorded against **DeepSeek**, not the on-prem gateway —
+  `provider=deepseek` on 69 of the 90 runs, because the answering path uses
+  the DEFAULT role and `PROVIDER_ROLE_DEFAULT` is deepseek; the gateway is
+  assigned to `advanced`/`reasoning` only. Console model selection (added
+  the same day) now makes switching the default a one-click action, and
+  doing so invalidates this baseline. **Re-arm after any provider or model
+  change**, with the same command, or a comparison will attribute a change
+  of model to a change of code.
+
+  Four cases are unstable across the three repeats and are the ones to look
+  at first, not a reason to distrust the number:
+
+  | case | note |
+  |---|---|
+  | "...Twin SMART Coin System baseplate - how many screws" | the multi-constraint spec lookup |
+  | "what are the pin assignments for that interface" | R3 deixis onto a near-all-numbers pin table — answered with a clarify, not the table |
+  | "ok and what about the full size one?" | grader returned nothing; the entity SWITCH case the cases file already flags as gradeable only by hand |
+  | "how do I reset the password on my Cisco router" | refused correctly; the case's expectation and the refusal wording disagree |
+
+  Recorded against the code in this commit. The backend was restarted onto
+  it first — the process serving :8000 was from the previous evening, and a
+  baseline taken against it would have encoded the old BM25 tokenisation and
+  no procedure completion as the reference, which is worse than no baseline
+  because it looks authoritative.
+- **No conversational layer in the eval suite.** — **CASES ADDED
+  2026-09-22; still unarmed.** Every case was a well-formed standalone
+  question (`new_session: true` on all 19), so the failure this whole run
+  was about — a follow-up that dies — could not be caught. Wanted cases for
+  follow-ups, anaphora, and the refusal path; `eval_cases_retrieval.json`
+  now has 30 cases, six of them conversational follow-ups, added while
+  fixing the condensation item above:
+
+  | follow-up | what it pins |
+  |---|---|
+  | "what is the power required to run both at once" | set anaphora, PENDING's own example — matched no marker, so no rewrite ran |
+  | "how much does it weigh on its own?" | R2 pro-form onto a spec-table row (`1.05`) |
+  | "what are the pin assignments for that interface" | R3 deixis onto a near-all-numbers pin table |
+  | "ok and what about the full size one?" | R1 stacked openers + an entity SWITCH (graded: `sources_any` cannot separate the two MyCheckr manuals) |
+  | "how do I reset the password on my Cisco router" | the refusal path *inside* a conversation — an ungated rewriter must not drag it into the corpus, and fusion must not rescue enough junk to clear the gate |
+  | "...operating temperature range for the MyCheckr" | a self-contained question with history present: the new door onto the 2026-09-19 fault |
+
+  The runner already threaded a session across consecutive cases, so a
+  follow-up is a case with `new_session` omitted — which makes this list
+  **order-dependent**, noted in its `_README`. Every expectation is grounded
+  in a chunk read out of the corpus first, not guessed. `--selfcheck`
+  passes at 30 cases.
+
+  **Armed 2026-09-22** with the item above — all 30 cases, including the six
+  conversational follow-ups, are in the recorded baseline. Two of the four
+  unstable cases are follow-ups (`what are the pin assignments for that
+  interface`, `ok and what about the full size one?`), which is the
+  conversational layer doing exactly the job it was added for: it is the
+  part of the suite that does not yet hold still.
+- **Nothing since `ea4320a` is verified end to end.** The numbered context
+  passages, the prompt changes and the clarify gate are all unit-tested and
+  none has seen a real generation, because the provider is unreachable.
+
+**Serving**
+
+- **The widget does not stream.** `/query/stream` exists with sentence-level
+  `StreamGrounder` verification; `groundedops-widget.js:1610` posts to the
+  blocking `/widget/ask`. The 260 chars/second reveal added in `152b960` is
+  presentation only. Real token streaming needs the generation call pushed
+  below the quota gates, which `widget_api.py` warns is not a change to make
+  unverified.
+- **`reanswer.py`'s passage-selection is unverified end-to-end.** Added
+  2026-09-17 (`0015564`) after benchmarking three cross-encoders showed
+  reranking was ordering, not losing, answers: r@8 was 100% across all three
+  models over the 19-case retrieval suite (`tools/bench_reranker.py`), so the
+  fix re-reads the already-retrieved passages with a model call
+  (`reanswer.py`, wired to the console test chat as "That didn't answer it -
+  read the sources again") instead of buying a more accurate reranker. The
+  prompt construction, response parser and merge-top-3 fallback are
+  unit-tested; what a real model actually picks when asked "which passages
+  answer this" has never run, because the LiteLLM gateway is still NXDOMAIN
+  (re-checked 2026-09-18, see the infrastructure item below). Done looks
+  like: exercise the "read the sources again" button against a live NV9
+  question once the gateway resolves, and confirm the selected-passage
+  answer beats the merged-top-3 fallback on at least the case that motivated
+  it ("can I use an nv9 spectral with note float?" — the disabling-firmware
+  passage ranked #1 but the served answer came from passage #2).
+- **`escalated_to_deepseek` is now a misleading field name.** `f51727c`
+  moved escalation onto the assigned backup role; the response key still
+  says DeepSeek. Kept for client compatibility.
+- **A 0.0009-grounding answer was served.** `logs.jsonl:1970` — correct, and
+  rescued by lexical containment, which is the rescue working as designed.
+  Worth one look at how far that rescue can carry an answer the NLI model
+  scored at essentially zero.
+
+**Infrastructure**
+
+- ~~**The LiteLLM gateway is gone from DNS.**~~ — **RESOLVED 2026-09-22**,
+  by whoever owns that host; nothing in this repo was involved.
+  `ukman-hsp-litellm.local.innovative-technology.co.uk` now resolves to
+  **10.10.76.7** from ukmandc01, and `:4000/v1/models` answers in 16ms with
+  `itl-gpt-pro` and `itl-gpt-flash`. The `OPENAI_BASE_URL`-to-an-IP
+  workaround is no longer needed. The repo side was already in place —
+  `OPENAI_BASE_URL` has been configurable since the note in `llm.py:20`,
+  and `src/.env` already points at the gateway — so the only thing that
+  was ever missing was the DNS record.
+
+  It unblocked immediately, and the first end-to-end run of the inference
+  contract found two defects in it that no unit test could have. See the
+  entry under **Resolved**.
+- **`release.py` cannot cut a drop while two READMEs share a basename.**
+  `python release.py --minor` refuses with `README.md <-> tools/README.md`,
+  because the legacy drop is FLAT and one would silently overwrite the
+  other. The refusal is right; the flatness is the bug. v16.3 was therefore
+  released by bumping `VERSION` by hand, with no `src/legacy/v16/v16.3`
+  snapshot. Fix by snapshotting into subfolders that mirror the repo, not
+  by renaming a README — the collision will recur for every `tools/` file
+  that shares a name with a root one. Nothing is lost meanwhile: the drop
+  is a convenience copy, and git holds the real history.
+
+- **`backup/pre-build-drop` still pins 290MB in `.git`.** The safety net for
+  the `f33b22b` rebase. Once the rebase is trusted:
+  `git branch -D backup/pre-build-drop && git reflog expire --expire=now
+  --all && git gc --prune=now`.
 
 ## Lower priority
 
@@ -484,6 +1459,297 @@ code scan and NV9 eval added; widget plugin export shipped.
   running before).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-09-25 — conversation stress test: handoff, greeting, warranty,
+  comparison follow-ups, second-document requests, follow-up refusal
+  retry.** 14 live scenarios 46/59 -> 53/59; tests 250/250. Report
+  `docs/stress-test-2026-09-25.md`. Commits: scenarios + runner + report,
+  and the fixes, both on `experimental/v16.4-logic-and-latency` (see
+  `git log --since=2026-09-25T09:00`).
+- **2026-09-22 — the gateway came back, and contract 2 met a real model for
+  the first time.** DNS was fixed by whoever owns the host (see
+  **Infrastructure**); nothing here caused or fixed it. What it unblocked
+  was the verification every feature on this list has been waiting for, and
+  the very first run found TWO defects in the inference contract that the
+  15 unit tests could not have, because both concern what a real model
+  actually writes:
+
+  1. **A semicolon was demoting the attribution sentence to a premise.**
+     `itl-gpt-flash` closed with *"This is my reading of the documentation
+     and not a stated claim; the team can confirm."* — the exact sentence
+     `build_inference_prompt` ASKS for. `_FRAME_TURNS` included `;` on the
+     reasoning that a frame turning mid-sentence is smuggling. True of the
+     grammar, false of the usage: scored as a premise it came in at 0.0004
+     and sank an otherwise sound answer. The rule was rejecting the
+     contract's own required output. The conjunctions stay — *"doesn't say,
+     BUT it has a thermal printer"* is still caught.
+  2. **The fact sentences described the passages instead of stating the
+     facts.** *"The passages describe…"*, *"They also state that…"* —
+     nothing entails a claim ABOUT a document, so they scored 0.0043.
+     `build_answer_prompt` has forbidden that style for a long time
+     ("NEVER refer to the source material"); the inference prompt had not
+     inherited the rule. Added.
+
+  With both fixed the same draft scores **0.9448** on its premise and both
+  frames are recognised.
+
+  **STILL TOO STRICT, and this is the honest state: 0 of 2 real drafts
+  served.** The remaining rejections are on connectives and paraphrase, not
+  invention — `introduces prevent, since, usable`. `since` was added to the
+  connective vocabulary (same class as `within`, already justified).
+  `usable` and `prevent` were deliberately NOT added: they carry meaning,
+  and loosening the safety list until one sample passes is how a lock
+  becomes decoration. Tuning past this point needs the inference eval cases
+  this file already calls for, measured — not a judgement about whichever
+  draft happened to be on screen. The lock does work: it caught a genuine
+  invention on the BV30 draft (`introduces machine, meet`).
+
+- **2026-09-22 — choosing a model in the console configures every route.**
+  Providers were settable per job; MODELS were not settable anywhere.
+  `ONLINE_<PROVIDER>_MODEL` was read from the environment at call time, so
+  choosing which model answers meant hand-editing `.env` and restarting,
+  and the console showed nothing about what was in force.
+
+  The cost was live the day the gateway returned: the ADVANCED job was
+  pointed at `itl-gpt-flash` on the on-prem gateway while DEFAULT and
+  BACKUP were still routed at DeepSeek — so nearly every customer question
+  went to a metered API while the local gateway sat idle. Nothing was
+  misconfigured; half the configuration had never been written.
+
+  Two levels, and the cascade is the point. A **baseline** per provider
+  (`ONLINE_<PROVIDER>_MODEL`) that every job using that provider follows,
+  and an optional **per-job override** (`MODEL_ROLE_<ROLE>`) where a job
+  should differ — which is what keeps the deliberate split available
+  (extraction on a fast model, the inference contract on a stronger one).
+  Clearing an override is not the same as setting it to the baseline's
+  current value: an inheriting job keeps following LATER changes, which is
+  what makes choosing once keep working.
+
+  Stored in `.env` via `keystore._rewrite_env_line`, exactly as the
+  provider assignments already are, so a change applies to the next
+  question with no restart and survives one. `llm._online_provider_model`
+  asks `keystore.model_for_role` rather than reading the variable itself,
+  so the model the console displays is the model that goes on the wire —
+  two readings of one setting is how they drift.
+
+  The picker offers the provider's OWN list where it can report one
+  (`GET /admin/keys/models/{provider}`; the gateway returns `itl-gpt-flash`
+  and `itl-gpt-pro`), and falls back to a typed box otherwise — a provider
+  that cannot list its models must not become one whose model cannot be
+  changed. Same reasoning that made the reranker a profile rather than a
+  free-text model name. 9 tests in `tests/test_model_routing.py`, writing
+  to a scratch env file so they can never touch the real `src/.env`.
+
+- **2026-09-22 (second pass) — BM25 was reading a different alphabet from
+  the corpus.** Chased from "Can I use MyCheckr with linux?" returning
+  MyCheckr manuals; the actual fault has nothing to do with MyCheckr,
+  Linux, ranking weights or the reranker.
+
+  Both sides tokenised with a bare `text.lower().split()`, so a token kept
+  whatever punctuation touched it. The query therefore asked BM25 for the
+  term `linux?`:
+
+      get_scores(["linux"])   max 9.5688   top 3 = the Linux document
+      get_scores(["linux?"])  max 0.0000   not in the idf table at all
+
+  An unseen term contributes nothing, so the question silently became
+  "can i connect to mycheckr using" — and `idf("linux")` is **5.018**
+  against `idf("mycheckr")` **2.233**, so with the term intact the right
+  document wins comfortably. **This was never about Linux.** The last word
+  of a question collects the "?" and is very often the most specific term
+  in it: "does it support ccTalk?", "what is the weight of the NV200S?".
+  The corpus side had the mirror image, where "environment:" and
+  "environment" were two different terms.
+
+  `_bm25_tokens` is now shared by both sides and strips only LEADING and
+  TRAILING punctuation, keeping "+" everywhere. Internal structure is
+  load-bearing here: `nv9usb+` must not collapse into `nv9usb` (different
+  products), `192.168.137.8` must stay one token, `linux-based` must not
+  become two — stripping to `\w+` would break all three.
+
+  **Measured on the 19-case retrieval suite**, and the gain is at the
+  stage that reaches context:
+
+  | stage | R@1 | R@3 | R@5 | R@8 | MRR | misses |
+  |---|---|---|---|---|---|---|
+  | retrieved, before | 0.520 | 0.800 | 0.880 | 0.880 | 0.671 | 3 |
+  | retrieved, after | 0.440 | 0.840 | 0.880 | **0.920** | 0.652 | **1** |
+  | reranked, before | 0.800 | 0.840 | 0.880 | 0.880 | 0.830 | 3 |
+  | reranked, after | 0.800 | **0.880** | **0.920** | **0.920** | **0.843** | **2** |
+
+  Every reranked metric improves or holds. The pre-rerank R@1 dip is the
+  expected trade: rare terms no longer score zero, so more genuine
+  candidates compete for rank 1 while coverage rises, and the reranker —
+  whose job that is — sorts it out.
+
+  **Found on the way, and it matters more than the test count suggests:
+  six tests in `test_rrf.py` were silently not running.** The file was
+  collected in-process, and only the 5 functions defined BEFORE its
+  module-level `from retrieval_db import apply_arm_guarantee` (line 72)
+  were ever collected — no load error was printed, so the suite reported
+  them as a clean pass. Everything after that import, including
+  `test_nv9s_weight_case_survives_the_cut`, which pins the RRF fusion bug
+  in the **Blocking** section above, had not run since it was written.
+  `retrieval_db` is now in `run_tests.py`'s own-process list, on the same
+  native-module grounds as `grounding`, `ingest` and `router`, and the
+  file runs all 16. This is why the suite total goes 219 → **215** while
+  coverage goes UP: 5 individually-counted entries became one
+  own-process line that actually executes 16.
+
+- **2026-09-22 (second pass) — a document the reranker is right to drop.**
+  The residue after the tokenizer fix. The Linux document now reaches the
+  candidate pool for "Can I use MyCheckr with linux?" and still does not
+  survive the rerank cut, because it never uses the word "MyCheckr" and
+  the cross-encoder correctly scores it off-topic against a question that
+  does. The knowledge that it IS a MyCheckr document lives only in the
+  tagging the operator set at upload.
+
+  Forcing it past the cut is the experiment already run and rejected here
+  (margin 2.0: two regressions, mean grounding 0.993 → 0.954), so
+  `retrieval_db.sources_titled_for` answers from the tagging instead and
+  touches neither ranking nor context. It is the LAST tier of the
+  capability scan — consulted only when the retrieved chunks showed
+  nothing — and scoped to the product, which is the whole safety of it:
+  unscoped, the same lookup would claim a BV30 Linux procedure that does
+  not exist. Verified against the real tagging: `mycheckr` and
+  `mycheckr_mini` find it; `bv30` and `nv200s` do not.
+
+  **Correction to the note this replaces:** the earlier entry said the
+  document "IS filed under `mycheckr`" on the strength of chunk metadata.
+  `catalog.product_for_source` reports it as `biometrics_general` alone.
+  The two disagree because the catalogue maps filename substrings for
+  ingest defaults, while the chunk metadata records what the operator
+  actually chose at upload — and it is the operator's assignment that
+  retrieval scopes on, so that is what this reads.
+
+- **2026-09-22 — three faults behind "I still can't get simple answers",
+  from the widget transcript of the previous evening.** Diagnosed by
+  replaying the four failing turns stage by stage (retrieval → target
+  extraction → switchboard) rather than by reading the code, which is the
+  only reason they came apart into three different bugs.
+
+  1. **A typo defeated the capability match, and retrieval had not been
+     fooled by it.** "does ICU lite work with andorid?" — retrieval
+     returned `ICU_Network_API` p14, the Android procedure, at rank 4.
+     The literal substring test in `capability_evidence` was the only
+     thing that failed, and the refusal then quoted the visitor's typo
+     back at them. The target is now respelled from the words in the
+     chunks retrieval already returned (`_as_documented`, difflib at 0.8,
+     words of 5+ characters only). Safe because the candidate set is a
+     few hundred words that are relevant by construction, not the corpus.
+     The old comment argued a typo SHOULD fall through "to retrieval,
+     which is tolerant of spelling" — retrieval was tolerant; this was
+     not.
+
+  2. **Five prepositions were missing from the capability pivot.** "Can I
+     connect to MyCheckr using linux?" found no companion preposition, so
+     the target read as "MyCheckr using linux", `_names_a_product`
+     rejected it, and the turn got a bare refusal with no capability line
+     at all. `using|via|through|over|in` added to `_COMPANION_PREP`.
+
+  3. **THE STEPS OF A PROCEDURE ARE THE LEAST RETRIEVABLE PART OF IT** —
+     the real one. "how to get RNDIS working with linux?" retrieved the
+     sentence announcing the procedure and its Important Notes, and none
+     of Steps 1-4: not ranked low, ranked outside the top SIXTEEN. A step
+     reads `sudo touch /etc/udev/rules.d/80-local.rules`, which contains
+     no word a person would type, so BM25 has nothing to match and its
+     embedding is nothing like a question's. The parts of a document that
+     talk ABOUT a task out-retrieve the parts that DO it, on both
+     rankings at once, and widening the candidate window cannot help.
+
+     `retrieval_db.complete_procedures` fetches them instead of ranking
+     them: a chunk whose own `section` is the parent of a step heading is
+     the introduction to those steps, so the document's step chunks are
+     added in document order, below everything retrieved and marked
+     `fetched_by`. All of the document's steps, not only the nested ones
+     — the Linux document has Steps 1-2 under the introduction and Steps
+     3-4 at the top level purely because of heading styling, and half a
+     procedure strands the reader mid-way.
+
+     Also fixed on the way: `section` was being dropped from
+     `retrieve_from_db`'s results, exactly as `product`/`category` were
+     in v15.2 and unnoticed for the same reason — nothing downstream had
+     needed it yet.
+
+     **Measured, because it runs on every query.** `eval_retrieval.py` is
+     the wrong instrument (an additive fetch downstream of it cannot move
+     recall@k; it stays at R@8 0.880 / MRR 0.830). What matters is blast
+     radius: `tests/measure_procedure_completion.py` reports it fires on
+     **2 of 37 questions (5%)**, only on the one document with a
+     step-structured procedure, adding at most 4 chunks / 1972 chars
+     against a 4000-char budget. The second of those two gains Step 3,
+     which ranked 11th and was being cut at `CONTEXT_K=8`.
+
+  One self-inflicted regression on the way, worth recording because the
+  trap is documented and was walked into anyway: adding
+  `complete_procedures` to `retrieval_db` without adding it to the
+  `_harness` stub took out NINE test files at once. `_harness` replaces
+  the module with a `types.ModuleType`, so `main`'s import of a name the
+  stub lacks fails at import with `cannot import name ... (unknown
+  location)`. The stub is a PASS-THROUGH, matching the real contract —
+  the function is additive, and a stub returning `[]` would empty the
+  context of every API test and fail far from the cause.
+
+  Tests 219/219, 1 skipped; scenarios 79/79. **Turn 2 is still not fully
+  fixed** and is listed under **In progress** — the Linux document is
+  tagged to `mycheckr`, so a MyCheckr-scoped Linux question SHOULD reach
+  it and does not.
+
+- **2026-09-21 — the answerability switchboard and the inference contract.**
+  Two changes, deliberately in this order.
+
+  *The switchboard* (`src/answerability.py`, `tests/test_answerability.py`).
+  Four features had each grown their own sniff at the question at four
+  points in `main.query()`: crossrefs and the capability scan inside
+  `_friendly_refusal`, the capability scan again in `query()`, sales ~4000
+  lines earlier, and the clarify gate deciding without reference to any of
+  them. `classify()` is now asked once and every branch reads it;
+  `_capability_reply` is an alias for the one implementation rather than a
+  second copy. The kind reaches clients as `answerability`.
+
+  *The inference contract* (`grounding.check_inference`,
+  `tests/test_inference_contract.py`). Contract 1 asks whether a passage
+  entails the answer, which is why "it exposes HTTP on a static IP, so a
+  Windows client on that subnet can reach it" scored 0.0039 and could never
+  be said. Contract 2 splits the answer into premise / conclusion / frame
+  and allows ONE hedged, attributed conclusion when every premise is
+  entailed, no passage the answer was drawn from contradicts it, and it
+  introduces no content word those passages do not contain.
+
+  **Off by default** (`policy.inference_mode`, console → Answering from
+  inference). Not verified end to end: the gateway is still NXDOMAIN, so
+  no model has ever been asked `build_inference_prompt`. What IS verified
+  is the gate — 15 rule tests with a faked scorer, plus
+  `tests/sweep_inference_products.py`, which runs the same compatibility
+  question shape across all eight products against the real index and the
+  real NLI model: **8/8 sound inferences served, 0/8 inventions served.**
+
+  Three faults were found by running that sweep rather than by reasoning,
+  and all three made the contract look safer than it was:
+  1. *No frame role.* "The documentation doesn't say" and "that is my
+     reading" are claims about the corpus, not the product; nothing entails
+     them (0.0015, 0.0071). Scored as premises they sank every answer —
+     including the invented ones, so the rules meant to catch invention had
+     never once run.
+  2. *The vocabulary lock pooled every retrieved passage.* Asked "does the
+     BV30 work with polymer notes", retrieval returns the BV30 cashbox
+     section AND the NV200S media table listing "Polymer notes" — which
+     licensed "polymer" in a conclusion about the BV30. Now scoped to the
+     passages that actually supported a premise.
+  3. *The contradiction check was vetoed by page furniture.* Given an
+     unrelated pair this model returns high contradiction, not high
+     neutral, so `max` over a chunk's sentences meant the footer "MyCheckr
+     User Manual - 31" (0.995) and a section heading (0.991) could each
+     veto a sound inference. Three of eight were being refused that way.
+     Now checked only against the premises the conclusion was drawn from.
+
+  Tests 218/218, 1 skipped. **Still unmeasured on answer quality for the
+  inference path specifically.** `eval_baseline_retrieval.json` was armed
+  later the same day, so there is now a reference to compare against — but
+  it contains no inference-mode cases, and the contract was off while it
+  was recorded. Writing those cases, with the HEDGE as part of the expected
+  answer, is the remaining prerequisite. That is the reason for the
+  default, not caution for its own sake.
 
 - v15.1: three uncalibrated-threshold refusal bugs (retrieval gate, context
   floor, FAQ candidate cut), conversation context not reaching the answering

@@ -27,6 +27,7 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 import faq_store
@@ -120,36 +121,22 @@ def widget_catalog():
             "message": "Product list is temporarily unavailable.",
         })
 
-    # Count distinct ingested sources per product/category.
-    #
-    # Reads BOTH "products" and "product" metadata keys: ingest.py writes
-    # the plural, while the admin catalog endpoint reads the singular, so
-    # doc_count there is 0 for everything ingested normally. Accepting both
-    # keeps this correct regardless of which path wrote the document.
-    prod_sources, cat_sources = {}, {}
+    # Distinct ingested sources per product/category, from the shared
+    # inventory (docindex) -- the same numbers the admin /catalog shows.
     try:
-        from db import get_collection
-        got = get_collection().get(include=["metadatas"])
-        for m in (got.get("metadatas") or []):
-            src = m.get("source")
-            if not src:
-                continue
-            raw = m.get("products") or m.get("product") or ""
-            for key in [k.strip() for k in str(raw).split(",") if k.strip()]:
-                prod_sources.setdefault(key, set()).add(src)
-            ckey = (m.get("category") or "").strip()
-            if ckey:
-                cat_sources.setdefault(ckey, set()).add(src)
+        from docindex import doc_counts
+        prod_counts, cat_counts = doc_counts()
     except Exception as e:
         logger.warning(f"widget catalog doc_count failed (non-fatal): {e}")
+        prod_counts, cat_counts = {}, {}
 
     cats = []
     for c in (cat.get("categories") or []):
         prods = [{"key": p["key"], "name": p["name"],
-                  "doc_count": len(prod_sources.get(p["key"], set()))}
+                  "doc_count": prod_counts.get(p["key"], 0)}
                  for p in (c.get("products") or [])]
         prods = [p for p in prods if p["doc_count"] > 0]
-        ccount = len(cat_sources.get(c["key"], set()))
+        ccount = cat_counts.get(c["key"], 0)
         # Keep a range if either it or any of its products has documents -
         # a document tagged only at category level still makes the range
         # answerable.
@@ -237,6 +224,12 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
             "passages": [], "label": "Contact support for more information",
         },
         "needs_clarification": clarify,
+        # Always present so a client can read it unconditionally. The FAQ
+        # path disambiguates through faq_candidates, which carry ids; these
+        # are the free-text options the generation path builds, and there
+        # are none here.
+        "clarification_options": [],
+        "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
         "effort": "faq_only",
@@ -373,7 +366,11 @@ def register(app, answer_query, draft_enquiry=None):
         # allowance there is no point resolving effort or touching the FAQ.
         # A 429 with a distinct reason, so the widget can say "this chat has
         # reached its limit, start a new one" rather than the daily wording.
-        sess = quota.session_check(payload.session_id)
+        # This handler is `async`, so anything that blocks here blocks EVERY
+        # other request on the event loop: the quota sqlite calls (a new
+        # connection each), and the FAQ lookup, which embeds the question
+        # and can rebuild the FAQ vector cache after an edit. Threadpool.
+        sess = await run_in_threadpool(quota.session_check, payload.session_id)
         if not sess["allowed"]:
             raise HTTPException(status_code=429, detail={
                 "error": "quota_exceeded",
@@ -394,7 +391,7 @@ def register(app, answer_query, draft_enquiry=None):
         # anon_llm_enabled) — a deliberate choice with a bill attached, which
         # is why it is off until someone turns it on.
         if tier == "anonymous" and not quota.anon_llm_enabled():
-            gate = quota.check_faq_lookup(caller)
+            gate = await run_in_threadpool(quota.check_faq_lookup, caller)
             if not gate["allowed"]:
                 raise HTTPException(status_code=429, detail={
                     "error": "quota_exceeded",
@@ -405,7 +402,7 @@ def register(app, answer_query, draft_enquiry=None):
                     "message": "You have reached today's limit for FAQ lookups.",
                 })
 
-            quota.consume_faq_lookup(caller)
+            await run_in_threadpool(quota.consume_faq_lookup, caller)
 
             # Selecting a specific curated question is served by id.
             if payload.faq_id:
@@ -416,11 +413,24 @@ def register(app, answer_query, draft_enquiry=None):
                 raise HTTPException(status_code=404, detail={
                     "error": "not_found", "message": "That answer is no longer available."})
 
-            faq = faq_store.suggest_candidates(payload.q, payload.product or payload.category)
+            faq = await run_in_threadpool(
+                faq_store.suggest_candidates, payload.q,
+                payload.product or payload.category)
 
             if faq["mode"] == "answer":
                 return _faq_response(faq["entry"]["answer"], caller,
                                      matched=faq["entry"]["question"])
+
+            # "Can I have the MyCheckr manual?" -- the file is member-only
+            # (/source_file is token gated), so say that plainly rather than
+            # the generic "no reviewed answer", which reads as "we have no
+            # manual". A curated FAQ about manuals still wins, above.
+            import doc_request
+            if doc_request.document_request(payload.q):
+                return _faq_response(
+                    "Product manuals and documents are available to account "
+                    "holders. Sign in and I can give you the download link.",
+                    caller, needs_sign_in=True)
 
             if faq["mode"] == "disambiguate":
                 return _faq_response(
@@ -475,7 +485,11 @@ def register(app, answer_query, draft_enquiry=None):
         # Curated answers and disambiguation prompts involve no LLM call,
         # so they cost nothing - cheap for us, and it steers people towards
         # the reviewed answers.
-        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")) \
+        # ...and neither is our own outage: service_degraded means no
+        # provider answered, and quota.py promises a failed request does not
+        # burn the visitor's allowance.
+        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
+                        or result.get("service_degraded")) \
                   else spec["credits"]
         state = quota.consume(caller, charged) if charged else quota.status(caller)
 
@@ -512,6 +526,21 @@ def register(app, answer_query, draft_enquiry=None):
             # with _public_sources; the passages carry the text instead.
             "more_context": _public_more_context(result.get("more_context")),
             "needs_clarification": bool(result.get("needs_clarification")),
+            # The options themselves, not just the boolean. They have been
+            # built on every clarify turn since v12 and dropped here ever
+            # since -- so the widget rendered "which did you mean?" as prose
+            # and the visitor had to type the answer to a question we had
+            # already enumerated. Strings only, and short ones: they are
+            # product labels or the visitor's own earlier questions, so
+            # nothing here is new information leaving the backend.
+            "clarification_options": [
+                str(o)[:120] for o in
+                (result.get("clarification_options") or [])[:5]],
+            # Replies the answer asked for ("Would you like them?"), shown as
+            # buttons and as the composer's right-arrow suggestion.
+            "suggested_replies": [
+                str(o)[:80] for o in
+                (result.get("suggested_replies") or [])[:3]],
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
@@ -558,15 +587,21 @@ def register(app, answer_query, draft_enquiry=None):
                 yield sse("error", {"status": e.status_code,
                                     "detail": e.detail})
                 return
-            except Exception as e:
+            except Exception:
+                # This one is the PUBLIC surface, so the rule matters most
+                # here: an anonymous visitor gets a status and nothing else.
+                # The traceback is already in the log via logger.exception.
                 logger.exception("widget ask/stream failed")
-                yield sse("error", {"status": 503, "detail": str(e)[:160]})
+                yield sse("error", {"status": 503, "detail":
+                                    "The assistant is temporarily "
+                                    "unavailable. Please try again."})
                 return
 
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_candidates",
                                 "offer_support", "needs_clarification",
+                                "clarification_options", "suggested_replies",
                                 "flagged", "quota", "session")})
 
             # Whole sentences, not tokens: a sentence is the unit the

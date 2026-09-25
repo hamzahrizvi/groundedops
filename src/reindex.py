@@ -155,6 +155,39 @@ def report(recoverable, orphaned) -> None:
         print()
 
 
+def snapshot_collection() -> dict:
+    """Capture the live derived index so a failed rebuild can roll back."""
+    from db import get_collection
+    got = get_collection().get(
+        include=["documents", "metadatas", "embeddings"])
+    return {
+        "ids": list(got.get("ids") or []),
+        "documents": list(got.get("documents") or []),
+        "metadatas": list(got.get("metadatas") or []),
+        "embeddings": list(got.get("embeddings") or []),
+    }
+
+
+def restore_collection(snapshot: dict) -> int:
+    """Replace the live collection with a previously captured snapshot."""
+    from db import reset_collection
+    col = reset_collection()
+    ids = snapshot.get("ids") or []
+    batch = 100
+    for start in range(0, len(ids), batch):
+        stop = start + batch
+        kwargs = {
+            "ids": ids[start:stop],
+            "documents": snapshot["documents"][start:stop],
+            "metadatas": snapshot["metadatas"][start:stop],
+        }
+        embeddings = snapshot.get("embeddings") or []
+        if embeddings:
+            kwargs["embeddings"] = embeddings[start:stop]
+        col.add(**kwargs)
+    return len(ids)
+
+
 def rebuild(targets: list[dict], dry_run: bool) -> int:
     from db import reset_collection
     from ingest import ingest_file
@@ -167,21 +200,43 @@ def rebuild(targets: list[dict], dry_run: bool) -> int:
             print(f"  {e['source']}  <- {e['path']}")
         return 0
 
+    # Preflight every source before touching the live collection. Permissions
+    # and a missing file should fail while the current index is still intact.
+    for e in targets:
+        with open(e["path"], "rb") as fh:
+            fh.read(1)
+
     settings = docstore.current_settings()
     print(f"Rebuilding {len(targets)} document(s) at {settings}")
+    snapshot = snapshot_collection()
+    print(f"rollback snapshot captured ({len(snapshot['ids'])} chunks)")
     reset_collection()
     print("collection reset")
 
     total = 0
-    for e in targets:
-        with open(e["path"], "rb") as fh:
-            content = fh.read()
-        n = ingest_file(content, e["source"],
-                        category_key=e.get("category") or None,
-                        product_key=e.get("product") or None)
-        total += n
-        print(f"  {e['source']}: {n} chunks "
-              f"(was {e['chunks']})")
+    try:
+        for e in targets:
+            with open(e["path"], "rb") as fh:
+                content = fh.read()
+            n = ingest_file(content, e["source"],
+                            category_key=e.get("category") or None,
+                            product_key=e.get("product") or None)
+            if n <= 0:
+                raise RuntimeError(
+                    f"{e['source']} produced no chunks; rebuild aborted")
+            total += n
+            print(f"  {e['source']}: {n} chunks "
+                  f"(was {e['chunks']})")
+    except BaseException as exc:
+        print(f"rebuild failed ({exc}); restoring previous collection")
+        try:
+            restored = restore_collection(snapshot)
+            print(f"rollback complete ({restored} chunks restored)")
+        except Exception as restore_exc:
+            raise RuntimeError(
+                "rebuild failed and the automatic index rollback also failed: "
+                f"{restore_exc}") from exc
+        raise
     print(f"\ndone — {total} chunks across {len(targets)} document(s)")
     return total
 

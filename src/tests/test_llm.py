@@ -52,15 +52,17 @@ def test_fallback_chain_tries_each_entry_exactly_once_on_failure():
     with patch.object(llm, "generate", side_effect=fake_generate):
         result = llm.generate_with_fallback("reasoning", "some prompt")
 
-    # In api mode the online provider leads and local/mistral follows as the
-    # forced final attempt. What this guards is unchanged: each model is tried
-    # EXACTLY once, never twice (the old safe_generate behaviour that let one
-    # model burn the whole time budget).
+    # In api mode the online provider is the whole chain: the forced
+    # local/mistral attempt is a LOCAL-mode safety net and no longer runs
+    # here (it was a 240s connect to an Ollama that api-mode hosts do not
+    # have). What this guards is unchanged: each model is tried EXACTLY
+    # once, never twice (the old safe_generate behaviour that let one model
+    # burn the whole time budget).
     #
-    # The expected pair is derived, not literal -- the online model comes from
-    # ONLINE_DEEPSEEK_MODEL, and a hardcoded "deepseek-chat" here broke the
-    # moment that retired alias was replaced.
-    assert calls == [llm._online_provider_model(), ("local", "mistral")]
+    # The expected entry is derived, not literal -- the online model comes
+    # from ONLINE_DEEPSEEK_MODEL, and a hardcoded "deepseek-chat" here broke
+    # the moment that retired alias was replaced.
+    assert calls == [llm._online_provider_model()]
     assert len(calls) == len(set(calls)), "a model was attempted twice"
     assert result["model"] == "none"
 
@@ -157,3 +159,230 @@ def test_fallback_chain_without_mistral_forces_single_final_mistral_attempt():
     # fixture, not a real model name, so it does not go stale.
     assert calls == [("deepseek", "deepseek-chat"), ("local", "mistral")]
     assert result["fallback_used"] is True
+
+# ── which key does which job (v16.5) ──────────────────────────────────
+# A second saved key used to change nothing: every role went to the one
+# provider named in Settings. These pin what an assignment actually does to
+# the chain, which is the only place the feature is observable.
+#
+# `_rewrite_env_line` is patched out throughout: keystore.set_role writes to
+# a real .env, and this module runs without _harness's ENV_FILE_PATH
+# redirect, so an unpatched run would edit the developer's own file.
+
+from contextlib import contextmanager
+
+import keystore
+
+
+@contextmanager
+def roles(assignments, keyed=True):
+    """Assignments live in os.environ only, with every provider reporting a
+    key (or none of them, for `keyed=False`)."""
+    with patch.object(keystore, "_rewrite_env_line", lambda k, v: None), \
+         patch.object(keystore, "has_key", lambda p: keyed):
+        for role in keystore.roles():
+            keystore.set_role(role, assignments.get(role))
+        try:
+            yield
+        finally:
+            for role in keystore.roles():
+                keystore.set_role(role, None)
+
+
+def test_default_assignment_leads_the_chain_and_advanced_falls_back_to_it():
+    with roles({"default": "anthropic"}):
+        assert llm._chain_for("accurate")[0][0] == "anthropic"
+        # An unassigned Advanced must not mean "nothing" — a deep question
+        # still has to be answered.
+        assert llm._provider_for_job("advanced") == "anthropic"
+        assert llm._chain_for("reasoning")[0][0] == "anthropic"
+
+
+def test_advanced_assignment_routes_only_the_reasoning_role():
+    with roles({"default": "anthropic", "advanced": "deepseek"}):
+        assert llm._chain_for("reasoning")[0][0] == "deepseek"
+        assert llm._chain_for("accurate")[0][0] == "anthropic"
+        assert llm._chain_for("fast")[0][0] == "anthropic"
+
+
+def test_no_backup_leaves_the_chain_one_attempt_long():
+    with roles({"default": "anthropic"}):
+        assert len(llm._chain_for("accurate")) == 1
+
+
+def test_backup_appends_one_attempt_after_the_leader():
+    with roles({"default": "anthropic", "backup": "deepseek"}):
+        assert [p for p, _ in llm._chain_for("accurate")] == ["anthropic", "deepseek"]
+
+
+def test_backup_equal_to_the_leader_is_not_two_attempts_at_one_provider():
+    # Retrying the model that just failed is exactly the behaviour this
+    # module exists to prevent.
+    with roles({"default": "anthropic", "backup": "anthropic"}):
+        assert len(llm._chain_for("accurate")) == 1
+
+
+def test_an_assignment_whose_key_was_removed_does_not_route_generation():
+    with roles({"default": "anthropic"}, keyed=False):
+        # The assignment is still written — masked, not lost — but a provider
+        # certain to fail auth must not lead the chain.
+        assert keystore.get_role_assignment("default") == "anthropic"
+        assert keystore.get_role("default") is None
+        assert llm._chain_for("accurate")[0][0] == runtime_config.get_online_provider()
+
+
+def test_local_mode_ignores_key_roles_entirely():
+    with roles({"default": "anthropic", "backup": "deepseek"}):
+        runtime_config.set_generation_mode("local")
+        try:
+            assert llm._chain_for("accurate") == llm.FALLBACK_CHAIN["accurate"]
+        finally:
+            runtime_config.set_generation_mode("api")
+
+
+def test_deepseek_calls_disable_thinking_unless_asked(monkeypatch=None):
+    """DeepSeek V4 thinks by default and bills the thought. Every DeepSeek
+    request -- answer and stream alike -- must say so explicitly, and the
+    env switch must be able to turn it back on."""
+    import os
+    import llm
+
+    seen = []
+
+    class _Res:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}],
+                    "usage": {"total_tokens": 3}}
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def iter_lines(self, decode_unicode=True):
+            return iter(["data: [DONE]"])
+
+    def fake_post(url, headers=None, json=None, timeout=None, stream=False):
+        seen.append(json)
+        return _Res()
+
+    real_post = llm._HTTP.post
+    llm._HTTP.post = fake_post
+    saved = os.environ.pop("DEEPSEEK_THINKING", None)
+    try:
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        list(llm.stream_generate("deepseek", "q", "deepseek-v4-flash",
+                                 api_keys={"deepseek": "k"}))
+        assert [j["thinking"] for j in seen] == [{"type": "disabled"}] * 2
+        # An OpenAI-compatible gateway is not sent a DeepSeek field.
+        list(llm.stream_generate("openai", "q", "itl-gpt-flash",
+                                 api_keys={"openai": "k"}))
+        assert "thinking" not in seen[-1]
+        os.environ["DEEPSEEK_THINKING"] = "on"
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        assert seen[-1]["thinking"] == {"type": "enabled"}
+    finally:
+        llm._HTTP.post = real_post
+        os.environ.pop("DEEPSEEK_THINKING", None)
+        if saved is not None:
+            os.environ["DEEPSEEK_THINKING"] = saved
+
+
+def test_a_provider_in_cooldown_is_skipped_when_the_chain_has_another():
+    """The gateway that answered 5xx a moment ago is not asked again on the
+    very next question -- unless it is the only provider there is."""
+    import runtime_config, keystore, llm
+
+    calls = []
+
+    def fake_generate(provider, prompt, model, deepseek_api_key=None, api_keys=None):
+        calls.append(provider)
+        return {"text": "ok", "model": model, "provider": provider}
+
+    real_generate, real_chain = llm.generate, llm._chain_for
+    llm.generate = fake_generate
+    llm._provider_down.clear()
+    try:
+        llm._chain_for = lambda role: [("openai", "itl-gpt-pro"), ("deepseek", "deepseek-v4-flash")]
+        llm._note_unreachable("openai")
+        out = llm.generate_with_fallback("reasoning", "q")
+        assert calls == ["deepseek"] and out["provider"] == "deepseek"
+        # The only entry is always tried, cooldown or not.
+        calls.clear()
+        llm._chain_for = lambda role: [("openai", "itl-gpt-pro")]
+        llm.generate_with_fallback("reasoning", "q")
+        assert calls == ["openai"]
+        # A success clears it.
+        llm._note_reachable("openai")
+        assert not llm.provider_cooling("openai")
+    finally:
+        llm.generate, llm._chain_for = real_generate, real_chain
+        llm._provider_down.clear()
+
+
+def test_api_mode_never_forces_a_local_attempt():
+    """In api mode a total online failure ends the chain; it does not fall
+    through to a 240s Ollama connect on a host that has no Ollama."""
+    import runtime_config, llm
+
+    calls = []
+
+    def fake_generate(provider, prompt, model, deepseek_api_key=None, api_keys=None):
+        calls.append((provider, model))
+        return None
+
+    real_generate, real_chain = llm.generate, llm._chain_for
+    saved_mode = runtime_config.get_generation_mode()
+    llm.generate = fake_generate
+    llm._provider_down.clear()
+    try:
+        runtime_config.set_generation_mode("api")
+        llm._chain_for = lambda role: [("deepseek", "deepseek-v4-flash")]
+        out = llm.generate_with_fallback("accurate", "q")
+        assert calls == [("deepseek", "deepseek-v4-flash")]
+        assert out["provider"] == "none"
+        runtime_config.set_generation_mode("local")
+        calls.clear()
+        llm.generate_with_fallback("accurate", "q")
+        assert ("local", "mistral") in calls
+    finally:
+        llm.generate, llm._chain_for = real_generate, real_chain
+        runtime_config.set_generation_mode(saved_mode)
+        llm._provider_down.clear()
+
+
+def test_judgement_calls_think_even_with_thinking_off():
+    """The verifier inverted with thinking off (accepted a mispaired fault
+    code 4/4, rejected the right one 2/2). Calls inside llm.judging() send
+    thinking enabled; answer calls outside it do not."""
+    import os
+    import llm
+
+    seen = []
+
+    class _Res:
+        status_code = 200
+        text = ""
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 1}}
+
+    real_post = llm._HTTP.post
+    llm._HTTP.post = lambda url, **kw: (seen.append(kw.get("json")), _Res())[1]
+    saved = os.environ.pop("DEEPSEEK_THINKING", None)
+    try:
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        with llm.judging():
+            llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        llm._call_deepseek("q", model="deepseek-v4-flash", api_key="k")
+        assert [j["thinking"]["type"] for j in seen] == ["disabled", "enabled", "disabled"]
+    finally:
+        llm._HTTP.post = real_post
+        if saved is not None:
+            os.environ["DEEPSEEK_THINKING"] = saved
+
+
+def test_the_verifier_and_selection_calls_are_judgements():
+    import inspect
+    import main
+    assert "with judging():" in inspect.getsource(main._llm_verified)
+    assert inspect.getsource(main.query).count("with judging():") >= 1

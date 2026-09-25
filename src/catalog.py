@@ -79,6 +79,24 @@ def _save(data: dict) -> None:
     that, one bad read replaced the real product tree with the seed and the
     next edit made it permanent."""
     jsonstore.save(_PATH, data, label="catalogue")
+    _invalidate_derived()
+
+
+def _invalidate_derived() -> None:
+    """Two classifiers memoise a view of the catalogue for the life of the
+    process: the product terms the follow-up gate reads (text_utils) and
+    the product->category map that scopes shared documents (retrieval_db).
+    Neither knew about a product added or renamed in the console until a
+    restart. Lazy imports: both modules import this one."""
+    for mod, attr in (("text_utils", "_PRODUCT_TERMS"),
+                      ("retrieval_db", "_PRODUCT_CATEGORY")):
+        try:
+            import importlib
+            m = importlib.import_module(mod)
+            if hasattr(m, attr):
+                setattr(m, attr, None)
+        except Exception:
+            pass
 
 
 def catalog() -> dict:
@@ -149,6 +167,14 @@ def product_for_source(source: str) -> list[str]:
             if any(s.lower() in source.lower() for s in p.get("sources", [])):
                 keys.append(p["key"])
     return keys
+
+
+def is_shared_product(key: str | None) -> bool:
+    """True for a category's synthetic shared-documents entry ("General
+    (shared docs)"), which holds documents rather than naming something we
+    make. It must never be listed or offered as a product."""
+    k = (key or "").lower()
+    return k.endswith("_general") or k.endswith("_shared")
 
 
 # ── Admin mutations (guarded by the password gate in main.py) ──────────

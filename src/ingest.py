@@ -2,6 +2,7 @@ import os
 import re
 import logging
 import tempfile
+from datetime import datetime, timezone
 
 from parsing import extract_pages
 import docstore
@@ -20,7 +21,7 @@ from chunking import (chunk_text, strip_table_fences, pop_section,
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1200"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 from embeddings import embed_texts
-from db import get_collection
+from db import get_collection, invalidate_retrieval_cache
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,47 @@ def _detect_header(line: str) -> str | None:
     if _STEP_RE.match(l):
         return l
     return None
+
+
+_FOOTER_LINE = re.compile(r"^(?P<title>.{3,70}?)\s*[–—-]\s*\d{1,4}\s*$")
+
+
+def _strip_running_footer(text: str, filename: str) -> str:
+    """Remove the manual's own running footer from a page.
+
+    Every page of these manuals ends "NV200S Range User Manual – 107". It is
+    not content, and it does two kinds of damage:
+
+      * a chunk that holds nothing else becomes a chunk whose entire body is
+        a page footer. 64 of 1749 chunks (3.7%) are exactly that, and they
+        are not inert -- one of them ("[... — WR00147 - SMART Payout to NV200
+        Adapter] NV200S Range User Manual – 107") reranked #1 at 0.9974 for
+        "can the NV200 be used with a SMART Payout?", winning on the heading
+        alone and then carrying no answer;
+      * on every other chunk it is a tail of title words that the embedder
+        and BM25 both see, making chunks from one manual look more alike.
+
+    Conservative on purpose: a line is only a footer if it ends in a number
+    AND its words are mostly the document's own title. A page whose last line
+    happens to be "Supply Voltage - 24" keeps it, because "supply voltage" is
+    nothing like the filename.
+    """
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    title_words = {w for w in re.findall(r"[a-z0-9]+", stem.lower())
+                   if len(w) > 2}
+    if not title_words:
+        return text
+    out = []
+    for line in (text or "").split("\n"):
+        m = _FOOTER_LINE.match(line.strip())
+        if m:
+            words = {w for w in re.findall(r"[a-z0-9]+", m.group("title").lower())
+                     if len(w) > 2}
+            # Most of the line's words are title words -> it is the footer.
+            if words and len(words & title_words) >= max(1, int(len(words) * 0.6)):
+                continue
+        out.append(line)
+    return "\n".join(out)
 
 
 def _breadcrumb(chunk: str) -> str | None:
@@ -222,13 +264,26 @@ def ingest_file(content: bytes, filename: str,
                 api_keys: dict | None = None,  # accepted for call-site compat; unused since doc2query removal (v10.16)
                 progress=None,
                 category_key: str | None = None,
-                product_key: str | None = None) -> int:
+                product_key: str | None = None,
+                replace_existing: bool = False) -> int:
     """
     Parse, chunk, embed and store a file.
 
     Returns the number of chunks added (0 if duplicate or empty).
     """
     collection = get_collection()
+
+    # The caller passes this so the console can show what is happening; it was
+    # accepted and never called, so /upload/status reported the 0.0 it was
+    # created with until the job finished. Every upload read "working 0%" for
+    # its whole run -- on a 200-page manual that is minutes of a progress
+    # indicator that looks stuck.
+    def _step(stage, done=0, total=0):
+        if progress:
+            try:
+                progress(stage, done, total)
+            except Exception:      # a broken reporter must not fail an ingest
+                pass
 
     # v12.0: keep the ORIGINAL file so answers can offer a download link
     # back to the source document. Previously the upload lived only in a
@@ -239,13 +294,32 @@ def ingest_file(content: bytes, filename: str,
     # than the Docker path "/data/source_files" -- that default silently
     # resolved to C:\data\source_files on Windows, outside the repo and any
     # backup, and was mistaken for data loss.
-    _src_dir = docstore.store_dir()
-
-    # ── Duplicate check ───────────────────────────────────────────────────────
-    existing = collection.get(where={"source": filename})
-    if existing and existing.get("ids"):
+    # ── Duplicate/version check ───────────────────────────────────────────────
+    content_hash = docstore.sha256(content)
+    existing = collection.get(where={"source": filename}, include=["metadatas"])
+    old_ids = list((existing or {}).get("ids") or [])
+    old_versions = {
+        (m or {}).get("document_version") or (m or {}).get("content_sha256")
+        for m in ((existing or {}).get("metadatas") or [])
+    }
+    if old_ids and content_hash in old_versions:
+        logger.info("Skipping unchanged document: %s (%s)", filename,
+                    content_hash[:12])
+        return 0
+    if old_ids and not replace_existing:
         logger.info(f"Skipping duplicate: {filename}")
         return 0
+
+    previous_content = None
+    if old_ids:
+        previous_path = docstore.find(filename)
+        if previous_path:
+            try:
+                with open(previous_path, "rb") as fh:
+                    previous_content = fh.read()
+            except Exception as exc:
+                logger.warning("could not stage the previous original for "
+                               "replacement rollback: %s", exc)
 
     # ── Save to temp file for parsing ────────────────────────────────────────
     # Use only the extension as suffix so extract_text() can detect the type
@@ -265,6 +339,7 @@ def ingest_file(content: bytes, filename: str,
         # Page-crossing content is largely recovered by retrieval returning
         # both halves, and by the breadcrumb enrichment below keeping each
         # half attributable to its section.
+        _step("reading the document", 0, 1)
         pages = extract_pages(tmp_path)
         if not pages:
             logger.warning(f"No text extracted from '{filename}'")
@@ -275,9 +350,17 @@ def ingest_file(content: bytes, filename: str,
         # can tell near-identical sections apart (e.g. app-login credentials
         # vs. device-registration API credentials). See the block comment at
         # the top of this file.
+        _step("splitting into sections", 0, len(pages))
         texts, pageno, sections = [], [], []
-        for pno, ptext in pages:
+        for _pi, (pno, ptext) in enumerate(pages, start=1):
+            if _pi % 5 == 0 or _pi == len(pages):
+                _step("splitting into sections", _pi, len(pages))
             if not ptext or not ptext.strip():
+                continue
+            # Before chunking, so the footer never reaches an embedding and
+            # cannot become a chunk's entire body.
+            ptext = _strip_running_footer(ptext, filename)
+            if not ptext.strip():
                 continue
             for raw in chunk_text(ptext, size=CHUNK_SIZE,
                                   overlap=CHUNK_OVERLAP):
@@ -286,6 +369,12 @@ def ingest_file(content: bytes, filename: str,
                 # only embedded in the text. That distinction is the point
                 # of the change: as metadata it can be filtered and boosted.
                 body, section = pop_section(raw)
+                # Tested on the BODY, not on the enriched chunk. The check
+                # below runs after _enrich_chunks has prepended a breadcrumb,
+                # so "[Doc — Section]\n" is always non-empty and a chunk with
+                # nothing in it would be stored as though it had content.
+                if not body.strip():
+                    continue
                 for c in _enrich_chunks([body], filename, section):
                     # Sentinels are a chunker-internal signal only — strip
                     # before anything is embedded, BM25-tokenised or shown
@@ -303,18 +392,22 @@ def ingest_file(content: bytes, filename: str,
             texts, pageno, sections = _drop_shadowed(texts, pageno, sections,
                                                      filename)
 
-        # ── Retain original for download ──────────────────────────────────────
-        try:
-            os.makedirs(_src_dir, exist_ok=True)
-            with open(os.path.join(_src_dir, os.path.basename(filename)), "wb") as fh:
-                fh.write(content)
-        except Exception as e:
-            # Non-fatal: ingestion still succeeds, the answer just won't
-            # offer a download link for this source.
-            logger.warning(f"could not retain source file for '{filename}': {e}")
-
         # ── Embed ─────────────────────────────────────────────────────────────
-        vectors = embed_texts(texts)
+        # The long pole on a big document, and the reason the console needs to
+        # say something: a 235-chunk manual spends most of its ingest here.
+        # In batches, so the percentage MOVES. One embed_texts call over 200
+        # chunks is a single minutes-long step that can only report 0% -- and
+        # a progress figure that never changes is indistinguishable from a
+        # stalled job, which is the one thing a progress bar exists to rule
+        # out.
+        _step("understanding the text", 0, len(texts))
+        vectors = []
+        _batch = 16
+        for _i in range(0, len(texts), _batch):
+            vectors.extend(embed_texts(texts[_i:_i + _batch]))
+            _step("understanding the text", min(_i + _batch, len(texts)),
+                  len(texts))
+        _step("saving", len(texts), len(texts))
 
         # ── Store ─────────────────────────────────────────────────────────────
         # v12.0: product key(s) this file belongs to, comma-joined for
@@ -325,7 +418,11 @@ def ingest_file(content: bytes, filename: str,
         # chunk so retrieval filters on the explicit assignment.
         _cat_tag = category_key or ""
         _prod_tag = product_key or ""
-        ids = [f"{filename}_{i}" for i in range(len(texts))]
+        # IDs include the immutable content version. This lets a replacement
+        # be written completely before the old IDs are removed, so an embed or
+        # database failure cannot erase the working version first.
+        ids = [f"{filename}:{content_hash[:16]}:{i}" for i in range(len(texts))]
+        indexed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         collection.add(
             documents=texts,
@@ -343,6 +440,25 @@ def ingest_file(content: bytes, filename: str,
                         "product": _prod_tag,
                         "products": _prod_tag,
                         "category": _cat_tag,
+                        "document_version": content_hash,
+                        "content_sha256": content_hash,
+                        "indexed_at": indexed_at,
+                        # One flag per product this document belongs to, so a
+                        # document can belong to SEVERAL. Chroma's `where` is
+        # A table that runs onto the next page restarts there with no
+        # heading and no column names; merged cells arrive blank; a matrix
+        # reads wrongly. See tables.py for the measurements.
+        import tables as _tables
+        texts, sections = _tables.carry_table_context(
+            texts, sections, os.path.splitext(filename)[0])
+        texts = [_tables.spell_out(t) for t in texts]
+
+                        # exact-match, so a comma-joined "a,b" matches neither
+                        # "a" nor "b" and multi-tagging would have silently
+                        # made a document invisible to both products. A flag
+                        # per key keeps the filter server-side and exact.
+                        **{("prod_" + k): True
+                           for k in _prod_tag.split(",") if k.strip()},
                         # v12.0: page number for citation + deep-linking.
                         "page": pageno[i],
                         # The document's own heading for this chunk, found by
@@ -355,6 +471,33 @@ def ingest_file(content: bytes, filename: str,
                        for i in range(len(texts))],
             ids=ids,
         )
+
+        # The new version is queryable now. Commit the durable original with
+        # an atomic replace, then retire the previous chunks. If retaining the
+        # source fails, roll the new IDs back and leave the old index intact.
+        try:
+            docstore.save(filename, content)
+        except Exception:
+            collection.delete(ids=ids)
+            raise
+
+        if old_ids:
+            try:
+                collection.delete(ids=old_ids)
+            except Exception:
+                # Prefer a duplicate index over data loss, but do not report a
+                # successful replacement: the operator needs to retry/repair.
+                try:
+                    collection.delete(ids=ids)
+                finally:
+                    if previous_content is not None:
+                        try:
+                            docstore.save(filename, previous_content)
+                        except Exception as restore_exc:
+                            logger.critical("could not restore original %r after "
+                                            "index replacement failed: %s",
+                                            filename, restore_exc)
+                    raise
 
         # v10.16: doc2query removed. It generated synthetic per-chunk
         # questions (kind="query") purely to boost retrieval recall; the
@@ -373,6 +516,10 @@ def ingest_file(content: bytes, filename: str,
                             pages=len(pages), settings=docstore.current_settings())
         except Exception as _exc:
             logger.warning(f"Could not record manifest entry: {_exc}")
+
+        # A replacement may have exactly the same number of chunks. BM25's
+        # normal count-based refresh cannot detect that content change.
+        invalidate_retrieval_cache()
 
         logger.info(f"Ingested '{filename}': {len(texts)} chunks")
         return len(texts)

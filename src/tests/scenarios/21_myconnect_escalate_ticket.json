@@ -1,0 +1,76 @@
+{
+  "id": "21_myconnect_escalate_ticket",
+  "product": "MyConnect",
+  "product_key": "myconnect",
+  "source": "MyConnect Environment-v4.pdf",
+  "persona": "Installer who hits a wall and wants a ticket / a human.",
+  "scoped": true,
+  "expect_labels": [
+    "MyConnect"
+  ],
+  "turns": [
+    {
+      "q": "the MyConnect app says the device is offline but the device is on",
+      "followup": false,
+      "commercial": false,
+      "note": "troubleshooting opener",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "network",
+          "port",
+          "firewall",
+          "connect",
+          "offline",
+          "Wi-Fi",
+          "ethernet"
+        ]
+      }
+    },
+    {
+      "q": "tried all that, still offline",
+      "followup": true,
+      "commercial": false,
+      "note": "no new information; should not repeat verbatim, ideally hands off",
+      "live": {
+        "expect": "any"
+      }
+    },
+    {
+      "q": "I want to open a support ticket",
+      "followup": true,
+      "commercial": false,
+      "note": "explicit ticket request -> route to support, not a manual answer",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "support",
+          "contact",
+          "email",
+          "phone",
+          "team",
+          "ticket"
+        ],
+        "avoid": [
+          "I couldn't find anything"
+        ]
+      }
+    },
+    {
+      "q": "can someone call me back on 07700 900123",
+      "followup": true,
+      "commercial": false,
+      "note": "phone number given; must not store/echo unsafely, should route to support",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "support",
+          "contact",
+          "team",
+          "phone",
+          "email"
+        ]
+      }
+    }
+  ]
+}

@@ -300,19 +300,37 @@ def resolve_effort(requested: str | None, tier: str) -> tuple[str, dict]:
 
 def check_faq_lookup(caller: dict) -> dict:
     """Abuse ceiling for anonymous FAQ retrieval. Members are not counted
-    here - their credit budget already bounds them."""
+    here - their credit budget already bounds them.
+
+    Checked per visitor AND per IP. The visitor id comes from the browser, so
+    a per-visitor count alone resets whenever someone clears site data or
+    sends a new id -- as does starting a new conversation for the session
+    caps. The per-IP count is the one a determined caller cannot reset.
+    consume_faq_lookup always wrote it; until 2026-09-24 nothing read it, so
+    in the default guest mode (FAQ only) the per-IP ceiling the console
+    describes did not exist.
+    """
     if caller["tier"] != "anonymous":
         return {"allowed": True, "remaining": None, "limit": None,
                 "reset_at": _window_start() + WINDOW_SECONDS, "reason": None}
     win = _window_start()
     key = caller["identity"] + ":faq"
+    ip_key = caller["ip_identity"] + ":faq" if caller.get("ip_identity") else None
     with _lock, _conn() as c:
         used = _used(c, key, win)
+        ip_used = _used(c, ip_key, win) if ip_key else 0
     faq_cap = anon_faq_limit()
     if used >= faq_cap:
         return {"allowed": False, "remaining": 0, "limit": faq_cap,
                 "reset_at": win + WINDOW_SECONDS, "reason": "faq_quota"}
-    return {"allowed": True, "remaining": faq_cap - used,
+    remaining = faq_cap - used
+    if ip_key:
+        ip_cap = anon_ip_limit()
+        if ip_used >= ip_cap:
+            return {"allowed": False, "remaining": 0, "limit": faq_cap,
+                    "reset_at": win + WINDOW_SECONDS, "reason": "ip_faq_quota"}
+        remaining = min(remaining, ip_cap - ip_used)
+    return {"allowed": True, "remaining": remaining,
             "limit": faq_cap, "reset_at": win + WINDOW_SECONDS,
             "reason": None}
 
@@ -518,7 +536,10 @@ def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
     with _lock, _conn() as c:
         keys = [identity, identity + ":faq"]
         if ip_identity:
-            keys.append(ip_identity + ":faq")
+            # Both per-IP counters: credits (guest AI on) and FAQ lookups.
+            # Only the FAQ one used to be cleared, so a guest blocked on
+            # ip_quota stayed blocked after the console said it had reset.
+            keys += [ip_identity, ip_identity + ":faq"]
         c.execute(f"DELETE FROM usage WHERE identity IN ({','.join('?' * len(keys))})",
                   keys)
 

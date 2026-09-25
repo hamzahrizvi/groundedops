@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 from pypdf import PdfReader
 from docx import Document
@@ -135,17 +136,84 @@ def _is_heading(line: dict, body: float, doc_is_bold: bool) -> bool:
     return False
 
 
+def _continues_previous(text: str) -> bool:
+    """Whether this line is the middle of a sentence rather than a label.
+
+    A wrapped line of an emphasised opening paragraph passes every test
+    _is_heading applies -- it is short enough, carries alphabetic text and
+    does not end in a full stop -- while being prose. Two things give it
+    away: starting lower-case, and carrying a sentence break inside it.
+    """
+    if not text:
+        return False
+    first = text.lstrip()[:1]
+    if first.islower():
+        return True
+    # ". " mid-line means the line spans a sentence boundary, which a label
+    # does not do. "Fig. 3" and "e.g." are followed by a lower-case letter
+    # or a digit, so requiring a capital after the stop leaves them alone.
+    return bool(re.search(r"[a-z]{2}\.\s+[A-Z]", text))
+
+
 def _headings_on_page(page, body: float, doc_is_bold: bool) -> list[str]:
-    """Heading texts on this page, in reading order."""
+    """Heading texts on this page, in reading order.
+
+    A heading whose NEXT line starts lower-case is dropped: the next line is
+    continuing its sentence, so it was a wrapped line of prose set large,
+    not a label. This is what made the first line of the NV4000 Development
+    Kit -- "Thank you for purchasing the NV4000 multi note recycler and
+    bill" -- a section heading over an empty body, which then dropped out at
+    ingest and took the only definition of the product with it: the phrase
+    "multi note recycler" was in the document and absent from the index.
+    """
     try:
         lines = page.extract_text_lines()
     except Exception:
         return []
-    return [(L.get("text") or "").strip() for L in lines
-            if _is_heading(L, body, doc_is_bold)]
+
+    texts = [(L.get("text") or "").strip() for L in lines]
+    out = []
+    for i, L in enumerate(lines):
+        text = texts[i]
+        if not _is_heading(L, body, doc_is_bold):
+            continue
+        if _continues_previous(text):
+            continue
+        nxt = texts[i + 1] if i + 1 < len(texts) else ""
+        if nxt[:1].islower():
+            continue
+        sizes = [round(c.get("size") or 0, 1) for c in (L.get("chars") or [])]
+        out.append((text, max(sizes) if sizes else 0.0))
+    return out
 
 
-def _mark_sections(prose: str, headings: list[str]) -> str:
+def _heading_paths(headings):
+    """Each heading mapped to itself plus its parents, biggest type first.
+
+    A heading alone is not always enough to say what a chunk IS. Page 19 of
+    the NV4000 manual carries two tables that are word-for-word identical
+    apart from four numbers -- operating limits and storage limits -- under
+    the one-word headings "Operation" and "Storage", both sitting beneath
+    "Environmental Requirements". Filed correctly and still nearly
+    indistinguishable: asked for the operating range the pipeline answered
+    with the storage one three times out of three, and asked the same of the
+    SMART Coin System it refused a question its own manual answers.
+
+    Larger type means a parent. Carrying the path makes the two chunks
+    differ by more than a single word, which is what the embedding and BM25
+    both need in order to tell them apart.
+    """
+    stack = []
+    paths = {}
+    for text, size in headings:
+        while stack and stack[-1][1] <= size:
+            stack.pop()
+        stack.append((text, size))
+        paths[text] = " › ".join(t for t, _ in stack)
+    return paths
+
+
+def _mark_sections(prose: str, headings) -> str:
     """Fence each heading so the chunker can start a new chunk at it.
 
     Matched by text against the prose extract_text() produced, rather than
@@ -155,14 +223,74 @@ def _mark_sections(prose: str, headings: list[str]) -> str:
     """
     if not headings:
         return prose
-    wanted = {h for h in headings if h}
+    paths = _heading_paths(headings)
     out = []
     for raw in prose.split("\n"):
-        if raw.strip() in wanted:
-            out.append(f"{SECTION_OPEN}{raw.strip()}{SECTION_CLOSE}")
+        key = raw.strip()
+        if key in paths:
+            out.append(f"{SECTION_OPEN}{paths[key]}{SECTION_CLOSE}")
         else:
             out.append(raw)
     return "\n".join(out)
+
+
+def _page_blocks(fpage, prose, tables):
+    """The page as ("prose"|"table", text) blocks in READING ORDER.
+
+    Every table used to be appended after ALL of the page's prose, so each
+    one landed under the LAST heading on its page instead of its own. In the
+    NV4000 development kit that filed the 3D CAD table under "Software
+    Development Kit", the Validator Manager row under "Currency Datasets",
+    and left "3D CAD Files" with nothing beneath it, so that heading never
+    reached the index -- which is why a question about the CAD files could
+    not find the rows that answer it while a question naming a part number
+    could.
+
+    The prose text itself is NOT re-extracted: extract_text() is what the
+    rest of the pipeline has always consumed, and re-deriving it from line
+    objects would change spacing and column handling for every document at
+    once. It is only SPLIT, at line boundaries, using the line objects'
+    vertical positions. If those do not correspond one-to-one with the
+    extracted lines the split cannot be trusted, and the old order is kept
+    rather than risking a dropped or duplicated line.
+    """
+    rendered = []
+    for t in tables:
+        try:
+            body = _render_table(t.extract())
+        except Exception:
+            body = ""
+        if body.strip():
+            rendered.append((t.bbox[1], body))
+    rendered.sort(key=lambda r: r[0])
+
+    lines = prose.split("\n") if prose.strip() else []
+    tops = None
+    if lines:
+        try:
+            objs = fpage.extract_text_lines()
+        except Exception:
+            objs = []
+        if len(objs) == len(lines):
+            tops = [o.get("top") for o in objs]
+
+    if tops is None:
+        blocks = [("prose", prose)] if prose.strip() else []
+        return blocks + [("table", b) for _, b in rendered]
+
+    blocks = []
+    idx = 0
+    for top, body in rendered:
+        band = []
+        while idx < len(lines) and (tops[idx] is None or tops[idx] < top):
+            band.append(lines[idx])
+            idx += 1
+        if band:
+            blocks.append(("prose", "\n".join(band)))
+        blocks.append(("table", body))
+    if idx < len(lines):
+        blocks.append(("prose", "\n".join(lines[idx:])))
+    return blocks
 
 
 def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
@@ -209,9 +337,10 @@ def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
                 return True
 
             try:
-                prose = (page.filter(outside_tables).extract_text() or "") if boxes \
-                    else (page.extract_text() or "")
+                fpage = page.filter(outside_tables) if boxes else page
+                prose = fpage.extract_text() or ""
             except Exception:
+                fpage = page
                 prose = page.extract_text() or ""
 
             # Fence the headings before anything else touches the text, so
@@ -220,17 +349,18 @@ def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
             # prefix. Replaces the 19-title whitelist in ingest.py, which
             # covered 9% of chunks -- it was tuned to four documents and the
             # corpus has eleven.
-            if prose.strip() and body_size:
-                prose = _mark_sections(
-                    prose, _headings_on_page(page, body_size, doc_is_bold))
+            headings = (_headings_on_page(page, body_size, doc_is_bold)
+                        if prose.strip() and body_size else [])
 
-            parts = [prose.strip()] if prose.strip() else []
-            for t in tables:
-                try:
-                    rendered = _render_table(t.extract())
-                except Exception:
-                    rendered = ""
-                if rendered.strip():
+            parts = []
+            for kind, body in _page_blocks(fpage, prose, tables):
+                if kind == "prose":
+                    body = body.strip()
+                    if not body:
+                        continue
+                    parts.append(_mark_sections(body, headings)
+                                 if headings else body)
+                else:
                     # Fenced so the chunker can keep a table whole. A spec
                     # table split mid-row loses the row: "Validator NV9S" in
                     # one chunk and "1.05 Kg" in the next answers nothing,
@@ -238,7 +368,7 @@ def _pdf_pages_plumber(path: str) -> tuple[list[tuple[int, str]], list[int]]:
                     # chunking.strip_table_fences() removes these before the
                     # text is stored, so the marker never reaches the index
                     # or a prompt.
-                    parts.append(TABLE_OPEN + "\n" + rendered.strip()
+                    parts.append(TABLE_OPEN + "\n" + body.strip()
                                  + "\n" + TABLE_CLOSE)
 
             text = "\n\n".join(parts).strip()

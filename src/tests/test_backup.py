@@ -21,6 +21,7 @@ import _harness
 from fastapi.testclient import TestClient
 
 import backup
+import accounts
 
 app = _harness.app
 client = TestClient(app)
@@ -63,6 +64,8 @@ def export(headers, passphrase=PW, **body):
 with open(os.environ["FAQ_STORE_PATH"], "w", encoding="utf-8") as _fh:
     json.dump([{"id": "seed", "question": "q", "answer": "a",
                 "source": "s", "products": ""}], _fh)
+accounts.submit_access_request("pending@test.local", "pending-password",
+                               "Pending Person")
 
 print("\n== export: level boundaries ==")
 r = export(ROOT)
@@ -104,8 +107,12 @@ finally:
 print("\n== export: contents scale with level ==")
 check("stores/accounts.json" in names(root_zip),
       "a root export carries accounts.json")
+check("stores/account_requests.json" in names(root_zip),
+      "a root export carries pending account requests")
 check("stores/accounts.json" not in names(support_zip),
       "a support export does NOT — no password hashes below root")
+check("stores/account_requests.json" not in names(support_zip),
+      "nor pending requests, which also contain password hashes")
 check("stores/policy.json" not in names(support_zip),
       "nor policy.json, which support cannot see in the console either")
 check("stores/faq_store.json" in names(support_zip),
@@ -296,6 +303,8 @@ print("\n== restore: the lock-out footgun ==")
 check("accounts.json" in r.json()["skipped"],
       "accounts are SKIPPED by default — restoring an accounts file without "
       "your own account in it locks you out of the console you are using")
+check("account_requests.json" in r.json()["skipped"],
+      "pending account requests follow the same restore opt-in")
 r2 = client.post("/admin/backup/import?restore_accounts=true", headers=ROOT,
                  data={"passphrase": PW},
                  files={"file": ("b.gobk", snapshot, "application/octet-stream")})

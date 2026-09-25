@@ -1,0 +1,80 @@
+{
+  "id": "14_product_switch_unscoped",
+  "product": "NV9 Spectral then NV9USB+",
+  "product_key": null,
+  "source": null,
+  "persona": "Integrator who starts on one validator and switches to another mid-conversation, no product picked.",
+  "scoped": false,
+  "expect_labels": [
+    "NV9 Spectral",
+    "NV9USB+"
+  ],
+  "expect_labels_sources": [
+    "NV9 Spectral Range User Manual-v1.pdf",
+    "NV9USB+ Range User Manual-v1.pdf"
+  ],
+  "turns": [
+    {
+      "q": "what bezel options are there for the NV9 Spectral",
+      "followup": false,
+      "commercial": false,
+      "note": "opening, product named",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV9 Spectral"
+        ],
+        "mention": [
+          "bezel"
+        ]
+      }
+    },
+    {
+      "q": "ok now the NV9USB+, does it use the same bezel",
+      "followup": false,
+      "commercial": false,
+      "note": "explicit product switch; names the new product so standalone",
+      "live": {
+        "expect": "any",
+        "cite": [
+          "NV9USB"
+        ],
+        "mention": [
+          "bezel"
+        ]
+      }
+    },
+    {
+      "q": "and how big is the cashbox on it",
+      "followup": true,
+      "commercial": false,
+      "note": "'it' must now resolve to the NV9USB+, not the NV9 Spectral",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "NV9USB"
+        ],
+        "mention": [
+          "note",
+          "capacity",
+          "cashbox",
+          "300",
+          "500",
+          "600"
+        ]
+      }
+    },
+    {
+      "q": "which of the two takes more notes",
+      "followup": true,
+      "commercial": false,
+      "note": "'the two' -- comparison across the switch",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "NV9"
+        ]
+      }
+    }
+  ]
+}

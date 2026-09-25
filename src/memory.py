@@ -47,6 +47,16 @@ def add_to_memory(session_id: str, query: str, answer: str) -> None:
     lower = answer.lower()
     if "could not find" in lower or "unable to generate" in lower:
         return
+    # The customer-facing refusal ("I don't have that in the product
+    # documentation...") replaced the model's token before this was called,
+    # and it passed the two substrings above. Remembered, it made the next
+    # "tell me more" expand a refusal into passages -- contradicting it.
+    try:
+        from text_utils import is_refusal
+        if is_refusal(answer):
+            return
+    except Exception:
+        pass
 
     with _lock:
         _reap_expired_locked()

@@ -34,7 +34,6 @@ except Exception as _exc:                                  # pragma: no cover
 _CACHE: dict[tuple, list] = {}
 _CACHE_MAX = 256
 
-CHECKLIST_RE = re.compile(r"check\s?list", re.I)
 # A heading looks like "5C. Final outro checklist - before you leave" or
 # "Pre-Requisites Checklist". Kept loose: the point is to find the START of a
 # checklist, and the extractor below stops at the next heading-ish line.
@@ -144,6 +143,39 @@ def _caption_above(page, bbox) -> str:
 
 
 _VOCAB_CACHE: dict[tuple, set] = {}
+_VOCAB_CACHE_MAX = 64
+# On disk too: keyed by "basename|mtime", so a re-uploaded document gets a
+# fresh entry and a restart does not re-read every page of every manual.
+# One full text pass per document is ~7s for a 100-page manual, and this
+# used to run INSIDE a customer's request whenever the model refused --
+# 200s gaps in the logs were three manuals being read cover to cover.
+_VOCAB_PATH = os.getenv("DOC_VOCAB_CACHE", "doc_vocab.json")
+_VOCAB_DISK: dict[str, list] | None = None
+_VOCAB_DISK_MAX = 256
+
+
+def _vocab_disk() -> dict[str, list]:
+    global _VOCAB_DISK
+    if _VOCAB_DISK is None:
+        try:
+            import jsonstore
+            data = jsonstore.load(_VOCAB_PATH, {}, label="document vocabulary")
+            _VOCAB_DISK = data if isinstance(data, dict) else {}
+        except Exception:
+            _VOCAB_DISK = {}
+    return _VOCAB_DISK
+
+
+def _vocab_disk_put(key: str, words: set) -> None:
+    disk = _vocab_disk()
+    disk[key] = sorted(words)
+    while len(disk) > _VOCAB_DISK_MAX:
+        disk.pop(next(iter(disk)))
+    try:
+        import jsonstore
+        jsonstore.save(_VOCAB_PATH, disk, label="document vocabulary", indent=None)
+    except Exception as exc:
+        logger.debug(f"vocabulary cache not saved: {exc}")
 
 
 def _doc_vocab(path: str, pdf) -> set:
@@ -161,18 +193,49 @@ def _doc_vocab(path: str, pdf) -> set:
     except OSError:
         return set()
     if key not in _VOCAB_CACHE:
-        if len(_VOCAB_CACHE) > 16:
-            _VOCAB_CACHE.clear()
-        try:
-            text = " ".join((p.extract_text() or "") for p in pdf.pages)
-        except Exception:
-            text = ""
-        _VOCAB_CACHE[key] = {w.lower() for w in re.findall(r"\w+", text)}
+        while len(_VOCAB_CACHE) >= _VOCAB_CACHE_MAX:
+            _VOCAB_CACHE.pop(next(iter(_VOCAB_CACHE)))   # oldest, not all
+        disk_key = f"{os.path.basename(path)}|{int(key[1])}"
+        words = _vocab_disk().get(disk_key)
+        if words is None:
+            try:
+                text = " ".join((p.extract_text() or "") for p in pdf.pages)
+            except Exception:
+                text = ""
+            words = {w.lower() for w in re.findall(r"\w+", text)}
+            _vocab_disk_put(disk_key, words)
+        _VOCAB_CACHE[key] = set(words)
     return _VOCAB_CACHE[key]
 
 
-def tables_on_page(path: str, page_no: int) -> list[dict]:
-    """Every table on one page, verbatim. [] if the page has none."""
+def _tables_from(pdf, path: str, page_no: int) -> list[dict]:
+    """The table blocks of one page of an ALREADY-OPEN document."""
+    if not (1 <= page_no <= len(pdf.pages)):
+        return []
+    page = pdf.pages[page_no - 1]
+    vocab = _doc_vocab(path, pdf)
+    out: list[dict] = []
+    for t in page.find_tables():
+        md = _render_markdown(t.extract(), vocab)
+        if not md:
+            continue
+        out.append({"kind": "table", "page": page_no,
+                    "title": _caption_above(page, t.bbox),
+                    "markdown": md})
+    return out
+
+
+def tables_on_page(path: str, page_no: int, pdf=None) -> list[dict]:
+    """Every table on one page, verbatim. [] if the page has none.
+
+    `pdf` is an already-open pdfplumber document for `path`, passed by a
+    caller sweeping every page of one file. Opening is NOT the ~0.02s the
+    module docstring quotes when you do it 832 times: pdfplumber re-parses
+    the document structure on each open, and the spec-index build was
+    paying that once PER PAGE. Left None, the file is opened and closed
+    here exactly as before, which is what the on-demand callers want --
+    they read one cited page and are done with the file.
+    """
     if pdfplumber is None or not os.path.exists(path):
         return []
     try:
@@ -182,20 +245,12 @@ def tables_on_page(path: str, page_no: int) -> list[dict]:
     if key in _CACHE:
         return _CACHE[key]
 
-    out: list[dict] = []
     try:
-        with pdfplumber.open(path) as pdf:
-            if not (1 <= page_no <= len(pdf.pages)):
-                return []
-            page = pdf.pages[page_no - 1]
-            vocab = _doc_vocab(path, pdf)
-            for t in page.find_tables():
-                md = _render_markdown(t.extract(), vocab)
-                if not md:
-                    continue
-                out.append({"kind": "table", "page": page_no,
-                            "title": _caption_above(page, t.bbox),
-                            "markdown": md})
+        if pdf is not None:
+            out = _tables_from(pdf, path, page_no)
+        else:
+            with pdfplumber.open(path) as doc:
+                out = _tables_from(doc, path, page_no)
     except Exception as exc:
         logger.warning(f"table extraction failed for {path} p{page_no}: {exc}")
         return []
@@ -631,56 +686,3 @@ def overview_pairs_for_document(path: str, source: str,
             if len(out) >= max_pairs:
                 return out
     return out
-
-
-def harvest_into_faq(doc_dir: str, catalog_products: dict,
-                     include_tables: bool = True,
-                     include_overviews: bool = True) -> dict:
-    """Put every table, checklist and product overview into the FAQ store.
-
-    These are the answers that should never involve a model: they are stated
-    verbatim in the manual, they do not change between releases, and serving
-    them from the store is instant, free and cannot be refused by the
-    grounding gate.
-
-    Overviews matter most. "What is X and what does it do?" is the first
-    thing a new customer types and a 42-question assessment found that exact
-    shape being refused across products -- not for want of retrieval (0.9993)
-    but because a synthesised description is not entailed sentence-by-
-    sentence. Curating it sidesteps the whole problem.
-
-    catalog_products maps source filename -> (product_key, product_name) so
-    each entry is filed against the right product; unmapped documents are
-    still harvested, just unscoped.
-
-    Non-destructive: faq_store.merge_questions never overwrites a curated
-    answer or a question that already exists.
-    """
-    import faq_store
-
-    added = skipped = docs = 0
-    for fname in sorted(os.listdir(doc_dir)):
-        if not fname.lower().endswith((".pdf", ".docx")):
-            continue
-        path = os.path.join(doc_dir, fname)
-        key, name = catalog_products.get(fname, ("", ""))
-
-        pairs = []
-        if include_overviews:
-            pairs += overview_pairs_for_document(path, fname, name)
-        if include_tables:
-            pairs += faq_pairs_for_document(path, fname)
-        if not pairs:
-            continue
-
-        res = faq_store.merge_questions(
-            fname, key, [{"question": p["question"], "answer": p["answer"],
-                          "origin": "harvested"}
-                         for p in pairs])
-        added += res.get("added", 0)
-        skipped += res.get("skipped_duplicates", 0)
-        docs += 1
-        logger.info("FAQ harvest %s: +%d, %d duplicate(s)",
-                    fname, res.get("added", 0), res.get("skipped_duplicates", 0))
-
-    return {"documents": docs, "added": added, "skipped_duplicates": skipped}
