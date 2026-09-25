@@ -807,7 +807,10 @@ $("run").onclick=async()=>{
   const base=$("base").value.replace(/\/+$/,""), q=$("q").value.trim(); if(!q) return;
   $("run").disabled=true; $("status").textContent="asking "+base+"/query …";
   const body={q,session_id:sessionStorage.gomap||(sessionStorage.gomap=
-    "map-"+Math.random().toString(36).slice(2))};
+    // getRandomValues, not Math.random (CodeQL js/insecure-randomness), and
+    // not randomUUID, which is missing when this page is opened over plain http.
+    "map-"+Array.from(crypto.getRandomValues(new Uint8Array(12)),
+                      b=>b.toString(16).padStart(2,"0")).join(""))};
   if($("product").value.trim()) body.product=$("product").value.trim();
   const t0=performance.now();
   try{

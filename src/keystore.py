@@ -339,12 +339,35 @@ def get_smtp_settings() -> dict:
     out = {k: (os.getenv(env) or "").strip() for k, env in _SMTP_ENV.items()}
     out["security"] = out["security"].lower() or "starttls"
     out["port"] = out["port"] or ("465" if out["security"] == "ssl" else "587")
-    out["password_set"] = bool((os.getenv(_SMTP_PASSWORD_ENV) or "").strip())
+    out["password_set"] = bool(get_smtp_password())
     return out
 
 
+def _vault_secret(name: str, legacy_env: str) -> str:
+    """A secret from the encrypted vault, else the env var an older install
+    (or a docker-compose file) set. Reading the env keeps those working;
+    the console never WRITES a secret there any more."""
+    try:
+        import keyvault
+        val = keyvault.load_secret(name)
+        if val:
+            return val
+    except Exception as exc:
+        logger.warning(f"secret vault unreadable ({name}): {exc}")
+    return (os.getenv(legacy_env) or "").strip()
+
+
+def _set_vault_secret(name: str, legacy_env: str, value: str | None) -> None:
+    """Store (or with None, clear) a secret in the encrypted vault, and
+    drop any clear-text copy the .env file still carries from before."""
+    import keyvault
+    keyvault.save_secret(name, value or "")
+    _rewrite_env_line(legacy_env, None)
+    os.environ.pop(legacy_env, None)
+
+
 def get_smtp_password() -> str:
-    return (os.getenv(_SMTP_PASSWORD_ENV) or "").strip()
+    return _vault_secret("smtp_password", _SMTP_PASSWORD_ENV)
 
 
 def set_smtp_settings(changes: dict) -> None:
@@ -368,11 +391,9 @@ def set_smtp_settings(changes: dict) -> None:
             os.environ.pop(env, None)
     pw = changes.get("password")
     if pw and str(pw).strip():
-        _rewrite_env_line(_SMTP_PASSWORD_ENV, str(pw).strip())
-        os.environ[_SMTP_PASSWORD_ENV] = str(pw).strip()
+        _set_vault_secret("smtp_password", _SMTP_PASSWORD_ENV, str(pw).strip())
     elif changes.get("clear_password"):
-        _rewrite_env_line(_SMTP_PASSWORD_ENV, None)
-        os.environ.pop(_SMTP_PASSWORD_ENV, None)
+        _set_vault_secret("smtp_password", _SMTP_PASSWORD_ENV, None)
     logger.info("SMTP settings updated (via console)")
 
 
@@ -399,7 +420,10 @@ def get_sso_settings(provider: str) -> dict:
 
 
 def get_sso_secret(provider: str) -> str:
-    return (os.getenv(_SSO_SECRET_ENV.get(provider, "")) or "").strip()
+    env = _SSO_SECRET_ENV.get(provider, "")
+    if not env:
+        return ""
+    return _vault_secret(f"sso_{provider}_client_secret", env)
 
 
 def set_sso_settings(provider: str, changes: dict) -> None:
@@ -419,12 +443,10 @@ def set_sso_settings(provider: str, changes: dict) -> None:
             os.environ.pop(env, None)
     secret_env = _SSO_SECRET_ENV[provider]
     if changes.get("secret") and str(changes["secret"]).strip():
-        val = str(changes["secret"]).strip()
-        _rewrite_env_line(secret_env, val)
-        os.environ[secret_env] = val
+        _set_vault_secret(f"sso_{provider}_client_secret", secret_env,
+                          str(changes["secret"]).strip())
     elif changes.get("clear_secret"):
-        _rewrite_env_line(secret_env, None)
-        os.environ.pop(secret_env, None)
+        _set_vault_secret(f"sso_{provider}_client_secret", secret_env, None)
     logger.info(f"SSO settings for {provider} updated (via console)")
 
 

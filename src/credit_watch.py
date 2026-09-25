@@ -35,6 +35,7 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import requests
 
@@ -102,7 +103,11 @@ def _gateway_root() -> str:
 
 def _check_openai_slot(threshold: float) -> dict:
     root = _gateway_root()
-    if "api.openai.com" in root:
+    # Compare the HOST, not a substring of the URL: "api.openai.com" in root
+    # also matched a gateway at api.openai.com.example or one whose path or
+    # query merely mentioned it (CodeQL py/incomplete-url-substring-
+    # sanitization), and would report that gateway's budget as unsupported.
+    if (urlparse(root).hostname or "").lower() == "api.openai.com":
         return _result("openai", "unsupported",
                        detail="OpenAI does not publish a balance API")
     key = keystore.get_key("openai")
