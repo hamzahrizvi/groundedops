@@ -531,10 +531,6 @@ _PROVIDER_MODEL_FALLBACK = {
 }
 
 
-def providers() -> list[str]:
-    return list(_PROVIDER_KEY_ENV)
-
-
 def get_model(provider: str) -> str:
     """The baseline model for one provider."""
     provider = (provider or "").strip().lower()

@@ -518,19 +518,6 @@ def get_by_id(faq_id: str) -> dict | None:
     return None
 
 
-def update_answer(faq_id: str, answer: str) -> dict | None:
-    with _lock:
-        items = _load()
-        for it in items:
-            if it["id"] == faq_id:
-                it["answer"] = answer
-                it["edited"] = True
-                _save(items)
-                _invalidate_cache()
-                return it
-    return None
-
-
 def delete_entry(faq_id: str) -> bool:
     with _lock:
         items = _load()
@@ -784,13 +771,6 @@ _gap_vec_by_text: dict | None = None
 # asked for. Gaps get resolved and stop being asked, and without a bound the
 # file would carry every question the widget has ever failed to answer.
 _GAP_VEC_MAX = 5000
-
-
-def _gap_store_mtime() -> float:
-    try:
-        return os.path.getmtime(_GAP_PATH)
-    except OSError:
-        return 0.0
 
 
 def _gap_vector_cache_file() -> str:
@@ -1689,16 +1669,3 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     logger.info(f"FAQ disambiguate {question!r} -> "
                 + "; ".join(f"{c['question'][:40]} ({c['score']})" for c in cands))
     return {"mode": "disambiguate", "candidates": cands}
-
-
-# Back-compat shim: older callers expect match_answer(). It now only ever
-# returns a NEAR-VERBATIM hit, never a guess — anything ambiguous returns
-# None so the caller falls through rather than silently asserting.
-def match_answer(question: str, scope_key: str | None = None,
-                 min_score: float | None = None) -> dict | None:
-    r = suggest_candidates(question, scope_key)
-    if r["mode"] == "answer":
-        e = r["entry"]
-        return {"answer": e["answer"], "question": e["question"],
-                "score": r["score"], "mode": "answer"}
-    return None

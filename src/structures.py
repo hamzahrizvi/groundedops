@@ -34,7 +34,6 @@ except Exception as _exc:                                  # pragma: no cover
 _CACHE: dict[tuple, list] = {}
 _CACHE_MAX = 256
 
-CHECKLIST_RE = re.compile(r"check\s?list", re.I)
 # A heading looks like "5C. Final outro checklist - before you leave" or
 # "Pre-Requisites Checklist". Kept loose: the point is to find the START of a
 # checklist, and the extractor below stops at the next heading-ish line.
@@ -687,56 +686,3 @@ def overview_pairs_for_document(path: str, source: str,
             if len(out) >= max_pairs:
                 return out
     return out
-
-
-def harvest_into_faq(doc_dir: str, catalog_products: dict,
-                     include_tables: bool = True,
-                     include_overviews: bool = True) -> dict:
-    """Put every table, checklist and product overview into the FAQ store.
-
-    These are the answers that should never involve a model: they are stated
-    verbatim in the manual, they do not change between releases, and serving
-    them from the store is instant, free and cannot be refused by the
-    grounding gate.
-
-    Overviews matter most. "What is X and what does it do?" is the first
-    thing a new customer types and a 42-question assessment found that exact
-    shape being refused across products -- not for want of retrieval (0.9993)
-    but because a synthesised description is not entailed sentence-by-
-    sentence. Curating it sidesteps the whole problem.
-
-    catalog_products maps source filename -> (product_key, product_name) so
-    each entry is filed against the right product; unmapped documents are
-    still harvested, just unscoped.
-
-    Non-destructive: faq_store.merge_questions never overwrites a curated
-    answer or a question that already exists.
-    """
-    import faq_store
-
-    added = skipped = docs = 0
-    for fname in sorted(os.listdir(doc_dir)):
-        if not fname.lower().endswith((".pdf", ".docx")):
-            continue
-        path = os.path.join(doc_dir, fname)
-        key, name = catalog_products.get(fname, ("", ""))
-
-        pairs = []
-        if include_overviews:
-            pairs += overview_pairs_for_document(path, fname, name)
-        if include_tables:
-            pairs += faq_pairs_for_document(path, fname)
-        if not pairs:
-            continue
-
-        res = faq_store.merge_questions(
-            fname, key, [{"question": p["question"], "answer": p["answer"],
-                          "origin": "harvested"}
-                         for p in pairs])
-        added += res.get("added", 0)
-        skipped += res.get("skipped_duplicates", 0)
-        docs += 1
-        logger.info("FAQ harvest %s: +%d, %d duplicate(s)",
-                    fname, res.get("added", 0), res.get("skipped_duplicates", 0))
-
-    return {"documents": docs, "added": added, "skipped_duplicates": skipped}

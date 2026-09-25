@@ -50,18 +50,6 @@ def _query_prefix() -> str:
     return _BGE_QUERY_PREFIX if "bge" in EMBED_MODEL.lower() else ""
 
 
-def embedding_dim() -> int:
-    """Dimension of the active model. Used by reindex to detect that an
-    existing collection was built with a different model and must be
-    rebuilt rather than appended to."""
-    m = _get_model()
-    for attr in ("get_embedding_dimension", "get_sentence_embedding_dimension"):
-        fn = getattr(m, attr, None)
-        if callable(fn):
-            return int(fn())
-    return int(m.encode(["x"], convert_to_numpy=True).shape[1])
-
-
 def embed_texts(texts: list[str]) -> np.ndarray:
     return _get_model().encode(
         texts,

@@ -28,7 +28,6 @@ no obvious plaintext key sitting next to it.
 
 import base64
 import getpass
-import hashlib
 import os
 import platform
 

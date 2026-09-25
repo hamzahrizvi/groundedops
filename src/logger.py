@@ -15,8 +15,8 @@ This version:
   - stores a normalized query field                  → easy dedup/analytics
 
 NOTE: this is a different file format from the old logs.json (JSON array).
-If you have an existing logs.json, archive or delete it — it won't be
-read by get_last_logs()/get_flagged_logs() here.
+If you have an existing logs.json, archive or delete it — nothing here
+reads it.
 """
 
 import json
@@ -103,33 +103,3 @@ def log_interaction(
         except IOError as exc:
             _logger.error(f"Failed to write log: {exc}")
 
-
-def _read_all_entries() -> list[dict]:
-    if not os.path.exists(LOG_FILE):
-        return []
-
-    entries: list[dict] = []
-    with _lock:
-        try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-        except IOError:
-            return []
-
-    return entries
-
-
-def get_last_logs(n: int = 5) -> list[dict]:
-    return _read_all_entries()[-n:]
-
-
-def get_flagged_logs() -> list[dict]:
-    """Return all interactions where the grounding check failed."""
-    return [e for e in _read_all_entries() if e.get("flagged")]

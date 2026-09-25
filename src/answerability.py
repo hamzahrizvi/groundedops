@@ -54,8 +54,6 @@ INFERABLE = "inferable"
 ADVISORY = "advisory"
 UNANSWERABLE = "unanswerable"
 
-ALL_KINDS = (STATED, DOCUMENTED_ELSEWHERE, INFERABLE, ADVISORY, UNANSWERABLE)
-
 
 def capability_evidence(query: str, chunks: list[dict],
                         product: str | None = None) -> dict | None:

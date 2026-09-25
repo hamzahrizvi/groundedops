@@ -601,7 +601,7 @@ def register(app, answer_query, draft_enquiry=None):
                 yield sse("error", {"status": e.status_code,
                                     "detail": e.detail})
                 return
-            except Exception as e:
+            except Exception:
                 # This one is the PUBLIC surface, so the rule matters most
                 # here: an anonymous visitor gets a status and nothing else.
                 # The traceback is already in the log via logger.exception.

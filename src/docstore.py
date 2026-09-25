@@ -27,7 +27,6 @@ tell whether a chunk in the index was built at 500 chars or 1200, which makes
 "did the chunking change help?" unanswerable.
 """
 import hashlib
-import json
 import logging
 import os
 import shutil

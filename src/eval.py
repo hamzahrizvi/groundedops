@@ -384,7 +384,6 @@ def main():
           f"skipped={sum(1 for r in results if r.get('skipped'))}")
 
     # Persist this run.
-    by_q = {r["q"] + ("::" + r.get("provider", "") if r.get("provider") else ""): r for r in results}
     results_path.write_text(json.dumps({"pass_rate": rate,
                                         "stable_pass_rate": stable_rate,
                                         "repeats": repeats,
