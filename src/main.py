@@ -6421,6 +6421,22 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     elif refusal:
         is_grounded, grounding_score = True, None
         flagged = False
+    elif re.search(r"^\s*\|", answer, re.M):
+        # A markdown table. The NLI model is trained on sentence pairs and
+        # scores a table row at ~0.00 whether it is right or wrong (see
+        # grounding.py's measurements), so every table answer failed here
+        # and was decided by the LLM verifier anyway -- after 5-30s of CPU
+        # scoring rows it cannot read. Go straight to the verifier that
+        # can; it fails closed like everything else in this stage.
+        is_grounded, grounding_score = False, 0.0
+        verifier_unavailable = False
+        ptrace.mark("verify", "table answer: NLI skipped, LLM verifier decides")
+        if _timed("llm_verify", _llm_verified,
+                  answer, top_chunks, deepseek_api_key, resolved_query):
+            is_grounded, ground_via = True, "llm"
+            logger.info("Table answer verified by LLM verifier for: "
+                        f"{resolved_query[:60]}")
+        flagged = not is_grounded
     else:
         is_grounded, grounding_score = _timed(
             "verify", check_grounding,

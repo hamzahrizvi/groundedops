@@ -22,7 +22,21 @@ know what changed since last week.
 Every item should be actionable by someone who was not in the session that
 found it. If it needs a transcript to understand, it is not written yet.
 
-Last hand-updated: 2026-09-21 — the answerability switchboard
+Last hand-updated: 2026-09-25 — **v16.3 is tagged and published as
+GO_v3.2**; the work after it is on `experimental/v16.4-logic-and-latency`.
+Two audits of the answer path (a latency map, and a logic review that
+confirmed each finding against the code) landed together; see the dated
+section **2026-09-25** below for what was fixed, what was measured, and the
+five findings deferred with their evidence. Headline numbers: DeepSeek V4
+was thinking by default on every call (3.15s -> 0.94s per call once
+disabled, a tenth of the completion tokens); the same seven questions on an
+idle box go 29.7s -> 30.9s end to end only because the new code ANSWERS
+three of them the old code refused (each answer costs an NLI pass the
+refusal skipped); the same short question repeated is 3.4s -> 2.6s. Tests
+**248/248**, 1 skipped. eval.py --no-grade: 34/34 identical outcomes old
+vs new; DeepSeek V4 Pro measured against Flash and rejected (below).
+
+Previously: 2026-09-21 — the answerability switchboard
 (`src/answerability.py`) and the second grounding contract
 (`grounding.check_inference`) both landed; see **Resolved**. The switchboard
 replaced four independent question-sniffs with one classification; the
@@ -72,6 +86,135 @@ the LiteLLM gateway; v16.5 pipeline-hardening deferrals still open (see the
 dated section below).
 
 ---
+
+## 2026-09-25 — experimental/v16.4-logic-and-latency (opened after GO_v3.2)
+
+Two read-only audits of the answer path, run in parallel, then fixes. Every
+logic fix is pinned in `src/tests/test_logic_holes.py`; every latency claim
+below was measured on this box (12 cores, CPU inference) with nothing else
+running unless stated.
+
+### Shipped — latency
+
+- **DeepSeek V4 thinks by default, and nothing turned it off.** `llm.py`
+  sent `model` + `messages` + `temperature`; V4 Flash then writes a hidden
+  chain of thought, bills it as completion tokens, and only then answers.
+  Measured on a 1.3k-token manual prompt, 3 runs each: thinking on 3.15s,
+  365-700 completion tokens of which 334-669 were reasoning; thinking off
+  0.94s, 30-66 tokens; same answer. Every DeepSeek call — answer, condense,
+  verifier, clarify draft, retries, the stream — now sends
+  `thinking: {type: disabled}`; `DEEPSEEK_THINKING=on` restores it.
+  End to end, `llm_time` per answer went 0.8-5.1s -> 0.6-0.9s and tokens
+  per turn 2726 -> 1981 on the worst question. **The reasoning tokens were
+  being charged to the visitor's quota.**
+- **Provider cooldown** (`PROVIDER_COOLDOWN_SECONDS`, 60): a provider that
+  failed to connect or answered 5xx is skipped while the chain has another
+  entry. The role `reasoning` leads with the on-prem gateway, which is
+  NXDOMAIN again today, so every such question and every grounding retry of
+  it paid that failure first.
+- **No forced Ollama in api mode.** `generate_with_fallback` appended a
+  local/mistral attempt whenever the chain lacked one — in api mode that is
+  always, and on a host without Ollama it is a 240s connect after every
+  online provider has already failed. Contradicted the "Ollama is never
+  touched" comment in `_chain_for`.
+- One `requests.Session` with a pool for every provider call (was a fresh
+  TCP+TLS per call, three to five calls a turn); query embeddings memoised
+  (the same resolved query was embedded three times a turn: FAQ, retrieval,
+  router); the router's 30 category examples embed at warmup instead of on
+  the first question after a restart; the widget's `async` handler runs the
+  quota sqlite calls and the FAQ lookup in the threadpool instead of on the
+  event loop.
+- **BM25 padded its arm with zero-score chunks** in corpus order up to
+  `fetch_n`, and RRF rewarded them: dense #20 + zero-pad BM25 #5 outscored
+  dense #1 alone. The arm now ends at the last lexical hit. (Logic and
+  latency both.)
+- **NLI grounding stops at the first failing unit.** Batching every pair
+  into one `predict()` was tried first and measured at no gain — 8.8s vs
+  10.2s on a 15-unit answer, noise; the cost is ~50ms per pair on CPU. Early
+  exit changes no verdict (the callers branch on the boolean; no rescue
+  reads the score). A markdown-table answer skips NLI entirely and goes to
+  the LLM verifier, which is where every table answer ended up anyway after
+  5-30s of scoring rows NLI cannot read.
+- `timing` now logs `retrieval_time` and `verifier_llm_time`, and the
+  response carries the verifier split too.
+
+### Shipped — logic (each with the input that used to go wrong)
+
+- **Table punctuation was a grounding unit.** `split_units` emitted
+  `|---|---|---|` and `### Heading` as claims; NLI scores them ~0 and the
+  gate takes the minimum, so every 3+-column table answer failed on its
+  punctuation. Stripped now.
+- **The number rescue used substring containment.** "30 notes" was
+  supported by "300 notes", "12V" by "revised 2012", "1.2 kg" by "1.25 Kg"
+  — the contradictions the gate exists for. Whole-number match now, and
+  never on a table.
+- **The picker was overridden by the rewrite, not the question.** With a
+  product selected, the override read `_products_named_in(resolved_query)`,
+  and the condense prompt tells the rewriter to carry the product over from
+  history. Pick NV9USB+, ask its supply voltage, change to BV30, ask "and
+  the current draw?" -> answered for the NV9USB+ under a BV30 scope bar.
+  Now the typed text decides when a picker is set; the rewrite still counts
+  when there is no picker (it is a follow-up's only product signal).
+- **`_AFFIRMATIVE` had no word boundary.** "Yesterday the NV9 stopped
+  accepting notes", "okay so what about android then?", "please tell me the
+  weight" all served the pending steps. `\b`, <= 8 words, no question word.
+- **Commercial classifier on technical vocabulary.** "quotes around the
+  value", "subscribe to age result events", "availability of the RS232
+  port", "third-party power supplier" all deflected to the sales reply.
+- **A customer-facing refusal was remembered**, so "tell me more" expanded
+  it into passages or "that is everything the documentation has" — the
+  memory filter only knew the model's own refusal string.
+- **An off-topic cross-reference claimed the refusal**: any NV200S refusal
+  that retrieved p84 said "the manual refers jam recovery to the Service
+  Guide, which I don't hold" and dropped the suggested questions. A
+  deferral now needs word overlap with the question OR to come from the
+  top-ranked passage ("screen size" vs "the dimensions of the device").
+- **The widget charged a credit for our own outage** (`service_degraded`).
+- **A curated question typed verbatim in a product chat was never
+  auto-served**: the FAQ matcher saw the retrieval-expanded "…? (NV9
+  Spectral)" and scored 0.50 against itself. Every widget chat is scoped,
+  so every customer got "is this what you meant?" instead. Two eval FAQ
+  cases flipped to pass on the backend that had this fix.
+- Catalogue-derived classifier caches (`text_utils._PRODUCT_TERMS`,
+  `retrieval_db._PRODUCT_CATEGORY`) reset on catalogue save; they lived
+  until restart.
+- `safe_generate` removed (dead; referenced an undefined name).
+
+### Measured and rejected
+
+- **DeepSeek V4 Pro as the default.** Same code, `ONLINE_DEEPSEEK_MODEL=
+  deepseek-v4-pro`: `llm_time` 1.2-4.0s vs 0.6-0.9s, and on the five
+  probe questions it refused three that Flash answered (bezel colour,
+  cashbox capacity, protocol steps). eval --no-grade 20/34 vs 18/34, but
+  both extra passes are the FAQ verbatim fix above, which only that backend
+  had. No quality gain to pay 2-3x latency for. The gateway models
+  (`itl-gpt-pro`, `itl-gpt-flash`) could not be tested: NXDOMAIN all day.
+- **Thinking mode as a quality lever**: the old backend (thinking on) and
+  the new (off) produced identical eval outcomes on all 34 cases.
+
+### Deferred, with the evidence
+
+- **"Deep" effort buys fewer safety nets.** `_widget_answer` maps deep to
+  `force_provider/force_model`, which makes `role="rethink"`, and that role
+  skips extraction, backup escalation and the grounding retry
+  (`main.py` ~6145, ~6427, ~6491). Its `role`/`top_k` parameters are never
+  read. Map deep to a real role instead of the rethink path.
+- **A reranker outage reads as a documentation gap.** `reranker.py` returns
+  chunks without `rerank_score` on failure -> confidence "none" ->
+  "rejected" + `record_gap`. Should be a system refusal. Fail-closed, so no
+  wrong answer, just a false gap.
+- **`/query/stream` skips** condensation, name scoping, sales deflect, the
+  template-leak check, the LLM verifier and procedure completion. Admin
+  only; noted.
+- **No overall deadline on a provider call.** `timeout=60` bounds connect
+  and each read, not the total; one logged turn has `escalation_time`
+  16544s. A worker-thread `future.result(timeout)` or a streaming cap.
+- **`doc_request` on "is there documentation on the MDB pinout?"** returns
+  the file list; `_CONTENT_WORDS` checks the prefix only. Needs the
+  catalogue to tell a product from a topic in the object.
+- **rerank_time 1.2s on the new process vs 0.9s on the old** for the same
+  question, steady state. Not explained; same model, same candidates. Worth
+  one look at torch thread settings when two backends share a box.
 
 ## Blocking
 
@@ -326,13 +469,18 @@ dated section below).
   can just ask for a new one. What bounds a caller is identity: the IP for
   guests, the account for members.
 
-- **~50s of a 113s answered query is unattributed.** Measured breakdown:
-  DeepSeek call 47.8s, NLI grounding 8.4s, reranker 3.9s, retrieval 3.0s — sums
-  to ~63s, wall clock was 113s. Needs per-stage timing instrumentation around
-  the request path to close (today's `timing` dict only covers part of it).
-  `CONTEXT_K=5 CHUNK_CHAR_CAP=1200` roughly halves prompt size as a stopgap if
-  latency matters more than recall — untested trade-off, measure with
-  `eval_retrieval.py --compare`.
+- ~~**~50s of a 113s answered query is unattributed.**~~ — **RESOLVED
+  2026-09-25, and the figure was stale.** It came from v15.1, when the
+  `timing` dict had four keys. Re-traced against the 52 timed entries in
+  `logs.jsonl`: on answered turns the gap between `total_time` and the
+  logged stages is now ~0.8s median. The big gaps (201.9s, 67.9s, 29.0s)
+  were all turns where the model refused or the answer was flagged, and the
+  time went into `_structures_for(force_kind="table")` reading every page
+  of each cited PDF for its vocabulary — untimed, per process, cache
+  cleared wholesale at 16 files. That vocabulary is now persisted
+  (`doc_vocab.json`, `DOC_VOCAB_CACHE`). And "NLI grounding 8.4s" was
+  mostly the LLM verifier's second full-context call, which `grounding_time`
+  hid; `verifier_llm_time` and `retrieval_time` are now logged separately.
 
 - **RESOLVED v15.2: markdown now renders in both surfaces.** The admin
   console's test chat and the widget both render lists, tables, bold and code.

@@ -287,12 +287,24 @@ def check_grounding(
         col = _entailment_index()
         min_score = 1.0
 
+        # One predict() per unit, and the FIRST unit under the bar ends it.
+        # The verdict is the minimum over units against the threshold, so
+        # once one unit fails, every later unit could only lower a score
+        # that nothing downstream reads as a number: the callers branch on
+        # the boolean, and the rescues (lexical, LLM verifier) do not take
+        # the score. On this corpus most answers fail NLI -- the manuals
+        # keep their facts in tables -- and on CPU each unit is ~12 pairs
+        # at ~50ms, so a 15-unit answer that failed on unit 2 used to spend
+        # ~8s scoring the rest. (Batching every pair into one predict()
+        # was measured first: same verdict, no gain; the cost is per pair.)
         for unit in units:
             cand = _scoring_premises(unit, premises)
             logits = model.predict([(p, unit) for p in cand],
                                    apply_softmax=True)
             best_entailment = float(max(logits[:, col]))
             min_score = min(min_score, best_entailment)
+            if min_score < threshold:
+                break
 
         return min_score >= threshold, round(min_score, 4)
 
