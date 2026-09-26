@@ -21,10 +21,31 @@ is the bucket for documents that are not about one product, so it is no
 longer offered; those documents are in scope for every product in their
 category instead (test_shared_documents.py).
 """
+import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# A fixed catalogue, set BEFORE main (and so catalog) is imported: catalog
+# resolves CATALOG_CONFIG at import. Without this the display-name check
+# read the operator's gitignored catalog_config.json, so it passed on a dev
+# machine and failed in CI and any fresh checkout, where the seed catalogue
+# has no "myconnect".
+_FIXTURE = os.path.join(tempfile.mkdtemp(prefix="chips-catalog-"),
+                        "catalog_config.json")
+with open(_FIXTURE, "w", encoding="utf-8") as _fh:
+    json.dump({"categories": [
+        {"key": "biometrics", "name": "Biometrics", "products": [
+            {"key": "myconnect", "name": "MyConnect", "sources": []},
+            {"key": "mycheckr", "name": "MyCheckr", "sources": []},
+            {"key": "mycheckr_mini", "name": "MyCheckr Mini", "sources": []},
+            {"key": "biometrics_general", "name": "General (shared docs)",
+             "sources": []}]},
+        {"key": "note_validators", "name": "Note Validators", "products": [
+            {"key": "nv200s", "name": "NV200S", "sources": []}]}]}, _fh)
+os.environ["CATALOG_CONFIG"] = _FIXTURE
 
 import main  # noqa: E402
 

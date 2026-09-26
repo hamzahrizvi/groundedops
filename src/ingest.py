@@ -388,6 +388,14 @@ def ingest_file(content: bytes, filename: str,
             logger.warning(f"No usable chunks from '{filename}'")
             return 0
 
+        # A table that runs onto the next page restarts there with no
+        # heading and no column names; merged cells arrive blank; a matrix
+        # reads wrongly. See tables.py for the measurements.
+        import tables as _tables
+        texts, sections = _tables.carry_table_context(
+            texts, sections, os.path.splitext(filename)[0])
+        texts = [_tables.spell_out(t) for t in texts]
+
         if _dedupe_enabled():
             texts, pageno, sections = _drop_shadowed(texts, pageno, sections,
                                                      filename)
@@ -445,14 +453,6 @@ def ingest_file(content: bytes, filename: str,
                         "indexed_at": indexed_at,
                         # One flag per product this document belongs to, so a
                         # document can belong to SEVERAL. Chroma's `where` is
-        # A table that runs onto the next page restarts there with no
-        # heading and no column names; merged cells arrive blank; a matrix
-        # reads wrongly. See tables.py for the measurements.
-        import tables as _tables
-        texts, sections = _tables.carry_table_context(
-            texts, sections, os.path.splitext(filename)[0])
-        texts = [_tables.spell_out(t) for t in texts]
-
                         # exact-match, so a comma-joined "a,b" matches neither
                         # "a" nor "b" and multi-tagging would have silently
                         # made a document invisible to both products. A flag

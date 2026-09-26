@@ -404,12 +404,6 @@ def retrieve_from_db(
 
     bm25_ids = _bm25_ranking(query, collection, fetch_n, source_filter, scope)
     dense_ids = _dense_ranking(query, collection, fetch_n, source_filter, scope)
-
-    scores = rrf_merge(bm25_ids, dense_ids, k=RRF_K)
-    if not scores:
-        return []
-
-    # Keep a margin of candidates (top_k*2) so the downstream reranker has
     try:
         phrase_ids = (_phrase_ranking(query, collection, PHRASE_ARM_GUARANTEE,
                                       source_filter, scope)
@@ -417,6 +411,12 @@ def retrieve_from_db(
     except Exception as exc:
         logger.debug(f"phrase arm skipped: {exc}")
         phrase_ids = []
+
+    scores = rrf_merge(bm25_ids, dense_ids, k=RRF_K)
+    if not scores:
+        return []
+
+    # Keep a margin of candidates (top_k*2) so the downstream reranker has
     # room to reorder before the answering pipeline trims to top_k.
     #
     # 2026-08-28: the margin built here was thrown away again by the
@@ -461,12 +461,6 @@ def retrieve_from_db(
             guarantee=RETRIEVAL_ARM_GUARANTEE,
         )
         keep_n = len(ranked_ids)
-
-    _, chunks = _get_bm25_index(collection)
-    by_id = {c["id"]: c for c in chunks}
-
-    # v10.16: with doc2query gone, every ranked id maps directly to a real
-    # chunk (no question->parent indirection, no dedupe needed). Any id the
     # Phrase hits are added, never substituted: they only widen what the
     # reranker is shown, and it decides.
     _extra = [i for i in phrase_ids if i not in ranked_ids]
@@ -475,6 +469,12 @@ def retrieve_from_db(
         keep_n = len(ranked_ids)
         for i in _extra:
             scores.setdefault(i, 0.0)
+
+    _, chunks = _get_bm25_index(collection)
+    by_id = {c["id"]: c for c in chunks}
+
+    # v10.16: with doc2query gone, every ranked id maps directly to a real
+    # chunk (no question->parent indirection, no dedupe needed). Any id the
     # dense query returns that isn't in by_id — e.g. a stale kind="query"
     # entry filtered out above — is skipped by the `if not entry` guard.
     results = []
@@ -786,14 +786,6 @@ def complete_procedures(chunks: list[dict],
         return chunks
 
 
-def sources_titled_for(words: list[str], product: str) -> list[str]:
-    """Documents whose FILENAME contains every word, tagged to `product`.
-
-    A metadata lookup, not a retrieval: no embedding, no ranking, and it
-    reuses the BM25 chunk cache, so it costs one pass over a list that is
-    already in memory.
-
-    It exists because ranking cannot be fixed into covering one case.
 TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))
 
 
@@ -850,6 +842,14 @@ def complete_tables(chunks: list[dict],
         return chunks
 
 
+def sources_titled_for(words: list[str], product: str) -> list[str]:
+    """Documents whose FILENAME contains every word, tagged to `product`.
+
+    A metadata lookup, not a retrieval: no embedding, no ranking, and it
+    reuses the BM25 chunk cache, so it costs one pass over a list that is
+    already in memory.
+
+    It exists because ranking cannot be fixed into covering one case.
     "Can I use MyCheckr with linux?" should find "Accessing my device in
     Linux Environment", which the operator tagged to MyCheckr at upload.
     The document never uses the word "MyCheckr", so the cross-encoder
