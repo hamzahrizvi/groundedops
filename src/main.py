@@ -3385,7 +3385,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             f"escalating to backup provider '{_backup_provider}' "
             f"for: {resolved_query[:60]}"
         )
-        _bk_model = _default_model_for(_backup_provider)
+        # The BACKUP role's model: its own override (MODEL_ROLE_BACKUP) or
+        # the provider's configured model -- never a hardcoded default.
+        try:
+            _bk_model = keystore.model_for_role("backup", _backup_provider)
+        except Exception:
+            _bk_model = _default_model_for(_backup_provider)
         backup_result = _timed("regen", generate,
                                _backup_provider, prompt, _bk_model,
                                deepseek_api_key=deepseek_api_key)
