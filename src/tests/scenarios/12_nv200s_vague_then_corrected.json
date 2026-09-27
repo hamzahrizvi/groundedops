@@ -48,15 +48,17 @@
       "q": "sorry, I mean the bezel LED flashes red 3 times then pauses",
       "followup": true,
       "commercial": false,
-      "note": "self-correction with a concrete error code; should read the flash-code table",
+      "note": "red 3 is always paired with blue flashes (p.84): name the red-3 codes and ask how many blue, or ask",
       "live": {
-        "expect": "answer",
+        "expect": [
+          "answer",
+          "clarify"
+        ],
         "cite": [
           "NV200S"
         ],
-        "mention": [
-          "3",
-          "three"
+        "answer_mention": [
+          "blue"
         ]
       }
     },
@@ -64,9 +66,12 @@
       "q": "how do I clear that",
       "followup": true,
       "commercial": false,
-      "note": "'that' = the fault just identified",
+      "note": "'that' = the fault identified in turn 3; if turn 3 rightly asked, nothing is identified yet",
       "live": {
-        "expect": "answer",
+        "expect": [
+          "answer",
+          "clarify"
+        ],
         "cite": [
           "NV200S"
         ]

@@ -43,13 +43,15 @@ LINUX = "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf"
 
 
 def t(q, followup, commercial, note, expect="answer", cite=None,
-      mention=None, avoid=None, **extra):
+      mention=None, avoid=None, answer_mention=None, **extra):
     d = {"q": q, "followup": followup, "commercial": commercial, "note": note,
          "live": {"expect": expect}}
     if cite:
         d["live"]["cite"] = cite
     if mention:
         d["live"]["mention"] = mention
+    if answer_mention:
+        d["live"]["answer_mention"] = answer_mention
     if avoid:
         d["live"]["avoid"] = avoid
     d.update(extra)
@@ -90,11 +92,19 @@ SCENARIOS = [
             t("the light on the front is flashing", True, False,
               "'the light' refers to the unit; still vague",
               expect="any", mention=["flash", "LED", "bezel", "error", "code"]),
+            # CORRECTED 2026-09-27 against the manual, not against a run:
+            # NV200S p.84 lists red 3 only WITH a blue count (3+1 Firmware
+            # Checksum, 3+2 Interface, 3+3 EEPROM, 3+4 Dataset); "red 3
+            # alone" is not a code. The original label (answer, mention "3")
+            # scored the 2026-09-25 reply "red x3 = Unit Not Initialised"
+            # (that is red 1 + blue 3) as a pass. Right is: read out the
+            # red-3 codes and ask for the blue count, or ask.
             t("sorry, I mean the bezel LED flashes red 3 times then pauses", True, False,
-              "self-correction with a concrete error code; should read the flash-code table",
-              cite=["NV200S"], mention=["3", "three"]),
+              "red 3 is always paired with blue flashes (p.84): name the red-3 codes and ask how many blue, or ask",
+              expect=["answer", "clarify"], cite=["NV200S"], answer_mention=["blue"]),
             t("how do I clear that", True, False,
-              "'that' = the fault just identified", cite=["NV200S"]),
+              "'that' = the fault identified in turn 3; if turn 3 rightly asked, nothing is identified yet",
+              expect=["answer", "clarify"], cite=["NV200S"]),
             t("and if it keeps happening?", True, False,
               "'and' opener; escalation advice or further steps", expect="any"),
         ],
