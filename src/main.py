@@ -2663,6 +2663,26 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     ptrace.mark("band", f"{confidence} (best {top_score:.3f}, gate "
             f"{RETRIEVAL_GATE_THRESHOLD}, clear at {AMBIGUOUS_CEILING})")
 
+    # UNSCOPED AND WEAK: is this about one of our products at all? Asked
+    # once, here, because both branches below need the answer: a nothing-
+    # found question that IS about a product should ask which one, and a
+    # weak match that is NOT (an HP printer "jamming" finds the validators'
+    # jam pages) must be refused rather than offered a product menu or
+    # answered from the wrong device's manual. See clarify.py.
+    _unscoped_verdict = None
+    if (not payload.product and not payload.category
+            and top_score < AMBIGUOUS_CEILING
+            and not (history and is_followup_turn(q, history, condensed_query))):
+        try:
+            import clarify as _clarify
+            import catalog as _cat_mod
+            _unscoped_verdict = _clarify.classify_unscoped(q, _cat_mod.catalog())
+            ptrace.mark("band", f"unscoped: {_unscoped_verdict or 'no verdict'}")
+        except Exception as _exc:
+            logger.warning(f"unscoped routing skipped: {_exc}")
+        if _unscoped_verdict == "other":
+            confidence = "none"
+
     # ── No relevant content at all ───────────
     if confidence == "none":
         total_time = time.time() - start_total
@@ -2689,26 +2709,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # which device/product instead of flatly rejecting, and surface
         # whatever low-scoring candidate sources retrieval DID turn up
         # as a concrete hint rather than a generic "which one?".
-    # UNSCOPED AND WEAK: is this about one of our products at all? Asked
-    # once, here, because both branches below need the answer: a nothing-
-    # found question that IS about a product should ask which one, and a
-    # weak match that is NOT (an HP printer "jamming" finds the validators'
-    # jam pages) must be refused rather than offered a product menu or
-    # answered from the wrong device's manual. See clarify.py.
-    _unscoped_verdict = None
-    if (not payload.product and not payload.category
-            and top_score < AMBIGUOUS_CEILING
-            and not (history and is_followup_turn(q, history, condensed_query))):
-        try:
-            import clarify as _clarify
-            import catalog as _cat_mod
-            _unscoped_verdict = _clarify.classify_unscoped(q, _cat_mod.catalog())
-            ptrace.mark("band", f"unscoped: {_unscoped_verdict or 'no verdict'}")
-        except Exception as _exc:
-            logger.warning(f"unscoped routing skipped: {_exc}")
-        if _unscoped_verdict == "other":
-            confidence = "none"
-
         # Vague-but-in-domain is decided from the manuals' own vocabulary,
         # and only when no product is selected: see clarify.py for the
         # measurements. It used a 35-word list tuned to two manuals, which
@@ -2799,6 +2799,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 results, [], answer, [], refused=(role_out == "rejected")),
             "needs_clarification": needs_clarification,
             "clarification_options": clarification_options,
+            "product_options": product_options,
             "reason": reason,
             "retrieval_score": round(top_score, 4),
             "resolved_query": resolved_query if resolved_query != q else None,
@@ -2825,7 +2826,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ("nv9 usb") is chat text, not payload.product, so the next turn asked
     # again. Resolve the product from the query wording first, and only ask
     # when the wording genuinely does not pick one out.
-            "product_options": product_options,
     if not payload.product and not payload.category and len(_span) > 1:
         _narrowed = _products_named_in(resolved_query, _span)
         if len(_narrowed) == 1:
@@ -2866,6 +2866,20 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # point rather than a problem. The visitor named both products; asking
     # "which did you mean?" answers a question nobody asked, and either reply
     # throws away half of what they asked for.
+    # Only products whose passages score near a CONFIDENT top result are
+    # alternatives; weak ones are not choices. And one shared document is
+    # never ambiguous with itself: "what port does the ICU local REST API
+    # use" scored 0.997 for MyCheckr and MyCheckr Mini from the same
+    # document, and asked which one. See clarify.near_top_products.
+    if not payload.product and not payload.category and len(_span) > 1:
+        try:
+            import clarify as _clarify
+            _near = _clarify.near_top_products(results, CONTEXT_K, top_score,
+                                               AMBIGUOUS_CEILING)
+            if _near is not None:
+                _span = _near
+        except Exception as _exc:
+            logger.warning(f"near-top span skipped: {_exc}")
     _cmp_named = (_products_named_in(resolved_query, _span)
                   if _comparing and len(_span) > 1 else [])
     _ask_product = (not payload.product and not payload.category
@@ -2892,20 +2906,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         else:
             clarifying = (
                 "I found a few different sections that could be relevant — "
-    # Only products whose passages score near a CONFIDENT top result are
-    # alternatives; weak ones are not choices. And one shared document is
-    # never ambiguous with itself: "what port does the ICU local REST API
-    # use" scored 0.997 for MyCheckr and MyCheckr Mini from the same
-    # document, and asked which one. See clarify.near_top_products.
-    if not payload.product and not payload.category and len(_span) > 1:
-        try:
-            import clarify as _clarify
-            _near = _clarify.near_top_products(results, CONTEXT_K, top_score,
-                                               AMBIGUOUS_CEILING)
-            if _near is not None:
-                _span = _near
-        except Exception as _exc:
-            logger.warning(f"near-top span skipped: {_exc}")
                 "could you clarify which part you mean? "
                 f"Possible areas: {', '.join(candidate_sources)}."
             )

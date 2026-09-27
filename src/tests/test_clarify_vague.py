@@ -78,7 +78,13 @@ def test_the_pipeline_asks_only_when_unscoped():
 
 
 def test_the_classifier_reads_one_word_and_fails_open_to_none():
-    import llm
+    # llm needs `requests`, which CI's unit job does not install. A missing
+    # optional package is a skip everywhere else in this suite; imported
+    # inside the test, it was a failure.
+    try:
+        import llm
+    except ModuleNotFoundError as exc:
+        raise SkipTest(f"needs {exc.name}")  # noqa: F821 -- injected by the runner
     cat = {"categories": [{"key": "note_val", "name": "Note Validators",
                            "products": [{"key": "bv30", "name": "BV30"}, {"key": "nv_general", "name": "General"}]}]}
     seen = {}
