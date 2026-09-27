@@ -373,9 +373,12 @@ exactly, we cannot tell whether a fix helped.
   last stage is not an outcome), verified_by (ground_via), verifier (the
   SUPPORT/RELEVANCE verdict text) and service_degraded, read by
   logger._trace_fields from a new pipeline_trace meta dict at write time.
-  Origin is server-side by session prefix (eval-/live-/preflight-, else
-  console); the widget opens its own trace via main._traced_query and sets
-  "widget", which a spoofed prefix cannot override. Newly logged: steps,
+  Origin (who asked) is server-side by session prefix (eval-/live-/
+  preflight-), else "widget" for a visitor on the widget and "console" on
+  /query; a separate `surface` field says which door ("widget"/"query").
+  The widget now opens its own trace via main._traced_query. The prefix
+  wins on the widget so M12's widget-path test runs are not counted as
+  customers (a visitor could label only their own turns a test). Newly logged: steps,
   acknowledgement, more, document request, sales/catalogue, faq.ask, and
   every _curated_faq_reply (faq.answer and the now-marked faq.picked);
   request_id and timing added at the handoff, early-refusal, span.ask
@@ -453,9 +456,25 @@ exactly, we cannot tell whether a fix helped.
   not gitignored); CI now also triggers on experimental/** branches; a
   comment in docker-compose.yml warns against `--workers N` (every JSON
   store's threading.Lock() is process-local).
-- [ ] **M12 Run the live test conversations through the website widget
+- [x] **M12 Run the live test conversations through the website widget
   path**, not only the internal one. This is how we found that a "fixed"
-  handoff was never fixed for real visitors.
+  handoff was never fixed for real visitors. (2026-09-27.) `run_live.py
+  --path widget` posts each turn to /widget/ask as a member (token minted
+  locally with WIDGET_TOKEN_SECRET from env or src/.env, one uid per
+  scenario so the 25-credit member allowance never binds) and names every
+  missing WIDGET_KEYS key per turn; `--path both` runs both paths on one
+  backend and prints per-turn outcome agreement; exit 1 on any fail,
+  dropped key or disagreement. The widget's public sources carry
+  `page_label` not `pages`, so observed_outcome now reads either (without
+  it every cited answer scored "manual"). The needs_history check stays
+  /query-only: the widget dict has no resolved_query. Smoke run on the
+  running :8000 backend, scenarios 17 and 19: 6/7 agree; the one
+  disagreement is 19 T4, a handoff /query decided that the customer sees
+  as a refusal because /widget/ask drops role -- 8.1, now measured. Every
+  widget turn drops role, reason, request_id, service_degraded and
+  product_options. The full 59-turn `--path both` reading is in the S4
+  batch (tools/overnight_eval.sh). Pinned by
+  tests/test_run_live_widget_path.py.
 - [ ] **M13 Check whether the fact-checking model is still earning its
   keep** - 58% of served answers now score under 0.1 on it.
 - [x] **M14 Add tests for the new table and phrase-search code** before it

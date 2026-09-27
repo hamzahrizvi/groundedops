@@ -140,18 +140,31 @@ def test_the_log_line_knows_the_session_origin_and_outcome():
     assert row["request_id"]
 
 
-def test_origin_comes_from_the_server_not_the_client():
+def test_origin_is_who_asked_and_surface_is_the_door():
     assert pipeline_trace.origin_for("live-abc") == "live"
+    assert pipeline_trace.origin_for("live-abc", "widget") == "live"
     assert pipeline_trace.origin_for("preflight-x") == "preflight"
     assert pipeline_trace.origin_for("3f2a-uuid") == "console"
+    assert pipeline_trace.origin_for("3f2a-uuid", "widget") == "widget"
     assert pipeline_trace.origin_for(None) == "console"
-    # The widget route says "widget" before query() runs, and a session id
-    # that happens to look like a test's cannot override it.
+    # A visitor on the widget is origin "widget"...
     rows, spy = _log_spy()
-    _ask(log=spy, session_id="live-spoof",
+    _ask(log=spy, session_id="3f2a-visitor",
          entry=lambda req: main._traced_query(req, None, "widget"))
     assert rows[0]["meta"]["origin"] == "widget"
-    assert rows[0]["meta"]["session_id"] == "live-spoof"
+    assert rows[0]["meta"]["surface"] == "widget"
+    # ...and run_live --path widget (M12) is a test on the widget surface,
+    # not a customer.
+    rows, spy = _log_spy()
+    _ask(log=spy, session_id="live-11-abcd",
+         entry=lambda req: main._traced_query(req, None, "widget"))
+    assert rows[0]["meta"]["origin"] == "live"
+    assert rows[0]["meta"]["surface"] == "widget"
+    # /query is the "query" surface.
+    rows, spy = _log_spy()
+    _ask(log=spy)
+    assert rows[0]["meta"]["surface"] == "query"
+    assert rows[0]["meta"]["origin"] == "console"
 
 
 def test_a_curated_faq_answer_now_writes_a_log_row():
@@ -191,7 +204,7 @@ def _real_logger():
 def test_the_real_logger_reads_the_trace_and_tolerates_its_absence():
     real = _real_logger()
     blank = real._trace_fields()
-    assert set(blank) == {"session_id", "origin", "outcome", "verified_by",
+    assert set(blank) == {"session_id", "origin", "surface", "outcome", "verified_by",
                           "verifier", "service_degraded"}
     assert all(v is None for v in blank.values())
 

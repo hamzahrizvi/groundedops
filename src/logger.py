@@ -90,6 +90,7 @@ def _trace_fields() -> dict:
     return {
         "session_id":       meta.get("session_id"),
         "origin":           meta.get("origin"),
+        "surface":          meta.get("surface"),
         "outcome":          outcome,
         "verified_by":      meta.get("ground_via"),
         "verifier":         meta.get("verifier"),

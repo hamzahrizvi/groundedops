@@ -2133,15 +2133,14 @@ def query_route(payload: QueryRequest, x_user_id: str | None = Header(default=No
 
 
 def _traced_query(payload: QueryRequest, x_user_id: str | None = None,
-                  origin: str | None = None, attach: bool = False):
+                  surface: str = "query", attach: bool = False):
     """query_any_language inside a pipeline trace. Both entry points use it:
     /query attaches the trace to the response for the console; the widget
     only needs it open so the log line knows how the turn ended (M2 --
     before this, real customer turns were the only ones with no trace)."""
     _tok = ptrace.start()
     try:
-        if origin:
-            ptrace.set_meta(origin=origin)
+        ptrace.set_meta(surface=surface)
         result = query_any_language(payload, x_user_id)
         if attach:
             try:
@@ -2217,8 +2216,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
 
     q = payload.q
     session_id = payload.session_id or DEFAULT_SESSION_ID
-    ptrace.set_meta(session_id=session_id)
-    ptrace.set_meta(keep=True, origin=ptrace.origin_for(payload.session_id))
+    ptrace.set_meta(session_id=session_id, origin=ptrace.origin_for(
+        payload.session_id, ptrace.get_meta("surface")))
 
     # "YES" TO AN OFFER WE MADE, answered before anything else runs.
     #

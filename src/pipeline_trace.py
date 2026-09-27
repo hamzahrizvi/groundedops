@@ -124,43 +124,50 @@ def mark(stage: str, note: str | None = None) -> None:
 
 
 # M2: who asked, and what checked the answer. Set once each where the value
-# is decided (session and origin at the top of query(), ground_via after the
-# grounding step, the verifier's verdict inside _llm_verified) and read by
-# logger.log_interaction at write time, so the log line needs no new
-# arguments threaded through a 1700-line function.
-META_KEYS = ("session_id", "origin", "ground_via", "verifier",
-             "service_degraded")
-
-# Origin is derived from the session id's prefix, server-side, so no client
-# can claim to be a test. eval.py sends "eval-", run_live.py "live-", the
-# eval preflight "preflight-". The widget route sets "widget" itself before
-# query() runs; anything else reaching /query is the console.
+# is decided (surface by main._traced_query, session and origin at the top
+# of query(), ground_via after the grounding step, the verifier's verdict
+# inside _llm_verified) and read by logger.log_interaction at write time,
+# so the log line needs no new arguments threaded through a 1700-line
+# function.
+#
+# Two separate facts. `surface` is the door the question came through
+# ("widget" or "query"). `origin` is who asked: a test harness, by session
+# id prefix (eval.py sends "eval-", run_live.py "live-", the eval preflight
+# "preflight-"), else a visitor on the widget or a person in the console on
+# /query. The prefix wins on the widget too, so run_live --path widget
+# (M12) is not counted as customers. It is derived server-side; a widget
+# visitor does choose their own session id, so one could label their own
+# turns a test -- that hides only themselves from the report and unlocks
+# nothing.
 _ORIGIN_PREFIXES = (("eval-", "eval"), ("live-", "live"),
                     ("preflight-", "preflight"))
 
 
-def origin_for(session_id: str | None) -> str:
+def origin_for(session_id: str | None, surface: str | None = None) -> str:
     sid = session_id or ""
     for prefix, origin in _ORIGIN_PREFIXES:
         if sid.startswith(prefix):
             return origin
-    return "console"
+    return "widget" if surface == "widget" else "console"
 
 
-def set_meta(keep: bool = False, **fields) -> None:
-    """Record facts about this turn for the log line. `keep=True` leaves a
-    value already set alone (the widget route's origin beats the prefix)."""
+def set_meta(**fields) -> None:
+    """Record facts about this turn for the log line."""
     try:
         cur = _current.get()
         if cur is None:
             return
-        meta = cur.setdefault("meta", {})
-        for k, v in fields.items():
-            if keep and meta.get(k) is not None:
-                continue
-            meta[k] = v
+        cur.setdefault("meta", {}).update(fields)
     except Exception:
         pass
+
+
+def get_meta(key: str):
+    try:
+        cur = _current.get()
+        return (cur or {}).get("meta", {}).get(key)
+    except Exception:
+        return None
 
 
 # The stages that are an OUTCOME rather than a step along the way. "respond"
