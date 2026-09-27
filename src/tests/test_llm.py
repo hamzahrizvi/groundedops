@@ -384,5 +384,9 @@ def test_judgement_calls_think_even_with_thinking_off():
 def test_the_verifier_and_selection_calls_are_judgements():
     import inspect
     import main
-    assert "with judging():" in inspect.getsource(main._llm_verified)
+    # The verifier thinks on flash/LED/colour/code answers only (measured
+    # 2026-09-27, see main._needs_judgement and test_verifier_thinking_gate);
+    # the re-answer passage selection always does.
+    assert "judging() if _think" in inspect.getsource(main._llm_verified)
+    assert "_needs_judgement(question, answer)" in inspect.getsource(main._llm_verified)
     assert inspect.getsource(main.query).count("with judging():") >= 1
