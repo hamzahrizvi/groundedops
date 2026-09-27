@@ -5,6 +5,12 @@ success percentage per scenario and overall.
     cd src && ../.venv/Scripts/python.exe tests/run_scenarios.py
     ... --verbose      show every turn, not only the failures
     ... --before       also score the pre-2026-09-19 code, for the delta
+    ... --transcript   keyless replay: needs_history against the resolved
+                       queries saved in
+                       docs/stress-test-2026-09-25-transcripts-after.md,
+                       instead of the raw question this file's classify()
+                       otherwise resolves on its own (no condense_query call,
+                       no provider key -- M10)
 
 WHAT THIS DOES AND DOES NOT PROVE. No language model is involved, and none
 is available (the gateway is NXDOMAIN). This scores the ROUTING decisions
@@ -33,6 +39,7 @@ import sales                      # noqa: E402
 import text_utils as T            # noqa: E402
 
 SCENARIO_DIR = HERE / "scenarios"
+TRANSCRIPT_DOC = HERE.parent.parent / "docs" / "stress-test-2026-09-25-transcripts-after.md"
 
 # Any non-empty history: the classifiers only need a conversation to exist.
 # Turn 1 of each scenario is scored with an EMPTY history, because a first
@@ -102,7 +109,16 @@ def score_scenario(sc, legacy=False, verbose=False):
 
         checks = []
         got = classify(q, history, product, legacy)
-        checks.append(("follow-up", turn["followup"], got))
+        # M10: scenarios 11-24 carry `needs_history` (this same is_followup_
+        # turn decision, renamed) instead of 01-10's bare `followup`, and it
+        # may be null -- a deflect or an intent (main.py:1448 / :2501) reaches
+        # some turns before routing ever asks whether they needed history, so
+        # there is nothing honest to check there.
+        if "needs_history" in turn:
+            if turn["needs_history"] is not None:
+                checks.append(("needs_history", turn["needs_history"], got))
+        else:
+            checks.append(("follow-up", turn["followup"], got))
 
         # The commercial deflect is not affected by the follow-up work, but a
         # price question answered from a manual is the worst failure this
@@ -113,6 +129,15 @@ def score_scenario(sc, legacy=False, verbose=False):
         if "markers" in turn:
             checks.append(("markers", turn["markers"],
                            T.has_reference_markers(q)))
+
+        # M10: intent is scored only against the two deterministic intent
+        # classifiers, never invented for a shape neither one covers.
+        if turn.get("intent") == "handoff":
+            import intents
+            checks.append(("intent", True, intents.is_handoff_request(q)))
+        elif turn.get("intent") == "greeting":
+            import intents
+            checks.append(("intent", True, intents.is_greeting(q)))
 
         bad = [(name, want, got) for name, want, got in checks if want != got]
         if bad:
@@ -167,6 +192,92 @@ def score_scenario(sc, legacy=False, verbose=False):
                     lines.append(f"           - {s}")
 
     return passed + extra_pass, failed + extra_fail, lines
+
+
+def parse_transcript_turns(path):
+    """{scenario_id: [(raw_q, resolved_q, answer), ...]} from a saved live
+    transcript (tests/run_live.py's --out markdown), in turn order.
+
+    A turn with no '- resolved query:' line was not rewritten by
+    condensation, so its resolved text falls back to the raw question. The
+    answer is carried too, because is_followup_turn's rewrite check
+    (_rewrite_folded_in_history) looks for added words in the last two
+    HISTORY turns' q+a -- feeding it a placeholder history (as
+    score_scenario's fixed PRIOR does) can never agree with a real run,
+    since the words a real rewrite pulled in came from this scenario's own
+    prior answers, not from a generic stand-in.
+    """
+    text = path.read_text(encoding="utf-8")
+    scenarios: dict[str, list] = {}
+    sid = raw_q = resolved_q = None
+    answer_lines: list[str] = []
+
+    def _flush():
+        if sid and raw_q is not None:
+            scenarios.setdefault(sid, []).append(
+                (raw_q, resolved_q or raw_q, " ".join(answer_lines).strip()))
+
+    for line in text.splitlines():
+        m = re.match(r"^## (\S+)", line)
+        if m:
+            _flush()
+            sid, raw_q, resolved_q, answer_lines = m.group(1), None, None, []
+            continue
+        m = re.match(r"^### Turn (\d+): (.+)$", line)
+        if m:
+            _flush()
+            raw_q, resolved_q, answer_lines = m.group(2).strip(), None, []
+            continue
+        m = re.match(r"^- resolved query: `(.*)`$", line)
+        if m and sid and raw_q is not None:
+            resolved_q = m.group(1)
+            continue
+        m = re.match(r"^> (.*)$", line)
+        if m and sid and raw_q is not None:
+            answer_lines.append(m.group(1))
+    _flush()
+    return scenarios
+
+
+def run_transcript_replay(verbose=False):
+    """Keyless: replays needs_history against the RESOLVED queries a real
+    condense_query call already produced and this repo saved, with the real
+    accumulated per-scenario history -- rather than calling condense_query
+    again (which needs a provider key) or trusting classify()'s own
+    approximation, which only ever sees the raw question against a fixed
+    placeholder history."""
+    scenarios = parse_transcript_turns(TRANSCRIPT_DOC)
+    files = sorted(SCENARIO_DIR.glob("*.json"))
+    total_pass = total_fail = 0
+    for f in files:
+        sc = json.loads(f.read_text(encoding="utf-8"))
+        sid = sc["id"]
+        transcript_turns = scenarios.get(sid)
+        if not transcript_turns:
+            continue
+        history: list = []
+        for i, turn in enumerate(sc["turns"], start=1):
+            if i > len(transcript_turns):
+                break
+            raw_q, resolved_q, answer = transcript_turns[i - 1]
+            want = turn.get("needs_history")
+            if want is not None:
+                got = T.is_followup_turn(raw_q, history, resolved_q)
+                if got == want:
+                    total_pass += 1
+                else:
+                    total_fail += 1
+                    if verbose:
+                        print(f"  FAIL {sid} T{i}: expected "
+                              f"needs_history={want}, got {got}  "
+                              f"resolved={resolved_q!r}")
+            history.append({"q": raw_q, "a": answer})
+
+    total = total_pass + total_fail
+    pct = 100.0 * total_pass / total if total else 0.0
+    print(f"\n--transcript replay: {total_pass}/{total} needs_history "
+          f"checks agree with the saved resolved queries ({pct:.1f}%)")
+    return 0 if total_fail == 0 else 1
 
 
 def _entry_for(question):
@@ -269,7 +380,18 @@ def main():
                     help="print every turn, not only failures")
     ap.add_argument("--before", action="store_true",
                     help="also score the pre-2026-09-19 code")
+    ap.add_argument("--transcript", action="store_true",
+                    help="keyless: replay needs_history against the saved "
+                         "resolved queries instead of the normal run")
+    ap.add_argument("--min-pass", type=int, default=None,
+                    help="M11/CI: fail if fewer than this many checks pass "
+                         "(a regression gate looser than 'every check', "
+                         "since a handful are known, documented misses -- "
+                         "never raised by relabelling instead of fixing)")
     args = ap.parse_args()
+
+    if args.transcript:
+        return run_transcript_replay(verbose=args.verbose)
 
     if args.before:
         old_pct, old_p, old_t = run(legacy=True, verbose=args.verbose)
@@ -278,6 +400,14 @@ def main():
     if args.before:
         print(f"  before {old_pct:.1f}%  ->  after {new_pct:.1f}%   "
               f"({new_p - old_p:+d} checks)\n")
+
+    if args.min_pass is not None:
+        if new_p < args.min_pass:
+            print(f"  GATE: FAIL — {new_p} checks passed, below the "
+                  f"committed floor of {args.min_pass}\n")
+            return 1
+        print(f"  GATE: PASS — {new_p} checks passed (floor {args.min_pass})\n")
+        return 0
     return 0 if new_p == new_t else 1
 
 

@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "mycheckr mini no turn on wat i do",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "typos: power-on troubleshooting",
       "live": {
@@ -28,7 +28,7 @@
     },
     {
       "q": "how i conect the divice to wifi",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "typos: Wi-Fi setup",
       "live": {
@@ -45,7 +45,7 @@
     },
     {
       "q": "were is power buton on it",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'it'; typos",
       "live": {
@@ -62,9 +62,9 @@
     },
     {
       "q": "thank you very much you help me",
-      "followup": true,
+      "needs_history": null,
       "commercial": false,
-      "note": "closing pleasantry: should acknowledge, not retrieve",
+      "note": "closing pleasantry: should acknowledge, not retrieve. Neither intents.is_greeting nor is_handoff_request matches this exact phrasing (it is not a bare pleasantry), so needs_history is left unscored here rather than asserted against a classifier that was not built to catch it",
       "live": {
         "expect": "any",
         "avoid": [

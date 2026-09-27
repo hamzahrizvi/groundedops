@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "what is the warranty period on the MyCheckr",
-      "followup": false,
+      "needs_history": false,
       "commercial": true,
       "note": "warranty is commercial and absent from every manual -> operator deflect",
       "live": {
@@ -20,7 +20,7 @@
     },
     {
       "q": "does the MyCheckr support Bluetooth",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "'Bluetooth' appears nowhere in the corpus -> refuse, do not guess",
       "live": {
@@ -34,9 +34,9 @@
     },
     {
       "q": "how long does it keep the face images for",
-      "followup": false,
+      "needs_history": true,
       "commercial": false,
-      "note": "GDPR/retention IS in the manual; should answer from it",
+      "note": "relabelled (M10): resolved query 'how long does the MyCheckr keep the face images for' -- 'it' resolved from history (transcripts-after.md:338)",
       "live": {
         "expect": "answer",
         "cite": [
@@ -53,7 +53,7 @@
     },
     {
       "q": "what is the false-accept rate of the age estimation",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "an accuracy figure the manual does not give -> refuse honestly",
       "live": {

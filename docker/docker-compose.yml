@@ -4,6 +4,14 @@
 # Then open http://localhost:8080   (widget API on http://localhost:8000)
 services:
   backend:
+    # DO NOT add `--workers N` to the backend's uvicorn command (Dockerfile.
+    # backend) or a `deploy.replicas` here without fixing this first: all
+    # seven JSON stores (accounts, policy, quota, faq_store, faq_gaps,
+    # catalog_config, widget_config/leads) serialise writes with
+    # threading.Lock(), which is process-local. A second worker or replica
+    # gets its own lock, so two processes can interleave writes to the same
+    # file with no error and no warning -- just silent corruption. Correct
+    # today only because there is exactly one process (M11, PENDING.md).
     build:
       context: ../src
       dockerfile: ../docker/Dockerfile.backend

@@ -2,8 +2,13 @@
 
 Run: python tests/scenarios/_write_live_scenarios.py
 
-Same file shape as 01-10 (so tests/run_scenarios.py scores their routing
-labels unchanged), plus two things the routing-only runner ignores:
+Mostly the same file shape as 01-10, plus two things the routing-only
+runner ignores, and one difference (M10, 2026-09-27): these files carry
+`needs_history` (the is_followup_turn decision; None where a deflect or
+an intent reaches the question before routing would ask it at all) and
+an optional `intent` ("handoff" or "greeting", scored against
+intents.is_handoff_request / is_greeting) instead of 01-10's bare
+`followup`, because several of these turns never reach that decision.
 
   scoped      whether the customer picked the product in the widget before
               asking (True -> /query is sent with product=<product_key>)
@@ -42,10 +47,16 @@ ICU_AGE = "ICU_Age_Result_Quick_Guide_v1_1.pdf"
 LINUX = "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf"
 
 
-def t(q, followup, commercial, note, expect="answer", cite=None,
+def t(q, needs_history, commercial, note, expect="answer", cite=None,
       mention=None, avoid=None, **extra):
-    d = {"q": q, "followup": followup, "commercial": commercial, "note": note,
-         "live": {"expect": expect}}
+    """needs_history is the is_followup_turn routing decision (None where a
+    deflect or an intent, main.py:1448 / :2501, reaches the question first
+    and the routing decision never happens); markers/intent are optional
+    kwargs forwarded through **extra, scored by run_scenarios.py against
+    has_reference_markers / intents.is_handoff_request /
+    intents.is_greeting respectively."""
+    d = {"q": q, "needs_history": needs_history, "commercial": commercial,
+         "note": note, "live": {"expect": expect}}
     if cite:
         d["live"]["cite"] = cite
     if mention:
@@ -125,8 +136,11 @@ SCENARIOS = [
         "turns": [
             t("what bezel options are there for the NV9 Spectral", False, False,
               "opening, product named", cite=["NV9 Spectral"], mention=["bezel"]),
-            t("ok now the NV9USB+, does it use the same bezel", False, False,
-              "explicit product switch; names the new product so standalone",
+            t("ok now the NV9USB+, does it use the same bezel", True, False,
+              "relabelled (M10): the resolved query is 'does the NV9USB+ use "
+              "the same bezel options as the NV9 Spectral' -- condensation "
+              "pulled the NV9 Spectral in from history even though the turn "
+              "names its own product (transcripts-after.md:278)",
               expect="any", cite=["NV9USB"], mention=["bezel"]),
             t("and how big is the cashbox on it", True, False,
               "'it' must now resolve to the NV9USB+, not the NV9 Spectral",
@@ -147,8 +161,10 @@ SCENARIOS = [
             t("does the MyCheckr support Bluetooth", False, False,
               "'Bluetooth' appears nowhere in the corpus -> refuse, do not guess",
               expect="refuse", avoid=["yes, the MyCheckr supports Bluetooth", "Bluetooth 5", "pair"]),
-            t("how long does it keep the face images for", False, False,
-              "GDPR/retention IS in the manual; should answer from it",
+            t("how long does it keep the face images for", True, False,
+              "relabelled (M10): resolved query 'how long does the MyCheckr "
+              "keep the face images for' -- 'it' resolved from history "
+              "(transcripts-after.md:338)",
               cite=["MyCheckr"], mention=["stor", "retain", "delet", "image", "not"]),
             t("what is the false-accept rate of the age estimation", False, False,
               "an accuracy figure the manual does not give -> refuse honestly",
@@ -162,7 +178,10 @@ SCENARIOS = [
         "scoped": True, "expect_labels": ["NV9USB+"],
         "turns": [
             t("how much does the NV9USB+ cost", False, True, "price", expect="deflect"),
-            t("can I get a quote for 20 units", True, True, "quote; 'units' relies on the prior turn", expect="deflect"),
+            t("can I get a quote for 20 units", None, True,
+              "quote; 'units' relies on the prior turn, but the commercial "
+              "deflect (main.py:1448) reaches the question before routing "
+              "ever asks whether it needed history", expect="deflect"),
             t("is there a volume discount", False, True, "discount", expect="deflect"),
             t("what is the lead time on an order", False, True, "availability", expect="deflect"),
             t("does it come with a warranty", True, True, "warranty; 'it'", expect="deflect"),
@@ -219,9 +238,11 @@ SCENARIOS = [
               "second ask, sharper; same content expected", cite=["ICU"], mention=["age"]),
             t("for the third time: how do I get the age out of the device??", True, False,
               "third ask; should not degrade into a refusal", cite=["ICU"], mention=["age"]),
-            t("this is useless, I want to talk to a person", True, False,
-              "handoff request -> offer support contact, not another manual answer",
-              expect="any", mention=["support", "contact", "team", "human", "person", "email", "phone"]),
+            t("this is useless, I want to talk to a person", None, False,
+              "handoff request -> the intent gate (main.py:2501) reaches it "
+              "before the follow-up decision does",
+              expect="any", mention=["support", "contact", "team", "human", "person", "email", "phone"],
+              intent="handoff"),
         ],
     },
     {
@@ -236,8 +257,12 @@ SCENARIOS = [
               "typos: Wi-Fi setup", expect="any", mention=["Wi-Fi", "wifi", "network", "SSID", "ethernet", "MyConnect"]),
             t("were is power buton on it", True, False, "'it'; typos",
               expect="any", mention=["power", "button", "switch", "rear", "side", "back"]),
-            t("thank you very much you help me", True, False,
-              "closing pleasantry: should acknowledge, not retrieve", expect="any",
+            t("thank you very much you help me", None, False,
+              "closing pleasantry: should acknowledge, not retrieve. Neither "
+              "intents.is_greeting nor is_handoff_request matches this exact "
+              "phrasing (it is not a bare pleasantry), so needs_history is "
+              "left unscored here rather than asserted against a classifier "
+              "that was not built to catch it", expect="any",
               avoid=["I couldn't find", "documentation"]),
         ],
     },
@@ -251,13 +276,17 @@ SCENARIOS = [
               "troubleshooting opener", expect="any", mention=["network", "port", "firewall", "connect", "offline", "Wi-Fi", "ethernet"]),
             t("tried all that, still offline", True, False,
               "no new information; should not repeat verbatim, ideally hands off", expect="any"),
-            t("I want to open a support ticket", True, False,
-              "explicit ticket request -> route to support, not a manual answer",
+            t("I want to open a support ticket", None, False,
+              "explicit ticket request -> the intent gate (main.py:2501) "
+              "reaches it before the follow-up decision does",
               expect="any", mention=["support", "contact", "email", "phone", "team", "ticket"],
-              avoid=["I couldn't find anything"]),
-            t("can someone call me back on 07700 900123", True, False,
-              "phone number given; must not store/echo unsafely, should route to support",
-              expect="any", mention=["support", "contact", "team", "phone", "email"]),
+              avoid=["I couldn't find anything"], intent="handoff"),
+            t("can someone call me back on 07700 900123", None, False,
+              "phone number given; must not store/echo unsafely. 'call ... "
+              "back' is a handoff request too, so the intent gate reaches "
+              "it first",
+              expect="any", mention=["support", "contact", "team", "phone", "email"],
+              intent="handoff"),
         ],
     },
     {

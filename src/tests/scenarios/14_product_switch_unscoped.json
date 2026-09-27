@@ -16,7 +16,7 @@
   "turns": [
     {
       "q": "what bezel options are there for the NV9 Spectral",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "opening, product named",
       "live": {
@@ -31,9 +31,9 @@
     },
     {
       "q": "ok now the NV9USB+, does it use the same bezel",
-      "followup": false,
+      "needs_history": true,
       "commercial": false,
-      "note": "explicit product switch; names the new product so standalone",
+      "note": "relabelled (M10): the resolved query is 'does the NV9USB+ use the same bezel options as the NV9 Spectral' -- condensation pulled the NV9 Spectral in from history even though the turn names its own product (transcripts-after.md:278)",
       "live": {
         "expect": "any",
         "cite": [
@@ -46,7 +46,7 @@
     },
     {
       "q": "and how big is the cashbox on it",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'it' must now resolve to the NV9USB+, not the NV9 Spectral",
       "live": {
@@ -66,7 +66,7 @@
     },
     {
       "q": "which of the two takes more notes",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'the two' -- comparison across the switch",
       "live": {

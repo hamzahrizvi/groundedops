@@ -16,7 +16,7 @@
   "turns": [
     {
       "q": "what is the difference between the NV9 Spectral and the NV9USB+",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "comparison; both named",
       "live": {
@@ -28,7 +28,7 @@
     },
     {
       "q": "which one validates notes faster",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'which one' -- follow-up comparison",
       "live": {
@@ -37,7 +37,7 @@
     },
     {
       "q": "do they both use the same SSP interface",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'they both'",
       "live": {
@@ -49,7 +49,7 @@
     },
     {
       "q": "which one should I pick for an arcade cabinet",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "advisory: a recommendation the manuals do not make",
       "live": {

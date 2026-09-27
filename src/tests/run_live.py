@@ -40,11 +40,25 @@ import sys
 import time
 import uuid
 
+import re
+
 import requests
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 SCENARIO_DIR = HERE / "scenarios"
+
+import text_utils as T  # noqa: E402
+
+# main.py:1894's _add_selected_product_context appends this to a resolved
+# query when a product is scoped; it is retrieval scope, not something
+# condensation pulled from the conversation, so is_followup_turn's own
+# "added word came from history" check must not see it.
+_PRODUCT_SUFFIX = re.compile(r"\s*\([^()]+\)\s*$")
+
+
+def _strip_product_suffix(resolved_query: str) -> str:
+    return _PRODUCT_SUFFIX.sub("", resolved_query or "").strip()
 
 
 def observed_outcome(r):
@@ -103,9 +117,25 @@ def buttons(r):
     return out
 
 
+def score_needs_history(turn, r, history):
+    """M10: needs_history against the LIVE resolved_query, with the real
+    accumulated conversation (not a placeholder) -- the one thing
+    tests/run_scenarios.py's own replay can only approximate from a saved
+    transcript. None (a deflect or an intent reached the question first,
+    so the pipeline never made this decision) is not scored."""
+    want = turn.get("needs_history")
+    if want is None:
+        return None
+    raw_q = turn["q"]
+    resolved_q = _strip_product_suffix(r.get("resolved_query") or raw_q)
+    got = T.is_followup_turn(raw_q, history, resolved_q)
+    return None if got == want else f"needs_history: expected {want}, got {got}"
+
+
 def run_scenario(sc, url, verbose):
     sid = f"live-{sc['id']}-{uuid.uuid4().hex[:8]}"
     rows = []
+    history: list = []
     for turn in sc["turns"]:
         body = {"q": turn["q"], "session_id": sid}
         if sc.get("scoped") and sc.get("product_key"):
@@ -121,6 +151,9 @@ def run_scenario(sc, url, verbose):
             r = {"answer": f"REQUEST FAILED: {e}", "role": "error"}
         wall = time.perf_counter() - t0
         got, fails = score_turn(turn, r)
+        history_fail = score_needs_history(turn, r, history)
+        if history_fail:
+            fails = [*fails, history_fail]
         rows.append({"turn": turn, "response": r, "wall": wall,
                      "got": got, "fails": fails})
         if verbose:
@@ -128,6 +161,7 @@ def run_scenario(sc, url, verbose):
             print(f"  {mark} {got:8s} {wall:5.1f}s  {turn['q'][:70]}")
             for f in fails:
                 print(f"         {f}")
+        history.append({"q": turn["q"], "a": r.get("answer") or ""})
     return sid, rows
 
 

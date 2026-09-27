@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "the MyConnect app says the device is offline but the device is on",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "troubleshooting opener",
       "live": {
@@ -29,7 +29,7 @@
     },
     {
       "q": "tried all that, still offline",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "no new information; should not repeat verbatim, ideally hands off",
       "live": {
@@ -38,9 +38,9 @@
     },
     {
       "q": "I want to open a support ticket",
-      "followup": true,
+      "needs_history": null,
       "commercial": false,
-      "note": "explicit ticket request -> route to support, not a manual answer",
+      "note": "explicit ticket request -> the intent gate (main.py:2501) reaches it before the follow-up decision does",
       "live": {
         "expect": "any",
         "mention": [
@@ -54,13 +54,14 @@
         "avoid": [
           "I couldn't find anything"
         ]
-      }
+      },
+      "intent": "handoff"
     },
     {
       "q": "can someone call me back on 07700 900123",
-      "followup": true,
+      "needs_history": null,
       "commercial": false,
-      "note": "phone number given; must not store/echo unsafely, should route to support",
+      "note": "phone number given; must not store/echo unsafely. 'call ... back' is a handoff request too, so the intent gate reaches it first",
       "live": {
         "expect": "any",
         "mention": [
@@ -70,7 +71,8 @@
           "phone",
           "email"
         ]
-      }
+      },
+      "intent": "handoff"
     }
   ]
 }

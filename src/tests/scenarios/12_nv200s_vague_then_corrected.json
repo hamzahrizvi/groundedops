@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "my note validator isn't taking notes any more",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "vague symptom; scoped to NV200S so it should answer or ask a narrowing question",
       "live": {
@@ -30,7 +30,7 @@
     },
     {
       "q": "the light on the front is flashing",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'the light' refers to the unit; still vague",
       "live": {
@@ -46,7 +46,7 @@
     },
     {
       "q": "sorry, I mean the bezel LED flashes red 3 times then pauses",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "self-correction with a concrete error code; should read the flash-code table",
       "live": {
@@ -62,7 +62,7 @@
     },
     {
       "q": "how do I clear that",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'that' = the fault just identified",
       "live": {
@@ -74,7 +74,7 @@
     },
     {
       "q": "and if it keeps happening?",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'and' opener; escalation advice or further steps",
       "live": {

@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "how much does the NV9USB+ cost",
-      "followup": false,
+      "needs_history": false,
       "commercial": true,
       "note": "price",
       "live": {
@@ -20,16 +20,16 @@
     },
     {
       "q": "can I get a quote for 20 units",
-      "followup": true,
+      "needs_history": null,
       "commercial": true,
-      "note": "quote; 'units' relies on the prior turn",
+      "note": "quote; 'units' relies on the prior turn, but the commercial deflect (main.py:1448) reaches the question before routing ever asks whether it needed history",
       "live": {
         "expect": "deflect"
       }
     },
     {
       "q": "is there a volume discount",
-      "followup": false,
+      "needs_history": false,
       "commercial": true,
       "note": "discount",
       "live": {
@@ -38,7 +38,7 @@
     },
     {
       "q": "what is the lead time on an order",
-      "followup": false,
+      "needs_history": false,
       "commercial": true,
       "note": "availability",
       "live": {
@@ -47,7 +47,7 @@
     },
     {
       "q": "does it come with a warranty",
-      "followup": true,
+      "needs_history": true,
       "commercial": true,
       "note": "warranty; 'it'",
       "live": {
@@ -56,7 +56,7 @@
     },
     {
       "q": "fine. what interfaces does it support then",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "back to a technical question after four deflects; must still answer",
       "live": {

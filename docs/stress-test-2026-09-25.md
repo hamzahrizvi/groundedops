@@ -177,13 +177,46 @@ pinned in `test_technical_questions_are_not_handoffs`.
 
 ### Routing labels on the new scenarios
 
-`run_scenarios.py` now scores 24 files. The original ten stay 79/79. Of
-the 18 disagreements on 11–24, all are `followup` labels: the classifier
-calls "how do I connect it to my machine", "how do I clear that", "tried
-all that, still offline" standalone. In the live runs those turns were
-resolved correctly by the condense step regardless, so the flag only
-bites when generation then refuses. Left as written — the labels are the
-engineer's reading and the runner exists to show where the code disagrees.
+**Updated 2026-09-27 (M10):** `followup` on scenarios 11–24 split into
+`needs_history` (this same is_followup_turn decision) and an optional
+`intent` ("handoff"/"greeting", scored against `intents.is_handoff_request`
+/ `is_greeting`). Five turns' `needs_history` is now `None` rather than a
+label the code was never going to be asked to honour, because a deflect
+(main.py:1448) or the intent gate (main.py:2501) answers the question
+before routing decides whether it needed history: 16 T2 (a quote request,
+deflected), 19 T4, 21 T3, 21 T4 (handoff requests), and 20 T4 (a closing
+"thank you" that neither intent classifier matches, so it is left
+unscored rather than asserted against a classifier not built to catch
+it). Two labels were corrected against the evidence rather than left
+wrong: 14 T2 and 15 T3 were written `False` but the live transcript's
+resolved query shows condensation genuinely pulling a product name in
+from history (`docs/stress-test-2026-09-25-transcripts-after.md:278`,
+`:338`); both are now `True`.
+
+`run_scenarios.py` now scores 24 files, gated in CI at a committed floor
+of 148/160 checks (`--min-pass`). The original ten stay 79/79. Of the
+remaining disagreements on 11–24 (11 `needs_history`, plus the pre-
+existing 24 T3 commercial miss), the classifier still calls turns like
+"how do I connect it to my machine" and "tried all that, still offline"
+standalone — `has_reference_markers` does not catch a mid-sentence
+pronoun the way a human reader does, and `score_scenario`'s static check
+only ever sees the raw question, never a real condensed one. Two harder,
+better instruments now exist instead of trusting that check alone:
+`run_scenarios.py --transcript` keylessly replays `needs_history` against
+the RESOLVED queries this stress test already saved, with each
+scenario's real accumulated history (not a synthetic placeholder) —
+52/54 scored turns agree (96.3%), and the two disagreements are exactly
+15 T4 and 20 T2, kept as written on purpose (see below). `run_live.py`
+scores the same thing live, against the backend's own returned
+`resolved_query` (stripped of the trailing `(Product)` scope suffix,
+main.py:1894) and the real conversation it is driving.
+
+Two labels stay as the engineer wrote them even though both replay
+instruments disagree with them: 15 T4 ("what is the false-accept rate
+of the age estimation") and 20 T2 ("how i conect the divice to wifi").
+The labels are the engineer's reading of what SHOULD happen, and the
+runner exists to show where the code disagrees, not to be tuned until
+it stops disagreeing.
 
 ## Left undone, and why
 

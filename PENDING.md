@@ -357,10 +357,14 @@ Our test scores wobble by about 3 cases out of 34 from run to run, even
 with no code change. Until we fix the measuring tools and know that wobble
 exactly, we cannot tell whether a fix helped.
 
-- [ ] **M1 Fix the test tool.** It marks some right answers wrong (word
-  matching too strict), some polite refusals as "answered", and its grader
-  quietly does nothing unless one setting is exported. Also label the
-  second blind test set as "blind" so it can never be tuned against.
+- [x] **M1 Fix the test tool** (`21698b0`, 2026-09-27). Any-of keywords_all
+  entries; the run_live.py offer_support rule ported into classify_outcome
+  so an INFERABLE/ADVISORY friendly refusal scores "rejected"; "blind" is
+  a valid layer and eval_cases_blind2.json now carries it on every case;
+  two over-narrow blind2 keywords and blind.json:249's SD card speed-class
+  fixed; preflight makes one real grader call and aborts before case 1 if
+  it comes back empty; the unparsed-"pass" fallback deleted;
+  eval_retrieval.py gets a --cases flag.
 - [ ] **M2 Label every log line.** Record which conversation, whether it
   came from a real visitor or from our tests, how the turn ended, and what
   checked the answer. Today we cannot tell customers from test runs.
@@ -384,16 +388,33 @@ exactly, we cannot tell whether a fix helped.
   answers so we know whether the grader can be trusted.
 - [ ] **M9 Pin spec-table test cases to the exact page**, and fix the
   reranker benchmark, which has been testing the same model every time.
-- [ ] **M10 Honest routing labels.** Split "needs the earlier conversation"
-  from "is a handoff/greeting" in the scenario tests.
-- [ ] **M11 Run the routing tests in CI** on every change.
+- [x] **M10 Honest routing labels** (2026-09-27). `followup` on scenarios
+  11-24 split into `needs_history` (nullable: None where a deflect or the
+  intent gate answers first, main.py:1448/:2501) and `intent`
+  ("handoff"/"greeting"). 14 T2 and 15 T3 relabelled against the live
+  transcript's own resolved query; 15 T4 and 20 T2 kept as written. New
+  keyless `run_scenarios.py --transcript` replays needs_history against
+  the saved resolved queries with each scenario's real accumulated
+  history: 52/54 agree, the two disagreements being the deliberately-kept
+  15 T4 / 20 T2. `run_live.py` now scores the same thing against a live
+  backend's own resolved_query. See docs/stress-test-2026-09-25.md's
+  "Routing labels on the new scenarios" section.
+- [x] **M11 Run the routing tests in CI** (2026-09-27). `run_scenarios.py
+  --min-pass` (new flag) gates the unit job at the committed floor of
+  148/160; eval-selfcheck runs over all four case files and is a real
+  gate now (continue-on-error dropped: eval_baseline*.json are committed,
+  not gitignored); CI now also triggers on experimental/** branches; a
+  comment in docker-compose.yml warns against `--workers N` (every JSON
+  store's threading.Lock() is process-local).
 - [ ] **M12 Run the live test conversations through the website widget
   path**, not only the internal one. This is how we found that a "fixed"
   handoff was never fixed for real visitors.
 - [ ] **M13 Check whether the fact-checking model is still earning its
   keep** - 58% of served answers now score under 0.1 on it.
-- [ ] **M14 Add tests for the new table and phrase-search code** before it
-  is baked into the index.
+- [x] **M14 Add tests for the new table and phrase-search code** before it
+  is baked into the index (`f703927`, 2026-09-27). _phrase_ranking and
+  complete_tables now have tests; the chunk's lowercased text is
+  precomputed once in the BM25 cache build instead of per query.
 
 ### Tier 7 -> 8 - fix what customers would notice
 

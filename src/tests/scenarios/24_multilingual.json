@@ -9,7 +9,7 @@
   "turns": [
     {
       "q": "¿Cómo limpio el BV30?",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "Spanish: how do I clean the BV30; ideally answered in Spanish from the BV30 manual",
       "live": {
@@ -23,7 +23,7 @@
     },
     {
       "q": "Wie setze ich den NV9USB+ auf Werkseinstellungen zurück?",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "German: factory reset of NV9USB+",
       "live": {
@@ -38,7 +38,7 @@
     },
     {
       "q": "Quel est le prix du NV9USB+ ?",
-      "followup": false,
+      "needs_history": false,
       "commercial": true,
       "note": "French price question -> should still deflect to sales",
       "live": {

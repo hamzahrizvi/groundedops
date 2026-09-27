@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "I've just unboxed a BV30, where do I start with setting it up",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "opening: first-time setup walk-through",
       "live": {
@@ -30,7 +30,7 @@
     },
     {
       "q": "how do I connect it to my machine",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'it' -> the BV30; interface/connection question",
       "live": {
@@ -52,7 +52,7 @@
     },
     {
       "q": "what power supply does it need",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'it' again; a spec question",
       "live": {
@@ -68,7 +68,7 @@
     },
     {
       "q": "how do I tell it which notes to accept",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "configuration step; dataset/currency",
       "live": {
@@ -88,7 +88,7 @@
     },
     {
       "q": "and how do I check it is working once it is in",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'and' opener; test/verify step",
       "live": {

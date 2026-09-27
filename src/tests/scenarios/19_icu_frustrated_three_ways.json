@@ -10,7 +10,7 @@
   "turns": [
     {
       "q": "how do I get the age result out of the ICU",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "first ask",
       "live": {
@@ -30,7 +30,7 @@
     },
     {
       "q": "you didn't answer me. how do I READ the age it estimated",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "second ask, sharper; same content expected",
       "live": {
@@ -45,7 +45,7 @@
     },
     {
       "q": "for the third time: how do I get the age out of the device??",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "third ask; should not degrade into a refusal",
       "live": {
@@ -60,9 +60,9 @@
     },
     {
       "q": "this is useless, I want to talk to a person",
-      "followup": true,
+      "needs_history": null,
       "commercial": false,
-      "note": "handoff request -> offer support contact, not another manual answer",
+      "note": "handoff request -> the intent gate (main.py:2501) reaches it before the follow-up decision does",
       "live": {
         "expect": "any",
         "mention": [
@@ -74,7 +74,8 @@
           "email",
           "phone"
         ]
-      }
+      },
+      "intent": "handoff"
     }
   ]
 }

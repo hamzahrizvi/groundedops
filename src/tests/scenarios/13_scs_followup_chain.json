@@ -11,7 +11,7 @@
   "turns": [
     {
       "q": "how do I install the SMART Coin System in the machine",
-      "followup": false,
+      "needs_history": false,
       "commercial": false,
       "note": "opening procedure",
       "live": {
@@ -31,7 +31,7 @@
     },
     {
       "q": "and step 3?",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "step reference into the previous answer",
       "live": {
@@ -45,7 +45,7 @@
     },
     {
       "q": "what about on Linux?",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'what about' opener; the SCS manual says nothing about Linux -- must not invent",
       "live": {
@@ -59,7 +59,7 @@
     },
     {
       "q": "ok, what do the LED colours on it mean",
-      "followup": true,
+      "needs_history": true,
       "commercial": false,
       "note": "'ok' + 'it'; back to the manual",
       "live": {
