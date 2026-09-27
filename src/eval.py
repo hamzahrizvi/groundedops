@@ -69,7 +69,7 @@ DEEPSEEK_KEY = _deepseek_key()
 
 # Roles the backend uses for a real answer (anything not clarify/rejected/none).
 ANSWERED_ROLES = {"fast", "reasoning", "accurate", "extract", "rethink"}
-VALID_LAYERS = {"faq", "retrieval", "comparison", "refusal", "grounding"}
+VALID_LAYERS = {"faq", "retrieval", "comparison", "refusal", "grounding", "blind"}
 
 
 def _arg_value(name: str, default: str | None = None) -> str | None:
@@ -92,6 +92,16 @@ def case_key(case: dict) -> str:
     return f"{case_layer(case)}::{case['q']}"
 
 
+def _keyword_present(low_answer: str, entry) -> bool:
+    """A keywords_all entry is either a literal substring, or a list of
+    alternatives (any-of) for a fact the model may phrase more than one way
+    ("1s" vs "1 second") — exact substring matching either way, no stemming
+    or synonym table."""
+    if isinstance(entry, list):
+        return any(str(alt).lower() in low_answer for alt in entry)
+    return str(entry).lower() in low_answer
+
+
 def classify_outcome(data: dict) -> str:
     role = (data.get("role") or "").lower()
     if data.get("needs_clarification") or role == "clarify":
@@ -106,6 +116,14 @@ def classify_outcome(data: dict) -> str:
     if role == "sales":
         return "rejected"
     if (data.get("answerability") or "") in ("unanswerable", "documented_elsewhere"):
+        return "rejected"
+    # A friendly refusal keeps the answering role (INFERABLE/ADVISORY turns
+    # never reset role away from fast/reasoning) but is a rejection wearing
+    # the answer's clothes. Ported from run_live.py:64-65's offer_support
+    # rule, which is how the stress test scores the same turns; without it
+    # eval.py counted these as "answered" purely because role never changed.
+    if data.get("offer_support") and (
+            not data.get("sources") or (data.get("answerability") or "") == "unanswerable"):
         return "rejected"
     if role in ANSWERED_ROLES or (role not in ("none", "") and data.get("answer")):
         return "answered"
@@ -141,10 +159,10 @@ def llm_grade(question: str, reference: str, answer: str) -> tuple[bool, str]:
         verdict = json.loads(text[start:end])
         return verdict.get("verdict", "").lower() == "pass", verdict.get("reason", "")[:160]
     except Exception:
-        # Last resort: look for the word pass/fail.
-        low = text.lower()
-        if "pass" in low and "fail" not in low:
-            return True, "grader said pass (unparsed)"
+        # No more "does the word 'pass' appear anywhere" fallback: it let a
+        # chatty non-JSON response score a pass off one stray word. The
+        # latest recorded run had 0 unparsed outputs, so removing this
+        # changes no score; a genuinely unparsed reply now fails closed.
         return False, f"unparsed grader output: {text[:120]}"
 
 
@@ -184,7 +202,7 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
     # 2. keywords
     low = answer.lower()
     if case.get("keywords_all"):
-        checks["keywords_all"] = all(k.lower() in low for k in case["keywords_all"])
+        checks["keywords_all"] = all(_keyword_present(low, k) for k in case["keywords_all"])
     if case.get("keywords_absent"):
         checks["keywords_absent"] = all(k.lower() not in low for k in case["keywords_absent"])
     if case.get("sources_any"):
@@ -214,7 +232,28 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
     }
 
 
-def preflight(skip: bool) -> bool:
+def preflight_grader() -> bool:
+    """One real grader call before case 1. EVAL_GRADER_PROVIDER/EVAL_GRADER_
+    MODEL default to a local Ollama ("local"/"mistral") that most shells
+    never start, so a run that exports only DEEPSEEK_API_KEY still grades
+    against the unreachable default and every case silently reports "grader
+    returned nothing" — a poisoned run discovered only after it finishes.
+    A real fail verdict from a reachable grader is NOT an abort; only the
+    two infra-failure shapes are."""
+    ok, reason = llm_grade(
+        "What colour is a clear sky?", "The sky is blue.", "The sky is blue.")
+    if not ok and (reason == "grader returned nothing"
+                   or (reason or "").startswith("grader import failed")):
+        print(f"preflight: FAIL — grader ({GRADER_PROVIDER}/{GRADER_MODEL}) "
+              f"did not answer: {reason}")
+        print("  Set EVAL_GRADER_PROVIDER / EVAL_GRADER_MODEL to a reachable")
+        print("  provider (e.g. EVAL_GRADER_PROVIDER=deepseek with")
+        print("  DEEPSEEK_API_KEY exported), or pass --no-grade.")
+        return False
+    return True
+
+
+def preflight(skip: bool, do_grade: bool = False) -> bool:
     """
     Health-gate the run. A 40+ case eval against a degraded backend
     produces a poisoned log that costs more time to un-learn than the
@@ -258,6 +297,13 @@ def preflight(skip: bool) -> bool:
         return False
 
     print(f"preflight: OK (provider={provider}, answer starts: {answer!r})")
+
+    if do_grade:
+        print(f"preflight: checking grader ({GRADER_PROVIDER}/{GRADER_MODEL}) ...")
+        if not preflight_grader():
+            return False
+        print("preflight: grader OK")
+
     return True
 
 
@@ -326,7 +372,7 @@ def main():
     baseline_path = Path(_arg_value("baseline", str(BASELINE_FILE)))
     results_path = Path(_arg_value("results", str(RESULTS_FILE)))
 
-    if not preflight(skip_preflight):
+    if not preflight(skip_preflight, do_grade):
         return 2  # distinct exit code: environment failure, not eval failure
 
     results = []

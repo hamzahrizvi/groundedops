@@ -246,9 +246,10 @@
       "keywords_all": [
         "FAT32"
       ],
-      "reference": "MicroSD card requirements: MBR partition style, FAT32 format, minimum 4GB, maximum 32GB, speed class 10 minimum (NV9 Spectral Range User Manual-v1.pdf p.19).",
+      "reference": "MicroSD card requirements: MBR partition style, FAT32 format, minimum 4GB, maximum 32GB, speed class minimum 4, maximum 10 (NV9 Spectral Range User Manual-v1.pdf p.19).",
       "grade": true,
-      "layer": "blind"
+      "layer": "blind",
+      "disputed": "instrument correction, M1: the case was originally written as 'speed class 10 minimum'; the manual (p.19) and Chroma chunk 442's copy of the same table both read minimum 4, maximum 10 -- see K26 / PENDING.md M6."
     },
     {
       "q": "Max note width for the BV30?",
