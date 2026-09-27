@@ -24,6 +24,8 @@ Usage:
   python eval.py --cases eval_cases_retrieval.json \
       --baseline eval_baseline_retrieval.json --repeats 3
                                     # gate that suite against its own baseline
+  python eval.py --compare-results A.json B.json
+                                    # offline before/after diff of two --results files
 
 Requires the backend running on :8000. LLM grading uses a model via the
 backend's llm.generate(); configure with:
@@ -39,6 +41,7 @@ result: a case is stable only when every non-skipped attempt passes.
 import json
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -184,13 +187,18 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
         return {"q": q, "layer": case_layer(case), "skipped": True,
                 "reason": "no DeepSeek key", "passed": None, "checks": {}}
 
+    # M3: wall seconds for the request alone (grading excluded: it is the
+    # instrument's cost, not the visitor's). 8.11 and 10.1 read this field.
+    t0 = time.perf_counter()
     try:
         r = requests.post(URL, json=body, timeout=180)
         r.raise_for_status()
         data = r.json()
     except Exception as e:
         return {"q": q, "layer": case_layer(case), "error": str(e),
+                "wall": round(time.perf_counter() - t0, 3),
                 "passed": False, "checks": {"request": False}}
+    wall = round(time.perf_counter() - t0, 3)
 
     answer = data.get("answer", "") or ""
     outcome = classify_outcome(data)
@@ -237,11 +245,141 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
         "grounding": data.get("grounding_score"),
         "retrieval": data.get("retrieval_score"),
         "provider": data.get("provider"),
+        "role": data.get("role"),
+        "wall": wall,
         "answer": answer,
         "checks": checks,
         "passed": passed,
         "skipped": skipped,
     }
+
+
+MEASURE_ONLY_BANNER = (
+    "MEASURE-ONLY: this run includes blind cases. Read and compare them;\n"
+    "never tune against them or lock them in as a baseline.")
+
+
+def has_blind(cases_or_results) -> bool:
+    return any(case_layer(c) == "blind" for c in cases_or_results)
+
+
+def _per_case(results: list) -> dict:
+    """{layer::q: [passed, ...]} over non-skipped attempts."""
+    out = {}
+    for r in results:
+        if r.get("skipped"):
+            continue
+        out.setdefault(case_key(r), []).append(bool(r.get("passed")))
+    return out
+
+
+def compare_results(a: dict, b: dict) -> dict:
+    """Pure before/after diff of two results files (eval.py --results).
+
+    The headline is the per-case STABLE flips: a case that passed on every
+    attempt on one side and failed on every attempt on the other. A case
+    that flipped within a side is noise until more repeats say otherwise,
+    so it is listed but never counted as a change. Totals are context only:
+    the suite carries about +/-3 cases of run-to-run noise."""
+    pa = _per_case(a.get("results") or [])
+    pb = _per_case(b.get("results") or [])
+
+    def state(runs):
+        if not runs:
+            return "absent"
+        if all(runs):
+            return "stable_pass"
+        if not any(runs):
+            return "stable_fail"
+        return "flaky"
+
+    lost, gained, flaky, only_a, only_b = [], [], [], [], []
+    unchanged = 0
+    for key in sorted(set(pa) | set(pb)):
+        ra, rb = pa.get(key) or [], pb.get(key) or []
+        sa, sb = state(ra), state(rb)
+        row = {"case": key, "a": f"{sum(ra)}/{len(ra)}", "b": f"{sum(rb)}/{len(rb)}"}
+        if sa == "absent":
+            only_b.append(row)
+        elif sb == "absent":
+            only_a.append(row)
+        elif sa == "stable_pass" and sb == "stable_fail":
+            lost.append(row)
+        elif sa == "stable_fail" and sb == "stable_pass":
+            gained.append(row)
+        elif "flaky" in (sa, sb):
+            flaky.append(row)
+        else:
+            unchanged += 1
+
+    def totals(per):
+        return {"cases": len(per),
+                "stable_pass": sum(1 for v in per.values() if all(v))}
+
+    both = (a.get("results") or []) + (b.get("results") or [])
+    return {"lost": lost, "gained": gained, "flaky": flaky,
+            "only_a": only_a, "only_b": only_b, "unchanged": unchanged,
+            "totals_a": totals(pa), "totals_b": totals(pb),
+            "blind": has_blind(both)}
+
+
+def _percentile(values: list, pct: float) -> float:
+    """Nearest-rank percentile; no numpy for an advisory print."""
+    vals = sorted(values)
+    if not vals:
+        return 0.0
+    rank = -(-pct * len(vals) // 100)  # ceil
+    return vals[max(0, min(len(vals), int(rank)) - 1)]
+
+
+def latency_by_role(results: list) -> dict:
+    """{role: (n, p50, p90)} from the per-case wall field. Advisory only:
+    two backends on one box skew each other's timings (PENDING.md: the
+    same question reranked in 1.2s on one process and 0.9s on the other)."""
+    by = {}
+    for r in results:
+        if r.get("skipped") or r.get("wall") is None:
+            continue
+        by.setdefault(r.get("role") or "?", []).append(r["wall"])
+    return {role: (len(w), _percentile(w, 50), _percentile(w, 90))
+            for role, w in sorted(by.items())}
+
+
+def print_latency(results: list) -> None:
+    rows = latency_by_role(results)
+    if not rows:
+        return
+    print("  wall seconds per role (advisory; p50 / p90):")
+    for role, (n, p50, p90) in rows.items():
+        print(f"    {role:10} n={n:3}  p50={p50:6.2f}s  p90={p90:6.2f}s")
+
+
+def print_comparison(cmp: dict, name_a: str, name_b: str) -> None:
+    if cmp["blind"]:
+        print(MEASURE_ONLY_BANNER)
+    print("=" * 70)
+    print(f"A = {name_a}")
+    print(f"B = {name_b}")
+    print("=" * 70)
+    print(f"Stable pass on A, stable fail on B ({len(cmp['lost'])}):")
+    for r in cmp["lost"]:
+        print(f"  - {r['case']}   A {r['a']}  B {r['b']}")
+    print(f"Stable fail on A, stable pass on B ({len(cmp['gained'])}):")
+    for r in cmp["gained"]:
+        print(f"  + {r['case']}   A {r['a']}  B {r['b']}")
+    if cmp["flaky"]:
+        print(f"Flipped within a side, not counted ({len(cmp['flaky'])}):")
+        for r in cmp["flaky"]:
+            print(f"  ~ {r['case']}   A {r['a']}  B {r['b']}")
+    for label, rows in (("Only in A", cmp["only_a"]), ("Only in B", cmp["only_b"])):
+        if rows:
+            print(f"{label} ({len(rows)}): " + "; ".join(r["case"] for r in rows))
+    ta, tb = cmp["totals_a"], cmp["totals_b"]
+    print("-" * 70)
+    print(f"Totals: A {ta['stable_pass']}/{ta['cases']} stable, "
+          f"B {tb['stable_pass']}/{tb['cases']} stable, "
+          f"{cmp['unchanged']} unchanged. Within +/-3 noise unless a case is")
+    print("stable on both sides: quote the per-case lines above, not these.")
 
 
 def preflight_grader() -> bool:
@@ -325,6 +463,17 @@ def main():
     report = "--report" in sys.argv  # survey mode: show answers, no judging/gate
     skip_preflight = "--skip-preflight" in sys.argv
 
+    if "--compare-results" in sys.argv:
+        i = sys.argv.index("--compare-results")
+        if len(sys.argv) < i + 3:
+            print("usage: eval.py --compare-results A.json B.json")
+            return 2
+        path_a, path_b = Path(sys.argv[i + 1]), Path(sys.argv[i + 2])
+        cmp = compare_results(json.loads(path_a.read_text()),
+                              json.loads(path_b.read_text()))
+        print_comparison(cmp, str(path_a), str(path_b))
+        return 0
+
     # v10.4: --selfcheck validates the suite schema + baseline parse WITHOUT
     # a running backend or corpus. Used by CI (where the ITL corpus isn't
     # present) to catch broken cases/baseline before merge. Exit 0 on OK.
@@ -383,6 +532,16 @@ def main():
 
     baseline_path = Path(_arg_value("baseline", str(BASELINE_FILE)))
     results_path = Path(_arg_value("results", str(RESULTS_FILE)))
+
+    # M3: a blind set is measured, never tuned against. Locking it in as a
+    # baseline would make it a target, so refuse before anything runs or
+    # is written.
+    blind = has_blind(cases)
+    if blind:
+        print(MEASURE_ONLY_BANNER)
+        if update_baseline:
+            print("Refusing --update-baseline on blind cases; nothing written.")
+            return 2
 
     if not preflight(skip_preflight, do_grade):
         return 2  # distinct exit code: environment failure, not eval failure
@@ -449,6 +608,9 @@ def main():
           f"{sum(stable_cases.values())}/{len(stable_cases)} cases stable "
           f"across {repeats} run(s) ({stable_rate:.0%}); "
           f"skipped={sum(1 for r in results if r.get('skipped'))}")
+    print_latency(results)
+    if blind:
+        print(MEASURE_ONLY_BANNER)
 
     # Persist this run.
     results_path.write_text(json.dumps({"pass_rate": rate,

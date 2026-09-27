@@ -368,9 +368,16 @@ exactly, we cannot tell whether a fix helped.
 - [ ] **M2 Label every log line.** Record which conversation, whether it
   came from a real visitor or from our tests, how the turn ended, and what
   checked the answer. Today we cannot tell customers from test runs.
-- [ ] **M3 A before/after comparison tool** for test results, and a guard
+- [x] **M3 A before/after comparison tool** for test results, and a guard
   that stops anyone locking in a blind set as a target. Also record how
-  long each test case took.
+  long each test case took (2026-09-27). `eval.py --compare-results A.json
+  B.json` (pure `compare_results`, offline): headline is stable-pass-on-A /
+  stable-fail-on-B and the reverse; within-side flips are listed, not
+  counted; totals carry the +/-3 noise label. Any blind-layer case prints
+  MEASURE-ONLY and `--update-baseline` exits 2 before preflight, writing
+  nothing. Each result now carries `wall` (request seconds, grading
+  excluded) and `role`, with an advisory p50/p90 per role. tools/README.md
+  has the two-index-copy recipe and the three commands.
 - [ ] **M4 Measure the wobble.** Run each test set 3-5 times on unchanged
   code, write down which cases flip, then reset the pass mark to the cases
   that pass every time.

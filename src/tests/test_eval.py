@@ -131,3 +131,79 @@ def test_preflight_grader_passes_on_a_real_verdict_even_if_it_is_fail():
         generate=lambda *a, **k: {"text": '{"verdict":"fail","reason":"wrong"}'})
     with patch.dict(sys.modules, {"llm": fake_llm}):
         assert rag_eval.preflight_grader() is True
+
+
+def _res(q, passed, layer="faq", repeat=1, **extra):
+    return dict({"q": q, "layer": layer, "passed": passed, "repeat": repeat}, **extra)
+
+
+def test_compare_results_headlines_only_stable_flips():
+    a = {"results": [
+        _res("lost", True), _res("lost", True, repeat=2),
+        _res("gained", False), _res("gained", False, repeat=2),
+        _res("noisy", True), _res("noisy", False, repeat=2),
+        _res("same", True), _res("same", True, repeat=2),
+        _res("gone", True),
+        _res("skipped", None, skipped=True),
+    ]}
+    b = {"results": [
+        _res("lost", False), _res("lost", False, repeat=2),
+        _res("gained", True), _res("gained", True, repeat=2),
+        _res("noisy", True), _res("noisy", True, repeat=2),
+        _res("same", True), _res("same", True, repeat=2),
+        _res("new", False),
+    ]}
+    cmp = rag_eval.compare_results(a, b)
+    assert [r["case"] for r in cmp["lost"]] == ["faq::lost"]
+    assert cmp["lost"][0]["a"] == "2/2" and cmp["lost"][0]["b"] == "0/2"
+    assert [r["case"] for r in cmp["gained"]] == ["faq::gained"]
+    assert [r["case"] for r in cmp["flaky"]] == ["faq::noisy"]
+    assert [r["case"] for r in cmp["only_a"]] == ["faq::gone"]
+    assert [r["case"] for r in cmp["only_b"]] == ["faq::new"]
+    assert cmp["unchanged"] == 1
+    assert cmp["blind"] is False
+    # a case is keyed by layer too: the same question in two layers is two cases
+    assert rag_eval.compare_results(
+        {"results": [_res("q", True, layer="blind")]},
+        {"results": [_res("q", False, layer="retrieval")]})["blind"] is True
+
+
+def test_run_case_records_wall_seconds_and_role():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"answer": "ok", "role": "fast", "sources": []}
+
+    with patch.object(rag_eval.requests, "post", return_value=Response()):
+        res = rag_eval.run_case({"q": "x", "outcome": "answered"}, "s", do_grade=False)
+    assert res["role"] == "fast"
+    assert isinstance(res["wall"], float) and res["wall"] >= 0
+
+
+def test_latency_by_role_reports_nearest_rank_p50_p90():
+    results = [_res(str(i), True, role="fast", wall=float(i)) for i in range(1, 11)]
+    results.append(_res("s", None, skipped=True, role="fast", wall=99.0))
+    results.append(_res("r", True, role="reasoning", wall=4.0))
+    rows = rag_eval.latency_by_role(results)
+    assert rows["fast"] == (10, 5.0, 9.0)
+    assert rows["reasoning"] == (1, 4.0, 4.0)
+
+
+def test_update_baseline_is_refused_on_a_blind_set_and_writes_nothing():
+    import json as _json
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        cases = os.path.join(d, "cases.json")
+        baseline = os.path.join(d, "baseline.json")
+        with open(cases, "w") as f:
+            _json.dump({"cases": [{"q": "x", "outcome": "answered", "layer": "blind"}]}, f)
+        argv = ["eval.py", "--cases", cases, "--baseline", baseline,
+                "--update-baseline", "--no-grade"]
+        with patch.object(sys, "argv", argv), \
+                patch.object(rag_eval.requests, "post",
+                             side_effect=AssertionError("must not run")):
+            assert rag_eval.main() == 2
+        assert not os.path.exists(baseline)

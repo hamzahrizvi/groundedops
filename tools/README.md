@@ -39,6 +39,35 @@ cd src && ACCOUNTS_PATH=$T/accounts.json FAQ_STORE_PATH=$T/faq.json \
 `ALLOWED_EMAIL_DOMAIN=` must be cleared or the first sign-in — which
 bootstraps the root account — is rejected for using an outside address.
 
+## Before/after comparison (eval.py --compare-results)
+
+Two backends, one per side, each on its **own copy** of the index and
+stores. A bare `uvicorn` launch of the second side opens the same
+`src/chroma_db` and JSON stores as `:8000`, so its writes (FAQ gaps,
+memory, quota) leak into the first side's run. Copy the index first
+(`cp -r src/chroma_db $T/chroma`), start side B with the store variables
+above pointed at `$T` and `CHROMA_DIR=$T/chroma`, and record which
+`chroma_db` each side used: the index changes under re-ingests and table
+backfills, and a comparison across two indexes measures the index, not
+the code.
+
+Then three commands, from `src/`:
+
+```bash
+EVAL_URL=http://127.0.0.1:8000/query python eval.py --cases eval_cases_blind2.json --repeats 3 --results results_A.json
+EVAL_URL=http://127.0.0.1:8099/query python eval.py --cases eval_cases_blind2.json --repeats 3 --results results_B.json
+python eval.py --compare-results results_A.json results_B.json
+```
+
+The comparison is offline. Quote its per-case lines (stable pass on one
+side, stable fail on the other), never the totals: the suite carries about
++/-3 cases of run-to-run noise. A blind file prints MEASURE-ONLY and
+`--update-baseline` refuses it (exit 2, nothing written). The `wall`
+p50/p90 per role is advisory: two backends on one box skew each other
+(PENDING.md records the same question reranking in 1.2s on one process
+and 0.9s on the other). For the retrieval layer alone, use
+`eval_retrieval.py --compare`, which is deterministic and needs no grader.
+
 ## Two traps these scripts exist because of
 
 **Run from `src/`, always.** Every store path is relative. From the repo
