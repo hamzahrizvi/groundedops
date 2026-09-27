@@ -651,9 +651,11 @@ def _llm_verified(answer: str, chunks: list[dict],
         logger.info("LLM verify: %s (%s)",
                     "SUPPORTED" if ok else "REJECTED",
                     verdict[:120].replace("\n", " "))
+        ptrace.set_meta(verifier=verdict[:120].replace("\n", " "))
         return ok
     except Exception as exc:
         logger.warning(f"LLM verify failed, keeping the refusal: {exc}")
+        ptrace.set_meta(verifier=f"error: {str(exc)[:100]}")
         return False
 
 
@@ -1527,6 +1529,13 @@ def _curated_faq_reply(entry: dict, asked: str, payload, x_user_id,
     chose it. `asked` is what the saved conversation records: the entry's own
     wording when it was picked from a list, the visitor's when it matched."""
     total_time = time.time() - started
+    # M2: FAQ-served answers used to be absent from logs.jsonl entirely
+    # (0 rows with model 'faq-curated').
+    ptrace.set_meta(ground_via="faq")
+    log_interaction(asked, entry["answer"], "answered", "faq-curated",
+                    [entry["source"]] if entry.get("source") else [],
+                    grounding_score=None, flagged=False,
+                    timing={"total_time": total_time})
     _uid = convo_store.resolve_user_id(x_user_id)
     _convo_id = None
     if _uid:
@@ -2120,14 +2129,26 @@ def query_route(payload: QueryRequest, x_user_id: str | None = Header(default=No
     and the flags -- which is what the console used to have to do, and
     could not distinguish "nothing matched" from "the model declined".
     """
+    return _traced_query(payload, x_user_id, attach=True)
+
+
+def _traced_query(payload: QueryRequest, x_user_id: str | None = None,
+                  origin: str | None = None, attach: bool = False):
+    """query_any_language inside a pipeline trace. Both entry points use it:
+    /query attaches the trace to the response for the console; the widget
+    only needs it open so the log line knows how the turn ended (M2 --
+    before this, real customer turns were the only ones with no trace)."""
     _tok = ptrace.start()
     try:
+        if origin:
+            ptrace.set_meta(origin=origin)
         result = query_any_language(payload, x_user_id)
-        try:
-            if isinstance(result, dict):
-                result["pipeline"] = ptrace.snapshot()
-        except Exception:
-            pass          # a diagnostic must never cost an answer
+        if attach:
+            try:
+                if isinstance(result, dict):
+                    result["pipeline"] = ptrace.snapshot()
+            except Exception:
+                pass      # a diagnostic must never cost an answer
         return result
     finally:
         ptrace.reset(_tok)
@@ -2196,6 +2217,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
 
     q = payload.q
     session_id = payload.session_id or DEFAULT_SESSION_ID
+    ptrace.set_meta(session_id=session_id)
+    ptrace.set_meta(keep=True, origin=ptrace.origin_for(payload.session_id))
 
     # "YES" TO AN OFFER WE MADE, answered before anything else runs.
     #
@@ -2217,6 +2240,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _steps:
             logger.info("serving the offered steps for %s", _pending_src)
             ptrace.mark("steps", _pending_src)
+            ptrace.set_meta(ground_via="verbatim")
+            log_interaction(q, _steps, "steps", None, [_pending_src],
+                            grounding_score=None, flagged=False)
             add_to_memory(session_id, q, _steps)
             return {
                 "answer": _steps,
@@ -2232,6 +2258,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             }
     if _pending_src and _NEGATIVE.match((q or "").strip()):
         _ack = "No problem. What else can I help you with?"
+        log_interaction(q, _ack, "acknowledgement", None, [],
+                        grounding_score=None, flagged=False)
         add_to_memory(session_id, q, _ack)
         return {
             "answer": _ack, "sources": [], "role": "acknowledgement",
@@ -2469,6 +2497,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if payload.faq_id:
         _entry = faq_store.get_by_id(payload.faq_id)
         if _entry:
+            ptrace.mark("faq.picked", _entry["question"][:60])
             return _curated_faq_reply(_entry, _entry["question"], payload,
                                       x_user_id, start_total)
         logger.warning(f"faq_id {payload.faq_id} not found — falling through")
@@ -2489,6 +2518,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             total_time = time.time() - start_total
             add_to_memory(session_id, q, _expanded["answer"])
             ptrace.mark("more", "expanded the previous answer")
+            ptrace.set_meta(ground_via="verbatim")
+            log_interaction(q, _expanded["answer"], "expand", None,
+                            [s.get("source") for s in _expanded["sources"] or []],
+                            grounding_score=None, flagged=False,
+                            request_id=request_id,
+                            timing={"total_time": total_time})
             return {
                 "answer": _expanded["answer"],
                 "response_time_ms": round(total_time * 1000),
@@ -2531,6 +2566,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                      _effective_product)))
     if _doc:
         total_time = time.time() - start_total
+        log_interaction(q, _doc["answer"], "document", None,
+                        [s.get("source") for s in _doc["sources"] or []],
+                        grounding_score=None, flagged=False,
+                        request_id=request_id,
+                        timing={"total_time": total_time})
         add_to_memory(session_id, q, _doc["answer"])
         return {
             "answer": _doc["answer"],
@@ -2568,9 +2608,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         total_time = time.time() - start_total
         add_to_memory(session_id, q, _reply)
         _role = "handoff" if _handoff else "greeting"
-        log_interaction(q, _reply, _role, "none", [], grounding_score=None,
-                        flagged=False)
         ptrace.mark(_role, "no search")
+        log_interaction(q, _reply, _role, "none", [], grounding_score=None,
+                        flagged=False, request_id=request_id,
+                        timing={"total_time": total_time})
         return {
             "answer": _reply,
             "response_time_ms": int(total_time * 1000),
@@ -2595,6 +2636,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # products, so "tell me more about the second one" is the obvious
         # next turn and needs this turn in history to mean anything.
         add_to_memory(session_id, q, _sales["answer"])
+        ptrace.set_meta(ground_via="verbatim")
+        log_interaction(q, _sales["answer"],
+                        "sales" if _sales.get("kind") == "deflected" else "catalogue",
+                        None, [], grounding_score=None, flagged=False,
+                        request_id=request_id,
+                        timing={"total_time": total_time})
         return {
             "answer": _sales["answer"],
             "response_time_ms": int(total_time * 1000),
@@ -2651,6 +2698,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _faq["mode"] == "disambiguate":
             ptrace.mark("faq.ask", f"{len(_faq['candidates'])} candidate(s)")
             total_time = time.time() - start_total
+            log_interaction(q, "(offered FAQ choices)", "clarify", "none",
+                            [], grounding_score=None, flagged=False,
+                            request_id=request_id,
+                            timing={"total_time": total_time})
             _n = len(_faq["candidates"])
             _msg = ("These FAQs match your query — please select the one you "
                     "meant:") if _n > 1 else \
@@ -2856,7 +2907,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             faq_store.record_gap(q, payload.product or payload.category,
                                  reason=reason)
 
-        log_interaction(q, answer, role_out, "none", [], grounding_score=None, flagged=False)
+        log_interaction(q, answer, role_out, "none", [], grounding_score=None,
+                        flagged=False, request_id=request_id,
+                        timing={"total_time": total_time})
         return {
             "answer": answer,
         "response_time_ms": round(total_time * 1000),
@@ -2989,8 +3042,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 f"Possible areas: {', '.join(candidate_sources)}."
             )
             product_options = []
+        ptrace.mark("span.ask", f"{len(candidate_sources)} source(s)")
         log_interaction(q, clarifying, "clarify", "none", candidate_sources,
-                        grounding_score=None, flagged=False)
+                        grounding_score=None, flagged=False,
+                        request_id=request_id,
+                        timing={"total_time": total_time})
         return {
             "answer": clarifying,
         "response_time_ms": round(total_time * 1000),
@@ -3021,11 +3077,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if extracted and role == "extract":
             total_time = time.time() - start_total
             sources = _build_sources(results)
+            ptrace.mark("extract", "checklist copied from the document")
+            ptrace.set_meta(ground_via="verbatim")
             log_interaction(q, extracted, "extract", "structured",
                             [s["source"] for s in sources],
-                            grounding_score=None, flagged=False)
+                            grounding_score=None, flagged=False,
+                            request_id=request_id,
+                            timing={"total_time": total_time})
             add_to_memory(session_id, q, extracted)
-            ptrace.mark("extract", "checklist copied from the document")
             return {
                 "answer": extracted,
             "response_time_ms": round(total_time * 1000),
@@ -3487,6 +3546,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     verify_stage_time = time.time() - t_grounding
     ptrace.mark("ground", _ground_note(
         verifier_unavailable, flagged, grounding_score, ground_via))
+    ptrace.set_meta(ground_via=ground_via)
 
     # ── Suppress an answer we could not verify ──
     # PRECISION-FIRST ENFORCEMENT (v8.4): suppress on ANY unresolved flag,
@@ -3859,6 +3919,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     total_time = time.time() - start_total
 
     ptrace.mark("respond", f"{len(sources)} source(s), role {role}")
+    ptrace.set_meta(service_degraded=bool(system_refusal))
     log_interaction(q, answer, role, output.get("model"),
                     [s["source"] for s in sources],
                     grounding_score=grounding_score, flagged=flagged,
@@ -4102,7 +4163,7 @@ try:
         # so no new dependency.
         from starlette.concurrency import run_in_threadpool
         return await run_in_threadpool(
-            query_any_language, req, str(user_id) if user_id else None
+            _traced_query, req, str(user_id) if user_id else None, "widget"
         )
 
     async def _widget_draft_enquiry(kind, product, notes, transcript):

@@ -89,7 +89,7 @@ _current: ContextVar[dict | None] = ContextVar("pipeline_trace", default=None)
 def start():
     """Begin a trace for this request. Returns a token for reset()."""
     try:
-        return _current.set({"t0": time.time(), "stages": []})
+        return _current.set({"t0": time.time(), "stages": [], "meta": {}})
     except Exception:
         return None
 
@@ -119,6 +119,46 @@ def mark(stage: str, note: str | None = None) -> None:
             "note": note,
             "at_ms": round((time.time() - cur["t0"]) * 1000),
         })
+    except Exception:
+        pass
+
+
+# M2: who asked, and what checked the answer. Set once each where the value
+# is decided (session and origin at the top of query(), ground_via after the
+# grounding step, the verifier's verdict inside _llm_verified) and read by
+# logger.log_interaction at write time, so the log line needs no new
+# arguments threaded through a 1700-line function.
+META_KEYS = ("session_id", "origin", "ground_via", "verifier",
+             "service_degraded")
+
+# Origin is derived from the session id's prefix, server-side, so no client
+# can claim to be a test. eval.py sends "eval-", run_live.py "live-", the
+# eval preflight "preflight-". The widget route sets "widget" itself before
+# query() runs; anything else reaching /query is the console.
+_ORIGIN_PREFIXES = (("eval-", "eval"), ("live-", "live"),
+                    ("preflight-", "preflight"))
+
+
+def origin_for(session_id: str | None) -> str:
+    sid = session_id or ""
+    for prefix, origin in _ORIGIN_PREFIXES:
+        if sid.startswith(prefix):
+            return origin
+    return "console"
+
+
+def set_meta(keep: bool = False, **fields) -> None:
+    """Record facts about this turn for the log line. `keep=True` leaves a
+    value already set alone (the widget route's origin beats the prefix)."""
+    try:
+        cur = _current.get()
+        if cur is None:
+            return
+        meta = cur.setdefault("meta", {})
+        for k, v in fields.items():
+            if keep and meta.get(k) is not None:
+                continue
+            meta[k] = v
     except Exception:
         pass
 
@@ -159,6 +199,7 @@ def snapshot() -> dict | None:
         return {
             "stages": stages,
             "exit": exit_stage,
+            "meta": dict(cur.get("meta") or {}),
             "ms": round((time.time() - cur["t0"]) * 1000),
         }
     except Exception:

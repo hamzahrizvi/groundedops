@@ -21,9 +21,14 @@ CHUNK = {
 }
 
 
-def _ask(**over):
+def _ask(log=None, faq=None, entry=None, **over):
     """Run one question through the ROUTE (not the body), which is what
-    opens the trace, and hand back the response."""
+    opens the trace, and hand back the response.
+
+    `log` replaces main.log_interaction (default: a silent mock); `faq` is
+    what suggest_candidates returns (default: no FAQ, and skip_faq=True);
+    `entry` calls a different entry point with the request instead of the
+    route (the widget's)."""
     main.APP_STATE["ready"] = True
     stubs = {
         "retrieve_from_db": [CHUNK], "rerank": [CHUNK],
@@ -37,16 +42,18 @@ def _ask(**over):
     with patch.object(main, "retrieve_from_db", return_value=stubs["retrieve_from_db"]), \
          patch.object(main, "rerank", return_value=stubs["rerank"]), \
          patch.object(main.faq_store, "suggest_candidates",
-                      return_value={"mode": "none"}), \
+                      return_value=faq or {"mode": "none"}), \
          patch.object(main, "route_model", return_value=stubs["route_model"]), \
          patch.object(main, "generate_with_fallback",
                       return_value=stubs["generate_with_fallback"]), \
          patch.object(main, "check_grounding", return_value=stubs["check_grounding"]), \
          patch.object(main, "_structures_for", return_value=stubs["_structures_for"]), \
          patch.object(main.more_context, "build", return_value={"kind": "support"}), \
-         patch.object(main, "log_interaction"):
-        return main.query_route(main.QueryRequest(
-            q="Does the product support USB?", skip_faq=True))
+         patch.object(main, "log_interaction", side_effect=log):
+        req = main.QueryRequest(
+            q=over.get("q", "Does the product support USB?"),
+            session_id=over.get("session_id"), skip_faq=faq is None)
+        return (entry or main.query_route)(req)
 
 
 def test_an_answered_turn_reports_the_path_it_took():
@@ -100,7 +107,107 @@ def test_tracing_never_costs_an_answer():
     diagnostic. Outside a request there is nothing to record, and every
     call still has to be safe."""
     pipeline_trace.mark("retrieve", "no trace open")   # must not raise
+    pipeline_trace.set_meta(origin="widget")            # nor this
     assert pipeline_trace.snapshot() is None
+
+
+# ── M2: the log line knows who asked, how it ended, what checked it ──────
+
+def _log_spy():
+    """A log_interaction stand-in that records what the REAL logger would
+    read from the trace at write time (logger._trace_fields reads the same
+    snapshot), plus the arguments it was called with."""
+    rows = []
+
+    def spy(query, answer, role=None, *a, **k):
+        snap = pipeline_trace.snapshot() or {}
+        rows.append({"role": role, "request_id": k.get("request_id"),
+                     "exit": (snap.get("exit") or {}).get("id"),
+                     "meta": snap.get("meta") or {}})
+    return rows, spy
+
+
+def test_the_log_line_knows_the_session_origin_and_outcome():
+    rows, spy = _log_spy()
+    _ask(log=spy, session_id="eval-1234")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["meta"]["session_id"] == "eval-1234"
+    assert row["meta"]["origin"] == "eval"
+    assert row["exit"] == "respond"
+    assert row["meta"]["ground_via"] == "nli"
+    assert row["meta"]["service_degraded"] is False
+    assert row["request_id"]
+
+
+def test_origin_comes_from_the_server_not_the_client():
+    assert pipeline_trace.origin_for("live-abc") == "live"
+    assert pipeline_trace.origin_for("preflight-x") == "preflight"
+    assert pipeline_trace.origin_for("3f2a-uuid") == "console"
+    assert pipeline_trace.origin_for(None) == "console"
+    # The widget route says "widget" before query() runs, and a session id
+    # that happens to look like a test's cannot override it.
+    rows, spy = _log_spy()
+    _ask(log=spy, session_id="live-spoof",
+         entry=lambda req: main._traced_query(req, None, "widget"))
+    assert rows[0]["meta"]["origin"] == "widget"
+    assert rows[0]["meta"]["session_id"] == "live-spoof"
+
+
+def test_a_curated_faq_answer_now_writes_a_log_row():
+    entry = {"id": "f1", "question": "Does the product support USB?",
+             "answer": "Yes, over USB-C.", "source": "Manual.pdf"}
+    rows, spy = _log_spy()
+    out = _ask(log=spy, faq={"mode": "answer", "entry": entry})
+    assert out["from_faq"] is True
+    assert len(rows) == 1
+    assert rows[0]["exit"] == "faq.answer"
+    assert rows[0]["meta"]["ground_via"] == "faq"
+
+
+def test_a_catalogue_answer_now_writes_a_log_row():
+    rows, spy = _log_spy()
+    with patch.object(main, "_sales_answer",
+                      return_value={"answer": "The NV9 and NV200 run on 24V.",
+                                    "kind": "catalogue"}):
+        _ask(log=spy, q="Which of your validators run on 24V?")
+    assert len(rows) == 1
+    assert rows[0]["role"] == "catalogue"
+    assert rows[0]["exit"] == "sales"
+    assert rows[0]["request_id"]
+
+
+def _real_logger():
+    """_harness stubs `logger`; load the real module under another name."""
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "logger.py"
+    spec = importlib.util.spec_from_file_location("_real_logger", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_real_logger_reads_the_trace_and_tolerates_its_absence():
+    real = _real_logger()
+    blank = real._trace_fields()
+    assert set(blank) == {"session_id", "origin", "outcome", "verified_by",
+                          "verifier", "service_degraded"}
+    assert all(v is None for v in blank.values())
+
+    t = pipeline_trace.start()
+    try:
+        pipeline_trace.set_meta(session_id="eval-9", origin="eval",
+                                ground_via="llm", verifier="SUPPORT: YES")
+        pipeline_trace.mark("retrieve", "8 candidates")
+        # a step along the way is not how the turn ended
+        assert real._trace_fields()["outcome"] is None
+        pipeline_trace.mark("respond", "1 source")
+        f = real._trace_fields()
+    finally:
+        pipeline_trace.reset(t)
+    assert f["outcome"] == "respond" and f["origin"] == "eval"
+    assert f["verified_by"] == "llm" and f["verifier"] == "SUPPORT: YES"
 
 
 if __name__ == "__main__":

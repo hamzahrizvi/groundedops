@@ -67,6 +67,36 @@ def _rotate_if_needed() -> None:
             _logger.error(f"Log rotation failed: {exc}")
 
 
+def _trace_fields() -> dict:
+    """M2: which conversation, who asked (visitor or test), how the turn
+    ended and what checked the answer, read from the request's pipeline
+    trace at write time. Every key is always present (None when there is no
+    trace, e.g. a direct call from a script) so old and new rows sort into
+    one 'missing' bucket rather than a schema split. Imported here, not in
+    main, because tests stub logger and read main.query's source."""
+    try:
+        import pipeline_trace
+        snap = pipeline_trace.snapshot() or {}
+    except Exception:
+        snap = {}
+    meta = snap.get("meta") or {}
+    exit_stage = snap.get("exit") or {}
+    outcome = exit_stage.get("id")
+    try:
+        if outcome not in pipeline_trace.OUTCOMES:
+            outcome = None     # a step along the way is not how it ended
+    except Exception:
+        outcome = None
+    return {
+        "session_id":       meta.get("session_id"),
+        "origin":           meta.get("origin"),
+        "outcome":          outcome,
+        "verified_by":      meta.get("ground_via"),
+        "verifier":         meta.get("verifier"),
+        "service_degraded": meta.get("service_degraded"),
+    }
+
+
 def log_interaction(
     query: str,
     answer: str,
@@ -92,6 +122,7 @@ def log_interaction(
         "timing":           {k: round(float(v), 3)
                                for k, v in (timing or {}).items()},
     }
+    entry.update(_trace_fields())
 
     line = json.dumps(entry)
 

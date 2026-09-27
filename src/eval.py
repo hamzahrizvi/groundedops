@@ -553,10 +553,10 @@ def main():
           f"layer={layer_filter or 'all'})")
     print("=" * 70)
     for repeat in range(1, repeats + 1):
-        session_id = str(uuid.uuid4())
+        session_id = f"eval-{uuid.uuid4()}"  # M2: origin=eval server-side
         for i, case in enumerate(cases, 1):
             if case.get("new_session"):
-                session_id = str(uuid.uuid4())
+                session_id = f"eval-{uuid.uuid4()}"
             run_case_input = dict(case)
             if report and force_answers and not run_case_input.get("force_provider"):
                 run_case_input["force_provider"] = force_prov

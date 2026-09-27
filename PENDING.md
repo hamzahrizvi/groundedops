@@ -365,9 +365,24 @@ exactly, we cannot tell whether a fix helped.
   fixed; preflight makes one real grader call and aborts before case 1 if
   it comes back empty; the unparsed-"pass" fallback deleted;
   eval_retrieval.py gets a --cases flag.
-- [ ] **M2 Label every log line.** Record which conversation, whether it
+- [x] **M2 Label every log line.** Record which conversation, whether it
   came from a real visitor or from our tests, how the turn ended, and what
   checked the answer. Today we cannot tell customers from test runs.
+  (2026-09-27, code and deterministic tests.) Every logs.jsonl row now
+  carries session_id, origin, outcome (the trace's exit id, None when the
+  last stage is not an outcome), verified_by (ground_via), verifier (the
+  SUPPORT/RELEVANCE verdict text) and service_degraded, read by
+  logger._trace_fields from a new pipeline_trace meta dict at write time.
+  Origin is server-side by session prefix (eval-/live-/preflight-, else
+  console); the widget opens its own trace via main._traced_query and sets
+  "widget", which a spoofed prefix cannot override. Newly logged: steps,
+  acknowledgement, more, document request, sales/catalogue, faq.ask, and
+  every _curated_faq_reply (faq.answer and the now-marked faq.picked);
+  request_id and timing added at the handoff, early-refusal, span.ask
+  (now marked) and extract sites. eval.py session ids get "eval-". Not
+  done here, needs a live backend: the Counter(origin) gate over a real
+  `eval.py --no-grade` run plus one widget chat, and the ground_via split
+  check. The pre-pipeline widget FAQ returns stay 9.4's.
 - [x] **M3 A before/after comparison tool** for test results, and a guard
   that stops anyone locking in a blind set as a target. Also record how
   long each test case took (2026-09-27). `eval.py --compare-results A.json
