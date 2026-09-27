@@ -22,6 +22,41 @@ know what changed since last week.
 Every item should be actionable by someone who was not in the session that
 found it. If it needs a transcript to understand, it is not written yet.
 
+**Friday review 2026-09-25 (automated, not yet reviewed by hand).** One
+commit since the last hand update, `1f594c0` (the verifier thinks again),
+recorded below. Ticked off: the `fix/wire-faq-choices` PR (merged as
+hamzahrizvi/groundedops#7 on 2026-08-19), "nothing verified end to end
+since `ea4320a`", and code-scan finding 1 (atomic writes, `f40ce3b`).
+Corrected: the gateway is **NXDOMAIN again** (checked during this review, after the
+night's measurements), code-scan finding 4 is half done, the backend-crash
+item has a fix in the tree, and "thinking mode is not a quality lever" is
+wrong for judgement calls. Added: three items under **Measurement** (the
+blind set's gap to v16.3, the verifier's thinking cost, and eval.py not reading
+`.env`). Checked in this review: both eval baselines pass `--selfcheck` (30 and 34
+cases, baseline present). `run_tests.py`: **240/240, 1 skipped**
+(`test_ui`), 0 failed. That is down from the 252 recorded below. The drop
+is not a regression. `1f594c0` moved `test_llm` into its own process, so its
+16 functions now count as one entry. The run was against the working tree,
+which also holds another session's uncommitted OCR/table work
+(`src/ocr.py`, `src/tables.py`, `src/tests/test_ocr.py`), not HEAD alone.
+
+**2026-09-27 - the 7 -> 10 upgrade plan is written:
+`docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
+independent planners (59 proposals) and an adversarial verdict on each of 37
+merged clusters (33 kept with changes, 4 rejected: a standalone-refusal
+regeneration, lexical-rescue label adjacency, condenser slots, an advisory
+stub). It carries a rubric with the instrument that reads each criterion, a
+"Measure first" section (M1-M14: instrument fixes, the noise floor at
+--repeats 3/5, the blind 3x3 against v16.3, log labelling, a run_live mode
+through /widget/ask), three execution tiers, "Rejected and why", "Already
+built - do not rebuild" with file:line, and the first three actions with
+commands. Two findings worth reading before anything else: 440 chunks carry
+a stale prod_biometrics_general flag that leaks NV9 Spectral rows into
+MyCheckr-scoped retrieval (dense arm only), and /widget/ask never forwards
+`role`, so the handoff fix recorded below as shipped has only ever worked on
+/query. Every number in this file is a harness number until the bot has a
+host and an origin field in the log.
+
 Last hand-updated: 2026-09-25 (night) — the four follow-ups from the
 v16.3 rating are done: graded eval **20/34 -> 32/34 (94%)** with the answer
 baseline re-armed, the gateway models measured (like-for-like on quality,
@@ -97,12 +132,380 @@ dated section below).
 
 ---
 
+## 2026-09-27 - the 7 -> 10 plan, in plain English (all open)
+
+The full plan, with file:line anchors, tests to keep green and the exact
+commands, is `docs/upgrade-plan-7-to-10.md`. This section is the same list
+in plain words, so anyone can see what is left and why. Item numbers match
+the plan. Tick each off here, with its commit, as it lands.
+
+**Why we are at 7.** The bot answers from the manuals, cites pages, and
+refuses rather than guesses. But it still says a confident "No" about
+things the manuals never mention, loses track of the conversation after a
+refusal, cannot compare two products properly, and has no real customers
+yet. Almost everything in the logs is our own testing, so every score we
+have is a test score.
+
+### Latest rating: 7/10, up from 6.5 (2026-09-27)
+
+This is the first rise backed by questions nobody tuned against. The gain
+is in behaviour customers notice: the bot now asks when a question is
+vague and refuses when it is off-topic, instead of the reverse.
+
+| Measure | v16.3 | Now | How much to trust it |
+|---|---|---|---|
+| Blind set 2, scoped chats | 25/34 | 30/34 | Moderate. About 28 on substance: three of its questions were seen, and two passes are grading noise. |
+| Held-out unscoped set | 14/30 | 19/30 | High. Never used for development. |
+| Vague questions asked "which product?" | 5/10 | 9/10 | High, held out. |
+| Off-topic questions refused | 9/10 | 10/10 | High, held out. |
+| Picture-only questions | 1/12 | 1/12 live, 2/12 with figure text | High. The feature is unfinished and not live. |
+
+**What went up, and why:**
+- The main customer path, a scoped widget chat, is roughly 82-88% right
+  on unseen questions. Most remaining failures are safe ones: refusals,
+  not wrong answers.
+- The failure mix got safer. A mispaired fault code is caught again, a
+  wrong age band became a refusal, and off-topic questions no longer get
+  a product menu or an answer from the wrong manual.
+- Measurement can now be trusted. Held-out sets exist for scoped,
+  unscoped and image questions, so a claimed gain can be checked.
+
+**What holds it back, by category.** Each item links to its plan step.
+New items are numbered P1, 8.16, 8.17 and 9.14 in the table below.
+
+*Accuracy (wrong or misleading answers)*
+- [ ] **A confident "No" on near-miss questions.** It says the MyCheckr has
+  no backup battery when the manual says nothing. Plan step **8.3**
+  (honest "not mentioned"). Add the backup-battery case to 8.3's probe and
+  its absence cases.
+- [ ] **Table conditions get lost.** The right row is found, but a
+  condition such as "or 20 coins" is misstated. **Step 8.16.** Nearest steps:
+  M9 (spec cases pinned to a page) and M14 (tests for the table code).
+  Done looks like a set of table-qualifier cases where the answer must
+  keep the condition word for word, measured before any fix.
+
+*Understanding the question*
+- [ ] **Describing a product instead of naming it: 0/10.** "The screenless
+  age-estimation camera" gets a menu or a refusal, not the MyCheckr Mini's
+  answer. **Step 8.17.** Likely fix: match the description against the
+  catalogue's product descriptions before asking "which product?".
+  Measure on the held-out set; do not tune against it.
+
+*Retrieval and images*
+- [ ] **Picture-only questions: 2/12 even with figure text.** OCR reads the
+  labels, but figure chunks carry no page heading, so search rarely finds
+  them. **Step 9.14**, a retrieval fix alongside plan steps 9.7 (reindex) and
+  10.6 (figures beside procedures). Done looks like figure chunks carrying
+  their page's section heading, and the 12 image cases re-run.
+
+*Process*
+- [ ] **Two sessions editing one working tree broke the repository twice
+  this session.** The code is sound now. **Step P1.** Rule: one session
+  changes code at a time. A second session works in its own git worktree
+  or branch and merges, and never runs `git add -A` on a shared tree. This
+  matches the session-tooling memory note.
+
+### Full plan in order, with the Claude model for each step
+
+Switch model with `/model` at the start of a step, never midway through one.
+Only one session changes code at a time (step P1).
+
+**Which model, and why**
+- **Fable 5.1:** changes to the answer pipeline in `main.py`, where many tests
+  pin the exact code and a wrong edit can quietly lower answer quality. Also
+  reading measurement results and deciding what they mean. Costs the most
+  session limit, so keep it to these steps.
+- **Opus 5.5:** most of the work. Normal feature changes with clear
+  instructions in the plan.
+- **Sonnet 5:** small, mechanical edits where the plan already says exactly
+  what to change, plus doc and PENDING updates.
+- **Haiku 4.5:** running things and reporting numbers, with no design
+  decisions.
+- **You:** decisions, credentials, documents and labels no model can supply.
+
+| # | Step | What it does | Model |
+|---|---|---|---|
+| **Phase 0 - process** | | | |
+| 1 | P1 | One session edits code at a time. Others use their own worktree or branch. Write the rule into CLAUDE.md. | Sonnet |
+| 2 | Commit landing work | Commit the other session's OCR, figures and clarify work, staged by hunk, so later steps start clean. | Opus |
+| **Phase 1 - measure first** | | | |
+| 3 | M1 | Fix the test tool: word matching, polite refusals, grader setting, "blind" label on blind set 2. | Sonnet |
+| 4 | M3 | Before/after comparison tool, blind-set guard, time per test case. | Opus |
+| 5 | M2 | Label every log line: conversation, visitor or test, outcome, what checked the answer. | Opus |
+| 6 | M12 | Run the live test conversations through the widget path too. | Opus |
+| 7 | M14 | Tests for the new table and phrase-search code. | Sonnet |
+| 8 | M10, M11 | Honest routing labels; routing tests in CI. | Sonnet |
+| 9 | M9 | Pin spec-table test cases to the page; fix the reranker benchmark. | Sonnet |
+| 10 | M6 (4th check) | Check whether vague fault reports now get "which product?". | Sonnet |
+| 11 | M4 runs | Run each test set 3-5 times on unchanged code. | Haiku |
+| 12 | M4 reading | Decide which flips are noise, reset the pass mark. | Fable |
+| 13 | M5 | Blind comparison against v16.3, 3 runs each side (Haiku runs, Fable reads). Commission blind set 3 (you). | Haiku + Fable |
+| 14 | M7, M13 | Re-measure checker cost and NLI value from the labelled log (Haiku runs, Fable reads). | Haiku + Fable |
+| 15 | M8 | Rewire the checker test; try a second vendor as checker. A person labels ~50 answers. | Opus + you |
+| **Phase 2 - Tier 7 -> 8** | | | |
+| 16 | 8.1 | Widget passes on role, reason, request id, outage flag. | Sonnet |
+| 17 | 8.2 | Repair the 440 wrong product tags. | Opus |
+| 18 | 8.3 | Honest "not mentioned", including the MyCheckr backup-battery case. | Fable |
+| 19 | 8.16 (new) | Keep table conditions such as "or 20 coins": measure first, then fix. | Fable |
+| 20 | 8.4 | Stop treating fresh questions as follow-ups. | Opus |
+| 21 | 8.5 | Remember refused turns. | Fable |
+| 22 | 8.6 | Comparisons read both manuals. | Fable |
+| 23 | 8.17 (new) | Recognise a product from a description ("the screenless age camera"). | Opus |
+| 24 | 8.7 | "And step 3?" from the previous answer. | Opus |
+| 25 | 8.8 | Prove "want the steps?" -> "yes" works on the widget. | Opus |
+| 26 | 8.9 | Handoff reference number, email send, contact-form limit. You supply SMTP details. | Opus + you |
+| 27 | 8.10 | Thumbs up/down and a review list. | Opus |
+| 28 | 8.11 | Real progress while waiting. | Opus |
+| 29 | 8.12 | Show "open the manual at page N", related questions, softer refusals. | Opus |
+| 30 | 8.13 | Phone layout, screen reader, browser walk-through test. | Sonnet |
+| 31 | 8.14 | First multilingual step. | Sonnet |
+| 32 | 8.15 | Test cases for all of Tier 8. | Opus |
+| **Phase 3 - Tier 8 -> 9** | | | |
+| 33 | 9.1 | Always-on server and fixed address. You choose and provide the host; Opus writes the setup doc. | You + Opus |
+| 34 | 9.2 | Restart on hang, alerts. | Opus |
+| 35 | 9.3 | Backup AI vendor, outage drill. You supply the key. | Opus + you |
+| 36 | 9.4 | Daily spending cap. You flip guest AI on. | Opus + you |
+| 37 | 9.5 | Backups on a second disk, restore test. | Opus |
+| 38 | 9.6 | Check unreviewed FAQs; honest "Reviewed" badge. | Opus |
+| 39 | 9.14 (new) | Give figure chunks their page heading so image questions are found. | Opus |
+| 40 | 9.7 | Rebuild the index: Fable checks the gates, Haiku runs it. | Fable + Haiku |
+| 41 | 9.8 | Get and ingest the MyCheckr technical data sheet. | You + Haiku |
+| 42 | 9.9 | Full multilingual answers behind a switch. | Fable |
+| 43 | 9.10 | Explain every answer that flips run to run. | Fable |
+| 44 | 9.11 | Label or hide the slow "accurate" reranker. | Sonnet |
+| 45 | 9.12 | Draft FAQs for ~10 repeat questions; a person approves. | Opus + you |
+| 46 | 9.13 | Test a stronger model on flagged answers (Haiku runs, Fable reads). | Haiku + Fable |
+| **Phase 4 - Tier 9 -> 10** | | | |
+| 47 | 10.1 | Weekly report: resolved, refused, handed off, speed. | Opus |
+| 48 | 10.2 | Console review loop; OCR verified end to end. | Opus |
+| 49 | 10.3 | Nightly automatic tests, Docker start-up test. | Sonnet |
+| 50 | 10.4 | Full side-by-side comparisons, only if still needed after 8.6. | Fable |
+| - | 10.5-10.9 | Deferred until needed. | - |
+
+### How to run the plan: sessions, not steps
+
+The table above is the step reference. Run it as the sessions below.
+Switching model per step restarts the prompt cache about 40 times, which
+wastes more than the per-step model choice saves.
+
+**Rules**
+1. One session per block. Start with `/clear` or a new session, set the
+   model once, never switch mid-block.
+2. Eval runs are shell jobs, not model work. Steps 11, 13, 14, 40, 41 and 46
+   ("Haiku runs") become background scripts that write a small summary
+   JSON. Haiku is then unnecessary. The reading session opens only the
+   summary, never raw logs.
+3. A block with mixed models uses the stronger one throughout. A cache
+   rebuild costs more than doing a few Opus steps in a Fable session.
+4. Read little: only the block's step sections here (grep the ids), only the
+   covering tests (`pytest -k`), full suite once at the end of the block,
+   one commit per step.
+5. Stop at any "you" step. An unattended session reports and stops; it
+   never guesses.
+6. Check `.venv` has fastapi before any test run, or 21 tests skip silently,
+   including the ones covering these changes.
+7. No Explore/subagent fan-out for these steps; they re-read files the main
+   session already holds.
+
+**Collect before starting (no Claude needed):** SMTP details (26), server
+host choice (33), backup vendor key (35), guest-AI decision (36), commission
+blind set 3 (13), the MyCheckr technical data sheet (41), time booked for
+the ~50 human labels (15).
+
+| S | Model | Steps | Notes |
+|---|---|---|---|
+| 1 | Opus | 1, 2 | Attended. Confirm the other session has stopped first. P1 is a one-line CLAUDE.md edit. |
+| 2 | Sonnet | 3, 7, 8, 9, 10 | Edits the plan already spells out. M1 must land before any eval run. |
+| 3 | Opus | 4, 5, 6 | Also write the eval batch script used in S4. |
+| 4 | none (shell) | 11, runs for 13 and 14 | One overnight background job; writes summaries only. |
+| 5 | Fable | 12, reading for 13 and 14 | Reads the summaries; resets the pass mark. |
+| 6 | Opus + you | 15 | |
+| 7 | Sonnet | 16, 30, 31 | Check they are independent before grouping. |
+| 8 | Opus | 17 | Tag repair. |
+| 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. |
+| 10 | Opus | 23, 24, 25 | Conversation follow-ups. |
+| 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. |
+| 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. |
+| 13 | Opus | 38, 39 | |
+| 14 | Fable, then shell | 40, 41 | Fable checks the rebuild is safe, a script runs it, you add the sheet. |
+| 15 | Fable | 42, 43 | |
+| 16 | Sonnet | 44 | |
+| 17 | Opus + you | 45 | |
+| 18 | shell, then Fable | 46 | |
+| 19 | Opus | 47, 48 | |
+| 20 | Sonnet | 49 | |
+| 21 | Fable | 50 | Only if still needed after 8.6. |
+
+**Opening prompt for each session**
+
+```
+Do steps <ids> from PENDING.md. Read only those sections (grep the ids).
+Per step: implement, run the targeted tests, commit, tick the box.
+Stop and report at anything marked "you", on a failing test you can't
+fix in two tries, or if git status shows files you didn't touch.
+Full test suite once at the end. Don't push.
+```
+
+**Auto mode:** fine for S2, S3, S7-S11, S13, S16, S19 and S20. Keep S1
+(someone else's uncommitted work), S12, S17 and anything with credentials or
+outside services attended. S4's overnight job uses the nohup recipe, since
+`preview_start` is refused in scheduled runs.
+
+### Step 0 - measure first (do these before changing any behaviour)
+
+Our test scores wobble by about 3 cases out of 34 from run to run, even
+with no code change. Until we fix the measuring tools and know that wobble
+exactly, we cannot tell whether a fix helped.
+
+- [ ] **M1 Fix the test tool.** It marks some right answers wrong (word
+  matching too strict), some polite refusals as "answered", and its grader
+  quietly does nothing unless one setting is exported. Also label the
+  second blind test set as "blind" so it can never be tuned against.
+- [ ] **M2 Label every log line.** Record which conversation, whether it
+  came from a real visitor or from our tests, how the turn ended, and what
+  checked the answer. Today we cannot tell customers from test runs.
+- [ ] **M3 A before/after comparison tool** for test results, and a guard
+  that stops anyone locking in a blind set as a target. Also record how
+  long each test case took.
+- [ ] **M4 Measure the wobble.** Run each test set 3-5 times on unchanged
+  code, write down which cases flip, then reset the pass mark to the cases
+  that pass every time.
+- [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
+  each side. The first blind set is used up (we read it to fix things); a
+  third one must be written fresh by someone who has not seen the fixes.
+- [x] **M6 Root causes of the four named failures** (done in the plan):
+  one was a wrong answer key (SD card class), one was already fixed, two
+  are the "confident No" problem. A fourth shape (vague fault reports with
+  no product) still needs a quick check.
+- [x] **M7 Cost of letting the checker "think"** (done): checking went from
+  about 0.9s to 3.3s typical. Re-measure once logs are labelled.
+- [ ] **M8 Test the answer-checker itself** on known right and wrong
+  answers, and try a second AI vendor as checker. Have a person label ~50
+  answers so we know whether the grader can be trusted.
+- [ ] **M9 Pin spec-table test cases to the exact page**, and fix the
+  reranker benchmark, which has been testing the same model every time.
+- [ ] **M10 Honest routing labels.** Split "needs the earlier conversation"
+  from "is a handoff/greeting" in the scenario tests.
+- [ ] **M11 Run the routing tests in CI** on every change.
+- [ ] **M12 Run the live test conversations through the website widget
+  path**, not only the internal one. This is how we found that a "fixed"
+  handoff was never fixed for real visitors.
+- [ ] **M13 Check whether the fact-checking model is still earning its
+  keep** - 58% of served answers now score under 0.1 on it.
+- [ ] **M14 Add tests for the new table and phrase-search code** before it
+  is baked into the index.
+
+### Tier 7 -> 8 - fix what customers would notice
+
+- [ ] **8.1 Widget passes on what the server decided** (role, reason,
+  request id, outage flag). Stops the handoff message contradicting itself.
+- [ ] **8.2 Repair wrong product tags.** 440 chunks are tagged to the wrong
+  product, so NV9 Spectral figures can appear in MyCheckr answers.
+- [ ] **8.3 Honest "not mentioned".** When the manual never mentions
+  Bluetooth, say so, instead of answering "No".
+- [ ] **8.4 Stop treating fresh questions as follow-ups** just because the
+  rewriter added the product name.
+- [ ] **8.5 Remember refused turns** (the question, not the refusal), so the
+  next "which one?" still knows what was being asked.
+- [ ] **8.6 Comparisons read both manuals.** A letter-case mismatch in table
+  titles stopped the spec comparison finding any shared rows (0 -> 7 once
+  fixed), and a product chat only searched one manual.
+- [ ] **8.7 "And step 3?"** is answered from the previous answer, or the bot
+  says honestly that the last answer had only two steps.
+- [ ] **8.8 Prove "want the steps?" -> "yes" -> steps works end to end** on
+  the widget.
+- [ ] **8.9 Handoff gives the visitor a reference number, the enquiry is
+  actually emailed** (needs SMTP details), and the contact form is limited
+  so bots cannot flood or wipe enquiries.
+- [ ] **8.10 Thumbs up/down under answers**, feeding a review list in the
+  console.
+- [ ] **8.11 Show real progress while waiting** ("searching", "checking"...)
+  instead of timed placeholder lines.
+- [ ] **8.12 Show what the server already sends**: "open the manual at page
+  N", related questions, and a softer refusal that does not quote the
+  visitor's typo back.
+- [ ] **8.13 Phone layout and screen-reader fixes**, plus an automated
+  browser walk through the widget.
+- [ ] **8.14 First multilingual step**: spot French/Spanish/German price
+  questions and refusals.
+- [ ] **8.15 Add test cases for all of the above**, so the test suite looks
+  like real conversations and not just FAQ lookups.
+
+### Tier 8 -> 9 - reliable, reachable, safe
+
+- [ ] **9.1 A proper always-on server with a fixed web address.** Today it
+  runs on a PC with an address that changes on restart.
+- [ ] **9.2 Restart it if it hangs** (but not just because the AI provider
+  is down), and alert someone when it is down.
+- [ ] **9.3 A backup AI provider from a different company**, tested by
+  deliberately cutting off DeepSeek.
+- [ ] **9.4 A daily spending cap, then turn AI answers on for guests.** The
+  switch is the operator's decision.
+- [ ] **9.5 Backups onto a second disk, and one timed restore test.**
+- [ ] **9.6 Check the unreviewed FAQ answers** and only show "Reviewed
+  answer" on ones a person actually checked.
+- [ ] **9.7 Rebuild the search index** (removes page footers, adds table
+  context) - only after the new code is committed and five document tags
+  are confirmed.
+- [ ] **9.8 Get the missing "MyCheckr Range Technical Data" document.**
+- [ ] **9.9 Full multilingual answers**, behind a switch.
+- [ ] **9.10 Explain every answer that flips run to run.**
+- [ ] **9.11 Label or hide the "accurate" reranker option** - it makes every
+  answer take about 28 seconds.
+- [ ] **9.12 Write FAQ answers for about 10 questions** that keep being asked
+  and refused.
+- [ ] **9.13 Test whether a stronger model rescues flagged answers.**
+
+### Tier 9 -> 10 - it improves itself from real use
+
+- [ ] **10.1 A weekly report**: how many questions were resolved, refused,
+  handed off, and how fast.
+- [ ] **10.2 Console review loop**: see unanswered and thumbs-down questions
+  and turn them into FAQs in one click; verify OCR end to end.
+- [ ] **10.3 Nightly automatic test runs**, and a Docker start-up test.
+- [ ] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
+  comparisons still refused.
+- [ ] 10.5-10.9 Deferred until needed: richer memory, figures beside
+  procedures, true word-by-word streaming, translated widget text, test
+  cases for the "inference" mode.
+
+### Rejected - do not redo without new evidence
+
+- Asking the AI a second time when it refuses a first question: it would
+  turn some correct refusals into wrong answers.
+- Tightening the number-matching check: no wrong answer was ever traced
+  to it.
+- Giving the rewriter extra "slots": already measured, no effect.
+- A canned reply for "what do you recommend?": almost no one asks it; the
+  comparison work covers it.
+
+### Waiting on things outside the code
+
+SMTP login details (emails), a server and web address, a second AI
+vendor's key, the missing documents, a person to label answers and write
+the third blind set, and real visitors.
+
 ## 2026-09-25 — experimental/v16.4-logic-and-latency (opened after GO_v3.2)
 
 Two read-only audits of the answer path, run in parallel, then fixes. Every
 logic fix is pinned in `src/tests/test_logic_holes.py`; every latency claim
 below was measured on this box (12 cores, CPU inference) with nothing else
 running unless stated.
+
+### Shipped — the verifier thinks again (`1f594c0`, 2026-09-25 14:56)
+
+A blind eval (`src/eval_cases_blind.json`: 34 cases written from the PDFs by
+an agent that saw no case, test or fix) found the branch answering "1 long,
+2 short = Note Path Open" for an NV9USB+ bezel code the manual (p.56) lists
+as Note Path Jam, and the LLM verifier approving it. Measured on that page:
+thinking off, wrong code accepted **4/4** and right code **0/2**; thinking
+on, 0/4 and 2/2. So `0cd3b69` switching thinking off everywhere had
+inverted the verifier. `llm.judging()` now forces thinking on for the
+verifier, the inference contract and the re-answer passage selection;
+answer writing stays fast. After the fix: 0/4 wrong, 3/3 right. Blind set:
+v16.3 28/34, branch 25-26/34 (see **Measurement** for why that gap is still
+open). Original set 33/34. **The blind set stops being blind once anything
+is tuned against it. Use it to measure, not to fix.**
 
 ### Shipped — the four follow-ups (night of 2026-09-25)
 
@@ -290,6 +693,15 @@ the classifier calls standalone — left as the engineer wrote them).
   python -X faulthandler -m uvicorn` with readiness read from the log
   survived twice. Suspect: today's "models imported on first use" moving
   a torch import off the main thread. Unresolved.
+  **Friday review 2026-09-25: a fix for that exact suspect is in the tree.**
+  `ccc84cb` imports `sentence_transformers` on the main thread in the
+  startup hook, before the warmup thread starts (`src/main.py` ~875-880,
+  confirmed in the code). Its own note says the unfixed code crashed on
+  three of four starts. This review could not tell whether the four crashes
+  above happened before or after `ccc84cb`, and did not launch a backend to
+  check. Done looks like: three cold starts in a row on the current HEAD
+  with a plain `uvicorn` (no faulthandler), each still answering `/health`
+  60s after "System warmup complete". Then strike this.
 
 ### Shipped — cleanup and compaction (later on 2026-09-25)
 
@@ -451,6 +863,11 @@ component schemas before and after.
   (`itl-gpt-pro`, `itl-gpt-flash`) could not be tested: NXDOMAIN all day.
 - **Thinking mode as a quality lever**: the old backend (thinking on) and
   the new (off) produced identical eval outcomes on all 34 cases.
+  **CORRECTED (Friday review 2026-09-25): true for answer writing, false for
+  judgement.** With thinking off the verifier approved a wrong flash code
+  4/4 and rejected the right one 2/2 (`1f594c0`). The 34-case eval could not
+  see this because none of its cases depended on the verifier catching an
+  error. Judgement calls now think again.
 
 ### Deferred, with the evidence — **all closed on the night of 2026-09-25**,
 see *Shipped — the four follow-ups* above; kept for the record.
@@ -661,6 +1078,9 @@ see *Shipped — the four follow-ups* above; kept for the record.
   product, or drop it. Until then the suite has one permanently-failing
   case, which is worse than 26 cases because it trains people to ignore a
   red result.
+  **Still open, Friday review 2026-09-25:** the case is unchanged at
+  `src/eval_cases.json:111` and was one of the two failures in the 32/34
+  run.
 
 - **One answer is genuinely ungrounded, and the gate is catching it.**
   "Does MyCheckr require integration with other systems?" scores **0.0051**
@@ -674,6 +1094,12 @@ see *Shipped — the four follow-ups* above; kept for the record.
 
   This does not change the threshold conclusion above. 0.55 still discards
   nothing that scores well, and the one refusal is the gate doing its job.
+
+  **Friday review 2026-09-25: the eval no longer exercises this.** In the
+  latest graded run (`src/eval_results.json`, 14:52) the case passes, but
+  `layer: faq`, `provider: faq`, `grounding: None`. A curated FAQ answers
+  it now, so the generation path that scored 0.0051 never runs. Still
+  worth the one look, but it needs `skip_faq: true` to reproduce.
 
 ## In progress / known gaps
 
@@ -793,12 +1219,6 @@ see *Shipped — the four follow-ups* above; kept for the record.
   three legacy files still need consolidating with
   `reindex.py --migrate` before a backup can include them.
 
-- **PR for branch `fix/wire-faq-choices` → `main` not yet opened.** `gh` CLI
-  is installed (`winget install --id GitHub.cli`) but not authenticated as of
-  last check (`gh auth status` → not logged in). Device-code login was
-  started at least twice; confirm which attempt (if any) completed. Once
-  authenticated, `gh pr create` against `main` with the body already drafted
-  in this session's scratchpad.
 
 - ~~"talk to sales" and one-word replies on the customer-questions list~~ —
   fixed 2026-08-27. `record_gap` now filters anything that is not a
@@ -845,10 +1265,17 @@ see *Shipped — the four follow-ups* above; kept for the record.
   itself is proven in a browser (see the browser-verification gap above),
   not before.
 
-- **Code scan 2026-08-28 — five findings, none yet fixed.** A read-through
-  of the live tree (`legacy/` excluded) for gaps not already on this list.
+- **Code scan 2026-08-28 — five findings: #1 fixed, #4 half done, #2,
+  #3 and #5 still open** (re-checked against the code in the Friday review
+  2026-09-25). A read-through of the live tree (`legacy/` excluded) for
+  gaps not already on this list.
 
-  1. **Non-atomic writes on the only copy of customer data.**
+  1. ~~**Non-atomic writes on the only copy of customer data.**~~ —
+     **FIXED `f40ce3b` (2026-09-02).** Leads, the FAQ store and the
+     catalogue now write through `jsonstore.save` (temp file, fsync,
+     `os.replace`). The gap log `faq_gaps.json` still uses bare
+     `open(..., "w")` in `faq_store.py` (8 sites). That is a regenerable
+     log, not customer data. Original text:
      `accounts.py`, `policy.py`, `keystore.py` and `docstore.py` write via
      temp-file + `os.replace`. `widget_config.py:314` (leads),
      `faq_store.py:113` (curated answers) and `catalog.py:81` do not — they
@@ -885,6 +1312,13 @@ see *Shipped — the four follow-ups* above; kept for the record.
      every answer refuses — exactly the state a fresh deploy is in. A
      `?deep=1` variant that counts collection rows would make the runbook's
      check real.
+     **HALF DONE:** `/health?deep=1` exists (since `1365920`, 2026-09-01)
+     and returns 503 when the index is empty, no key is set or the models
+     are not loaded. But neither consumer uses it:
+     `docker/Dockerfile.backend:35` still probes plain `/health`, and so
+     does `STAGING.md:139`. Done looks like: the runbook step uses
+     `?deep=1`, and the container healthcheck either does too (with a
+     `start-period` longer than the ~30s model load) or says why not.
 
   5. **Worker scaling would silently corrupt every store.** All seven JSON
      stores rely on `threading.Lock()`, which is process-local. Correct
@@ -1361,14 +1795,43 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   interface`, `ok and what about the full size one?`), which is the
   conversational layer doing exactly the job it was added for: it is the
   part of the suite that does not yet hold still.
-- **Nothing since `ea4320a` is verified end to end.** The numbered context
-  passages, the prompt changes and the clarify gate are all unit-tested and
-  none has seen a real generation, because the provider is unreachable.
+- **The blind set trails v16.3 by 2-3 cases, and nobody has shown that is
+  noise.** `src/eval_cases_blind.json` (added in `1f594c0`), grader-judged:
+  v16.3 **28/34**, this branch **25-26/34** after the verifier fix. The
+  commit calls that "within run-to-run noise". The original suite's own noise
+  (±3 cases between two runs of one baseline, 2026-08-28) makes that
+  plausible, but that noise figure is from a different suite. Two blind runs per
+  side cannot tell a regression from noise. It matters because the branch
+  is about to be rated against v16.3, and the blind set is the only
+  measure that nothing has been tuned against. Done looks like: 3 runs
+  each of v16.3 and HEAD, per-case outcome diff, and every case that fails
+  on HEAD in all 3 runs but passes on v16.3 in all 3 either explained or
+  filed. **Measure only. Do not tune against this set.**
+- **The verifier's thinking has a latency cost nobody has measured.**
+  `1f594c0` turned DeepSeek thinking back on for the verifier, the
+  inference contract and re-answer selection. On an answer-sized prompt,
+  thinking cost 3.15s against 0.94s per call (see *Shipped — latency*).
+  From 792 logged turns, 284 (36%) were settled by the LLM verifier, plus
+  every table answer, which skips NLI. So roughly a third or more of answered
+  turns may have gained ~2s. That is an estimate from two separate
+  measurements, not a measurement. Done looks like: `verifier_llm_time` median and
+  p90 from `logs.jsonl`, turns before `1f594c0` against turns after, and
+  the figure recorded here.
+- **`eval.py` grades nothing unless `DEEPSEEK_API_KEY` is exported, and
+  the preflight does not notice.** Re-checked 2026-09-25 in the code:
+  `_deepseek_key()` reads the environment, then falls back to
+  `keyvault.load_key()`. Nothing loads `src/.env`, and `preflight()`
+  checks only that `/query` generates. The night run lost a full graded
+  pass to this: every check came back "grader returned nothing". Done
+  looks like: the preflight makes one grader call and aborts on an empty
+  verdict, or eval.py loads `src/.env` itself. The preflight check is safer, because it also
+  catches a bad key. Pinned by a test that runs the preflight with no key
+  in the environment.
 
 **Serving**
 
 - **The widget does not stream.** `/query/stream` exists with sentence-level
-  `StreamGrounder` verification; `groundedops-widget.js:1610` posts to the
+  `StreamGrounder` verification; `groundedops-widget.js:1939` (line re-checked 2026-09-25) posts to the
   blocking `/widget/ask`. The 260 chars/second reveal added in `152b960` is
   presentation only. Real token streaming needs the generation call pushed
   below the quota gates, which `widget_api.py` warns is not a change to make
@@ -1412,6 +1875,14 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   It unblocked immediately, and the first end-to-end run of the inference
   contract found two defects in it that no unit test could have. See the
   entry under **Resolved**.
+
+  **CORRECTION (Friday review 2026-09-25): it is gone from DNS again.**
+  `Resolve-DnsName` returned "DNS name does not exist" during this review,
+  after the night's measurements of `itl-gpt-flash` had worked. It has gone
+  down three times on record: NXDOMAIN until 2026-09-22; back; NXDOMAIN
+  during the 25th's stress test; back that night; NXDOMAIN again now. Anything that depends on the gateway should
+  re-check DNS on the day and not trust this file. The owner of the host
+  has never been named here, and naming them is the useful next step.
 - **`release.py` cannot cut a drop while two READMEs share a basename.**
   `python release.py --minor` refuses with `README.md <-> tools/README.md`,
   because the legacy drop is FLAT and one would silently overwrite the
@@ -1459,6 +1930,22 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   running before).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-09-25 (Friday review) — ticked off from the open list:**
+  - ~~**PR for branch `fix/wire-faq-choices` → `main` not yet opened.**~~
+    Merged as hamzahrizvi/groundedops#7 on 2026-08-19, with #8 after it.
+    `gh` is authenticated, and the branch has no commits that are not in
+    `main`. The item had been stale for five weeks.
+  - ~~**Nothing since `ea4320a` is verified end to end.**~~ The numbered
+    passages, prompt changes and clarify gate have all been through real
+    generations since. Evidence: the 2026-09-25 live stress test (14
+    conversations through `/query`), graded eval 32/34 with the baseline
+    re-armed (`2ed5276`), and the blind set (`1f594c0`).
+  - ~~**Code scan finding 1, non-atomic writes.**~~ `f40ce3b`, see the
+    code-scan item.
+- **2026-09-25 — the verifier thinks again** (`1f594c0`). With thinking
+  off it had inverted on a flash-code table. See the dated section at the
+  top.
 
 - **2026-09-25 — conversation stress test: handoff, greeting, warranty,
   comparison follow-ups, second-document requests, follow-up refusal
