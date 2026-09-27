@@ -38,6 +38,11 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest):
     removed = delete_source(payload.source)
     clear_memory()
+    try:
+        import figures as _figures
+        _figures.remove_figures(payload.source)
+    except Exception as exc:
+        logger.warning("figures for %r not removed: %s", payload.source, exc)
     return {"removed_chunks": removed, "source": payload.source}
 
 
@@ -70,10 +75,12 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
     if ingest_provider:
         os.environ["INGEST_PROVIDER"] = ingest_provider
     try:
+        report: dict = {}
         count = ingest_file(
             content, filename, api_keys=api_keys, progress=_progress,
             category_key=category_key, product_key=product_key,
-            replace_existing=bool(replace_source and replace_source == filename))
+            replace_existing=bool(replace_source and replace_source == filename),
+            report=report)
         # A new version of a document already held. The old chunks go only
         # AFTER the new ones are in: if ingest fails we still have the
         # version we had, which is the whole point of replacing rather than
@@ -93,10 +100,20 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
                 catalog_mod.attach_source(category_key, product_key, filename)
             except Exception as e:
                 logger.warning(f"attach_source after ingest failed: {e}")
+        # Pages the parser could not read are OFFERED, not OCR'd. The console
+        # shows the list with the warning OCR deserves and a button; nothing
+        # is guessed from a picture until somebody chooses that.
+        candidates = list(report.get("ocr_candidates") or [])
+        ocr_ok, ocr_why = _ocr_availability() if candidates else (False, None)
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id] = {
                 "status": "done", "file": filename, "chunks_added": count,
+                "chunks": count,
                 "warning": None if count else "File already exists or no usable text found",
+                "pages": report.get("pages"),
+                "ocr_candidates": candidates,
+                "ocr_available": ocr_ok,
+                "ocr_unavailable_reason": ocr_why,
                 "done": True, "pct": 100.0}
     except Exception as e:
         logger.exception(f"Ingest job {job_id} failed")
@@ -255,6 +272,94 @@ def upload_status(job_id: str):
     return job
 
 
+# ── OCR of unreadable pages (admin-approved) ─────────────────────────
+# The parser reports pages with no usable text layer; this is the step the
+# admin takes after reading the warning. It runs as a job on the same
+# status endpoint as an upload, because on CPU it is slower than one.
+
+def _ocr_availability() -> tuple[bool, str | None]:
+    try:
+        import ocr as _ocr
+        return _ocr.available()
+    except Exception as exc:
+        return False, str(exc)
+
+
+class OcrRequest(BaseModel):
+    source: str
+    # Defaults to every pending candidate for the source.
+    pages: list[int] | None = None
+
+
+def _ocr_worker(job_id: str, source: str, pages: list[int]):
+    def _progress(stage, done, total):
+        with _INGEST_LOCK:
+            _INGEST_JOBS[job_id].update(
+                stage=stage, done=done, total=total,
+                pct=round(done / total * 100, 1) if total else 0.0)
+    try:
+        # Imported here, not at module top: the route tests stand in a stub
+        # for `ingest` that knows only ingest_file.
+        from ingest import ingest_ocr_pages
+        count = ingest_ocr_pages(source, pages, progress=_progress)
+        with _INGEST_LOCK:
+            _INGEST_JOBS[job_id] = {
+                "status": "done", "kind": "ocr", "file": source,
+                "chunks_added": count, "chunks": count,
+                "ocr_pages": pages,
+                "warning": None if count else "OCR found no legible text on those pages",
+                "done": True, "pct": 100.0}
+    except Exception as e:
+        logger.exception(f"OCR job {job_id} failed")
+        with _INGEST_LOCK:
+            _INGEST_JOBS[job_id] = {"status": "error", "kind": "ocr",
+                                    "error": str(e), "file": source, "done": True}
+
+
+@router.get("/admin/ocr/status")
+def ocr_status(x_admin_password: str | None = Header(default=None)):
+    """Whether OCR can run on this install, so the console can say "not
+    installed" instead of offering a button that fails."""
+    _require_admin(x_admin_password)
+    ok, why = _ocr_availability()
+    return {"available": ok, "reason": why}
+
+
+@router.post("/admin/ocr")
+def run_ocr(payload: OcrRequest,
+            x_admin_password: str | None = Header(default=None)):
+    """Start OCR on a document's unreadable pages. Returns a job id to poll
+    on /upload/status/{job_id}.
+
+    Pages default to the manifest's pending candidates. Explicit pages are
+    accepted (an admin may want a page the heuristic did not flag) but must
+    exist in the document, which ingest_ocr_pages checks.
+    """
+    _require_admin(x_admin_password)
+    ok, why = _ocr_availability()
+    if not ok:
+        raise HTTPException(status_code=503, detail=f"OCR is not available: {why}")
+    import docstore as _ds
+    source = os.path.basename((payload.source or "").replace("\\", "/"))
+    if not _ds.find(source):
+        raise HTTPException(status_code=404,
+                            detail=f"No retained original for {source!r}")
+    pages = payload.pages
+    if not pages:
+        pages = _ds.ocr_state(source)["pending"]
+    pages = sorted({int(p) for p in pages if int(p) >= 1})
+    if not pages:
+        raise HTTPException(status_code=400,
+                            detail="No pages to OCR for that document")
+    job_id = str(uuid.uuid4())
+    with _INGEST_LOCK:
+        _INGEST_JOBS[job_id] = {"status": "starting", "kind": "ocr",
+                                "file": source, "pct": 0.0, "done": False}
+    threading.Thread(target=_ocr_worker, args=(job_id, source, pages),
+                     daemon=True).start()
+    return {"job_id": job_id, "file": source, "pages": pages, "status": "started"}
+
+
 # ── Ingest version fingerprint (v10.4) ───────────────────────────────
 # When ingestion LOGIC changes (chunking, breadcrumbs, doc2query), old
 # vectors are stale. We fingerprint the ingest-affecting code; the UI
@@ -374,6 +479,33 @@ def source_file(filename: str):
     return FileResponse(path, filename=safe)
 
 
+@router.get("/figure/{source}/{name}")
+def figure(source: str, name: str):
+    """Serve one crop cut from a document at ingest (figures.py), so an
+    answer can show the diagram beside the text it cites.
+
+    Same shape as /source_file: the source is reduced to a bare basename
+    and resolved by the module that wrote it, and the crop name must be
+    exactly the form figures.py writes (p<page>_<n>.png), so nothing off
+    the URL ever becomes a path. Excluded sources are refused, as their
+    originals are. Token-gated externally alongside /source_file.
+    """
+    import docstore
+    import figures as _figures
+    safe = docstore._safe_basename(source)
+    if not safe:
+        raise HTTPException(status_code=404, detail="Not found")
+    _lower = safe.lower()
+    from main import EXCLUDED_SOURCES
+    for _ex in EXCLUDED_SOURCES:
+        if _ex and _ex in _lower:
+            raise HTTPException(status_code=404, detail="Not found")
+    path = _figures.figure_path(safe, docstore._safe_basename(name))
+    if not path:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path, media_type="image/png")
+
+
 class ReassignReq(BaseModel):
     source: str
     category_key: str
@@ -462,6 +594,10 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
         import docstore as _ds
         for item, r in zip(out, rows):
             item["freshness"] = _ds.freshness(r["source"], r["version"])
+            # Pages the parser could not read, and which of them have been
+            # OCR'd. Shown on the row so the offer is not lost with the
+            # upload card.
+            item["ocr"] = _ds.ocr_state(r["source"])
     except Exception as exc:
         logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
     return {"sources": out}

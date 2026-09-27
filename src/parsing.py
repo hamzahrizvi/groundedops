@@ -483,6 +483,76 @@ def _strip_repeated_lines(pages: list[tuple[int, str]],
     return out
 
 
+# A text layer that exists but cannot be read. Seen on PDFs whose fonts
+# carry no Unicode map: pdfplumber and pypdf both return "(cid:42)(cid:17)"
+# runs, or a page of symbols, and the page is indexed as though that were
+# prose. It scores on nothing and is never cited, so it looks like a page the
+# model "could not use" -- when in fact nothing legible was ever stored.
+_CID_RUN = re.compile(r"\(cid:\d+\)")
+
+
+def _looks_garbled(text: str) -> bool:
+    """Whether a page's text layer is unusable and the page is an OCR candidate.
+
+    Two signals, either is enough. (cid:N) tokens are pdfminer's own way of
+    saying it has a glyph and no character for it; when they carry a page
+    they ARE the page. Failing that, a page whose characters are mostly not
+    letters, digits or ordinary punctuation is not prose in any language
+    this corpus holds. Short pages are exempt: a page that is one part
+    number is legitimately mostly digits and symbols.
+    """
+    stripped = (text or "").strip()
+    if len(stripped) < 40:
+        return False
+    cid_chars = sum(len(m.group(0)) for m in _CID_RUN.finditer(stripped))
+    if cid_chars > len(stripped) * 0.3:
+        return True
+    visible = [c for c in stripped if not c.isspace()]
+    if not visible:
+        return False
+    ordinary = sum(1 for c in visible
+                   if c.isalnum() or c in ".,;:!?()[]{}<>/\\-–—_'\"%&+=*#@°µ|")
+    return ordinary / len(visible) < 0.6
+
+
+def extract_pages_report(path: str) -> tuple[list[tuple[int, str]], dict]:
+    """extract_pages() plus what it could NOT read.
+
+    Returns (pages, report). The report is {"pages": total page count,
+    "empty": [page numbers with no text layer], "garbled": [page numbers whose
+    text layer is unusable]}. Both lists are OCR candidates; the console
+    offers them for OCR after the upload and records the offer so it is not
+    lost when the upload card is dismissed. Non-PDF formats report nothing:
+    a .docx with no text is an empty document, not a scanned one.
+    """
+    report = {"pages": 0, "empty": [], "garbled": []}
+    if not path.endswith(".pdf"):
+        pages = extract_pages(path)
+        report["pages"] = len(pages)
+        return pages, report
+    pages, empty = _extract_pdf(path)
+    report["pages"] = len(pages) + len(empty)
+    report["empty"] = list(empty)
+    report["garbled"] = [n for n, t in pages if _looks_garbled(t)]
+    return _strip_repeated_lines(pages), report
+
+
+def _extract_pdf(path: str) -> tuple[list[tuple[int, str]], list[int]]:
+    """Raw per-page PDF text and the pages that produced none.
+
+    Split out of extract_pages so the empty-page list can be RETURNED, not
+    only logged. It was logged and dropped, so a scanned manual's missing
+    pages were known to the log file and to nobody else.
+    """
+    if pdfplumber is not None:
+        try:
+            return _pdf_pages_plumber(path)
+        except Exception as exc:
+            logger.warning(f"Layout-aware extraction failed for "
+                           f"'{path}' ({exc}); falling back to pypdf")
+    return _pdf_pages_pypdf(path)
+
+
 def extract_pages(path: str) -> list[tuple[int, str]]:
     """Extract text as [(page_number, text), ...], 1-indexed.
 
@@ -508,15 +578,7 @@ def extract_pages(path: str) -> list[tuple[int, str]]:
                 return [(1, f.read())]
 
         elif path.endswith(".pdf"):
-            if pdfplumber is not None:
-                try:
-                    out, empty = _pdf_pages_plumber(path)
-                except Exception as exc:
-                    logger.warning(f"Layout-aware extraction failed for "
-                                   f"'{path}' ({exc}); falling back to pypdf")
-                    out, empty = _pdf_pages_pypdf(path)
-            else:
-                out, empty = _pdf_pages_pypdf(path)
+            out, empty = _extract_pdf(path)
 
             if empty:
                 logger.warning(

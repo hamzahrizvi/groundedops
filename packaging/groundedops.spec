@@ -48,7 +48,10 @@ for pkg in ("torch", "chromadb", "sentence_transformers", "transformers",
     except Exception as exc:          # a missing optional package is not fatal
         print(f"[spec] collect_all({pkg}) skipped: {exc}")
 
-for pkg in ("pdfplumber", "pypdfium2", "certifi"):
+# rapidocr keeps its config.yaml and .onnx models (downloaded on first use)
+# inside the package; without them the exe would try the network on the
+# customer's machine. Run `python -m ocr --warm` in src/ before building.
+for pkg in ("pdfplumber", "pypdfium2", "certifi", "rapidocr"):
     try:
         datas += collect_data_files(pkg)
     except Exception:

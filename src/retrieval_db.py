@@ -199,6 +199,12 @@ def _get_bm25_index(collection):
                 "product": m.get("product", ""),
                 "category": m.get("category", ""),
                 "section": m.get("section", ""),
+                # Read from the page's pixels, not its text layer. Carried
+                # to the citation so the reader is told.
+                "ocr": bool(m.get("ocr")),
+                # Crop names from this chunk's page (figures.py), shown
+                # beside the answer; never searched.
+                "figures": m.get("figures") or "",
             }
             for i, d, m in zip(data["ids"], data["documents"], data["metadatas"])
             # v10.16: doc2query removed. Fresh ingests no longer create
@@ -499,6 +505,8 @@ def retrieve_from_db(
             # instead of asking which product was meant.
             "product": entry.get("product", ""),
             "category": entry.get("category", ""),
+            "ocr": bool(entry.get("ocr")),
+            "figures": entry.get("figures") or "",
             # The heading path ingest wrote from the document's own
             # outline ("Accessing my device ... > Step 1: ..."). Dropped
             # here until 2026-09-22, the same way product/category were

@@ -394,6 +394,10 @@
     ".go-srcn{font-weight:600}" +
     ".go-pg{font-weight:500;color:var(--mut);font-size:11.5px}" +
     ".go-dl{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--a);text-decoration:none}" +
+    ".go-figs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}" +
+    ".go-fig{max-height:96px;max-width:46%;border:1px solid var(--line);border-radius:6px;" +
+    "background:#fff;cursor:zoom-in;object-fit:contain}" +
+    ".go-fig.big{max-height:none;max-width:100%;cursor:zoom-out}" +
     ".go-dl:hover{text-decoration:underline}" +
     ".go-badge{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;" +
     "color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:1px 5px;margin-top:7px}" +
@@ -755,7 +759,35 @@
           ? ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>'
           : "";
         i.innerHTML = head + dl;
+        // The pictures that sat beside the cited text: a wiring diagram is
+        // the answer to "where does pin 3 go" in a way prose is not. Loaded
+        // with the bearer token, like the download: /figure is gated and an
+        // <img src> cannot carry a header. Click toggles full size.
+        if (x.figures && x.figures.length) {
+          var strip = document.createElement("div");
+          strip.className = "go-figs";
+          x.figures.slice(0, 4).forEach(function (f) {
+            var im = document.createElement("img");
+            im.className = "go-fig";
+            im.alt = f.caption || ("Figure, page " + f.page);
+            im.title = (f.caption ? f.caption + " — " : "") + "page " + f.page;
+            im.setAttribute("data-fig", f.url);
+            im.addEventListener("click", function () {
+              im.classList.toggle("big");
+            });
+            strip.appendChild(im);
+          });
+          i.appendChild(strip);
+        }
         s.appendChild(i);
+      });
+      s.querySelectorAll("[data-fig]").forEach(function (im) {
+        var headers = {};
+        if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+        fetch(cfg.api + im.getAttribute("data-fig"), { headers: headers })
+          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+          .then(function (blob) { im.src = URL.createObjectURL(blob); })
+          .catch(function () { im.remove(); });
       });
       s.querySelectorAll("[data-dl]").forEach(function (a) {
         a.addEventListener("click", function (ev) {

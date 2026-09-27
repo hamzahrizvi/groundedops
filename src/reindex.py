@@ -216,14 +216,24 @@ def rebuild(targets: list[dict], dry_run: bool) -> int:
     total = 0
     try:
         for e in targets:
+            # Pages an admin approved for OCR are re-read after the rebuild:
+            # ingest_file resets the manifest's OCR record for the version it
+            # indexes, and the approval must not be lost to a rebuild.
+            ocr_done = docstore.ocr_state(e["source"])["done"]
             with open(e["path"], "rb") as fh:
                 content = fh.read()
             n = ingest_file(content, e["source"],
                             category_key=e.get("category") or None,
                             product_key=e.get("product") or None)
-            if n <= 0:
+            if n <= 0 and not ocr_done:
                 raise RuntimeError(
                     f"{e['source']} produced no chunks; rebuild aborted")
+            if ocr_done:
+                from ingest import ingest_ocr_pages
+                m = ingest_ocr_pages(e["source"], ocr_done)
+                print(f"  {e['source']}: OCR re-read {len(ocr_done)} page(s), "
+                      f"{m} chunks")
+                n += m
             total += n
             print(f"  {e['source']}: {n} chunks "
                   f"(was {e['chunks']})")

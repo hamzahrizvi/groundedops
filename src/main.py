@@ -220,7 +220,9 @@ def _admin_ip_allowed(ip: str | None) -> bool:
 # be downloaded through the tunnel by anyone who knew or guessed a
 # filename - and filenames appear in answers. Anonymous callers get FAQ
 # answers with no sources, so they never need it.
-_TOKEN_GATED_PREFIXES = ("/source_file",)
+# /figure serves crops cut from those same documents, so it is gated the
+# same way: a picture of the spec table is the spec table.
+_TOKEN_GATED_PREFIXES = ("/source_file", "/figure")
 
 # ── retrieval / context geometry ──────────────────────────────────────────
 # Env-tunable so eval.py can sweep them without code edits. Raising CONTEXT_K
@@ -2037,16 +2039,40 @@ def _build_sources(results: list[dict]) -> list[dict]:
         _pg = r.get("page")
         if isinstance(_pg, int) and _pg not in by_source[src]["pages"]:
             by_source[src]["pages"].append(_pg)
+        # A page read by OCR is a guess from the picture, and the reader
+        # should know that before trusting a figure from it.
+        if r.get("ocr"):
+            by_source[src]["ocr"] = True
+        # The pictures on the cited pages, in rank order of the chunks
+        # that carried them, so the best chunk's figure comes first.
+        for name in (r.get("figures") or "").split(","):
+            name = name.strip()
+            if name and name not in by_source[src].setdefault("_fig_names", []):
+                by_source[src]["_fig_names"].append(name)
 
     out = []
     for sdict in by_source.values():
         sdict["pages"] = sorted(sdict["pages"])
+        sdict.setdefault("ocr", False)
+        # At most four per source: the answer is the answer, and a strip
+        # of thumbnails under it should be the figures next to the cited
+        # text, not the document's gallery. Served by /figure, which is
+        # token-gated the same way /source_file is.
+        names = sdict.pop("_fig_names", [])
+        try:
+            import figures as _figures
+            sdict["figures"] = _figures.describe(
+                sdict["source"], names[:4], f"/figure/{quote(sdict['source'])}")
+        except Exception as exc:
+            logger.debug("figures for %r unavailable: %s", sdict["source"], exc)
+            sdict["figures"] = []
         # Pre-formatted so every UI renders it identically.
         if sdict["pages"]:
             sdict["page_label"] = ("page " if len(sdict["pages"]) == 1 else "pages ") + \
-                                  ", ".join(str(pg) for pg in sdict["pages"])
+                                  ", ".join(str(pg) for pg in sdict["pages"]) + \
+                                  (" (OCR)" if sdict["ocr"] else "")
         else:
-            sdict["page_label"] = None
+            sdict["page_label"] = "(OCR)" if sdict["ocr"] else None
         out.append(sdict)
     return out
 

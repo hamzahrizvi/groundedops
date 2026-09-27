@@ -188,6 +188,10 @@
             color:color-mix(in srgb, var(--color-text) 45%, transparent)}
   .bgtask-acts{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
   .bgtask-acts .btn{font-size:11.5px;padding:3px 9px}
+  /* The unreadable-pages notice sits above the buttons, full width, so
+     the offer reads as a sentence and not as a fourth button. */
+  .bgtask-ocr{flex:1 0 100%;font-size:12px;line-height:1.45;margin-bottom:4px;
+              display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   .bgtask.done{box-shadow:var(--shadow-lg),inset 0 0 0 1px
                color-mix(in srgb, var(--color-accent) 35%, transparent)}
   .bgtask .st{font-size:11.5px;margin-top:2px;
@@ -1947,7 +1951,31 @@ function drawJobs() {
     bar.firstChild.style.width = j.pct ? Math.min(100, j.pct) + "%" : "";
 
     const acts = card.querySelector(".bgtask-acts");
-    if (done && !acts.childElementCount) {
+    if (done && !acts.childElementCount && j.kind === "ocr") {
+      acts.append(el("button", { class: "btn btn-ghost",
+        onclick: () => { jobs.delete(id); drawJobs(); } }, "Done"));
+    } else if (done && !acts.childElementCount) {
+      // Pages the parser could not read are offered here, with the warning
+      // OCR deserves, rather than read unasked. The list is also kept on the
+      // document's row, so dismissing this card loses nothing.
+      const oc = j.ocr || {};
+      if ((oc.candidates || []).length) {
+        const n = oc.candidates.length;
+        acts.append(el("div", { class: "bgtask-ocr" },
+          el("b", {}, n + " of " + (j.pages || "?") + " page" + (n === 1 ? "" : "s")
+                      + " could not be read"),
+          el("span", {}, " (page" + (n === 1 ? " " : "s ")
+                      + oc.candidates.slice(0, 12).join(", ")
+                      + (n > 12 ? "…" : "") + ") — scanned or image-only, "
+                      + "so not searchable."),
+          oc.available
+            ? el("button", { class: "btn btn-secondary",
+                onclick: () => offerOcr(j.name, oc.candidates) },
+                "Run OCR on " + (n === 1 ? "that page" : "those pages"))
+            : el("span", { class: "sec-hint" },
+                " OCR is not installed on this server"
+                + (oc.reason ? " (" + oc.reason + ")" : "") + ".")));
+      }
       // An indexed document is not finished work: it has no answers yet, and
       // it may belong to more products than the one it was filed under.
       acts.append(
@@ -1999,6 +2027,31 @@ function flashDocRow(name) {
   setTimeout(() => row.classList.remove("tour-hi"), 2600);
 }
 
+// What OCR is before anybody agrees to it. Shown every time, not once: the
+// person approving the tenth document is not necessarily the one who read
+// the warning on the first.
+const OCR_WARNING =
+  "OCR reads the page as a picture and guesses the characters.\n\n" +
+  "• Numbers, part codes and units can come out wrong (1.O5 for 1.05, " +
+  "NV95 for NV9S).\n" +
+  "• Tables are read as loose lines, not as rows and columns.\n" +
+  "• Answers drawn from these pages are marked \"(OCR)\" in their sources " +
+  "so readers know.\n\n" +
+  "Pages with a readable text layer are never OCR'd. Run OCR on ";
+
+async function offerOcr(source, pages) {
+  const n = (pages || []).length;
+  const which = n ? n + " page" + (n === 1 ? "" : "s") + " of " : "the unreadable pages of ";
+  if (!confirm(OCR_WARNING + which + source + "?")) return;
+  try {
+    const r = await api("/admin/ocr", { method: "POST",
+      body: JSON.stringify({ source, pages: pages || null }) });
+    trackUpload(r.job_id, source + " — OCR", null, null);
+    toast("OCR started on " + (r.pages || []).length + " page"
+          + ((r.pages || []).length === 1 ? "" : "s"));
+  } catch (e) { toast(e.message, true); }
+}
+
 function trackUpload(jobId, name, onUpdate, filing) {
   const j = { name, stage: "queued", pct: 0, status: "working",
               product: (filing || {}).product || "",
@@ -2018,7 +2071,17 @@ function trackUpload(jobId, name, onUpdate, filing) {
 
       if (s.status === "done") {
         j.status = "done"; j.pct = 100;
-        j.stage = "Added — " + (s.chunks || 0) + " sections";
+        j.kind = s.kind || "upload";
+        j.pages = s.pages || 0;
+        j.ocr = { candidates: s.ocr_candidates || [],
+                  available: !!s.ocr_available,
+                  reason: s.ocr_unavailable_reason || "" };
+        j.stage = j.kind === "ocr"
+          ? "OCR added — " + (s.chunks || 0) + " section" + (s.chunks === 1 ? "" : "s")
+            + " from " + (s.ocr_pages || []).length + " page"
+            + ((s.ocr_pages || []).length === 1 ? "" : "s")
+            + (s.chunks ? "" : " (nothing legible found)")
+          : "Added — " + (s.chunks || 0) + " sections";
         drawJobs(); if (onUpdate) onUpdate(j);
         try { await refresh(); render(); } catch (e) {}
         // NOT dismissed on a timer. It used to vanish eight seconds after
@@ -4108,10 +4171,30 @@ function viewDocuments() {
         })));
     const move = box;
 
+    // Pages the parser could not read. Pending ones get the OCR offer here
+    // as well as on the upload card, since the card can be dismissed.
+    const ocr = s.ocr || {};
+    const pending = ocr.pending || [], ocrDone = ocr.done || [];
+    const ocrBits = [];
+    if (pending.length) {
+      ocrBits.push(el("span", { class: "tag tag-accent",
+        title: "Pages " + pending.join(", ") + " have no readable text layer "
+             + "(scanned or image-only) and are not searchable" },
+        pending.length + " page" + (pending.length === 1 ? "" : "s") + " unreadable"));
+      ocrBits.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+        onclick: () => offerOcr(s.source, pending) }, "OCR…"));
+    } else if (ocrDone.length) {
+      ocrBits.push(el("span", { class: "tag tag-neutral",
+        title: "Pages " + ocrDone.join(", ") + " were read by OCR — text "
+             + "guessed from the picture, marked (OCR) in answers" },
+        "OCR: " + ocrDone.length + " page" + (ocrDone.length === 1 ? "" : "s")));
+    }
+
     return el("div", { class: "item" + (cur.length ? "" : " flagged") },
       el("div", { class: "grow" },
         el("b", {}, s.source),
         el("span", {}, (s.chunks || 0) + " sections" + indexedWhen)),
+      ...ocrBits,
       freshness.status === "stale"
         ? el("span", { class: "tag tag-accent", title: staleWhy }, "Needs re-index")
         : el("span", { class: "tag tag-neutral",
@@ -5926,6 +6009,23 @@ function viewTest() {
           if (s.page_label) {
             row.append(el("span", { style: "color:color-mix(in srgb, var(--color-text) 55%, transparent)" },
               "  \u2014 see " + s.page_label));
+          }
+          // The pictures from the cited pages, as the widget shows them.
+          // Direct <img src>: the console is on the same origin and /figure
+          // is only token-gated through the tunnel.
+          if (s.figures && s.figures.length) {
+            row.append(el("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px" },
+              s.figures.slice(0, 4).map(f => el("img", {
+                src: API + f.url, alt: f.caption || ("Figure, page " + f.page),
+                title: (f.caption ? f.caption + " \u2014 " : "") + "page " + f.page,
+                style: "max-height:96px;max-width:46%;border:1px solid var(--color-line);" +
+                       "border-radius:6px;background:#fff;object-fit:contain;cursor:zoom-in",
+                onclick: e => {
+                  const big = e.target.style.maxHeight === "none";
+                  e.target.style.maxHeight = big ? "96px" : "none";
+                  e.target.style.maxWidth = big ? "46%" : "100%";
+                  e.target.style.cursor = big ? "zoom-in" : "zoom-out";
+                } }))));
           }
           det.append(row);
         });

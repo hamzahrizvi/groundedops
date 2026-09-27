@@ -91,7 +91,17 @@ groundedops/
     │                             /catalog, /widget/catalog, /admin/sources and /stats
     ├── db.py                     shared persistent ChromaDB client
     ├── parsing.py                page-preserving text extraction (PDF/DOCX/TXT),
-    │                             tables fenced, headings found by FONT SIZE/WEIGHT
+    │                             tables fenced, headings found by FONT SIZE/WEIGHT;
+    │                             reports the pages it could NOT read (no text
+    │                             layer, or a garbled one) as OCR candidates
+    ├── ocr.py                    reads those pages from their pixels (RapidOCR,
+    │                             English model) -- only after an admin approves,
+    │                             never on a page with a text layer; chunks are
+    │                             tagged ocr=True and cited "(OCR)"
+    ├── figures.py                the pictures in a manual, cut out at ingest into
+    │                             documents/figures/<source>/ and attached to that
+    │                             page's chunks by name; shown under an answer's
+    │                             sources (/figure), never searched
     ├── chunking.py               step-, table- and heading-aware chunking; a
     │                             heading forces a boundary and rides along as
     │                             `section` metadata (74% of chunks carry one)

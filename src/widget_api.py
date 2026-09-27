@@ -184,6 +184,9 @@ def _public_sources(sources) -> list:
         "page_label": s.get("page_label"),
         "snippet": s.get("snippet"),
         "download_url": s.get("download_url"),
+        # Crops from the cited pages: url, page, caption. Already public
+        # in form -- no chunk ids, no scores.
+        "figures": s.get("figures") or [],
     } for s in (sources or [])]
 
 

@@ -21,6 +21,12 @@ pypdf
 # into space-joined cells, which made spec tables unusable. MIT, unlike
 # PyMuPDF which is AGPL-3.0 without a commercial licence.
 pdfplumber
+# OCR for scanned / image-only pages (ocr.py), run only on pages an admin
+# approves. Apache-2.0, ONNX models, no system binary -- Tesseract would
+# need installing beside the exe. onnxruntime is already a dependency.
+# 3.x, not rapidocr-onnxruntime 1.x: only 3.x offers the English
+# recogniser, and the Chinese default drops the spaces between words.
+rapidocr>=3.4
 python-docx
 
 cryptography

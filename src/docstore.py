@@ -176,11 +176,16 @@ def load_manifest() -> dict:
 
 def record(filename: str, *, content: bytes | None = None,
            chunks: int | None = None, pages: int | None = None,
-           settings: dict | None = None) -> dict:
+           settings: dict | None = None, ocr: dict | None = None) -> dict:
     """Note how one document was ingested.
 
     Written after a successful ingest so the manifest describes what is
     actually in the index, not what was attempted.
+
+    `ocr` is {"candidates": [pages the parser could not read],
+    "done": [pages OCR has been run on]}. Kept here rather than only on the
+    upload job so the offer outlives the upload card, and so a rebuild
+    (reindex.py) knows which pages to OCR again.
     """
     data = load_manifest()
     name = _safe_basename(filename)
@@ -211,6 +216,8 @@ def record(filename: str, *, content: bytes | None = None,
         entry["pages"] = pages
     if settings:
         entry["settings"] = settings
+    if ocr is not None:
+        entry["ocr"] = ocr
     data["version"] = max(int(data.get("version") or 1), 2)
     data["documents"][name] = entry
 
@@ -227,6 +234,20 @@ def record(filename: str, *, content: bytes | None = None,
         # Never fail an ingest because bookkeeping failed.
         logger.warning(f"Could not write manifest ({exc})")
     return entry
+
+
+def ocr_state(filename: str) -> dict:
+    """What OCR has been offered and done for a document.
+
+    {"candidates": [...], "done": [...], "pending": [...]} -- pending being
+    the candidates not yet OCR'd, which is what the console offers.
+    """
+    entry = load_manifest()["documents"].get(_safe_basename(filename)) or {}
+    state = entry.get("ocr") or {}
+    candidates = sorted({int(p) for p in state.get("candidates") or []})
+    done = sorted({int(p) for p in state.get("done") or []})
+    return {"candidates": candidates, "done": done,
+            "pending": [p for p in candidates if p not in done]}
 
 
 def freshness(filename: str, indexed_version: str | None = None) -> dict:
