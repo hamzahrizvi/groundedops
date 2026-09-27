@@ -143,3 +143,6 @@ brag-output/
 promo-output/
 demo/
 scratchpad/
+
+# Local database/backup snapshots, never versioned
+backups/
