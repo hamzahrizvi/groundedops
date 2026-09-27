@@ -3,7 +3,8 @@
 Verification scripts. These were written during the v16.2/v16.3 work and
 kept because each one caught something that reading the code did not.
 
-All of them expect a backend already running; none of them start one.
+All of them expect a backend already running, except `overnight_eval.sh`,
+which starts (and stops) its own.
 
 For a release-facing gate, use `src/eval.py --repeats 3`. Cases can be marked
 as `faq`, `retrieval`, `comparison`, `refusal`, or `grounding`; use
@@ -19,6 +20,8 @@ runs, then lock it separately with `--baseline eval_baseline_retrieval.json
 | `verifier_probe.py` | Scores the LLM verifier against known-good answers and deliberate fabrications, including fault-code mispairings. Use before changing the verifier prompt. |
 | `console_audit.py` | Logs into a throwaway console and screenshots every page in both themes, reporting JS errors. Catches render breakage no unit test sees. |
 | `capture_screenshots.py` | Regenerates `docs/img/*` for the README, driving the real widget against the real backend. |
+| `overnight_eval.sh` | PENDING.md session 4 as one unattended job: starts its **own** HEAD backend and proves it is HEAD, runs the M4 repeats, `run_live --path both`, the v16.3 blind2 side on a copied index, and the M13 sweep, then writes `eval_runs/<stamp>/summary.json`. `STEPS="m4 summary"` runs a subset. |
+| `eval_batch_summary.py` | Turns one batch directory into that `summary.json`: flip tables, blind per-case flips, widget agreement, and the M2-labelled log window. Offline. |
 
 ## The throwaway console
 

@@ -47,6 +47,7 @@ import json
 import os
 import sys
 import time
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -96,9 +97,14 @@ def run_suite(cases: list[dict]) -> list[dict]:
         q = case["q"]
         started = time.time()
         try:
+            # A fresh session per case: with none, every case shared the
+            # default session's memory, so case N could be condensed as a
+            # follow-up to case N-1. Traced, so the log row is labelled
+            # (M2: origin "eval" by the prefix).
             req = main.QueryRequest(q=q, product=case.get("product"),
-                                    skip_faq=True)
-            result = main.query(req, None)
+                                    skip_faq=True,
+                                    session_id=f"eval-sweep-{uuid.uuid4().hex[:12]}")
+            result = main._traced_query(req, None)
         except Exception as e:
             print(f"  [{i}/{len(answerable)}] ERROR  {q[:58]}  ({e})")
             out.append({"q": q, "product": case.get("product"),

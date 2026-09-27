@@ -119,6 +119,10 @@ HANDOFF_*.md
 sweep_grounding.json
 sweep_run.log
 
+# tools/overnight_eval.sh's batches: results, logs and copied stores (the
+# stores hold visitor questions and account records).
+eval_runs/
+
 # The uploaded source documents. ~107MB of PDFs, and the durable asset this
 # install cannot regenerate -- but git is the wrong home for them: they are
 # binary, they never diff usefully, and once committed they are in the

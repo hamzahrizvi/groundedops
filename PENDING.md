@@ -317,7 +317,7 @@ the ~50 human labels (15).
 | 1 | Opus | 1, 2 | Attended. Confirm the other session has stopped first. P1 is a one-line CLAUDE.md edit. |
 | 2 | Sonnet | 3, 7, 8, 9, 10 | Edits the plan already spells out. M1 must land before any eval run. |
 | 3 | Opus | 4, 5, 6 | Also write the eval batch script used in S4. |
-| 4 | none (shell) | 11, runs for 13 and 14 | One overnight background job; writes summaries only. |
+| 4 | none (shell) | 11, runs for 13 and 14 | One overnight background job; writes summaries only. `nohup bash tools/overnight_eval.sh > /dev/null 2>&1 &` from the repo root (written in S3); S5 reads `eval_runs/<stamp>/summary.json`. |
 | 5 | Fable | 12, reading for 13 and 14 | Reads the summaries; resets the pass mark. |
 | 6 | Opus + you | 15 | |
 | 7 | Sonnet | 16, 30, 31 | Check they are independent before grouping. |
