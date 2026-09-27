@@ -98,6 +98,34 @@ def test_preflight_grader_aborts_on_empty_verdict():
         assert rag_eval.preflight_grader() is False
 
 
+def test_expected_page_checks_the_cited_pages_not_just_the_source():
+    sent = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "answer": "The BV30 PSU voltage too low fault is 4 red, 1 blue.",
+                "role": "accurate", "provider": "local",
+                "sources": [{"source": "BV30 User Manual-v1.pdf", "pages": [1, 31]}],
+            }
+
+    def fake_post(url, json, timeout):
+        sent.update(json)
+        return Response()
+
+    with patch.object(rag_eval.requests, "post", side_effect=fake_post):
+        wrong_page = rag_eval.run_case(
+            {"q": "x", "expected_page": 32}, "s", do_grade=False)
+        right_page = rag_eval.run_case(
+            {"q": "x", "expected_page": [31, 32]}, "s", do_grade=False)
+
+    assert wrong_page["checks"]["expected_page"] is False
+    assert right_page["checks"]["expected_page"] is True
+
+
 def test_preflight_grader_passes_on_a_real_verdict_even_if_it_is_fail():
     fake_llm = types.SimpleNamespace(
         generate=lambda *a, **k: {"text": '{"verdict":"fail","reason":"wrong"}'})

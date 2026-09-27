@@ -51,8 +51,15 @@ CONTEXT_K = 8
 
 
 def relevant(text, keywords):
+    """A keywords_all entry is either a literal substring or a list of
+    alternatives (any-of, for a fact the model may phrase more than one
+    way) -- same shape eval.py and eval_retrieval.py match against."""
     low = (text or "").lower()
-    return all(k.lower() in low for k in keywords)
+    for k in keywords:
+        alts = k if isinstance(k, list) else [k]
+        if not any(str(alt).lower() in low for alt in alts):
+            return False
+    return True
 
 
 def main():
@@ -85,12 +92,19 @@ def main():
     results = {}
     for name in models:
         try:
-            # BOTH, and the module global is the one that matters: rerank()
-            # calls _get() with no argument, so it resolves RERANKER_MODEL.
-            # Setting only the cache made all three models score identically
-            # to three decimals -- every rerank() call quietly reloaded the
-            # default and measured it three times.
-            reranker.RERANKER_MODEL = name
+            # The ENVIRONMENT variable, not the module global: rerank()
+            # calls _get() with no argument, which resolves through
+            # _configured(), and _configured() checks os.getenv
+            # ("RERANKER_MODEL") FIRST -- reranker.RERANKER_MODEL (the
+            # module attribute, only ever read at import time) is not what
+            # it looks at. Setting only that attribute made every model
+            # measure MiniLM three times: whatever _get(name) loaded here
+            # was undone the moment rerank() called _get() with no
+            # argument and fell through to policy's reranker_profile
+            # ("fast" -> MiniLM), a few lines later.
+            os.environ["RERANKER_MODEL"] = name
+            reranker._model = None
+            reranker._loaded = None
             reranker._get(name)
         except Exception as e:
             print("%-42s  COULD NOT LOAD: %s" % (name, str(e)[:30]))

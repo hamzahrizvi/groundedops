@@ -377,17 +377,42 @@ exactly, we cannot tell whether a fix helped.
 - [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
   each side. The first blind set is used up (we read it to fix things); a
   third one must be written fresh by someone who has not seen the fixes.
-- [x] **M6 Root causes of the four named failures** (done in the plan):
-  one was a wrong answer key (SD card class), one was already fixed, two
-  are the "confident No" problem. A fourth shape (vague fault reports with
-  no product) still needs a quick check.
+- [x] **M6 Root causes of the four named failures**, all four closed
+  (2026-09-27): one was a wrong answer key (SD card class, fixed in M1),
+  one was already fixed, two are the "confident No" problem. The fourth
+  (vague fault reports with no product) is fixed, not a gap: against the
+  LIVE catalogue vocabulary (not the fixture test_clarify_vague.py already
+  used), `clarify.unscoped_clarify_products` on all three blind2 strings
+  returns >= 2 products -- "My machine's showing an error" -> 6 products
+  (top_score 0.0055), "How do I set the age limit?" -> 3 (0.094), "It
+  won't turn on, help?" -> 5 (0.0509). Not widened to make them pass; this
+  is what the landed code already does.
 - [x] **M7 Cost of letting the checker "think"** (done): checking went from
   about 0.9s to 3.3s typical. Re-measure once logs are labelled.
 - [ ] **M8 Test the answer-checker itself** on known right and wrong
   answers, and try a second AI vendor as checker. Have a person label ~50
   answers so we know whether the grader can be trusted.
-- [ ] **M9 Pin spec-table test cases to the exact page**, and fix the
-  reranker benchmark, which has been testing the same model every time.
+- [x] **M9 Pin spec-table test cases to the exact page**, and fix the
+  reranker benchmark (2026-09-27). eval.py gets an `expected_page` check
+  beside `sources_any`, checked against `_build_sources`'s `pages` list;
+  added to the NV9USB+ pinout (p44), NV9S weight (p25) and NV200S power
+  (p69) cases, plus two new ones: the BV30 flash-code table's p31-32
+  continuation (the exact case `complete_tables`, M14, exists for) and
+  the NV9 Spectral SD card speed class (p19, the same fact M1 corrected
+  in eval_cases_blind.json). eval_cases_retrieval.json 30 -> 32 cases.
+  `tools/bench_reranker.py`'s env-override bug fixed: it set
+  `reranker.RERANKER_MODEL` (the module attribute, read only at import)
+  instead of `os.environ["RERANKER_MODEL"]`, which `_configured()`
+  actually checks -- every row's `rerank()` call was silently reloading
+  MiniLM the moment it ran, undoing the row's own explicit load. Verified
+  live: MiniLM and bge-reranker-base now measure identical r@1/r@3/r@8
+  (70%/96%/100%) and near-identical MRR (0.828 vs 0.822) but very
+  different latency (1.07s vs 9.47s/query) -- confirming the earlier
+  "identical scores" reading was the bug, and that `reranker_profile:
+  fast` is the right default on latency, not on any accuracy gap.
+  `eval_baseline_retrieval.json` still needs a live-backend re-arm before
+  the two new cases are regression-gated (no backend running in this
+  session to do it honestly); `--selfcheck` passes in the meantime.
 - [x] **M10 Honest routing labels** (2026-09-27). `followup` on scenarios
   11-24 split into `needs_history` (nullable: None where a deflect or the
   intent gate answers first, main.py:1448/:2501) and `intent`

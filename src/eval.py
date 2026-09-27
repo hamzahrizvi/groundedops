@@ -210,6 +210,18 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
                             for s in data.get("sources") or [])
         checks["sources_any"] = any(s.lower() in sources.lower()
                                     for s in case["sources_any"])
+    # M9: a spec-table answer citing the RIGHT document is not enough --
+    # sources_any passes even when the cited page is the table of contents.
+    # _build_sources (main.py:2011) already emits each source's `pages`
+    # list; expected_page is one page or a list of acceptable pages (a
+    # table spanning a page break, where the answer may come from either
+    # the primary chunk or its table_completion continuation).
+    if case.get("expected_page") is not None:
+        cited_pages = {p for s in (data.get("sources") or [])
+                       for p in (s.get("pages") or []) if isinstance(p, int)}
+        want = case["expected_page"]
+        wanted_pages = want if isinstance(want, list) else [want]
+        checks["expected_page"] = any(p in cited_pages for p in wanted_pages)
 
     # 3. LLM grade (only meaningful for answered outcomes)
     if do_grade and case.get("grade") and case.get("reference") and outcome == "answered":
