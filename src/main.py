@@ -2689,7 +2689,43 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # which device/product instead of flatly rejecting, and surface
         # whatever low-scoring candidate sources retrieval DID turn up
         # as a concrete hint rather than a generic "which one?".
-        is_vague_in_domain = (not is_followup) and has_domain_vocabulary(q)
+    # UNSCOPED AND WEAK: is this about one of our products at all? Asked
+    # once, here, because both branches below need the answer: a nothing-
+    # found question that IS about a product should ask which one, and a
+    # weak match that is NOT (an HP printer "jamming" finds the validators'
+    # jam pages) must be refused rather than offered a product menu or
+    # answered from the wrong device's manual. See clarify.py.
+    _unscoped_verdict = None
+    if (not payload.product and not payload.category
+            and top_score < AMBIGUOUS_CEILING
+            and not (history and is_followup_turn(q, history, condensed_query))):
+        try:
+            import clarify as _clarify
+            import catalog as _cat_mod
+            _unscoped_verdict = _clarify.classify_unscoped(q, _cat_mod.catalog())
+            ptrace.mark("band", f"unscoped: {_unscoped_verdict or 'no verdict'}")
+        except Exception as _exc:
+            logger.warning(f"unscoped routing skipped: {_exc}")
+        if _unscoped_verdict == "other":
+            confidence = "none"
+
+        # Vague-but-in-domain is decided from the manuals' own vocabulary,
+        # and only when no product is selected: see clarify.py for the
+        # measurements. It used a 35-word list tuned to two manuals, which
+        # missed every validator and hopper question and fired inside a
+        # product chat ("which device do you mean?" in a MyCheckr chat).
+        _vague_products: list[str] = []
+        if not is_followup and not payload.product and not payload.category:
+            try:
+                import clarify as _clarify
+                if _unscoped_verdict == "product":
+                    _vague_products = _clarify.candidate_products(q)
+                elif _unscoped_verdict is None:       # no model: word rule
+                    _vague_products = _clarify.unscoped_clarify_products(q, top_score)
+            except Exception as _exc:
+                logger.warning(f"vague-question check skipped: {_exc}")
+        is_vague_in_domain = bool(_vague_products)
+        product_options: list[dict] = []
 
         if is_followup:
             # is_followup_turn requires non-empty history, so this is
@@ -2708,12 +2744,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             needs_clarification = True
             clarification_options = build_clarification_options("followup", history, results)
         elif is_vague_in_domain:
-            candidate_sources = sorted({r.get("source") for r in results[:4] if r.get("source")})
-            hint = f" The closest matches I found were in: {', '.join(candidate_sources)}." if candidate_sources else ""
-            answer = (
-                "I'm not sure which specific device or product area you mean here "
-                "— could you say which one you're asking about?" + hint
-            )
+            import catalog as _cat_mod
+            product_options = _clarify.options_for(
+                _vague_products, _cat_mod.catalog(), _product_names())
+            # The products are on the buttons. Filenames used to be listed
+            # here instead, which a visitor cannot click and should not see.
+            answer = ("Which product is this about? The answer is different "
+                      "for each of them.")
             role_out = "clarify"
             reason = "ambiguous_in_domain_query"
             ptrace.mark("none.vague", f"best {top_score:.3f}, no product named")
@@ -2788,6 +2825,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ("nv9 usb") is chat text, not payload.product, so the next turn asked
     # again. Resolve the product from the query wording first, and only ask
     # when the wording genuinely does not pick one out.
+            "product_options": product_options,
     if not payload.product and not payload.category and len(_span) > 1:
         _narrowed = _products_named_in(resolved_query, _span)
         if len(_narrowed) == 1:
@@ -2854,6 +2892,20 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         else:
             clarifying = (
                 "I found a few different sections that could be relevant — "
+    # Only products whose passages score near a CONFIDENT top result are
+    # alternatives; weak ones are not choices. And one shared document is
+    # never ambiguous with itself: "what port does the ICU local REST API
+    # use" scored 0.997 for MyCheckr and MyCheckr Mini from the same
+    # document, and asked which one. See clarify.near_top_products.
+    if not payload.product and not payload.category and len(_span) > 1:
+        try:
+            import clarify as _clarify
+            _near = _clarify.near_top_products(results, CONTEXT_K, top_score,
+                                               AMBIGUOUS_CEILING)
+            if _near is not None:
+                _span = _near
+        except Exception as _exc:
+            logger.warning(f"near-top span skipped: {_exc}")
                 "could you clarify which part you mean? "
                 f"Possible areas: {', '.join(candidate_sources)}."
             )
