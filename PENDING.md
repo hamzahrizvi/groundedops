@@ -199,7 +199,7 @@ New items are numbered P1, 8.16, 8.17 and 9.14 in the table below.
   their page's section heading, and the 12 image cases re-run.
 
 *Process*
-- [ ] **Two sessions editing one working tree broke the repository twice
+- [x] **Two sessions editing one working tree broke the repository twice
   this session.** The code is sound now. **Step P1.** Rule: one session
   changes code at a time. A second session works in its own git worktree
   or branch and merges, and never runs `git add -A` on a shared tree. This
