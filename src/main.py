@@ -3178,8 +3178,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # Merged cells filled and matrices read out, for the model AND the
         # verifiers -- both read top_chunks. Idempotent, so an index already
         # migrated by backfill_table_context.py is left as it is.
-        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or ""))
-                      for c in top_chunks]
+        # The chunk before each one lets a continuation borrow its table's
+        # labels and merged-cell values (tables.spell_out, 2026-09-27).
+        from retrieval_db import chunks_before
+        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or "", above=_above))
+                      for c, _above in zip(top_chunks, chunks_before(top_chunks))]
     except Exception as _exc:
         logger.warning(f"table completion skipped: {_exc}")
 
