@@ -27,6 +27,9 @@ _PERSON = (r"(?:a\s+|an\s+|the\s+|some\s+|another\s+)?"
            r"(?:real\s+|actual\s+|live\s+|human\s+)?"
            r"(?:person|human|someone|somebody|agent|operator|representative"
            r"|rep|advisor|adviser|engineer|technician|colleague|member\s+of\s+staff"
+           # "employee" and "staff member" are what a translation of
+           # "Mitarbeiter" / "empleado" comes back as (language.py).
+           r"|employee|staff\s+member|member\s+of\s+your\s+team"
            r"|support\s+team|support\s+staff|customer\s+service|customer\s+support"
            r"|help\s*desk|sales\s+team)")
 

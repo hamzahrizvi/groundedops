@@ -201,3 +201,40 @@ engineer's reading and the runner exists to show where the code disagrees.
   first import on the main thread, which today's "models imported on
   first use" commit may have changed). The recipe that works is recorded;
   the crash itself is filed in PENDING.
+
+## Follow-up 2026-09-27: multilingual (gap 9) implemented
+
+`src/language.py`, wired in as a thin wrapper around the query pipeline
+(`main.query_any_language` calls the unchanged `main.query`), so `/query`
+and the widget both get it. A question that looks non-English is translated to English with one
+fast model call; the unchanged pipeline runs on the English, so retrieval,
+the commercial deflect, the handoff rule and document requests all see
+English; the finished answer is translated back with a second call.
+
+One change from the plan above: the answer is **verified in English and
+then translated**, rather than generated in the customer's language. The
+grounding check is `cross-encoder/nli-deberta-v3-small`, an English NLI
+model, so a Spanish answer checked against English passages would score as
+unsupported and correct answers would be flagged.
+
+The detector (no model call) fires on none of the 364 English questions in
+the eval sets and scenarios, so English turns cost nothing extra.
+
+| Measure (live, DeepSeek V4 Flash) | Before | After |
+|---|---|---|
+| Conversation 24: Spanish cleaning question | refused | answered in Spanish from BV30 p.14-38 |
+| Conversation 24: German factory reset | refused | "not in the documentation", in German; the English question gets the same reply, so the manual lacks it |
+| Conversation 24: French price question | answered by the model, 29.0s | sales deflect in French, 2.8s |
+| Ten questions in six languages vs their English twins, same outcome | not measured | 10 of 10 (after adding "employee" / "staff member" to the handoff rule, which a German "Mitarbeiter" translates to; 8 of 10 before that, the other being a known flip-flop) |
+| Spanish follow-up "¿Y con qué frecuencia debo hacerlo?" | not measured | resolved and answered in Spanish |
+| Median latency, foreign vs English twin | | 2.75s vs 0.95s |
+
+Still English on non-English turns: buttons (product names, FAQ
+suggestions) and anything the client renders itself. `/query/stream` (the
+console's streaming path) does not go through the wrapper.
+
+The same live run of conversations 11-24 scored 47/59, down from 53/59 on
+2026-09-25, with some English turns at 25-79s server time while the model
+call took 1-3s and answers held back at grounding ~0. None of those turns
+reach the new code; the cause is elsewhere on the branch and is filed as
+its own task.

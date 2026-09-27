@@ -432,6 +432,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |
 | `DEEPSEEK_THINKING` | off | DeepSeek V4 thinks by default and bills the hidden reasoning tokens; every call sends `thinking: disabled`. Set `on` to restore it (3x the latency per call, measured). |
 | `PROVIDER_COOLDOWN_SECONDS` | `60` | A provider that failed to connect or answered 5xx is skipped for this long when the chain has another entry; `0` disables. |
+| `MULTILINGUAL` | `1` | A question that looks non-English is translated to English for search and verification, and the verified answer is translated back (`language.py`; two fast model calls, on non-English turns only). `0` turns it off. |
 | `PROVIDER_DEADLINE_SECONDS` | `120` | Wall-clock cap on one provider call (requests' timeout bounds connect and each read, not the total); past it the provider is treated as unreachable. `0` disables. |
 | `FAQ_AUTO_SERVE_SOLE` | `0.92` | When exactly one curated candidate survives the content-word check at or above this semantic score, it is served rather than offered as a one-item menu. |
 | `FAQ_SEMANTIC_SOLE_MIN` | `0.95` | A candidate sharing no content word with the question is kept only as the top entry at or above this score, and never a product overview. |

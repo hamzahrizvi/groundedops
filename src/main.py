@@ -67,6 +67,7 @@ from logger import log_interaction
 from router import route_model
 from grounding import check_grounding, _get_nli_model
 import answerability
+import language
 from llm import generate, generate_with_fallback, condense_query
 
 import faq_store
@@ -2095,7 +2096,7 @@ def query_route(payload: QueryRequest, x_user_id: str | None = Header(default=No
     """
     _tok = ptrace.start()
     try:
-        result = query(payload, x_user_id)
+        result = query_any_language(payload, x_user_id)
         try:
             if isinstance(result, dict):
                 result["pipeline"] = ptrace.snapshot()
@@ -2104,6 +2105,58 @@ def query_route(payload: QueryRequest, x_user_id: str | None = Header(default=No
         return result
     finally:
         ptrace.reset(_tok)
+
+
+def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
+    """Answer a question in whatever language it was asked in.
+
+    A question in another language is translated to English, the whole
+    pipeline runs on the English, and the finished answer -- already
+    grounding-checked in English -- is translated back. Both /query and the
+    widget come through here. See language.py for why the edges and not the
+    answer prompt: the verifier is an English NLI model.
+
+    English questions pass straight through with no model call; so does any
+    turn where translation fails, which then behaves exactly as before.
+
+    A new entry point should call this, not query(): query() is the English
+    pipeline, kept under its old name because the tests read its source.
+    """
+    q = payload.q or ""
+    if not language.looks_foreign(q) or not capability("ask"):
+        return query(payload, x_user_id)
+
+    api_keys = {"deepseek": payload.deepseek_api_key,
+                "openai": payload.openai_api_key,
+                "anthropic": payload.anthropic_api_key}
+    t0 = time.time()
+    got = language.to_english(q, api_keys)
+    if not got:
+        ptrace.mark("language", "looked foreign; no translation, asked as typed")
+        return query(payload, x_user_id)
+    lang, english = got
+    ptrace.mark("language", f"{lang} -> English ({time.time() - t0:.1f}s)")
+    logger.info("question in %s translated for the pipeline: %r -> %r",
+                lang, q[:80], english[:80])
+
+    result = query(payload.model_copy(update={"q": english}),
+                             x_user_id)
+    if not isinstance(result, dict):
+        return result
+    result["language"] = lang
+    result["question_original"] = q
+    result["question_english"] = english
+    answer_en = result.get("answer") or ""
+    if answer_en.strip():
+        t1 = time.time()
+        translated = language.from_english(answer_en, lang, api_keys)
+        if translated:
+            result["answer_english"] = answer_en
+            result["answer"] = translated
+            ptrace.mark("language", f"answer -> {lang} ({time.time() - t1:.1f}s)")
+        else:
+            ptrace.mark("language", f"answer left in English (translation to {lang} failed)")
+    return result
 
 
 def query(payload: QueryRequest, x_user_id: str | None = None):
@@ -4023,7 +4076,7 @@ try:
         # so no new dependency.
         from starlette.concurrency import run_in_threadpool
         return await run_in_threadpool(
-            query, req, str(user_id) if user_id else None
+            query_any_language, req, str(user_id) if user_id else None
         )
 
     async def _widget_draft_enquiry(kind, product, notes, transcript):
