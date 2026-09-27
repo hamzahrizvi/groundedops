@@ -100,7 +100,9 @@ def _phrase_ranking(query: str, collection, limit: int,
     for c in chunks:
         if not _matches_scope(c, source_filter, scope):
             continue
-        flat = " ".join(re.findall(r"[a-z0-9]+", (c.get("text") or "").lower()))
+        # Precomputed once per chunk in the BM25 cache build, not
+        # re-lowercased and re-scanned here on every query.
+        flat = c.get("_flat", "")
         best = max((len(g.split()) for g in grams if g in flat), default=0)
         if best:
             hits.append((best, c["id"]))
@@ -205,6 +207,9 @@ def _get_bm25_index(collection):
                 # Crop names from this chunk's page (figures.py), shown
                 # beside the answer; never searched.
                 "figures": m.get("figures") or "",
+                # The phrase arm's own lowercased, alnum-joined text, built
+                # once here instead of on every query in _phrase_ranking.
+                "_flat": " ".join(re.findall(r"[a-z0-9]+", (d or "").lower())),
             }
             for i, d, m in zip(data["ids"], data["documents"], data["metadatas"])
             # v10.16: doc2query removed. Fresh ingests no longer create
