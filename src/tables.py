@@ -97,17 +97,90 @@ def _fill_down(rows: list[list[str]], width: int,
     return out
 
 
-def spell_out(text: str) -> str:
-    """Fill merged cells and read matrices out; idempotent."""
+# FLASH-CODE TABLES READ OUT ROW BY ROW (2026-09-27). Most flash-code tables
+# have a TWO-ROW header -- a spanning label over two sub-columns:
+#
+#     Flashes |  | Indicated Status / Error | Recommended Action
+#     Red | Blue |  |
+#     1 | 3 | Unit Not Initialised | ...
+#
+# (NV200S bezel and BNF, NV9 Spectral, NV200S payout: Red|Blue, Yellow|Cyan,
+# Long|Short). Nothing here read them, and "1 | 3" under that header was
+# answered as "red 3 flashes = Unit Not Initialised" -- the manual (NV200S
+# p.83) says red 1 + blue 3. The fast verifier accepted that 3/3; only a
+# thinking one caught it. So each row whose two code cells are numbers is
+# also written out as "Red Flashes 1 and Blue Flashes 3: Unit Not
+# Initialised", the form the NV9USB+ matrix already gets. A single-row
+# header gets the same only when it names flashes or colours ("Red Flashes
+# | Blue Flashes", BV30), so spec and pin tables are left alone.
+_CODE_AXIS = re.compile(r"flash|long|short|red|blue|green|yellow|cyan|amber|"
+                        r"orange|white|purple", re.I)
+
+
+def _is_int(v: str) -> bool:
+    return v.strip().isdigit()
+
+
+def _code_labels(header: list[str], sub: list[str] | None
+                 ) -> tuple[tuple[str, str], int] | None:
+    """((label A, label B), first data row) for a flash-code table, else None."""
+    if len(header) < 3 or not header[0]:
+        return None
+    if (sub and not header[1] and len(sub) >= 2 and sub[0] and sub[1]
+            and not any(sub[2:])
+            and all(len(c) <= 15 and not _is_int(c) for c in sub[:2])):
+        return (f"{sub[0]} {header[0]}", f"{sub[1]} {header[0]}"), 2
+    if (header[1] and not _is_int(header[0]) and not _is_int(header[1])
+            and _CODE_AXIS.search(header[0]) and _CODE_AXIS.search(header[1])):
+        return (header[0], header[1]), 1
+    return None
+
+
+def _code_readout(labels: tuple[str, str], rows: list[list[str]]) -> list[str]:
+    return [f"{labels[0]} {r[0]} and {labels[1]} {r[1]}: {r[2]}"
+            for r in rows
+            if len(r) >= 3 and _is_int(r[0]) and _is_int(r[1]) and r[2]]
+
+
+def _context_above(above: str | None):
+    """What a continuation chunk needs from the chunk before it:
+    (width, flash-code labels or None, last data row filled), or None when
+    `above` does not END in a table."""
+    if not above:
+        return None
+    lines = split_prefix(above)[1].split("\n")
+    blocks = _blocks(lines)
+    if not blocks:
+        return None
+    s, e = blocks[-1]
+    if sum(1 for l in lines[e:] if l.strip()) > 1:
+        return None                       # the table finished; prose follows
+    rows = [cells(l) for l in lines[s:e]]
+    got = _code_labels(rows[0], rows[1] if len(rows) > 1 else None)
+    labels, data = got if got else (None, 1)
+    body = rows[data:] or rows
+    filled = _fill_down(body, len(rows[0]))
+    return len(rows[0]), labels, filled[-1]
+
+
+def spell_out(text: str, above: str | None = None) -> str:
+    """Fill merged cells, read matrices and flash-code tables out; idempotent.
+
+    `above` is the text of the chunk BEFORE this one in its document. When
+    this chunk opens with the rows of a table that began there, its merged
+    cells are filled from that table's last row and its flash-code rows are
+    read out under that table's labels."""
     if not text or "|" not in text:
         return text
     lines = text.split("\n")
     blocks = _blocks(lines)
     if not blocks:
         return text
+    carried = (_context_above(above)
+               if above and _starts_with_rows(split_prefix(text)[1]) else None)
     out: list[str] = []
     pos = 0
-    for start, end in blocks:
+    for bi, (start, end) in enumerate(blocks):
         out.extend(lines[pos:start])
         rows = [cells(l) for l in lines[start:end]]
         header = rows[0]
@@ -135,9 +208,29 @@ def spell_out(text: str) -> str:
                 out.extend(reading)
         else:
             width = len(header)
-            filled = _fill_down(rows, width) if header and header[0] else rows
+            got = _code_labels(header, rows[1] if len(rows) > 1 else None)
+            if got:
+                # Fill from the data rows only: the sub-header row ("Red |
+                # Blue") must never become the value of a merged cell.
+                labels, data = got
+                filled = rows[:data] + _fill_down(rows[data:], width)
+            elif bi == 0 and carried and len(header) == carried[0]:
+                # A continuation: the header and the merged cell's value
+                # are in the previous chunk.
+                width, labels, last = carried
+                data = 0
+                filled = _fill_down(rows, width, above=last)
+            else:
+                labels, data = None, 1
+                filled = _fill_down(rows, width) if header and header[0] else rows
             out.extend(_join(r) if r != cells(l) else l
                        for r, l in zip(filled, lines[start:end]))
+            if labels:
+                reading = [ln for ln in _code_readout(labels, filled[data:])
+                           if ln not in text]
+                if reading:
+                    out.append(READ_MARK)
+                    out.extend(reading)
         pos = end
     out.extend(lines[pos:])
     return "\n".join(out)

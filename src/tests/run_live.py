@@ -25,7 +25,11 @@ grader model:
                     refuse   role "rejected", or a refusal with no sources
                     answer   anything else with sources
 
-  expect            must equal the observed outcome, unless "any"
+  expect            must equal the observed outcome, unless "any"; a list
+                    accepts any of its outcomes
+  answer_mention    (answer only) one of the words must appear -- for a
+                    turn where a clarify is also right, so the check does
+                    not fail the clarify for lacking the answer's words
   cite              (answer only) one substring must match a cited source
   mention           one of the words must appear in the answer
   avoid             none of the words may appear in the answer
@@ -160,8 +164,12 @@ def score_turn(turn, r):
     got = observed_outcome(r)
     fails = []
     want = live.get("expect", "any")
-    if want != "any" and want != got:
-        fails.append(f"outcome: expected {want}, got {got}")
+    allowed = want if isinstance(want, list) else [want]
+    if "any" not in allowed and got not in allowed:
+        fails.append(f"outcome: expected {'/'.join(allowed)}, got {got}")
+    if got == "answer" and live.get("answer_mention") and not any(
+            m.lower() in low for m in live["answer_mention"]):
+        fails.append(f"answer_mention: none of {live['answer_mention']}")
     if got == "answer" and live.get("cite"):
         srcs = " | ".join(s.get("source", "") for s in r.get("sources") or [])
         if not any(c.lower() in srcs.lower() for c in live["cite"]):

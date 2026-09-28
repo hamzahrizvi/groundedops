@@ -802,6 +802,24 @@ def complete_procedures(chunks: list[dict],
 TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))
 
 
+def chunks_before(chunks: list[dict]) -> list[str | None]:
+    """For each chunk, the text of the chunk before it in its document, or
+    None. tables.spell_out uses it to fill a continuation's merged cells and
+    label its flash-code rows from the table they began in. Reuses the BM25
+    chunk cache; never raises."""
+    try:
+        _, all_chunks = _get_bm25_index(get_collection())
+        by_id = {c["id"]: c.get("text") for c in all_chunks}
+    except Exception as exc:
+        logger.warning(f"chunks_before skipped: {exc}")
+        return [None] * len(chunks)
+    out = []
+    for c in chunks:
+        base, _, n = (c.get("id") or "").rpartition("_")
+        out.append(by_id.get(f"{base}_{int(n) - 1}") if n.isdigit() else None)
+    return out
+
+
 def complete_tables(chunks: list[dict],
                     budget: int = TABLE_COMPLETION_CHARS) -> list[dict]:
     """Add the continuation of a table that a retrieved chunk begins.

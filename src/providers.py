@@ -4,8 +4,6 @@ Read by the answer pipeline (main.query), the console's provider pickers and
 the FAQ drafting routes, so it lives outside all of them.
 """
 
-import os
-
 import keystore
 from runtime_config import get_settings
 
@@ -29,9 +27,19 @@ _PROVIDER_STATIC_MODEL = {
 
 
 def _default_model_for(provider: str) -> str:
-    if provider == "deepseek":
-        return os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
-    return _PROVIDER_STATIC_MODEL.get(provider, "")
+    """The provider's configured model (ONLINE_<PROVIDER>_MODEL, which the
+    console writes), falling back to the static default.
+
+    The same lesson twice: deepseek was pinned here to a retired alias, and
+    "openai" still was on 2026-09-27 -- "gpt-4o-mini", with the slot pointed
+    at the on-prem gateway (ONLINE_OPENAI_MODEL=itl-gpt-flash), which answers
+    400 for a model it does not have. Every backup escalation and console
+    generation on that slot failed. keystore.get_model is what the answering
+    path already reads, so both now agree."""
+    try:
+        return keystore.get_model(provider)
+    except Exception:                    # "local", or a provider keystore does not know
+        return _PROVIDER_STATIC_MODEL.get(provider, "")
 
 
 # Which providers this install can actually reach. An online provider needs

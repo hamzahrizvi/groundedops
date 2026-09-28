@@ -585,6 +585,43 @@ ANSWER:
 """
 
 
+# THE VERIFIER THINKS ONLY WHERE THINKING CHANGES THE VERDICT. 1f594c0 made
+# every verifier call think; measured 2026-09-27 (same answer, same
+# passages, 3 runs each, only thinking changed -- /c/tmp/regress):
+#
+#                                              thinking on    thinking off
+#   NV200S "red x3 = Unit Not Initialised"     rejected 3/3   ACCEPTED 3/3
+#     (wrong: p.83 lists it as red 1 + blue 3)
+#   SCS install, eight screws on the wrong kit rejected 3/3   rejected 3/3
+#   SSP poll, BV30 inhibits (both correct)     passed 3/3     passed 3/3
+#   NV9USB+ 1 long 2 short, Jam / Open         right 6/6      right 6/6
+#   median seconds per check                   1.2-12.9       0.9-1.2
+#
+# The one verdict thinking changed is the worst kind: a flash code paired
+# with the wrong meaning. Everything else was judged the same, 3-13x
+# faster -- and thinking on every check put 396s of the 2026-09-27 live
+# run's 766s into the verifier (median 9.7s, max 62s; 0.9s on 09-25). So a
+# question or answer about flashes, LEDs, lights, beeps, colours or an
+# error/fault/status code is judged thinking; the rest is judged fast.
+# BOTH the resolved question and the answer are read: the follow-up "how
+# do I clear that" names no flash, and its answer does. Deliberately NOT
+# "error", "code", "bezel" or hex numbers on their own: those put 43% of
+# the 09-25 answers through thinking (SSP commands, bezel options) where
+# the fast verdict was already right; this set is 9 of 44 and catches
+# every flash-code turn. VERIFIER_THINKING=always restores 1f594c0.
+_JUDGEMENT_RE = re.compile(
+    r"\b(flash\w*|blink\w*|leds?|lights?|beep\w*|"
+    r"red|blue|green|amber|yellow|orange|"
+    r"(?:error|fault|status|flash)\s+codes?)\b", re.I)
+
+
+def _needs_judgement(question: str, answer: str) -> bool:
+    """Whether the LLM verifier should think on this answer. See above."""
+    if os.getenv("VERIFIER_THINKING", "").strip().lower() in ("always", "on", "1"):
+        return True
+    return bool(_JUDGEMENT_RE.search(f"{question or ''}\n{answer or ''}"))
+
+
 def _llm_verified(answer: str, chunks: list[dict],
                   deepseek_api_key: str | None = None,
                   question: str = "") -> bool:
@@ -635,8 +672,10 @@ def _llm_verified(answer: str, chunks: list[dict],
         ctx = "\n\n".join(c.get("text", "")[:CHUNK_CHAR_CAP] for c in chunks)
         if not ctx.strip():
             return False
+        from contextlib import nullcontext
         from llm import judging
-        with judging():   # the verifier must think -- see llm.judging
+        _think = _needs_judgement(question, answer)
+        with (judging() if _think else nullcontext()):   # see _needs_judgement
             out = generate_with_fallback(
                 "accurate", _VERIFY_PROMPT.format(
                     q=(question or "").strip() or "(not given)",
@@ -648,8 +687,9 @@ def _llm_verified(answer: str, chunks: list[dict],
         rel = re.search(r"RELEVANCE\W*\s*(YES|NO)\b", verdict, re.I)
         ok = bool(sup and rel and sup.group(1).upper() == "YES"
                   and rel.group(1).upper() == "YES")
-        logger.info("LLM verify: %s (%s)",
+        logger.info("LLM verify: %s%s (%s)",
                     "SUPPORTED" if ok else "REJECTED",
+                    " [thinking]" if _think else "",
                     verdict[:120].replace("\n", " "))
         ptrace.set_meta(verifier=verdict[:120].replace("\n", " "))
         return ok
@@ -3222,8 +3262,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # Merged cells filled and matrices read out, for the model AND the
         # verifiers -- both read top_chunks. Idempotent, so an index already
         # migrated by backfill_table_context.py is left as it is.
-        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or ""))
-                      for c in top_chunks]
+        # The chunk before each one lets a continuation borrow its table's
+        # labels and merged-cell values (tables.spell_out, 2026-09-27).
+        from retrieval_db import chunks_before
+        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or "", above=_above))
+                      for c, _above in zip(top_chunks, chunks_before(top_chunks))]
     except Exception as _exc:
         logger.warning(f"table completion skipped: {_exc}")
 
@@ -3426,7 +3469,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             f"escalating to backup provider '{_backup_provider}' "
             f"for: {resolved_query[:60]}"
         )
-        _bk_model = _default_model_for(_backup_provider)
+        # The BACKUP role's model: its own override (MODEL_ROLE_BACKUP) or
+        # the provider's configured model -- never a hardcoded default.
+        try:
+            _bk_model = keystore.model_for_role("backup", _backup_provider)
+        except Exception:
+            _bk_model = _default_model_for(_backup_provider)
         backup_result = _timed("regen", generate,
                                _backup_provider, prompt, _bk_model,
                                deepseek_api_key=deepseek_api_key)

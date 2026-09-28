@@ -87,6 +87,56 @@ def test_plain_text_and_simple_tables_are_untouched():
         assert tables.spell_out(t) == t
 
 
+# The NV200S bezel table (p.83) as indexed: a spanning "Flashes" label over
+# Red | Blue. "1 | 3" was answered as "red 3 flashes" on 2026-09-25.
+NV200S_P83 = """[NV200S Range User Manual-v1 — Bezel/Status LED Flash Codes]
+the NV200 Spectral front bezel will flash in a particular sequence:
+Flashes |  | Indicated Status / Error | Recommended Action
+Red | Blue |  |
+1 | 1 | Note Path Open | Close the lid
+1 | 2 | Note Path Jam | Power down the NV200 Spectral
+| 3 | Unit Not Initialised | Return to your nearest repair centre
+2 | 1 | Cashbox Removed | Insert the cashbox."""
+
+
+def test_a_two_row_header_flash_table_is_read_row_by_row():
+    out = tables.spell_out(NV200S_P83)
+    assert tables.READ_MARK in out
+    assert "Red Flashes 1 and Blue Flashes 3: Unit Not Initialised" in out
+    assert "Red Flashes 1 and Blue Flashes 1: Note Path Open" in out
+    assert "Red Flashes 2 and Blue Flashes 1: Cashbox Removed" in out
+    # the merged cell is filled from the data row above, never from "Red | Blue"
+    assert "1 | 3 | Unit Not Initialised" in out
+    assert "Red | 3" not in out
+    assert tables.spell_out(out) == out
+
+
+def test_a_single_header_flash_table_is_read_out_too():
+    out = tables.spell_out(BV30_P31)
+    assert "Red Flashes 1 and Blue Flashes 3: Unit Not Initialised" in out
+    assert "Red Flashes 3 and Blue Flashes 1: Firmware Checksum" in out
+    assert tables.spell_out(out) == out
+
+
+def test_a_continuation_borrows_labels_and_merged_cells_from_the_chunk_above():
+    above = BV30_P31 .replace("\nBV30 User Manual – 31", "")
+    out = tables.spell_out(BV30_P32, above=above)
+    assert "3 | 2 | Interface Checksum" in out
+    assert "4 | 2 | PSU Voltage too High" in out
+    assert "Red Flashes 3 and Blue Flashes 2: Interface Checksum" in out
+    # without the chunk above, nothing is guessed
+    alone = tables.spell_out(BV30_P32)
+    assert "3 | 2 | Interface Checksum" not in alone
+    assert tables.READ_MARK not in alone
+
+
+def test_non_flash_two_column_tables_get_no_readout():
+    t = "[Doc — Pins]\nPin | Signal | Direction\n1 | 12V | In\n2 | 0V | In"
+    assert tables.READ_MARK not in tables.spell_out(t)
+    t = "[Doc — Specs]\nMinimum | Maximum | Unit\n10 | 20 | V\n1 | 2 | A"
+    assert tables.READ_MARK not in tables.spell_out(t)
+
+
 def test_phrase_runs_are_three_content_words_in_order():
     import retrieval_db
     runs = retrieval_db._phrase_runs("What's the payout module capacity on the NV200 Spectral?")

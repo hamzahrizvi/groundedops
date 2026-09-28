@@ -430,14 +430,15 @@ See [.env.example](.env.example) for the annotated full list.
 | `GENERATION_MODE` | `api` | `api` (Online) or `local` (Free) at boot |
 | `ONLINE_PROVIDER` | `deepseek` | `deepseek` / `openai` / `anthropic` |
 | `ONLINE_DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek retired the `deepseek-chat` alias on 24 July 2026 |
-| `DEEPSEEK_THINKING` | off | DeepSeek V4 thinks by default and bills the hidden reasoning tokens; every call sends `thinking: disabled`. Set `on` to restore it (3x the latency per call, measured). |
+| `DEEPSEEK_THINKING` | off | DeepSeek V4 thinks by default and bills the hidden reasoning tokens; answer-writing calls send `thinking: disabled`. Judgement calls (`llm.judging()`: the inference contract, re-answer passage selection, the unscoped router, and the verifier as `VERIFIER_THINKING` decides) think regardless. Set `on` to make every call think (3x the latency per call, measured). |
+| `VERIFIER_THINKING` | auto | The LLM verifier thinks only when the question or answer is about flashes, LEDs, lights, beeps, colours or an error/fault/status code (`main._needs_judgement`) — the one kind of verdict thinking changed when measured, at 3–13x the time. `always` makes every verifier call think. |
 | `PROVIDER_COOLDOWN_SECONDS` | `60` | A provider that failed to connect or answered 5xx is skipped for this long when the chain has another entry; `0` disables. |
 | `MULTILINGUAL` | `1` | A question that looks non-English is translated to English for search and verification, and the verified answer is translated back (`language.py`; two fast model calls, on non-English turns only). `0` turns it off. |
 | `PROVIDER_DEADLINE_SECONDS` | `120` | Wall-clock cap on one provider call (requests' timeout bounds connect and each read, not the total); past it the provider is treated as unreachable. `0` disables. |
 | `FAQ_AUTO_SERVE_SOLE` | `0.92` | When exactly one curated candidate survives the content-word check at or above this semantic score, it is served rather than offered as a one-item menu. |
 | `FAQ_SEMANTIC_SOLE_MIN` | `0.95` | A candidate sharing no content word with the question is kept only as the top entry at or above this score, and never a product overview. |
 | `DOC_VOCAB_CACHE` | `doc_vocab.json` | Per-document word lists for the verbatim-table fallback, persisted so a refusal never re-reads a manual cover to cover. |
-| `ONLINE_OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI answering model |
+| `ONLINE_OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI answering model. Also the model the backup escalation and console generations send on this slot (set it to the gateway's name, e.g. `itl-gpt-flash`). |
 | `ONLINE_ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Override the Anthropic answering model |
 | `WIDGET_ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins for the widget |
 | `SOURCE_FILE_DIR` | `/data/source_files` | Where original documents are retained |
