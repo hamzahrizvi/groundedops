@@ -712,8 +712,29 @@ exactly, we cannot tell whether a fix helped.
 - [ ] **8.12 Show what the server already sends**: "open the manual at page
   N", related questions, and a softer refusal that does not quote the
   visitor's typo back.
-- [ ] **8.13 Phone layout and screen-reader fixes**, plus an automated
-  browser walk through the widget.
+- [x] **8.13 Phone layout and screen-reader fixes**, plus an automated
+  browser walk through the widget. (2026-09-28.) Three bugs found by
+  walking the panel with Playwright/Chromium and fixed in
+  `groundedops-widget.js`: (1) opening the panel hid the launcher
+  (`display:none`) without moving focus anywhere, so a keyboard/screen
+  reader user landed on `<body>` with no sense of where they were --
+  `openPanel()` now focuses the panel itself (new `tabindex="-1"`), which
+  also got `aria-modal="true"`; (2) the composer's 14px font-size is under
+  the 16px Mobile Safari treats as "no need to zoom", so focusing it on a
+  phone zoomed the whole page in and left it that way after blur; (3)
+  below 480px the panel stayed the desktop 400x600 floating card pinned to
+  a corner instead of filling the screen like a native sheet. (2) and (3),
+  plus a 44px touch-target bump on the header icon buttons, are behind a
+  new `@media (max-width:480px)` block so desktop is unaffected (pinned by
+  `test_desktop_layout_is_unaffected`). New
+  `tests/test_widget_phone_and_screen_reader.py`: 7 cases, no backend
+  needed (`/widget/config`, `/widget/catalog`, `/widget/quota` stubbed --
+  the widget already fails open on all three by design), skips rather than
+  fails with no Chromium build installed. Verified against the pre-fix
+  file (stashed, reran, restored): 5 of 7 cases fail without the fix, so
+  the test is pinning real behaviour, not tautologies. No focus trap: a
+  visitor can still Tab past the dialog into the host page behind it,
+  which is out of scope here -- flagged, not built.
 - [ ] **8.14 First multilingual step**: spot French/Spanish/German price
   questions and refusals.
 - [ ] **8.15 Add test cases for all of the above**, so the test suite looks

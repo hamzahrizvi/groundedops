@@ -418,7 +418,24 @@
     ".go-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}" +
     ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
-    "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}";
+    "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}" +
+    // 8.13 phone layout: below this the 400x600 floating card left barely any
+    // room either side, so the panel goes edge-to-edge like a native sheet
+    // instead. Fixed (not the base rule's absolute) so it fills the viewport
+    // on its own regardless of .go-w's own (collapsed, zero-size) box.
+    "@media (max-width:480px){" +
+    ".go-panel{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;" +
+    "max-width:100%;max-height:100%;border-radius:0}" +
+    // Mobile Safari zooms the whole page in on focus of any text input under
+    // 16px, which then leaves the page zoomed after the field blurs. 14px
+    // read fine on a desktop pointer but not here.
+    ".go-in,.go-fin{font-size:16px}" +
+    // 27px icon buttons (5px padding around a 17px svg) are under the ~44px
+    // touch target guideline; easy to miss with a mouse cursor, not with a
+    // thumb.
+    ".go-hbtn{min-width:44px;min-height:44px;display:inline-flex;" +
+    "align-items:center;justify-content:center;padding:0}" +
+    "}";
 
   var st = document.createElement("style");
   st.textContent = css;
@@ -448,7 +465,8 @@
   root.innerHTML =
     '<button class="go-launch" type="button" aria-haspopup="dialog" aria-expanded="false">' +
       I_CHAT + "<span>" + esc(cfg.launcherLabel) + "</span></button>" +
-    '<section class="go-panel" role="dialog" aria-label="' + esc(cfg.title) + '">' +
+    '<section class="go-panel" role="dialog" aria-modal="true" tabindex="-1" ' +
+      'aria-label="' + esc(cfg.title) + '">' +
       '<div class="go-head"><div class="go-av">' + avatarHtml + "</div>" +
         '<div class="go-hname">' + esc(cfg.agent) + "</div>" +
         '<button class="go-hbtn go-settings-btn" type="button" aria-label="Usage and settings" title="Usage and settings">' + I_GEAR + "</button>" +
@@ -464,6 +482,7 @@
   document.body.appendChild(root);
 
   var $launch = root.querySelector(".go-launch");
+  var $panel = root.querySelector(".go-panel");
   var $min = root.querySelector(".go-min");
   var $restart = root.querySelector(".go-restart");
   var $scope = root.querySelector(".go-scope");
@@ -2173,6 +2192,12 @@
   function openPanel(firstScreen) {
     root.classList.add("go-open");
     $launch.setAttribute("aria-expanded", "true");
+    // $launch (which held focus) becomes display:none the instant "go-open"
+    // is applied, and a display:none element cannot hold focus -- the
+    // browser drops it to <body> with nothing announced. Move it into the
+    // dialog explicitly instead of leaving a keyboard/screen-reader user
+    // stranded with no sense of where they landed.
+    $panel.focus();
     if (!opened) {
       opened = true;
       // Config must be applied before the first screen is drawn: the welcome
