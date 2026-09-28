@@ -19,15 +19,23 @@ would, all fixed in groundedops-widget.js alongside this test:
      corner, leaving barely any margin on a real phone screen instead of
      using it as a native sheet would.
 
+No pytest fixtures: run_tests.py's own discovery calls every module-level
+test_* function with no arguments (see its discover_and_run), the same
+constraint test_ui.py works under. setup_function/teardown_function give a
+fresh page per test instead -- xunit-style hooks pytest also runs natively,
+so this file works the same way under both runners.
+
 Skips (does not fail) when no Chromium build is installed, the same policy
 tests/conftest.py already gives an isolated file with a missing optional
 dependency.
 """
+import atexit
 from pathlib import Path
 
-import pytest
-
-playwright_sync = pytest.importorskip("playwright.sync_api")
+try:
+    from playwright.sync_api import sync_playwright
+except ModuleNotFoundError:
+    raise SkipTest("needs playwright")  # noqa: F821
 
 HERE = Path(__file__).resolve().parent
 WIDGET_JS = (HERE.parent / "widget" / "groundedops-widget.js").read_text(encoding="utf-8")
@@ -53,66 +61,84 @@ def _stub(route):
     route.fulfill(status=200, content_type="application/json", body="{}")
 
 
-@pytest.fixture(scope="module")
-def browser():
-    with playwright_sync.sync_playwright() as p:
-        try:
-            b = p.chromium.launch()
-        except Exception as e:
-            pytest.skip(f"no chromium build installed: {e}")
-            return
-        yield b
-        b.close()
+_pw = sync_playwright().start()
+try:
+    _browser = _pw.chromium.launch()
+except Exception as e:
+    _pw.stop()
+    raise SkipTest(f"no chromium build installed: {e}")  # noqa: F821
 
 
-@pytest.fixture
-def page(browser):
-    pg = browser.new_page()
-    pg.route("**/*", _stub)
-    pg.goto("https://example.test/")
-    yield pg
-    pg.close()
+def _shutdown():
+    # Order matters (browser before driver) and interpreter shutdown can
+    # already have torn down the event loop by the time this runs, which
+    # is cosmetic -- the process is exiting either way.
+    try:
+        _browser.close()
+    except Exception:
+        pass
+    try:
+        _pw.stop()
+    except Exception:
+        pass
 
 
-def _open(page):
-    page.click(".go-launch")
-    page.wait_for_selector(".go-panel.go-open, .go-open .go-panel")
+atexit.register(_shutdown)
+
+_page = None
 
 
-def test_opening_the_panel_moves_focus_into_it(page):
+def setup_function(func):
+    global _page
+    _page = _browser.new_page()
+    _page.route("**/*", _stub)
+    _page.goto("https://example.test/")
+
+
+def teardown_function(func):
+    if _page:
+        _page.close()
+
+
+def _open():
+    _page.click(".go-launch")
+    _page.wait_for_selector(".go-panel.go-open, .go-open .go-panel")
+
+
+def test_opening_the_panel_moves_focus_into_it():
     """Bug 1: the launcher used to hold focus, vanish, and drop it."""
-    page.click(".go-launch")
-    page.wait_for_function(
+    _page.click(".go-launch")
+    _page.wait_for_function(
         "document.querySelector('.go-w').classList.contains('go-open')")
-    focused = page.evaluate(
+    focused = _page.evaluate(
         "document.activeElement && document.activeElement.className")
     assert focused is not None and "go-panel" in focused
 
 
-def test_the_dialog_announces_itself_as_modal(page):
-    _open(page)
-    panel = page.query_selector(".go-panel")
+def test_the_dialog_announces_itself_as_modal():
+    _open()
+    panel = _page.query_selector(".go-panel")
     assert panel.get_attribute("role") == "dialog"
     assert panel.get_attribute("aria-modal") == "true"
     assert panel.get_attribute("aria-label")
 
 
-def test_escape_returns_focus_to_the_launcher(page):
-    _open(page)
-    page.keyboard.press("Escape")
-    page.wait_for_function(
+def test_escape_returns_focus_to_the_launcher():
+    _open()
+    _page.keyboard.press("Escape")
+    _page.wait_for_function(
         "!document.querySelector('.go-w').classList.contains('go-open')")
-    focused = page.evaluate(
+    focused = _page.evaluate(
         "document.activeElement && document.activeElement.className")
     assert focused is not None and "go-launch" in focused
 
 
-def test_phone_viewport_fills_the_screen_edge_to_edge(page):
+def test_phone_viewport_fills_the_screen_edge_to_edge():
     """Bug 3: a 375-wide phone used to see a 343x?? card with rounded
     corners floating over the page instead of a full sheet."""
-    page.set_viewport_size({"width": 375, "height": 812})
-    _open(page)
-    box = page.eval_on_selector(".go-panel", """(el) => {
+    _page.set_viewport_size({"width": 375, "height": 812})
+    _open()
+    box = _page.eval_on_selector(".go-panel", """(el) => {
         const r = el.getBoundingClientRect();
         return {w: r.width, h: r.height,
                 radius: getComputedStyle(el).borderRadius};
@@ -122,20 +148,20 @@ def test_phone_viewport_fills_the_screen_edge_to_edge(page):
     assert box["radius"] in ("0px", "0")
 
 
-def test_phone_composer_font_size_is_16px_or_more(page):
+def test_phone_composer_font_size_is_16px_or_more():
     """Bug 2: iOS Safari auto-zooms the page on focusing any text input
     under 16px, and stays zoomed in after the field blurs."""
-    page.set_viewport_size({"width": 375, "height": 812})
-    _open(page)
-    size = page.eval_on_selector(
+    _page.set_viewport_size({"width": 375, "height": 812})
+    _open()
+    size = _page.eval_on_selector(
         ".go-in", "(el) => parseFloat(getComputedStyle(el).fontSize)")
     assert size >= 16
 
 
-def test_phone_header_buttons_meet_the_touch_target_minimum(page):
-    page.set_viewport_size({"width": 375, "height": 812})
-    _open(page)
-    boxes = page.eval_on_selector_all(".go-hbtn", """(els) =>
+def test_phone_header_buttons_meet_the_touch_target_minimum():
+    _page.set_viewport_size({"width": 375, "height": 812})
+    _open()
+    boxes = _page.eval_on_selector_all(".go-hbtn", """(els) =>
         els.map(el => {
             const r = el.getBoundingClientRect();
             return {w: r.width, h: r.height};
@@ -145,12 +171,12 @@ def test_phone_header_buttons_meet_the_touch_target_minimum(page):
         assert b["w"] >= 44 and b["h"] >= 44, boxes
 
 
-def test_desktop_layout_is_unaffected(page):
+def test_desktop_layout_is_unaffected():
     """The phone fixes are scoped to the <=480px media query; a normal
     desktop viewport keeps the floating card."""
-    page.set_viewport_size({"width": 1280, "height": 900})
-    _open(page)
-    box = page.eval_on_selector(".go-panel", """(el) => {
+    _page.set_viewport_size({"width": 1280, "height": 900})
+    _open()
+    box = _page.eval_on_selector(".go-panel", """(el) => {
         const r = el.getBoundingClientRect();
         return {w: r.width, h: r.height};
     }""")
