@@ -735,8 +735,33 @@ exactly, we cannot tell whether a fix helped.
   the test is pinning real behaviour, not tautologies. No focus trap: a
   visitor can still Tab past the dialog into the host page behind it,
   which is out of scope here -- flagged, not built.
-- [ ] **8.14 First multilingual step**: spot French/Spanish/German price
-  questions and refusals.
+- [x] **8.14 First multilingual step**: spot French/Spanish/German price
+  questions and refusals. (2026-09-28.) **Found already built and merged**
+  (`f4c1399`, `language.py` + `main.query_any_language`, ahead of this
+  branch's own PENDING bookkeeping -- neither this step nor 9.9 was ever
+  ticked). The mechanism is not per-language spotting: every non-English
+  question is translated to English at the edge (`looks_foreign` ->
+  `to_english`), the whole pipeline including the commercial/price deflect
+  and every refusal rule runs on the translation, and the finished
+  answer -- refusal or not -- is translated back
+  (`query_any_language`, `main.py:2196`). So a French, Spanish or German
+  price question already reached the one commercial rule, and a refusal
+  in any of the three already came back in the visitor's language, not
+  English. `test_multilingual.py` already pinned the French case
+  end-to-end; this session added the matching Spanish and German price
+  cases and a German refusal round-trip case (13 tests total, all pass).
+  One real gap found and fixed on the way: `language.py`'s foreign-word
+  list did not have "kostet"/"kosten" (German for "cost(s)"), so "Was
+  kostet der BV30?" -- the plain, ordinary way to ask a price in German --
+  scored foreign=1 ("der") vs english=1 ("was" is ambiguously both), which
+  `looks_foreign`'s `foreign <= english` guard reads as "not foreign" and
+  leaves the question unrouted. Added those two words (plus "kostenlos");
+  the cost-guard test (`test_no_english_question_in_the_eval_sets_looks_foreign`,
+  364 English questions) still fires on none of them, so this did not buy
+  a false positive. No new production code otherwise -- 9.9 ("full
+  multilingual answers, behind a switch") looks substantially done by the
+  same commit too (the `MULTILINGUAL` env var is the switch), but that is
+  a separate step's box to tick, not read further here.
 - [ ] **8.15 Add test cases for all of the above**, so the test suite looks
   like real conversations and not just FAQ lookups.
 

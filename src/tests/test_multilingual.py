@@ -149,6 +149,36 @@ def test_the_pipeline_runs_on_the_english_and_the_answer_comes_back_translated()
     assert out["question_original"] == "¿Cómo limpio el BV30?"
 
 
+def test_a_german_refusal_also_comes_back_translated():
+    """8.14's other half: "spot ... refusals" too, not only answers. The
+    wrapper translates result["answer"] regardless of role, so a refusal
+    the English pipeline decided on is translated the same way a real
+    answer is -- this pins that a German refusal is not left in English."""
+    seen = {}
+
+    def pipeline(payload, x_user_id=None):
+        seen["q"] = payload.q
+        return {"answer": "I don't have that in the documentation.",
+                "role": "rejected", "offer_support": True}
+
+    def generate(prompt, keys):
+        if prompt.startswith("A customer wrote"):
+            return "LANGUAGE: German\nENGLISH: Does the BV30 have Bluetooth?"
+        return "Das steht nicht in der Dokumentation."
+
+    real_p, real_g = _with_pipeline(pipeline, generate)
+    try:
+        out = main.query_any_language(
+            main.QueryRequest(q="Hat der BV30 Bluetooth?"))
+    finally:
+        main.query, language._generate = real_p, real_g
+    assert seen["q"] == "Does the BV30 have Bluetooth?"
+    assert out["role"] == "rejected" and out["offer_support"] is True
+    assert out["answer"] == "Das steht nicht in der Dokumentation."
+    assert out["answer_english"] == "I don't have that in the documentation."
+    assert out["language"] == "German"
+
+
 def test_english_makes_no_model_call():
     calls = []
 
@@ -190,6 +220,25 @@ def test_the_french_price_question_reaches_the_commercial_rule_in_english():
     import sales
     assert not sales.is_commercial_question("Quel est le prix du NV9USB+ ?")
     assert sales.is_commercial_question("What is the price of the NV9USB+?")
+
+
+def test_spanish_and_german_price_questions_also_look_foreign_and_translate():
+    """8.14: the first multilingual step is spotting a price question in
+    each of the three named languages, not just French. The deflect is one
+    English-only rule (sales.is_commercial_question) reached through the
+    same to_english() edge as any other question -- these pin that a
+    Spanish or German price question is recognised as foreign, and that
+    ITS English translation (what a real translator would produce) is what
+    the commercial rule actually sees."""
+    import sales
+    es_q, es_en = "¿Cuál es el precio del NV9S?", "What is the price of the NV9S?"
+    de_q, de_en = "Was kostet der BV30?", "What does the BV30 cost?"
+    for q in (es_q, de_q):
+        assert language.looks_foreign(q), q
+    assert not sales.is_commercial_question(es_q)
+    assert not sales.is_commercial_question(de_q)
+    assert sales.is_commercial_question(es_en)
+    assert sales.is_commercial_question(de_en)
 
 
 def test_translated_requests_for_a_person_are_handoffs():

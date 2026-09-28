@@ -62,7 +62,7 @@ este esta ese esa hola gracias favor ayuda necesito quiero cuánto cuanto
 der das den dem des ein eine einen einem einer und oder aber weil wie
 wer wo wann warum ist sind habe hat ich du sie wir ihr mein meine nicht
 kein keine mit ohne für auf bei nach von zu zum zur auch noch schon kann
-können muss bitte danke hallo gerät funktioniert
+können muss bitte danke hallo gerät funktioniert kostet kosten kostenlos
 le les des du au aux une et ou mais parce quoi qui où quand
 pourquoi est sont avoir suis je tu il elle nous vous ils mon ma mes
 votre vos ce cette ces pas avec sans sur dans chez aussi très peut
