@@ -530,7 +530,62 @@ exactly, we cannot tell whether a fix helped.
   one blind1 confident-No now passes the fast verifier.
 - [ ] **M8 Test the answer-checker itself** on known right and wrong
   answers, and try a second AI vendor as checker. Have a person label ~50
-  answers so we know whether the grader can be trusted.
+  answers so we know whether the grader can be trusted. **Done except the
+  second vendor (2026-09-28, S6).**
+  *Labels* (`src/eval_labels.json`, the 50 served answers S5 sampled from
+  batch 20260928_0807): 18 by the product owner (the MyCheckr, MyConnect
+  and ICU rows, all "right", some with "should say more" notes), 32 by
+  Claude, each checked against the manual text with the page in `note`
+  (so these 32 are not an independent human reading). 49 right, 1 wrong.
+  The one wrong is #20: "pin assignments for that interface" got the
+  previous turn's IF5 description again, with no pinout (the MDB pinout
+  is on NV9USB+ p.44). **The NLI cleared it at 0.747**: it judges support,
+  not whether the question was answered; only the LLM verifier has the
+  RELEVANCE line (the probe below rejects this answer 3/3). Served-answer
+  false accepts by checker: nli 1/20, llm 0/20, lexical 0/10. No kappa:
+  the sample holds only accepted answers, so it measures false accepts,
+  not false rejects; a kappa needs refused answers labelled too.
+  *Probe* (`tools/verifier_probe.py`, rewired to `main._llm_verified`
+  with the production prompt and thinking gate; 26 cases, 3 runs, DeepSeek
+  as configured, `eval_runs/m8/probe_production.*`): wrong 0/27 accepted
+  (all four mispaired flash codes, fabrications, and the #20 answer),
+  stated-"No" controls 9/9 passed, correct 21/24. The three misses are
+  one case (NV9 Spectral SSP mode, 0/3). The probe's bare
+  `retrieve_from_db` top-5 does not return the p.11 button table, so the
+  verifier was right to reject it; the case needs the production
+  retrieval, not a verifier fix. Absence "No"s (Bluetooth x2, coins,
+  facial recognition, Mini ethernet/wifi) accepted 15/15. That is the
+  8.3 baseline. **But the person marked the Mini ethernet/wifi "No" (#45)
+  right, and the coins "No" (#30) is right in substance, so 8.3's "reject
+  every unstated No" goes further than the owner's own judgement. Settle
+  which absences 8.3 should refuse before S9 builds it (you).**
+  *Grader* (`tools/grader_ab.py`, 101 frozen graded answers, 3x each way,
+  `eval_runs/20260928_0807/grader_ab.json`): as-is (DeepSeek thinking off)
+  passes 303/303 and agrees with the labels 36/36 on the answers both
+  cover; five deliberately wrong copies (exFAT, 450 mA, red x2 = feeder,
+  15 mm, 5 s relay) failed 15/15. Inside `judging()` it failed 16 runs of
+  correct answers that add true detail beyond the reference (370 mA peak,
+  p.37; the SD card's "larger capacity is fine" note, p.19; #25's relay
+  warning, which the owner marked right). **Decision: the grader stays
+  thinking-off. The plan's "wrap llm_grade in judging()" is dropped on
+  this A/B.**
+  *Still open, needs you:* the second vendor. There is no
+  ANTHROPIC_API_KEY in src/.env or the environment, and the ITL gateway
+  (OPENAI_BASE_URL) does not answer off the office network. With either
+  available: `python tools/verifier_probe.py --judge anthropic` (default
+  claude-sonnet-5, which thinks adaptively with no thinking field, so
+  `_call_anthropic` needs no change; its max_tokens 2048 includes the
+  thinking tokens) or `--judge openai --model itl-gpt-pro`, and
+  EVAL_GRADER_PROVIDER=anthropic for grader_ab.py.
+  *Found on the way:* (1) `logger.MAX_ANSWER_LEN = 500` cuts every logged
+  answer, so any sheet or review built from logs.jsonl shows #13, #15
+  and #32 trailing off; the owner asked why #13 stops mid-word. The
+  customer saw the full text. 10.2's review loop needs the full answer
+  stored. (2) The manuals disagree on the SCS supply: NV200S p.69 says
+  24V/7.5A with the NV200 Spectral, the SCS manual p.20 says 24V/6.5A
+  (#22 quoted the NV200S figure). A documentation fix for ITL, not code.
+  (3) Two served answers open with a stray "Yes." (#20, #28), a
+  writer-prompt habit on non-yes/no questions.
 - [x] **M9 Pin spec-table test cases to the exact page**, and fix the
   reranker benchmark (2026-09-27). eval.py gets an `expected_page` check
   beside `sources_any`, checked against `_build_sources`'s `pages` list;

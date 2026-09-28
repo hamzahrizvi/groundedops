@@ -17,7 +17,8 @@ runs, then lock it separately with `--baseline eval_baseline_retrieval.json
 | Script | What it is for |
 |---|---|
 | `eval_battery.py` | 19 grounded questions × 3 repeats against `/query`, across all four product ranges. **Repeats are the point** — a single pass cannot tell a fix from noise (see HANDOFF.md). |
-| `verifier_probe.py` | Scores the LLM verifier against known-good answers and deliberate fabrications, including fault-code mispairings. Use before changing the verifier prompt. |
+| `verifier_probe.py` | Scores the production LLM verifier (`main._llm_verified`: its prompt, thinking gate and parsing) on 26 cases in four groups (correct, wrong incl. fault-code mispairings, absence "No"s, stated-"No" controls), N runs each. `--judge deepseek\|anthropic\|openai` swaps the vendor. Use before changing the verifier prompt. |
+| `grader_ab.py` | Re-grades one batch's frozen graded answers N times with the eval grader as-is and N times inside `llm.judging()`, and checks both against `src/eval_labels.json`. Writes `<batch>/grader_ab.json`. |
 | `console_audit.py` | Logs into a throwaway console and screenshots every page in both themes, reporting JS errors. Catches render breakage no unit test sees. |
 | `capture_screenshots.py` | Regenerates `docs/img/*` for the README, driving the real widget against the real backend. |
 | `overnight_eval.sh` | PENDING.md session 4 as one unattended job: starts its **own** HEAD backend and proves it is HEAD, runs the M4 repeats, `run_live --path both`, the v16.3 blind2 side on a copied index, and the M13 sweep, then writes `eval_runs/<stamp>/summary.json`. `STEPS="m4 summary"` runs a subset. |
