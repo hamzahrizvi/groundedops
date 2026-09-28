@@ -398,7 +398,8 @@ exactly, we cannot tell whether a fix helped.
   has the two-index-copy recipe and the three commands.
 - [ ] **M4 Measure the wobble.** Run each test set 3-5 times on unchanged
   code, write down which cases flip, then reset the pass mark to the cases
-  that pass every time.
+  that pass every time. Runs done (S4, 2026-09-27): `eval_runs/20260927_1825/`;
+  the reset is S5's. m13 there was rerun by hand after a segfault.
 - [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
   each side. The first blind set is used up (we read it to fix things); a
   third one must be written fresh by someone who has not seen the fixes.

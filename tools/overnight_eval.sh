@@ -95,16 +95,28 @@ start_backend() {  # start_backend PORT DIR LOGFILE [VAR=value ...]
   log "backend :$port ready (${waited}s)"
 }
 
-stop_backend() {  # only the PID this script started
+listener_pid() {  # Windows PID listening on 127.0.0.1:PORT, if any
+  netstat -ano 2>/dev/null | tr -d '\r' \
+    | awk -v a="127.0.0.1:$1" '$2 == a && $4 == "LISTENING" {print $5; exit}'
+}
+
+stop_backend() {  # only a backend this script started (pid file present)
   local port="$1" pid
   pid="$(cat "$OUT/pid_$port" 2>/dev/null)" || return 0
   [ -n "$pid" ] || return 0
+  # $! is the MSYS env/nohup wrapper, and the venv python.exe is a launcher
+  # that spawns the real interpreter: killing $! (or its winpid) left both
+  # 2026-09-27 backends serving all night. Kill the listener's whole tree;
+  # start_backend refused an occupied port, so the listener is ours.
+  local lpid; lpid="$(listener_pid "$port")"
+  [ -n "$lpid" ] && taskkill //F //T //PID "$lpid" > /dev/null 2>&1
   local winpid; winpid="$(cat "/proc/$pid/winpid" 2>/dev/null)"
+  [ -n "$winpid" ] && taskkill //F //T //PID "$winpid" > /dev/null 2>&1
   kill "$pid" 2>/dev/null
   sleep 5
-  if up "$port" && [ -n "$winpid" ]; then taskkill //F //PID "$winpid" > /dev/null 2>&1; fi
   rm -f "$OUT/pid_$port"
-  log "backend :$port stopped"
+  if up "$port"; then log "backend :$port STILL SERVING after stop"
+  else log "backend :$port stopped"; fi
 }
 trap 'stop_backend "$A_PORT"; stop_backend "$B_PORT"' EXIT
 
@@ -190,10 +202,17 @@ fi
 # ── M13: the grounding sweep, in-process ────────────────────────────────
 if want m13; then
   log "m13: sweep_grounding --cases eval_cases_retrieval.json"
-  ( cd "$SRC" && "$PY" sweep_grounding.py --cases eval_cases_retrieval.json ) \
+  # HF_HUB_OFFLINE: headless, SentenceTransformer's online revalidation
+  # segfaults inside huggingface_hub (2026-09-28, twice, main thread); the
+  # models are cached by then, backend A loaded them this batch.
+  ( cd "$SRC" && HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" "$PY" -X faulthandler \
+      sweep_grounding.py --cases eval_cases_retrieval.json ) \
     >> "$OUT/m13_sweep.log" 2>&1
-  log "m13: exit $?"
-  if [ -f "$SRC/sweep_grounding.json" ]; then
+  rc=$?
+  log "m13: exit $rc"
+  # Copy only this run's output: on 2026-09-27 the sweep segfaulted and a
+  # month-old sweep_grounding.json was copied in as if it were tonight's.
+  if [ "$rc" -eq 0 ] && [ "$SRC/sweep_grounding.json" -nt "$LOG" ]; then
     cp "$SRC/sweep_grounding.json" "$OUT/m13_sweep.json"
     ( cd "$SRC" && "$PY" sweep_grounding.py --report-only ) > "$OUT/m13_sweep_report.txt" 2>&1
   fi
