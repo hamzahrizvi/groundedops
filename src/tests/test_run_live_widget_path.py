@@ -62,14 +62,13 @@ def test_widget_path_posts_to_the_widget_as_a_member_and_names_dropped_keys():
     assert q.called, "a member turn must reach the full pipeline, not the FAQ-only gate"
     row = rows[0]
     assert row["response"].get("role") != "error", row["response"]
-    # Today's drops (8.1 adds role/reason/request_id/service_degraded; K03
-    # product_options). When 8.1 lands this set must shrink -- update it
-    # then, it is the instrument's reading, not a target.
-    assert set(row["missing_keys"]) == {"role", "reason", "request_id",
-                                        "service_degraded", "product_options"}
-    # And the dropped role is visible as a wrong shape: the customer saw a
-    # refusal where /query decided a handoff.
-    assert row["got"] != "handoff"
+    # 8.1 landed: role/reason/request_id/service_degraded now reach the
+    # widget. product_options stays dropped on purpose (K03; see
+    # widget_api.py's comment on why it can never be populated here).
+    assert set(row["missing_keys"]) == {"product_options"}
+    # And the role now reaches the customer: the widget sees the same
+    # handoff /query decided, instead of a bare refusal.
+    assert row["got"] == "handoff"
 
 
 def test_agreement_reports_a_disagreement_beside_its_dropped_keys():

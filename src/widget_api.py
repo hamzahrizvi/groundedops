@@ -512,6 +512,19 @@ def register(app, answer_query, draft_enquiry=None):
             "sources": _public_sources(result.get("sources")),
             "from_faq": bool(result.get("from_faq")),
             "faq_candidates": result.get("faq_candidates"),
+            # 8.1: /query decided these but this endpoint builds its own dict,
+            # so they never reached the surface customers actually use. Most
+            # visibly, a handoff turn's own "I'll hand this over to a person"
+            # was followed by the widget's own "that is not something I have
+            # in my knowledge base" -- the offer_support refusal copy -- since
+            # the widget could not tell a handoff from a plain refusal without
+            # `role`. `reason` and `service_degraded` are the same drop for
+            # the console's/instrumentation's sake; `request_id` lets a
+            # visitor's report be matched to a log line.
+            "role": result.get("role"),
+            "reason": result.get("reason"),
+            "request_id": result.get("request_id"),
+            "service_degraded": bool(result.get("service_degraded")),
             # v15.2: passed through so the widget can offer a human instead of
             # dead-ending on a refusal. It was already computed by /query but
             # this endpoint builds its own response dict, so it never reached

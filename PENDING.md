@@ -673,8 +673,20 @@ exactly, we cannot tell whether a fix helped.
 
 ### Tier 7 -> 8 - fix what customers would notice
 
-- [ ] **8.1 Widget passes on what the server decided** (role, reason,
+- [x] **8.1 Widget passes on what the server decided** (role, reason,
   request id, outage flag). Stops the handoff message contradicting itself.
+  (2026-09-28.) `/widget/ask`'s hand-built response dict now forwards
+  `role`, `reason`, `request_id` and `service_degraded` from the pipeline
+  result (`widget_api.py`), fixing the exact bug M12 measured: the widget's
+  own offer-support copy ("that is not something I have in my knowledge
+  base") is only skipped for a handoff turn when `d.role === "handoff"`
+  (`groundedops-widget.js:2116`), which was always false with the key
+  missing. `service_degraded` also fixes an outage notice being typed out
+  character-by-character like a real answer (`groundedops-widget.js:2059`).
+  `product_options` stays deliberately dropped (K03). Re-pinned
+  `test_run_live_widget_path.py`: the widget's missing-key set shrinks from
+  5 keys to just `product_options`, and the handoff scenario's observed
+  outcome now agrees with `/query`'s.
 - [ ] **8.2 Repair wrong product tags.** 440 chunks are tagged to the wrong
   product, so NV9 Spectral figures can appear in MyCheckr answers.
 - [ ] **8.3 Honest "not mentioned".** When the manual never mentions
