@@ -445,6 +445,32 @@ exactly, we cannot tell whether a fix helped.
 - [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
   each side. The first blind set is used up (we read it to fix things); a
   third one must be written fresh by someone who has not seen the fixes.
+  **Runs and reading done on blind set 2 (S4/S5, 2026-09-28):** HEAD
+  7c58720 on :8010 vs v16.3 (bd5e6b5) on :8004, each on its own copy of
+  the same index, blind2 x3 per side, `m5_compare.txt` in
+  `eval_runs/20260927_1825/`. Per-case, which is the only honest unit:
+  **lost 1** -- "Does the MyCheckr have a backup battery" passed 3/3 on
+  v16.3 and fails 3/3 on HEAD, which now answers a confident "No." So the
+  confident-No (8.3) is a regression since v16.3, not an old gap, and it
+  is the one case the release must win back before v16.4 ships.
+  **gained 6** -- the three vague fault reports now get "which product?"
+  (M6), the Euro 1 cent and Thai 50 Satang coin limits and the NV200
+  Spectral MCBF now come out of their tables (8d9f5ca / M14). **Flaky,
+  not counted, 5** -- four wobble on the v16.3 side only (MyCheckr solid
+  yellow LED 2/3, "and 5 flashes?" 2/3, widest BV30 banknote 1/3, SCS MCBF
+  2/3; all 3/3 on HEAD) and one on HEAD only (relay activation duration
+  2/3, see M4). 22 unchanged. Totals, context only: v16.3 22/34 stable,
+  HEAD 30/34. Speed: v16.3 p50 5.6s, p90 15.3s per turn against HEAD's
+  3.3s/8-14s on the same set, and one v16.3 request hung for 11.6 hours
+  (wall 41,912s), which is why the 102-turn run took all night instead
+  of ten minutes; HEAD's provider cooldown and timeouts (0cd3b69) are
+  what stop that, and it is the exact failure 9.2 (restart on hang) is
+  for. Caveats: blind2 is only partly blind now (M1 corrected two of its
+  keywords, M6 read three of its questions), both sides shared one box
+  so the walls are advisory, and the grader was deepseek-v4-flash on both
+  sides. **Still open, needs you:** commission blind set 3 from someone
+  who has not seen the fixes; the comparison above is not repeated until
+  it exists.
 - [x] **M6 Root causes of the four named failures**, all four closed
   (2026-09-27): one was a wrong answer key (SD card class, fixed in M1),
   one was already fixed, two are the "confident No" problem. The fourth
@@ -456,7 +482,26 @@ exactly, we cannot tell whether a fix helped.
   won't turn on, help?" -> 5 (0.0509). Not widened to make them pass; this
   is what the landed code already does.
 - [x] **M7 Cost of letting the checker "think"** (done): checking went from
-  about 0.9s to 3.3s typical. Re-measure once logs are labelled.
+  about 0.9s to 3.3s typical. **Re-measured from the labelled log
+  (2026-09-28, S5):** the batch window holds 624 rows, every one labelled
+  (origin: eval 501, live 118, preflight 5; surface: query 565, widget
+  59), so M2 works. HEAD 7c58720 still has the always-thinking verifier
+  (1f594c0); the thinking gate (15a776e, `fix/verifier-thinking-gate`,
+  five commits, worktree `.claude/worktrees/dreamy-driscoll-eab095`) is
+  NOT on this branch and PENDING never mentioned it -- **your call whether
+  to merge it; if so the M4 marks must be re-run, they were measured
+  without it.** Cost as it stands: when the LLM verifier rescues an
+  answer, its call is p50 2.8s, p90 13.1s (n=154); when it rejects one it
+  thinks longer, p50 8.8s, p90 28s (n=38). Total request time p50 by what
+  checked the answer: faq 0.01s, verbatim 0.2s, lexical 2.7s, nli 2.9s,
+  llm 6.3s. The NLI model's own tail is the other cost: p50 0.6s on
+  answers under 400 characters but p50 10.9s / p90 21s on the 18 longer
+  ones -- CPU time, not the vendor. Label gap found on the way: all 25
+  suppressed answers carry `verified_by: nli`, because ground_via keeps
+  its default when nothing rescues the answer; every one of them was in
+  fact rejected by the LLM verifier (verifier_llm_time > 0). A suppressed
+  row should name the checker that said no. Small main.py fix for the
+  next session that touches the verify stage (S9), not done here.
 - [ ] **M8 Test the answer-checker itself** on known right and wrong
   answers, and try a second AI vendor as checker. Have a person label ~50
   answers so we know whether the grader can be trusted.
@@ -518,8 +563,28 @@ exactly, we cannot tell whether a fix helped.
   product_options. The full 59-turn `--path both` reading is in the S4
   batch (tools/overnight_eval.sh). Pinned by
   tests/test_run_live_widget_path.py.
-- [ ] **M13 Check whether the fact-checking model is still earning its
-  keep** - 58% of served answers now score under 0.1 on it.
+- [x] **M13 Check whether the fact-checking model is still earning its
+  keep** - 58% of served answers now score under 0.1 on it. **Read
+  2026-09-28 (S5)** from the labelled log window and `m13_sweep_report.txt`
+  in `eval_runs/20260927_1825/`. It is earning its keep, but as a cheap
+  accept, not as a gate. Of the 365 served answers in the window the NLI
+  model cleared 174 (48%) on its own at p50 0.6s, the LLM verifier rescued
+  154 (42%) and lexical containment 37 (10%); 159/327 served answers with
+  a score sat under 0.1 (49%, was 58%). It never refuses alone: all 25
+  suppressions in the window were LLM-verifier rejections (see the M7
+  label gap). The sweep on the retrieval suite says the threshold value
+  barely matters: scores are bimodal (median 0.048, widest gap 0.50 ->
+  0.93), 18 of the 28 correct answers that reach the gate score under
+  0.55 and 15 of them under 0.15, so lowering the bar to anywhere in
+  0.15-0.45 would spare at most 3 LLM calls in 28. 0.55 stays. What it
+  costs: about 0.7s p50 spent on the NLI before each of the 191 rescues,
+  and the long-answer tail (p50 10.9s, p90 21s on the 18 answers over
+  400 characters, on CPU). The one change worth measuring, not made
+  here: send answers over ~400 characters straight to the LLM verifier
+  the way tables already go (408fcae), then re-run the S4 batch and read
+  `cost_by_verified_by` again. Anything that scores under 0.1 and gets
+  rescued is a table or a long answer; the model is not wrong about
+  short prose.
 - [x] **M14 Add tests for the new table and phrase-search code** before it
   is baked into the index (`f703927`, 2026-09-27). _phrase_ranking and
   complete_tables now have tests; the chunk's lowercased text is
