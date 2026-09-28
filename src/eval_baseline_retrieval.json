@@ -35,5 +35,5 @@
     "retrieval::the bezel is showing 4 red flashes then 1 blue flash, what does that mean": true,
     "retrieval::what speed class does the microSD card need to be for the NV9 Spectral": true
   },
-  "source": "eval_runs/20260927_1825/m4_retrieval.json"
+  "source": "eval_runs/20260928_0807/m4_retrieval.json"
 }

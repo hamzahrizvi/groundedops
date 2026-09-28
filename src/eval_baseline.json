@@ -37,5 +37,5 @@
     "faq::does the SMART Coin System support facial recognition": true,
     "faq::what is the maximum coin capacity in litres of the SMART Coin System": true
   },
-  "source": "eval_runs/20260927_1825/m4_tuned.json"
+  "source": "eval_runs/20260928_0807/m4_tuned.json"
 }

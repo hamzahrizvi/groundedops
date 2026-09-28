@@ -442,6 +442,25 @@ exactly, we cannot tell whether a fix helped.
   since taken it. It stays listed here so the mark does not hide it; 8.6
   (comparisons read both manuals) is the step that should win it back.
   Any future "N/34" quoted against these marks means stable-across-repeats.
+  **Re-run after merging the thinking gate (0f08c73, batch
+  `eval_runs/20260928_0807/`, same suites and repeats):** both marks came
+  out case-for-case identical (tuned 33/34, retrieval 29/32, same
+  always-fails), so the baselines now cite the new run and nothing else
+  changed. Blind sets: blind2 30/34 again, with the relay-duration case
+  now 3/3 and a different one at 2/3 ("BV30 one red flash and four blue
+  flashes" -- grader passed all three, the failing run only missed the
+  keyword phrasing "Sensor Covered", wording noise). Blind1 lost one:
+  "can the NV9USB+ take coins as well as notes" refused 3/3 before the
+  merge and now answers a confident "No. The NV9USB+ is a banknote
+  validator and does not accept coins." 3/3 at NLI 0.0014. Same score
+  both days; the always-thinking verifier rejected the "No", the gated
+  one does not think on a plain yes/no and lets it through. So the gate
+  bought its latency at the price of one more confident-No, the second
+  such case with the MyCheckr battery. 8.3 now has two named cases and
+  is not a "not mentioned" wording problem alone: an unsupported "No"
+  passes a fast verifier that only thinks on flash, LED, colour and code
+  answers. Whether "No"/"Yes" openers should also trigger thinking is
+  the first thing to measure in 8.3.
 - [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
   each side. The first blind set is used up (we read it to fix things); a
   third one must be written fresh by someone who has not seen the fixes.
@@ -502,6 +521,13 @@ exactly, we cannot tell whether a fix helped.
   fact rejected by the LLM verifier (verifier_llm_time > 0). A suppressed
   row should name the checker that said no. Small main.py fix for the
   next session that touches the verify stage (S9), not done here.
+  **After the merge (0f08c73, batch 20260928_0807, M4 suites only, 460
+  case-runs):** the LLM verifier's call on a rescue fell from p50 2.8s /
+  p90 13.1s to p50 1.1s / p90 2.2s (n=112); total time for an
+  LLM-verified answer p50 6.3s -> 4.8s, p90 20.9s -> 8.1s; NLI-verified
+  p50 2.9s -> 3.1s (unchanged, the NLI itself did not move). Served
+  answers under 0.1 on the NLI: 123/271 (45%). What it cost is in M4:
+  one blind1 confident-No now passes the fast verifier.
 - [ ] **M8 Test the answer-checker itself** on known right and wrong
   answers, and try a second AI vendor as checker. Have a person label ~50
   answers so we know whether the grader can be trusted.
