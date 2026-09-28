@@ -1,6 +1,6 @@
 {
-  "pass_rate": 0.9411764705882353,
-  "repeats": 1,
+  "pass_rate": 0.9705882352941176,
+  "repeats": 5,
   "cases": {
     "faq::What is MyCheckr?": true,
     "faq::Does MyCheckr need an internet connection?": true,
@@ -34,7 +34,8 @@
     "faq::what is the capital of france": true,
     "faq::how do I reset the password on my Cisco router": true,
     "faq::what is the bitcoin price today": true,
-    "faq::does the SMART Coin System support facial recognition": false,
+    "faq::does the SMART Coin System support facial recognition": true,
     "faq::what is the maximum coin capacity in litres of the SMART Coin System": true
-  }
+  },
+  "source": "eval_runs/20260927_1825/m4_tuned.json"
 }

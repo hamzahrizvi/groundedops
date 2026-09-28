@@ -26,6 +26,10 @@ Usage:
                                     # gate that suite against its own baseline
   python eval.py --compare-results A.json B.json
                                     # offline before/after diff of two --results files
+  python eval.py --baseline-from-results RESULTS.json [--baseline X.json]
+                                    # reset the pass mark from a repeated run's
+                                    # saved results: only cases that passed on
+                                    # every attempt (M4); refuses blind sets
 
 Requires the backend running on :8000. LLM grading uses a model via the
 backend's llm.generate(); configure with:
@@ -323,6 +327,28 @@ def compare_results(a: dict, b: dict) -> dict:
             "blind": has_blind(both)}
 
 
+def baseline_from_results(data: dict, source: str = "") -> dict:
+    """The pass mark, reset from a saved ``--results`` file (M4).
+
+    Same shape --update-baseline writes, built offline from a repeated run:
+    a case is in the mark only when it passed on every attempt, so the gate
+    is "the cases that pass every time on unchanged code", not one lucky
+    run. ``source`` records where the numbers came from. Refuses a blind
+    set: those are measured, never locked in."""
+    results = data.get("results") or []
+    if has_blind(results):
+        raise ValueError("blind cases are measured, never a baseline")
+    per = _per_case(results)
+    cases = {key: all(runs) for key, runs in per.items()}
+    rate = sum(cases.values()) / len(cases) if cases else 0.0
+    repeats = data.get("repeats") or max((len(v) for v in per.values()),
+                                         default=0)
+    out = {"pass_rate": rate, "repeats": repeats, "cases": cases}
+    if source:
+        out["source"] = source
+    return out
+
+
 def _percentile(values: list, pct: float) -> float:
     """Nearest-rank percentile; no numpy for an advisory print."""
     vals = sorted(values)
@@ -472,6 +498,33 @@ def main():
         cmp = compare_results(json.loads(path_a.read_text()),
                               json.loads(path_b.read_text()))
         print_comparison(cmp, str(path_a), str(path_b))
+        return 0
+
+    # M4: reset the pass mark from a repeated run's saved results, offline.
+    if "--baseline-from-results" in sys.argv:
+        src = _arg_value("baseline-from-results")
+        if not src:
+            print("usage: eval.py --baseline-from-results RESULTS.json "
+                  "[--baseline eval_baseline.json]")
+            return 2
+        src_path = Path(src)
+        baseline_path = Path(_arg_value("baseline", str(BASELINE_FILE)))
+        data = json.loads(src_path.read_text())
+        if has_blind(data.get("results") or []):
+            print(MEASURE_ONLY_BANNER)
+            print("Refusing to build a baseline from blind results; "
+                  "nothing written.")
+            return 2
+        try:
+            rel = src_path.resolve().relative_to(HERE.parent.resolve())
+        except ValueError:
+            rel = src_path.name
+        base = baseline_from_results(data, source=str(rel).replace("\\", "/"))
+        baseline_path.write_text(json.dumps(base, indent=2))
+        print(f"Baseline written -> {baseline_path.name} from {rel}: "
+              f"{sum(base['cases'].values())}/{len(base['cases'])} cases "
+              f"stable across {base['repeats']} run(s) "
+              f"({base['pass_rate']:.0%})")
         return 0
 
     # v10.4: --selfcheck validates the suite schema + baseline parse WITHOUT

@@ -207,3 +207,56 @@ def test_update_baseline_is_refused_on_a_blind_set_and_writes_nothing():
                              side_effect=AssertionError("must not run")):
             assert rag_eval.main() == 2
         assert not os.path.exists(baseline)
+
+
+def test_baseline_from_results_keeps_only_cases_that_pass_every_time():
+    data = {"repeats": 3, "results": [
+        _res("always", True), _res("always", True, repeat=2), _res("always", True, repeat=3),
+        _res("flaky", True), _res("flaky", False, repeat=2), _res("flaky", True, repeat=3),
+        _res("never", False), _res("never", False, repeat=2), _res("never", False, repeat=3),
+        _res("skipped", None, skipped=True),
+        _res("r", True, layer="retrieval"),
+    ]}
+    base = rag_eval.baseline_from_results(data, source="eval_runs/x/m4.json")
+    # M4: a flip on unchanged code is a fail in the mark, not a pass
+    assert base["cases"] == {"faq::always": True, "faq::flaky": False,
+                             "faq::never": False, "retrieval::r": True}
+    assert base["pass_rate"] == 0.5 and base["repeats"] == 3
+    assert base["source"] == "eval_runs/x/m4.json"
+    # same shape --update-baseline writes, so the gate's diff reads it as is
+    assert set(base) == {"pass_rate", "repeats", "cases", "source"}
+    # repeats is recovered from the attempts when the results file has none
+    assert rag_eval.baseline_from_results({"results": data["results"][:3]})["repeats"] == 3
+
+
+def test_baseline_from_results_refuses_a_blind_set_and_writes_nothing():
+    import json as _json
+    import os
+    import tempfile
+    import pytest
+    with pytest.raises(ValueError):
+        rag_eval.baseline_from_results({"results": [_res("q", True, layer="blind")]})
+    with tempfile.TemporaryDirectory() as d:
+        results = os.path.join(d, "results.json")
+        baseline = os.path.join(d, "baseline.json")
+        with open(results, "w") as f:
+            _json.dump({"repeats": 3, "results": [_res("q", True, layer="blind")]}, f)
+        argv = ["eval.py", "--baseline-from-results", results, "--baseline", baseline]
+        with patch.object(sys, "argv", argv), \
+                patch.object(rag_eval.requests, "post",
+                             side_effect=AssertionError("must not run")):
+            assert rag_eval.main() == 2
+        assert not os.path.exists(baseline)
+        # and the non-blind path writes the mark without touching the backend
+        with open(results, "w") as f:
+            _json.dump({"repeats": 2, "results": [
+                _res("a", True), _res("a", True, repeat=2),
+                _res("b", True), _res("b", False, repeat=2)]}, f)
+        with patch.object(sys, "argv", argv), \
+                patch.object(rag_eval.requests, "post",
+                             side_effect=AssertionError("must not run")):
+            assert rag_eval.main() == 0
+        with open(baseline) as f:
+            written = _json.load(f)
+        assert written["cases"] == {"faq::a": True, "faq::b": False}
+        assert written["pass_rate"] == 0.5 and written["repeats"] == 2

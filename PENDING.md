@@ -396,10 +396,52 @@ exactly, we cannot tell whether a fix helped.
   nothing. Each result now carries `wall` (request seconds, grading
   excluded) and `role`, with an advisory p50/p90 per role. tools/README.md
   has the two-index-copy recipe and the three commands.
-- [ ] **M4 Measure the wobble.** Run each test set 3-5 times on unchanged
+- [x] **M4 Measure the wobble.** Run each test set 3-5 times on unchanged
   code, write down which cases flip, then reset the pass mark to the cases
   that pass every time. Runs done (S4, 2026-09-27): `eval_runs/20260927_1825/`;
-  the reset is S5's. m13 there was rerun by hand after a segfault.
+  m13 there was rerun by hand after a segfault. **Read 2026-09-28 (S5), HEAD
+  7c58720, grader deepseek-v4-flash, one backend on :8010.** The wobble on
+  this code is far below the +/-3 we had assumed: across 134 cases and 470
+  case-runs (tuned x5, blind1 x3, blind2 x3, retrieval x3) exactly one case
+  flipped, blind2's "installer checklist default relay activation duration"
+  (2/3, the failing run refused with "I don't have that... about the
+  MyConnect" at NLI 0.19, so a generation flip, not a grader one). That
+  flip is noise until it repeats; it is not in any pass mark (blind).
+  Every other failure is deterministic, so the honest reading is "0 to 1
+  case per suite per 3 runs" -- the +/-3 figure came from the
+  always-thinking verifier (1f594c0) and belongs to that code, not this.
+  The tool's "+/-3" label stays as a conservative ceiling. The v16.3 side
+  of M5 wobbled more (4 of 34 cases flaky, see M5), so the noise budget
+  depends on the build under test and must be re-measured per build.
+  Always-fail, none of them noise: tuned "What voltage is supported on the
+  NV9ST?" (refuses, scoped to the NV9USB+ -- the NV9ST is not a product the
+  catalogue knows, so this is a product-recognition case, 8.17); blind1
+  "ICU REST API HTTPS port" (the FAQ picker fires instead of answering);
+  blind2 MyCheckr backup battery ("No." -- the confident-No case, 8.3),
+  MyCheckr ad-screen age band index 2 (refused, NLI unavailable), BV30
+  Bluetooth diagnostics (served a gap statement as an answer at NLI 0.0008
+  instead of a clean refusal); retrieval Twin SCS baseplate screws and the
+  NV200 Spectral docked power supply (both refuse, scoped to the SMART
+  Coin System: its product scoping wins over the second product in the
+  question, so neither reaches the page), and "pin assignments for that
+  interface" (answers the MDB/IF5 question instead of listing pins:
+  keywords fail on a correct-outcome answer, a follow-up-resolution case
+  for 8.7). **Pass mark reset:** eval.py gains `--baseline-from-results
+  RESULTS.json [--baseline X]` (pure `baseline_from_results`, offline, same
+  shape `--update-baseline` writes plus a `source` line; refuses blind
+  results with exit 2 and writes nothing). eval_baseline.json is now the
+  5-run tuned result, 33/34 (was 32/34 from one run; "does the SMART Coin
+  System support facial recognition" is in, it passed 5/5).
+  eval_baseline_retrieval.json is the 3-run result, 29/32 (was 26/30): the
+  two M9 cases are regression-gated at last, "ok and what about the full
+  size one?" and the Cisco-router refusal are in, and the NV200 Spectral
+  docked power-supply case drops out of the mark (True -> False). That
+  drop is real, not noise: it refuses 3/3, `sources_any` and
+  `expected_page` (p69, pinned in M9) both fail, so either the old
+  baseline passed it on a page that was not p69 or the SCS scoping has
+  since taken it. It stays listed here so the mark does not hide it; 8.6
+  (comparisons read both manuals) is the step that should win it back.
+  Any future "N/34" quoted against these marks means stable-across-repeats.
 - [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
   each side. The first blind set is used up (we read it to fix things); a
   third one must be written fresh by someone who has not seen the fixes.

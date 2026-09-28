@@ -62,9 +62,20 @@ EVAL_URL=http://127.0.0.1:8099/query python eval.py --cases eval_cases_blind2.js
 python eval.py --compare-results results_A.json results_B.json
 ```
 
+To reset a pass mark from a repeated run on unchanged code (M4), build it
+from the saved results instead of re-running against a backend:
+
+```bash
+python eval.py --baseline-from-results ../eval_runs/<stamp>/m4_tuned.json --baseline eval_baseline.json
+```
+
+Only cases that passed on every attempt go in; blind results are refused.
+
 The comparison is offline. Quote its per-case lines (stable pass on one
 side, stable fail on the other), never the totals: the suite carries about
-+/-3 cases of run-to-run noise. A blind file prints MEASURE-ONLY and
++/-3 cases of run-to-run noise as a ceiling (measured 2026-09-28 on HEAD:
+one flip in 470 case-runs; the v16.3 build wobbled 4 cases in 34, so
+re-measure per build). A blind file prints MEASURE-ONLY and
 `--update-baseline` refuses it (exit 2, nothing written). The `wall`
 p50/p90 per role is advisory: two backends on one box skew each other
 (PENDING.md records the same question reranking in 1.2s on one process
