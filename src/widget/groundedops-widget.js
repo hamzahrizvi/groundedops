@@ -411,6 +411,8 @@
     ".go-srci{font-size:12.5px;margin-bottom:4px;line-height:1.45}" +
     ".go-srcn{font-weight:600}" +
     ".go-pg{font-weight:500;color:var(--mut);font-size:11.5px}" +
+    ".go-quote{margin:4px 0 10px;padding-left:9px;border-left:2px solid var(--line);" +
+    "white-space:pre-wrap;font-size:12.5px;line-height:1.45}" +
     ".go-dl{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--a);text-decoration:none}" +
     ".go-figs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}" +
     ".go-fig{max-height:96px;max-width:46%;border:1px solid var(--line);border-radius:6px;" +
@@ -781,8 +783,14 @@
       var s = document.createElement("details");
       s.className = "go-src";
       var n = Math.min(msg.sources.length, 4);
-      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + "Sources (" +
-        n + ")</summary>";
+      // 8.12: one source on a generated answer is the manual it was checked
+      // against, so say that. A curated answer (badge) was not checked here.
+      var one = msg.sources[0];
+      var summaryText = n === 1 && !msg.badge
+        ? "Verified against " + esc(pretty(one.source)) +
+          (one.page_label ? ", " + esc(one.page_label) : "")
+        : "Sources (" + n + ")";
+      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + summaryText + "</summary>";
       msg.sources.slice(0, 4).forEach(function (x) {
         var i = document.createElement("div");
         i.className = "go-srci";
@@ -1895,7 +1903,7 @@
               label: f.question,
               style: "q",
               onClick: function () {
-                ask(f.question);
+                ask(f.question, { faqId: f.id });
               },
             };
           }),
@@ -2236,7 +2244,12 @@
             style: "alt",
             onClick: function () { $in.focus(); },
           });
+          // 8.12: the closest page the search did find, when there is one.
+          var nearDoc = docChip(d.more_context);
+          if (nearDoc) supportChips.splice(1, 0, nearDoc);
           chips(supportChips, "What would you like to do?");
+        } else if (!d.flagged && !d.service_degraded && !d.needs_sign_in) {
+          afterAnswer(d);
         }
       })
       .catch(function (e) {
@@ -2268,6 +2281,110 @@
         if (state.product) unlockComposer();
         $in.focus();
       });
+  }
+
+  /** 8.12: what the server sent to go with an answer, as chips: more from
+   *  the manual, the manual itself at the page, and up to three related
+   *  questions. Nothing is added to state.messages: the passages are
+   *  document text, not the assistant's answer, and history is what the
+   *  next question is condensed against. */
+  function afterAnswer(d) {
+    var mc = d.more_context || {};
+    var items = [];
+    if (mc.kind === "detail" && (mc.passages || []).length) {
+      items.push({
+        label: "Show more from the manual",
+        onClick: function () { showPassages(mc.passages); },
+      });
+    }
+    var doc = docChip(mc);
+    if (doc) items.push(doc);
+    var turn = state.messages.length;
+    relatedQuestions().then(function (rel) {
+      // Not if the visitor has already moved on.
+      if (busy || state.messages.length !== turn) return;
+      rel.forEach(function (f) {
+        items.push({ label: f.question, style: "q",
+                     onClick: function () { ask(f.question, { faqId: f.id }); } });
+      });
+      if (items.length) chips(items, rel.length ? "Related questions" : null);
+    });
+  }
+
+  /** "Open <manual>, page N". Signed-in only: /source_file is token gated,
+   *  so for a guest the chip could only fail. */
+  function docChip(mc) {
+    var doc = mc && mc.document;
+    if (!cfg.token || !doc || !doc.download_url) return null;
+    var pages = doc.pages || [];
+    return {
+      label: "Open " + pretty(doc.source) + (pages.length ? ", page " + pages[0] : ""),
+      style: "alt",
+      onClick: function () { openDoc(doc.download_url, pages[0]); },
+    };
+  }
+
+  function openDoc(url, page) {
+    // Opened now, while the click still counts, or the browser blocks it.
+    var w = window.open("", "_blank");
+    var headers = {};
+    if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+    fetch(cfg.api + url, { headers: headers })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(function (blob) {
+        var u = URL.createObjectURL(blob) + (page ? "#page=" + page : "");
+        if (w) w.location.href = u; else window.open(u, "_blank");
+      })
+      .catch(function () {
+        if (w) w.close();
+        say("That document could not be opened just now.", { flagged: true });
+      });
+  }
+
+  /** Document excerpts, labelled with where they came from. Shown as a
+   *  quote, not as the assistant speaking: relevance was ranked, not
+   *  checked against the question. */
+  function showPassages(passages) {
+    var row = document.createElement("div");
+    row.className = "go-row";
+    var b = document.createElement("div");
+    b.className = "go-b bot";
+    passages.forEach(function (p) {
+      var h = document.createElement("div");
+      h.className = "go-srcn";
+      h.textContent = "From " + pretty(p.source) + (p.page ? ", page " + p.page : "");
+      var t = document.createElement("blockquote");
+      t.className = "go-quote";
+      t.textContent = p.text;
+      b.appendChild(h);
+      b.appendChild(t);
+    });
+    row.appendChild(b);
+    $log.appendChild(row);
+    scrollDown();
+  }
+
+  /** Curated questions for this product the visitor has not asked yet,
+   *  reviewed ones first. */
+  function relatedQuestions() {
+    if (!state.product) return Promise.resolve([]);
+    var asked = {};
+    state.messages.forEach(function (m) {
+      if (m.role === "user") asked[(m.text || "").trim().toLowerCase()] = true;
+    });
+    return fetch(cfg.api + "/widget/faq?limit=10&product=" + encodeURIComponent(state.product.key)
+                 + "&language=" + encodeURIComponent(detectedLanguage()))
+      .then(function (r) { return r.ok ? r.json() : { faq: [] }; })
+      .then(function (d) {
+        return (d.faq || [])
+          .filter(function (f) {
+            return f.question && (f.answer || "").trim()
+              && !asked[f.question.trim().toLowerCase()];
+          })
+          .sort(function (a, b) { return (b.edited ? 1 : 0) - (a.edited ? 1 : 0); })
+          .slice(0, 3);
+      })
+      .catch(function () { return []; });
   }
 
   /** 8.11: read /widget/ask/stream's server-sent events into the object

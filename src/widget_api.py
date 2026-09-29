@@ -250,7 +250,7 @@ def widget_faq(product: str | None = None, limit: int = 4,
         logger.error(f"widget faq failed: {e}")
         return {"faq": []}
     return {"faq": [{"id": f["id"], "question": f["question"],
-                     "answer": f["answer"]}
+                     "answer": f["answer"], "edited": bool(f.get("edited"))}
                     for f in items[:max(1, min(limit, 10))]]}
 
 

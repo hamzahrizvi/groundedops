@@ -77,7 +77,7 @@ def test_the_refusal_clarify_offers_product_labels_first():
     the buttons have to be model names, not the visitor's own earlier
     questions."""
     src = inspect.getsource(main.query)
-    branch = src[src.index("I could not pin down"):][:1800]
+    branch = src[src.index("I couldn't find that in the documentation"):][:1800]
     assert 'build_clarification_options(\n                    "ambiguous_in_domain"' in branch \
         or '"ambiguous_in_domain", history, results' in branch
     assert '"followup", history, results' in branch, \

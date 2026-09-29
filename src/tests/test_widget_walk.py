@@ -1,6 +1,7 @@
 """The widget walked in a real browser against a stubbed backend: ask a
 question over /widget/ask/stream (8.11), vote on the answer (8.10), hit the
-daily limit, and submit the contact form to get a GO- reference (8.9).
+daily limit, submit the contact form to get a GO- reference (8.9), and see
+what the server sends after an answer or a refusal (8.12).
 
 Same set-up as test_widget_phone_and_screen_reader.py: Playwright, every
 request answered by _stub, skipped when no Chromium build is installed.
@@ -19,7 +20,7 @@ except ModuleNotFoundError:
 HERE = Path(__file__).resolve().parent
 WIDGET_JS = (HERE.parent / "widget" / "groundedops-widget.js").read_text(encoding="utf-8")
 HOST_HTML = """<!doctype html><html><head><meta charset="utf-8"></head><body>
-<script src="/w.js" data-api="https://example.test" data-title="Support"></script>
+<script src="/w.js" data-api="https://example.test" data-title="Support" TOKEN></script>
 </body></html>"""
 CATALOG = {"categories": [{"key": "val", "name": "Validators", "doc_count": 1,
                            "products": [{"key": "nv9", "name": "NV9", "doc_count": 1}]}]}
@@ -38,6 +39,28 @@ STREAM_OK = _sse(
     ("delta", {"text": "The bezel lifts off. "}),
     ("delta", {"text": "Press the two clips first."}),
     ("done", {"flagged": False}))
+MANUAL = "NV9 Manual.pdf"
+STREAM_DETAIL = _sse(
+    ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12"}],
+              "request_id": "rid-mc", "role": "fast",
+              "more_context": {"kind": "detail", "label": "x", "support": False,
+                               "document": {"source": MANUAL, "download_url": "/source_file/x",
+                                            "pages": [12]},
+                               "passages": [{"source": MANUAL, "page": 14,
+                                             "text": "Clip B releases the lower bezel."}]}}),
+    ("delta", {"text": ANSWER}))
+STREAM_REFUSAL = _sse(
+    ("meta", {"sources": [], "request_id": "rid-no", "role": "rejected",
+              "offer_support": True,
+              "more_context": {"kind": "document", "label": "x", "support": True,
+                               "document": {"source": MANUAL, "download_url": "/source_file/x",
+                                            "pages": [30]},
+                               "passages": []}}),
+    ("delta", {"text": "I could not find that in the documentation."}))
+FAQ = {"faq": [
+    {"id": "f1", "question": "How do I remove the bezel?", "answer": "a", "edited": True},
+    {"id": "f2", "question": "How do I clean the sensor?", "answer": "a", "edited": False},
+    {"id": "f3", "question": "What voltage does it need?", "answer": "a", "edited": True}]}
 STREAM_429 = _sse(
     ("status", {"stage": "Searching the documentation", "id": "entry"}),
     ("error", {"status": 429, "detail": {
@@ -46,6 +69,7 @@ STREAM_429 = _sse(
 
 posted = []
 stream_body = [STREAM_OK]
+host_token = [""]
 
 
 def _stub(route):
@@ -53,9 +77,12 @@ def _stub(route):
     if url.endswith("/w.js"):
         return route.fulfill(status=200, content_type="application/javascript", body=WIDGET_JS)
     if url.rstrip("/").endswith("example.test"):
-        return route.fulfill(status=200, content_type="text/html", body=HOST_HTML)
+        return route.fulfill(status=200, content_type="text/html",
+                             body=HOST_HTML.replace("TOKEN", host_token[0]))
     if req.method == "POST":
         posted.append((url, json.loads(req.post_data or "{}")))
+    if "/widget/faq" in url:
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(FAQ))
     if "/widget/catalog" in url:
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(CATALOG))
     if url.endswith("/widget/ask/stream"):
@@ -90,6 +117,7 @@ def setup_function(func):
     global _page
     posted.clear()
     stream_body[0] = STREAM_OK
+    host_token[0] = 'data-token="member-token"' if "signed_in" in func.__name__ else ""
     _page = _browser.new_page()
     _page.route("**/*", _stub)
     _page.goto("https://example.test/")
@@ -145,3 +173,47 @@ def test_the_contact_form_gives_a_reference():
     _page.wait_for_selector(".go-b.bot:has-text('GO-ABCD1234')")
     lead = next(b for u, b in posted if u.endswith("/widget/lead"))
     assert lead.get("visitor_id"), "the widget sends its visitor id for the daily cap"
+
+
+SAVED_COUNT = "JSON.parse(localStorage.getItem('groundedops_widget_v2') || '{}').messages.length"
+
+
+def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
+    stream_body[0] = STREAM_DETAIL
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector("button:has-text('Show more from the manual')")
+    assert _page.locator("summary:has-text('Verified against NV9 Manual, page 12')").count() == 1
+    assert _page.locator("button:has-text('Open NV9 Manual, page 12')").count() == 1
+    assert _page.locator("button:has-text('What voltage does it need?')").count() == 1
+    assert _page.locator("button:has-text('How do I clean the sensor?')").count() == 1
+    assert _page.locator("button:has-text('How do I remove the bezel?')").count() == 0,         "the question just asked is not offered again"
+    n_msgs = _page.evaluate(SAVED_COUNT)
+    _page.click("button:has-text('Show more from the manual')")
+    _page.wait_for_selector("blockquote.go-quote:has-text('Clip B releases')")
+    assert _page.locator("text=From NV9 Manual, page 14").count() == 1
+    n_after = _page.evaluate(SAVED_COUNT)
+    assert n_after == n_msgs, "the excerpt is not saved as a chat message"
+
+
+def test_a_related_question_is_asked_by_id():
+    stream_body[0] = STREAM_DETAIL
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector("button:has-text('What voltage does it need?')")
+    _page.click("button:has-text('What voltage does it need?')")
+    _page.wait_for_function("document.querySelectorAll('.go-b.usr').length >= 2")
+    asks = [b for u, b in posted if u.endswith("/widget/ask/stream")]
+    assert asks[-1]["faq_id"] == "f3" and asks[-1]["q"] == "What voltage does it need?"
+
+
+def test_a_signed_in_refusal_offers_the_closest_page_beside_support():
+    stream_body[0] = STREAM_REFUSAL
+    _ask("Can it make coffee?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator("button:has-text('Open NV9 Manual, page 30')").count() == 1
+
+
+def test_a_guest_is_not_offered_a_document_it_cannot_open():
+    stream_body[0] = STREAM_REFUSAL
+    _ask("Can it make coffee?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator("button:has-text('Open NV9 Manual')").count() == 0

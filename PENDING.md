@@ -908,9 +908,31 @@ exactly, we cannot tell whether a fix helped.
   streamed answer + vote, the 429 wording, the form's GO- reference).
   **Not measured live:** no backend was started this session. Run
   `run_live.py --path stream` N=3 on an idle box before declaring an SLO.
-- [ ] **8.12 Show what the server already sends**: "open the manual at page
+- [x] **8.12 Show what the server already sends**: "open the manual at page
   N", related questions, and a softer refusal that does not quote the
-  visitor's typo back.
+  visitor's typo back. Done 2026-09-29 (S11). After an answered turn (not
+  flagged, outage or sign-in) the widget shows, as chips: "Show more from
+  the manual" when more_context is `detail` (the passages render as
+  labelled quotes, "From <manual>, page N", and are NOT added to
+  state.messages, so the next condense is unchanged); "Open <manual>, page
+  N" (signed-in only: /source_file is token gated, so a guest's chip could
+  only fail; opens the PDF blob at #page=N in a tab opened on the click);
+  and up to 3 "Related questions": this product's curated FAQs the visitor
+  has not asked, edited ones first (`edited` added to /widget/faq), tapped
+  by faq_id. The starter chips now go by faq_id too. On a refusal, the same
+  "Open <manual>, page N" chip sits beside Email support. One source on a
+  generated answer reads "Verified against <manual>, page N"; otherwise
+  "Sources (n)". The clarify line no longer quotes the question back ("I
+  couldn't find that in the documentation I have here -- could you tell me
+  more concretely..."); the never-ask-twice marker is kept, and
+  test_clarify_gate now fails if a `{...}` returns to that string. Related
+  is not ranked by similarity to the answer, only by edited-first. **Not
+  done:** the section heading on refusals (optional in the plan), the
+  more_context.kind histogram over the retrieval set (needs a live
+  backend), and the console's Test chat still does not render
+  more_context -- it diverges from the widget here (no shared build step).
+  test_widget_walk.py gained 4 browser cases (detail, related by id,
+  signed-in refusal page chip, guest gets none).
 - [x] **8.13 Phone layout and screen-reader fixes**, plus an automated
   browser walk through the widget. (2026-09-28.) Three bugs found by
   walking the panel with Playwright/Chromium and fixed in

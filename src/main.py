@@ -4138,11 +4138,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 # about pricing, because pricing was simply the last thing
                 # typed. What the visitor asked THIS turn is the only thing
                 # certain to be what they want, so ask about that.
+                # 8.12: no longer quoted back in the reply. Echoing a typo
+                # ("I could not pin down "hwo do i rset"") reads as mockery;
+                # the visitor knows what they typed.
                 _asked = (q or "").strip() or history[-1].get("q", "")
                 answer = (
-                    f'I could not pin down "{_asked}" in the documentation I '
-                    f"have here — could you tell me more concretely what "
-                    f"you'd like me to check, or which model you mean?")
+                    "I couldn't find that in the documentation I have "
+                    "here — could you tell me more concretely what "
+                    "you'd like me to check, or which model you mean?")
                 role = "clarify"
                 ptrace.mark("clarify", _asked[:60])
                 needs_clarification = True

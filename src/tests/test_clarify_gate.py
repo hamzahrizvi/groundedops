@@ -101,8 +101,10 @@ def test_the_reworded_clarify_is_still_recognised_as_our_own():
     import inspect
     src = inspect.getsource(main.query)
     # The literal the clarify branch builds, with the f-string holes removed.
-    text = _re.search(r'f\'I could not pin down.*?\?"\)', src, _re.S)
+    text = _re.search(r'"I couldn\'t find that in the documentation.*?\?"\)', src, _re.S)
     assert text, "the clarify wording moved -- update this test with it"
+    assert "{" not in text.group(0), \
+        "8.12: the reply must not quote the visitor's own (often mistyped) words back"
     spoken = _re.sub(r'\{[^}]*\}|f?[\'"]|\s*\+?\s*\n\s*', " ", text.group(0))
     assert main._asked_to_clarify_last_turn([{"q": "x", "a": spoken}]) is True, \
         f"no _CLARIFY_MARKERS phrase survives in: {spoken!r}"
