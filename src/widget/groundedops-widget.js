@@ -2160,7 +2160,7 @@
           reveal: !d.from_faq && !d.flagged && !d.service_degraded,
           sources: d.flagged ? null : d.sources,
           flagged: !!d.flagged,
-          badge: d.from_faq ? "Reviewed answer" : null,
+          badge: d.from_faq ? (d.faq_reviewed ? "Reviewed answer" : "From our FAQ") : null,
           // Only a generated answer can be voted on: a curated one has been
           // reviewed, and a refusal or clarify question is not an answer.
           requestId: (!d.from_faq && !d.flagged && !d.offer_support &&

@@ -337,6 +337,8 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
                 # matching -- see HARVEST_MIN_SCORE in suggest_candidates.
                 "origin": qa.get("origin", "generated"),
             }
+            if qa.get("reviewed"):
+                entry["reviewed"] = True
             if lang != "en":
                 entry["language"] = lang
             if translation_of:
@@ -386,6 +388,17 @@ def add_entry(question: str, answer: str, products: str = "",
         _save(items)
     _invalidate_cache()
     return entry
+
+
+def is_reviewed(entry: dict) -> bool:
+    """9.6: may this entry wear the "Reviewed answer" badge? Only when a
+    person provably read it (approved as a draft, written or edited by hand,
+    or a pre-origin curated entry) or verify_faq_entries.py found it
+    supported by its own manual 3 times out of 3. /autogenerate saves
+    drafts nobody read, and harvested entries are raw manual text."""
+    return bool(entry.get("reviewed") or entry.get("verified") is True
+                or entry.get("edited")
+                or entry.get("origin") in ("manual", "curated", None))
 
 
 def update_entry(faq_id: str, question: str | None = None,

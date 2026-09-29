@@ -1618,8 +1618,9 @@ def _curated_faq_reply(entry: dict, asked: str, payload, x_user_id,
     visitor picked it from the suggestions or typed it near-verbatim.
 
     No grounding ran, so none is claimed -- rather than asserting 1.0 as the
-    old code did. It does not need it: a human wrote this answer AND a human
-    chose it. `asked` is what the saved conversation records: the entry's own
+    old code did. The entry may be a generated draft nobody read, so the
+    reply says which (`faq_reviewed`, see faq_store.is_reviewed) and the
+    badge follows it. `asked` is what the saved conversation records: the entry's own
     wording when it was picked from a list, the visitor's when it matched."""
     total_time = time.time() - started
     # M2: FAQ-served answers used to be absent from logs.jsonl entirely
@@ -1649,6 +1650,7 @@ def _curated_faq_reply(entry: dict, asked: str, payload, x_user_id,
         "grounding_score": None,
         "flagged": False,
         "from_faq": True,
+        "faq_reviewed": faq_store.is_reviewed(entry),
         "faq_matched_question": entry["question"],
         "sources": [],
     }

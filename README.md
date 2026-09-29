@@ -28,7 +28,7 @@ system actually produced against real product manuals — nothing is mocked.
 |---|---|
 | ![Launcher on a host page](docs/img/01-launcher.png) | **One `<script>` tag.** The widget sits on any page and opens on click. |
 | ![Choosing a product range](docs/img/03-ranges.png) | **Scope first.** Free typing is locked until a product is chosen, so every search runs against the right manual instead of the whole corpus. |
-| ![Suggested questions for the chosen product](docs/img/05-faq-suggestions.png) | **Reviewed answers first.** Curated FAQs for that product are offered before the model is involved — instant, and already checked by a person. |
+| ![Suggested questions for the chosen product](docs/img/05-faq-suggestions.png) | **Reviewed answers first.** Curated FAQs for that product are offered before the model is involved — instant, and badged "Reviewed" only when a person approved them or they were checked against the manual. |
 | ![An answer with its sources expanded](docs/img/07-sources-expanded.png) | **Grounded, and it shows its working.** The answer cites the manual and the exact pages, with the original PDF one click away. |
 
 ### When it doesn't know

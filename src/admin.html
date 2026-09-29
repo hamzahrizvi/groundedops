@@ -6378,7 +6378,7 @@ function viewTest() {
             sel.value = o.key; send(q, { silent: true });
           } }, o.label)));
       });
-      if (r.from_faq) bub.append(el("div", { class: "tag tag-outline", style: "margin-top:8px" }, "reviewed answer"));
+      if (r.from_faq) bub.append(el("div", { class: "tag tag-outline", style: "margin-top:8px" }, r.faq_reviewed ? "reviewed answer" : "from our FAQ"));
       log.append(bub._row);
 
       // The widget shows these; this page did not, so a clarify turn arrived

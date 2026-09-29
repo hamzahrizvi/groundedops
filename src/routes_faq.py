@@ -634,7 +634,9 @@ def admin_faq_bulk(payload: FaqBulkReq,
         e = e or {}
         if not (e.get("question") and e.get("answer")):
             continue
-        pair = {"question": e["question"], "answer": e["answer"]}
+        # 9.6: a person approved this draft; /autogenerate's are unread.
+        pair = {"question": e["question"], "answer": e["answer"],
+                "reviewed": True}
         if lang:
             pair["language"] = lang
             if e.get("translation_of"):

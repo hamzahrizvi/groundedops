@@ -339,11 +339,14 @@ def _faq_turn(payload, *args, **kwargs) -> dict:
 
 def _faq_response(answer: str, caller: dict, matched: str | None = None,
                   candidates: list | None = None, clarify: bool = False,
-                  needs_sign_in: bool = False, faq_language: str = "en") -> dict:
+                  needs_sign_in: bool = False, faq_language: str = "en",
+                  reviewed: bool = False) -> dict:
     return {
         "answer": answer,
         "sources": [],
         "from_faq": not needs_sign_in and not clarify,
+        # 9.6: the widget shows "Reviewed answer" only when this is true.
+        "faq_reviewed": reviewed,
         "faq_matched_question": matched,
         "faq_candidates": candidates,
         # A curated FAQ answer ran no retrieval, so there is no spare
@@ -555,7 +558,8 @@ def register(app, answer_query, draft_enquiry=None):
                 if entry:
                     return _faq_turn(payload, 
                         entry["answer"], caller, matched=entry["question"],
-                        faq_language=faq_store.norm_lang(entry.get("language")) or "en")
+                        faq_language=faq_store.norm_lang(entry.get("language")) or "en",
+                        reviewed=faq_store.is_reviewed(entry))
                 raise HTTPException(status_code=404, detail={
                     "error": "not_found", "message": "That answer is no longer available."})
 
@@ -567,7 +571,8 @@ def register(app, answer_query, draft_enquiry=None):
             if faq["mode"] == "answer":
                 return _faq_turn(payload, faq["entry"]["answer"], caller,
                                      matched=faq["entry"]["question"],
-                                     faq_language=lang)
+                                     faq_language=lang,
+                                     reviewed=faq_store.is_reviewed(faq["entry"]))
 
             # "Can I have the MyCheckr manual?" -- the file is member-only
             # (/source_file is token gated), so say that plainly rather than
@@ -672,6 +677,7 @@ def register(app, answer_query, draft_enquiry=None):
             "answer": result.get("answer"),
             "sources": _public_sources(result.get("sources")),
             "from_faq": bool(result.get("from_faq")),
+            "faq_reviewed": bool(result.get("faq_reviewed")),
             "faq_candidates": result.get("faq_candidates"),
             # 8.1: /query decided these but this endpoint builds its own dict,
             # so they never reached the surface customers actually use. Most
@@ -834,7 +840,7 @@ def register(app, answer_query, draft_enquiry=None):
 
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
-                               ("sources", "from_faq", "faq_candidates",
+                               ("sources", "from_faq", "faq_reviewed", "faq_candidates",
                                 "request_id", "role", "reason",
                                 "needs_sign_in", "sign_in_url",
                                 "service_degraded", "more_context",
