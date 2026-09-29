@@ -209,6 +209,18 @@ New items are numbered P1, 8.16, 8.17 and 9.14 in the table below.
   them. **Step 9.14**, a retrieval fix alongside plan steps 9.7 (reindex) and
   10.6 (figures beside procedures). Done looks like figure chunks carrying
   their page's section heading, and the 12 image cases re-run.
+  **Code done 2026-09-29** (`912239b`). The heading goes into the chunk's
+  breadcrumb, its body and its `section` metadata, on ingest and on
+  `index_figure_text`; a page with no heading takes the nearest earlier
+  page's. Measured on scratch copies of documents/ and chroma_db
+  (figures cut and OCR'd there, the live index untouched), with
+  `retrieve_from_db` scoped to the product: the case's figure chunk is
+  retrieved for **3/12 without headings and 4/12 with them** (SMART Hopper
+  height newly found at rank 4). That is retrieval only, not answers.
+  Headings are not the main barrier; the other 8 misses need
+  query-to-label matching (dimension words vs bare numbers) or 10.6. Live
+  only after the 9.7 rebuild with FIGURE_TEXT_INDEX=1 (currently 0
+  figure-text chunks in the live index).
 
 *Process*
 - [x] **Two sessions editing one working tree broke the repository twice
@@ -343,7 +355,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 10 | Opus | 23, 24, 25 | Conversation follow-ups. **Done 2026-09-29** (`8b9fe65`..`c858ab7`); full suite 305 passed (1 skipped); run_live 25 3/3 on both paths, 13 4/4 x3; routing 152/164 (same 12 fails); retrieval old 32 unchanged but one 1/3 noise flip; held-out unscoped 22/30 (was 19). 8.17 is only partly done: 7/10 held-out descriptions still fail. |
 | 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: SMTP settings + one real enquiry (8.9); the 8.15 baseline re-arm and a `run_live --path stream` N=3 run (both need a live backend). |
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), backup via company gateway + drill ~10-01 (9.3), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
-| 13 | Opus | 38, 39 | |
+| 13 | Opus | 38, 39 | **Done 2026-09-29** (`b2cb5dc`, `912239b`, `ca0d6e2` + this); full suite 312 passed (1 skipped). 9.6: the "Reviewed answer" badge now appears on 168/406 entries, down from all 406. The audit checked the 157 unedited generated entries: 110 verified 3/3, 8 unstable, 39 stable rejects (list in `eval_runs/faq_audit_9.6.log`). 9.14: figure chunks carry their page heading. On a scratch index, the case's figure chunk is retrieved for 4/12 image cases, up from 3/12. The new chunks reach the live index only through the 9.7 rebuild (S14). Left for you: read the 39 rejects against the PDFs, then edit or delete them (9.6). |
 | 14 | Fable, then shell | 40, 41 | Fable checks the rebuild is safe, a script runs it, you add the sheet. |
 | 15 | Fable | 42, 43 | |
 | 16 | Sonnet | 44 | |
@@ -1066,8 +1078,25 @@ exactly, we cannot tell whether a fix helped.
   harmless this time). **Left for you:** put BACKUP_PASSPHRASE in the
   password manager, then delete `BACKUP_ALLOW_PLAINTEXT=1` from src/.env
   (gate: POST /admin/backup/export without a passphrase -> 400).
-- [ ] **9.6 Check the unreviewed FAQ answers** and only show "Reviewed
-  answer" on ones a person actually checked.
+- [x] **9.6 Check the unreviewed FAQ answers** and only show "Reviewed
+  answer" on ones a person actually checked. **Code done 2026-09-29**
+  (`b2cb5dc`, `ca0d6e2`). `faq_store.is_reviewed` decides who gets the
+  badge. Approved drafts are saved `reviewed: true`; manual, curated and
+  edited entries count as reviewed, as do entries the audit verified 3/3.
+  Everything else shows "From our FAQ". Badge-eligible: 168/406 (harvested
+  entries are raw manual text and get no badge). `verify_faq_entries.py`
+  ran 3x over the 157 unedited generated entries (backup of the store
+  before the run: `eval_runs/faq_store.before-9.6.json`): 110 verified,
+  8 unstable, 39 stable rejects.
+  The rejects fall into three groups. (a) 10 ICU API entries answer "how
+  do I X" with "X was added in version 1.0.N", which is a changelog line,
+  not an answer: likely genuinely bad. (b) About 20 table-caption entries
+  saved as "generated", where the verifier's top-3 chunks probably missed
+  the table page: likely fine. (c) BV30/NV9USB+ overview blurbs.
+  No serve gate was added (per the plan: only if the person finds real
+  wrong entries). **Left for you:** read the 39 rejects in
+  `eval_runs/faq_audit_9.6.log` against the PDFs, then edit or delete them.
+  Editing an entry makes it reviewed.
 - [ ] **9.7 Rebuild the search index** (removes page footers, adds table
   context) - only after the new code is committed and five document tags
   are confirmed.
