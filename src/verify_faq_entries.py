@@ -27,6 +27,8 @@ def main_() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    # A cp1252 console dies on the first "Ω" in a question.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     # torch must first import on the main thread; main pulls it in.
     import main
@@ -40,27 +42,29 @@ def main_() -> int:
     if args.limit:
         todo = todo[:args.limit]
     verdicts = {}
-    for i, e in enumerate(todo, 1):
-        chunks = retrieval_db.retrieve_from_db(e["question"], top_k=3,
-                                               source_filter=e["source"])
-        with judging():
-            passes = sum(main._llm_verified(e["answer"], chunks,
-                                            question=e["question"])
-                         for _ in range(RUNS))
-        verdicts[e["id"]] = (True if passes == RUNS else
-                             False if passes == 0 else "unstable")
-        print(f"[{i}/{len(todo)}] {passes}/{RUNS} {e['question'][:70]!r}",
-              flush=True)
-
-    if not args.dry_run and verdicts:
-        # Re-read so an edit made while this ran is not overwritten.
-        with faq_store._lock:
-            items = faq_store._load()
-            for it in items:
-                if it.get("id") in verdicts and not it.get("edited"):
-                    it["verified"] = verdicts[it["id"]]
-            faq_store._save(items)
-        faq_store._invalidate_cache()
+    try:
+        for i, e in enumerate(todo, 1):
+            chunks = retrieval_db.retrieve_from_db(e["question"], top_k=3,
+                                                   source_filter=e["source"])
+            with judging():
+                passes = sum(main._llm_verified(e["answer"], chunks,
+                                                question=e["question"])
+                             for _ in range(RUNS))
+            verdicts[e["id"]] = (True if passes == RUNS else
+                                 False if passes == 0 else "unstable")
+            print(f"[{i}/{len(todo)}] {passes}/{RUNS} {e['question'][:70]!r}",
+                  flush=True)
+    finally:
+        # Even on a crash: the judging calls already made are worth keeping.
+        if not args.dry_run and verdicts:
+            # Re-read so an edit made while this ran is not overwritten.
+            with faq_store._lock:
+                items = faq_store._load()
+                for it in items:
+                    if it.get("id") in verdicts and not it.get("edited"):
+                        it["verified"] = verdicts[it["id"]]
+                faq_store._save(items)
+            faq_store._invalidate_cache()
 
     vals = list(verdicts.values())
     print(f"\nverified {vals.count(True)}, unstable {vals.count('unstable')}, "
