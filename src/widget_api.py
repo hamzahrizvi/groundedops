@@ -312,6 +312,31 @@ def _resolve_anon_language(payload_language: str | None, question: str) -> str:
     return code if (code == "en" or code in quota.faq_enabled_languages()) else "en"
 
 
+def _faq_turn(payload, *args, **kwargs) -> dict:
+    """_faq_response for a guest turn, logged. These returns never reach
+    query(), so no trace is open and nothing used to record them; the row
+    carries M2's field names (session_id, origin, outcome) so the guest
+    funnel reads from logs.jsonl like every other turn."""
+    resp = _faq_response(*args, **kwargs)
+    try:
+        import pipeline_trace as ptrace
+        from logger import log_interaction
+        outcome = ("clarify" if resp["needs_clarification"] else
+                   ("faq.picked" if payload.faq_id else "faq.answer")
+                   if resp["from_faq"] else "refusal")
+        tok = ptrace.start()
+        try:
+            ptrace.set_meta(surface="widget", session_id=payload.session_id,
+                            origin=ptrace.origin_for(payload.session_id, "widget"))
+            ptrace.mark(outcome)
+            log_interaction(payload.q, resp["answer"], role="faq_only")
+        finally:
+            ptrace.reset(tok)
+    except Exception as exc:
+        logger.warning(f"guest FAQ turn not logged: {exc}")
+    return resp
+
+
 def _faq_response(answer: str, caller: dict, matched: str | None = None,
                   candidates: list | None = None, clarify: bool = False,
                   needs_sign_in: bool = False, faq_language: str = "en") -> dict:
@@ -434,8 +459,10 @@ def register(app, answer_query, draft_enquiry=None):
         assembled = _assemble_enquiry(payload.kind, payload.product or "",
                                       notes, transcript)
 
-        anon_ok = os.getenv("WIDGET_AI_DRAFT_ANONYMOUS", "").strip().lower() \
-            in ("1", "true", "yes")
+        # The console switch, or the env the site-bot instance sets: the
+        # env alone left drafting shut after the console opened /ask.
+        anon_ok = quota.anon_llm_enabled() or os.getenv(
+            "WIDGET_AI_DRAFT_ANONYMOUS", "").strip().lower() in ("1", "true", "yes")
         if draft_enquiry is None or (tier == "anonymous" and not anon_ok):
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
@@ -500,7 +527,13 @@ def register(app, answer_query, draft_enquiry=None):
         # path. An operator can lift it from the console (policy.py's
         # anon_llm_enabled) — a deliberate choice with a bill attached, which
         # is why it is off until someone turns it on.
-        if tier == "anonymous" and not quota.anon_llm_enabled():
+        # 9.4: a guest who reaches the site-wide daily cap is served exactly
+        # as if the switch were off -- never a 429 for the site's own spend.
+        guest_capped = (tier == "anonymous" and quota.anon_llm_enabled()
+                        and (await run_in_threadpool(
+                            quota.check, caller, spec["credits"]))["reason"]
+                        == "global_quota")
+        if tier == "anonymous" and (not quota.anon_llm_enabled() or guest_capped):
             gate = await run_in_threadpool(quota.check_faq_lookup, caller)
             if not gate["allowed"]:
                 raise HTTPException(status_code=429, detail={
@@ -520,7 +553,7 @@ def register(app, answer_query, draft_enquiry=None):
             if payload.faq_id:
                 entry = faq_store.get_by_id(payload.faq_id)
                 if entry:
-                    return _faq_response(
+                    return _faq_turn(payload, 
                         entry["answer"], caller, matched=entry["question"],
                         faq_language=faq_store.norm_lang(entry.get("language")) or "en")
                 raise HTTPException(status_code=404, detail={
@@ -532,7 +565,7 @@ def register(app, answer_query, draft_enquiry=None):
                 payload.product or payload.category, True, lang)
 
             if faq["mode"] == "answer":
-                return _faq_response(faq["entry"]["answer"], caller,
+                return _faq_turn(payload, faq["entry"]["answer"], caller,
                                      matched=faq["entry"]["question"],
                                      faq_language=lang)
 
@@ -542,13 +575,13 @@ def register(app, answer_query, draft_enquiry=None):
             # manual". A curated FAQ about manuals still wins, above.
             import doc_request
             if doc_request.document_request(payload.q):
-                return _faq_response(
+                return _faq_turn(payload, 
                     "Product manuals and documents are available to account "
                     "holders. Sign in and I can give you the download link.",
                     caller, needs_sign_in=True, faq_language=lang)
 
             if faq["mode"] == "disambiguate":
-                return _faq_response(
+                return _faq_turn(payload, 
                     "These FAQs match your query - please select the one you meant:",
                     caller, candidates=faq["candidates"], clarify=True,
                     faq_language=lang)
@@ -559,7 +592,7 @@ def register(app, answer_query, draft_enquiry=None):
             # answer" failure suggest_candidates's own design exists to
             # prevent. record_gap (inside suggest_candidates) already
             # captured this as language-tagged demand.
-            return _faq_response(
+            return _faq_turn(payload, 
                 "I don't have a reviewed answer for that yet. Sign in to your "
                 "account and I can search the full product documentation for you.",
                 caller, needs_sign_in=True, faq_language=lang)
@@ -574,7 +607,10 @@ def register(app, answer_query, draft_enquiry=None):
                 "limit": gate["limit"],
                 "remaining": gate["remaining"],
                 "reset_at": gate["reset_at"],
-                "message": "You have used your allowance for today. It resets in 24 hours.",
+                "message": ("The assistant has reached its limit for today. "
+                            "Please try again tomorrow, or contact our team."
+                            if gate["reason"] == "global_quota" else
+                            "You have used your allowance for today. It resets in 24 hours."),
             })
 
         started = time.time()

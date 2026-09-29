@@ -67,6 +67,9 @@ _DEFAULTS = {
     "staff_daily_credits": int(os.getenv("QUOTA_STAFF", "500")),
     "anon_faq_daily": int(os.getenv("QUOTA_ANON_FAQ", "60")),
     "anon_ip_daily": int(os.getenv("QUOTA_ANON_IP", "200")),
+    # Site-wide credits per window across every non-staff caller: the bill
+    # ceiling a per-visitor cap cannot give. 0 = off.
+    "global_llm_daily": int(os.getenv("QUOTA_GLOBAL_LLM", "0")),
 
     # ── Per-conversation caps ──────────────────────────────────────────
     # Distinct from the daily allowance: these bound a single sitting, so one
@@ -161,7 +164,7 @@ _DEFAULTS = {
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
                "anon_faq_daily", "anon_ip_daily", "questions_per_session",
-               "tokens_per_session", "grounding_retries")
+               "tokens_per_session", "grounding_retries", "global_llm_daily")
 _BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks",
                "multilingual_faq_enabled")
 _TEXT_FIELDS = ("anon_notice", "sales_reply")
@@ -186,6 +189,7 @@ _MAX = {
     "staff_daily_credits": 100000,
     "anon_faq_daily": 100000,
     "anon_ip_daily": 100000,
+    "global_llm_daily": 1000000,
     "questions_per_session": 1000,
     "tokens_per_session": 2000000,
     # More than a handful of regenerations is a bill, not a retry strategy.

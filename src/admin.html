@@ -3184,10 +3184,12 @@ function viewPolicy() {
          "Credits a signed-in customer may spend each day. A standard answer costs 1, a detailed one 4.", "credits/day");
   numRow("staff_daily_credits", "Staff allowance",
          "For tokens issued to your own team.", "credits/day");
+  numRow("global_llm_daily", "Site-wide daily cap",
+         "0 means off. Credits all guests and customers together may spend per day; staff are exempt. When it is reached guests fall back to reviewed FAQs and customers are told to try tomorrow.", "credits/day");
   const acctCard = el("div", { class: "card elev-sm",
                                style: "padding:18px 20px;gap:0;margin-bottom:14px",
                                "data-sec": "Account holders" },
-    el("h3", {}, "Account holders"), mk.splice(0, 2));
+    el("h3", {}, "Account holders"), mk.splice(0, 3));
 
   numRow("questions_per_session", "Questions per conversation",
          "0 means no limit. Bounds one sitting, so a single runaway thread cannot spend a whole day of allowance.", "questions");

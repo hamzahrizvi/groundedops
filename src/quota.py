@@ -111,6 +111,10 @@ def anon_ip_limit() -> int:
     return int(_policy("anon_ip_daily", ANON_IP_LIMIT))
 
 
+def global_llm_limit() -> int:
+    return int(_policy("global_llm_daily", 0))
+
+
 def anon_llm_enabled() -> bool:
     return bool(_policy("anon_llm_enabled", False))
 
@@ -408,6 +412,12 @@ def check(caller: dict, cost: int) -> dict:
             if ip_used + cost > anon_ip_limit():
                 return {"allowed": False, "remaining": 0, "limit": limit,
                         "reset_at": win + WINDOW_SECONDS, "reason": "ip_quota"}
+        # The site's own bill, shared by every non-staff caller.
+        cap = global_llm_limit()
+        if (cap and caller["tier"] != "staff"
+                and _used(c, GLOBAL_IDENTITY, win) + cost > cap):
+            return {"allowed": False, "remaining": 0, "limit": limit,
+                    "reset_at": win + WINDOW_SECONDS, "reason": "global_quota"}
     return {"allowed": True, "remaining": remaining, "limit": limit,
             "reset_at": win + WINDOW_SECONDS, "reason": None}
 
@@ -421,6 +431,8 @@ def consume(caller: dict, cost: int) -> dict:
         _add(c, caller["identity"], win, cost)
         if caller.get("ip_identity"):
             _add(c, caller["ip_identity"], win, cost)
+        if caller["tier"] != "staff":
+            _add(c, GLOBAL_IDENTITY, win, cost)
         _purge_old(c)
         used = _used(c, caller["identity"], win)
     limit = limit_for(caller["tier"])
@@ -487,6 +499,9 @@ def status(caller: dict) -> dict:
         "standard_cost": EFFORT["standard"]["credits"],
         "deep_cost": EFFORT["deep"]["credits"],
     }
+
+
+GLOBAL_IDENTITY = "global:llm"
 
 
 def _used(c, identity: str, win: int) -> int:
