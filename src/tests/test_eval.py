@@ -263,3 +263,44 @@ def test_baseline_from_results_refuses_a_blind_set_and_writes_nothing():
             written = _json.load(f)
         assert written["cases"] == {"faq::a": True, "faq::b": False}
         assert written["pass_rate"] == 0.5 and written["repeats"] == 2
+
+
+def test_fine_outcomes_mirror_run_live_and_leave_old_cases_alone():
+    """8.15: handoff / deflect / manual are scored by name; a case asking for
+    "rejected" still passes on a sales deflect, as it did before."""
+    fo = rag_eval.fine_outcome
+    assert fo({"role": "handoff", "answer": "I'll hand this over"}) == "handoff"
+    assert fo({"role": "sales", "answer": "Contact sales"}) == "deflect"
+    assert fo({"role": "document", "sources": [{"download_url": "/source_file/x"}]}) == "manual"
+    assert fo({"role": "fast", "sources": [{"download_url": "/source_file/x"}]}) == "manual"
+    assert fo({"role": "fast", "sources": [{"download_url": "/x", "pages": [3]}]}) is None, \
+        "a cited page is an answer, not a document handed over"
+    assert fo({"role": "fast", "answer": "It weighs 1 kg"}) is None
+    assert set(rag_eval.VALID_OUTCOMES) >= {"handoff", "deflect", "manual", "rejected"}
+
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.data
+
+    sales = {"answer": "Please contact our sales team.", "role": "sales"}
+    for want, ok in (("deflect", True), ("rejected", True), ("handoff", False)):
+        with patch.object(rag_eval.requests, "post", return_value=Response(sales)):
+            res = rag_eval.run_case({"q": "price?", "outcome": want}, "s", do_grade=False)
+        assert res["checks"]["outcome"] is ok, want
+        assert res["fine_outcome"] == "deflect"
+
+
+def test_breakdown_counts_layers_and_the_faq_share():
+    results = [_res("a", True, layer="faq", provider="faq"),
+               _res("b", False, layer="faq", provider="deepseek"),
+               _res("c", True, layer="refusal", provider="none"),
+               _res("d", None, skipped=True, layer="refusal", provider="faq")]
+    b = rag_eval.breakdown(results)
+    assert b["layers"] == {"faq": [1, 2], "refusal": [1, 1]}
+    assert b["providers"] == {"faq": 1, "deepseek": 1, "none": 1}

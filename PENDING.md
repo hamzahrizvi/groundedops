@@ -984,7 +984,31 @@ exactly, we cannot tell whether a fix helped.
   same commit too (the `MULTILINGUAL` env var is the switch), but that is
   a separate step's box to tick, not read further here.
 - [ ] **8.15 Add test cases for all of the above**, so the test suite looks
-  like real conversations and not just FAQ lookups.
+  like real conversations and not just FAQ lookups. **Partly done
+  2026-09-29 (S11): code and cases in, baseline NOT re-armed.** eval.py:
+  `fine_outcome` (handoff / deflect / manual, mirroring
+  run_live.observed_outcome; a manual is a download_url with no cited
+  page) is checked only when a case asks for one of those by name, so all
+  34 older cases score exactly as before ("sales" is still "rejected");
+  --selfcheck accepts the six outcomes; every run prints runs passed per
+  layer and "answered by" per provider (the provider == 'faq' count is the
+  curated share, no --skip-faq pass). eval_cases.json 34 -> 49: 15 new
+  phrasings (none from the blind sets; the SCS warranty and MyCheckr
+  battery drafts were dropped for overlapping them), covering stress items
+  1 (handoff x2), 3 (BV30 vs NV200S supply voltage, unscoped), 4 (NV200S
+  interfaces -> "and the BV30?"), 5 (manual x2), 6 (deflect x2), 7
+  (greeting), 8 (absence x2, keywords_absent "Yes,"), 9 (Spanish price),
+  plus SSP poll 0x07 and sync 0x11. The handoff, deflect, manual and
+  greeting triggers were checked against the real detectors. Items 10 and
+  11 are UI and are covered by test_widget_walk.py (related questions,
+  votes); item 2 is --repeats. So 8/11 items have an eval case, 10/11 have
+  a gating test. **Not done:** the unscoped fault-report case (needs
+  clarify.unscoped_clarify_products run with a live top_score), and the
+  re-arm itself, a shell job on a spare backend: `EVAL_URL=http://127.0.0.1:8004/query
+  python eval.py --repeats 3 --results eval_runs/815_all.json`, then the same
+  with `--layer faq --results eval_runs/815_faq.json`, then
+  `--baseline-from-results eval_runs/815_all.json`. Expect the tuned number
+  to FALL: the new cases were written to find failures, not to pass.
 
 ### Tier 8 -> 9 - reliable, reachable, safe
 

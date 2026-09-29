@@ -139,6 +139,29 @@ def classify_outcome(data: dict) -> str:
     return "rejected"
 
 
+# 8.15: the three shapes run_live.observed_outcome can see and classify_outcome
+# folds into "rejected". A case asks for one of these by name; every older
+# case keeps scoring on classify_outcome, so "sales" still counts as rejected.
+SPECIFIC_OUTCOMES = ("handoff", "deflect", "manual")
+VALID_OUTCOMES = ("answered", "clarify", "rejected") + SPECIFIC_OUTCOMES
+
+
+def fine_outcome(data: dict) -> str | None:
+    """handoff / deflect / manual, or None. Mirrors run_live.observed_outcome:
+    a manual is a document handed over (download_url, no cited page)."""
+    role = (data.get("role") or "").lower()
+    if role == "sales" or data.get("kind") == "deflected":
+        return "deflect"
+    if role == "document" or any(
+            (s or {}).get("download_url") and not (s or {}).get("pages")
+            and not str((s or {}).get("page_label") or "").startswith("page")
+            for s in data.get("sources") or []):
+        return "manual"
+    if role == "handoff":
+        return "handoff"
+    return None
+
+
 def llm_grade(question: str, reference: str, answer: str) -> tuple[bool, str]:
     """Ask a model whether `answer` is correct given `reference`. Returns
     (passed, reason). Fails closed (returns False) if the grader is
@@ -207,9 +230,12 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
 
     answer = data.get("answer", "") or ""
     outcome = classify_outcome(data)
+    fine = fine_outcome(data)
 
     # 1. outcome
-    if "outcome" in case:
+    if case.get("outcome") in SPECIFIC_OUTCOMES:
+        checks["outcome"] = (fine == case["outcome"])
+    elif "outcome" in case:
         checks["outcome"] = (outcome == case["outcome"])
 
     # 2. keywords
@@ -247,6 +273,7 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
         "q": q,
         "layer": case_layer(case),
         "outcome": outcome,
+        "fine_outcome": fine,
         "grounding": data.get("grounding_score"),
         "retrieval": data.get("retrieval_score"),
         "provider": data.get("provider"),
@@ -379,6 +406,32 @@ def print_latency(results: list) -> None:
     print("  wall seconds per role (advisory; p50 / p90):")
     for role, (n, p50, p90) in rows.items():
         print(f"    {role:10} n={n:3}  p50={p50:6.2f}s  p90={p90:6.2f}s")
+
+
+def breakdown(results: list) -> dict:
+    """8.15: runs passed per layer, and which provider answered. provider
+    'faq' is the curated-answer share, read from a normal run -- no
+    --skip-faq second pass, which would record a gap on every question."""
+    layers, providers = {}, {}
+    for r in results:
+        if r.get("skipped"):
+            continue
+        n = layers.setdefault(r.get("layer") or "faq", [0, 0])
+        n[0] += bool(r.get("passed"))
+        n[1] += 1
+        prov = r.get("provider") or "none"
+        providers[prov] = providers.get(prov, 0) + 1
+    return {"layers": layers, "providers": providers}
+
+
+def print_breakdown(results: list) -> None:
+    b = breakdown(results)
+    if not b["layers"]:
+        return
+    print("  per layer (runs passed): " + ", ".join(
+        f"{k} {p}/{n}" for k, (p, n) in sorted(b["layers"].items())))
+    print("  answered by: " + ", ".join(
+        f"{k} {n}" for k, n in sorted(b["providers"].items(), key=lambda kv: -kv[1])))
 
 
 def print_comparison(cmp: dict, name_a: str, name_b: str) -> None:
@@ -539,7 +592,7 @@ def main():
             assert isinstance(cases, list) and cases, "no cases"
             for i, c in enumerate(cases):
                 assert "q" in c, f"case {i} missing 'q'"
-                assert c.get("outcome") in ("answered", "clarify", "rejected"), \
+                assert c.get("outcome") in VALID_OUTCOMES, \
                     f"case {i} bad outcome"
                 assert case_layer(c) in VALID_LAYERS, \
                     f"case {i} has invalid layer {case_layer(c)!r}"
@@ -663,6 +716,7 @@ def main():
           f"across {repeats} run(s) ({stable_rate:.0%}); "
           f"skipped={sum(1 for r in results if r.get('skipped'))}")
     print_latency(results)
+    print_breakdown(results)
     if blind:
         print(MEASURE_ONLY_BANNER)
 
