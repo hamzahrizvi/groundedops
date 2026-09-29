@@ -401,6 +401,7 @@
     },
     {
       "q": "¿Cuánto cuesta el SMART Coin System?",
+      "language": "es",
       "new_session": true,
       "product": "sku_scs",
       "layer": "refusal",

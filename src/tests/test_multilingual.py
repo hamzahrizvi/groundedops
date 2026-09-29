@@ -27,7 +27,9 @@ def _english_questions():
         except Exception:
             continue
         for c in (d if isinstance(d, list) else d.get("cases", [])):
-            if isinstance(c, dict):
+            # A case that says it is not English is asked in that language
+            # on purpose (8.15's Spanish price question).
+            if isinstance(c, dict) and c.get("language", "en") == "en":
                 for k in ("question", "q", "query"):
                     if isinstance(c.get(k), str):
                         out.append(c[k])

@@ -341,7 +341,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 8 | Opus | 17 | Tag repair. |
 | 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. **Done 2026-09-29** (`dde62db`..`c4cc950` + two follow-ups); full suite 299/299 (1 skipped); retrieval 29/32 and tuned 33/34 unchanged. |
 | 10 | Opus | 23, 24, 25 | Conversation follow-ups. **Done 2026-09-29** (`8b9fe65`..`c858ab7`); full suite 305 passed (1 skipped); run_live 25 3/3 on both paths, 13 4/4 x3; routing 152/164 (same 12 fails); retrieval old 32 unchanged but one 1/3 noise flip; held-out unscoped 22/30 (was 19). 8.17 is only partly done: 7/10 held-out descriptions still fail. |
-| 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. |
+| 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: SMTP settings + one real enquiry (8.9); the 8.15 baseline re-arm and a `run_live --path stream` N=3 run (both need a live backend). |
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. |
 | 13 | Opus | 38, 39 | |
 | 14 | Fable, then shell | 40, 41 | Fable checks the rebuild is safe, a script runs it, you add the sheet. |
