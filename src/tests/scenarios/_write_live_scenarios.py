@@ -1,4 +1,4 @@
-"""Generates scenarios 11-24: the LIVE conversations added on 2026-09-25.
+"""Generates scenarios 11-25: the LIVE conversations added on 2026-09-25.
 
 Run: python tests/scenarios/_write_live_scenarios.py
 
@@ -20,6 +20,7 @@ intents.is_handoff_request / is_greeting) instead of 01-10's bare
                          source filename (only checked when expect=answer)
                 mention  words, one of which must appear in the answer
                 avoid    words that must NOT appear in the answer
+                reply    a button that must be in suggested_replies (8.8)
 
 "any" means the engineer would accept more than one shape (e.g. a refusal
 OR a clarify) and only the mention/avoid lists are scored. Where the label
@@ -48,7 +49,7 @@ LINUX = "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf"
 
 
 def t(q, needs_history, commercial, note, expect="answer", cite=None,
-      mention=None, avoid=None, answer_mention=None, **extra):
+      mention=None, avoid=None, answer_mention=None, reply=None, **extra):
     """needs_history is the is_followup_turn routing decision (None where a
     deflect or an intent, main.py:1448 / :2501, reaches the question first
     and the routing decision never happens); markers/intent are optional
@@ -65,6 +66,8 @@ def t(q, needs_history, commercial, note, expect="answer", cite=None,
         d["live"]["answer_mention"] = answer_mention
     if avoid:
         d["live"]["avoid"] = avoid
+    if reply:
+        d["live"]["reply"] = reply
     d.update(extra)
     return d
 
@@ -347,6 +350,22 @@ SCENARIOS = [
               "German: factory reset of NV9USB+", expect="any", mention=["NV9USB", "reset", "zurück", "Werks"]),
             t("Quel est le prix du NV9USB+ ?", False, True,
               "French price question -> should still deflect to sales", expect="deflect"),
+        ],
+    },
+    {
+        "id": "25_mycheckr_linux_steps_offer",
+        "product": "MyCheckr (Linux guide)", "product_key": "biometrics_general", "source": LINUX,
+        "persona": "Installer on a Linux box; takes the offered steps (8.8).",
+        "scoped": False, "expect_labels": [],
+        "turns": [
+            t("Can I connect to MyCheckr using Linux?", False, False,
+              "capability question (classified capability 7/7 in logs); "
+              "the reply offers the steps with a button",
+              mention=["steps"], reply="Yes, show me the steps"),
+            t("Yes, show me the steps", None, False,
+              "the offer's own button: served verbatim from the Linux guide "
+              "before routing runs, so no follow-up decision is made",
+              cite=["Linux Environment"], mention=["udev", "sudo"]),
         ],
     },
 ]

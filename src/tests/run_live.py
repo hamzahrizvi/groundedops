@@ -176,6 +176,8 @@ def score_turn(turn, r):
             fails.append(f"cite: none of {live['cite']} in [{srcs}]")
     if live.get("mention") and not any(m.lower() in low for m in live["mention"]):
         fails.append(f"mention: none of {live['mention']}")
+    if live.get("reply") and live["reply"] not in (r.get("suggested_replies") or []):
+        fails.append(f"reply: no {live['reply']!r} button")
     hit = [a for a in live.get("avoid", []) if a.lower() in low]
     if hit:
         fails.append(f"avoid: found {hit}")
