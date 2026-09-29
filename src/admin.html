@@ -3930,7 +3930,7 @@ const FLOWS = [
       { view: "widget", ref: "wd-install", title: "2. Put it on the site",
         text: "One script tag. Paste it before the closing body tag of any page the widget should appear on." },
       { view: "leads", ref: "leads-list", title: "3. What comes back",
-        text: "Sales and support forms land here. They are not emailed anywhere, so this is the only place they appear." }] },
+        text: "Sales and support forms land here, and are emailed to the form's Send-to address once the mail server is set under API keys." }] },
 ];
 
 function quickSetup() {
@@ -4032,7 +4032,7 @@ function viewOverview() {
   const unhandled = (cache.leadStats || {}).unhandled || 0;
   if (unhandled) {
     steps.push(step("todo", unhandled + " enquir" + (unhandled === 1 ? "y" : "ies") + " waiting",
-      "Someone filled in the sales or support form. These are not emailed anywhere, so they sit here until you reply.",
+      "Someone filled in the sales or support form. They stay here until you mark them handled.",
       [goTo("leads", "Read them", true)]));
   }
 
@@ -5558,7 +5558,7 @@ function viewWidget() {
         el("label", { class: "flabel" }, "Send to"), notify,
         notifyWarn,
         el("p", { class: "sec-hint", style: "margin:6px 0 0" },
-          "Where this form's submissions belong. \u26a0 Not emailed yet \u2014 there is no mail server configured, so enquiries are collected under Enquiries in this console and this address is stored ready for when sending is wired up. It is never shown to visitors.")));
+          "Where this form's submissions are emailed, once the mail server is set under API keys. Every enquiry also lands under Enquiries in this console. It is never shown to visitors.")));
   }
 
   /* Builds the WordPress plugin zip with this deployment's backend address
@@ -5741,6 +5741,7 @@ function viewLeads() {
       el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" },
         el("span", { class: "tag " + (l.kind === "sales" ? "tag-accent" : "tag-neutral") }, l.kind),
         l.product ? el("span", { class: "tag tag-neutral mono" }, l.product) : null,
+        el("span", { class: "mono", style: "font-size:12px" }, "GO-" + String(l.id || "").slice(0, 8).toUpperCase()),
         el("span", { style: "flex:1" }),
         el("span", { style: "font-size:11.5px;color:color-mix(in srgb,var(--color-text) 45%,transparent)" },
           shortDate(l.created_at))),
@@ -5759,13 +5760,12 @@ function viewLeads() {
                 : l.summary_source === "written" ? "In their own words" : "Summary"),
             el("div", { style: "white-space:pre-wrap;font-size:13.5px;line-height:1.5" }, l.enquiry))
         : null,
-      // Recorded by widget_config.add_lead so the console can be honest that
-      // nothing was emailed. Says so plainly rather than letting someone
+      // Says plainly when it was not emailed, rather than letting someone
       // assume the destination address means it was delivered.
       l.notify_email
         ? el("div", { style: "margin-top:8px;font-size:11.5px;color:color-mix(in srgb,var(--color-text) 50%,transparent)" },
             l.notified ? "Emailed to " + l.notify_email
-                       : "For " + l.notify_email + " — not emailed (no mail server configured yet)")
+                       : "For " + l.notify_email + " — not emailed (mail server not set, or the send failed)")
         : el("div", { style: "margin-top:8px;font-size:11.5px;color:var(--color-warn,#c98a00)" },
             "No destination set for this form — add one under Widget design"),
       (l.transcript || []).length
@@ -5796,13 +5796,16 @@ function viewLeads() {
   const s = cache.leadStats || {};
   return [
     el("h1", {}, "Enquiries"),
-    el("p", { class: "lede" }, "Sales and support forms submitted through the widget. These are not emailed to anyone \u2014 this console is where they arrive, so check it regularly."),
+    el("p", { class: "lede" }, "Sales and support forms submitted through the widget. Each is emailed to its form's Send-to address when the mail server is set, and always kept here. The visitor is given the GO- reference shown on each."),
+    s.full ? el("p", { class: "warn" }, "The enquiry store is full, so the contact form is refusing new messages. Delete handled enquiries to make room.") : null,
     el("div", { class: "readout" },
       el("div", { class: s.unhandled ? "warn" : "" },
         el("div", { class: "lbl" }, "Needs a reply"), el("b", {}, String(s.unhandled || 0))),
       el("div", {}, el("div", { class: "lbl" }, "Sales"), el("b", {}, String(s.sales || 0))),
       el("div", {}, el("div", { class: "lbl" }, "Support"), el("b", {}, String(s.support || 0))),
-      el("div", {}, el("div", { class: "lbl" }, "Total"), el("b", {}, String(s.total || 0)))),
+      el("div", {}, el("div", { class: "lbl" }, "Total"), el("b", {}, String(s.total || 0))),
+      el("div", { class: s.unsent ? "warn" : "" },
+        el("div", { class: "lbl" }, "Not emailed"), el("b", {}, String(s.unsent || 0)))),
     el("div", { "data-tour": "leads-list" }, rows),
   ];
 }
@@ -6569,7 +6572,7 @@ const tourStepsByView = {
   ],
   leads: [
     { ref: "leads-list", title: "Enquiries arrive here and nowhere else",
-      text: "The sales and support forms visitors submit. Nothing is emailed out, so this console is the only place they land \u2014 worth building a habit of checking." },
+      text: "The sales and support forms visitors submit. They are emailed out once the mail server is set, and always kept here \u2014 worth building a habit of checking." },
   ],
   test: [
     { ref: "test-widget", title: "The actual widget, not a copy of it",

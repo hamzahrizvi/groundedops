@@ -846,9 +846,25 @@ exactly, we cannot tell whether a fix helped.
   (capability question, then the offer's own button) passed 3/3 on both
   /query and /widget/ask, the "yes" turn in 0.0s. run_live gained a `reply`
   check (the offer's button must be in suggested_replies).
-- [ ] **8.9 Handoff gives the visitor a reference number, the enquiry is
+- [x] **8.9 Handoff gives the visitor a reference number, the enquiry is
   actually emailed** (needs SMTP details), and the contact form is limited
-  so bots cannot flood or wipe enquiries.
+  so bots cannot flood or wipe enquiries. Done 2026-09-29 (S11), code
+  side. /widget/lead returns `reference` (GO- + first 8 hex of the id); the
+  widget says "Your reference is GO-XXXXXXXX", and the console shows it on
+  each Enquiries row. After the response, the lead is emailed to the form's
+  notify_email only (never the visitor-typed address: open relay) and
+  marked notified; unconfigured mail = no attempt; a MailError keeps the
+  lead, notified false. `quota.check_public_write` caps it at 5/visitor
+  and 30/IP a day (env QUOTA_LEADS_PER_*; IP from widget_api._client_ip,
+  and /widget/config now uses that too instead of trusting
+  X-Forwarded-For). Transcript entries truncated to 4000 chars; a full
+  store (MAX_LEADS) refuses with 503 instead of evicting. Enquiries page
+  gained "Not emailed" and a store-full warning. One warning per process
+  when posts arrive from loopback with no CF header and TRUST_PROXY unset.
+  tests/test_lead_handoff.py (21 checks). **You:** fill in the mail server
+  under API keys, send one real enquiry, and check it arrives and shows
+  "Emailed to" in the console. The unsent count is on the Enquiries page,
+  not on the nav badge.
 - [ ] **8.10 Thumbs up/down under answers**, feeding a review list in the
   console.
 - [ ] **8.11 Show real progress while waiting** ("searching", "checking"...)
@@ -1815,7 +1831,9 @@ see *Shipped — the four follow-ups* above; kept for the record.
      problem, but it is really a *data destruction* problem: 5000
      submissions permanently erase every real enquiry behind them, with no
      trace and nothing emailed. At minimum log the eviction; better, refuse
-     past the cap rather than discarding history.
+     past the cap rather than discarding history. **Fixed 2026-09-29
+     (8.9):** a full store refuses with 503 and a warning, no eviction;
+     the route is capped per visitor and per IP.
 
   3. **`transcript` is the one untrusted field with no size cap.** `q` 500,
      `notes` 2000, each `values` entry 2000, `enquiry` 4000 — all bounded.
@@ -1824,6 +1842,7 @@ see *Shipped — the four follow-ups* above; kept for the record.
      verbatim. Twenty 10MB entries is ~200MB in one lead, in a file fully
      read and rewritten on every subsequent write; uvicorn sets no default
      body limit. (Draft is safe — `_assemble_enquiry` returns `[:4000]`.)
+     **Fixed 2026-09-29 (8.9):** each entry is truncated to 4000 chars.
 
   4. **`/health` cannot detect the failure it is used to rule out.**
      `main.py:658` returns `{"status":"ok"}` unconditionally, touching

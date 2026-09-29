@@ -257,9 +257,11 @@ nobody runs is not a backup.
 
 Known and deliberate, so nobody discovers them as surprises:
 
-- **Nothing is emailed.** Enquiries land in the console's Enquiries page.
-  Every lead records its destination address and `notified: false`, pending
-  SMTP credentials.
+- **Enquiries are emailed only once SMTP is set** (console, API keys ->
+  Mail server). Until then, or when a send fails, they sit in the
+  Enquiries page marked "not emailed". The contact form is capped per
+  visitor and per IP; set `TRUST_PROXY=1` behind a proxy without
+  CF-Connecting-IP, or every visitor shares the per-IP cap.
 - **`/widget/lead` is unauthenticated and not rate limited** — it has to be
   public, and bots will find it. Put it behind the proxy's rate limiting or a
   WAF before this is anything other than internal staging.

@@ -344,6 +344,40 @@ def check_faq_lookup(caller: dict) -> dict:
             "reason": None}
 
 
+# Daily caps on the public write routes (contact form, answer votes), as
+# (per visitor, per IP). One limiter for both. The visitor id comes from the
+# browser, so the per-IP count is the one a script cannot reset; it is kept
+# loose because behind a tunnel without CF-Connecting-IP or TRUST_PROXY every
+# visitor shares one IP.
+PUBLIC_WRITE_LIMITS = {
+    "lead": (int(os.getenv("QUOTA_LEADS_PER_VISITOR", "5")),
+             int(os.getenv("QUOTA_LEADS_PER_IP", "30"))),
+    "feedback": (int(os.getenv("QUOTA_VOTES_PER_VISITOR", "50")),
+                 int(os.getenv("QUOTA_VOTES_PER_IP", "300"))),
+}
+
+
+def check_public_write(kind: str, visitor_id: str | None, client_ip: str) -> dict:
+    """Count one public write of `kind` if it fits under both daily caps.
+
+    Checks and counts in one step, so two racing posts cannot both take the
+    last slot. A refused write is not counted. Returns {allowed, reason}.
+    """
+    per_visitor, per_ip = PUBLIC_WRITE_LIMITS[kind]
+    who = identify(None, visitor_id, client_ip)
+    v_key = f"{who['identity']}:{kind}"
+    i_key = f"{who['ip_identity']}:{kind}"
+    win = _window_start()
+    with _lock, _conn() as c:
+        if _used(c, v_key, win) >= per_visitor:
+            return {"allowed": False, "reason": f"{kind}_quota"}
+        if _used(c, i_key, win) >= per_ip:
+            return {"allowed": False, "reason": f"ip_{kind}_quota"}
+        _add(c, v_key, win, 1)
+        _add(c, i_key, win, 1)
+    return {"allowed": True, "reason": None}
+
+
 def consume_faq_lookup(caller: dict) -> None:
     if caller["tier"] != "anonymous":
         return
@@ -543,12 +577,14 @@ def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
     identity = "v:" + _h(f"{visitor_id}|{client_ip}")
     ip_identity = "i:" + _h(client_ip) if client_ip else None
     with _lock, _conn() as c:
-        keys = [identity, identity + ":faq"]
+        suffixes = ["", ":faq"] + [":" + k for k in PUBLIC_WRITE_LIMITS]
+        keys = [identity + s for s in suffixes]
         if ip_identity:
-            # Both per-IP counters: credits (guest AI on) and FAQ lookups.
-            # Only the FAQ one used to be cleared, so a guest blocked on
-            # ip_quota stayed blocked after the console said it had reset.
-            keys += [ip_identity, ip_identity + ":faq"]
+            # Every per-IP counter: credits (guest AI on), FAQ lookups and
+            # the public writes. Only the FAQ one used to be cleared, so a
+            # guest blocked on ip_quota stayed blocked after the console
+            # said it had reset.
+            keys += [ip_identity + s for s in suffixes]
         c.execute(f"DELETE FROM usage WHERE identity IN ({','.join('?' * len(keys))})",
                   keys)
 

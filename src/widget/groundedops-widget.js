@@ -1597,8 +1597,7 @@
     if (form.cc_visitor) {
       var ccNote = document.createElement("div");
       ccNote.className = "go-fnote";
-      ccNote.textContent = "We will copy you in on the reply, so you have the "
-        + "thread and can chase it directly.";
+      ccNote.textContent = "Our team will reply to the email address above.";
       wrap.appendChild(ccNote);
     }
 
@@ -1646,6 +1645,7 @@
           transcript: form.allow_summary ? transcriptForServer() : [],
           enquiry: enqBox ? enqBox.value.trim() : "",
           summary_source: enqBox && enqBox.value.trim() ? source : "none",
+          visitor_id: visitorId(),
         }),
       })
         .then(function (r) {
@@ -1654,11 +1654,12 @@
           });
           return r.json();
         })
-        .then(function () {
+        .then(function (d) {
           wrap.remove();
+          var ref = d && d.reference ? " Your reference is " + d.reference + "." : "";
           say("Thanks — that's been recorded and our " +
               (kind === "sales" ? "sales" : "support") +
-              " team will be in touch. Anything else I can help with?");
+              " team will be in touch." + ref + " Anything else I can help with?");
           chips([
             {
               label: "Ask a question",

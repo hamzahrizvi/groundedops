@@ -206,12 +206,13 @@ with sync_playwright() as p:
                          "values": {"f_name": "Dana Reeves", "f_email": "dana@buyer.test",
                                     "f_msg": "Pricing for 50 units?"}}).encode(),
         headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(req).read()
+    ref = json.loads(urllib.request.urlopen(req).read())["reference"]
     pg.reload(); pg.wait_for_timeout(1500)
     pg.click(".nav button:has-text('Enquiries')")
     pg.wait_for_timeout(700)
     check(pg.locator("text=Dana Reeves").count() > 0, "submitted enquiry appears")
     check(pg.locator("text=Pricing for 50 units?").count() > 0, "long-answer field shown")
+    check(pg.locator(f"text={ref}").count() > 0, "the visitor's GO- reference is on the row")
     pg.click("button:has-text('Mark handled')")
     pg.wait_for_timeout(900)
     check(pg.locator("button:has-text('Mark unhandled')").count() > 0, "can mark handled")

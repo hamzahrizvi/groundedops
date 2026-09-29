@@ -8,11 +8,12 @@ app.include_router; paths, parameters and responses are unchanged.
 import logging
 import os
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import accounts
+import quota
 import widget_config
 import widget_export
 from guards import _require_admin
@@ -97,10 +98,8 @@ def widget_get_config(request: Request, visitor_id: str | None = None):
 
         auth = request.headers.get("authorization", "")
         _tok = auth[7:].strip() if auth.lower().startswith("bearer ") else None
-        _fwd = request.headers.get("x-forwarded-for", "")
-        _ip = (_fwd.split(",")[0].strip() if _fwd
-               else (request.client.host if request.client else ""))
-        out["quota"] = _q.status(_q.identify(_tok, visitor_id, _ip))
+        from widget_api import _client_ip
+        out["quota"] = _q.status(_q.identify(_tok, visitor_id, _client_ip(request)))
     except Exception as e:
         logger.warning(f"/widget/config: quota unavailable ({e})")
         out["quota"] = None
@@ -209,10 +208,62 @@ class LeadReq(BaseModel):
     # visitor) and which of those it was.
     enquiry: str | None = None
     summary_source: str = "none"   # "chat" | "written" | "none"
+    visitor_id: str | None = None  # the widget's own id, for the daily cap
+
+
+_proxy_warned = False
+
+
+def _warn_if_shared_ip(request: Request) -> None:
+    """Once per process: behind a plain tunnel every visitor arrives from
+    loopback, so the per-IP cap is shared by all of them."""
+    global _proxy_warned
+    if _proxy_warned or request.headers.get("cf-connecting-ip"):
+        return
+    if os.getenv("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes"):
+        return
+    host = request.client.host if request.client else ""
+    if host in ("127.0.0.1", "::1", "localhost"):
+        _proxy_warned = True
+        logger.warning("public form posts arrive from loopback with no "
+                       "CF-Connecting-IP and TRUST_PROXY unset: every visitor "
+                       "shares one per-IP limit. Set TRUST_PROXY=1 behind a proxy.")
+
+
+def _notify_lead(lead: dict) -> None:
+    """Email a new lead to its form's destination, then mark it notified.
+    Runs after the response. Never mails the visitor-typed address."""
+    import mailer
+    to = (lead.get("notify_email") or "").strip()
+    if not to or not mailer.is_configured():
+        return
+    ref = widget_config.lead_ref(lead["id"])
+    lines = [f"New {lead['kind']} enquiry from the website widget ({ref})."]
+    if lead.get("product"):
+        lines.append(f"Product: {lead['product']}")
+    lines.append("")
+    lines += [f"{v['label']}: {v['value']}" for v in lead["values"].values()]
+    if lead.get("enquiry"):
+        who = "summary of their chat" if lead.get("summary_source") == "chat" else "their words"
+        lines += ["", f"Enquiry ({who}):", lead["enquiry"]]
+    if lead.get("transcript"):
+        lines += ["", "Chat:"]
+        lines += [("Visitor: " if t.get("role") == "user" or t.get("q") else "Assistant: ")
+                  + str(t.get("text") or t.get("q") or t.get("a") or "")
+                  for t in lead["transcript"]]
+    lines += ["", "Reply to the visitor directly, then mark it handled under "
+                  "Enquiries in the console."]
+    try:
+        mailer.send([to], f"[{ref}] New {lead['kind']} enquiry", "\n".join(lines))
+    except Exception as e:
+        logger.warning(f"lead {ref} not emailed: {e}")
+        return
+    widget_config.mark_notified(lead["id"])
 
 
 @router.post("/widget/lead")
-def widget_submit_lead(payload: LeadReq):
+def widget_submit_lead(payload: LeadReq, request: Request,
+                       background: BackgroundTasks):
     """PUBLIC — a visitor submitting the sales or support form.
 
     Unauthenticated by necessity: the widget is embedded on a customer-facing
@@ -220,22 +271,34 @@ def widget_submit_lead(payload: LeadReq):
     the transcript is kept only if that form allows it — see
     widget_config.add_lead.
 
-    NOT RATE LIMITED HERE. This is a public write endpoint and bots will find
-    it; MAX_LEADS caps the file size but does nothing about the noise. Put it
-    behind the same rate limiting / captcha as any other public form at the edge
-    (reverse proxy, WAF) before exposing it — which is why this is called out
-    rather than half-implemented in application code.
+    Capped per visitor and per IP (quota.check_public_write), and the store
+    refuses new leads once full instead of trimming old ones. The lead is
+    stored first; the email goes out after the response, so a slow or broken
+    mail server never loses or delays a submission.
     """
+    from widget_api import _client_ip
+    _warn_if_shared_ip(request)
+    gate = quota.check_public_write("lead", payload.visitor_id, _client_ip(request))
+    if not gate["allowed"]:
+        raise HTTPException(status_code=429, detail=(
+            "We have already received several messages from you today. "
+            "Please try again tomorrow, or contact us directly."))
     try:
         lead = widget_config.add_lead(
             payload.kind, payload.values or {},
             product=payload.product, transcript=payload.transcript,
             enquiry=payload.enquiry or "",
             summary_source=payload.summary_source)
+    except widget_config.LeadStoreFull:
+        raise HTTPException(status_code=503, detail=(
+            "We cannot take new messages through this form right now. "
+            "Please contact us directly."))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    background.add_task(_notify_lead, lead)
     # Deliberately does not echo the stored lead back to a public caller.
-    return {"received": True, "id": lead["id"]}
+    return {"received": True, "id": lead["id"],
+            "reference": widget_config.lead_ref(lead["id"])}
 
 
 @router.get("/admin/leads")
