@@ -513,6 +513,11 @@ Output ONLY the final query text. No explanation, no preamble, no quotation mark
 Rewritten query:"""
 
 
+# How a refused turn reads in a prompt's conversation block: the question
+# was asked, nothing was answered. See memory.add_to_memory (8.5).
+REFUSED_TURN_NOTE = "(no answer was given: the documentation did not cover it)"
+
+
 def build_condense_prompt(
     current_query: str,
     history: list[dict],
@@ -528,8 +533,13 @@ def build_condense_prompt(
     recent = history[-max_history_turns:] if history else []
 
     if recent:
+        # A refused turn is stored with the question and no answer (memory
+        # .add_to_memory, 8.5). Shown as unanswered rather than as an empty
+        # line, so the rewriter still has the question to resolve "which
+        # one?" against and is not misled into thinking it was answered.
         history_text = "\n".join(
-            f'User: {h["q"]}\nAssistant: {h["a"]}' for h in recent
+            f'User: {h["q"]}\nAssistant: {h.get("a") or REFUSED_TURN_NOTE}'
+            for h in recent
         )
     else:
         history_text = "(none — this is the first message)"

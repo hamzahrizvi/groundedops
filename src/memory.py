@@ -43,26 +43,41 @@ def _reap_expired_locked() -> None:
         _last_seen.pop(sid, None)
 
 
-def add_to_memory(session_id: str, query: str, answer: str) -> None:
-    lower = answer.lower()
-    if "could not find" in lower or "unable to generate" in lower:
-        return
-    # The customer-facing refusal ("I don't have that in the product
-    # documentation...") replaced the model's token before this was called,
-    # and it passed the two substrings above. Remembered, it made the next
-    # "tell me more" expand a refusal into passages -- contradicting it.
-    try:
-        from text_utils import is_refusal
-        if is_refusal(answer):
-            return
-    except Exception:
-        pass
+def add_to_memory(session_id: str, query: str, answer: str,
+                  refused: bool | None = None) -> None:
+    """Remember this turn. A REFUSED turn keeps the question, not the
+    refusal (PENDING 8.5): {"q": ..., "a": "", "refused": True}.
 
+    Refusals used to be dropped whole, so that "tell me more" could not
+    expand a refusal into passages contradicting it. But dropping the
+    question with it lost the thread: ask "does the Mini have Bluetooth",
+    get refused, ask "and the full-size one?" -- and the rewriter, shown no
+    previous turn, had nothing to resolve "the full-size one" against. The
+    question is what the next turn needs; the refusal text is what must not
+    be expanded. Keeping one without the other serves both.
+
+    `refused` overrides the detection for a caller that knows (main's
+    "not mentioned" reply is a rejection is_refusal does not recognise).
+    """
+    lower = answer.lower()
+    # Nothing was said: a generation failure is a service event, not a turn.
+    if "unable to generate" in lower or "could not generate" in lower:
+        return
+    if refused is None:
+        refused = "could not find" in lower
+        try:
+            from text_utils import is_refusal
+            refused = refused or is_refusal(answer)
+        except Exception:
+            pass
+
+    turn = ({"q": query, "a": "", "refused": True} if refused
+            else {"q": query, "a": answer[:MAX_ANSWER_LEN]})
     with _lock:
         _reap_expired_locked()
         _last_seen[session_id] = time.time()
         history = _sessions.setdefault(session_id, [])
-        history.append({"q": query, "a": answer[:MAX_ANSWER_LEN]})
+        history.append(turn)
         if len(history) > MAX_MEMORY:
             history.pop(0)
 

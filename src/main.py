@@ -3311,9 +3311,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _hist = ""
     if history:
         _turns = []
+        from text_utils import REFUSED_TURN_NOTE as _unanswered
         for _h in history[-4:]:
             _turns.append(f"Customer: {_h.get('q','')}")
-            _turns.append(f"You: {(_h.get('a') or '')[:400]}")
+            # A refused turn carries its question and no answer (8.5).
+            _turns.append(f"You: {(_h.get('a') or '')[:400] or _unanswered}")
         _hist = "<conversation>\n" + "\n".join(_turns) + "\n</conversation>\n\n"
 
     prompt = build_answer_prompt(_hist, context, resolved_query)
@@ -3797,7 +3799,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                          else "No provider reachable", q[:80])
 
     # ── Memory + logging ──────────────────────
-    add_to_memory(session_id, q, answer)
+    # The "not mentioned" reply is a rejection is_refusal does not
+    # recognise, so say so: the question is kept, the reply is not (8.5).
+    add_to_memory(session_id, q, answer, refused=True if _not_mentioned else None)
     sources = _build_sources(top_chunks)
 
     # The oldest turn is silently discarded once the window is full, so the

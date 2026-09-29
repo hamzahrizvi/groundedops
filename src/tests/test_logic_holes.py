@@ -67,15 +67,20 @@ def test_technical_words_are_not_commercial():
         assert sales.is_commercial_question(q), q
 
 
-def test_a_refusal_is_not_remembered():
+def test_a_refusal_is_remembered_as_its_question_only():
+    """8.5: the refused QUESTION stays in memory so the next "which one?"
+    can be resolved against it; the refusal text does not, so "tell me
+    more" cannot expand a refusal into passages that contradict it."""
     import memory
     sid = "logic-holes-refusal"
     memory.add_to_memory(sid, "how do I change the bezel colour?",
                          "I don't have that in the product documentation.\n\n"
                          "Here are some things I can answer:\n- x")
-    assert memory.get_history(sid) == []
+    assert memory.get_history(sid) == [
+        {"q": "how do I change the bezel colour?", "a": "", "refused": True}]
     memory.add_to_memory(sid, "what is the weight?", "The NV9S weighs 1.05 kg.")
-    assert len(memory.get_history(sid)) == 1
+    assert len(memory.get_history(sid)) == 2
+    assert memory.get_history(sid)[-1]["a"] == "The NV9S weighs 1.05 kg."
 
 
 def test_an_off_topic_deferral_does_not_claim_the_turn():
