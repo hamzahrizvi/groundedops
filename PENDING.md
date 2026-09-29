@@ -174,15 +174,14 @@ vague and refuses when it is off-topic, instead of the reverse.
 New items are numbered P1, 8.16, 8.17 and 9.14 in the table below.
 
 *Accuracy (wrong or misleading answers)*
-- [ ] **A confident "No" on near-miss questions.** It says the MyCheckr has
+- [x] **A confident "No" on near-miss questions.** It says the MyCheckr has
   no backup battery when the manual says nothing. Plan step **8.3**
-  (honest "not mentioned"). Add the backup-battery case to 8.3's probe and
-  its absence cases.
-- [ ] **Table conditions get lost.** The right row is found, but a
-  condition such as "or 20 coins" is misstated. **Step 8.16.** Nearest steps:
-  M9 (spec cases pinned to a page) and M14 (tests for the table code).
-  Done looks like a set of table-qualifier cases where the answer must
-  keep the condition word for word, measured before any fix.
+  (honest "not mentioned"). Done 2026-09-29: the battery, coins, Bluetooth
+  and facial-recognition cases all answer "not mentioned" (see 8.3).
+- [x] **Table conditions get lost.** The right row is found, but a
+  condition such as "or 20 coins" is misstated. **Step 8.16.** Measured
+  and half fixed 2026-09-29 (2/6 -> 4/6 cases stable; the "or 20 coins"
+  row itself 3/3); two table shapes still open, see 8.16.
 
 *Understanding the question*
 - [ ] **Describing a product instead of naming it: 0/10.** "The screenless
@@ -322,7 +321,7 @@ the ~50 human labels (15).
 | 6 | Opus + you | 15 | |
 | 7 | Sonnet | 16, 30, 31 | Check they are independent before grouping. |
 | 8 | Opus | 17 | Tag repair. |
-| 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. |
+| 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. **Done 2026-09-29** (`dde62db`..`c4cc950` + two follow-ups); full suite 299/299 (1 skipped); retrieval 29/32 and tuned 33/34 unchanged. |
 | 10 | Opus | 23, 24, 25 | Conversation follow-ups. |
 | 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. |
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. |
@@ -441,6 +440,8 @@ exactly, we cannot tell whether a fix helped.
   baseline passed it on a page that was not p69 or the SCS scoping has
   since taken it. It stays listed here so the mark does not hide it; 8.6
   (comparisons read both manuals) is the step that should win it back.
+  (S9, 2026-09-29: it now answers from both manuals once the NV200S
+  catalogue alias exists -- see 8.6; the p.69 pin is unverified.)
   Any future "N/34" quoted against these marks means stable-across-repeats.
   **Re-run after merging the thinking gate (0f08c73, batch
   `eval_runs/20260928_0807/`, same suites and repeats):** both marks came
@@ -521,6 +522,8 @@ exactly, we cannot tell whether a fix helped.
   fact rejected by the LLM verifier (verifier_llm_time > 0). A suppressed
   row should name the checker that said no. Small main.py fix for the
   next session that touches the verify stage (S9), not done here.
+  **Done in S9 (`dde62db`, 2026-09-29): `verified_by: llm` when the LLM
+  verifier ran and the answer was still flagged.**
   **After the merge (0f08c73, batch 20260928_0807, M4 suites only, 460
   case-runs):** the LLM verifier's call on a rescue fell from p50 2.8s /
   p90 13.1s to p50 1.1s / p90 2.2s (n=112); total time for an
@@ -713,19 +716,85 @@ exactly, we cannot tell whether a fix helped.
   in `test_shared_documents.py`. **Still to do:** re-arm
   `eval_baseline_retrieval.json` (graded eval.py run, live backend,
   `--repeats 3`) on the repaired index, since M4 armed it before this.
-- [ ] **8.3 Honest "not mentioned".** When the manual never mentions
+- [x] **8.3 Honest "not mentioned".** When the manual never mentions
   Bluetooth, say so, instead of answering "No". **Scope decided
   (2026-09-29, you):** say "not mentioned" only when X appears nowhere in
   that product's manual (Bluetooth). Keep the plain "No" when the manual
-  lists the full set (interfaces, accepted coins) and X is not in it, so
-  M8's #45 (Mini ethernet/wifi) and #30 (coins) stay "No".
-- [ ] **8.4 Stop treating fresh questions as follow-ups** just because the
-  rewriter added the product name.
-- [ ] **8.5 Remember refused turns** (the question, not the refusal), so the
-  next "which one?" still knows what was being asked.
-- [ ] **8.6 Comparisons read both manuals.** A letter-case mismatch in table
+  lists the full set (interfaces, accepted coins) and X is not in it.
+  (2026-09-29, S9, `dde62db`.) New `mentions.py`: when the answer opens
+  with "No", read what it denies (or, for a bare "No.", what the question
+  asked about), drop product and qualifier words, and search the
+  product's own chunks (same scope rule as retrieval, cached per product)
+  for the feature words. Nowhere in them -> "The <product> documentation
+  doesn't mention <feature>, so I can't confirm it either way", role
+  `rejected`, `answerability: not_mentioned` (counted as rejected by
+  eval.py), gap recorded, question kept in memory. Mentioned anywhere ->
+  the No stands and is verified as before; Yes and prose answers are never
+  touched. `NOT_MENTIONED_CHECK=off` restores the plain No. Measured on
+  the labelled set: #45 (Mini Ethernet/Wi-Fi, both named in the manual)
+  keeps its No; #30 flips, because "coin" is nowhere in the NV9USB+ manual
+  -- which is also what blind set 1 expects for it, and what the rule as
+  decided says (the note above used to say #30 stays; it does not). Live
+  on :8010, 2 runs: battery, coins, BV30 Bluetooth and SCS facial
+  recognition all "not mentioned" (12/12 with the two documented controls
+  still answered). The tuned facial-recognition case now expects
+  `rejected` (answer-key change following the decision); tuned mark still
+  33/34, retrieval 29/32, same always-fails. Known wording quirk: a bare
+  "No." to "connect to a phone over Bluetooth" reads "doesn't mention
+  phone over Bluetooth". Also fixed here (M7 label gap): a suppressed
+  answer logs `verified_by: llm` when the LLM verifier was the checker
+  that said no.
+- [x] **8.4 Stop treating fresh questions as follow-ups** just because the
+  rewriter added the product name. (2026-09-29, S9, `ef64954`.)
+  `is_followup_turn` takes an `ignore` set; `main._is_followup` passes
+  every word of every catalogue product's key, name and aliases at all
+  three call sites, so "how do I clean the note path" rewritten to "how do
+  I clean the NV9USB+ note path" in an NV9USB+ chat is no longer a
+  follow-up. "and the current draw?" still is (its own wording), and words
+  pulled from history still count beside the name. Three pinned cases.
+- [x] **8.5 Remember refused turns** (the question, not the refusal), so the
+  next "which one?" still knows what was being asked. (2026-09-29, S9,
+  `252a9a9`, `1187b6a`.) `add_to_memory` stores a refused turn as
+  `{"q": ..., "a": "", "refused": True}`; the condense prompt and the
+  answer prompt's <conversation> block show it as "(no answer was given:
+  the documentation did not cover it)". A generation failure is still not
+  a turn. The 8.3 reply is stored the same way (refused=True from main).
+- [x] **8.6 Comparisons read both manuals.** A letter-case mismatch in table
   titles stopped the spec comparison finding any shared rows (0 -> 7 once
-  fixed), and a product chat only searched one manual.
+  fixed), and a product chat only searched one manual. (2026-09-29, S9,
+  `9664e07`.) `sales._shared_differences` keys rows case- and
+  space-folded: on the live spec index NV9 Spectral vs NV9USB+ 0 -> 7
+  shared rows, vs NV200S 0 -> 5, vs BV30 0 -> 5, vs SCS 0 -> 3, every
+  other pair unchanged, and `compare()` now returns the table. In a
+  product chat a question that TYPES two products widens the scope to
+  their shared category, or the whole corpus (`_scope_for_products`).
+  The M4 case this should win back ("NV200 Spectral docked with the SCS")
+  needed one more thing: the catalogue had no alias for "NV200 Spectral"
+  (NV200S has none), so the question named only the SCS. Added
+  `"aliases": ["NV200 Spectral", "NV200"]` to `src/catalog_config.json`
+  -- **operator data, not in git**, so set it in the console on any other
+  install. With it the question answers from both manuals in an SCS chat
+  (24VDC/3.5A for the NV200S, 24V/6.5A for the SCS; cites NV200S p.66-68
+  and SCS p.20). The retrieval case pins p.69, so check it on the next
+  retrieval run rather than assuming.
+- [x] **8.16 Keep table conditions** ("or 20 coins"): measure first, then
+  fix. (2026-09-29, S9, `c4cc950`.) Six page-pinned cases in
+  `eval_cases_tables.json`, each requiring the value AND its condition in
+  the manual's words. Before (HEAD 8a1a8e9, 3 runs, keywords only): 7/18
+  runs, 2/6 stable -- the MyCheckr max-load current lost "both USB Type-A
+  ports drawing 0.5A each" 3/3, the Thai 50 Satang limit came back as a
+  bare "15%" 2/3. Fix: one rule in the answer prompt beside "support is
+  often conditional" -- a table value is conditional in the same way, and
+  a figure without its condition is a wrong answer. After: 12/18, 4/6
+  stable; both rows above 3/3. **Open, 0/3 before and after, kept in the
+  case file:** the NV9 Spectral note length drops the Multi Note Float
+  column (160 mm beside 167 mm -- a variant with its own column group),
+  and the Euro 1-cent limit is answered from the WRONG row ("50 coins per
+  roll" instead of 25% / max 20) although p.65 is cited -- a wrong answer,
+  not a dropped condition; the model does map "1 cent" to "0,01€" and
+  still picks the roll table. Next step for both: a table-shape fix
+  (spell out variant column groups; give the small-coins row its header
+  words), not more prompt.
 - [ ] **8.7 "And step 3?"** is answered from the previous answer, or the bot
   says honestly that the last answer had only two steps.
 - [ ] **8.8 Prove "want the steps?" -> "yes" -> steps works end to end** on
