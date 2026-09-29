@@ -39,6 +39,29 @@ def test_health_ready_requires_reachability_not_just_a_key():
     assert data["status"] == "not-ready"
 
 
+def test_deep_health_reports_every_role_and_no_hostname():
+    """9.2/9.3: /health is public, so the reason must not name the internal
+    gateway; and every role is reported so a dead backup shows up early."""
+    import json
+    from unittest.mock import patch
+    import requests
+    err = requests.ConnectionError(
+        "HTTPSConnectionPool(host='gw.internal.example', port=443): "
+        "NameResolutionError")
+    with patch.object(requests, "get", side_effect=err), \
+         patch.object(main.keystore, "get_key", return_value="k"), \
+         patch.object(main.keystore, "has_key", return_value=True), \
+         patch.object(main.keystore, "get_role",
+                      side_effect=lambda r: None if r == "backup" else "openai"):
+        data = json.loads(main.health(deep=1).body)
+    assert set(data["roles"]) == {"default", "advanced", "backup"}
+    assert data["roles"]["default"]["provider"] == data["provider"] == "openai"
+    assert data["roles"]["backup"] == {"provider": None, "reachable": None}
+    assert "gw.internal" not in json.dumps(data)
+    assert "does not resolve" in data["provider_unreachable_reason"]
+    assert data["ready"] is False
+
+
 def test_escalation_does_not_fire_without_an_assigned_backup():
     """The escalation used to hardcode generate("deepseek", ...), so it
     billed a key the operator never chose -- hardest exactly when the

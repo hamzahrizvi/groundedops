@@ -472,7 +472,8 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         _note_reachable("openai")
         body = res.json()
         text = body["choices"][0]["message"]["content"]
-        return {"text": text, "tokens": _usage_tokens(body, "openai")} if text else None
+        return ({"text": text, "model": model, "provider": "openai",
+                 "tokens": _usage_tokens(body, "openai")} if text else None)
     except (requests.ConnectionError, requests.Timeout) as e:
         logger.warning(f"OpenAI unreachable ({model}): {e}")
         _note_unreachable("openai")
@@ -505,7 +506,8 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
         body = res.json()
         blocks = body.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        return {"text": text, "tokens": _usage_tokens(body, "anthropic")} if text else None
+        return ({"text": text, "model": model, "provider": "anthropic",
+                 "tokens": _usage_tokens(body, "anthropic")} if text else None)
     except (requests.ConnectionError, requests.Timeout) as e:
         logger.warning(f"Anthropic unreachable ({model}): {e}")
         _note_unreachable("anthropic")

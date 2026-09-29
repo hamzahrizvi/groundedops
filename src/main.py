@@ -1704,9 +1704,13 @@ def _provider_reachable(provider: str | None,
         return False, f"no API key set for {provider}"
     except Exception as exc:
         # The class name carries the useful distinction (a name that does not
-        # resolve vs a refused connection vs a timeout) without dragging a
-        # multi-line urllib traceback into a JSON payload.
-        return False, f"{type(exc).__name__}: {str(exc)[:110]}"
+        # resolve vs a refused connection vs a timeout). The message does not
+        # go out: /health is public and requests' text names the internal
+        # gateway host.
+        name = type(exc).__name__
+        if "NameResolution" in str(exc) or "getaddrinfo" in str(exc):
+            name += " (name does not resolve)"
+        return False, f"{name} from {provider}"
 
 
 @app.get("/health")
@@ -1748,9 +1752,25 @@ def health(deep: int = 0):
     # OR'd in every provider's env var, so an install pointed at one provider
     # reported a healthy key because a DIFFERENT provider had one — green
     # here, and every question refused.
+    # The DEFAULT role's provider, the one that answers customers -- not the
+    # Settings picker, which pointed at the gateway and reported not-ready
+    # through every gateway outage while DeepSeek answered fine.
+    def _role_provider(role):
+        # llm._provider_for_job's fallback (unassigned -> default -> the
+        # Settings picker), except that an unassigned backup is no backup.
+        p = keystore.get_role(role)
+        if not p and role != "backup":
+            p = keystore.get_role("default")
+            if not p:
+                try:
+                    from runtime_config import get_online_provider
+                    p = get_online_provider()
+                except Exception:
+                    p = None
+        return p
+
     try:
-        from runtime_config import get_online_provider
-        _prov = get_online_provider()
+        _prov = _role_provider("default")
         checks["provider"] = _prov
         checks["provider_key"] = bool(keystore.has_key(_prov))
     except Exception as e:
@@ -1769,6 +1789,24 @@ def health(deep: int = 0):
     checks["provider_reachable"], _why = _provider_reachable(_prov)
     if _why:
         checks["provider_unreachable_reason"] = _why
+
+    # Every role, reported only: a dead backup is visible before the outage
+    # that needs it. Readiness stays on the default role above. An
+    # unassigned backup is None (no second provider), not a fallback.
+    try:
+        _seen = {_prov: (checks["provider_reachable"], _why)}
+        roles = {}
+        for role in keystore.roles():
+            p = _role_provider(role)
+            if p and p not in _seen:
+                _seen[p] = _provider_reachable(p)
+            roles[role] = {"provider": p,
+                           "reachable": _seen[p][0] if p else None}
+            if p and _seen[p][1]:
+                roles[role]["reason"] = _seen[p][1]
+        checks["roles"] = roles
+    except Exception as e:
+        checks["roles_error"] = str(e)[:120]
 
     # Reported, never triggered: loading them here would turn a health probe
     # into a 30-second model download on a cold instance.
