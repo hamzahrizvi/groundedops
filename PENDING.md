@@ -342,7 +342,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. **Done 2026-09-29** (`dde62db`..`c4cc950` + two follow-ups); full suite 299/299 (1 skipped); retrieval 29/32 and tuned 33/34 unchanged. |
 | 10 | Opus | 23, 24, 25 | Conversation follow-ups. **Done 2026-09-29** (`8b9fe65`..`c858ab7`); full suite 305 passed (1 skipped); run_live 25 3/3 on both paths, 13 4/4 x3; routing 152/164 (same 12 fails); retrieval old 32 unchanged but one 1/3 noise flip; held-out unscoped 22/30 (was 19). 8.17 is only partly done: 7/10 held-out descriptions still fail. |
 | 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: SMTP settings + one real enquiry (8.9); the 8.15 baseline re-arm and a `run_live --path stream` N=3 run (both need a live backend). |
-| 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. |
+| 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), backup via company gateway + drill ~10-01 (9.3), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
 | 13 | Opus | 38, 39 | |
 | 14 | Fable, then shell | 40, 41 | Fable checks the rebuild is safe, a script runs it, you add the sheet. |
 | 15 | Fable | 42, 43 | |
@@ -1052,6 +1052,20 @@ exactly, we cannot tell whether a fix helped.
   fails). **Left for you:** pick the cap from a week of /admin/credits
   deltas, set it, then flip guest AI on in Access & limits.
 - [ ] **9.5 Backups onto a second disk, and one timed restore test.**
+  Done 2026-09-29: "GroundedOps Daily Backup" re-registered to
+  `D:\GroundedOpsBackups` (second NVMe; off-disk, not off-box), one run
+  now: groundedops-20260929-181436.gobk, 166 MB in 6s, envelope
+  `encrypted: true`, scrypt n=65536, counts documents=24, index_files=83,
+  stores=7. The 14 older archives stay in `backups\` on C:. **Timed
+  restore:** `manage_backup.py restore -y --accounts` into a scratch dir
+  with every store path exported: 1s; uvicorn on the restored data
+  ready:true at 328s from restore start, index_chunks 1749 = live :8000.
+  Drill lesson: also export `SPEC_INDEX_CACHE` and `DOC_VOCAB_CACHE` --
+  the warm-up rebuilds src/spec_index.json and src/doc_vocab.json at those
+  fixed paths (gitignored caches; rewritten from an identical index, so
+  harmless this time). **Left for you:** put BACKUP_PASSPHRASE in the
+  password manager, then delete `BACKUP_ALLOW_PLAINTEXT=1` from src/.env
+  (gate: POST /admin/backup/export without a passphrase -> 400).
 - [ ] **9.6 Check the unreviewed FAQ answers** and only show "Reviewed
   answer" on ones a person actually checked.
 - [ ] **9.7 Rebuild the search index** (removes page footers, adds table
