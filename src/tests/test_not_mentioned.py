@@ -126,8 +126,14 @@ def test_the_reply_names_the_gap_and_is_not_a_refusal_phrase():
     assert not is_refusal(r)
 
 
-def test_kill_switch(monkeypatch):
-    monkeypatch.delenv("NOT_MENTIONED_CHECK", raising=False)
-    assert mentions.enabled()
-    monkeypatch.setenv("NOT_MENTIONED_CHECK", "off")
-    assert not mentions.enabled()
+def test_kill_switch():
+    # No pytest fixtures: run_tests.py calls test functions directly.
+    before = os.environ.pop("NOT_MENTIONED_CHECK", None)
+    try:
+        assert mentions.enabled()
+        os.environ["NOT_MENTIONED_CHECK"] = "off"
+        assert not mentions.enabled()
+    finally:
+        os.environ.pop("NOT_MENTIONED_CHECK", None)
+        if before is not None:
+            os.environ["NOT_MENTIONED_CHECK"] = before
