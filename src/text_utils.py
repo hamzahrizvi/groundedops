@@ -1075,12 +1075,17 @@ def build_clarification_options(
     return options[:max_options]
 
 
-def is_followup_turn(raw_query: str, history: list, resolved_query: str) -> bool:
+def is_followup_turn(raw_query: str, history: list, resolved_query: str,
+                     ignore: set | None = None) -> bool:
     """
     True if this turn was dependent on conversation history rather than a
     fresh, standalone question — either the raw query had reference
     markers, or condense_query actually rewrote it into something
     different.
+
+    `ignore` is a set of words that never count as evidence of dependency
+    when the rewrite adds them: the catalogue's product names (see
+    _rewrite_folded_in_history and PENDING 8.4).
 
     Used in main.py's retrieval_confidence_band == "none" branch to tell
     apart two cases that look identical from a bare retrieval score but
@@ -1101,11 +1106,13 @@ def is_followup_turn(raw_query: str, history: list, resolved_query: str) -> bool
     if not history:
         return False
     return (has_reference_markers(raw_query)
-            or _rewrite_folded_in_history(raw_query, resolved_query, history))
+            or _rewrite_folded_in_history(raw_query, resolved_query, history,
+                                          ignore))
 
 
 def _rewrite_folded_in_history(raw_query: str, resolved_query: str,
-                               history: list) -> bool:
+                               history: list,
+                               ignore: set | None = None) -> bool:
     """True if condensation actually pulled context out of the history.
 
     `resolved_query != raw_query` used to stand in for this, and it is too
@@ -1128,11 +1135,24 @@ def _rewrite_folded_in_history(raw_query: str, resolved_query: str,
     words came from the conversation. Reflowing, recasing and repunctuating
     add nothing and are correctly ignored; genuinely resolving "and the
     app?" against "how do I reset the Hub" is not.
+
+    PRODUCT NAMES ARE NOT CONTENT WORDS HERE (8.4). The rewriter is told to
+    carry the product over from the conversation, so in an NV9USB+ chat a
+    fresh "how do I clean the note path" comes back "how do I clean the
+    NV9USB+ note path": one word added, and it is in the history because
+    every earlier turn named the product too. That made a standalone
+    question a follow-up on nothing but its scope, and a refusal on it a
+    clarifying question about the previous topic. The caller passes the
+    catalogue's names in `ignore`; a follow-up that only adds the product
+    name is still caught by its own wording ("and the current draw?" has a
+    reference marker).
     """
     def _words(text: str) -> set:
         return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
 
     added = {w for w in _words(resolved_query) - _words(raw_query) if len(w) > 3}
+    if ignore:
+        added -= {w.lower() for w in ignore}
     if not added:
         return False
 

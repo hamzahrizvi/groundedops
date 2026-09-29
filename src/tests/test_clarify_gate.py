@@ -45,9 +45,13 @@ def test_the_gate_is_guarded_on_all_three_conditions():
     code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
     assert "if offer_support and not system_refusal:" in code, \
         "an outage must never be answered with a clarifying question"
-    assert "is_followup_turn(q, history, condensed_query)" in code, \
+    # _is_followup is is_followup_turn with the catalogue's product names
+    # ignored (8.4): the rewrite adding the product under discussion is
+    # scope, not evidence that the turn depended on the conversation.
+    assert "_is_followup(q, history, condensed_query)" in code, \
         "a standalone miss must still get the flat refusal"
-    assert "is_followup_turn(q, history, resolved_query)" not in code, \
+    assert "is_followup_turn(q, history, resolved_query)" not in code \
+        and "_is_followup(q, history, resolved_query)" not in code, \
         ("NOT resolved_query -- by the time the clarify gate runs, "
          "_add_selected_product_context has appended the scoped product to "
          "it, so `resolved != raw` is true on nearly every scoped turn and "

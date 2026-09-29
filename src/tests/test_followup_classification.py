@@ -231,3 +231,35 @@ def test_words_the_rewrite_invented_are_not_evidence():
     assert not is_followup_turn(
         "how long does a full cashbox take to count", hist,
         "how long does a completely full cashbox take to count notes")
+
+
+# ── 8.4: the product name the rewriter carries over is scope, not evidence ──
+
+PRODUCT_WORDS = {"nv9usb", "nv9", "usb", "nv11", "spectral", "nv9s", "mycheckr", "mini"}
+
+
+def test_a_rewrite_that_only_added_the_product_name_is_not_a_follow_up():
+    """In an NV9USB+ chat the rewriter is told to carry the product over, so
+    a fresh question comes back with the name in it. The name is in the
+    history because every earlier turn named it too, which made this read
+    as a follow-up and a refusal on it a clarifying question about the
+    previous topic (voltage)."""
+    q = "how do I clean the note path"
+    resolved = "how do I clean the NV9USB+ note path"
+    assert is_followup_turn(q, HIST, resolved)                 # the fault
+    assert not is_followup_turn(q, HIST, resolved, ignore=PRODUCT_WORDS)
+
+
+def test_a_real_follow_up_that_adds_the_product_name_is_still_one():
+    """The wording carries the dependency: "and the ..." is a marker."""
+    assert is_followup_turn("and the current draw?", HIST,
+                            "what is the NV9USB+ current draw",
+                            ignore=PRODUCT_WORDS)
+
+
+def test_words_pulled_from_history_still_count_beside_the_product_name():
+    hist = [{"q": "what voltage does the NV9USB+ need",
+             "a": "12 V DC nominal on the power connector."}]
+    assert is_followup_turn("same for the connector pins?", hist,
+                            "what voltage do the NV9USB+ power connector pins need",
+                            ignore=PRODUCT_WORDS)

@@ -1883,6 +1883,33 @@ def _token_runs(query: str, max_len: int = 8) -> set[str]:
     return out
 
 
+def _product_words() -> set[str]:
+    """Every word of every catalogue product's key, name and aliases, plus
+    the de-spaced forms. What the retrieval rewrite may add to a question
+    without making it a follow-up (text_utils.is_followup_turn, 8.4)."""
+    out: set[str] = set()
+    names, aliases = _product_names(), _product_aliases()
+    for key, name in names.items():
+        forms = aliases.get(key, ())
+        out |= _product_alias_tokens(key, name, forms)
+        out |= set(re.findall(r"[a-z0-9]+", f"{key} {name} {' '.join(forms)}".lower()))
+    return out
+
+
+def _is_followup(q: str, history: list | None, condensed_query: str) -> bool:
+    """is_followup_turn with the catalogue's product names ignored: a rewrite
+    that only added the product under discussion did not depend on the
+    conversation for anything but its scope (8.4)."""
+    if not history:
+        return False
+    try:
+        ignore = _product_words()
+    except Exception as _exc:
+        logger.debug(f"product words for follow-up check skipped: {_exc}")
+        ignore = set()
+    return is_followup_turn(q, history, condensed_query, ignore=ignore)
+
+
 def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     """Which of `candidates` the question wording actually picks out.
 
@@ -2842,7 +2869,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _unscoped_verdict = None
     if (not payload.product and not payload.category
             and top_score < AMBIGUOUS_CEILING
-            and not (history and is_followup_turn(q, history, condensed_query))):
+            and not _is_followup(q, history, condensed_query)):
         try:
             import clarify as _clarify
             import catalog as _cat_mod
@@ -2867,7 +2894,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # response the user is reporting. Ask for clarification instead;
         # standalone misses (no reference markers, no history) are
         # completely unaffected and still get the blunt rejection.
-        is_followup = is_followup_turn(q, history, condensed_query)
+        is_followup = _is_followup(q, history, condensed_query)
 
         # A STANDALONE query (no history dependency) can still be too
         # vague to retrieve well while clearly being about something in
@@ -3941,7 +3968,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             #  * not _asked_to_clarify_last_turn — never twice in a row. Two
             #    consecutive questions back reads as an assistant that cannot
             #    answer anything, and the visitor leaves.
-            elif (history and is_followup_turn(q, history, condensed_query)
+            elif (_is_followup(q, history, condensed_query)
                     and not _asked_to_clarify_last_turn(history)):
                 # QUOTE THE TURN THAT FAILED, not history[-1]. The first
                 # version named the previous topic, on the assumption that a
