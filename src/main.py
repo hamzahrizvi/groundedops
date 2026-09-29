@@ -3830,7 +3830,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ── Memory + logging ──────────────────────
     # The "not mentioned" reply is a rejection is_refusal does not
     # recognise, so say so: the question is kept, the reply is not (8.5).
-    add_to_memory(session_id, q, answer, refused=True if _not_mentioned else None)
+    # Two calls rather than refused=None: the test harnesses stub
+    # add_to_memory with a three-argument lambda.
+    if _not_mentioned:
+        add_to_memory(session_id, q, answer, refused=True)
+    else:
+        add_to_memory(session_id, q, answer)
     sources = _build_sources(top_chunks)
 
     # The oldest turn is silently discarded once the window is full, so the
