@@ -294,6 +294,7 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
 # object stays valid afterwards.
 from text_utils import stem as _real_stem  # noqa: E402
 from text_utils import is_more_request as _real_is_more  # noqa: E402
+from text_utils import is_step_reference as _real_is_step_ref  # noqa: E402
 from text_utils import normalize_markdown_tables as _real_normalize_markdown  # noqa: E402
 # Handed through for the same reason as stem(): _capability_reply asks it
 # which entity a "does X work with Y" question is about, and a lambda here
@@ -307,6 +308,7 @@ stub("text_utils",
      has_domain_vocabulary=lambda q: False, has_reference_markers=lambda q: False,
      is_template_leak=lambda a: False, build_clarification_options=lambda *a: [],
      stem=_real_stem, is_more_request=_real_is_more,
+     is_step_reference=_real_is_step_ref,
      capability_target=_real_capability_target,
      normalize_markdown_tables=_real_normalize_markdown)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,

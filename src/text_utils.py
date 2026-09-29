@@ -67,7 +67,8 @@ _MORE_RE = re.compile(
     r"^\s*(?:and\s+|ok(?:ay)?[,\s]+|so\s+)?"
     r"(?:tell\s+me\s+more|more\s+(?:info(?:rmation)?|detail|on\s+(?:this|that|it))"
     r"|elaborate|go\s+on|continue|expand(?:\s+on\s+(?:this|that|it))?"
-    r"|anything\s+else|what\s+else|say\s+more)"
+    r"|anything\s+else(?:\s+(?:i|we)\s+(?:should|need\s+to)\s+know)?"
+    r"|what\s+else|say\s+more)"
     r"(?:\s+(?:about|on)\s+(?:it|this|that|the\s+above))?"
     # ONE class for the tail, not `\s*[.?!]*\s*`: two whitespace runs either
     # side of an optional one can split a long run of spaces n^2 ways before
@@ -79,6 +80,40 @@ _MORE_RE = re.compile(
 def is_more_request(q: str) -> bool:
     """True when the user is asking to expand the previous answer."""
     return bool(_MORE_RE.match(q or ""))
+
+
+# "And step 3?" points into the previous answer. Retrieval on it scores
+# noise and re-serves the whole procedure (docs/stress-test-2026-09-25.md:70),
+# so main.py serves the item from the last answer instead. Anchored with no
+# other content words, so "from step 3 onwards, is the loom the same" is a
+# real follow-up and not captured.
+_NUM_WORDS = {w: i for i, w in enumerate(
+    "one two three four five six seven eight nine ten eleven twelve".split(), 1)}
+_ORDINALS = {w: i for i, w in enumerate(
+    "first second third fourth fifth sixth seventh eighth ninth tenth"
+    " eleventh twelfth".split(), 1)}
+_STEP_REF_RE = re.compile(
+    r"^\s*(?:and|ok(?:ay)?|so|then)?[,\s]*"
+    r"(?:(?:what\s+(?:about|was|is)|what'?s|show\s+me|tell\s+me|give\s+me"
+    r"|repeat|can\s+you\s+(?:show|tell|give)\s+me)\s+)?"
+    r"(?:the\s+)?"
+    r"(?:step\s+(?:number\s+|no\.?\s*|#\s*)?(?P<n>\d{1,2}|[a-z]+)"
+    r"|(?P<o>\d{1,2}(?:st|nd|rd|th)|[a-z]+)\s+(?:step|one))"
+    r"(?:\s+again)?"
+    r"(?:\s+(?:from|of|in)\s+(?:that|this|it|the\s+above|your\s+(?:last\s+)?answer))?"
+    r"[\s.?!]*$", re.I)
+
+
+def is_step_reference(q: str) -> int | None:
+    """The step number "and step 3?" asks for, or None."""
+    m = _STEP_REF_RE.match(q or "")
+    if not m:
+        return None
+    if m.group("n"):
+        w = m.group("n").lower()
+        return int(w) if w.isdigit() else _NUM_WORDS.get(w)
+    w = m.group("o").lower()
+    return int(w[:-2]) if w[:1].isdigit() else _ORDINALS.get(w)
 
 
 def stem(w: str) -> str:

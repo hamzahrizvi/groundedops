@@ -82,6 +82,7 @@ from text_utils import (
     is_refusal,
     is_followup_turn,
     is_more_request,
+    is_step_reference,
     has_domain_vocabulary,
     has_reference_markers,
     is_template_leak,
@@ -1032,6 +1033,56 @@ def _format_steps(steps: list[dict]) -> str:
         body = " ".join(body.split())
         out.append(f"**{section}**" + "\n" + body if section else body)
     return "\n\n".join(out)
+
+
+# "And step 3?" (8.7): the last ANSWERED turn per session, full text and
+# built sources. memory.py keeps only the first 300 characters, which cuts
+# a procedure off after a step or two. Popped at the top of every turn, so
+# after a refusal or any other reply there is nothing stale to serve from;
+# only the answered exits write it back. Same cheap bound as _PENDING_STEPS.
+_LAST_ANSWER: dict[str, dict] = {}
+
+
+def _remember_answer(session_id: str | None, answer: str, sources) -> None:
+    if not session_id or session_id == DEFAULT_SESSION_ID or not answer:
+        return
+    if len(_LAST_ANSWER) >= _PENDING_STEPS_MAX:
+        _LAST_ANSWER.clear()
+    _LAST_ANSWER[session_id] = {"answer": answer, "sources": sources}
+
+
+_STEP_HEAD_RE = re.compile(r"^\s*(?:#+\s*|\*\*\s*)?step\s+(\d{1,2})\b", re.I | re.M)
+_HASH_HEAD_RE = re.compile(r"^\s*#{2,}\s+\S", re.M)
+_NUM_LINE_RE = re.compile(r"^(\d{1,2})[.)]\s+\S", re.M)
+
+
+def _answer_steps(answer: str) -> dict[int, str]:
+    """{N: item text} for a numbered answer, verbatim, never re-numbered.
+
+    "Step N" headings win over "###" headings, which win over top-level
+    "1." / "1)" lines: a Step heading usually has its own 1. 2. sub-list,
+    and that sub-list is not the procedure. An item runs to the next item
+    of its own kind; the last numbered line stops at the first unindented
+    paragraph after it, so a closing remark is not served as step N.
+    """
+    for rx in (_STEP_HEAD_RE, _HASH_HEAD_RE, _NUM_LINE_RE):
+        heads = list(rx.finditer(answer))
+        if len(heads) >= 2:
+            break
+    else:
+        return {}
+    nums = ([int(m.group(1)) for m in heads] if rx.groups
+            else range(1, len(heads) + 1))
+    ends = [m.start() for m in heads[1:]] + [len(answer)]
+    if rx is _NUM_LINE_RE:
+        # A code fence or indented line after a blank line is still the
+        # step; a paragraph starting with a word or ** is the answer's close.
+        tail = re.search(r"\n\s*\n(?=[A-Za-z*])", answer[heads[-1].start():])
+        if tail:
+            ends[-1] = heads[-1].start() + tail.start()
+    # reversed: a repeated number keeps its FIRST occurrence
+    return {n: answer[m.start():e].strip()
+            for n, m, e in reversed(list(zip(nums, heads, ends)))}
 
 
 def _steps_answer(source: str) -> str | None:
@@ -2317,6 +2368,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # hijack a "yes" in any other conversation, and the offer is consumed
     # either way -- a second "yes" is a new question, not the same steps
     # again.
+    _last_answer = _LAST_ANSWER.pop(session_id, None)
     _pending_src = _PENDING_STEPS.pop(session_id, None)
     if _pending_src and _is_bare_affirmative(q):
         _steps = _steps_answer(_pending_src)
@@ -2327,10 +2379,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             log_interaction(q, _steps, "steps", None, [_pending_src],
                             grounding_score=None, flagged=False)
             add_to_memory(session_id, q, _steps)
+            _steps_sources = _build_sources(
+                [{"source": _pending_src, "page": 1, "text": ""}])
+            _remember_answer(session_id, _steps, _steps_sources)
             return {
                 "answer": _steps,
-                "sources": _build_sources(
-                    [{"source": _pending_src, "page": 1, "text": ""}]),
+                "sources": _steps_sources,
                 "role": "steps",
                 "answerability": "stated",
                 "model": None, "provider": "documents",
@@ -2351,6 +2405,41 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "offer_support": False, "system_refusal": False,
             "needs_clarification": False, "clarification_options": [],
             "suggested_replies": [],
+            "retrieval_score": None, "resolved_query": None,
+        }
+
+    # "AND STEP 3?" (8.7) -- served from the last answer, no model. Only
+    # when there IS a last answer; otherwise it is an ordinary question.
+    _step_n = is_step_reference(q) if _last_answer else None
+    if _step_n:
+        _LAST_ANSWER[session_id] = _last_answer      # "and step 4?" next
+        _items = _answer_steps(_last_answer["answer"])
+        if _step_n in _items:
+            _reply, _sources = _items[_step_n], _last_answer["sources"]
+        else:
+            _reply = (f"The answer I gave had {len(_items)} steps, so there "
+                      f"is no step {_step_n}." if _items else
+                      "The answer I gave was not a numbered procedure, so "
+                      "there is no step to pick out.")
+            _reply += " Say \"tell me more\" and I will look for more detail."
+            _sources = []
+        ptrace.mark("step", f"{_step_n} of {len(_items)}")
+        ptrace.set_meta(ground_via="verbatim")
+        log_interaction(q, _reply, "step", None,
+                        [s.get("source") for s in _sources or []],
+                        grounding_score=None, flagged=False)
+        # The "no step N" line stays out of memory, so the offered "tell me
+        # more" expands the real answer, not this one.
+        if _sources:
+            add_to_memory(session_id, q, _reply)
+        return {
+            "answer": _reply, "sources": _sources, "role": "step",
+            "answerability": "stated" if _sources else None,
+            "model": None, "provider": "documents",
+            "grounding_score": None, "flagged": False,
+            "offer_support": False, "system_refusal": False,
+            "needs_clarification": False, "clarification_options": [],
+            "suggested_replies": [] if _sources else ["Tell me more"],
             "retrieval_score": None, "resolved_query": None,
         }
 
@@ -3181,6 +3270,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                             request_id=request_id,
                             timing={"total_time": total_time})
             add_to_memory(session_id, q, extracted)
+            _remember_answer(session_id, extracted, sources)
             return {
                 "answer": extracted,
             "response_time_ms": round(total_time * 1000),
@@ -4121,6 +4211,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 _uid, payload.session_id, payload.product, q, answer, sources)
         except Exception as e:
             logger.warning(f"Conversation save failed (non-fatal): {e}")
+
+    # 8.7: only a turn that answered is something "and step 3?" can point at.
+    if not (offer_support or flagged or system_refusal or needs_clarification
+            or _not_mentioned):
+        _remember_answer(session_id, answer, sources)
 
     return {
         "answer": answer,
