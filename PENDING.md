@@ -1013,13 +1013,44 @@ exactly, we cannot tell whether a fix helped.
 ### Tier 8 -> 9 - reliable, reachable, safe
 
 - [ ] **9.1 A proper always-on server with a fixed web address.** Today it
-  runs on a PC with an address that changes on restart.
+  runs on a PC with an address that changes on restart. **Host decided
+  2026-09-29: a company server, not yet provisioned (you).** Done in S12:
+  TUNNEL_SETUP.md (named tunnel steps + the go-live checklist). Left: the
+  server, the tunnel/DNS, `serve.ps1 -Install` there, plugin re-export,
+  and the 14-day /health gate.
 - [ ] **9.2 Restart it if it hangs** (but not just because the AI provider
-  is down), and alert someone when it is down.
+  is down), and alert someone when it is down. Code done 2026-09-29
+  (`4e8748a`, `f77fedc`): serve.ps1 probes plain /health every 30s after a
+  120s grace and kills the process tree after 3 failures (never ?deep=1);
+  Dockerfile healthcheck start-period 120s; provider_unreachable_reason no
+  longer carries the exception text (it named the internal gateway host on
+  a public endpoint). Not done: the manual acceptance (suspend the pid ->
+  restart in logs/service.log within 2 min; black-holed provider 10 min ->
+  zero restarts; 3/3 cold starts), SMTP credentials + test-email (you), and
+  the external pinger (waits for 9.1).
 - [ ] **9.3 A backup AI provider from a different company**, tested by
-  deliberately cutting off DeepSeek.
+  deliberately cutting off DeepSeek. Code done 2026-09-29 (`f77fedc`):
+  deep health now probes the DEFAULT role (what answers customers) instead
+  of the Settings picker (the gateway), and reports `roles.{default,
+  advanced,backup}` each with provider + reachable (report-only; backup
+  None when unassigned); _call_openai/_call_anthropic return model and
+  provider. The escalation-model drift (main.py) was already fixed.
+  **Waiting on you (~2026-10-01, at work):** no Anthropic key; plan is to
+  route the backup through the company OpenAI-compatible server instead --
+  assign it as backup in the console, check `roles.backup.reachable` on
+  /health?deep=1, then the 30-minute DeepSeek black-hole drill with
+  run_live. Open question from the plan: whether api-mode condensation
+  should go through generate_with_fallback.
 - [ ] **9.4 A daily spending cap, then turn AI answers on for guests.** The
-  switch is the operator's decision.
+  switch is the operator's decision. Code done 2026-09-29 (`b63ef28`):
+  policy `global_llm_daily` (0 = off; console "Site-wide daily cap" under
+  Account holders), counted under `global:llm` for every non-staff charge;
+  a capped guest falls to the FAQ path, a capped member gets 429
+  `global_quota`; /widget/draft_enquiry follows the console switch; guest
+  FAQ turns now write a logs.jsonl row (origin/outcome/session_id);
+  scenario 22 has 5 injection probes (run_scenarios 156/168, same 12
+  fails). **Left for you:** pick the cap from a week of /admin/credits
+  deltas, set it, then flip guest AI on in Access & limits.
 - [ ] **9.5 Backups onto a second disk, and one timed restore test.**
 - [ ] **9.6 Check the unreviewed FAQ answers** and only show "Reviewed
   answer" on ones a person actually checked.
@@ -1619,6 +1650,11 @@ see *Shipped — the four follow-ups* above; kept for the record.
   built.
 
   **Two decisions taken 2026-08-27, both deliberate, both with a condition:**
+
+  *(Both superseded, 2026-09-29, 9.5: nightly archives go through
+  manage_backup.py with BACKUP_PASSPHRASE and are encrypted (scrypt);
+  BACKUP_ALLOW_PLAINTEXT now governs only the console export; the nightly
+  task writes to D:\GroundedOpsBackups.)*
 
   1. **Encryption is OFF** (`BACKUP_ALLOW_PLAINTEXT=1` in `src/.env`). The
      lose-the-passphrase risk was judged worse than the at-rest risk while

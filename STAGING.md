@@ -278,5 +278,7 @@ Known and deliberate, so nobody discovers them as surprises:
   spending API calls. One case is a real outlier at 0.0051 — "Does MyCheckr
   require integration with other systems?" — and is a retrieval problem, not
   a threshold problem.
-- **Nothing schedules a backup yet.** Step 6 is a manual command. Put it on
-  cron on the host before this carries anything you would miss.
+- **Backups are scheduled on the dev box only** (`backup_daily.ps1 -Install`,
+  nightly 02:30 to `D:\GroundedOpsBackups`, encrypted). Step 6 is still a
+  manual command here: put it on cron on the host before this carries
+  anything you would miss.
