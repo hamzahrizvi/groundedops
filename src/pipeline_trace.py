@@ -85,6 +85,22 @@ LABELS: dict[str, str] = {
 
 _current: ContextVar[dict | None] = ContextVar("pipeline_trace", default=None)
 
+# 8.11: an optional (loop, callback) that mark() reports each stage to, so
+# /widget/ask/stream can show real progress. Set by the caller in the
+# context the request runs in; run_in_threadpool copies it into the worker
+# thread, and call_soon_threadsafe hands each stage back to the event loop.
+_listener: ContextVar[tuple | None] = ContextVar("pipeline_listener", default=None)
+
+
+def listen(loop, callback) -> None:
+    """Report every later mark() in this context to `callback(stage_dict)`,
+    called on `loop`. Set it in a copied context (contextvars.copy_context)
+    so it ends with the request."""
+    try:
+        _listener.set((loop, callback))
+    except Exception:
+        pass
+
 
 def start():
     """Begin a trace for this request. Returns a token for reset()."""
@@ -113,12 +129,16 @@ def mark(stage: str, note: str | None = None) -> None:
         cur = _current.get()
         if cur is None:
             return
-        cur["stages"].append({
+        entry = {
             "id": stage,
             "label": LABELS.get(stage, stage),
             "note": note,
             "at_ms": round((time.time() - cur["t0"]) * 1000),
-        })
+        }
+        cur["stages"].append(entry)
+        lis = _listener.get()
+        if lis is not None:
+            lis[0].call_soon_threadsafe(lis[1], entry)
     except Exception:
         pass
 

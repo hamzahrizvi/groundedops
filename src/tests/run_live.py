@@ -212,26 +212,61 @@ def score_needs_history(turn, r, history):
     return None if got == want else f"needs_history: expected {want}, got {got}"
 
 
+def post_stream(endpoint, body, headers):
+    """8.11: one turn through /widget/ask/stream. Returns the response dict
+    rebuilt from meta + deltas, the seconds to the first event, and the
+    status events in order."""
+    t0 = time.perf_counter()
+    resp = requests.post(endpoint, json=body, headers=headers, timeout=240,
+                         stream=True)
+    if resp.status_code != 200:
+        return ({"answer": f"HTTP {resp.status_code}", "role": "error"}, None, [])
+    first, statuses, meta, text, event = None, [], None, "", None
+    for line in resp.iter_lines(decode_unicode=True):
+        if first is None and line:
+            first = time.perf_counter() - t0
+        if line.startswith("event: "):
+            event = line[7:].strip()
+        elif line.startswith("data: "):
+            d = json.loads(line[6:])
+            if event == "status":
+                statuses.append(d.get("id") or d.get("stage"))
+            elif event == "meta":
+                meta = d
+            elif event == "delta":
+                text += d.get("text", "")
+            elif event == "error":
+                return ({"answer": f"HTTP {d.get('status')}: {json.dumps(d.get('detail'))[:300]}",
+                         "role": "error"}, first, statuses)
+    r = dict(meta or {"role": "error"})
+    r["answer"] = text
+    return r, first, statuses
+
+
 def run_scenario(sc, url, verbose, path="query"):
     sid = f"live-{sc['id']}-{uuid.uuid4().hex[:8]}"
     rows = []
     history: list = []
     endpoint, headers = f"{url}/query", {}
-    if path == "widget":
-        endpoint = f"{url}/widget/ask"
+    if path in ("widget", "stream"):
+        endpoint = f"{url}/widget/ask" + ("/stream" if path == "stream" else "")
         headers = {"Authorization": "Bearer " + member_token(sid)}
     for turn in sc["turns"]:
         body = {"q": turn["q"], "session_id": sid}
         if sc.get("scoped") and sc.get("product_key"):
             body["product"] = sc["product_key"]
         t0 = time.perf_counter()
+        first, statuses = None, []
         try:
-            resp = requests.post(endpoint, json=body, headers=headers,
-                                 timeout=240)
-            r = resp.json()
-            if resp.status_code != 200:
-                r = {"answer": f"HTTP {resp.status_code}: {json.dumps(r)[:300]}",
-                     "role": "error"}
+            if path == "stream":
+                r, first, statuses = post_stream(endpoint, body, headers)
+            else:
+                resp = requests.post(endpoint, json=body, headers=headers,
+                                     timeout=240)
+                r = resp.json()
+                if resp.status_code != 200:
+                    r = {"answer": f"HTTP {resp.status_code}: {json.dumps(r)[:300]}",
+                         "role": "error"}
         except Exception as e:                      # noqa: BLE001
             r = {"answer": f"REQUEST FAILED: {e}", "role": "error"}
         wall = time.perf_counter() - t0
@@ -245,10 +280,13 @@ def run_scenario(sc, url, verbose, path="query"):
             if history_fail:
                 fails = [*fails, history_fail]
         rows.append({"turn": turn, "response": r, "wall": wall,
-                     "got": got, "fails": fails, "missing_keys": missing})
+                     "got": got, "fails": fails, "missing_keys": missing,
+                     "first_event": first, "statuses": statuses})
         if verbose:
             mark = "ok  " if not fails else "FAIL"
-            print(f"  {mark} {got:8s} {wall:5.1f}s  {turn['q'][:70]}")
+            extra = (f"  first {first:.2f}s, {len(statuses)} status"
+                     if first is not None else "")
+            print(f"  {mark} {got:8s} {wall:5.1f}s  {turn['q'][:70]}{extra}")
             for f in fails:
                 print(f"         {f}")
             if missing:
@@ -349,7 +387,7 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--json", default=None)
     ap.add_argument("--quiet", action="store_true")
-    ap.add_argument("--path", choices=("query", "widget", "both"),
+    ap.add_argument("--path", choices=("query", "widget", "both", "stream"),
                     default="query")
     a = ap.parse_args()
 
@@ -380,13 +418,29 @@ def main():
     summary = {"path": a.path, "url": a.url, "started": started.isoformat()}
     for path, results in by_path.items():
         target = out if len(paths) == 1 else out.with_name(f"{out.stem}_{path}{out.suffix}")
-        route = "/widget/ask" if path == "widget" else "/query"
+        route = {"widget": "/widget/ask", "stream": "/widget/ask/stream"}.get(path, "/query")
         p, f = write_markdown(results, target, a.url, started, route)
         print(f"\n[{path}] {p} of {p + f} turns as expected "
               f"({100.0 * p / max(1, p + f):.1f}%)  -> {target}")
         summary[path] = {"passed": p, "turns": p + f, "transcript": str(target)}
         if f:
             status = 1
+        if path == "stream":
+            firsts = sorted(r["first_event"] for _, _, rows in results for r in rows
+                            if r["first_event"] is not None)
+            walls = sorted(r["wall"] for _, _, rows in results for r in rows)
+            n_status = [len(r["statuses"]) for _, _, rows in results for r in rows]
+            pct = lambda xs, q: xs[min(len(xs) - 1, int(q * len(xs)))] if xs else None
+            summary[path]["first_event_p50"] = pct(firsts, 0.5)
+            summary[path]["first_event_p90"] = pct(firsts, 0.9)
+            summary[path]["wall_p50"] = pct(walls, 0.5)
+            summary[path]["wall_p90"] = pct(walls, 0.9)
+            summary[path]["status_events_mean"] = (sum(n_status) / len(n_status)
+                                                   if n_status else None)
+            print(f"[stream] first event p50 {summary[path]['first_event_p50']}, "
+                  f"p90 {summary[path]['first_event_p90']}; wall p50 "
+                  f"{summary[path]['wall_p50']}; status events/turn "
+                  f"{summary[path]['status_events_mean']}")
         if path == "widget":
             counts = missing_key_counts(results)
             summary[path]["missing_keys"] = counts

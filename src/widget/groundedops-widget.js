@@ -1138,8 +1138,22 @@
     /* Chained timeouts rather than an interval, because the sequence has to
      * be able to STOP: it holds on the last line instead of looping round to
      * claim it is starting the search again. */
+    /* 8.11: the stream reports the real stage. Once one arrives the timed
+     * lines stop, and the wait shows what is actually happening. */
+    var real = false;
+    function show(text) {
+      label.textContent = text;
+      label.className = "";
+      void label.offsetWidth;
+      label.className = "go-waitin";
+    }
+    d.setStage = function (text) {
+      if (!text || !d.parentNode) return;
+      real = true;
+      if (label.textContent !== text) show(text);
+    };
     function step() {
-      if (!d.parentNode || i >= WAIT_LINES.length - 1) return;
+      if (real || !d.parentNode || i >= WAIT_LINES.length - 1) return;
       i += 1;
       label.textContent = WAIT_LINES[i];
       /* Restart the fade: drop the class, force a reflow, put it back.
@@ -2046,7 +2060,7 @@
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
 
-    fetch(cfg.api + "/widget/ask", {
+    fetch(cfg.api + "/widget/ask/stream", {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
@@ -2076,7 +2090,7 @@
             throw err;
           });
         }
-        return r.json();
+        return readAnswerStream(r, s);
       })
       .then(function (d) {
         s.remove();
@@ -2227,7 +2241,10 @@
       })
       .catch(function (e) {
         s.remove();
-        var detail = e && e.status === 429 && e.body ? e.body : null;
+        // FastAPI wraps an HTTPException as {"detail": {...}}; the stream's
+        // error event sends the inner object. Reading e.body.error directly
+        // missed every 429, so a quota limit read as "check your connection".
+        var detail = e && e.status === 429 && e.body ? (e.body.detail || e.body) : null;
         if (detail && detail.error === "quota_exceeded") {
           var msg = detail.message || "You have reached your limit for now.";
           if (detail.reset_at) msg += " " + resetsAt(detail.reset_at);
@@ -2251,6 +2268,58 @@
         if (state.product) unlockComposer();
         $in.focus();
       });
+  }
+
+  /** 8.11: read /widget/ask/stream's server-sent events into the object
+   *  /widget/ask returns, showing each real stage on the wait line.
+   *  EventSource is GET-only, so the POST body is parsed here; with no
+   *  ReadableStream the whole body is read at the end instead. */
+  function readAnswerStream(r, wait) {
+    var d = null, text = "", fail = null, buf = "";
+    function frame(raw) {
+      var ev = "message", data = "";
+      raw.split("\n").forEach(function (line) {
+        if (line.indexOf("event: ") === 0) ev = line.slice(7).trim();
+        else if (line.indexOf("data: ") === 0) data += line.slice(6);
+      });
+      if (!data) return;
+      var v = JSON.parse(data);
+      if (ev === "status") { if (wait.setStage) wait.setStage(v.stage); }
+      else if (ev === "meta") d = v;
+      else if (ev === "delta") text += v.text;
+      else if (ev === "error") {
+        fail = new Error("HTTP " + v.status);
+        fail.status = v.status;
+        fail.body = v.detail;
+      }
+    }
+    function feed(chunk) {
+      buf += chunk.replace(/\r/g, "");
+      var i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        frame(buf.slice(0, i));
+        buf = buf.slice(i + 2);
+      }
+    }
+    function finish() {
+      if (buf.trim()) frame(buf);
+      if (fail) throw fail;
+      if (!d) throw new Error("the answer stream ended early");
+      d.answer = text;
+      return d;
+    }
+    if (!r.body || !r.body.getReader || typeof TextDecoder === "undefined") {
+      return r.text().then(function (all) { feed(all); return finish(); });
+    }
+    var reader = r.body.getReader(), dec = new TextDecoder();
+    function pump() {
+      return reader.read().then(function (res) {
+        if (res.done) { feed(dec.decode()); return finish(); }
+        feed(dec.decode(res.value, { stream: true }));
+        return pump();
+      });
+    }
+    return pump();
   }
 
   // ── events ────────────────────────────────────────────────────────────

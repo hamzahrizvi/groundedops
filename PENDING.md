@@ -884,8 +884,30 @@ exactly, we cannot tell whether a fix helped.
   flagged rows say so; Promote to FAQ is the existing draft button. No
   note box in the widget (the API takes one). tests/test_answer_feedback.py
   (6). Rates are for after go-live, origin=widget only.
-- [ ] **8.11 Show real progress while waiting** ("searching", "checking"...)
-  instead of timed placeholder lines.
+- [x] **8.11 Show real progress while waiting** ("searching", "checking"...)
+  instead of timed placeholder lines. Done 2026-09-29 (S11).
+  `pipeline_trace.listen(loop, callback)` sets a context var that mark()
+  reports each stage to via call_soon_threadsafe; /widget/ask/stream runs
+  widget_ask as a task in a copied context (run_in_threadpool carries it
+  into the worker thread) and sends each stage as a `status` event, mapped
+  to visitor wording in `widget_api.PROGRESS_LINES` (a stage is marked when
+  it finishes, so each names the step that starts next). Gates unchanged:
+  the stream still calls widget_ask. The widget now asks through the
+  stream (fetch + ReadableStream; EventSource is GET-only), shows the real
+  stage once one arrives, and keeps the timed lines and clock as the
+  fallback. The meta allowlist gained needs_sign_in, sign_in_url,
+  service_degraded and more_context (the widget reads all four). The
+  sentence splitter dropped a leading "." and a "?" after a newline; now
+  lossless. **Found on the way:** the widget read a 429 body as
+  `e.body.error`, but FastAPI wraps it as `{"detail": {...}}`, so every
+  quota or session limit showed "check your connection". Fixed.
+  `run_live.py --path stream` records seconds to first event, status
+  events per turn and wall p50/p90 into the summary. Tests:
+  test_progress_stream.py (4, real _traced_query + threadpool, faked
+  pipeline) and test_widget_walk.py (3, Chromium with a stubbed backend:
+  streamed answer + vote, the 429 wording, the form's GO- reference).
+  **Not measured live:** no backend was started this session. Run
+  `run_live.py --path stream` N=3 on an idle box before declaring an SLO.
 - [ ] **8.12 Show what the server already sends**: "open the manual at page
   N", related questions, and a softer refusal that does not quote the
   visitor's typo back.

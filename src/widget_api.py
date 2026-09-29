@@ -109,6 +109,19 @@ def _save_vote(request_id: str, row: dict) -> None:
         jsonstore.save(_FEEDBACK_PATH, data, label="widget feedback")
 
 
+# 8.11: what the visitor is told while the pipeline runs. A stage is marked
+# when it FINISHES, so each one names the step that starts next. Stages not
+# listed say nothing new and are not sent.
+PROGRESS_LINES = {
+    "condense":   "Searching the manuals",
+    "retrieve":   "Reading the pages that matched",
+    "procedures": "Writing the answer",
+    "generate":   "Checking the answer against the manual",
+    "escalate":   "Trying our backup service",
+    "retry":      "Rewriting the answer and checking it again",
+}
+
+
 def _client_ip(request: Request) -> str:
     """Real client IP behind a reverse proxy.
 
@@ -742,9 +755,33 @@ def register(app, answer_query, draft_enquiry=None):
                     + "data: " + _json.dumps(data) + "\n\n")
 
         async def run():
-            yield sse("status", {"stage": "searching the documentation"})
+            yield sse("status", {"stage": "Searching the documentation",
+                                 "id": "entry", "at_ms": 0})
+            # The pipeline reports each stage through pipeline_trace's
+            # listener; the answer runs as a task so its progress can be
+            # sent while it is still working.
+            import contextvars
+            import pipeline_trace
+            loop = asyncio.get_running_loop()
+            progress: asyncio.Queue = asyncio.Queue()
+            ctx = contextvars.copy_context()
+            ctx.run(pipeline_trace.listen, loop, progress.put_nowait)
+            task = loop.create_task(widget_ask(payload, request), context=ctx)
+            sent = set()
+            while not task.done():
+                getter = asyncio.ensure_future(progress.get())
+                await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+                if not getter.done():
+                    getter.cancel()
+                    continue
+                stage = getter.result()
+                line = PROGRESS_LINES.get(stage.get("id"))
+                if line and line not in sent:
+                    sent.add(line)
+                    yield sse("status", {"stage": line, "id": stage["id"],
+                                         "at_ms": stage.get("at_ms")})
             try:
-                result = await widget_ask(payload, request)
+                result = task.result()
             except HTTPException as e:
                 yield sse("error", {"status": e.status_code,
                                     "detail": e.detail})
@@ -763,6 +800,8 @@ def register(app, answer_query, draft_enquiry=None):
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_candidates",
                                 "request_id", "role", "reason",
+                                "needs_sign_in", "sign_in_url",
+                                "service_degraded", "more_context",
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "suggested_replies",
                                 "flagged", "quota", "session")})
@@ -770,7 +809,10 @@ def register(app, answer_query, draft_enquiry=None):
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would
             # show text that has not been checked.
-            _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*\s*|\n+")
+            # Lossless: the widget rebuilds the answer from these pieces, and
+            # the old pattern dropped a leading "." (".NET") or a "?" after a
+            # newline.
+            _SENTENCE = re.compile(r"[^\n]*?(?:[.!?]+(?:\s+|$)|\n+|$)")
             for part in _SENTENCE.findall(answer) or [answer]:
                 if part:
                     yield sse("delta", {"text": part})
