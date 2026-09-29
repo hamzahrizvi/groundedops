@@ -66,12 +66,33 @@ def test_figure_chunk_names_the_figure_above_its_labels():
         out = ingest._figure_chunks("M.pdf", {"p12_1.png": ("1 +V\n2 GND\n15 TX", 0.9),
                                               "p13_1.png": ("65.84\n36.92", 0.8),
                                               "p99_1.png": ("orphan", 0.9)})
-    assert [(p, n) for p, n, _, _ in out] == [(12, "p12_1.png"), (13, "p13_1.png")]
+    assert [(p, n) for p, n, *_ in out] == [(12, "p12_1.png"), (13, "p13_1.png")]
     body = out[0][2]
     assert "Figure on page 12: Figure 4: SSP connector" in body
     assert "Text in the figure:\n1 +V\n2 GND\n15 TX" in body
     assert body.startswith("[M — Figure: Figure 4: SSP connector]")
     assert out[1][2].startswith("[M — Figure]")
+
+
+def test_figure_chunk_carries_its_page_heading():
+    """9.14: a figure chunk held only labels and a caption, so search
+    rarely found it. It now carries its page's section heading, and a page
+    with none takes the nearest earlier page's."""
+    headings = ingest._page_headings([(10, "Connectors"), (10, ""), (10, "Connectors"),
+                                      (10, "SSP pinout"), (14, "Mounting")])
+    assert headings == {10: "Connectors / SSP pinout", 14: "Mounting"}
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(docstore, "store_dir", return_value=tmp):
+        _sidecar(tmp, "M.pdf", {"p12_1.png": {"page": 12, "caption": "Figure 4"},
+                                "p9_1.png": {"page": 9, "caption": ""}})
+        out = ingest._figure_chunks("M.pdf", {"p12_1.png": ("1 +V", 0.9),
+                                              "p9_1.png": ("65.84", 0.8)}, headings)
+    by_name = {n: (body, heading) for _, n, body, _, heading in out}
+    body, heading = by_name["p12_1.png"]
+    assert heading == "Connectors / SSP pinout"
+    assert body.startswith("[M — Connectors / SSP pinout — Figure: Figure 4]")
+    assert "Figure on page 12, Connectors / SSP pinout: Figure 4" in body
+    assert by_name["p9_1.png"][1] == ""     # nothing at or before page 9
 
 
 def test_index_figure_text_tags_and_replaces():
@@ -92,7 +113,8 @@ def test_index_figure_text_tags_and_replaces():
         _sidecar(tmp, "M.pdf", {"p12_1.png": {"page": 12, "caption": "Pinout"}})
         docstore.record("M.pdf", content=b"%PDF-1.4 stub", chunks=3, pages=20)
         # A prose chunk already held must survive untouched.
-        collection.rows["M.pdf:abc:0"] = ("prose", {"source": "M.pdf", "page": 12})
+        collection.rows["M.pdf:abc:0"] = ("prose", {"source": "M.pdf", "page": 12,
+                                                     "section": "Connectors"})
 
         assert ingest.index_figure_text("M.pdf") == 1
         assert run.call_count == 1
@@ -102,6 +124,7 @@ def test_index_figure_text_tags_and_replaces():
         assert meta["ocr"] is True and meta["figure_text"] is True
         assert meta["figures"] == "p12_1.png" and meta["page"] == 12
         assert meta["product"] == "nv9" and meta["prod_nv9"] is True
+        assert meta["section"] == "Connectors"      # 9.14: from the held prose
 
         # Second run replaces, never duplicates; the prose chunk stays.
         assert ingest.index_figure_text("M.pdf") == 1

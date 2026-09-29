@@ -390,15 +390,14 @@ def ingest_file(content: bytes, filename: str,
             except Exception as exc:
                 logger.warning("figure extraction failed for %r (answers will "
                                "show no pictures from it): %s", filename, exc)
-        fig_chunks: list[tuple[int, str, str, float]] = []   # (page, name, text, conf)
+        fig_read: dict = {}
         if FIGURE_TEXT_INDEX and fig_by_page:
             _step("reading text in figures", 0, 1)
             try:
                 import figures as _figures
-                read = _figures.figure_text(
+                fig_read = _figures.figure_text(
                     tmp_path, filename,
                     progress=lambda d, t: _step("reading text in figures", d, t))
-                fig_chunks = _figure_chunks(filename, read)
             except Exception as exc:
                 logger.warning("figure text skipped for %r: %s", filename, exc)
 
@@ -461,10 +460,12 @@ def ingest_file(content: bytes, filename: str,
         # not prose, and a pinout photo's "1 2 15 16" must not be
         # "shadowed" away by another pinout photo's identical labels.
         extra_meta: list[dict] = [{} for _ in texts]
-        for pno, name, body, conf in fig_chunks:
+        fig_chunks = _figure_chunks(filename, fig_read,
+                                    _page_headings(zip(pageno, sections)))
+        for pno, name, body, conf, heading in fig_chunks:
             texts.append(body)
             pageno.append(pno)
-            sections.append("")
+            sections.append(heading)
             extra_meta.append({"ocr": True, "ocr_confidence": conf,
                                "figure_text": True, "figures": name})
 
@@ -747,15 +748,36 @@ def ingest_ocr_pages(filename: str, pages: list[int], progress=None) -> int:
     return len(texts)
 
 
+def _page_headings(page_sections) -> dict[int, str]:
+    """{page: "Heading A / Heading B"} from (page, section) pairs: the
+    distinct non-empty headings of each page's prose chunks, in order."""
+    out: dict[int, list[str]] = {}
+    for pno, sec in page_sections:
+        if sec and sec not in out.setdefault(pno, []):
+            out[pno].append(sec)
+    return {p: " / ".join(h) for p, h in out.items() if h}
+
+
 def _figure_chunks(filename: str,
-                   read: dict[str, tuple[str, float]]) -> list[tuple[int, str, str, float]]:
+                   read: dict[str, tuple[str, float]],
+                   headings: dict[int, str] | None = None,
+                   ) -> list[tuple[int, str, str, float, str]]:
     """One chunk per figure with legible text: what the figure is (page,
-    caption) and the labels read out of it. Returns (page, name, body, conf).
+    section, caption) and the labels read out of it. Returns (page, name,
+    body, conf, heading).
 
     The body names itself a figure so the model knows it is looking at
     labels, not prose: "1 2 15 16" under "connector pinout" is a pinout;
     on its own it is noise.
+
+    9.14: `headings` ({page: heading}, see _page_headings) gives the figure
+    its page's section heading. Without it a figure chunk held only its
+    labels and caption, so search rarely found it (2/12 image cases). A
+    page with no heading of its own takes the nearest earlier page's.
+    ponytail: every heading on the page, not the one above the figure --
+    needs the figure's y position against the heading's to do better.
     """
+    headings = headings or {}
     import figures as _figures
     meta = _figures.figures_for(filename)
     out = []
@@ -768,12 +790,18 @@ def _figure_chunks(filename: str,
         if not pno:
             continue
         caption = (m.get("caption") or "").strip()
-        head = f"Figure on page {pno}" + (f": {caption}" if caption else "")
+        heading = next((headings[p] for p in sorted(headings, reverse=True)
+                        if p <= pno), "")
+        head = (f"Figure on page {pno}" + (f", {heading}" if heading else "")
+                + (f": {caption}" if caption else ""))
         body = head + "\nText in the figure:\n" + text
-        for c in _enrich_chunks([body], filename, f"Figure: {caption}" if caption else "Figure"):
+        crumb = f"Figure: {caption}" if caption else "Figure"
+        if heading:
+            crumb = f"{heading} — {crumb}"
+        for c in _enrich_chunks([body], filename, crumb):
             c = strip_table_fences(strip_section_marks(c))
             if c.strip():
-                out.append((pno, name, c, conf))
+                out.append((pno, name, c, conf, heading))
     return out
 
 
@@ -816,9 +844,13 @@ def index_figure_text(filename: str, progress=None) -> int:
     _step("reading text in figures", 0, 1)
     read = _figures.figure_text(
         path, filename, progress=lambda d, t: _step("reading text in figures", d, t))
-    chunks = _figure_chunks(filename, read)
-
     collection = get_collection()
+    held = collection.get(where={"source": filename}, include=["metadatas"]) or {}
+    chunks = _figure_chunks(filename, read, _page_headings(
+        (m.get("page"), m.get("section"))
+        for m in (held.get("metadatas") or [])
+        if m and not m.get("figure_text")))
+
     stale = figure_text_chunks_for(filename)
     if stale:
         collection.delete(ids=stale)
@@ -855,10 +887,10 @@ def index_figure_text(filename: str, progress=None) -> int:
                     "indexed_at": indexed_at,
                     **{("prod_" + k): True
                        for k in _prod_tag.split(",") if k.strip()},
-                    "page": pno, "section": "",
+                    "page": pno, "section": heading,
                     "figures": name, "figure_text": True,
                     "ocr": True, "ocr_confidence": conf}
-                   for (pno, name, _body, conf) in chunks],
+                   for (pno, name, _body, conf, heading) in chunks],
         ids=[f"{filename}:{content_hash[:16]}:figtext:{i}" for i in range(len(chunks))],
     )
     invalidate_retrieval_cache()
