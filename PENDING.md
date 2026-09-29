@@ -184,11 +184,24 @@ New items are numbered P1, 8.16, 8.17 and 9.14 in the table below.
   row itself 3/3); two table shapes still open, see 8.16.
 
 *Understanding the question*
-- [ ] **Describing a product instead of naming it: 0/10.** "The screenless
-  age-estimation camera" gets a menu or a refusal, not the MyCheckr Mini's
-  answer. **Step 8.17.** Likely fix: match the description against the
-  catalogue's product descriptions before asking "which product?".
-  Measure on the held-out set; do not tune against it.
+- [x] **Describing a product instead of naming it: 0/10 -> 3/10.** "The
+  screenless age-estimation camera" gets a menu or a refusal, not the
+  MyCheckr Mini's answer. **Step 8.17.** Done 2026-09-29 (`ca94ebb`), in
+  part. Where the "which did you mean?" menu would be shown, one short
+  model call (clarify.described_product) is shown each candidate's own
+  retrieved passages and asked whether the question describes exactly one;
+  a clean name scopes the turn, anything else keeps the menu. The overview
+  FAQs were too thin to match against (6 products, truncated). Also fixed:
+  re-scoping turned a confident result "ambiguous" ("which part do you
+  mean?") because the product's shared documents widen the source count.
+  Developed on the probe set only: described 6/10 -> 9/10, vague 10/10
+  kept (the model said NONE on every vague case it was shown). Held out,
+  one run, measure-only: described 3/10, vague 9/10, off-topic 10/10,
+  22/30 (was 19/30). **Open: 7/10 held-out descriptions still fail**; not
+  inspected, to keep the set blind. The fix only covers the menu shape, so
+  the rest are likely refusals or the nothing-found path. Next: have
+  someone who has not seen the set read those 7 failures, or write a second
+  probe set.
 
 *Retrieval and images*
 - [ ] **Picture-only questions: 2/12 even with figure text.** OCR reads the
@@ -280,6 +293,11 @@ Only one session changes code at a time (step P1).
 | 49 | 10.3 | Nightly automatic tests, Docker start-up test. | Sonnet |
 | 50 | 10.4 | Full side-by-side comparisons, only if still needed after 8.6. | Fable |
 | - | 10.5-10.9 | Deferred until needed. | - |
+| **Extra - MCP server (outside the 7 -> 10 plan)** | | | |
+| 51 | MCP0 | Decide who may call it and whether retrieved text may leave the network. | You |
+| 52 | MCP1 | Read-only MCP server: `ask`, `list_products`, `search_faqs` on existing endpoints, stdio. | Opus |
+| 53 | MCP2 | `search_docs` route, token auth, `get_source_excerpt`, HTTP transport, eval cases. | Opus |
+| 54 | MCP3 | Optional: Jira support history; generic open-source version with no ITL code or data. | Opus + you |
 
 ### How to run the plan: sessions, not steps
 
@@ -309,7 +327,7 @@ wastes more than the per-step model choice saves.
 **Collect before starting (no Claude needed):** SMTP details (26), server
 host choice (33), backup vendor key (35), guest-AI decision (36), commission
 blind set 3 (13), the MyCheckr technical data sheet (41), time booked for
-the ~50 human labels (15).
+the ~50 human labels (15), the MCP access and data decision (51).
 
 | S | Model | Steps | Notes |
 |---|---|---|---|
@@ -322,7 +340,7 @@ the ~50 human labels (15).
 | 7 | Sonnet | 16, 30, 31 | Check they are independent before grouping. |
 | 8 | Opus | 17 | Tag repair. |
 | 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. **Done 2026-09-29** (`dde62db`..`c4cc950` + two follow-ups); full suite 299/299 (1 skipped); retrieval 29/32 and tuned 33/34 unchanged. |
-| 10 | Opus | 23, 24, 25 | Conversation follow-ups. |
+| 10 | Opus | 23, 24, 25 | Conversation follow-ups. **Done 2026-09-29** (`8b9fe65`..`c858ab7`); full suite 305 passed (1 skipped); run_live 25 3/3 on both paths, 13 4/4 x3; routing 152/164 (same 12 fails); retrieval old 32 unchanged but one 1/3 noise flip; held-out unscoped 22/30 (was 19). 8.17 is only partly done: 7/10 held-out descriptions still fail. |
 | 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. |
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. |
 | 13 | Opus | 38, 39 | |
@@ -334,6 +352,7 @@ the ~50 human labels (15).
 | 19 | Opus | 47, 48 | |
 | 20 | Sonnet | 49 | |
 | 21 | Fable | 50 | Only if still needed after 8.6. |
+| 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
 
 **Opening prompt for each session**
 
@@ -795,10 +814,38 @@ exactly, we cannot tell whether a fix helped.
   still picks the roll table. Next step for both: a table-shape fix
   (spell out variant column groups; give the small-coins row its header
   words), not more prompt.
-- [ ] **8.7 "And step 3?"** is answered from the previous answer, or the bot
-  says honestly that the last answer had only two steps.
-- [ ] **8.8 Prove "want the steps?" -> "yes" -> steps works end to end** on
-  the widget.
+- [x] **8.7 "And step 3?"** is answered from the previous answer, or the bot
+  says honestly that the last answer had only two steps. Done 2026-09-29
+  (`8b9fe65`, follow-up in `ca94ebb`). The last answered turn is kept per
+  session with its full text and sources (memory keeps 300 characters), and
+  popped at the top of every turn, so nothing stale survives a refusal. A
+  bare step reference (text_utils.is_step_reference) serves item N verbatim
+  with role `step` and no model call. "Step N" headings count, then
+  top-level "1."/"1)" lines; plain "###" headings do not (live, it served a
+  prose answer's third section, "Removal", as step 3). Out of range, it
+  says how many steps there were, or that the answer was not a numbered
+  procedure, and offers "Tell me more", which expands the real answer. That
+  reply is kept out of memory for this reason. "anything else I should know"
+  now expands. run_live 13: 4/4 on 3 runs after the ### fix, and T2 takes
+  0.0s with role step (its "mention 3/step/three" check is trivial, as the
+  plan said). eval_cases_retrieval.json gained a three-turn chain: the
+  capability question, then "Yes, show me the steps", then "and step 3?",
+  which serves "Step 3: Reboot or restart udev". It passed 9/9 over 3
+  repeats, with the step turn in 0.01-0.03s. The first attempt used a model
+  answer as turn 1 ("What are the steps to access my device in a Linux
+  environment?"); the extract shortcut answered it with four stray bullets,
+  so there was nothing numbered to point into. That extract answer is its
+  own quality problem, not yet filed. Retrieval --repeats 3 on the old 32
+  cases: the three known failures, plus "SSP programming mode" refused
+  1/3 (product-scoped, which neither change touches, so noise).
+- [x] **8.8 Prove "want the steps?" -> "yes" -> steps works end to end** on
+  the widget. Done 2026-09-29 (`b08a1b3`).
+  tests/test_steps_offer_widget_path.py posts "Yes, show me the steps" and
+  "No thanks" to /widget/ask as a member with an offer outstanding. The
+  steps are served and the offer is spent either way. Live scenario 25
+  (capability question, then the offer's own button) passed 3/3 on both
+  /query and /widget/ask, the "yes" turn in 0.0s. run_live gained a `reply`
+  check (the offer's button must be in suggested_replies).
 - [ ] **8.9 Handoff gives the visitor a reference number, the enquiry is
   actually emailed** (needs SMTP details), and the contact form is limited
   so bots cannot flood or wipe enquiries.
@@ -899,6 +946,49 @@ exactly, we cannot tell whether a fix helped.
 - [ ] 10.5-10.9 Deferred until needed: richer memory, figures beside
   procedures, true word-by-word streaming, translated widget text, test
   cases for the "inference" mode.
+
+### Extra - MCP server (MCP0-MCP3, session S22)
+
+Lets engineers and support staff ask GroundedOps from Claude Desktop,
+Claude Code or VS Code and get cited answers without opening the widget.
+Nothing MCP exists in the repo yet (checked 2026-09-29).
+
+Design: a separate small process using the official Python `mcp` SDK
+(FastMCP) that calls GroundedOps over HTTP. It must NOT import `main.py`:
+that loads torch and Chroma, needs torch imported on the main thread first,
+and would tie the two processes together. Read-only: no upload, delete,
+admin or key tools, ever.
+
+- [ ] **MCP0 (you) Decide access and data policy before anything goes past
+  a local demo.**
+  - Auth: `/query` takes only an `X-User-Id` header (`main.py` query_route).
+    Check whether middleware protects it. The plan is a server token from
+    `quota.issue_token()` with the `staff` tier.
+  - Scope: the MCP path must go through the same shared-document and
+    product-flag scoping as the widget, not around it.
+  - Data: with a cloud client (Claude, Copilot) every retrieved chunk goes
+    to that provider. Clear it with IT, or point clients at the on-prem
+    LiteLLM hub.
+- [ ] **MCP1 Read-only server over existing endpoints, stdio transport.**
+  Tools: `ask(question, product?, language?)` -> `POST /query` (answer,
+  sources with pages, answerability, request_id); `list_products()` ->
+  public `GET /catalog`; `search_faqs(query, product?)` -> `GET /faq`.
+  Tag the turn with `ptrace.set_meta(surface="mcp")` so the console shows
+  MCP use separately. Test with MCP Inspector and Claude Desktop; demo to
+  2-3 colleagues. About 2-3 days.
+- [ ] **MCP2 Search, auth, shared deployment.** New thin route around
+  `retrieval_db.retrieve_fused()` for `search_docs(query, product?, top_k)`
+  (ranked chunks with source and page); `get_source_excerpt` via
+  `POST /source_chunks`; the MCP0 token auth; streamable HTTP transport and
+  one internal deployment; a few eval cases run through the MCP path.
+  About a week.
+- [ ] **MCP3 (optional) Jira support history and an open-source version.**
+  Jira as a second source ("has this fault been reported before?"). A
+  generic "RAG to MCP bridge" with a pluggable backend adapter, published
+  only after checking ITL's IP and open-source policy (you).
+
+Measure: weekly active users, share of `ask` calls answered vs refused,
+lookup time saved for support staff (a small before/after sample).
 
 ### Rejected - do not redo without new evidence
 
