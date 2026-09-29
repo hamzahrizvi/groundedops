@@ -558,7 +558,8 @@ exactly, we cannot tell whether a fix helped.
   8.3 baseline. **But the person marked the Mini ethernet/wifi "No" (#45)
   right, and the coins "No" (#30) is right in substance, so 8.3's "reject
   every unstated No" goes further than the owner's own judgement. Settle
-  which absences 8.3 should refuse before S9 builds it (you).**
+  which absences 8.3 should refuse before S9 builds it (you).** Settled
+  2026-09-29: only never-mentioned features; see 8.3.
   *Grader* (`tools/grader_ab.py`, 101 frozen graded answers, 3x each way,
   `eval_runs/20260928_0807/grader_ab.json`): as-is (DeepSeek thinking off)
   passes 303/303 and agrees with the labels 36/36 on the answers both
@@ -713,7 +714,11 @@ exactly, we cannot tell whether a fix helped.
   `eval_baseline_retrieval.json` (graded eval.py run, live backend,
   `--repeats 3`) on the repaired index, since M4 armed it before this.
 - [ ] **8.3 Honest "not mentioned".** When the manual never mentions
-  Bluetooth, say so, instead of answering "No".
+  Bluetooth, say so, instead of answering "No". **Scope decided
+  (2026-09-29, you):** say "not mentioned" only when X appears nowhere in
+  that product's manual (Bluetooth). Keep the plain "No" when the manual
+  lists the full set (interfaces, accepted coins) and X is not in it, so
+  M8's #45 (Mini ethernet/wifi) and #30 (coins) stay "No".
 - [ ] **8.4 Stop treating fresh questions as follow-ups** just because the
   rewriter added the product name.
 - [ ] **8.5 Remember refused turns** (the question, not the refusal), so the
