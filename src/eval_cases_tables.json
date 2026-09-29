@@ -1,0 +1,117 @@
+{
+  "_README": "8.16 (PENDING.md): table VALUES whose cell or row carries a CONDITION. Each case requires the number AND the condition, in the manual's words (any-of lists allow the manual's own alternatives). Measured before any fix on 2026-09-29; see PENDING 8.16.",
+  "cases": [
+    {
+      "q": "What percentage of Thai 50 Satang coins can the SMART Coin System hold before it dumps them to the cashbox?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "15%",
+        "20",
+        [
+          "no other coins",
+          "whichever is greater"
+        ]
+      ],
+      "expected_page": [
+        64,
+        65
+      ],
+      "layer": "retrieval",
+      "reference": "SMART Coin System Range User Manual-v1.pdf p.64-65, Small Coins: THB 50 Satang 15% of all coins, or max 20 coins if no other coins in device -- whichever is greater."
+    },
+    {
+      "q": "What's the limit for Euro 1 cent coins in the SMART Coin System hopper?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "25%",
+        "20",
+        [
+          "no other coins",
+          "whichever is greater"
+        ]
+      ],
+      "expected_page": [
+        64,
+        65
+      ],
+      "layer": "retrieval",
+      "reference": "Same table: EUR 0.01, 25% of all coins, max 20 coins if no other coins in device -- whichever is greater."
+    },
+    {
+      "q": "How much current does the MyCheckr draw at maximum load on a 12V supply?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "1.1",
+        "1.35",
+        [
+          "0.5A each",
+          "0.5 A each",
+          "USB Type-A ports drawing"
+        ]
+      ],
+      "expected_page": 38,
+      "layer": "retrieval",
+      "reference": "MyCheckr User Manual-v7.pdf p.38 Supply Currents, Max Load row: 12VDC RMS 1.10A, peak 1.35A -- condition: as Max Operating (scanning for faces) but also both USB Type-A ports drawing 0.5A each."
+    },
+    {
+      "q": "What is the maximum note length the NV9 Spectral accepts?",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "167",
+        "160",
+        [
+          "Multi Note Float",
+          "multi-note float",
+          "Multi-Note Float"
+        ]
+      ],
+      "expected_page": 28,
+      "layer": "retrieval",
+      "reference": "NV9 Spectral Range User Manual-v1.pdf p.28 Notes: max length 167 mm, but 160 mm with the Multi Note Float."
+    },
+    {
+      "q": "What voltage does the SMART Hopper treat as logic high on its inputs?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "3.7",
+        [
+          "min",
+          "at least",
+          "or more",
+          "or higher",
+          "or above"
+        ]
+      ],
+      "expected_page": 22,
+      "layer": "retrieval",
+      "reference": "SMART Coin System Range User Manual-v1.pdf p.22 Interface Logic Levels: Inputs logic high = 3.7V min (internal pullup); logic low 0V to +0.5V."
+    },
+    {
+      "q": "What's the maximum supply voltage for the MyCheckr?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "26.4",
+        [
+          "+10%",
+          "10%",
+          "10 %"
+        ]
+      ],
+      "expected_page": 37,
+      "layer": "retrieval",
+      "reference": "MyCheckr User Manual-v7.pdf p.37 Supply Voltages: V IN maximum 26.4VDC (+10%); minimum 10.8VDC (-10%); nominal 12-24VDC."
+    }
+  ]
+}
