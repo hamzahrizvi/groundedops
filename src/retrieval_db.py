@@ -329,8 +329,16 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
     q_vec = embed_query(query)
     # v10.5: exact-match metadata `where` (valid in Chroma, unlike the old
     # substring attempt). scope = {"product": key} or {"category": key},
-    # set directly at upload time, so this filters server-side, fast and
-    # exact — no over-fetch/post-filter, no filename matching.
+    # set directly at upload time, so this filters server-side.
+    #
+    # The `where` is not the last word, though: it matches on prod_* flags,
+    # and a flag that outlived a retag (8.2: 440 chunks still carrying
+    # prod_biometrics_general) put NV9 Spectral rows into MyCheckr Mini
+    # answers while BM25, which goes through _matches_scope, stayed clean.
+    # So the dense hits are also held to _matches_scope. It over-fetches 2x
+    # to make up for what the filter drops, then cuts back to `limit`: more
+    # candidates reaching RRF and the reranker is RETRIEVAL_CANDIDATE_MARGIN
+    # 2.0, which was measured and rejected (fewer passes, lower grounding).
     where = None
     if source_filter:
         where = {"source": source_filter}
@@ -355,8 +363,14 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
         where = {"category": scope["category"]}
     if where:
         res = collection.query(query_embeddings=[q_vec.tolist()],
-                               n_results=limit, where=where)
-        return res["ids"][0] if res.get("ids") else []
+                               n_results=max(1, min(limit * 2, collection.count())),
+                               where=where, include=["metadatas"])
+        ids = res["ids"][0] if res.get("ids") else []
+        metas = (res.get("metadatas") or [None])[0]
+        if not metas:
+            return ids[:limit]
+        return [cid for cid, m in zip(ids, metas)
+                if _matches_scope(m or {}, source_filter, scope)][:limit]
     res = collection.query(query_embeddings=[q_vec.tolist()], n_results=limit)
     return res["ids"][0] if res.get("ids") else []
 

@@ -74,6 +74,66 @@ def test_an_unknown_product_gets_no_shared_arm():
     assert not R._matches_scope(SHARED, None, {"product": "not-a-product"})
 
 
+# A chunk moved off biometrics_general whose old flag survived the retag
+# (8.2). Chroma's `where` still matches it on the flag; _matches_scope does
+# not, because its products string says nv9_spectral.
+STALE_NV9 = {"source": "NV9 Spectral Range User Manual-v1.pdf",
+             "products": "nv9_spectral", "product": "nv9_spectral",
+             "category": "note", "prod_nv9_spectral": True,
+             "prod_biometrics_general": True}
+
+
+class _WhereMatchedCollection:
+    """Stands in for Chroma after its `where` has run: returns the rows it
+    was given, nearest first, and records what it was asked for."""
+
+    def __init__(self, rows):
+        self.rows, self.asked = rows, []
+
+    def count(self):
+        return len(self.rows)
+
+    def query(self, query_embeddings, n_results, where=None, include=None):
+        self.asked.append({"n_results": n_results, "where": where,
+                           "include": include})
+        rows = self.rows[:n_results]
+        return {"ids": [[r[0] for r in rows]],
+                "metadatas": [[r[1] for r in rows]]}
+
+
+class _Vec:
+    def tolist(self):
+        return [0.0]
+
+
+def _dense(rows, limit, scope):
+    col = _WhereMatchedCollection(rows)
+    real = R.embed_query
+    R.embed_query = lambda q: _Vec()
+    try:
+        return R._dense_ranking("what is the supply voltage", col, limit,
+                                None, scope), col
+    finally:
+        R.embed_query = real
+
+
+def test_a_stale_flag_does_not_put_another_products_chunk_in_the_dense_arm():
+    rows = [("nv9-1", STALE_NV9), ("shared-1", SHARED),
+            ("nv9-2", STALE_NV9), ("mycheckr-1", MYCHECKR)]
+    ids, _ = _dense(rows, 4, {"product": "mycheckr"})
+    assert ids == ["shared-1", "mycheckr-1"]
+
+
+def test_the_dense_arm_still_returns_exactly_limit_ids():
+    """Over-fetch to make up for what the filter drops, then cut back:
+    more than `limit` reaching RRF is the rejected candidate margin 2.0."""
+    rows = [("nv9-0", STALE_NV9)] + [(f"m-{i}", MYCHECKR) for i in range(10)]
+    ids, col = _dense(rows, 4, {"product": "mycheckr"})
+    assert ids == ["m-0", "m-1", "m-2", "m-3"]
+    assert col.asked[0]["n_results"] == 8
+    assert "metadatas" in col.asked[0]["include"]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

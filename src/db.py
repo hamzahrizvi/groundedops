@@ -127,6 +127,37 @@ def delete_source(source: str) -> int:
     return len(ids)
 
 
+def stale_product_flags(meta: dict, keys: list[str] | None = None) -> list[str]:
+    """The prod_* flags on a chunk that its product tags no longer name.
+
+    `keys` defaults to the chunk's own product tags."""
+    keep = set(product_keys(meta) if keys is None else keys)
+    return [k for k in meta if k.startswith("prod_") and k[5:] not in keep]
+
+
+def with_product_tags(meta: dict, keys: list[str]) -> dict:
+    """A copy of `meta` for col.update() that tags the chunk to exactly `keys`.
+
+    Chroma's update MERGES metadata: a key missing from the dict is KEPT, and
+    only a key set to None is deleted. Popping a stale prod_* flag before
+    update() therefore left it in the index, which is how 440 chunks moved
+    off biometrics_general still carried prod_biometrics_general=True -- and
+    the dense arm's shared-documents clause matches on that flag, so NV9
+    Spectral rows reached MyCheckr-scoped answers. So stale flags are written
+    as None. The singular "product" is rewritten rather than dropped: the
+    dense arm matches on it and reindex.py/clarify.py still read it, and a
+    pop() here never reached the index either, so it kept the OLD key.
+    """
+    out = dict(meta)
+    for k in stale_product_flags(meta, keys):
+        out[k] = None
+    out["products"] = ",".join(keys)
+    out["product"] = ",".join(keys)
+    for k in keys:
+        out["prod_" + k] = True
+    return out
+
+
 def count_by_product(product_key: str) -> int:
     """How many chunks are tagged to this product. Used to tell an operator
     what a deletion is about to affect BEFORE they confirm it."""
@@ -140,9 +171,9 @@ def retag_product(old_key: str, new_key: str | None) -> int:
     """Move every chunk tagged `old_key` to `new_key`, or drop the tag when
     `new_key` is None.
 
-    Returns the number of chunks changed. Writes both metadata keys back in
-    the plural form so the corpus converges on one spelling as things are
-    retagged, rather than accumulating more of the split above.
+    Returns the number of chunks changed. Writes both spellings and the
+    prod_* flags through with_product_tags, so the dropped key's flag is
+    really deleted from the index.
 
     A chunk tagged to several products keeps its other tags — retagging one
     product must not strip a document's membership of another.
@@ -162,11 +193,8 @@ def retag_product(old_key: str, new_key: str | None) -> int:
         keys = [k for k in keys if k != old_key]
         if new_key and new_key not in keys:
             keys.append(new_key)
-        updated = dict(meta)
-        updated["products"] = ",".join(keys)
-        updated.pop("product", None)      # collapse onto the plural spelling
         change_ids.append(cid)
-        change_metas.append(updated)
+        change_metas.append(with_product_tags(meta, keys))
 
     if change_ids:
         col.update(ids=change_ids, metadatas=change_metas)
@@ -197,11 +225,8 @@ def delete_by_product(product_key: str) -> int:
             continue
         remaining = [k for k in keys if k != product_key]
         if remaining:
-            updated = dict(meta)
-            updated["products"] = ",".join(remaining)
-            updated.pop("product", None)
             shared_ids.append(cid)
-            shared_metas.append(updated)
+            shared_metas.append(with_product_tags(meta, remaining))
         else:
             doomed.append(cid)
 

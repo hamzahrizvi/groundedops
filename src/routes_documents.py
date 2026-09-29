@@ -529,18 +529,16 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     # meant the other product's visitors were never offered it.
     keys = list(dict.fromkeys(
         k.strip() for k in (payload.product_key or "").split(",") if k.strip()))
-    metas = got["metadatas"]
-    for m in metas:
-        # Flags from a previous assignment have to go, or a document moved off
-        # a product stays findable under it -- the worst kind of stale tag,
-        # because nothing on screen says it is still there.
-        for stale in [k for k in list(m.keys()) if k.startswith("prod_")]:
-            m.pop(stale, None)
+    # Flags from a previous assignment have to go, or a document moved off
+    # a product stays findable under it -- the worst kind of stale tag,
+    # because nothing on screen says it is still there. with_product_tags
+    # writes them as None: Chroma keeps a key that is merely absent.
+    from db import with_product_tags
+    metas = []
+    for m in got["metadatas"]:
+        m = with_product_tags(m, keys)
         m["category"] = payload.category_key
-        m["product"] = ",".join(keys)
-        m["products"] = ",".join(keys)
-        for k in keys:
-            m["prod_" + k] = True
+        metas.append(m)
     col.update(ids=ids, metadatas=metas)
     # BM25 and the source inventory both carry the old tags until told.
     try:

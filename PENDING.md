@@ -687,8 +687,31 @@ exactly, we cannot tell whether a fix helped.
   `test_run_live_widget_path.py`: the widget's missing-key set shrinks from
   5 keys to just `product_options`, and the handoff scenario's observed
   outcome now agrees with `/query`'s.
-- [ ] **8.2 Repair wrong product tags.** 440 chunks are tagged to the wrong
+- [x] **8.2 Repair wrong product tags.** 440 chunks are tagged to the wrong
   product, so NV9 Spectral figures can appear in MyCheckr answers.
+  (2026-09-29, S8.) Cause: every retag path popped the old prod_* flag and
+  then called col.update(), and Chroma keeps a key that is merely absent
+  (only None deletes). Fixed at the source: `db.with_product_tags` writes
+  stale flags as None and is now used by `/admin/reassign_source`,
+  `db.retag_product` and `db.delete_by_product` (the last two also left the
+  old key in the singular `product` field). The dense arm now over-fetches
+  2x, holds its hits to `_matches_scope`, and cuts back to `limit`, so a
+  future stale flag cannot leak and RRF still sees the same candidate count.
+  Live index repaired with `src/repair_product_flags.py --apply` (dry run
+  first: exactly 440, all prod_biometrics_general: ICU_Network_API 160,
+  NV9 Spectral 119, MyConnect 97, MyCheckr Mini 64); read-only recount 0
+  left, 1749 chunks intact, `reindex.py --check` OK. Backup:
+  `backups/before-flag-repair-20260929_1331.zip`. eval_retrieval.py on
+  eval_cases_retrieval.json, results in `backups/retrieval_*_flags*.json`:
+  old code + old index -> fixed code + repaired index, retrieved R@1
+  0.613 -> 0.645, R@3 0.839 -> 0.871, MRR 0.749 -> 0.773; reranked unchanged
+  (0.710 / 0.935 / 1.000); no case lower. The four Mini/MyCheckr-scoped
+  probes (supply voltage x2, weight, operating temperature) return 0 NV9
+  Spectral chunks in the dense 16 and the final 8. Tests:
+  `test_product_flags.py` (real in-memory Chroma) and two dense-arm cases
+  in `test_shared_documents.py`. **Still to do:** re-arm
+  `eval_baseline_retrieval.json` (graded eval.py run, live backend,
+  `--repeats 3`) on the repaired index, since M4 armed it before this.
 - [ ] **8.3 Honest "not mentioned".** When the manual never mentions
   Bluetooth, say so, instead of answering "No".
 - [ ] **8.4 Stop treating fresh questions as follow-ups** just because the
