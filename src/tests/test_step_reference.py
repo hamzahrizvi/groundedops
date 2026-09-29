@@ -50,8 +50,11 @@ def test_items_are_split_by_their_own_form():
     items = main._answer_steps(headed)
     assert sorted(items) == [1, 2]
     assert items[2] == "**Step 2: Reboot**\nsudo reboot"
-    hashed = "### Remove the cover\nUnscrew it.\n### Clean the lens\nWipe it."
-    assert main._answer_steps(hashed)[2] == "### Clean the lens\nWipe it."
+    # "###" sections are not steps (live: served "Removal" as step 3).
+    hashed = "### Install\nSlide it in.\n### Test\nPower on.\n### Removal\nPress it."
+    assert main._answer_steps(hashed) == {}
+    stepped = "### Step 1: Remove the cover\nUnscrew it.\n### Step 2: Clean\nWipe it."
+    assert main._answer_steps(stepped)[2] == "### Step 2: Clean\nWipe it."
     assert main._answer_steps("The NV9 weighs 1.2 kg.") == {}
     # A code fence after the last step is still the step.
     fenced = "1. Open it.\n2. Run:\n\n```\nsudo reboot\n```"

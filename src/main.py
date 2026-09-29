@@ -1052,27 +1052,27 @@ def _remember_answer(session_id: str | None, answer: str, sources) -> None:
 
 
 _STEP_HEAD_RE = re.compile(r"^\s*(?:#+\s*|\*\*\s*)?step\s+(\d{1,2})\b", re.I | re.M)
-_HASH_HEAD_RE = re.compile(r"^\s*#{2,}\s+\S", re.M)
 _NUM_LINE_RE = re.compile(r"^(\d{1,2})[.)]\s+\S", re.M)
 
 
 def _answer_steps(answer: str) -> dict[int, str]:
     """{N: item text} for a numbered answer, verbatim, never re-numbered.
 
-    "Step N" headings win over "###" headings, which win over top-level
-    "1." / "1)" lines: a Step heading usually has its own 1. 2. sub-list,
-    and that sub-list is not the procedure. An item runs to the next item
+    "Step N" headings win over top-level "1." / "1)" lines: a Step heading
+    usually has its own 1. 2. sub-list, and that sub-list is not the
+    procedure. A plain "###" heading is a section, not a step: measured,
+    "and step 3?" after a prose install answer served its third section,
+    "Removal". An item runs to the next item
     of its own kind; the last numbered line stops at the first unindented
     paragraph after it, so a closing remark is not served as step N.
     """
-    for rx in (_STEP_HEAD_RE, _HASH_HEAD_RE, _NUM_LINE_RE):
+    for rx in (_STEP_HEAD_RE, _NUM_LINE_RE):
         heads = list(rx.finditer(answer))
         if len(heads) >= 2:
             break
     else:
         return {}
-    nums = ([int(m.group(1)) for m in heads] if rx.groups
-            else range(1, len(heads) + 1))
+    nums = [int(m.group(1)) for m in heads]
     ends = [m.start() for m in heads[1:]] + [len(answer)]
     if rx is _NUM_LINE_RE:
         # A code fence or indented line after a blank line is still the
@@ -1960,6 +1960,28 @@ def _is_followup(q: str, history: list | None, condensed_query: str) -> bool:
         logger.debug(f"product words for follow-up check skipped: {_exc}")
         ignore = set()
     return is_followup_turn(q, history, condensed_query, ignore=ignore)
+
+
+def _described_among(query: str, results: list[dict], span: list[str],
+                     top_score: float) -> list[str]:
+    """[the product] the question describes among the ones a menu would
+    offer, else []. The menu's own candidates, so near_top_products first:
+    no model call when that alone leaves nothing to ask about."""
+    try:
+        import clarify as _clarify
+        near = _clarify.near_top_products(results, CONTEXT_K, top_score,
+                                          AMBIGUOUS_CEILING)
+        cands = span if near is None else near
+        if len(cands) < 2:
+            return []
+        key = _clarify.described_product(query, cands, results,
+                                         _product_names())
+    except Exception as exc:
+        logger.warning(f"description match skipped: {exc}")
+        return []
+    if key:
+        ptrace.mark("described", key)
+    return [key] if key else []
 
 
 def _products_named_in(query: str, candidates: list[str]) -> list[str]:
@@ -3145,6 +3167,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # when the wording genuinely does not pick one out.
     if not payload.product and not payload.category and len(_span) > 1:
         _narrowed = _products_named_in(resolved_query, _span)
+        # Described but not named (8.17): "the age-check device with no
+        # screen" is the Mini. Only where a menu would be the reply.
+        if not _narrowed and confidence != "none" and not _comparing:
+            _narrowed = _described_among(resolved_query, results, _span,
+                                         top_score)
         if len(_narrowed) == 1:
             payload.product = _narrowed[0]
             _scope = {"product": payload.product}
@@ -3164,8 +3191,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                             scope=_scope),
                              top_k=CONTEXT_K)
             _span = _product_keys_in(results, CONTEXT_K)
-            confidence = retrieval_confidence_band(
+            # Scoping pulls in the product's shared documents, so the top
+            # four span more sources and a confident result read as
+            # "ambiguous" ("which part do you mean?") after the visitor's
+            # product was found. A real "none" still stands.
+            _rescoped = retrieval_confidence_band(
                 results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
+            if not (_rescoped == "ambiguous" and confidence == "confident"):
+                confidence = _rescoped
 
     # A multi-product span is only AMBIGUITY when there is credible evidence
     # to be ambiguous between. With nothing relevant retrieved, results are

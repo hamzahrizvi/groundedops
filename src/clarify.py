@@ -42,6 +42,7 @@ TWO FAULTS, measured on 2026-09-26 on the blind sets and a probe set.
 """
 from __future__ import annotations
 
+import logging
 import re
 import threading
 
@@ -209,6 +210,52 @@ def classify_unscoped(query: str, catalog: dict) -> str | None:
         return None
     m = re.search(r"\b(PRODUCT|OTHER)\b", (out.get("text") or "").upper())
     return m.group(1).lower() if m else None
+
+
+def described_product(query: str, candidates: list[str], results: list[dict],
+                      names: dict[str, str]) -> str | None:
+    """The one candidate the question DESCRIBES without naming, or None.
+
+    8.17. "Which age-check device has no screen at all?" retrieved both
+    MyCheckr manuals near the top and was asked which it meant, although
+    only the Mini has no screen. Words cannot settle that ("screen" is in
+    both manuals; the question says "no screen"), so the model is shown
+    each candidate's own retrieved passages and asked. Only consulted where
+    the "which did you mean?" menu would otherwise be shown; None (unsure,
+    no model, an unparseable reply) shows the menu exactly as before.
+    """
+    import llm
+    blocks, by_name = [], {}
+    for k in candidates:
+        name = names.get(k) or k
+        by_name[name.lower()] = k
+        texts = [" ".join((r.get("text") or "").split())[:500]
+                 for r in results or []
+                 if k in [p.strip() for p in (r.get("product") or "").split(",")]][:2]
+        if texts:
+            blocks.append(f'Product "{name}":\n' + "\n".join(f"- {t}" for t in texts))
+    if len(blocks) < 2:
+        return None
+    msg = " ".join((query or "").split())[:400].replace('"', "'")
+    prompt = (
+        "A customer asked a support assistant a question without naming the "
+        "product. These passages come from each candidate product's manual.\n\n"
+        + "\n\n".join(blocks) + "\n\n"
+        f'Customer message: "{msg}"\n\n'
+        "Does the message describe ONE of these products by a feature, "
+        "specification or trait that the passages show only that product "
+        "has? Answer with exactly that product's name, nothing else. If the "
+        "message could apply to more than one of them, answer NONE.")
+    try:
+        with llm.judging():
+            out = llm.generate_with_fallback("fast", prompt)
+    except Exception:
+        return None
+    if not out or out.get("provider") in (None, "none"):
+        return None
+    reply = (out.get("text") or "").strip().strip(".\"'*` ").lower()
+    logging.getLogger(__name__).info("described_product %s -> %r", candidates, reply[:60])
+    return by_name.get(reply)
 
 
 def candidate_products(query: str, vocab: dict | None = None) -> list[str]:
