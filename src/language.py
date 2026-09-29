@@ -33,6 +33,7 @@ exactly as it was before this module existed.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -201,3 +202,105 @@ def from_english(text: str, language: str,
                        language, len(out), len(text))
         return None
     return out
+
+
+# ── FAQ console translation (Phase 1 of the anonymous-visitor multilingual
+# work; see PENDING.md 9.9) ─────────────────────────────────────────────
+#
+# Distinct from to_english()/from_english() above: those two are tuned for
+# one live customer turn -- a 600-char input cap, a fixed length-ratio
+# rejection, and the "fast" model role, because their output goes straight
+# to a visitor with no human in the loop. A curated FAQ answer can be much
+# longer than a live chat turn, and a person reviews every draft here
+# before it can reach anyone, so the bar is "did anything usable come
+# back", not a length heuristic.
+
+LANGUAGE_NAMES = {
+    "es": "Spanish", "fr": "French", "de": "German", "it": "Italian",
+    "pt": "Portuguese", "nl": "Dutch", "pl": "Polish", "sv": "Swedish",
+    "da": "Danish", "no": "Norwegian", "fi": "Finnish", "tr": "Turkish",
+    "ru": "Russian", "uk": "Ukrainian", "ar": "Arabic", "he": "Hebrew",
+    "hi": "Hindi", "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
+    "th": "Thai", "vi": "Vietnamese", "id": "Indonesian",
+}
+
+
+def translate_faq_pair(question: str, answer: str,
+                       target_language: str) -> tuple[str, str] | None:
+    """One FAQ question+answer translated together for the admin console's
+    draft-then-approve flow. Returns (question, answer) in the target
+    language, or None on any failure -- the caller treats that entry as
+    "could not be translated" and moves on rather than aborting the batch.
+    """
+    q, a = (question or "").strip(), (answer or "").strip()
+    if not q or not a:
+        return None
+    name = LANGUAGE_NAMES.get(target_language, target_language)
+    prompt = (
+        f"Translate this product-support FAQ question and answer into {name}.\n"
+        "Rules: translate only -- add nothing, remove nothing, do not "
+        "summarise or answer differently. Keep product names, model "
+        "numbers, error codes, numbers, units, URLs and markdown "
+        "formatting exactly as they are.\n\n"
+        'Return ONLY a JSON object, no other text: '
+        '{"question": "...", "answer": "..."}\n\n'
+        f"<question>\n{q}\n</question>\n<answer>\n{a}\n</answer>")
+    try:
+        from llm import generate_with_fallback
+        out = generate_with_fallback("accurate", prompt)
+    except Exception as exc:
+        logger.warning("FAQ translation to %s failed: %s", name, exc)
+        return None
+    if not out or out.get("provider") in (None, "none"):
+        return None
+    text = (out.get("text") or "").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        logger.warning("FAQ translation to %s unparseable: %r", name, text[:120])
+        return None
+    try:
+        data = json.loads(text[start:end + 1])
+    except Exception:
+        logger.warning("FAQ translation to %s: bad JSON: %r", name, text[:120])
+        return None
+    tq, ta = (data.get("question") or "").strip(), (data.get("answer") or "").strip()
+    return (tq, ta) if tq and ta else None
+
+
+try:
+    from langdetect import detect_langs as _detect_langs, DetectorFactory as _DetectorFactory
+    # Unseeded, langdetect's classifier samples n-gram features at random
+    # and the same text can return a different language on different
+    # calls. Seeding makes detect_language_no_llm deterministic.
+    _DetectorFactory.seed = 0
+    _LANGDETECT_AVAILABLE = True
+except ImportError:
+    _LANGDETECT_AVAILABLE = False
+
+# A two- or three-word question is not enough text for a statistical
+# language guess to be trustworthy, and this is the fallback for when the
+# widget itself sent no language hint -- a wrong guess here means matching
+# against the wrong language's FAQ pool. Defaulting to English (returning
+# None) is always the safe failure.
+_DETECT_MIN_WORDS = 3
+_DETECT_MIN_CONFIDENCE = 0.85
+
+
+def detect_language_no_llm(text: str) -> str | None:
+    """ISO 639-1 code for `text`, with no model call -- only used when the
+    widget sent no language hint at all (see widget_api.py). None on
+    anything short, on a low-confidence guess, or if langdetect is not
+    installed; the caller then defaults to English, which is always safe.
+    """
+    if not _LANGDETECT_AVAILABLE or not text:
+        return None
+    if len(text.split()) < _DETECT_MIN_WORDS:
+        return None
+    try:
+        best = _detect_langs(text)[0]
+    except Exception:
+        return None
+    if best.prob < _DETECT_MIN_CONFIDENCE:
+        return None
+    code = best.lang.split("-")[0].lower()
+    return code if re.match(r"^[a-z]{2}$", code) else None

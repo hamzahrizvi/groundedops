@@ -55,6 +55,14 @@ class AskRequest(BaseModel):
     # FAQ disambiguation passthrough.
     faq_id: str | None = None
     skip_faq: bool = False
+    # The visitor's language, as the widget itself determined it (an
+    # explicit embed override, the host page's own declared locale, or the
+    # browser's) -- see groundedops-widget.js's detectedLanguage(). Used
+    # only on the anonymous FAQ-only path; the signed-in pipeline has its
+    # own, LLM-based language handling (language.py's looks_foreign/
+    # to_english). Any shape survives here -- normalized once, in
+    # _resolve_anon_language.
+    language: str | None = None
 
 
 def _client_ip(request: Request) -> str:
@@ -152,7 +160,8 @@ def widget_catalog():
 
 
 @router.get("/faq")
-def widget_faq(product: str | None = None, limit: int = 4):
+def widget_faq(product: str | None = None, limit: int = 4,
+              language: str | None = None):
     """Curated questions for a product, shown as starting suggestions.
 
     Only entries with a human-reviewed answer are returned - an unanswered
@@ -161,12 +170,24 @@ def widget_faq(product: str | None = None, limit: int = 4):
     """
     try:
         import faq_store
+        # No question text to run the no-LLM detector on here (this is a
+        # GET with no visitor input), so only the widget's own explicit
+        # hint is honoured, and only once the feature is actually on --
+        # same gate as the ask path. Always resolves to a CONCRETE code
+        # (never None/"no filter"): starter suggestions must be one
+        # language, not English and translations mixed together.
+        lang = "en"
+        if quota.multilingual_faq_enabled():
+            code = _normalize_lang(language)
+            if code and (code == "en" or code in quota.faq_enabled_languages()):
+                lang = code
         # display_only: on guest chat this list IS the interface, so a
         # harvested table caption ("Operation: Temperature, Humidity") shown
         # as a suggested question is worse than one fewer suggestion. Those
         # entries stay fully searchable -- see faq_store.is_displayable.
         items = [f for f in faq_store.list_for_product(product,
-                                                       display_only=True)
+                                                       display_only=True,
+                                                       language=lang)
                  if (f.get("answer") or "").strip()]
     except Exception as e:
         logger.error(f"widget faq failed: {e}")
@@ -208,9 +229,35 @@ def _public_more_context(mc) -> dict | None:
     }
 
 
+_LANG_CODE_RE = re.compile(r"^[a-z]{2}$")
+
+
+def _normalize_lang(code: str | None) -> str:
+    c = (code or "").strip().lower().split("-")[0]
+    return c if _LANG_CODE_RE.match(c) else ""
+
+
+def _resolve_anon_language(payload_language: str | None, question: str) -> str:
+    """Which FAQ-language pool an anonymous question should match against.
+
+    "en" (the default, always allowed) unless the feature is switched on
+    AND the visitor's language -- from the widget's own hint, or failing
+    that a local no-LLM guess -- is one the operator has enabled. A guess
+    that doesn't match an enabled language falls back to "en" rather than
+    matching nothing: the pool is scoped, not the visitor turned away.
+    """
+    if not quota.multilingual_faq_enabled():
+        return "en"
+    code = _normalize_lang(payload_language)
+    if not code:
+        import language
+        code = language.detect_language_no_llm(question) or "en"
+    return code if (code == "en" or code in quota.faq_enabled_languages()) else "en"
+
+
 def _faq_response(answer: str, caller: dict, matched: str | None = None,
                   candidates: list | None = None, clarify: bool = False,
-                  needs_sign_in: bool = False) -> dict:
+                  needs_sign_in: bool = False, faq_language: str = "en") -> dict:
     return {
         "answer": answer,
         "sources": [],
@@ -238,6 +285,9 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         "effort": "faq_only",
         "quota": quota.status(caller),
         "sign_in_url": os.getenv("WIDGET_SIGN_IN_URL", "") if needs_sign_in else "",
+        # Which language pool actually answered -- transparency for anyone
+        # debugging a "wrong language" report, not read by the widget itself.
+        "faq_language": faq_language,
     }
 
 
@@ -407,22 +457,27 @@ def register(app, answer_query, draft_enquiry=None):
 
             await run_in_threadpool(quota.consume_faq_lookup, caller)
 
-            # Selecting a specific curated question is served by id.
+            # Selecting a specific curated question is served by id -- the
+            # id already came from a language-scoped suggest_candidates call
+            # in an earlier turn, so no language re-check is needed here.
             if payload.faq_id:
                 entry = faq_store.get_by_id(payload.faq_id)
                 if entry:
-                    return _faq_response(entry["answer"], caller,
-                                         matched=entry["question"])
+                    return _faq_response(
+                        entry["answer"], caller, matched=entry["question"],
+                        faq_language=faq_store.norm_lang(entry.get("language")) or "en")
                 raise HTTPException(status_code=404, detail={
                     "error": "not_found", "message": "That answer is no longer available."})
 
+            lang = _resolve_anon_language(payload.language, payload.q)
             faq = await run_in_threadpool(
                 faq_store.suggest_candidates, payload.q,
-                payload.product or payload.category)
+                payload.product or payload.category, True, lang)
 
             if faq["mode"] == "answer":
                 return _faq_response(faq["entry"]["answer"], caller,
-                                     matched=faq["entry"]["question"])
+                                     matched=faq["entry"]["question"],
+                                     faq_language=lang)
 
             # "Can I have the MyCheckr manual?" -- the file is member-only
             # (/source_file is token gated), so say that plainly rather than
@@ -433,20 +488,24 @@ def register(app, answer_query, draft_enquiry=None):
                 return _faq_response(
                     "Product manuals and documents are available to account "
                     "holders. Sign in and I can give you the download link.",
-                    caller, needs_sign_in=True)
+                    caller, needs_sign_in=True, faq_language=lang)
 
             if faq["mode"] == "disambiguate":
                 return _faq_response(
                     "These FAQs match your query - please select the one you meant:",
-                    caller, candidates=faq["candidates"], clarify=True)
+                    caller, candidates=faq["candidates"], clarify=True,
+                    faq_language=lang)
 
-            # Nothing curated covers it. This is the upsell moment, and the
-            # honest one: we are not refusing, we simply have no reviewed
-            # answer and a full answer needs an account.
+            # Nothing curated covers it in this language. Not a fall-through
+            # to the English pool: scoring non-English text against
+            # English-worded entries is exactly the "same topic, wrong
+            # answer" failure suggest_candidates's own design exists to
+            # prevent. record_gap (inside suggest_candidates) already
+            # captured this as language-tagged demand.
             return _faq_response(
                 "I don't have a reviewed answer for that yet. Sign in to your "
                 "account and I can search the full product documentation for you.",
-                caller, needs_sign_in=True)
+                caller, needs_sign_in=True, faq_language=lang)
 
         # ── Member / staff: full pipeline, charged in credits ─────────
         gate = quota.check(caller, spec["credits"])

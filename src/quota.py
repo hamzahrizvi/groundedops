@@ -114,6 +114,15 @@ def anon_ip_limit() -> int:
 def anon_llm_enabled() -> bool:
     return bool(_policy("anon_llm_enabled", False))
 
+
+def multilingual_faq_enabled() -> bool:
+    return bool(_policy("multilingual_faq_enabled", False))
+
+
+def faq_enabled_languages() -> set[str]:
+    return {c.strip() for c in str(_policy("faq_enabled_languages", "")).split(",")
+            if c.strip()}
+
 # FAQ lookups are cheap (no LLM, no external call), so anonymous visitors
 # get a generous allowance - enough that a real person never hits it, low
 # enough that nobody scrapes the whole FAQ in a loop.

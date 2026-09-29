@@ -120,7 +120,7 @@ def test_a_curated_question_typed_in_a_product_chat_is_served():
     import faq_store
     entry = {"id": "x", "question": "What is the weight of the NV9S?", "answer": "1.05 kg"}
     real_list, real_sem = faq_store.list_for_product, faq_store._semantic_scores
-    faq_store.list_for_product = lambda scope: [entry]
+    faq_store.list_for_product = lambda scope, display_only=False, language=None: [entry]
     faq_store._semantic_scores = lambda q, pool: {"x": 0.0}
     try:
         out = faq_store.suggest_candidates("What is the weight of the NV9S? (NV9 Spectral)", "nv9_spectral")

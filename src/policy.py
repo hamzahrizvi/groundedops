@@ -17,9 +17,12 @@ unlike accounts.json.
 """
 import logging
 import os
+import re
 import threading
 
 import jsonstore
+
+_LANG_CODE_RE = re.compile(r"^[a-z]{2}$")
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,19 @@ _DEFAULTS = {
     # Credits an anonymous visitor may spend on the generative pipeline once
     # anon_llm_enabled is on. Kept small: this is the public internet.
     "anon_llm_credits": int(os.getenv("QUOTA_ANON_LLM", "3")),
+
+    # ── Multilingual FAQs for anonymous visitors ────────────────────────
+    # Separate from anon_llm_enabled: curating/translating FAQs costs
+    # nothing at query time (no model call is ever made to serve one, only
+    # to draft one in the console), so this switch is its own decision, not
+    # a consequence of turning on guest LLM access.
+    "multilingual_faq_enabled": os.getenv("MULTILINGUAL_FAQ_ENABLED", "").strip().lower()
+                                in ("1", "true", "yes"),
+    # Comma-joined ISO 639-1 codes, e.g. "es,de,fr" -- same convention as a
+    # curated FAQ entry's own `products` field. English is always
+    # implicitly allowed regardless of this list; the list only ever adds
+    # languages on top of it, never removes English matching.
+    "faq_enabled_languages": os.getenv("FAQ_ENABLED_LANGUAGES", ""),
 
     # ── Daily allowances (per quota window) ────────────────────────────
     "member_daily_credits": int(os.getenv("QUOTA_MEMBER", "25")),
@@ -146,8 +162,13 @@ _DEFAULTS = {
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
                "anon_faq_daily", "anon_ip_daily", "questions_per_session",
                "tokens_per_session", "grounding_retries")
-_BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks")
+_BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks",
+               "multilingual_faq_enabled")
 _TEXT_FIELDS = ("anon_notice", "sales_reply")
+# faq_enabled_languages is text-shaped (a comma list) but needs its own
+# validation -- a typo'd code would otherwise silently produce a language
+# nobody can ever match a translated FAQ against.
+_LANG_LIST_FIELDS = ("faq_enabled_languages",)
 # Fields that accept one of a fixed set of values. Rejecting anything else
 # keeps a typo out of the request path: an unrecognised sales_mode would
 # otherwise silently fall through to whichever branch the code checked last.
@@ -221,6 +242,14 @@ def _coerce(key: str, raw):
         return v
     if key in _TEXT_FIELDS:
         return str(raw or "").strip()[:MAX_NOTICE_CHARS]
+    if key in _LANG_LIST_FIELDS:
+        codes = [c.strip().lower() for c in str(raw or "").split(",") if c.strip()]
+        bad = [c for c in codes if not _LANG_CODE_RE.match(c)]
+        if bad:
+            raise PolicyError(
+                f"'{key}' must be a comma-separated list of two-letter "
+                f"language codes; not valid: {', '.join(bad)}")
+        return ",".join(codes)
     raise PolicyError(f"unknown setting '{key}'")
 
 

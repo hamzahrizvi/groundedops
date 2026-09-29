@@ -94,7 +94,25 @@
     supportEmail: attr("data-support-email", ""),
     welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
     prompt: attr("data-prompt", "How can I help today?"),
+    // Explicit override for a single-locale embed (a dedicated /fr page, a
+    // French subdomain). Falls back to the page's own declared language,
+    // then the browser's, when not set -- see detectedLanguage().
+    language: attr("data-language", ""),
   };
+
+  // The anonymous FAQ-only path uses this to match same-language curated
+  // answers, with no model call involved in detecting it. Priority: an
+  // explicit embed override, then the host page's own <html lang>, then
+  // the visitor's browser locale. Bare two-letter code ("fr-CA" -> "fr");
+  // anything else is not sent, and the server falls back to its own
+  // no-LLM guess from the question text.
+  function detectedLanguage() {
+    var raw = cfg.language
+      || (document.documentElement && document.documentElement.lang)
+      || navigator.language || navigator.userLanguage || "";
+    var code = String(raw).split("-")[0].toLowerCase();
+    return /^[a-z]{2}$/.test(code) ? code : "";
+  }
 
   // Filled by /widget/config before the panel first opens. Defaults keep the
   // widget fully usable if that fetch fails — a support widget that renders
@@ -1805,7 +1823,8 @@
    *  Picking one usually resolves against the curated answer with no LLM
    *  call at all. Failure here is non-fatal — the visitor can still type. */
   function suggestQuestions() {
-    fetch(cfg.api + "/widget/faq?product=" + encodeURIComponent(state.product.key))
+    fetch(cfg.api + "/widget/faq?product=" + encodeURIComponent(state.product.key)
+          + "&language=" + encodeURIComponent(detectedLanguage()))
       .then(function (r) {
         return r.ok ? r.json() : { faq: [] };
       })
@@ -1999,6 +2018,7 @@
         category: state.category ? state.category.key : null,
         skip_faq: !!opts.skipFaq,
         faq_id: opts.faqId || null,
+        language: detectedLanguage(),
       }),
     })
       .then(function (r) {

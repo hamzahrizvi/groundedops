@@ -93,7 +93,7 @@ def test_faq_candidates_must_share_a_content_word_with_the_question():
     entries = [{"id": k, "question": v, "answer": "x", "origin": "curated"} for k, v in pool.items()]
     real = (faq_store.list_for_product, faq_store._semantic_scores, faq_store._product_terms,
             faq_store.record_gap)
-    faq_store.list_for_product = lambda scope: entries
+    faq_store.list_for_product = lambda scope, display_only=False, language=None: entries
     faq_store._product_terms = lambda: {"nv9usb", "nv9", "usb", "smart", "coin", "system", "scs", "range"}
     faq_store.record_gap = lambda *a, **k: None
     try:

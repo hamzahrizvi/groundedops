@@ -33,3 +33,10 @@ cryptography
 
 streamlit
 requests
+
+# Local (no model call, no network) language guess for an anonymous
+# visitor's question when the widget itself sent no language hint
+# (language.py's detect_language_no_llm). Pure Python, no model download --
+# unlike the FAQ-multilingual feature's own translation calls, this one
+# runs on every unhinted anonymous question, so it must not cost a request.
+langdetect

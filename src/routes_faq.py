@@ -9,7 +9,7 @@ import logging
 import os
 import re
 
-from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 import faq_store
@@ -23,17 +23,20 @@ router = APIRouter()
 # ── FAQ (v10.4) — doc2query questions per product, admin-editable ─────
 
 @router.get("/faq")
-def faq_list(product: str | None = None):
+def faq_list(product: str | None = None, language: str | None = None):
     """Generated questions for a product (or all). Public read.
 
     Deliberately UNFILTERED: this is what the admin console lists, and an
     entry too ugly to show a visitor is exactly the one an admin needs to
     find and rewrite. Each carries a `displayable` flag so the console can
     surface them for curation -- the guest-facing list at /widget/faq is the
-    one that hides them.
+    one that hides them. Also carries `stale_translation`: True when the
+    entry is a translation and its English source has been edited since.
     """
-    return {"faq": [dict(f, displayable=faq_store.is_displayable(f))
-                    for f in faq_store.list_for_product(product)]}
+    by_id = {it["id"]: it for it in faq_store.list_for_product(None)}
+    return {"faq": [dict(f, displayable=faq_store.is_displayable(f),
+                         stale_translation=faq_store.is_stale_translation(f, by_id))
+                    for f in faq_store.list_for_product(product, language=language)]}
 
 
 class FaqGenerateReq(BaseModel):
@@ -157,6 +160,7 @@ def _category_product_keys(key: str) -> set[str]:
 def faq_gaps(product: str | None = None,
              sort: str = "demand",
              group_similar: bool = True,
+             language: str | None = None,
              x_admin_password: str | None = Header(default=None)):
     """Questions the FAQ could not answer — either nothing was close enough
     to suggest, or the user rejected the suggestions (v12.0). This is the
@@ -193,6 +197,10 @@ def faq_gaps(product: str | None = None,
     else:
         gaps = faq_store.list_gaps(product)
 
+    if language:
+        want_lang = faq_store.norm_lang(language) or "en"
+        gaps = [g for g in gaps if g.get("language", "en") == want_lang]
+
     if group_similar:
         gaps = faq_store.cluster_gaps(gaps)
 
@@ -228,6 +236,10 @@ def faq_gaps(product: str | None = None,
         "scope_counts": _scope_totals,
         "grouped": bool(group_similar),
         "sort": sort,
+        # Same reasoning as "scopes": derived from the gaps themselves, over
+        # ALL of them, not the filtered view.
+        "languages": sorted({g.get("language", "en")
+                            for g in faq_store.list_gaps(None)}),
     }
 
 
@@ -508,6 +520,11 @@ class FaqBulkReq(BaseModel):
     product: str = ""
     category: str = ""
     entries: list = []
+    # Set when these entries are translations (from /admin/faq/translate/
+    # stream, or a pre-translated upload) rather than plain drafts of new
+    # English questions. Each entry may then also carry `translation_of`
+    # (the English source entry's id) and `source_hash`.
+    language: str = ""
 
 
 @router.post("/admin/faq/draft/stream")
@@ -611,10 +628,20 @@ def admin_faq_bulk(payload: FaqBulkReq,
     rather than duplicated.
     """
     _require_admin(x_admin_password)
-    pairs = [{"question": (e or {}).get("question", ""),
-              "answer": (e or {}).get("answer", "")}
-             for e in (payload.entries or [])
-             if (e or {}).get("question") and (e or {}).get("answer")]
+    lang = faq_store.norm_lang(payload.language)
+    pairs = []
+    for e in (payload.entries or []):
+        e = e or {}
+        if not (e.get("question") and e.get("answer")):
+            continue
+        pair = {"question": e["question"], "answer": e["answer"]}
+        if lang:
+            pair["language"] = lang
+            if e.get("translation_of"):
+                pair["translation_of"] = e["translation_of"]
+            if e.get("source_hash"):
+                pair["source_answer_sha256"] = e["source_hash"]
+        pairs.append(pair)
     if not pairs:
         raise HTTPException(status_code=400, detail="Nothing to save")
     merged = faq_store.merge_questions(payload.source or "",
@@ -624,9 +651,93 @@ def admin_faq_bulk(payload: FaqBulkReq,
     return merged
 
 
+class FaqTranslateReq(BaseModel):
+    target_language: str
+    product: str = ""
+    category: str = ""
+    # None = every eligible English entry in scope. Set to translate only
+    # specific entries (e.g. a "retranslate this one" action).
+    source_ids: list[str] | None = None
+    # Skip an entry that already has a fresh (non-stale) translation in
+    # this language, so re-running the drafter over a whole product only
+    # does the work that actually changed.
+    skip_fresh: bool = True
+
+
+@router.post("/admin/faq/translate/stream")
+def admin_faq_translate_stream(payload: FaqTranslateReq,
+                               x_admin_password: str | None = Header(default=None)):
+    """Draft translations of existing English FAQs, streamed as they are
+    produced. NOTHING IS SAVED -- same draft-then-approve invariant as
+    /admin/faq/draft/stream, committed the same way through /admin/faq/bulk.
+
+    Unlike autogenerate/draft (one generation call for a whole batch),
+    translation makes ONE call PER SOURCE ENTRY: a translation is not a
+    single blob the model might mangle the shape of, and per-entry calls
+    let an isolated failure (one bad answer) surface without losing every
+    other entry in the batch.
+    """
+    _require_admin(x_admin_password)
+    lang = faq_store.norm_lang(payload.target_language)
+    if not lang or lang == "en":
+        raise HTTPException(status_code=400,
+                            detail="target_language must be a non-English "
+                                   "two-letter language code")
+
+    scope = payload.product or payload.category
+    pool = [it for it in faq_store.list_for_product(scope, language="en")
+           if (it.get("answer") or "").strip()
+           and it.get("origin") != "harvested"]
+    if payload.source_ids:
+        wanted = set(payload.source_ids)
+        pool = [it for it in pool if it["id"] in wanted]
+
+    skipped_fresh = 0
+    if payload.skip_fresh:
+        translated = {
+            it["translation_of"]: it
+            for it in faq_store.list_for_product(scope, language=lang)
+            if it.get("translation_of")
+        }
+        before = len(pool)
+        pool = [it for it in pool
+               if not (it["id"] in translated
+                       and not faq_store.is_stale_translation(translated[it["id"]]))]
+        skipped_fresh = before - len(pool)
+
+    def events():
+        import json as _json
+
+        def sse(obj):
+            return "data: " + _json.dumps(obj) + "\n\n"
+
+        import language as _language
+        translated_n = failed_n = 0
+        for it in pool:
+            got = _language.translate_faq_pair(it["question"], it["answer"], lang)
+            if not got:
+                failed_n += 1
+                yield sse({"type": "pair_error", "source_id": it["id"],
+                          "question": it["question"]})
+                continue
+            tq, ta = got
+            translated_n += 1
+            yield sse({"type": "pair", "source_id": it["id"],
+                      "question": tq, "answer": ta,
+                      "source_hash": faq_store.hash_answer(it["answer"])})
+        yield sse({"type": "done", "translated": translated_n,
+                  "skipped": skipped_fresh, "failed": failed_n})
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store",
+                                      "X-Accel-Buffering": "no"})
+
+
 @router.post("/admin/faq/import")
 async def admin_faq_import(request: Request,
                            file: UploadFile = File(...),
+                           target_language: str = Form(default=""),
                            x_admin_password: str | None = Header(default=None)):
     """Read question/answer pairs OUT of a document, without indexing it.
 
@@ -639,8 +750,16 @@ async def admin_faq_import(request: Request,
     Nothing is saved here either. The pairs come back for the same review the
     drafting flow uses, because an import is exactly as capable of producing
     a mangled pair as a model is.
+
+    `target_language` marks this as a pre-translated FAQ file (already
+    written in that language, not something to translate here) so the
+    console can tag the reviewed entries with it on save. `translation_of`
+    is deliberately NOT set automatically -- there is no reliable
+    correspondence between an uploaded file's pairs and specific English
+    entries, so the console offers an optional manual link per row instead.
     """
     _require_admin(x_admin_password)
+    lang = faq_store.norm_lang(target_language)
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="That file is empty")
@@ -708,7 +827,7 @@ async def admin_faq_import(request: Request,
             status_code=422,
             detail="No question and answer pairs could be found in that file.")
     return {"entries": pairs[:60], "file": file.filename, "how": how,
-            "count": len(pairs[:60])}
+            "count": len(pairs[:60]), "language": lang}
 
 
 # "Q: ... A: ..." and "Question: ... Answer: ..." are how exported FAQs
