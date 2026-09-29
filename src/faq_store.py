@@ -720,7 +720,7 @@ def is_curatable_question(question: str) -> bool:
 
 def record_gap(question: str, scope_key: str | None,
                shown: list[str] | None = None, reason: str = "",
-               language: str | None = None) -> None:
+               language: str | None = None, flag: bool = False) -> None:
     """Record a question the FAQ could not answer.
 
     Two distinct causes land here, kept separable via `reason`:
@@ -731,6 +731,10 @@ def record_gap(question: str, scope_key: str | None,
         retrieval confidence, or an answer that failed grounding and was
         suppressed (reason e.g. "low_retrieval_confidence",
         "ungrounded_answer_suppressed")
+
+    `flag` is a visitor's thumbs-down on the answer they got (8.10): it
+    counts in `flagged_by_visitor`, not `times_asked`, since the question
+    was already counted when it was asked.
 
     Either way, this is the most valuable by-product of asking instead of
     guessing: an explicit list of questions your documentation is being
@@ -763,14 +767,17 @@ def record_gap(question: str, scope_key: str | None,
                     # into the existing entry instead of piling up one row
                     # per ask, so times_asked means what the admin page
                     # implies it means.
-                    g["times_asked"] = int(g.get("times_asked", 1)) + 1
+                    if flag:
+                        g["flagged_by_visitor"] = int(g.get("flagged_by_visitor", 0)) + 1
+                    else:
+                        g["times_asked"] = int(g.get("times_asked", 1)) + 1
                     g["ts"] = now
                     if scope_key and not g.get("scope"):
                         # Keep the most specific scope seen — a gap first
                         # asked with no product and later inside one belongs
                         # to that product.
                         g["scope"] = scope_key
-                    if reason and not g.get("reason"):
+                    if reason and (flag or not g.get("reason")):
                         g["reason"] = reason
                     if shown:
                         g["suggestions_shown"] = shown
@@ -791,6 +798,7 @@ def record_gap(question: str, scope_key: str | None,
                 "resolved_faq_id": None,
                 "spam": False,
                 "language": norm_lang(language) or "en",
+                "flagged_by_visitor": 1 if flag else 0,
             })
             if len(gaps) > 500:
                 gaps = gaps[-500:]            # keep it bounded
@@ -1051,6 +1059,8 @@ def cluster_gaps(gaps: list[dict],
                     "similarity": round(sim, 3),
                 })
                 c["times_asked"] += int(g.get("times_asked", 1))
+                c["flagged_by_visitor"] = (int(c.get("flagged_by_visitor", 0))
+                                           + int(g.get("flagged_by_visitor", 0)))
                 c["cluster_size"] += 1
                 # The cluster's timestamp is the most RECENT ask in it, so
                 # "sort by latest" means what a reader expects.

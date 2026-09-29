@@ -419,6 +419,11 @@
     ".go-dl:hover{text-decoration:underline}" +
     ".go-badge{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;" +
     "color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:1px 5px;margin-top:7px}" +
+    ".go-vote{display:flex;gap:4px;margin-top:6px}" +
+    ".go-vote button{border:1px solid var(--line);background:none;border-radius:6px;cursor:pointer;" +
+    "font-size:13px;line-height:1;padding:3px 7px;color:var(--mut)}" +
+    ".go-vote button[aria-pressed=true]{border-color:var(--ink);color:var(--ink)}" +
+    ".go-vote button:disabled{cursor:default}" +
     // composer
     ".go-form{display:flex;gap:8px;padding:11px;border-top:1px solid var(--line);background:var(--bg);flex:0 0 auto}" +
     ".go-in{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;" +
@@ -852,8 +857,42 @@
       bd.textContent = msg.badge;
       b.appendChild(bd);
     }
+    if (msg.requestId) b.appendChild(voteRow(msg));
     row.appendChild(b);
     return row;
+  }
+
+  /** 8.10: thumbs up/down under a generated answer. The vote is kept on the
+   *  message, so a resumed chat shows it and does not offer it again. */
+  function voteRow(msg) {
+    var wrap = document.createElement("div");
+    wrap.className = "go-vote";
+    [["up", "\ud83d\udc4d", "Helpful"], ["down", "\ud83d\udc4e", "Not helpful"]]
+      .forEach(function (v) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = v[1];
+        btn.setAttribute("aria-label", v[2]);
+        btn.setAttribute("aria-pressed", msg.vote === v[0] ? "true" : "false");
+        btn.disabled = !!msg.vote;
+        btn.addEventListener("click", function () {
+          msg.vote = v[0];
+          save();
+          wrap.querySelectorAll("button").forEach(function (x) {
+            x.disabled = true;
+            x.setAttribute("aria-pressed", x === btn ? "true" : "false");
+          });
+          fetch(cfg.api + "/widget/feedback", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ request_id: msg.requestId, vote: v[0],
+                                   session_id: state.sessionId,
+                                   visitor_id: visitorId() }),
+          }).catch(function () {});
+        });
+        wrap.appendChild(btn);
+      });
+    return wrap;
   }
 
   /** Fetch the caller's tier and remaining allowance. Shown in the
@@ -2100,6 +2139,11 @@
           sources: d.flagged ? null : d.sources,
           flagged: !!d.flagged,
           badge: d.from_faq ? "Reviewed answer" : null,
+          // Only a generated answer can be voted on: a curated one has been
+          // reviewed, and a refusal or clarify question is not an answer.
+          requestId: (!d.from_faq && !d.flagged && !d.offer_support &&
+                      !d.needs_clarification && !d.service_degraded &&
+                      d.request_id) || null,
         });
 
         // The answer asked a yes/no question ("Would you like them?") and

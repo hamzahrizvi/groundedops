@@ -865,8 +865,25 @@ exactly, we cannot tell whether a fix helped.
   under API keys, send one real enquiry, and check it arrives and shows
   "Emailed to" in the console. The unsent count is on the Enquiries page,
   not on the nav badge.
-- [ ] **8.10 Thumbs up/down under answers**, feeding a review list in the
-  console.
+- [x] **8.10 Thumbs up/down under answers**, feeding a review list in the
+  console. Done 2026-09-29 (S11). POST /widget/feedback {request_id,
+  session_id, vote up|down, note <= 280}: the id must be one /widget/ask
+  returned in that conversation (bounded in-memory set, 5000; a restart
+  forgets them, so a vote on an older answer is a 404), capped by 8.9's
+  `check_public_write('feedback')` at 50/visitor, 300/IP a day. Stored in
+  widget_feedback.json keyed by request_id, mirrored as an `event:
+  feedback`, `outcome: voted_down|voted_up` row in logs.jsonl. A down vote
+  calls record_gap(flag=True): `flagged_by_visitor` +1, times_asked
+  unchanged, reason `visitor_flagged`. The widget shows two chips under
+  generated answers only (not FAQ, refusal, clarify or outage turns); the
+  vote is kept on the message so a resumed chat shows it. Shortcut replies
+  (steps, tell-me-more) had no request_id at all; /widget/ask now mints one
+  when main.query did not, so those can be voted on too, but have no log
+  row to join to. The stream meta now carries request_id, role and reason.
+  Console: a "Flagged by visitors (N)" filter on FAQs from customers, and
+  flagged rows say so; Promote to FAQ is the existing draft button. No
+  note box in the widget (the API takes one). tests/test_answer_feedback.py
+  (6). Rates are for after go-live, origin=widget only.
 - [ ] **8.11 Show real progress while waiting** ("searching", "checking"...)
   instead of timed placeholder lines.
 - [ ] **8.12 Show what the server already sends**: "open the manual at page

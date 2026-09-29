@@ -103,6 +103,7 @@ os.environ["FAQ_STORE_PATH"] = _scratch("faq.json")
 os.environ["FAQ_GAP_PATH"] = _scratch("faq_gaps.json")
 os.environ["WIDGET_CONFIG_PATH"] = _scratch("widget_config.json")
 os.environ["WIDGET_LEADS_PATH"] = _scratch("widget_leads.json")
+os.environ["WIDGET_FEEDBACK_PATH"] = _scratch("widget_feedback.json")
 os.environ["CATALOG_CONFIG"] = _scratch("catalog.json")
 os.environ["ACCOUNTS_PATH"] = _scratch("accounts.json")
 os.environ["ACCOUNT_REQUESTS_PATH"] = _scratch("account_requests.json")
@@ -257,7 +258,8 @@ stub("db", get_collection=lambda: _Collection(), reset_collection=lambda: None,
 stub("embeddings", _get_model=lambda: None)
 stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
 stub("structure", extract_structured_block=lambda r, query=None: None)
-stub("logger", log_interaction=lambda *a, **k: None)
+stub("logger", log_interaction=lambda *a, **k: None,
+     log_feedback=lambda *a, **k: None)
 stub("router", route_model=lambda q: ("accurate", ("local", "mistral")))
 stub("grounding", check_grounding=lambda a, c, threshold=0.55: (True, 0.9),
      _get_nli_model=lambda: None)

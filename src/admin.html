@@ -4924,7 +4924,7 @@ function viewFaq() {
 /* ---------------- unanswered (gaps) ---------------- */
 // Filter/sort state for the customer-questions page. Module-level so it
 // survives render(), which rebuilds the whole view on every change.
-let gapFilter = { scope: "", sort: "demand", grouped: true, language: "" };
+let gapFilter = { scope: "", sort: "demand", grouped: true, language: "", flagged: false };
 
 // How many questions a product group shows before asking. 256 gaps across
 // six products meant 256 rows, each with a checkbox, a details element and
@@ -4977,7 +4977,8 @@ function viewGaps() {
   // with no product selected are their own group rather than being
   // hidden or forced under an arbitrary product.
   const groups = new Map();
-  cache.gaps.forEach(g => {
+  // 8.10: "Flagged by visitors" is a view of the same list, filtered here.
+  cache.gaps.filter(g => !gapFilter.flagged || g.flagged_by_visitor).forEach(g => {
     const key = g.scope || "";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(g);
@@ -5027,7 +5028,10 @@ function viewGaps() {
                       "\u2022 " + v.question
                       + (v.times_asked > 1 ? "  (" + v.times_asked + "\u00d7)" : "")))))
               : null,
-            el("p", {}, (g.reason === "ungrounded_answer_suppressed"
+            el("p", {}, (g.flagged_by_visitor
+                ? "Answered, but " + g.flagged_by_visitor + (g.flagged_by_visitor === 1 ? " visitor" : " visitors")
+                  + " marked the answer not helpful."
+                : g.reason === "ungrounded_answer_suppressed"
                 ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
                 : "Nothing in the documents matched.")
               + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : "")),
@@ -5225,6 +5229,10 @@ function viewGaps() {
   const groupCb = el("input", { type: "checkbox",
     onchange: () => { gapFilter.grouped = groupCb.checked; reload(); } });
   groupCb.checked = gapFilter.grouped;
+  const flaggedN = cache.gaps.filter(g => g.flagged_by_visitor).length;
+  const flaggedCb = el("input", { type: "checkbox",
+    onchange: () => { gapFilter.flagged = flaggedCb.checked; render(); } });
+  flaggedCb.checked = gapFilter.flagged;
 
   // Only shown once there is more than English to filter by -- an install
   // that has never touched the multilingual FAQ feature should see nothing
@@ -5250,6 +5258,8 @@ function viewGaps() {
     el("label", { class: "flabel", style: "margin:0" }, "Sort"), sortSel,
     el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
       groupCb, "Group similar wordings"),
+    el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
+      flaggedCb, "Flagged by visitors (" + flaggedN + ")"),
     langFilterSel ? el("label", { class: "flabel", style: "margin:0" }, "Language") : null,
     langFilterSel,
     el("span", { style: "flex:1" }),

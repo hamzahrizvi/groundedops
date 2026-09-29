@@ -135,3 +135,22 @@ def log_interaction(
         except IOError as exc:
             _logger.error(f"Failed to write log: {exc}")
 
+
+def log_feedback(request_id: str, vote: str, session_id: str | None = None) -> None:
+    """8.10: a visitor's vote, as its own row joined to the answer's row by
+    request_id. The vote itself is stored in widget_feedback.json; this
+    file rotates, so it is only a mirror."""
+    entry = {
+        "timestamp":  datetime.utcnow().isoformat(),
+        "event":      "feedback",
+        "request_id": request_id,
+        "session_id": session_id,
+        "outcome":    "voted_" + vote,
+    }
+    with _lock:
+        try:
+            _rotate_if_needed()
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except IOError as exc:
+            _logger.error(f"Failed to write log: {exc}")

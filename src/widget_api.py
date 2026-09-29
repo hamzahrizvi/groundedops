@@ -21,7 +21,10 @@ Endpoints
     POST /widget/ask      ask a question (costs credits)
 """
 import asyncio
+import collections
 import re
+import threading
+import uuid
 import logging
 import os
 import time
@@ -29,8 +32,10 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
+from typing import Literal
 
 import faq_store
+import jsonstore
 import quota
 
 logger = logging.getLogger(__name__)
@@ -63,6 +68,45 @@ class AskRequest(BaseModel):
     # to_english). Any shape survives here -- normalized once, in
     # _resolve_anon_language.
     language: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=64)
+    session_id: str | None = None
+    visitor_id: str | None = None
+    vote: Literal["up", "down"]
+    note: str = Field("", max_length=280)
+
+
+# 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
+# made-up ids. Filled when /ask returns a pipeline answer.
+# ponytail: in memory, so a restart forgets them and a vote on an answer
+# given before it is refused with 404; persist if that starts to matter.
+_RECENT_ANSWERS: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
+_RECENT_MAX = 5000
+_recent_lock = threading.Lock()
+_FEEDBACK_PATH = os.getenv("WIDGET_FEEDBACK_PATH", "widget_feedback.json")
+_feedback_lock = threading.Lock()
+
+
+def _remember_answer(request_id, q, scope, session_id) -> None:
+    if not request_id:
+        return
+    with _recent_lock:
+        _RECENT_ANSWERS[request_id] = {"q": q, "scope": scope,
+                                       "session_id": session_id}
+        while len(_RECENT_ANSWERS) > _RECENT_MAX:
+            _RECENT_ANSWERS.popitem(last=False)
+
+
+def _save_vote(request_id: str, row: dict) -> None:
+    """One row per answer, so a changed mind replaces the first vote."""
+    with _feedback_lock:
+        data = jsonstore.load(_FEEDBACK_PATH, {}, label="widget feedback")
+        if not isinstance(data, dict):
+            data = {}
+        data[request_id] = row
+        jsonstore.save(_FEEDBACK_PATH, data, label="widget feedback")
 
 
 def _client_ip(request: Request) -> str:
@@ -562,6 +606,15 @@ def register(app, answer_query, draft_enquiry=None):
             quota.session_record(payload.session_id,
                                  tokens_used=int(result.get("total_tokens") or 0))
 
+        # The shortcut replies (steps, "tell me more", handoff) return before
+        # main.query mints a request_id; a vote still needs one to name.
+        if not result.get("request_id"):
+            result["request_id"] = uuid.uuid4().hex[:12]
+        if not (result.get("from_faq") or result.get("faq_candidates")):
+            _remember_answer(result.get("request_id"), payload.q,
+                             payload.product or payload.category,
+                             payload.session_id)
+
         logger.info(f"widget ask tier={tier} effort={level} charged={charged} "
                     f"remaining={state['remaining']} "
                     f"ms={round((time.time() - started) * 1000)}")
@@ -624,6 +677,40 @@ def register(app, answer_query, draft_enquiry=None):
         }
 
 
+    @router.post("/feedback")
+    def widget_feedback(payload: FeedbackRequest, request: Request):
+        """PUBLIC -- a thumbs up or down on one answer.
+
+        Only for an answer this process gave, in the same conversation, and
+        capped by the same limiter as the contact form. A down vote also
+        flags the question on the console's FAQs-from-customers page.
+        """
+        with _recent_lock:
+            seen = _RECENT_ANSWERS.get(payload.request_id)
+        if not seen or (seen["session_id"] or None) != (payload.session_id or None):
+            raise HTTPException(status_code=404, detail="No such answer.")
+        gate = quota.check_public_write("feedback", payload.visitor_id,
+                                        _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429,
+                                detail="Too many votes today. Thank you, though.")
+        from datetime import datetime, timezone
+        _save_vote(payload.request_id, {
+            "vote": payload.vote,
+            "note": payload.note.strip(),
+            "question": seen["q"],
+            "scope": seen["scope"],
+            "session_id": payload.session_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        if payload.vote == "down":
+            faq_store.record_gap(seen["q"], seen["scope"],
+                                 reason="visitor_flagged", flag=True)
+        import logger as interaction_log
+        interaction_log.log_feedback(payload.request_id, payload.vote,
+                                     payload.session_id)
+        return {"received": True}
+
     @router.post("/ask/stream")
     async def widget_ask_stream(payload: AskRequest, request: Request):
         """Streamed answer for the widget, over server-sent events.
@@ -675,6 +762,7 @@ def register(app, answer_query, draft_enquiry=None):
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_candidates",
+                                "request_id", "role", "reason",
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "suggested_replies",
                                 "flagged", "quota", "session")})
