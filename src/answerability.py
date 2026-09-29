@@ -53,6 +53,12 @@ DOCUMENTED_ELSEWHERE = "documented_elsewhere"
 INFERABLE = "inferable"
 ADVISORY = "advisory"
 UNANSWERABLE = "unanswerable"
+# Set by main.py, not by classify(): the model said "No" to a feature the
+# product's documentation never mentions, and the reply says so instead
+# (PENDING 8.3, mentions.py). A rejection for outcome counting, kept apart
+# from UNANSWERABLE so the console can see how often the documents are
+# silent on what people ask.
+NOT_MENTIONED = "not_mentioned"
 
 
 def capability_evidence(query: str, chunks: list[dict],

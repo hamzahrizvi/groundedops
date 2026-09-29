@@ -349,12 +349,12 @@
       "q": "does the SMART Coin System support facial recognition",
       "new_session": true,
       "product": "sku_scs",
-      "outcome": "answered",
-      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System.",
+      "outcome": "rejected",
+      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System. The SCS manual never mentions facial recognition, so the honest reply says so (8.3).",
       "keywords_all": [
-        "coin"
+        "facial recognition"
       ],
-      "note": "2026-09-25: a grounded 'No, it validates coins by ...' beats a refusal; the wording of the 'no' varies run to run, so the check is on what it must and must not say",
+      "note": "2026-09-25: a grounded 'No, it validates coins by ...' beats a refusal. 2026-09-29 (8.3, owner's decision): a feature the manual never mentions gets 'the documentation doesn't mention facial recognition', which counts as rejected (answerability not_mentioned); it must still never say Yes.",
       "keywords_absent": [
         "yes, ",
         "supports facial recognition"

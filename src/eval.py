@@ -122,7 +122,8 @@ def classify_outcome(data: dict) -> str:
     # and an unwanted deflect could never fail.
     if role == "sales":
         return "rejected"
-    if (data.get("answerability") or "") in ("unanswerable", "documented_elsewhere"):
+    if (data.get("answerability") or "") in ("unanswerable", "documented_elsewhere",
+                                             "not_mentioned"):
         return "rejected"
     # A friendly refusal keeps the answering role (INFERABLE/ADVISORY turns
     # never reset role away from fast/reasoning) but is a rejection wearing

@@ -71,6 +71,7 @@ import language
 from llm import generate, generate_with_fallback, condense_query
 
 import faq_store
+import mentions
 import conversations as convo_store
 from memory import add_to_memory, get_history
 from retrieval_db import retrieve_from_db, retrieve_fused, complete_procedures
@@ -3369,6 +3370,42 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # Which check let the answer through, for the trace: a rescue must not
     # read as an NLI pass ("passed at 0.209" when the bar is 0.55).
     ground_via = "nli"
+
+    # ── A "No" nothing supports (PENDING 8.3) ──
+    # The prompt asks for a plain Yes or No on "does it have / support X",
+    # and the model says "No" even when its context never mentions X:
+    # "Does the MyCheckr have a backup battery?" -> "No." (blind set 2,
+    # lost since v16.3). Neither verifier catches it -- NLI has nothing to
+    # contradict, and the fast LLM verdict accepted 15/15 such absences
+    # (M8). So before verifying, ask the corpus the one question that
+    # settles it: does this product's documentation mention X at all? If
+    # it does, the No is a documented No and is verified as usual. If X
+    # appears nowhere in it, the honest answer is that the documents do
+    # not mention it. Scope decided 2026-09-29: only a NEVER-mentioned
+    # feature; see mentions.py. Needs a product scope, because "the
+    # documentation" has to be someone's.
+    _not_mentioned = None
+    _nm_product = (_scope or {}).get("product")
+    if (_nm_product and not generation_failed and role != "rethink"
+            and mentions.enabled() and not is_refusal(answer)):
+        try:
+            _nm_label = _product_names().get(_nm_product, "")
+            _nm_words = _product_alias_tokens(
+                _nm_product, _nm_label, _product_aliases().get(_nm_product, ()))
+            _nm_words |= set(re.findall(
+                r"[a-z0-9]+", f"{_nm_product} {_nm_label} "
+                f"{' '.join(_product_aliases().get(_nm_product, ()))}".lower()))
+            _not_mentioned = mentions.unmentioned_feature(
+                answer, q, _nm_product, _nm_words)
+        except Exception as _exc:
+            logger.warning(f"not-mentioned check skipped: {_exc}")
+        if _not_mentioned:
+            logger.info("unsupported No: %r never mentions %r; answering "
+                        "'not mentioned' instead of %r",
+                        _nm_product, _not_mentioned, answer[:60])
+            ptrace.mark("not_mentioned", _not_mentioned[:60])
+            answer = mentions.reply(_nm_label, _not_mentioned)
+
     refusal = is_refusal(answer)
     template_leak = is_template_leak(answer)
 
@@ -3395,7 +3432,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         is_grounded, grounding_score = False, 0.0
         flagged = True
         refusal = False
-    elif refusal:
+    elif refusal or _not_mentioned:
+        # A "not mentioned" reply claims nothing about the product, only
+        # about the documents, so like a refusal it has nothing to verify.
         is_grounded, grounding_score = True, None
         flagged = False
     elif re.search(r"^\s*\|", answer, re.M):
@@ -3591,6 +3630,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     verifier_llm_time = _spent["llm_verify"]
     escalation_time = _spent["regen"]
     verify_stage_time = time.time() - t_grounding
+    # A suppressed answer names the checker that said no. ground_via used to
+    # keep its "nli" default whenever nothing rescued the answer, so all 25
+    # suppressed rows in the 2026-09-28 batch were logged verified_by=nli
+    # when every one had in fact been rejected by the LLM verifier, which
+    # runs last in each chain and is the verdict that stood (M7).
+    if flagged and _spent["llm_verify"] > 0:
+        ground_via = "llm"
     ptrace.mark("ground", _ground_note(
         verifier_unavailable, flagged, grounding_score, ground_via))
     ptrace.set_meta(ground_via=ground_via)
@@ -3960,6 +4006,18 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 "(provider=%s)", resolved_query[:60], output.get("provider"))
     except Exception:
         offer_support = False
+    if _not_mentioned:
+        # Not a refusal to is_refusal (so the switchboard above left the
+        # wording alone), but it IS one to everything that counts outcomes:
+        # the visitor did not get their yes or no. A person can look it up,
+        # and it is a curatable gap -- "does it have X?" is exactly what a
+        # one-line FAQ closes.
+        role = "rejected"
+        offer_support = True
+        answerability_kind = answerability.NOT_MENTIONED
+        ptrace.mark("switchboard", answerability_kind)
+        faq_store.record_gap(q, payload.product or payload.category,
+                             reason="not_mentioned")
     # Computed BEFORE the log call, not after it: the logged timing block had
     # every stage except the one that says whether the turn was slow, because
     # total_time did not exist yet at the point the line was written.
