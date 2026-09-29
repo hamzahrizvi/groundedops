@@ -560,11 +560,20 @@ def _shared_differences(named: list[str], index: list[dict],
         # Storage are different rows, and merging them would compare one
         # product's operating limit against another's storage limit.
         table = (r.get("table") or "").strip()
-        key = (table + " › " + r["attribute"]) if table else r["attribute"]
-        by_attr.setdefault(key, {}).setdefault(r["product"], vals)
+        label = (table + " › " + r["attribute"]) if table else r["attribute"]
+        # Grouped without regard to case or spacing (8.6). Two manuals of the
+        # same range title the same table differently -- "Technical
+        # Specifications" in one, "TECHNICAL SPECIFICATIONS" in the other --
+        # and the exact-string key put their rows in different groups, so
+        # products that share seven documented attributes were compared on
+        # none and the comparison fell through. The first spelling seen is
+        # the one displayed.
+        norm = re.sub(r"\s+", " ", label).casefold()
+        shown, per_product = by_attr.setdefault(norm, (label, {}))
+        per_product.setdefault(r["product"], vals)
 
     documented, differing = [], []
-    for attr, per_product in sorted(by_attr.items()):
+    for _norm, (attr, per_product) in sorted(by_attr.items()):
         if len(per_product) < len(wanted):
             continue                      # not documented for both
         documented.append((attr, per_product))

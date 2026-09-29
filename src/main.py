@@ -2045,6 +2045,21 @@ def _is_family_parent(named: str, selected: str) -> bool:
     return False
 
 
+def _scope_for_products(keys: list[str]) -> dict | None:
+    """The narrowest retrieval scope that holds every product in `keys`:
+    their shared category, or None (the whole corpus) when they span
+    categories. For a question that names two products (8.6)."""
+    try:
+        from retrieval_db import _category_of
+        cats = {_category_of(k) for k in keys}
+    except Exception as exc:
+        logger.debug(f"category lookup skipped: {exc}")
+        return None
+    if len(cats) == 1 and next(iter(cats)):
+        return {"category": next(iter(cats))}
+    return None
+
+
 def _resolve_question_scope(selected_product: str | None,
                             category: str | None,
                             named_products: list[str]
@@ -2493,6 +2508,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _scope, _effective_product = _resolve_question_scope(
         payload.product, payload.category,
         _named_typed if payload.product else _named)
+    # TWO PRODUCTS TYPED IN A PRODUCT CHAT: READ BOTH MANUALS (8.6). The
+    # picker's product used to win whenever the question named more than
+    # one, so "what PSU does the NV200 Spectral need docked on the SMART
+    # Coin System" in an SCS chat was scoped to the SCS manual alone and the
+    # NV200S page (p.69) was unreachable -- it refused 3/3 in the retrieval
+    # set (M4), and every comparison asked in a product chat searched one of
+    # the two manuals it was comparing. Widened to what holds them both.
+    _both_named = _named_typed if payload.product else _named
+    if len(_both_named) >= 2 and _scope and "product" in _scope:
+        _scope = _scope_for_products(_both_named)
+        _effective_product = None
+        logger.info(f"Question names {_both_named}; widening scope to "
+                    f"{_scope or 'the whole corpus'}")
     if _effective_product and _effective_product != payload.product:
         logger.info(f"Using question-named product {_effective_product!r} "
                     f"instead of selected product {payload.product!r}")
