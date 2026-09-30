@@ -1126,7 +1126,7 @@ exactly, we cannot tell whether a fix helped.
     you.** The 9 GroundedOps help pages (.txt, added 09-25, chunk size
     450, never in the live index) are byte-identical copies of the
     website bot's knowledge, which already sits in the bot's own store
-    `..\groundedops-site-engine\documents` and its index. Nothing to
+    `../groundedops-site-engine/documents` and its index. Nothing to
     move; the copies here go. The session's delete was blocked by the
     permission classifier, so run from the repo root:
     `python tools/drop_site_pages.py` (written this session; removes the

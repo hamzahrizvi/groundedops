@@ -1,7 +1,7 @@
 """Remove the website bot's 9 help pages from THIS store (9.7 decision 2).
 
 They were stray copies: the bot keeps its own byte-identical copies in
-..\groundedops-site-engine\documents and its own index. Refuses unless the
+../groundedops-site-engine/documents and its own index. Refuses unless the
 sibling copy exists and matches, so nothing can be lost.
 """
 import hashlib, json, os, sys
