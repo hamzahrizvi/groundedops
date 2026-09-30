@@ -150,3 +150,6 @@ scratchpad/
 
 # Local database/backup snapshots, never versioned
 backups/
+
+# rollback copies kept beside the live index (9.7)
+src/chroma_db.before-*/
