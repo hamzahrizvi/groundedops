@@ -8,6 +8,23 @@ from unittest.mock import patch
 import reindex
 
 
+def test_snapshot_accepts_numpy_embeddings():
+    import numpy as np
+
+    class Col:
+        def get(self, include):
+            return {"ids": ["a", "b"], "documents": ["x", "y"],
+                    "metadatas": [{}, {}],
+                    "embeddings": np.array([[0.1, 0.2], [0.3, 0.4]])}
+
+    fake_db = types.ModuleType("db")
+    fake_db.get_collection = lambda: Col()
+    with patch.dict(sys.modules, {"db": fake_db}):
+        snap = reindex.snapshot_collection()
+    assert snap["embeddings"] == [[0.1, 0.2], [0.3, 0.4]]
+    assert all(isinstance(v, float) for row in snap["embeddings"] for v in row)
+
+
 def test_failed_rebuild_rolls_back_previous_collection():
     snapshot = {
         "ids": ["old:1"], "documents": ["known good"],

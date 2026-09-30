@@ -166,11 +166,15 @@ def snapshot_collection() -> dict:
     from db import get_collection
     got = get_collection().get(
         include=["documents", "metadatas", "embeddings"])
+    # Chroma returns embeddings as a numpy array, whose truth value is
+    # ambiguous: `or []` on it raised before the first rebuild started.
+    emb = got.get("embeddings")
     return {
         "ids": list(got.get("ids") or []),
         "documents": list(got.get("documents") or []),
         "metadatas": list(got.get("metadatas") or []),
-        "embeddings": list(got.get("embeddings") or []),
+        "embeddings": [[float(x) for x in row] for row in emb]
+                      if emb is not None and len(emb) else [],
     }
 
 
