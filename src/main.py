@@ -1350,12 +1350,16 @@ def _friendly_refusal(scope_key: str | None, product_label: str = "",
     except Exception as exc:
         logger.debug(f"refusal capability note skipped: {exc}")
 
-    deferral = ""
+    deferral, _in_manual = "", False
     try:
         import crossrefs
-        deferral = crossrefs.refusal_line(
-            (decision or {}).get("deferral") if decision
-            else crossrefs.deferral_for(query, sources or []))
+        _d = ((decision or {}).get("deferral") if decision
+              else crossrefs.deferral_for(query, sources or []))
+        deferral = crossrefs.refusal_line(_d)
+        # 9.8: the reference is a section of the same manual (the
+        # MyCheckr dimensions sit in a drawing on p36), so there is no
+        # document for support to "send".
+        _in_manual = bool(_d) and _d.get("section_page") is not None
     except Exception as exc:
         logger.debug(f"refusal deferral check skipped: {exc}")
 
@@ -1363,7 +1367,9 @@ def _friendly_refusal(scope_key: str | None, product_label: str = "",
         lines.append("")
         lines.append(deferral)
         lines.append("")
-        lines.append("Our support team can send you that, or I can answer "
+        lines.append("Our support team can help with that, or I can answer "
+                     "anything else the user manual covers." if _in_manual else
+                     "Our support team can send you that, or I can answer "
                      "anything the user manual does cover.")
         return "\n".join(lines)
 

@@ -164,6 +164,45 @@ def _flat(s: str) -> str:
     return re.sub(r"[^a-z0-9+]+", "", (s or "").lower())
 
 
+def _section_page(title: str, sections) -> int | None:
+    """The page of the citing document's OWN section this title names.
+
+    9.8: "Refer to MyCheckr Range Technical Data for the dimensions" is not
+    a missing document: it is the manual's Technical Data section (p36;
+    the Mini manual's is "MyCheckr Mini Range Technical Data", p29). All
+    five titles the first scan reported missing were sections like this.
+    `sections` is [(section heading, page)] for the citing document, as
+    ingest stores it ("Parent › Child"). A heading part matches when it
+    holds the title contiguously ("BNF Path Guide" in "BNF Path Guide
+    Inserts") or holds all of at least two of its content words ("MyCheckr
+    ... Technical" in "MyCheckr Mini Range Technical Data"). A part that is
+    itself a deferral ("Component Overview › 1 Refer to ..." is a heading
+    the layout reader got wrong) is not a section.
+    """
+    want_flat, want_key = _flat(title), _key(title)
+    for heading, page in sorted(sections or [], key=lambda hp: hp[1] or 0):
+        for part in re.split(r"\s*[›—]\s*", heading or ""):
+            if not part or _DEFERRAL.search(part):
+                continue
+            if (want_flat and want_flat in _flat(part)) or \
+                    (len(want_key) >= 2 and want_key <= _key(part)):
+                return page
+    return None
+
+
+def _sections_for(source: str) -> list[tuple[str, int]]:
+    """[(section, page)] held for one document, from the index."""
+    try:
+        from db import get_collection
+        got = get_collection().get(where={"source": source},
+                                   include=["metadatas"]) or {}
+    except Exception as exc:                       # pragma: no cover
+        logger.debug(f"crossrefs: sections unavailable: {exc}")
+        return []
+    return [(m.get("section"), m.get("page"))
+            for m in (got.get("metadatas") or []) if m and m.get("section")]
+
+
 def _chunks():
     from db import get_collection
     col = get_collection()
@@ -180,6 +219,11 @@ def scan() -> list[dict]:
     """
     documents, metadatas = _chunks()
     ingested = _ingested_titles()
+    sections: dict[str, list] = {}
+    for meta in metadatas:
+        if meta and meta.get("section"):
+            sections.setdefault(meta.get("source"), []).append(
+                (meta["section"], meta.get("page")))
 
     found: dict[frozenset, dict] = {}
     for text, meta in zip(documents, metadatas):
@@ -211,6 +255,15 @@ def scan() -> list[dict]:
     out = []
     for entry in found.values():
         entry["held"] = _match(entry["title"], ingested)
+        # 9.8: a section of the citing document is held, not missing.
+        entry["sections"] = [
+            {"source": c["source"], "page": pg}
+            for c in entry["citations"]
+            for pg in [_section_page(entry["title"], sections.get(c["source"]))]
+            if pg is not None]
+        if not entry["held"] and entry["sections"]:
+            s0 = entry["sections"][0]
+            entry["held"] = f"{s0['source']} (section, p{s0['page']})"
         out.append(entry)
     out.sort(key=lambda e: (e["held"] is not None, -e["count"], e["title"]))
     return out
@@ -254,6 +307,10 @@ def deferral_for(query: str, chunks: list[dict]) -> dict | None:
             hit = {"title": title, "topic": topic,
                    "source": c.get("source") or "?", "page": c.get("page"),
                    "on_topic": on_topic,
+                   # 9.8: the page of the citing manual's own section of
+                   # that name, when it has one -- then nothing is missing.
+                   "section_page": _section_page(
+                       title, _sections_for(c.get("source") or "")),
                    # Where the deferring passage sat in the retrieval order,
                    # so the caller can tell a reference in the best passage
                    # from one buried further down.
@@ -269,5 +326,9 @@ def refusal_line(deferral: dict | None) -> str:
     if not deferral:
         return ""
     what = f" for {deferral['topic']}" if deferral.get("topic") else ""
+    if deferral.get("section_page") is not None:
+        return (f"The {deferral['source'].rsplit('.', 1)[0]} refers"
+                f"{what} to its {deferral['title']} section, on page "
+                f"{deferral['section_page']}.")
     return (f"The {deferral['source'].rsplit('.', 1)[0]} refers"
             f"{what} to the {deferral['title']}, which I don't hold.")

@@ -25,6 +25,7 @@ and the real index is exercised separately by tests/run_scenarios.py.
 import _harness  # noqa: F401
 import main
 import crossrefs
+from unittest.mock import patch
 from text_utils import capability_target
 
 
@@ -58,18 +59,60 @@ BV30_P15 = chunk(
 # ── crossrefs ─────────────────────────────────────────────────────────
 
 def test_a_deferral_to_a_document_we_lack_is_found():
-    d = crossrefs.deferral_for("what is the screen size of the MyCheckr?",
-                               [MYCHECKR_P5])
+    # No section of that name in the citing manual: a real gap.
+    with patch.object(crossrefs, "_sections_for", return_value=[]):
+        d = crossrefs.deferral_for("what is the screen size of the MyCheckr?",
+                                   [MYCHECKR_P5])
     assert d, "the chunk defers dimensions to a sheet that is not ingested"
     assert d["title"] == "MyCheckr Range Technical Data"
     assert d["source"] == "MyCheckr User Manual-v7.pdf"
+    assert d["section_page"] is None
 
 
 def test_the_refusal_names_it():
-    line = crossrefs.refusal_line(
-        crossrefs.deferral_for("what is the screen size?", [MYCHECKR_P5]))
+    with patch.object(crossrefs, "_sections_for", return_value=[]):
+        line = crossrefs.refusal_line(
+            crossrefs.deferral_for("what is the screen size?", [MYCHECKR_P5]))
     assert "MyCheckr Range Technical Data" in line
     assert "don't hold" in line
+
+
+# The section headings ingest stored for the two MyCheckr manuals, as found
+# in the live index on 2026-09-30. The p5 one is a layout misread that
+# swallowed the pointer itself and must not count as the section.
+MYCHECKR_SECTIONS = [
+    ("Component Overview › 1 Refer to MyCheckr Range Technical Data for the "
+     "dimensions of the device", 5),
+    ("MyCheckr Range Technical Data › Weights", 36),
+]
+
+
+def test_9_8_a_section_of_the_same_manual_is_not_a_missing_document():
+    """"MyCheckr Range Technical Data" is the manual's own p36 section, not
+    a data sheet we lack. The refusal points at the page instead of telling
+    the customer to find a document we "don't hold"."""
+    with patch.object(crossrefs, "_sections_for", return_value=MYCHECKR_SECTIONS):
+        d = crossrefs.deferral_for("what is the screen size of the MyCheckr?",
+                                   [MYCHECKR_P5])
+    assert d["section_page"] == 36
+    line = crossrefs.refusal_line(d)
+    assert "page 36" in line and "don't hold" not in line
+
+
+def test_9_8_section_matching_rules():
+    sp = crossrefs._section_page
+    # The Mini manual calls its section "MyCheckr Mini Range Technical Data".
+    assert sp("MyCheckr Range Technical Data",
+              [("MyCheckr Mini Range Technical Data › Weights", 29)]) == 29
+    assert sp("BNF Path Guide", [("BNF Path Guide Inserts", 112)]) == 112
+    assert sp("Service Guide", [("NV200 Spectral Range Service Guide › "
+                                 "Recommended Cleaning Intervals", 73)]) == 73
+    # One shared word is not the same section.
+    assert sp("Service Guide", [("Service Mode", 40)]) is None
+    assert sp("MyCheckr Range Technical Data",
+              [("MyCheckr Range Overview", 4)]) is None
+    # The misread heading that contains the pointer itself is skipped.
+    assert sp("MyCheckr Range Technical Data", MYCHECKR_SECTIONS[:1]) is None
 
 
 def test_a_deferral_to_a_document_we_have_is_not_reported():
