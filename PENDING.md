@@ -293,7 +293,7 @@ Only one session changes code at a time (step P1).
 | 38 | 9.6 | Check unreviewed FAQs; honest "Reviewed" badge. | Opus |
 | 39 | 9.14 (new) | Give figure chunks their page heading so image questions are found. | Opus |
 | 40 | 9.7 | Rebuild the index: Fable checks the gates, Haiku runs it. | Fable + Haiku |
-| 41 | 9.8 | Cross-references to a section of the same manual count as held ("MyCheckr Range Technical Data" is p36 / Mini p29, not a missing document). | Fable |
+| 41 | 9.8 | Cross-references to a section of the same manual count as held ("MyCheckr Range Technical Data" is p36 / Mini p29, not a missing document). **Done 2026-09-30** (`d7ab9f5`). | Fable |
 | 42 | 9.9 | Full multilingual answers behind a switch. | Fable |
 | 43 | 9.10 | Explain every answer that flips run to run. | Fable |
 | 44 | 9.11 | Label or hide the slow "accurate" reranker. | Sonnet |
@@ -356,7 +356,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: SMTP settings + one real enquiry (8.9); the 8.15 baseline re-arm and a `run_live --path stream` N=3 run (both need a live backend). |
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), backup via company gateway + drill ~10-01 (9.3), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
 | 13 | Opus | 38, 39 | **Done 2026-09-29** (`b2cb5dc`, `912239b`, `ca0d6e2` + this); full suite 312 passed (1 skipped). 9.6: the "Reviewed answer" badge now appears on 168/406 entries, down from all 406. The audit checked the 157 unedited generated entries: 110 verified 3/3, 8 unstable, 39 stable rejects (list in `eval_runs/faq_audit_9.6.log`). 9.14: figure chunks carry their page heading. On a scratch index, the case's figure chunk is retrieved for 4/12 image cases, up from 3/12. The new chunks reach the live index only through the 9.7 rebuild (S14). Left for you: read the 39 rejects against the PDFs, then edit or delete them (9.6). |
-| 14 | Fable, then shell | 40, 41 | Fable checks the rebuild is safe and does the 9.8 fix; a script runs the rebuild. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8:** code only, nothing to supply. Do it before the rebuild; it needs no reindex. `crossrefs` treats a title that matches a section heading in the citing document as held, and the refusal names the page ("see MyCheckr Range Technical Data, p36 of the manual"), not a document we lack. Done when `crossrefs.missing()` goes 5 -> 3: "MyCheckr Range Technical Data" and the "Action Data" false positive (an ICU API section) both drop, while Service Guide, BNF Path Guide and Lock Specification stay. The dimensions themselves are only in the drawing on those pages, so answering "how big is the MyCheckr?" depends on gate (6) and the image cases, not on 9.8. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. |
+| 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. |
 | 15 | Fable | 42, 43 | |
 | 16 | Sonnet | 44 | |
 | 17 | Opus + you | 45 | |
@@ -1100,7 +1100,7 @@ exactly, we cannot tell whether a fix helped.
 - [ ] **9.7 Rebuild the search index** (removes page footers, adds table
   context) - only after the new code is committed and five document tags
   are confirmed.
-- [ ] **9.8 Stop calling an internal section a missing document.**
+- [x] **9.8 Stop calling an internal section a missing document.**
   Rewritten 2026-09-30. "MyCheckr Range Technical Data" is not a separate
   document: it is the Technical Data section of each manual (MyCheckr
   User Manual-v7 contents p3, section p36; MyCheckr Mini User Manual-v5
@@ -1109,9 +1109,21 @@ exactly, we cannot tell whether a fix helped.
   `crossrefs.missing()` lists it as absent, so a dimensions refusal
   tells the customer to find a document we "don't hold". Fix: a
   referenced title that matches a section heading in the citing document
-  counts as held, and the refusal points to that page. Gate:
-  `missing()` goes 5 -> 3 ("Action Data", an ICU API section, drops too);
-  test_crossrefs_and_capability.py still passes. The p36/p29 text layer
+  counts as held, and the refusal points to that page.
+  **Done 2026-09-30** (`d7ab9f5`). `crossrefs._section_page` matches the
+  title against the citing document's stored section headings (whole
+  title contiguous, or 2+ content words all present; a misread heading
+  that contains the pointer itself is skipped). `scan()` marks such
+  entries held "(section, pN)". `deferral_for` carries `section_page`, so
+  the refusal says "refers ... to its X section, on page N" and "our
+  support team can help", no longer "which I don't hold" / "can send you
+  that". On the live index **`missing()` went 5 -> 0**, not the 3 expected:
+  every entry was a section. MyCheckr Range Technical Data is p36 (Mini
+  p29). "Service Guide" is the NV200S manual's own chapter from p73 (the
+  jam steps included). BNF Path Guide Inserts is NV200S p112. Lock
+  Specification is a heading on NV200S p38, the citing page. Action Data
+  Update is ICU API p39. Each citing sentence was read against its page.
+  Full suite 312 passed (1 skipped); 2 new tests. The p36/p29 text layer
   holds only headings and weights; the dimensions are in the drawing, so
   answering them is the figure-text work (9.14, 9.7 gate 6, image cases
   "How tall is the MyCheckr?" and the Mini thread depth on p29).
@@ -1192,7 +1204,7 @@ lookup time saved for support staff (a small before/after sample).
 ### Waiting on things outside the code
 
 SMTP login details (emails), a server and web address, a second AI
-vendor's key, the missing documents, a person to label answers and write
+vendor's key, a person to label answers and write
 the third blind set, and real visitors.
 
 The two MyCheckr manuals disagree on the Mini's weight: MyCheckr User
@@ -2271,9 +2283,11 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   "Action Data" (an ICU API section name). Each row carries the sentence it
   came from so a false positive costs an operator seconds. Getting the
   Technical Data sheet ingested is the single highest-value corpus action
-  on this list. **Corrected 2026-09-30:** there is no separate sheet. It is
-  the Technical Data section of each manual (p36, Mini p29), so it is a
-  second false positive of the "Action Data" kind; see 9.8.
+  on this list. **Corrected 2026-09-30:** there is no separate sheet, and
+  none of the five is a missing document. Each is a section of the manual
+  that cites it (Technical Data p36/Mini p29, the NV200S Service Guide
+  chapter p73, BNF Path Guide Inserts p112, Lock Specification p38, Action
+  Data Update p39); see 9.8.
 
   Three filters earned their place, each against a real false positive: the
   title is matched CASE-SENSITIVELY (without that, "refer to the relevant
