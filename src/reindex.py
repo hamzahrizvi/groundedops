@@ -72,6 +72,10 @@ def catalog_assignment() -> dict[str, tuple[str, str]]:
     The catalogue is the durable record of which product a document belongs
     to. Reading the assignment from the INDEX means a damaged index takes the
     filing with it -- which is exactly the situation this mode exists for.
+
+    A source listed under several products gets ALL of them, comma-joined,
+    which ingest_file writes as one prod_* flag per key. Keeping only the
+    last one would silently re-file a manual shared by two products.
     """
     out: dict[str, tuple[str, str]] = {}
     try:
@@ -93,8 +97,10 @@ def catalog_assignment() -> dict[str, tuple[str, str]]:
     for cat in (cfg.get("categories") or []):
         for prod in (cat.get("products") or []):
             for src in (prod.get("sources") or []):
-                out[os.path.basename(src)] = (cat.get("key") or "",
-                                              prod.get("key") or "")
+                name = os.path.basename(src)
+                c, p = out.get(name, (cat.get("key") or "", ""))
+                keys = [k for k in p.split(",") if k] + [prod.get("key") or ""]
+                out[name] = (c, ",".join(dict.fromkeys(k for k in keys if k)))
     return out
 
 

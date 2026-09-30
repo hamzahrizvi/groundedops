@@ -4093,6 +4093,23 @@ function viewDocuments() {
   }
   syncProductOptions();
 
+  // A document can belong to more than one product (an installation guide
+  // covering the MyCheckr and the Mini). Extra products ride along in the
+  // same header, comma-joined; the server tags every chunk with each and
+  // files the source under each in the catalogue.
+  const also = new Set();
+  const alsoPick = el("details", { class: "tagpick" },
+    el("summary", {}, "Also file under…"),
+    el("div", { class: "tagpick-list", style: "right:auto;left:0" },
+      prods.map(p => el("label", { class: "tagpick-row" },
+        el("input", { type: "checkbox", onchange: e => {
+          e.target.checked ? also.add(p.key) : also.delete(p.key);
+          alsoPick.querySelector("summary").textContent = also.size
+            ? "Also under " + also.size + " more" : "Also file under…";
+        } }),
+        el("span", {}, p.categoryName + " › " + p.name)))));
+  const productKeys = p => [...new Set([p.key, ...also])].join(",");
+
   const drop = el("div", { class: "drop off" },
     el("b", {}, "Choose a product first"),
     "Then drop files here, or click to browse");
@@ -4114,7 +4131,7 @@ function viewDocuments() {
   async function postUpload(f, p, replaceSource) {
     const fd = new FormData(); fd.append("file", f);
     const headers = { "x-admin-password": tok,
-                      "category-key": p.category, "product-key": p.key };
+                      "category-key": p.category, "product-key": productKeys(p) };
     if (replaceSource) headers["replace-source"] = replaceSource;
     const r = await fetch(API + "/upload", { method: "POST", body: fd, headers });
     if (r.status === 409) {
@@ -4426,7 +4443,8 @@ function viewDocuments() {
       el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in."),
       el("div", { class: "row" },
         el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
-        el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel)),
+        el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel),
+        el("div", {}, el("label", { class: "flabel" }, "Optional"), alsoPick)),
       // Indexing a document needs the embedding model, so this is the one
       // control on the page that has to wait for it. POST /upload refuses
       // on the same capability, so the grey is never a lie.

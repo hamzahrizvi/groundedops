@@ -394,17 +394,61 @@ def delete_product(category_key: str, product_key: str,
             "reassigned_to": reassign_to}
 
 
+def load_catalog() -> dict:
+    """The raw tree (categories -> products -> sources), for reindex.py."""
+    return _load()
+
+
+def _product_by_key(data: dict, key: str) -> dict | None:
+    return next((p for c in data["categories"] for p in c.get("products", [])
+                 if p["key"] == key), None)
+
+
+def _split_keys(product_key: str | None) -> list[str]:
+    return list(dict.fromkeys(
+        k.strip() for k in (product_key or "").split(",") if k.strip()))
+
+
 def attach_source(category_key: str, product_key: str, source: str) -> dict:
-    """Tag an (already-ingested) source filename to a product."""
+    """Tag an (already-ingested) source filename to one or more products.
+
+    "a,b" files it under both, the same form ingest_file writes as one
+    prod_* flag per key, so an upload into several products records all of
+    them here and reindex.py rebuilds the same scoping.
+    """
     with _lock:
         data = _load()
-        cat = _find_category(data, category_key)
-        if not cat:
+        if not _find_category(data, category_key):
             raise ValueError(f"unknown category '{category_key}'")
-        prod = next((p for p in cat["products"] if p["key"] == product_key), None)
-        if not prod:
-            raise ValueError(f"unknown product '{product_key}'")
-        if source not in prod["sources"]:
+        for key in _split_keys(product_key):
+            prod = _product_by_key(data, key)
+            if not prod:
+                raise ValueError(f"unknown product '{key}'")
+            if source not in prod["sources"]:
+                prod["sources"].append(source)
+        _save(data)
+    return catalog()
+
+
+def refile_source(source: str, product_keys: list[str]) -> dict:
+    """Make the catalogue say exactly which products hold `source`: removed
+    from every product, then listed under each of `product_keys` (an empty
+    list leaves it unfiled).
+
+    The index carries the same tags (db.with_product_tags), but the
+    catalogue is what reindex.py rebuilds from: a tag that lived only in
+    Chroma was lost on the next rebuild, which is how five documents came
+    to be filed differently in the two places.
+    """
+    with _lock:
+        data = _load()
+        for c in data["categories"]:
+            for p in c.get("products", []):
+                p["sources"] = [s for s in p.get("sources", []) if s != source]
+        for key in _split_keys(",".join(product_keys)):
+            prod = _product_by_key(data, key)
+            if not prod:
+                raise ValueError(f"unknown product '{key}'")
             prod["sources"].append(source)
         _save(data)
     return catalog()

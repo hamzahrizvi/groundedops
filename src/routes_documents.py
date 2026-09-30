@@ -540,6 +540,13 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
         m["category"] = payload.category_key
         metas.append(m)
     col.update(ids=ids, metadatas=metas)
+    # The catalogue is what reindex.py rebuilds from. Until it was written
+    # here too, a retag lived only in Chroma and vanished on the next rebuild.
+    try:
+        catalog_mod.refile_source(payload.source, keys)
+    except Exception as exc:
+        logger.warning("reassign_source: catalogue not updated for %r: %s",
+                       payload.source, exc)
     # BM25 and the source inventory both carry the old tags until told.
     try:
         from db import invalidate_retrieval_cache
