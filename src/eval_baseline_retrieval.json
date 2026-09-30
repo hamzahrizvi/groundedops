@@ -1,5 +1,5 @@
 {
-  "pass_rate": 0.90625,
+  "pass_rate": 0.9142857142857143,
   "repeats": 3,
   "cases": {
     "retrieval::What size screws do I need to mount the MyCheckr, and how many mounting holes are there?": true,
@@ -20,8 +20,8 @@
     "retrieval::What note sizes will the NV9 Spectral take?": true,
     "retrieval::Can I connect the NV9USB+ directly to an MDB vending machine?": true,
     "retrieval::What cleaner is safe to use on the NV9USB+?": true,
-    "retrieval::How do I put the validator into SSP programming mode?": true,
-    "retrieval::What power supply does the NV200 Spectral need when docked with the SMART Coin System?": false,
+    "retrieval::How do I put the validator into SSP programming mode?": false,
+    "retrieval::What power supply does the NV200 Spectral need when docked with the SMART Coin System?": true,
     "retrieval::what is the power required to run both at once": true,
     "retrieval::What does the NV9 Spectral validator do?": true,
     "retrieval::how much does it weigh on its own?": true,
@@ -33,7 +33,10 @@
     "retrieval::how do I reset the password on my Cisco router": true,
     "retrieval::what is the recommended operating temperature range for the MyCheckr": true,
     "retrieval::the bezel is showing 4 red flashes then 1 blue flash, what does that mean": true,
-    "retrieval::what speed class does the microSD card need to be for the NV9 Spectral": true
+    "retrieval::what speed class does the microSD card need to be for the NV9 Spectral": true,
+    "retrieval::Can I connect to MyCheckr using Linux?": true,
+    "retrieval::Yes, show me the steps": true,
+    "retrieval::and step 3?": true
   },
-  "source": "eval_runs/20260928_0807/m4_retrieval.json"
+  "source": "eval_runs/20260930_2105/m4_retrieval.json"
 }

@@ -356,7 +356,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: SMTP settings + one real enquiry (8.9); the 8.15 baseline re-arm and a `run_live --path stream` N=3 run (both need a live backend). |
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), backup via company gateway + drill ~10-01 (9.3), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
 | 13 | Opus | 38, 39 | **Done 2026-09-29** (`b2cb5dc`, `912239b`, `ca0d6e2` + this); full suite 312 passed (1 skipped). 9.6: the "Reviewed answer" badge now appears on 168/406 entries, down from all 406. The audit checked the 157 unedited generated entries: 110 verified 3/3, 8 unstable, 39 stable rejects (list in `eval_runs/faq_audit_9.6.log`). 9.14: figure chunks carry their page heading. On a scratch index, the case's figure chunk is retrieved for 4/12 image cases, up from 3/12. The new chunks reach the live index only through the 9.7 rebuild (S14). Left for you: read the 39 rejects against the PDFs, then edit or delete them (9.6). |
-| 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. **Done 2026-09-30** (`b91a6a5`, `05fac34` + plan commits): decisions 1-4 taken and applied, index rebuilt 1749 -> 1668 chunks, footer-tailed 500 -> 0, retrieval R@1 up with no regression, full suite 315 passed (1 skipped); details under 9.7. Left running: the M4 eval batch that re-arms the baselines. Left for you: delete `src/chroma_db.before-9.7-20260930_2100` once the re-arm passes; try the upload form's new "Also file under" picker once. |
+| 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. **Done 2026-09-30** (`b91a6a5`, `05fac34` + plan commits): decisions 1-4 taken and applied, index rebuilt 1749 -> 1668 chunks, footer-tailed 500 -> 0, retrieval R@1 up with no regression, full suite 315 passed (1 skipped); details under 9.7. Baselines re-armed from `eval_runs/20260930_2105` (tuned 45/49 x5, retrieval 32/35 x3). Left for you: rule on the one rebuild-caused flip ("how do I mount it" now answers instead of asking; keep `AMBIGUOUS_CEILING` 0.65 or raise it, see 9.7); delete `src/chroma_db.before-9.7-20260930_2100` when satisfied; try the upload form's new "Also file under" picker once. |
 | 15 | Fable | 42, 43 | |
 | 16 | Sonnet | 44 | |
 | 17 | Opus + you | 45 | |
@@ -1177,7 +1177,31 @@ exactly, we cannot tell whether a fix helped.
     page per embed batch), not 40. Baseline re-arm: the M4 batch
     (`STEPS="m4 summary" tools/overnight_eval.sh`) then
     `eval.py --baseline-from-results` for the tuned and retrieval
-    suites; status in the S14 row.
+    suites. **Re-armed 2026-09-30 21:40** from `eval_runs/20260930_2105`
+    (HEAD `d9f1924`, grader deepseek-v4-flash, the batch's own backend on
+    :8010 against the rebuilt index): tuned 45/49 stable over 5 runs
+    (was 33/34 on 09-28; 15 cases were added since), retrieval 32/35
+    over 3 (was 29/32), blind1 31/34 (was 32), blind2 29/34 (was 30).
+    Caveat: the 09-28 run was code `0f08c73`, so the graded diffs mix
+    two days of code (S9-S13) with the rebuild. Stable regressions and
+    what they are: **"how do I mount it" (tuned, 5/5 -> 0/5) is the one
+    flip the rebuild caused**: unscoped, expected clarify; the Mini
+    mounting chunk's rerank score rose 0.627 -> 0.677 once its footer
+    went, crossing `AMBIGUOUS_CEILING` 0.65, so `near_top_products` saw
+    one confident document and answered instead of asking. Measured
+    across all 18 unscoped eval questions the top score moved by a
+    median of 0.000 (mean +0.003), so this is one case, not a shift;
+    raising the ceiling to 0.70 would fix only it. **Your call:** keep
+    0.65 and accept the answer (it now describes the MyCheckr and Mini
+    mounts without asking), or raise the ceiling. Left at 0.65. The
+    other stable flips retrieve the same passages at the same scores on
+    both indexes (checked), so they are answer/verifier-side, not the
+    index: blind1 MyCheckr fingerprint and SMART Coin coins-per-second;
+    blind2 Euro 1 cent limit (follow-up) and Thai 50 Satang percentage;
+    retrieval "SSP programming mode" (unscoped, five manuals at 0.99).
+    Newly stable passes: NV9USB+ takes coins (refusal), BV30 Bluetooth
+    (refusal), MyCheckr backup battery (refusal), NV200 docked power
+    supply. Blind sets are measure-only and were not tuned against.
   - **Run plan, as executed:** stop the backend on :8000 (started
     09-29 14:51, older than today's commits anyway); rebuild into a fresh
     copy with `CHROMA_DIR=<copy> python reindex.py --from-store`; on the

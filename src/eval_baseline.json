@@ -1,5 +1,5 @@
 {
-  "pass_rate": 0.9705882352941176,
+  "pass_rate": 0.9183673469387755,
   "repeats": 5,
   "cases": {
     "faq::What is MyCheckr?": true,
@@ -30,12 +30,27 @@
     "faq::What are the three key components of the MyConnect Environment?": true,
     "faq::How does the MyConnect App talk to the MyConnect Hub?": true,
     "faq::what voltage does it need": true,
-    "faq::how do I mount it": true,
+    "faq::how do I mount it": false,
     "faq::what is the capital of france": true,
     "faq::how do I reset the password on my Cisco router": true,
     "faq::what is the bitcoin price today": true,
     "faq::does the SMART Coin System support facial recognition": true,
-    "faq::what is the maximum coin capacity in litres of the SMART Coin System": true
+    "faq::what is the maximum coin capacity in litres of the SMART Coin System": true,
+    "refusal::Could I talk to a real person about my BV30?": true,
+    "refusal::Please raise a support ticket for my NV200 Spectral": true,
+    "refusal::What would 50 BV30 units cost me?": true,
+    "refusal::Is there a discount if I order ten BV30s?": true,
+    "refusal::\u00c2\u00bfCu\u00c3\u00a1nto cuesta el SMART Coin System?": true,
+    "refusal::Could you send me the SMART Coin System manual?": true,
+    "refusal::Can I get the NV200 Spectral manual?": true,
+    "refusal::Good morning!": true,
+    "grounding::Does the BV30 have a built-in touchscreen?": false,
+    "grounding::Can the SMART Coin System take card payments?": true,
+    "comparison::Does the BV30 run on the same supply voltage as the NV200 Spectral?": true,
+    "retrieval::What interfaces does the NV200 Spectral support?": false,
+    "retrieval::and the BV30?": true,
+    "grounding::Which SSP command polls the NV200 Spectral for events?": true,
+    "grounding::What is the command code for SSP sync?": true
   },
-  "source": "eval_runs/20260928_0807/m4_tuned.json"
+  "source": "eval_runs/20260930_2105/m4_tuned.json"
 }
