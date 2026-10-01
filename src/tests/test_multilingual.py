@@ -118,6 +118,25 @@ def test_a_translation_that_drops_content_is_rejected():
         language._generate = real
 
 
+def test_a_translation_that_changes_a_number_is_rejected():
+    # 9.9: the English draft was verified, the translation was not; a
+    # number that did not survive is the one mismatch a regex can catch.
+    real = language._generate
+    en = "Use a Class 10 microSD card of at least 1.5 GB; it takes 10,000 notes."
+    try:
+        language._generate = lambda p, k: ("Utilice una tarjeta microSD de Clase 4 "
+                                           "de al menos 1,5 GB; admite 10.000 billetes.")
+        assert language.from_english(en, "Spanish") is None      # 10 -> 4
+        language._generate = lambda p, k: ("Utilice una tarjeta microSD de Clase 10 "
+                                           "de al menos 1,5 GB; admite 10.000 billetes.")
+        assert language.from_english(en, "Spanish").startswith("Utilice")   # separators may change
+        # one-digit numbers may be spelled out: that is translation, not loss
+        language._generate = lambda p, k: "Cuatro destellos rojos y luego un destello azul."
+        assert language.from_english("4 red flashes then 1 blue flash.", "Spanish").startswith("Cuatro")
+    finally:
+        language._generate = real
+
+
 def _with_pipeline(fake_pipeline, fake_generate):
     # The harness never finishes loading models, so capability("ask") is
     # False there and the wrapper would pass everything straight through.

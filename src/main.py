@@ -2384,6 +2384,7 @@ def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
         ptrace.mark("language", "looked foreign; no translation, asked as typed")
         return query(payload, x_user_id)
     lang, english = got
+    ptrace.set_meta(language=lang)
     ptrace.mark("language", f"{lang} -> English ({time.time() - t0:.1f}s)")
     logger.info("question in %s translated for the pipeline: %r -> %r",
                 lang, q[:80], english[:80])

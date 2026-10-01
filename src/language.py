@@ -201,7 +201,24 @@ def from_english(text: str, language: str,
         logger.warning("answer translation to %s rejected: length %d vs %d",
                        language, len(out), len(text))
         return None
+    # 9.9: the English was verified, the translation is not (the NLI model,
+    # embedder and reranker are English-only), so the one thing that can be
+    # checked mechanically is checked: every number in the draft must come
+    # back, no more, no fewer. Separators are dropped so "1.5" vs "1,5" and
+    # "10,000" vs "10.000" agree, and one-digit numbers are not compared:
+    # translators spell those out ("1 blue flash" -> "un destello azul",
+    # measured 2 of 3 runs on 2026-10-01) and that is a correct translation.
+    if _digits(out) != _digits(text):
+        logger.warning("answer translation to %s rejected: numbers changed "
+                       "%s -> %s", language, _digits(text), _digits(out))
+        return None
     return out
+
+
+def _digits(text: str) -> list[str]:
+    nums = (n.replace(".", "").replace(",", "")
+            for n in re.findall(r"\d+(?:[.,]\d+)*", text or ""))
+    return sorted(n for n in nums if len(n) >= 2)
 
 
 # ── FAQ console translation (Phase 1 of the anonymous-visitor multilingual

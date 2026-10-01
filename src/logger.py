@@ -95,6 +95,7 @@ def _trace_fields() -> dict:
         "verified_by":      meta.get("ground_via"),
         "verifier":         meta.get("verifier"),
         "service_degraded": meta.get("service_degraded"),
+        "language":         meta.get("language"),   # 9.9: None = English
     }
 
 

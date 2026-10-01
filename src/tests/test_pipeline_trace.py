@@ -205,7 +205,7 @@ def test_the_real_logger_reads_the_trace_and_tolerates_its_absence():
     real = _real_logger()
     blank = real._trace_fields()
     assert set(blank) == {"session_id", "origin", "surface", "outcome", "verified_by",
-                          "verifier", "service_degraded"}
+                          "verifier", "service_degraded", "language"}
     assert all(v is None for v in blank.values())
 
     t = pipeline_trace.start()

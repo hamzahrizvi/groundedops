@@ -13,7 +13,7 @@
       "commercial": false,
       "note": "Spanish: how do I clean the BV30; ideally answered in Spanish from the BV30 manual",
       "live": {
-        "expect": "any",
+        "expect": "answer",
         "mention": [
           "limp",
           "clean",
@@ -25,9 +25,9 @@
       "q": "Wie setze ich den NV9USB+ auf Werkseinstellungen zurück?",
       "needs_history": false,
       "commercial": false,
-      "note": "German: factory reset of NV9USB+",
+      "note": "German: factory reset of NV9USB+. The English original ('How do I reset the NV9USB+ to factory settings?') refuses too (retrieval 0.98, the manual has no such procedure), so parity is a refusal in German, not an answer (measured 3/3 on 2026-10-01).",
       "live": {
-        "expect": "any",
+        "expect": "refuse",
         "mention": [
           "NV9USB",
           "reset",

@@ -357,7 +357,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), backup via company gateway + drill ~10-01 (9.3), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
 | 13 | Opus | 38, 39 | **Done 2026-09-29** (`b2cb5dc`, `912239b`, `ca0d6e2` + this); full suite 312 passed (1 skipped). 9.6: the "Reviewed answer" badge now appears on 168/406 entries, down from all 406. The audit checked the 157 unedited generated entries: 110 verified 3/3, 8 unstable, 39 stable rejects (list in `eval_runs/faq_audit_9.6.log`). 9.14: figure chunks carry their page heading. On a scratch index, the case's figure chunk is retrieved for 4/12 image cases, up from 3/12. The new chunks reach the live index only through the 9.7 rebuild (S14). Left for you: read the 39 rejects against the PDFs, then edit or delete them (9.6). |
 | 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. **Done 2026-09-30** (`b91a6a5`, `05fac34` + plan commits): decisions 1-4 taken and applied, index rebuilt 1749 -> 1668 chunks, footer-tailed 500 -> 0, retrieval R@1 up with no regression, full suite 315 passed (1 skipped); details under 9.7. Baselines re-armed from `eval_runs/20260930_2105` (tuned 45/49 x5, retrieval 32/35 x3). Left for you: rule on the one rebuild-caused flip ("how do I mount it" now answers instead of asking; keep `AMBIGUOUS_CEILING` 0.65 or raise it, see 9.7); delete `src/chroma_db.before-9.7-20260930_2100` when satisfied; try the upload form's new "Also file under" picker once. |
-| 15 | Fable | 42, 43 | |
+| 15 | Fable | 42, 43 | **Done 2026-10-01** (`c868dd6` + this). 9.9 was mostly built (8.14 found it); added the numeric translation check, the logged language, the 10-case es/de/fr parity suite (30/30 same document, 0.82 page overlap over 3 runs) and scenario 24 tightened. 9.10: 3 flips in 1,024 case-runs, all sampled-model (2 generation, 2 grader), none deterministic. |
 | 16 | Sonnet | 44 | |
 | 17 | Opus + you | 45 | |
 | 18 | shell, then Fable | 46 | |
@@ -1238,7 +1238,44 @@ exactly, we cannot tell whether a fix helped.
   holds only headings and weights; the dimensions are in the drawing, so
   answering them is the figure-text work (9.14, 9.7 gate 6, image cases
   "How tall is the MyCheckr?" and the Mini thread depth on p29).
-- [ ] **9.9 Full multilingual answers**, behind a switch.
+- [x] **9.9 Full multilingual answers**, behind a switch. Done 2026-10-01
+  (S15). The switch is `MULTILINGUAL` (default on since `f4c1399`; `=0`
+  turns it off), the mechanism is `language.py` + `main.query_any_language`
+  as 8.14 found: question to English at the edge, the unchanged English
+  pipeline, the verified English answer translated back. The upgrade plan
+  (docs/upgrade-plan-7-to-10.md 9.9) wanted three things on top, two were
+  missing and are now in: (1) the English draft kept in the payload --
+  already there as `answer_english`; (2) a numeric check between draft
+  and translation -- `language.from_english` now rejects a translation
+  whose numbers (two or more digits, separators ignored) differ from the
+  draft, so the English is served instead, since the translation is by
+  construction unverified (English NLI, embedder and reranker). One-digit
+  numbers are exempt on purpose: the measured Spanish translation wrote
+  "4 ... 1" as "cuatro ... un" in 2 of 3 runs, which is correct
+  translation, not loss; (3) the detected language logged -- `language`
+  is now a trace meta field and a logs.jsonl column (None = English).
+  **Parity gate, measured** (backend at `d9f1924` on :8000, no grading):
+  `src/eval_cases_multilingual.json`, ten es/de/fr renderings of ten
+  `eval_cases_retrieval.json` cases, each expecting the English original's
+  top document and cited pages (the English ran 3x first: 30/30 passed,
+  identical top source and page set on every run for all ten). Translated,
+  `--repeats 3`: **30/30 answered, 30/30 same top document as the English,
+  30/30 cite at least one of the English pages, 12/30 the identical page
+  set**; mean page overlap 0.82 (per case 1.0, 1.0, 0.8, 1.0, 0.75, 0.5,
+  1.0, 0.43, 1.0, 0.75), and every case retrieved the same pages on all
+  three of its own runs, so the difference is the translated wording, not
+  noise. The two eval.py "fails" are the Spanish bezel case's keywords
+  ("4"/"1" spelled out); its keywords are now empty and the page check
+  carries it. **Scenario 24** (`run_live --only 24`, 3 runs): T1 Spanish
+  BV30 cleaning answers 3/3, T3 French price deflects 3/3, T2 German
+  NV9USB+ factory reset refuses 3/3 -- and so does the English original
+  ("How do I reset the NV9USB+ to factory settings?", retrieval 0.98,
+  the manual has no such procedure), so T2 now expects `refuse`, T1
+  `answer`, both tightened from `any`. eval.py: results carry the top-3
+  cited sources and pages, "multilingual" is a valid layer. Not done, as
+  the plan said: widget localisation waits for the language column to
+  show non-English traffic. Cost unchanged: two extra model calls per
+  non-English turn.
 - [x] **9.10 Explain every answer that flips run to run.** Done 2026-10-01
   (S15), a measurement, no pipeline change. The flip table is M4's, read
   from the two batch runs on unchanged code: `eval_runs/20260927_1825`

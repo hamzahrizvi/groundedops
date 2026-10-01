@@ -76,7 +76,8 @@ DEEPSEEK_KEY = _deepseek_key()
 
 # Roles the backend uses for a real answer (anything not clarify/rejected/none).
 ANSWERED_ROLES = {"fast", "reasoning", "accurate", "extract", "rethink"}
-VALID_LAYERS = {"faq", "retrieval", "comparison", "refusal", "grounding", "blind"}
+VALID_LAYERS = {"faq", "retrieval", "comparison", "refusal", "grounding", "blind",
+                "multilingual"}
 
 
 def _arg_value(name: str, default: str | None = None) -> str | None:
@@ -280,6 +281,10 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
         "role": data.get("role"),
         "wall": wall,
         "answer": answer,
+        # 9.9: the cited documents and pages, so two runs (or an English
+        # case and its translation) can be compared on what they retrieved.
+        "sources": [{"source": s.get("source"), "pages": s.get("pages") or []}
+                    for s in (data.get("sources") or [])[:3]],
         "checks": checks,
         "passed": passed,
         "skipped": skipped,
