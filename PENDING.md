@@ -1239,7 +1239,44 @@ exactly, we cannot tell whether a fix helped.
   answering them is the figure-text work (9.14, 9.7 gate 6, image cases
   "How tall is the MyCheckr?" and the Mini thread depth on p29).
 - [ ] **9.9 Full multilingual answers**, behind a switch.
-- [ ] **9.10 Explain every answer that flips run to run.**
+- [x] **9.10 Explain every answer that flips run to run.** Done 2026-10-01
+  (S15), a measurement, no pipeline change. The flip table is M4's, read
+  from the two batch runs on unchanged code: `eval_runs/20260927_1825`
+  (HEAD `7c58720`, tuned x5, blind1 x3, blind2 x3, retrieval x3) and
+  `eval_runs/20260930_2105` (HEAD `d9f1924`, same shape, 49 tuned cases).
+  **1,024 case-runs, 3 flipping cases, all in blind2**; every other case
+  passed or failed every time. Root cause per flip, from the saved
+  records (`m4_blind2.json`, fields retrieval / grounding / role / answer /
+  `_grade_reason`):
+  - *Installer checklist default relay activation duration* (09-27, 2/3;
+    3/3 on 09-30). Retrieval 0.7575 and grounding 0.1942 identical on all
+    three runs; runs 2 and 3 answered "1 second", run 1 the model refused
+    ("I don't have that ... about the MyConnect"). **Sampled model**:
+    same prompt, temperature 0, a different completion.
+  - *DA3 error LED 4 short flashes during a firmware download* (09-30,
+    1/3). Retrieval 0.9919 on all three runs, role reasoning. Runs 1 and
+    2 gave the same claim ("1 long flash then 4 short flashes on the
+    download LED = download failure"); the grader failed run 1 ("not the
+    DA3 error LED's 4 short flashes") and passed run 2. Run 3 the model
+    refused at grounding 0.0008 after 48.7 s. **Two sampled sources in one
+    case**: the grader on runs 1 vs 2, the generator on run 3.
+  - *MyConnect live alert timeout* (09-30, 2/3). Three near-identical
+    answers ("10 minutes, configurable, logged as 'Left pending ...'");
+    the grader passed runs 1 and 2 and failed run 3 for the log-line
+    detail "not in the reference facts". **Sampled grader.** Across all
+    1,024 case-runs this "extra detail" verdict occurred exactly once, so
+    the grader prompt is left alone; a rule for a single occurrence would
+    be tuning, not a fix.
+  Nothing deterministic (no retrieval tie, no rerank-order dependence:
+  retrieval and grounding scores repeat to four decimals on every
+  flip). The generator (`llm.py` sends temperature 0; DeepSeek's chat
+  API offers no seed) and the grader are the two sampled components,
+  and both appear in the table, so Level 9a is capped there as the
+  upgrade plan said (docs/upgrade-plan-7-to-10.md 9.10). Flip rate on
+  this build: 3 cases in 1,024 case-runs; 2 of the 3 are generation
+  flips at a confident retrieval, 2 of the 3 are grader flips (one case
+  is both). The M4 "+/-3" label in `--compare-results` stays as the
+  ceiling; the measured band is 0-2 cases per suite per 3 runs.
 - [ ] **9.11 Label or hide the "accurate" reranker option** - it makes every
   answer take about 28 seconds.
 - [ ] **9.12 Write FAQ answers for about 10 questions** that keep being asked
