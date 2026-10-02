@@ -93,7 +93,9 @@ _ORDINALS = {w: i for i, w in enumerate(
     "first second third fourth fifth sixth seventh eighth ninth tenth"
     " eleventh twelfth".split(), 1)}
 _STEP_REF_RE = re.compile(
-    r"^\s*(?:and|ok(?:ay)?|so|then)?[,\s]*"
+    # The lead-in word owns its trailing [,\s]*: with both runs bare they
+    # overlapped, and leading whitespace was super-linear (CodeQL ReDoS).
+    r"^\s*(?:(?:and|ok(?:ay)?|so|then)[,\s]*)?"
     r"(?:(?:what\s+(?:about|was|is)|what'?s|show\s+me|tell\s+me|give\s+me"
     r"|repeat|can\s+you\s+(?:show|tell|give)\s+me)\s+)?"
     r"(?:the\s+)?"

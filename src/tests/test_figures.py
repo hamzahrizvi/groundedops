@@ -114,3 +114,17 @@ def test_replacement_and_removal():
         figures.remove_figures("Manual.pdf")
         assert not os.path.isdir(figures.figures_dir("Manual.pdf"))
         assert figures.figures_for("Manual.pdf") == {}
+
+
+def test_an_empty_or_dotted_name_never_reaches_the_figures_root():
+    """_safe_basename maps "" and "..." to "", which made figures_dir the
+    root of every document's figures; remove_figures("") deleted them all."""
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(docstore, "store_dir", return_value=tmp):
+        pdf = os.path.join(tmp, "m.pdf")
+        _pdf(pdf, [[(100, 500, 200, 150, RED)]])
+        figures.extract_figures(pdf, "Manual.pdf")
+        for bad in ("", "...", "../", "..\\"):
+            figures.remove_figures(bad)
+            assert figures.figure_path(bad, "p1_1.png") is None
+        assert figures.figure_path("Manual.pdf", "p1_1.png")

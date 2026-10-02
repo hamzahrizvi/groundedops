@@ -72,7 +72,9 @@ _ASKED_VERB = re.compile(
     r"(?:a\s+|an\s+|any\s+|the\s+|its\s+|with\s+)?", re.I)
 _ASKED_OBJECT = re.compile(
     r"(.+?)"
-    r"(?=\s+(?:so|if|when|as\s+well|or\s+only|or\s+just|instead|rather|for"
+    # One \s, not \s+: denied_feature collapses whitespace first, and \s+
+    # here re-scanned every run of spaces at every position (CodeQL ReDoS).
+    r"(?=\s(?:so|if|when|as\s+well|or\s+only|or\s+just|instead|rather|for"
     r"|to|in|on|at|with|without|from|too|also|either)\b"
     r"|[?.,;!]|$)", re.I)
 
@@ -114,26 +116,30 @@ def denied_feature(answer: str, question: str = "") -> str | None:
     or names nothing it denies."""
     if not answer or not _OPENS_NO.match(answer):
         return None
-    first = answer.strip().split("\n", 1)[0]
+    first = " ".join(answer.strip().split("\n", 1)[0].split())
+    question = " ".join((question or "").split())
     m = _DENIED.search(first)
     phrase = m.group(1) if m else None
     if not phrase and question:
         # The LAST verb, which is the innermost: "Does the MyCheckr have a
         # backup battery" has a verb at "does" (whose object would be the
         # whole clause, subject included) and at "have"; the feature is
-        # what follows "have".
-        for v in _ASKED_VERB.finditer(question):
+        # what follows "have". Scanned from the last verb back, stopping at
+        # the first object: matching from every verb was quadratic.
+        for v in reversed(list(_ASKED_VERB.finditer(question))):
             o = _ASKED_OBJECT.match(question, v.end())
             if o and o.group(1).strip():
                 phrase = o.group(1)
+                break
     if not phrase:
         return None
     phrase = re.sub(r"\s+", " ", phrase).strip(" \"'()")
     # "coins as well as notes" -> "coins"; "Ethernet or Wi-Fi configuration
     # through IMS" keeps both alternatives, they are both being denied. An
     # aside after a dash or in brackets is the answer explaining itself.
-    phrase = re.split(r"\s+(?:as well as|rather than|instead of|but)\s+"
-                      r"|\s+[—–-]+\s+|\s*\(",
+    # Single spaces: the line above collapsed every run (CodeQL ReDoS).
+    phrase = re.split(r" (?:as well as|rather than|instead of|but) "
+                      r"| [—–-]+ | ?\(",
                       phrase, maxsplit=1, flags=re.I)[0]
     phrase = re.sub(r"^(?:a|an|any|the|its)\s+", "", phrase, flags=re.I)
     return phrase.strip(" ,") or None

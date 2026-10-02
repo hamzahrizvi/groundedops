@@ -312,8 +312,11 @@ def _ocr_worker(job_id: str, source: str, pages: list[int]):
     except Exception as e:
         logger.exception(f"OCR job {job_id} failed")
         with _INGEST_LOCK:
+            # The detail is in the log (logger.exception above); exception
+            # text is not sent to the browser (CodeQL: information exposure).
             _INGEST_JOBS[job_id] = {"status": "error", "kind": "ocr",
-                                    "error": str(e), "file": source, "done": True}
+                                    "error": "OCR failed - the server log has the details.",
+                                    "file": source, "done": True}
 
 
 @router.get("/admin/ocr/status")
@@ -322,7 +325,12 @@ def ocr_status(x_admin_password: str | None = Header(default=None)):
     installed" instead of offering a button that fails."""
     _require_admin(x_admin_password)
     ok, why = _ocr_availability()
-    return {"available": ok, "reason": why}
+    if not ok:
+        # why can carry an exception's text; log it, send a fixed message.
+        logger.info("OCR unavailable: %s", why)
+    return {"available": ok,
+            "reason": None if ok else "OCR is not installed on this server "
+                                      "(the server log says why)."}
 
 
 @router.post("/admin/ocr")

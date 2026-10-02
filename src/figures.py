@@ -56,14 +56,25 @@ _sidecar_cache: dict[str, tuple[float, dict]] = {}
 
 
 def figures_dir(source: str) -> str:
-    """Where one document's crops live. Never created here."""
-    return os.path.join(docstore.store_dir(), FIG_DIRNAME,
-                        docstore._safe_basename(source))
+    """Where one document's crops live. Never created here.
+
+    Raises ValueError unless the result is strictly INSIDE the figures root.
+    _safe_basename strips path structure, but it maps "" and "..." to "",
+    which made this the root itself -- and remove_figures("") would then
+    have deleted every document's figures."""
+    root = os.path.realpath(os.path.join(docstore.store_dir(), FIG_DIRNAME))
+    d = os.path.realpath(os.path.join(root, docstore._safe_basename(source)))
+    if not d.startswith(root + os.sep):
+        raise ValueError(f"not a document name: {source!r}")
+    return d
 
 
 def remove_figures(source: str) -> None:
     """Drop a document's crops, on delete or before a replacement is cut."""
-    d = figures_dir(source)
+    try:
+        d = figures_dir(source)
+    except ValueError:
+        return
     if os.path.isdir(d):
         shutil.rmtree(d, ignore_errors=True)
     _sidecar_cache.pop(d, None)
@@ -74,7 +85,10 @@ def figure_path(source: str, name: str) -> str | None:
     be exactly the shape this module writes -- nothing else is resolved."""
     if not _NAME_RE.match(name or ""):
         return None
-    d = figures_dir(source)
+    try:
+        d = figures_dir(source)
+    except ValueError:
+        return None
     if not os.path.isdir(d):
         return None
     for entry in os.listdir(d):
