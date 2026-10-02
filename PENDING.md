@@ -360,7 +360,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 15 | Fable | 42, 43 | **Done 2026-10-01** (`c868dd6` + this). 9.9 was mostly built (8.14 found it); added the numeric translation check, the logged language, the 10-case es/de/fr parity suite (30/30 same document, 0.82 page overlap over 3 runs) and scenario 24 tightened. 9.10: 3 flips in 1,024 case-runs, all sampled-model (2 generation, 2 grader), none deterministic. |
 | 16 | Sonnet | 44 | **Done 2026-10-02**: label only, one admin.html edit. |
 | 17 | Opus + you | 45 | **Done 2026-10-02**: 2 FAQs added, 2 truncated ones repaired, refusals on the repeat phrasings 3 -> 1 (the one left is the intended litres absence refusal); table under 9.12. |
-| 18 | shell, then Fable | 46 | |
+| 18 | shell, then Fable | 46 | **Done 2026-10-02**: escalation on flag rejected. Rebuilt population (the 79 logged turns were lost): 3 of 196 replayed questions are still flagged; V4 Pro (thinking on) passed the verifier on all 3, but only 1 was right. The other 2 turned honest refusals into wrong answers. Detail under 9.13. |
 | 19 | Opus | 47, 48 | |
 | 20 | Sonnet | 49 | |
 | 21 | Fable | 50 | Only if still needed after 8.6. |
@@ -1365,7 +1365,46 @@ exactly, we cannot tell whether a fix helped.
   session test turns) are gone; no backup, File History or shadow copy had
   them. `faq_gaps.json`, `eval_runs/` and `conversations.db` were not
   touched. 10.1/10.2 counts will show that week as empty.
-- [ ] **9.13 Test whether a stronger model rescues flagged answers.**
+- [x] **9.13 Test whether a stronger model rescues flagged answers.**
+  **Done 2026-10-02 (S18): measured, rejected (9d struck).** The planned
+  population, 79 verifier-flagged turns in logs.jsonl, went with the
+  10-02 log loss: verifier timings were only logged from 09-24 23:51, so 2
+  such rows survive. `tools/escalation_replay.py` rebuilds it by replay
+  instead. Every distinct question flagged in the surviving log (85, no
+  product scope, since the log never stored one) and every single-turn
+  "answered" case of the main suites (111, scoped) went once through the
+  production `query()` in-process. The turns still flagged after
+  production's own retries were regenerated from the same prompt on
+  `deepseek-v4-pro` with thinking on, then judged by the production
+  verifier chain on the same chunks. Output: `eval_runs/913/` (gitignored).
+
+  | | count |
+  |---|---|
+  | replayed | 196 |
+  | still flagged today | 3 (1.5%, all log questions; 0 eval cases) |
+  | V4 Pro answer passed the verifier | 3/3 (2 by the LLM verifier, 1 lexical) |
+  | V4 Pro answer actually right (read against the manuals) | **1/3** |
+  | latency, p50 / max | 29.1s / 31.5s per regeneration |
+  | tokens | 4,597 p50, 12,574 total |
+
+  - Right: "difference in operating temperature, MyCheckr vs Mini" ->
+    "+5 to +50 C for both" (shared table, v7 p37 / Mini v5 p30).
+  - Wrong: "does MyCheckr store images of people" -> "Yes. MyCheckr can
+    store face images...". MyConnect Environment p38 says "By default,
+    MyCheckr devices do not store images of users"; the enrolment
+    thumbnail is an opt-in exception. A privacy question answered the
+    wrong way round.
+  - Wrong: "connected to Ethernet but I can't see it in IMS" -> "an
+    Ethernet connection alone will not make it available". v7 p9 says
+    network devices appear in the device list. This is the same question
+    the verifier wrongly passed on 09-24 (see `_llm_verified`).
+
+  Production refused all three. Escalating would have served 1 right
+  answer and 2 confidently wrong ones, about 30s later. The flag rate is
+  already low (1.5%), so the upside is small either way. No pipeline
+  change. A side finding for 9i: the LLM verifier passed both wrong
+  answers (thinking on: `_needs_judgement` was true for these), so its
+  false-accept rate on regenerated answers is not zero.
 
 ### Tier 9 -> 10 - it improves itself from real use
 
@@ -1425,6 +1464,9 @@ lookup time saved for support staff (a small before/after sample).
 
 ### Rejected - do not redo without new evidence
 
+- Escalating a flagged answer to a stronger model (V4 Pro, thinking on):
+  1/3 right, 2/3 confident wrong answers that the verifier passed, ~30s each
+  (9.13, 2026-10-02).
 - Asking the AI a second time when it refuses a first question: it would
   turn some correct refusals into wrong answers.
 - Tightening the number-matching check: no wrong answer was ever traced
