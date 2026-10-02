@@ -1358,6 +1358,13 @@ exactly, we cannot tell whether a fix helped.
   MyCheckr and what does it do?" entries (`064e4b35`, `1263559d`), whose
   answers stopped at a PDF line break ("to assist with the sale of"). These
   were the only two truncated answers among the 406 existing entries.
+  **Log loss, 2026-10-02:** an accidental `git stash pop` (an old
+  pipeline-hardening stash) overwrote the gitignored `src/logs.jsonl`. It
+  was rebuilt from every git and GitHub copy: 2,282 rows, 2026-06-14 to
+  2026-09-25 00:17. The ~2,000 rows from 09-25 to 10-02 (mostly eval and
+  session test turns) are gone; no backup, File History or shadow copy had
+  them. `faq_gaps.json`, `eval_runs/` and `conversations.db` were not
+  touched. 10.1/10.2 counts will show that week as empty.
 - [ ] **9.13 Test whether a stronger model rescues flagged answers.**
 
 ### Tier 9 -> 10 - it improves itself from real use
