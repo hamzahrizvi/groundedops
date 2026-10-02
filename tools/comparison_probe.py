@@ -50,6 +50,7 @@ COMPARISON_TURNS = {  # the turns that ARE comparisons (the others are set-up)
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("--only", nargs="*", default=None, help="conversation label prefixes")
     ap.add_argument("--out", default=os.path.join(ROOT, "eval_runs", "s21_comparisons.json"))
     a = ap.parse_args()
 
@@ -59,9 +60,10 @@ def main():
     m.convo_store.save_turn = lambda *a, **k: None
     m._warmup_stack()
 
+    convos = [c for c in CONVOS if not a.only or any(c[0].startswith(p) for p in a.only)]
     rows = []
     for rep in range(1, a.repeats + 1):
-        for label, product, turns in CONVOS:
+        for label, product, turns in convos:
             sid = f"s21-{uuid.uuid4().hex[:8]}"
             for i, q in enumerate(turns, 1):
                 t0 = time.time()

@@ -363,7 +363,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 18 | shell, then Fable | 46 | **Done 2026-10-02**: escalation on flag rejected. Rebuilt population (the 79 logged turns were lost): 3 of 196 replayed questions are still flagged; V4 Pro (thinking on) passed the verifier on all 3, but only 1 was right. The other 2 turned honest refusals into wrong answers. Detail under 9.13. |
 | 19 | Opus | 47, 48 | **Done 2026-10-02** (`a8adf82`, `63496d2`); full suite 321/322 (1 skipped; the 1 failure, test_reindex_safety numpy double-load, also fails at `a1a62f4`, so it predates S19). Left for you: see 10.1/10.2. |
 | 20 | Sonnet | 49 | **Done 2026-10-02**: `ci.yml` gains a nightly cron and a Docker start-up step; not yet run (see 10.3). |
-| 21 | Fable | 50 | **Measured 2026-10-02**, not built: comparisons are no longer refused as a class; one deterministic miss left (18 T3, SSP). Decision under 10.4. |
+| 21 | Fable | 50 | **Done 2026-10-02**: measured, then the one deterministic miss (18 T3) fixed by a per-product context cut; 3/3 right. Full suite 323/323 (1 skipped), routing 150/148. One flip for you under 10.4. |
 | 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
 | 23 | Opus (medium) | HC1 | Recurring corpus + RAG health check. Independent of S1-S22. One attended session, no subagents. Opening prompt below. |
 
@@ -1466,9 +1466,37 @@ exactly, we cannot tell whether a fix helped.
   need `WAIT` raised on a cold runner. The eval suites are not in the
   nightly (they need a corpus, a backend and a provider key; S23's
   `health_check.py` is the place for that).
-- [ ] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
+- [x] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
   comparisons still refused.
-  **Measured 2026-10-02 (S21), nothing built.** `tools/comparison_probe.py`
+  **Done 2026-10-02 (S21).** Measured first (below), then the one real
+  miss fixed with the smallest side-by-side there is: when the question
+  names two or more catalogue products (`_both_named`), the context cut is
+  per product instead of a global top-8. Each product takes its best
+  CONTEXT_K/n passages above the same floor, leftover slots fill in rank
+  order (`main.py`, after the CONTEXT_FLOOR cut; trace mark
+  `retrieve.pair`). Tried and reverted first: one prompt line naming the
+  pair, no effect 3/3, because the model already answered "yes, both" and
+  the **verifier** rejected it, rightly: the NV9USB+ passage that states
+  SSP ("Protocols and Interfacing", p.37) ranked #10 of 19 behind its own
+  configuration-button and IF9 pages and never reached the prompt. After:
+  18 T3 answered 3/3 ("Yes. Both the NV9 Spectral and the NV9USB+ support
+  SSP", both manuals cited); every other comparison turn unchanged (2
+  runs); full suite 323/323 (1 skipped); routing 150 (floor 148). Two new
+  tuned cases pin it (18 T1+T3 as a 2-turn conversation; baseline not
+  re-armed, they have no entry yet). `tools/comparison_probe.py --only 18
+  --repeats 3` is the re-measure.
+  **For you, one flip:** the single-turn "which validates notes faster, the
+  NV9 Spectral or the NV9USB+" went refused 3/3 -> answered 2/2 ("The NV9
+  Spectral validates notes faster, with faster note-to-note processing").
+  It rests on the NV9S p.4 feature bullet "Faster note to note processing",
+  now guaranteed a slot; no NV9USB+ figure exists. Defensible (the bullet
+  is a claim against the previous range) but soft. Rule: keep, or add a
+  `keywords_absent`/rejected case and tighten. The follow-up form (18 T2)
+  still asks back 3/3. Still open, not comparison synthesis: 14 T4 "which
+  of the two takes more notes" after a product switch resolves "the two"
+  to the NV9USB+ alone (one manual in sources), so the pair rule never
+  fires; wobbles answered/asked-back run to run.
+  **Measured 2026-10-02 (S21), before the fix.** `tools/comparison_probe.py`
   replays every comparison turn in the suites (scenario 18 T1-T3, 14 T4,
   07 T1, the extensive MyCheckr-vs-Mini case, the tuned BV30-vs-NV200S
   case, and the 8.15 "which validates notes faster" phrasing) in-process

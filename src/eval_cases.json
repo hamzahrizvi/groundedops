@@ -505,6 +505,30 @@
       "note": "8.15 (2026-09-29): stress item 4, turn 2: must switch to the BV30, not repeat the NV200."
     },
     {
+      "q": "what is the difference between the NV9 Spectral and the NV9USB+",
+      "new_session": true,
+      "layer": "comparison",
+      "outcome": "answered",
+      "keywords_all": [
+        "NV9 Spectral",
+        "NV9USB+"
+      ],
+      "note": "S21 10.4 (2026-10-02): turn 1 of 2, the sales.compare spec table (scenario 18 T1)."
+    },
+    {
+      "q": "do they both use the same SSP interface",
+      "layer": "comparison",
+      "outcome": "answered",
+      "keywords_all": [
+        "Yes",
+        "SSP"
+      ],
+      "sources_any": [
+        "NV9USB+"
+      ],
+      "note": "S21 10.4 (2026-10-02): scenario 18 T3. Each named product gets its own share of the context; before, the NV9USB+ SSP passage ranked #10 of 19 and was cut, so the verifier rejected 'yes, both' 3/3."
+    },
+    {
       "q": "Which SSP command polls the NV200 Spectral for events?",
       "new_session": true,
       "product": "nv200s",

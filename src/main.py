@@ -3442,6 +3442,35 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     top_chunks = [r for r in _cands if r.get("rerank_score", 0.0) >= _floor]
     if len(top_chunks) < CONTEXT_MIN:
         top_chunks = _cands[:CONTEXT_MIN]
+    # TWO PRODUCTS IN PLAY: EACH GETS ITS SHARE OF THE CONTEXT (S21, 10.4).
+    # 8.6 widened the scope to both manuals, but the cut above is a global
+    # top-K, and a comparison's two halves do not rank evenly. "Do the NV9
+    # Spectral and NV9USB+ both use the same SSP interface": the NV9USB+
+    # passage that states it ("Protocols and Interfacing", p.37) ranked #10
+    # of 19 behind its own configuration-button and IF9 pages, so the model
+    # answered "yes, both" from the NV9 Spectral alone and the verifier
+    # rightly rejected it, 3/3. So each named product takes its own best
+    # CONTEXT_K/n passages (above the same floor), and leftover slots fill
+    # in global order. A product with no candidates stays absent; this
+    # never invents a manual.
+    if len(_both_named) >= 2:
+        def _tags(c):
+            return {k.strip() for k in (c.get("product") or "").split(",")}
+        _per = max(2, CONTEXT_K // len(_both_named))
+        _picked: list[int] = []
+        for _k in _both_named:
+            _mine = [i for i, r in enumerate(_retrieved)
+                     if _k in _tags(r) and r.get("rerank_score", 0.0) >= _floor
+                     and i not in _picked][:_per]
+            _picked += _mine
+        for i, r in enumerate(_retrieved[:CONTEXT_K]):
+            if len(_picked) >= CONTEXT_K:
+                break
+            if i not in _picked and r.get("rerank_score", 0.0) >= _floor:
+                _picked.append(i)
+        if _picked:
+            top_chunks = [_strip_breadcrumb(_retrieved[i]) for i in sorted(_picked)]
+            ptrace.mark("retrieve.pair", f"{len(top_chunks)} passages over {_both_named}")
     # Was a flat 1200, which silently clipped anything larger. Tied to the
     # chunk size now so a whole chunk always survives into the prompt.
     #
