@@ -365,6 +365,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 20 | Sonnet | 49 | |
 | 21 | Fable | 50 | Only if still needed after 8.6. |
 | 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
+| 23 | Opus (medium) | HC1 | Recurring corpus + RAG health check. Independent of S1-S22. One attended session, no subagents. Opening prompt below. |
 
 **Opening prompt for each session**
 
@@ -374,6 +375,17 @@ Per step: implement, run the targeted tests, commit, tick the box.
 Stop and report at anything marked "you", on a failing test you can't
 fix in two tries, or if git status shows files you didn't touch.
 Full test suite once at the end. Don't push.
+```
+
+**S23 opening prompt (HC1)**
+
+```
+Build tools/health_check.py: one recurring corpus + RAG health check.
+Reuse existing tools (eval_retrieval --compare, eval_battery, crossrefs.missing,
+chunk short/dup/footer counts from 9.7, FAQ audit 9.6). Add per-new-document
+checks (empty/OCR-poor pages, catalogue entry, self-answer probe).
+Output eval_runs/<stamp>/health.json + a short pass/fail summary. No LLM
+calls except the existing eval grader. One commit, don't push.
 ```
 
 **Auto mode:** fine for S2, S3, S7-S11, S13, S16, S19 and S20. Keep S1
