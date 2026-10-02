@@ -1,0 +1,130 @@
+{
+ "categories": [
+  {
+   "key": "coin_hoppers",
+   "name": "Coin Hoppers",
+   "products": [
+    {
+     "key": "sku_scs",
+     "name": "SMART Coin System",
+     "aliases": [
+      "SMART Hopper",
+      "SCS",
+      "Twin SMART Coin System"
+     ],
+     "sources": [
+      "SMART Coin System Range User Manual-v1.pdf"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "biometrics",
+   "name": "Biometrics",
+   "products": [
+    {
+     "key": "biometrics_general",
+     "name": "General (shared docs)",
+     "sources": [
+      "ICU_Age_Result_Quick_Guide_v1_1.pdf",
+      "MyCheckr User Manual-v7.pdf",
+      "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf",
+      "CS-MyCheckr Installation & MyConnect App Pre-Requisites Checklist-170925-134345.pdf",
+      "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf"
+     ]
+    },
+    {
+     "key": "mycheckr",
+     "name": "MyCheckr",
+     "sources": [
+      "MyCheckr User Manual-v7.pdf",
+      "ICU_Network_API-v1.0.50.pdf",
+      "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf"
+     ]
+    },
+    {
+     "key": "myconnect",
+     "name": "MyConnect",
+     "sources": [
+      "MyConnect Environment-v4.pdf",
+      "CS-MyCheckr Installation & MyConnect App Pre-Requisites Checklist-170925-134345.pdf",
+      "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf"
+     ]
+    },
+    {
+     "key": "mycheckr_mini",
+     "name": "MyCheckr mini",
+     "aliases": [
+      "MyCheckr Mini"
+     ],
+     "sources": [
+      "MyCheckr Mini User Manual-v5.pdf",
+      "MyCheckr User Manual-v7.pdf",
+      "ICU_Network_API-v1.0.50.pdf",
+      "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "note_val",
+   "name": "Note Validator",
+   "products": [
+    {
+     "key": "note_val_general",
+     "name": "General (shared docs)",
+     "sources": []
+    },
+    {
+     "key": "nv9usb",
+     "name": "NV9USB+",
+     "aliases": [
+      "NV11+",
+      "NV9 USB",
+      "NV9USB"
+     ],
+     "sources": [
+      "NV9USB+ Range User Manual-v1.pdf"
+     ]
+    },
+    {
+     "key": "nv9_spectral",
+     "name": "NV9 Spectral",
+     "aliases": [
+      "NV9S",
+      "NV11S",
+      "NV22",
+      "NV11 Spectral"
+     ],
+     "sources": [
+      "NV9 Spectral Range User Manual-v1.pdf"
+     ]
+    },
+    {
+     "key": "nv22s",
+     "name": "NV22S",
+     "sources": []
+    },
+    {
+     "key": "bv30",
+     "name": "BV30",
+     "sources": [
+      "BV30 User Manual-v1.pdf"
+     ]
+    },
+    {
+     "key": "nv200s",
+     "name": "NV200S",
+     "aliases": [
+      "NV200 Spectral",
+      "NV200"
+     ],
+     "sources": [
+      "NV200S Range User Manual-v1.pdf",
+      "NV200 Spectral SSP Manual v.1.pdf"
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -35,6 +35,15 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
+# A fixed catalogue, set before catalog is imported (it reads the path at
+# import). The button labels in the scenarios are product NAMES, and
+# catalog_config.json is gitignored operator data: CI fell back to the seed
+# catalogue and scored 123/150 against a floor of 148. The fixture is the
+# operator's catalogue of 2026-10-02 minus owner and digest fields.
+import os                         # noqa: E402
+os.environ.setdefault("CATALOG_CONFIG",
+                      str(HERE / "fixtures" / "catalog_fixture.json"))
+
 import sales                      # noqa: E402
 import text_utils as T            # noqa: E402
 

@@ -70,13 +70,49 @@ _ASKED_VERB = re.compile(
     r"|connect(?:\s+(?:to|over|via|with))?|work\s+with|compatible\s+with"
     r"|equipped\s+with|fitted\s+with|capable\s+of|built[- ]in)\s+"
     r"(?:a\s+|an\s+|any\s+|the\s+|its\s+|with\s+)?", re.I)
-_ASKED_OBJECT = re.compile(
-    r"(.+?)"
-    # One \s, not \s+: denied_feature collapses whitespace first, and \s+
-    # here re-scanned every run of spaces at every position (CodeQL ReDoS).
-    r"(?=\s(?:so|if|when|as\s+well|or\s+only|or\s+just|instead|rather|for"
-    r"|to|in|on|at|with|without|from|too|also|either)\b"
-    r"|[?.,;!]|$)", re.I)
+# What follows the asked verb, up to the first clause word or punctuation.
+# A word scan, not a regex: the lazy `(.+?)(?=\s(?:so|if|...)\b|[?.,;!]|$)`
+# it replaces was flagged twice by CodeQL as polynomial on user input.
+# Same results (fuzzed against the regex when it was replaced).
+_STOP_WORDS = frozenset("so if when instead rather for to in on at with "
+                        "without from too also either".split())
+_STOP_PAIRS = frozenset({("as", "well"), ("or", "only"), ("or", "just")})
+
+
+def _word_head(w: str) -> str:
+    """The leading word characters of `w`, lower-cased: what `kw\\b` sees."""
+    n = 0
+    while n < len(w) and (w[n].isalnum() or w[n] == "_"):
+        n += 1
+    return w[:n].lower()
+
+
+def _asked_object(text: str) -> str:
+    """`text` up to (not including) the space before a clause word, or the
+    first ? . , ; ! -- at least one character, as `(.+?)` took. Expects
+    whitespace already collapsed to single spaces."""
+    if not text:
+        return ""
+    cut = len(text)
+    for ch in "?.,;!":
+        i = text.find(ch, 1)
+        if i != -1 and i < cut:
+            cut = i
+    words = text[:cut].split(" ")
+    pos = 0
+    for i, w in enumerate(words):
+        start = pos
+        pos += len(w) + 1
+        # The space before this word sits at start-1; the first character
+        # is always taken, so a stop needs that space at position >= 1.
+        if i == 0 or start - 1 < 1:
+            continue
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        if _word_head(w) in _STOP_WORDS:
+            return text[:start - 1]
+        if nxt is not None and (w.lower(), _word_head(nxt)) in _STOP_PAIRS:
+            return text[:start - 1]
+    return text[:cut]
 
 # Words that qualify a feature without naming it. "Bluetooth CONNECTIVITY",
 # "Ethernet CONFIGURATION", "battery BACKUP OPTION": the feature is the
@@ -127,9 +163,9 @@ def denied_feature(answer: str, question: str = "") -> str | None:
         # what follows "have". Scanned from the last verb back, stopping at
         # the first object: matching from every verb was quadratic.
         for v in reversed(list(_ASKED_VERB.finditer(question))):
-            o = _ASKED_OBJECT.match(question, v.end())
-            if o and o.group(1).strip():
-                phrase = o.group(1)
+            o = _asked_object(question[v.end():])
+            if o.strip():
+                phrase = o
                 break
     if not phrase:
         return None
