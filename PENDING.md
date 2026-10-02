@@ -1490,8 +1490,8 @@ exactly, we cannot tell whether a fix helped.
   Spectral validates notes faster, with faster note-to-note processing").
   It rests on the NV9S p.4 feature bullet "Faster note to note processing",
   now guaranteed a slot; no NV9USB+ figure exists. Defensible (the bullet
-  is a claim against the previous range) but soft. Rule: keep, or add a
-  `keywords_absent`/rejected case and tighten. The follow-up form (18 T2)
+  is a claim against the previous range) but soft. **Ruled 2026-10-02:
+  keep.** The follow-up form (18 T2)
   still asks back 3/3. Still open, not comparison synthesis: 14 T4 "which
   of the two takes more notes" after a product switch resolves "the two"
   to the NV9USB+ alone (one manual in sources), so the pair rule never
