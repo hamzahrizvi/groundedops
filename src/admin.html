@@ -1201,7 +1201,7 @@ async function api(path, opts = {}) {
 async function refresh() {
   // All independent reads — run them together rather than in series, so
   // opening the console is one round trip's worth of latency, not six.
-  const [cat, src, faq, gaps, widget, leads, prov] = await Promise.all([
+  const [cat, src, faq, gaps, widget, leads, prov, report] = await Promise.all([
     api("/catalog").catch(() => ({ categories: [] })),
     api("/admin/sources").catch(() => ({ sources: [] })),
     api("/faq").catch(() => ({ faq: [] })),
@@ -1209,6 +1209,7 @@ async function refresh() {
     api("/admin/widget/config").catch(() => null),
     api("/admin/leads").catch(() => ({ leads: [], stats: {} })),
     api("/admin/providers").catch(() => ({ providers: [] })),
+    api("/admin/report").catch(() => null),
   ]);
   cache.catalog = cat.categories || [];
   cache.sources = src.sources || src || [];
@@ -1224,6 +1225,7 @@ async function refresh() {
   cache.providers = prov.providers || [];
   cache.leads = leads.leads || [];
   cache.leadStats = leads.stats || {};
+  cache.report = report;   // 10.1: last 7 days, tests excluded; null if unreadable
 }
 
 // Deep copy, so edits in the Widget editor are staged locally and only
@@ -3963,6 +3965,22 @@ function quickSetup() {
 }
 
 
+// 10.1: the weekly report (GET /admin/report) as one row of tiles.
+function weekReadout(stat) {
+  const r = cache.report;
+  if (!r || !r.turns) return null;
+  const sp = r.speed || {};
+  const secs = v => v == null ? "–" : v + "s";
+  return el("div", {},
+    el("div", { class: "sec-title", style: "margin:14px 0 6px" }, "Last 7 days"),
+    el("div", { class: "readout" },
+      stat("Questions", r.turns, "", "gaps", r.answered + " answered"),
+      stat("Refused", r.refused, r.refused ? "warn" : "", "gaps", "See what was missed"),
+      stat("Handed off", r.handed_off + r.leads, "", "leads",
+           r.leads + " form" + (r.leads === 1 ? "" : "s") + " sent"),
+      stat("Typical answer", secs(sp.p50_s), "", "gaps", "1 in 10 slower than " + secs(sp.p90_s))));
+}
+
 function viewOverview() {
   const prods = products(), un = unassigned(), ans = answered();
 
@@ -4054,6 +4072,7 @@ function viewOverview() {
            ans.length ? "Review or edit" : "Write the first"),
       stat("Unanswered", cache.gaps.length, cache.gaps.length ? "warn" : "", "gaps",
            cache.gaps.length ? "Answer them" : "Nothing waiting")),
+    weekReadout(stat),
     quickSetup(),
     el("div", { class: "card elev-sm", style: "padding:18px 20px 6px;gap:0",
                 "data-tour": "ov-next" },

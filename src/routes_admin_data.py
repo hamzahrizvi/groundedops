@@ -1,4 +1,5 @@
-"""Backup export and restore, access policy, and quota resets.
+"""Backup export and restore, access policy, quota resets, and the weekly
+report (10.1).
 
 Moved out of main.py verbatim (2026-09-25). Registered on the app through
 app.include_router; paths, parameters and responses are unchanged.
@@ -235,3 +236,15 @@ def admin_quota_reset(payload: QuotaResetReq,
                             detail="Provide session_id, uid, and/or visitor_id")
     logger.info(f"/admin/quota/reset: {reset} reset by {me.get('email')}")
     return {"reset": reset}
+
+
+# ── 10.1 weekly report ──────────────────────────────────────────────────
+
+@router.get("/admin/report")
+def admin_report(days: int = 7, include_tests: bool = False,
+                 x_admin_password: str | None = Header(default=None)):
+    """Resolved / refused / handed off / speed over the last `days`
+    (log_report.summarise). Admin-gated: it reads visitor questions."""
+    _require_admin(x_admin_password)
+    import log_report
+    return log_report.report(max(1, min(days, 366)), include_tests=include_tests)
