@@ -83,3 +83,13 @@ if __name__ == "__main__":
             fn()
             print(f"  PASS  {name}")
     print("ALL CHECKS PASSED")
+
+
+def test_a_missing_documents_folder_is_an_empty_spec_index():
+    """A fresh deploy has no documents folder until the first upload. The
+    spec index raised FileNotFoundError there and warm-up ended "Started
+    with errors" (tools/docker_startup_check.sh, CI build job)."""
+    import os
+    import tempfile
+    missing = os.path.join(tempfile.mkdtemp(), "documents")
+    assert sales.build_index(missing, {}) == []

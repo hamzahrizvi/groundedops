@@ -221,6 +221,10 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
     import structures
 
     rows: list[dict] = []
+    # A fresh deploy has no documents folder until the first upload; that is
+    # an empty index, not a failed warm-up (tools/docker_startup_check.sh).
+    if not os.path.isdir(doc_dir):
+        return rows
     for fname in sorted(os.listdir(doc_dir)):
         if not fname.lower().endswith(".pdf"):
             continue
