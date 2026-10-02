@@ -1,0 +1,48 @@
+{
+  "id": "07_mycheckr_mini_nested_name",
+  "product": "MyCheckr mini",
+  "product_key": "mycheckr_mini",
+  "source": "MyCheckr Mini User Manual-v5.pdf",
+  "persona": "Customer who owns the full MyCheckr, asking about the mini. The nested-name trap.",
+  "expect_labels": [
+    "MyCheckr mini"
+  ],
+  "turns": [
+    {
+      "q": "how is the MyCheckr Mini different from the full size one",
+      "followup": false,
+      "commercial": false,
+      "note": "comparison, standalone"
+    },
+    {
+      "q": "is the mini one any smaller to mount",
+      "followup": true,
+      "commercial": false,
+      "note": "'the mini one' refers back"
+    },
+    {
+      "q": "what is the screen size on the MyCheckr Mini",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone, names the product"
+    },
+    {
+      "q": "and what about the two of them side by side",
+      "followup": true,
+      "commercial": false,
+      "note": "set anaphora + stacked opener"
+    },
+    {
+      "q": "can both run off the same power brick",
+      "followup": true,
+      "commercial": false,
+      "note": "'both' -- the case de5a37f added markers for"
+    },
+    {
+      "q": "which one would you recommend for a corner shop",
+      "followup": true,
+      "commercial": false,
+      "note": "advisory: no manual answers it, but it IS contextual"
+    }
+  ]
+}

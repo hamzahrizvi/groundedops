@@ -45,12 +45,11 @@ one feature. If lead volume becomes meaningful, move THIS module to
 SQLite (conversations.py already carries a sqlite dependency and its
 pattern can be copied directly) before moving anything else.
 
-Notification is deliberately not implemented. A form that promises "we'll
-get back to you" and silently files the response is worse than one that
-does not — but wiring SMTP means credentials, retries, and a bounce path,
-which is a feature in its own right, not a line in this module. The
-notify_email field is stored and surfaced to the admin so the console can
-say plainly that leads are collected in the console and not emailed yet.
+Notification: routes_widget emails each new lead to the form's notify_email
+once the console's mail settings are filled in, and marks it notified. Until
+then, or when a send fails, the lead sits in the console marked unsent. The
+visitor's own address is never mailed from here: it is typed by a public
+caller, and sending to it would make the form an open relay.
 """
 import json
 import os
@@ -374,6 +373,15 @@ def add_lead(kind: str, values: dict, product: str | None = None,
                 cc_email = clean_values[fid]["value"]
                 break
 
+    # Each entry capped like the enquiry, so a pasted essay cannot bloat the
+    # store. Truncated rather than refused: a genuine visitor should not
+    # lose the whole form over one long message.
+    kept = []
+    for t in (transcript or [])[-20:]:
+        if isinstance(t, dict):
+            kept.append({k: (v[:MAX_ENQUIRY_CHARS] if isinstance(v, str) else v)
+                         for k, v in t.items()})
+
     lead = {
         "id": str(uuid.uuid4()),
         "kind": kind,
@@ -382,20 +390,44 @@ def add_lead(kind: str, values: dict, product: str | None = None,
         "cc_email": cc_email,
         "enquiry": enquiry_text,
         "summary_source": summary_source,
-        "transcript": (transcript or [])[-20:] if form.get("allow_summary") else [],
+        "transcript": kept if form.get("allow_summary") else [],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "handled": False,
-        # Recorded so the console can be honest that nothing was emailed.
+        # Where it is emailed, and whether that has happened yet.
         "notify_email": form.get("notify_email", ""),
         "notified": False,
     }
     with _leads_lock:
         items = _load_leads()
+        # Full: refuse rather than drop the oldest. Trimming used to delete
+        # real enquiries silently, so a bot flood could wipe the store.
+        if len(items) >= MAX_LEADS:
+            logger.warning(f"widget leads store is full ({MAX_LEADS}); "
+                           "refusing a new enquiry. Delete handled ones in the console.")
+            raise LeadStoreFull(f"the enquiry store is full ({MAX_LEADS})")
         items.append(lead)
-        if len(items) > MAX_LEADS:
-            items = items[len(items) - MAX_LEADS:]
         _save_leads(items)
     return lead
+
+
+class LeadStoreFull(Exception):
+    """add_lead refused because MAX_LEADS enquiries are already stored."""
+
+
+def lead_ref(lead_id: str) -> str:
+    """The short reference a visitor is shown and staff search by."""
+    return "GO-" + (lead_id or "")[:8].upper()
+
+
+def mark_notified(lead_id: str) -> bool:
+    with _leads_lock:
+        items = _load_leads()
+        for l in items:
+            if l.get("id") == lead_id:
+                l["notified"] = True
+                _save_leads(items)
+                return True
+    return False
 
 
 def list_leads(kind: str | None = None, include_handled: bool = True,
@@ -436,4 +468,6 @@ def lead_stats() -> dict:
         "unhandled": len([l for l in items if not l.get("handled")]),
         "sales": len([l for l in items if l.get("kind") == "sales"]),
         "support": len([l for l in items if l.get("kind") == "support"]),
+        "unsent": len([l for l in items if not l.get("notified")]),
+        "full": len(items) >= MAX_LEADS,
     }

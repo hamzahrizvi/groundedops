@@ -15,8 +15,8 @@ This version:
   - stores a normalized query field                  → easy dedup/analytics
 
 NOTE: this is a different file format from the old logs.json (JSON array).
-If you have an existing logs.json, archive or delete it — it won't be
-read by get_last_logs()/get_flagged_logs() here.
+If you have an existing logs.json, archive or delete it — nothing here
+reads it.
 """
 
 import json
@@ -67,6 +67,38 @@ def _rotate_if_needed() -> None:
             _logger.error(f"Log rotation failed: {exc}")
 
 
+def _trace_fields() -> dict:
+    """M2: which conversation, who asked (visitor or test), how the turn
+    ended and what checked the answer, read from the request's pipeline
+    trace at write time. Every key is always present (None when there is no
+    trace, e.g. a direct call from a script) so old and new rows sort into
+    one 'missing' bucket rather than a schema split. Imported here, not in
+    main, because tests stub logger and read main.query's source."""
+    try:
+        import pipeline_trace
+        snap = pipeline_trace.snapshot() or {}
+    except Exception:
+        snap = {}
+    meta = snap.get("meta") or {}
+    exit_stage = snap.get("exit") or {}
+    outcome = exit_stage.get("id")
+    try:
+        if outcome not in pipeline_trace.OUTCOMES:
+            outcome = None     # a step along the way is not how it ended
+    except Exception:
+        outcome = None
+    return {
+        "session_id":       meta.get("session_id"),
+        "origin":           meta.get("origin"),
+        "surface":          meta.get("surface"),
+        "outcome":          outcome,
+        "verified_by":      meta.get("ground_via"),
+        "verifier":         meta.get("verifier"),
+        "service_degraded": meta.get("service_degraded"),
+        "language":         meta.get("language"),   # 9.9: None = English
+    }
+
+
 def log_interaction(
     query: str,
     answer: str,
@@ -75,6 +107,8 @@ def log_interaction(
     sources: list[str] | None = None,
     grounding_score: float | None = None,
     flagged: bool = False,
+    request_id: str | None = None,
+    timing: dict[str, float] | None = None,
 ) -> None:
     entry = {
         "timestamp":        datetime.utcnow().isoformat(),
@@ -86,7 +120,11 @@ def log_interaction(
         "sources":          sources or [],
         "grounding_score":  grounding_score,
         "flagged":          flagged,
+        "request_id":       request_id,
+        "timing":           {k: round(float(v), 3)
+                               for k, v in (timing or {}).items()},
     }
+    entry.update(_trace_fields())
 
     line = json.dumps(entry)
 
@@ -99,32 +137,21 @@ def log_interaction(
             _logger.error(f"Failed to write log: {exc}")
 
 
-def _read_all_entries() -> list[dict]:
-    if not os.path.exists(LOG_FILE):
-        return []
-
-    entries: list[dict] = []
+def log_feedback(request_id: str, vote: str, session_id: str | None = None) -> None:
+    """8.10: a visitor's vote, as its own row joined to the answer's row by
+    request_id. The vote itself is stored in widget_feedback.json; this
+    file rotates, so it is only a mirror."""
+    entry = {
+        "timestamp":  datetime.utcnow().isoformat(),
+        "event":      "feedback",
+        "request_id": request_id,
+        "session_id": session_id,
+        "outcome":    "voted_" + vote,
+    }
     with _lock:
         try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-        except IOError:
-            return []
-
-    return entries
-
-
-def get_last_logs(n: int = 5) -> list[dict]:
-    return _read_all_entries()[-n:]
-
-
-def get_flagged_logs() -> list[dict]:
-    """Return all interactions where the grounding check failed."""
-    return [e for e in _read_all_entries() if e.get("flagged")]
+            _rotate_if_needed()
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except IOError as exc:
+            _logger.error(f"Failed to write log: {exc}")

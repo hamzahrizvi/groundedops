@@ -72,6 +72,10 @@ def catalog_assignment() -> dict[str, tuple[str, str]]:
     The catalogue is the durable record of which product a document belongs
     to. Reading the assignment from the INDEX means a damaged index takes the
     filing with it -- which is exactly the situation this mode exists for.
+
+    A source listed under several products gets ALL of them, comma-joined,
+    which ingest_file writes as one prod_* flag per key. Keeping only the
+    last one would silently re-file a manual shared by two products.
     """
     out: dict[str, tuple[str, str]] = {}
     try:
@@ -93,8 +97,10 @@ def catalog_assignment() -> dict[str, tuple[str, str]]:
     for cat in (cfg.get("categories") or []):
         for prod in (cat.get("products") or []):
             for src in (prod.get("sources") or []):
-                out[os.path.basename(src)] = (cat.get("key") or "",
-                                              prod.get("key") or "")
+                name = os.path.basename(src)
+                c, p = out.get(name, (cat.get("key") or "", ""))
+                keys = [k for k in p.split(",") if k] + [prod.get("key") or ""]
+                out[name] = (c, ",".join(dict.fromkeys(k for k in keys if k)))
     return out
 
 
@@ -155,6 +161,43 @@ def report(recoverable, orphaned) -> None:
         print()
 
 
+def snapshot_collection() -> dict:
+    """Capture the live derived index so a failed rebuild can roll back."""
+    from db import get_collection
+    got = get_collection().get(
+        include=["documents", "metadatas", "embeddings"])
+    # Chroma returns embeddings as a numpy array, whose truth value is
+    # ambiguous: `or []` on it raised before the first rebuild started.
+    emb = got.get("embeddings")
+    return {
+        "ids": list(got.get("ids") or []),
+        "documents": list(got.get("documents") or []),
+        "metadatas": list(got.get("metadatas") or []),
+        "embeddings": [[float(x) for x in row] for row in emb]
+                      if emb is not None and len(emb) else [],
+    }
+
+
+def restore_collection(snapshot: dict) -> int:
+    """Replace the live collection with a previously captured snapshot."""
+    from db import reset_collection
+    col = reset_collection()
+    ids = snapshot.get("ids") or []
+    batch = 100
+    for start in range(0, len(ids), batch):
+        stop = start + batch
+        kwargs = {
+            "ids": ids[start:stop],
+            "documents": snapshot["documents"][start:stop],
+            "metadatas": snapshot["metadatas"][start:stop],
+        }
+        embeddings = snapshot.get("embeddings") or []
+        if embeddings:
+            kwargs["embeddings"] = embeddings[start:stop]
+        col.add(**kwargs)
+    return len(ids)
+
+
 def rebuild(targets: list[dict], dry_run: bool) -> int:
     from db import reset_collection
     from ingest import ingest_file
@@ -167,21 +210,53 @@ def rebuild(targets: list[dict], dry_run: bool) -> int:
             print(f"  {e['source']}  <- {e['path']}")
         return 0
 
+    # Preflight every source before touching the live collection. Permissions
+    # and a missing file should fail while the current index is still intact.
+    for e in targets:
+        with open(e["path"], "rb") as fh:
+            fh.read(1)
+
     settings = docstore.current_settings()
     print(f"Rebuilding {len(targets)} document(s) at {settings}")
+    snapshot = snapshot_collection()
+    print(f"rollback snapshot captured ({len(snapshot['ids'])} chunks)")
     reset_collection()
     print("collection reset")
 
     total = 0
-    for e in targets:
-        with open(e["path"], "rb") as fh:
-            content = fh.read()
-        n = ingest_file(content, e["source"],
-                        category_key=e.get("category") or None,
-                        product_key=e.get("product") or None)
-        total += n
-        print(f"  {e['source']}: {n} chunks "
-              f"(was {e['chunks']})")
+    try:
+        for e in targets:
+            # Pages an admin approved for OCR are re-read after the rebuild:
+            # ingest_file resets the manifest's OCR record for the version it
+            # indexes, and the approval must not be lost to a rebuild.
+            ocr_done = docstore.ocr_state(e["source"])["done"]
+            with open(e["path"], "rb") as fh:
+                content = fh.read()
+            n = ingest_file(content, e["source"],
+                            category_key=e.get("category") or None,
+                            product_key=e.get("product") or None)
+            if n <= 0 and not ocr_done:
+                raise RuntimeError(
+                    f"{e['source']} produced no chunks; rebuild aborted")
+            if ocr_done:
+                from ingest import ingest_ocr_pages
+                m = ingest_ocr_pages(e["source"], ocr_done)
+                print(f"  {e['source']}: OCR re-read {len(ocr_done)} page(s), "
+                      f"{m} chunks")
+                n += m
+            total += n
+            print(f"  {e['source']}: {n} chunks "
+                  f"(was {e['chunks']})")
+    except BaseException as exc:
+        print(f"rebuild failed ({exc}); restoring previous collection")
+        try:
+            restored = restore_collection(snapshot)
+            print(f"rollback complete ({restored} chunks restored)")
+        except Exception as restore_exc:
+            raise RuntimeError(
+                "rebuild failed and the automatic index rollback also failed: "
+                f"{restore_exc}") from exc
+        raise
     print(f"\ndone — {total} chunks across {len(targets)} document(s)")
     return total
 

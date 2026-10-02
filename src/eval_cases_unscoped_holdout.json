@@ -1,0 +1,235 @@
+{
+  "_README": "Holdout eval for the 'no product selected in widget' behaviour. Written independently from the developers' own unscoped-probe eval (never read it, or any src/ code, PENDING.md, or git history) so the phrasings are ones the pipeline has never seen. Phrasings and facts were built by skimming the manuals in documents/ with pdfplumber. Three groups of 10, all layer=blind, new_session=true, no product field: (1) clarify - realistic customer messages that don't name or describe a specific product, correct behaviour is to ask which product; (2) answered - questions that name no product but describe something only one product's manual covers, so a direct, gradable answer is correct; (3) rejected - plausible widget messages that no manual in this corpus answers (other brands, unrelated support topics, general chit-chat), correct behaviour is to decline/redirect rather than answer or ask which product.",
+  "cases": [
+    {
+      "q": "hey my machine is making this weird grinding noise when it tries to process anything, is that normal?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "A grinding noise during processing could describe a coin hopper, a banknote validator, or a camera unit jamming, and no product or product type is named, so the assistant should ask which product before diagnosing."
+    },
+    {
+      "q": "the light on it keeps blinking red and i dont know what that means",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Multiple products in the range use red status/error LEDs with different flash-code meanings, and nothing here names or describes a specific one, so the assistant must ask which product before quoting a flash code table."
+    },
+    {
+      "q": "not working",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "A two-word complaint gives no product identity or symptom detail at all, so the only reasonable reply is to ask which product is having the issue."
+    },
+    {
+      "q": "how do i get into the settings menu, i cant find the reset button anywhere on the unit",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Settings access and reset controls differ across the whole range and no product is named or described, so the assistant should ask which product before pointing at a specific button or menu."
+    },
+    {
+      "q": "its stuck and won't spit my item back out or take my money either way",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "A jam that stops the machine taking or returning something could describe a coin hopper or a note acceptor, and neither is named, so the assistant should ask which product before troubleshooting."
+    },
+    {
+      "q": "wat does error code 5 mean on the display",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Numbered error/status codes and their meanings differ by product line and none is named, so the assistant should ask which product's error code 5 is meant."
+    },
+    {
+      "q": "we're installing a new one this week, what's the recommended clearance behind the unit so we don't have wiring issues",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Mechanical installation clearances vary by product and none is named or described here, so the assistant should ask which product is being installed."
+    },
+    {
+      "q": "how often should i be cleaning the sensors on this thing, its been a few months",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Sensor cleaning schedules differ across the range and no product is named or described, so the assistant should ask which product before giving a maintenance interval."
+    },
+    {
+      "q": "customer says it beeped three times then just shut off, any idea whats wrong",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "A beep-count fault symptom is not tied to any named or described product here, so the assistant should ask which product before matching it to a fault table."
+    },
+    {
+      "q": "do you guys sell a cable to hook this up to my till system or do i need something else",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Interface cable part numbers differ per product and none is named or described, so the assistant should ask which product needs connecting before recommending a cable."
+    },
+    {
+      "q": "the status light on my coin unit just flashed red three times in a row, what's that telling me and what do i do next?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["fraud", "reset"],
+      "grade": true,
+      "reference": "Only the SMART Coin System Range manual defines a 3-red-flash status code, meaning a fraud attempt, with the recommended action to reset the unit (SMART Coin System Range User Manual v1, p.85)."
+    },
+    {
+      "q": "how fast is the USB-B connection on the age-checking unit that has its own screen, the one you plug straight into a till?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["480Mbps", "USB-B"],
+      "grade": true,
+      "reference": "Only the MyCheckr (with-screen) manual specifies its USB-B port speed at up to 480Mbps; MyCheckr Mini has no USB-B port at all (MyCheckr User Manual v7, p.29)."
+    },
+    {
+      "q": "does the screenless age-estimation camera need its own power brick, or can it just run off a USB port on my till?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["USB", "power"],
+      "grade": true,
+      "reference": "Only the MyCheckr Mini manual states the device only needs to be plugged into a USB A-type port to power up and function, with no separate power supply (MyCheckr Mini User Manual v5, p.4)."
+    },
+    {
+      "q": "what operating system does the phone app that talks to the hub and controls the relays run on?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["Android"],
+      "grade": true,
+      "reference": "Only the MyConnect Environment document describes the companion app as an Android client communicating with the MyConnect Hub (MyConnect Environment v4, p.4)."
+    },
+    {
+      "q": "what's the default username and password for logging into the age camera's local network API before i change it?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["apiuser", "apipassword"],
+      "grade": true,
+      "reference": "Only the ICU Network API document gives the default local API credentials as username apiuser and password apipassword (ICU_Network_API v1.0.50, p.7)."
+    },
+    {
+      "q": "once i get an auth token back from the camera's local API, how many seconds is it good for before i need to request a new one?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["3600"],
+      "grade": true,
+      "reference": "Only the ICU Network API document (and its companion quick guide) states the token expires_in value is fixed at 3600 seconds by default (ICU_Network_API v1.0.50, p.10)."
+    },
+    {
+      "q": "for the bill acceptor that has an add-on recycling module option, how many notes can that recycler actually hold?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["30"],
+      "grade": true,
+      "reference": "Only the NV9USB+ Range manual lists the add-on Note Float recycler capacity as 30 notes; the recycler capacity for other validators in the range is different or unspecified (NV9USB+ Range User Manual v1, p.4)."
+    },
+    {
+      "q": "for that note validator's cashbox-full-detection sensor to actually work, what's the minimum firmware version it needs?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["1.20"],
+      "grade": true,
+      "reference": "Only the NV9 Spectral Range manual specifies the moulded cashbox presence-sensor feature requires firmware version 1.20 or higher with build revision 8 or higher (NV9 Spectral Range User Manual v1, p.17)."
+    },
+    {
+      "q": "the big secure banknote validator with the payout recycling module, how many mixed notes can that payout module actually hold?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["80"],
+      "grade": true,
+      "reference": "Only the NV200 Spectral (NV200S) Range manual states the payout module capacity is up to 80 mixed banknotes (NV200S Range User Manual v1, p.4)."
+    },
+    {
+      "q": "for the little bill acceptor used in kiddie rides and jukeboxes with no cashbox built in, how big is the bezel opening, and are there other bezel sizes to choose from?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": ["72mm"],
+      "grade": true,
+      "reference": "Only the BV30 manual describes a stacker-less, free-fall bill acceptor for amusement use fitted with a single, standard 72mm bezel option (BV30 User Manual v1, p.6)."
+    },
+    {
+      "q": "hey do you know if the JCM bill validator we used to run takes the new polymer notes ok?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "JCM is a different manufacturer's banknote validator, not covered by any document in this knowledge base, so the assistant should decline rather than guess or answer."
+    },
+    {
+      "q": "our old MEI coin mech keeps rejecting good coins, any idea why",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "MEI coin mechanisms are a competitor's product not covered in this manual set, so the assistant should not attempt to troubleshoot it."
+    },
+    {
+      "q": "can you tell me if a Verifone card reader will fit in the same slot as our old kit",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Verifone card readers are a different vendor's product and outside the scope of these product manuals, so the assistant should decline."
+    },
+    {
+      "q": "my laptop won't connect to the office wifi this morning, can you help",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "General laptop/wifi troubleshooting is unrelated to any product manual in this knowledge base, so the assistant should redirect rather than attempt IT support."
+    },
+    {
+      "q": "when is my order supposed to arrive, i placed it like 2 weeks ago",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Order status and delivery tracking are account/logistics questions with no answer in the product manuals, so the assistant should redirect the customer rather than guess."
+    },
+    {
+      "q": "can you explain why my invoice this month is higher than last month",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Billing questions require account-specific data not present in any product manual, so the assistant should decline and redirect to billing support."
+    },
+    {
+      "q": "quick one, whats the capital of australia",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "A general-knowledge trivia question is unrelated to the product manuals and should be declined as out of scope."
+    },
+    {
+      "q": "lol you're actually pretty helpful for a bot, do you have a name",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Casual chit-chat about the assistant itself is not a product question answerable from the manuals, so it should be declined/redirected rather than improvised."
+    },
+    {
+      "q": "the receipt printer at the till keeps jamming on the perforation, is that a paper weight issue",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "A receipt printer is not one of the products documented in this knowledge base, so the assistant should decline rather than answer as if it were."
+    },
+    {
+      "q": "is it normal for my phone battery to drain faster in cold weather",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "General consumer-electronics/phone battery questions have no bearing on the product manuals and should be declined as out of scope."
+    }
+  ]
+}

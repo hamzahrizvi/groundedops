@@ -30,6 +30,8 @@ USAGE
   python eval_retrieval.py                    # measure at current settings
   python eval_retrieval.py --json out.json    # also write machine-readable
   python eval_retrieval.py --compare out.json # diff against an earlier run
+  python eval_retrieval.py --cases eval_cases_retrieval.json
+                                               # a separate, corpus-specific suite
   CONTEXT_K=5 python eval_retrieval.py        # sweep a setting
 
 Run with the backend stopped: it opens the vector store directly.
@@ -61,13 +63,27 @@ def catalog_sources_by_product() -> dict[str, set[str]]:
     return out
 
 
-def load_cases() -> list[dict]:
-    with open(os.path.join(HERE, "eval_cases.json"), encoding="utf-8") as fh:
+def load_cases(cases_path: str | None = None) -> list[dict]:
+    path = cases_path or os.path.join(HERE, "eval_cases.json")
+    with open(path, encoding="utf-8") as fh:
         return json.load(fh).get("cases") or []
 
 
+def _flatten_keywords(keywords: list | None) -> list[str]:
+    """keywords_all entries may be a literal string or a list of alternatives
+    (any-of, for a fact the model may phrase more than one way) — flatten so
+    either shape counts as a hit."""
+    flat: list[str] = []
+    for k in keywords or []:
+        if isinstance(k, list):
+            flat.extend(str(alt) for alt in k)
+        else:
+            flat.append(str(k))
+    return flat
+
+
 def first_hit_rank(results: list[dict], expected: set[str],
-                   keywords: list[str] | None) -> int | None:
+                   keywords: list | None) -> int | None:
     """1-indexed rank of the first chunk that actually carries the answer.
 
     Document-level matching is degenerate under production scoping: retrieval
@@ -77,23 +93,24 @@ def first_hit_rank(results: list[dict], expected: set[str],
     hit is a chunk whose TEXT contains an expected keyword. Falls back to
     document matching only for cases with no keywords to check.
     """
+    flat = _flatten_keywords(keywords)
     for i, r in enumerate(results, start=1):
-        if keywords:
+        if flat:
             text = (r.get("text") or "").lower()
-            if any(k.lower() in text for k in keywords):
+            if any(k.lower() in text for k in flat):
                 return i
         elif os.path.basename(r.get("source") or "") in expected:
             return i
     return None
 
 
-def measure() -> dict:
+def measure(cases_path: str | None = None) -> dict:
     from retrieval_db import retrieve_from_db
     from reranker import rerank
     import main as app          # for RETRIEVE_K / CONTEXT_K, one source of truth
 
     by_product = catalog_sources_by_product()
-    cases = load_cases()
+    cases = load_cases(cases_path)
 
     scored, skipped = [], []
     for case in cases:
@@ -214,9 +231,21 @@ def compare(new: dict, old_path: str) -> int:
     return 0
 
 
+def _arg_value(argv: list[str], name: str) -> str | None:
+    flag = f"--{name}"
+    for i, arg in enumerate(argv):
+        if arg == flag and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith(flag + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
 def main() -> int:
     argv = sys.argv[1:]
-    res = measure()
+    cases_arg = _arg_value(argv, "cases")
+    cases_path = os.path.join(HERE, cases_arg) if cases_arg and not os.path.isabs(cases_arg) else cases_arg
+    res = measure(cases_path)
 
     if res["cases_scored"] == 0:
         print("No cases could be scored. Either the index is empty (rebuild "

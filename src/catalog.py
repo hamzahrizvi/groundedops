@@ -79,6 +79,26 @@ def _save(data: dict) -> None:
     that, one bad read replaced the real product tree with the seed and the
     next edit made it permanent."""
     jsonstore.save(_PATH, data, label="catalogue")
+    _invalidate_derived()
+
+
+def _invalidate_derived() -> None:
+    """Two classifiers memoise a view of the catalogue for the life of the
+    process: the product terms the follow-up gate reads (text_utils) and
+    the product->category map that scopes shared documents (retrieval_db).
+    Neither knew about a product added or renamed in the console until a
+    restart. Only a module already loaded can hold a stale view, so this
+    never imports one: importing retrieval_db just to clear its cache
+    pulled in rank_bm25 and numpy, and the shared-process test runner then
+    dropped numpy from sys.modules with its C extension still loaded, so
+    the next `import numpy` failed with "cannot load module more than once
+    per process" (test_reindex_safety, after test_catalog_multi_product)."""
+    import sys
+    for mod, attr in (("text_utils", "_PRODUCT_TERMS"),
+                      ("retrieval_db", "_PRODUCT_CATEGORY")):
+        m = sys.modules.get(mod)
+        if m is not None and hasattr(m, attr):
+            setattr(m, attr, None)
 
 
 def catalog() -> dict:
@@ -149,6 +169,14 @@ def product_for_source(source: str) -> list[str]:
             if any(s.lower() in source.lower() for s in p.get("sources", [])):
                 keys.append(p["key"])
     return keys
+
+
+def is_shared_product(key: str | None) -> bool:
+    """True for a category's synthetic shared-documents entry ("General
+    (shared docs)"), which holds documents rather than naming something we
+    make. It must never be listed or offered as a product."""
+    k = (key or "").lower()
+    return k.endswith("_general") or k.endswith("_shared")
 
 
 # ── Admin mutations (guarded by the password gate in main.py) ──────────
@@ -368,17 +396,61 @@ def delete_product(category_key: str, product_key: str,
             "reassigned_to": reassign_to}
 
 
+def load_catalog() -> dict:
+    """The raw tree (categories -> products -> sources), for reindex.py."""
+    return _load()
+
+
+def _product_by_key(data: dict, key: str) -> dict | None:
+    return next((p for c in data["categories"] for p in c.get("products", [])
+                 if p["key"] == key), None)
+
+
+def _split_keys(product_key: str | None) -> list[str]:
+    return list(dict.fromkeys(
+        k.strip() for k in (product_key or "").split(",") if k.strip()))
+
+
 def attach_source(category_key: str, product_key: str, source: str) -> dict:
-    """Tag an (already-ingested) source filename to a product."""
+    """Tag an (already-ingested) source filename to one or more products.
+
+    "a,b" files it under both, the same form ingest_file writes as one
+    prod_* flag per key, so an upload into several products records all of
+    them here and reindex.py rebuilds the same scoping.
+    """
     with _lock:
         data = _load()
-        cat = _find_category(data, category_key)
-        if not cat:
+        if not _find_category(data, category_key):
             raise ValueError(f"unknown category '{category_key}'")
-        prod = next((p for p in cat["products"] if p["key"] == product_key), None)
-        if not prod:
-            raise ValueError(f"unknown product '{product_key}'")
-        if source not in prod["sources"]:
+        for key in _split_keys(product_key):
+            prod = _product_by_key(data, key)
+            if not prod:
+                raise ValueError(f"unknown product '{key}'")
+            if source not in prod["sources"]:
+                prod["sources"].append(source)
+        _save(data)
+    return catalog()
+
+
+def refile_source(source: str, product_keys: list[str]) -> dict:
+    """Make the catalogue say exactly which products hold `source`: removed
+    from every product, then listed under each of `product_keys` (an empty
+    list leaves it unfiled).
+
+    The index carries the same tags (db.with_product_tags), but the
+    catalogue is what reindex.py rebuilds from: a tag that lived only in
+    Chroma was lost on the next rebuild, which is how five documents came
+    to be filed differently in the two places.
+    """
+    with _lock:
+        data = _load()
+        for c in data["categories"]:
+            for p in c.get("products", []):
+                p["sources"] = [s for s in p.get("sources", []) if s != source]
+        for key in _split_keys(",".join(product_keys)):
+            prod = _product_by_key(data, key)
+            if not prod:
+                raise ValueError(f"unknown product '{key}'")
             prod["sources"].append(source)
         _save(data)
     return catalog()

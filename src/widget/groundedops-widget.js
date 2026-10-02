@@ -65,8 +65,22 @@
     return script.getAttribute(name) !== null;
   }
 
+  // On an HTTPS page an http:// URL is either blocked outright (fetch: mixed
+  // content, no message on screen) or, for a navigation, lands the visitor
+  // on a different origin whose localStorage does not have their
+  // conversation — so the sign-in round trip would lose the question it
+  // exists to answer. Upgrading cannot make either case worse. Loopback is
+  // left alone: browsers allow it, and a local test backend has no TLS.
+  var LOCAL_HOST_RE = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])([:/?#]|$)/i;
+  function secureUrl(url) {
+    if (!url || location.protocol !== "https:" || !/^http:\/\//i.test(url) || LOCAL_HOST_RE.test(url))
+      return url;
+    if (window.console) console.warn("GroundedOps widget: upgraded http URL to https on an https page:", url);
+    return "https://" + url.slice(7);
+  }
+
   var cfg = {
-    api: attr("data-api", "").replace(/\/+$/, ""),
+    api: secureUrl(attr("data-api", "").replace(/\/+$/, "")),
     title: attr("data-title", "Support"),
     agent: attr("data-agent-name", "Assistant"),
     avatar: attr("data-avatar-url", ""),
@@ -76,11 +90,29 @@
     // Signed by the website server-side for logged-in users. Absent for
     // anonymous visitors, who get curated FAQ answers only.
     token: attr("data-token", ""),
-    signInUrl: attr("data-sign-in-url", ""),
+    signInUrl: secureUrl(attr("data-sign-in-url", "")),
     supportEmail: attr("data-support-email", ""),
     welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
     prompt: attr("data-prompt", "How can I help today?"),
+    // Explicit override for a single-locale embed (a dedicated /fr page, a
+    // French subdomain). Falls back to the page's own declared language,
+    // then the browser's, when not set -- see detectedLanguage().
+    language: attr("data-language", ""),
   };
+
+  // The anonymous FAQ-only path uses this to match same-language curated
+  // answers, with no model call involved in detecting it. Priority: an
+  // explicit embed override, then the host page's own <html lang>, then
+  // the visitor's browser locale. Bare two-letter code ("fr-CA" -> "fr");
+  // anything else is not sent, and the server falls back to its own
+  // no-LLM guess from the question text.
+  function detectedLanguage() {
+    var raw = cfg.language
+      || (document.documentElement && document.documentElement.lang)
+      || navigator.language || navigator.userLanguage || "";
+    var code = String(raw).split("-")[0].toLowerCase();
+    return /^[a-z]{2}$/.test(code) ? code : "";
+  }
 
   // Filled by /widget/config before the panel first opens. Defaults keep the
   // widget fully usable if that fetch fails — a support widget that renders
@@ -115,7 +147,7 @@
       serverCfg.intro_options = d.intro_options;
     if (d.sales_form) serverCfg.sales_form = d.sales_form;
     if (d.support_form) serverCfg.support_form = d.support_form;
-    if (d.sign_in_url && !hasAttr("data-sign-in-url")) cfg.signInUrl = d.sign_in_url;
+    if (d.sign_in_url && !hasAttr("data-sign-in-url")) cfg.signInUrl = secureUrl(d.sign_in_url);
   }
 
   var configLoaded = null;   // a promise, so the panel can await it once
@@ -217,6 +249,48 @@
     } catch (e) {}
   }
 
+  // ── sign-in round trip ────────────────────────────────────────────────
+  // Sign-in navigates this tab away (it used to open a new one, which left
+  // the original tab holding a guest token forever). The question that hit
+  // the wall is parked here so the page the visitor lands back on — now
+  // rendered with a data-token — can answer it without being asked twice.
+  // Keyed to the session so it can only replay into the same conversation,
+  // and short-lived so an abandoned sign-in does not fire days later.
+  var PENDING_KEY = "groundedops_pending_ask";
+  var PENDING_MAX_AGE_MS = 30 * 60 * 1000;
+
+  function goSignIn(url, q) {
+    try {
+      if (q) {
+        localStorage.setItem(PENDING_KEY, JSON.stringify({
+          q: q, sessionId: state.sessionId, at: Date.now(),
+        }));
+      }
+    } catch (e) {
+      /* storage blocked: sign-in still works, the question just isn't replayed */
+    }
+    window.location.href = url;
+  }
+
+  /** Read and remove the parked question. Removed on read either way, so a
+   *  failed replay can never loop. */
+  function takePendingAsk() {
+    try {
+      var raw = localStorage.getItem(PENDING_KEY);
+      if (!raw) return null;
+      localStorage.removeItem(PENDING_KEY);
+      var p = JSON.parse(raw);
+      if (!p || !p.q || Date.now() - (p.at || 0) > PENDING_MAX_AGE_MS) return null;
+      return p;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function hasPendingAsk() {
+    try { return !!localStorage.getItem(PENDING_KEY); } catch (e) { return false; }
+  }
+
   // ── styles ────────────────────────────────────────────────────────────
   var css =
     ".go-w,.go-w *{box-sizing:border-box}" +
@@ -251,26 +325,35 @@
     ".go-scope button:hover{text-decoration:underline}" +
     // log
     ".go-log{flex:1 1 auto;overflow-y:auto;padding:16px 14px;background:var(--bg);display:flex;flex-direction:column;gap:10px}" +
-    ".go-row{display:flex;gap:9px;align-items:flex-end}" +
+    ".go-row{display:flex;gap:9px;align-items:flex-end;min-width:0}" +
     ".go-row.u{justify-content:flex-end}" +
     ".go-mav{width:28px;height:28px;border-radius:50%;background:var(--pane);flex:0 0 auto;overflow:hidden;" +
     "display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--mut)}" +
     ".go-mav img{width:100%;height:100%;object-fit:cover}" +
-    ".go-b{max-width:78%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}" +
+    ".go-b{max-width:78%;min-width:0;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}" +
     ".go-b.bot{background:var(--pane);border-bottom-left-radius:5px}" +
     // Markdown blocks. The bubble sets white-space:pre-wrap for plain text,
     // which would add phantom blank lines around real block elements, so
     // rendered markdown resets it to normal.
-    ".go-b .go-md-p,.go-b .go-md-list,.go-b .go-md-tw{white-space:normal}" +
+    ".go-b .go-md-p,.go-b .go-md-list,.go-b .go-md-heading,.go-b .go-md-tw{white-space:normal}" +
     ".go-md-p{margin:0 0 7px}" +
     ".go-md-p:last-child{margin-bottom:0}" +
+    ".go-md-heading{margin:13px 0 6px;font-weight:650;line-height:1.3;letter-spacing:-.01em;color:var(--ink)}" +
+    ".go-md-heading:first-child{margin-top:0}" +
+    ".go-md-heading.go-h3{font-size:15px}.go-md-heading.go-h4{font-size:13.5px}" +
     ".go-md-list{margin:4px 0 7px;padding-left:19px}" +
     ".go-md-list li{margin:2px 0}" +
-    // Wide pinout tables scroll inside the bubble rather than stretching it.
-    ".go-md-tw{overflow-x:auto;margin:6px 0 8px;max-width:100%}" +
-    ".go-md-table{border-collapse:collapse;font-size:12.5px;min-width:100%}" +
-    ".go-md-table th,.go-md-table td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top;font-variant-numeric:tabular-nums}" +
-    ".go-md-table th{font-weight:600;background:rgba(0,0,0,.05)}" +
+    // The wrapper owns overflow while the table remains a real table. That
+    // keeps every row on one column grid and makes wide pinouts scroll inside
+    // the answer instead of squeezing columns into a crooked stack.
+    ".go-b.has-table{width:calc(100% - 37px);max-width:calc(100% - 37px)}" +
+    ".go-md-tw{overflow-x:auto;margin:7px 0 9px;max-width:100%;border:1px solid var(--line);border-radius:9px;background:var(--bg)}" +
+    ".go-md-table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:12.5px;line-height:1.4}" +
+    ".go-md-table th,.go-md-table td{padding:7px 9px;text-align:left;vertical-align:top;border-right:1px solid var(--line);border-bottom:1px solid var(--line);white-space:normal;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}" +
+    ".go-md-table th{font-weight:650;background:rgba(0,0,0,.05)}" +
+    ".go-md-table tbody tr:nth-child(even) td{background:rgba(0,0,0,.018)}" +
+    ".go-md-table tr:last-child td{border-bottom:0}" +
+    ".go-md-table th:last-child,.go-md-table td:last-child{border-right:0}" +
     ".go-b code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:rgba(0,0,0,.06);padding:.1em .32em;border-radius:3px}" +
     ".go-b.usr{background:#2f3a45;color:#fff;border-bottom-right-radius:5px}" +
     ".go-b.warn{background:#fdf6e7;border:1px solid #e8d9b0}" +
@@ -278,6 +361,12 @@
     ".go-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--mut);" +
     "border-radius:50%;animation:go-spin .7s linear infinite}" +
     "@keyframes go-spin{to{transform:rotate(360deg)}}" +
+    // The wait line fades in rather than snapping to the next string. An
+    // instant swap of one short phrase for another reads as a flicker.
+    ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;opacity:.6;font-size:11.5px}" +
+    ".go-waitin{animation:go-waitfade .5s ease}" +
+    "@keyframes go-waitfade{from{opacity:.25}to{opacity:1}}" +
+    "@media (prefers-reduced-motion:reduce){.go-waitin{animation:none}}" +
     // chips (suggested pointers)
     ".go-chips{display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-top:2px}" +
     ".go-chip{border:0;background:#2f3a45;color:#fff;padding:11px 17px;border-radius:999px;cursor:pointer;" +
@@ -322,10 +411,21 @@
     ".go-srci{font-size:12.5px;margin-bottom:4px;line-height:1.45}" +
     ".go-srcn{font-weight:600}" +
     ".go-pg{font-weight:500;color:var(--mut);font-size:11.5px}" +
+    ".go-quote{margin:4px 0 10px;padding-left:9px;border-left:2px solid var(--line);" +
+    "white-space:pre-wrap;font-size:12.5px;line-height:1.45}" +
     ".go-dl{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--a);text-decoration:none}" +
+    ".go-figs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}" +
+    ".go-fig{max-height:96px;max-width:46%;border:1px solid var(--line);border-radius:6px;" +
+    "background:#fff;cursor:zoom-in;object-fit:contain}" +
+    ".go-fig.big{max-height:none;max-width:100%;cursor:zoom-out}" +
     ".go-dl:hover{text-decoration:underline}" +
     ".go-badge{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;" +
     "color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:1px 5px;margin-top:7px}" +
+    ".go-vote{display:flex;gap:4px;margin-top:6px}" +
+    ".go-vote button{border:1px solid var(--line);background:none;border-radius:6px;cursor:pointer;" +
+    "font-size:13px;line-height:1;padding:3px 7px;color:var(--mut)}" +
+    ".go-vote button[aria-pressed=true]{border-color:var(--ink);color:var(--ink)}" +
+    ".go-vote button:disabled{cursor:default}" +
     // composer
     ".go-form{display:flex;gap:8px;padding:11px;border-top:1px solid var(--line);background:var(--bg);flex:0 0 auto}" +
     ".go-in{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;" +
@@ -343,7 +443,24 @@
     ".go-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}" +
     ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
-    "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}";
+    "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}" +
+    // 8.13 phone layout: below this the 400x600 floating card left barely any
+    // room either side, so the panel goes edge-to-edge like a native sheet
+    // instead. Fixed (not the base rule's absolute) so it fills the viewport
+    // on its own regardless of .go-w's own (collapsed, zero-size) box.
+    "@media (max-width:480px){" +
+    ".go-panel{position:fixed;top:0;left:0;right:0;bottom:0;width:100%;height:100%;" +
+    "max-width:100%;max-height:100%;border-radius:0}" +
+    // Mobile Safari zooms the whole page in on focus of any text input under
+    // 16px, which then leaves the page zoomed after the field blurs. 14px
+    // read fine on a desktop pointer but not here.
+    ".go-in,.go-fin{font-size:16px}" +
+    // 27px icon buttons (5px padding around a 17px svg) are under the ~44px
+    // touch target guideline; easy to miss with a mouse cursor, not with a
+    // thumb.
+    ".go-hbtn{min-width:44px;min-height:44px;display:inline-flex;" +
+    "align-items:center;justify-content:center;padding:0}" +
+    "}";
 
   var st = document.createElement("style");
   st.textContent = css;
@@ -373,7 +490,8 @@
   root.innerHTML =
     '<button class="go-launch" type="button" aria-haspopup="dialog" aria-expanded="false">' +
       I_CHAT + "<span>" + esc(cfg.launcherLabel) + "</span></button>" +
-    '<section class="go-panel" role="dialog" aria-label="' + esc(cfg.title) + '">' +
+    '<section class="go-panel" role="dialog" aria-modal="true" tabindex="-1" ' +
+      'aria-label="' + esc(cfg.title) + '">' +
       '<div class="go-head"><div class="go-av">' + avatarHtml + "</div>" +
         '<div class="go-hname">' + esc(cfg.agent) + "</div>" +
         '<button class="go-hbtn go-settings-btn" type="button" aria-label="Usage and settings" title="Usage and settings">' + I_GEAR + "</button>" +
@@ -389,6 +507,7 @@
   document.body.appendChild(root);
 
   var $launch = root.querySelector(".go-launch");
+  var $panel = root.querySelector(".go-panel");
   var $min = root.querySelector(".go-min");
   var $restart = root.querySelector(".go-restart");
   var $scope = root.querySelector(".go-scope");
@@ -432,16 +551,92 @@
 
   var MD_BULLET = /^\s*[-*•]\s+(.*)$/;
   var MD_NUM = /^\s*\d+[.)]\s+(.*)$/;
-  var MD_ROW = /^\s*\|.*\|\s*$/;
+  var MD_ROW = /^\s*\|.*\|.*$/;
   var MD_SEP = /^[\s|:\-]+$/;
+  var MD_HEADING = /^\s*(#{1,4})\s+(.+?)\s*#*\s*$/;
+  var MD_BOLD_HEADING = /^\s*\*\*(.+?)\*\*:?\s*$/;
+
+  function mdTableCells(line) {
+    var body = line.replace(/^\s*\|/, "").replace(/\|\s*$/, "");
+    var cells = [];
+    var cell = "";
+    var inCode = false;
+    for (var n = 0; n < body.length; n++) {
+      var ch = body.charAt(n);
+      if (ch === "\\" && body.charAt(n + 1) === "|") {
+        cell += "|"; n++; continue;
+      }
+      if (ch === "`") inCode = !inCode;
+      if (ch === "|" && !inCode) {
+        cells.push(cell.replace(/^\s+|\s+$/g, "")); cell = "";
+      } else {
+        cell += ch;
+      }
+    }
+    cells.push(cell.replace(/^\s+|\s+$/g, ""));
+    return cells;
+  }
+
+  function mdAlignment(marker) {
+    var value = marker.replace(/^\s+|\s+$/g, "");
+    if (value.charAt(0) === ":" && value.charAt(value.length - 1) === ":") return "center";
+    if (value.charAt(value.length - 1) === ":") return "right";
+    return "left";
+  }
+
+  var MD_HEADER_HINTS = {
+    parameter: 1, minimum: 1, nominal: 1, maximum: 1, feature: 1,
+    dimension: 1, configuration: 1, mode: 1, pin: 1, signal: 1,
+    direction: 1, description: 1, length: 1, width: 1, item: 1,
+    value: 1, type: 1, voltage: 1, current: 1
+  };
+
+  function mdLooksLikeHeader(row) {
+    var cells = mdTableCells(row), hits = 0;
+    for (var c = 0; c < cells.length; c++) {
+      var words = cells[c].toLowerCase().replace(/[*_`]/g, "").match(/[a-z]+/g) || [];
+      for (var w = 0; w < words.length; w++) {
+        if (MD_HEADER_HINTS[words[w]]) { hits++; break; }
+      }
+    }
+    return hits >= 2;
+  }
+
+  function mdNormalizeText(text) {
+    // Markdown only recognises a heading at the start of a line. Repair model
+    // output such as "Humidity: 95% ### Power requirements" before parsing.
+    var expanded = String(text == null ? "" : text).replace(
+      /(\S)[ \t]+(?=#{1,4}\s+\S)/g, "$1\n");
+    var rawLines = expanded.split(/\r?\n/);
+    var out = [];
+    for (var i = 0; i < rawLines.length; i++) {
+      var line = rawLines[i].replace(/\s+$/, "");
+      if (/^\s*\\\|/.test(line) && (line.match(/\|/g) || []).length >= 3)
+        line = line.replace(/^(\s*)\\\|/, "$1|");
+
+      var merged = line.match(/^(.*)(\*\*[^*\n]{2,90}\*\*:?)\s*(\|.*\|)\s*$/);
+      var embeddedRow = merged && /^\s*\|/.test(merged[1]);
+      var sectionHeading = merged && /\b(?:operation|requirements?|specifications?|options?|notes?|pinout|dimensions?|limits?|settings?|installation|configuration)\b/i.test(merged[2]);
+      if (merged && mdLooksLikeHeader(merged[3]) && (!embeddedRow || sectionHeading)) {
+        if (merged[1].replace(/^\s+|\s+$/g, "")) out.push(merged[1].replace(/^\s+|\s+$/g, ""));
+        out.push(merged[2].replace(/^\s+|\s+$/g, ""), merged[3].replace(/^\s+|\s+$/g, ""));
+        continue;
+      }
+      var inline = line.match(/^([^|\n].*?\S)\s+(\|.*\|)\s*$/);
+      if (inline && mdLooksLikeHeader(inline[2])) {
+        out.push(inline[1].replace(/^\s+|\s+$/g, ""), inline[2].replace(/^\s+|\s+$/g, ""));
+        continue;
+      }
+      out.push(line);
+    }
+    return out.join("\n");
+  }
 
   function renderMd(text, into) {
     // A model sometimes runs a table onto the same line as its heading
     // ("**Pulse:** | Pin | Name |"), so split pipe runs onto their own lines
     // before parsing or the whole thing reads as one paragraph.
-    var normalized = String(text == null ? "" : text).replace(/\s\|\s*\n?/g, function (m) {
-      return m.indexOf("\n") >= 0 ? m : " | ";
-    });
+    var normalized = mdNormalizeText(text);
     var lines = normalized.split(/\r?\n/);
     var i = 0;
 
@@ -463,30 +658,74 @@
       var line = lines[i];
       if (!line.replace(/\s/g, "")) { i++; continue; }
 
+      var heading = line.match(MD_HEADING);
+      var boldHeading = line.match(MD_BOLD_HEADING);
+      if (heading || boldHeading) {
+        // The widget already lives below the host page's heading, so keep
+        // answer headings semantic without introducing a second H1.
+        var isH3 = !heading || heading[1].length <= 2;
+        var headingEl = document.createElement(isH3 ? "h3" : "h4");
+        headingEl.className = "go-md-heading " + (isH3 ? "go-h3" : "go-h4");
+        headingEl.innerHTML = mdInline(heading ? heading[2] : boldHeading[1]);
+        into.appendChild(headingEl);
+        i++;
+        continue;
+      }
+
       if (MD_ROW.test(line)) {
-        var wrap = document.createElement("div");
-        wrap.className = "go-md-tw";
-        var tbl = document.createElement("table");
-        tbl.className = "go-md-table";
-        var first = true;
+        var rows = [];
+        var separators = null;
         while (i < lines.length && MD_ROW.test(lines[i])) {
-          if (!MD_SEP.test(lines[i])) {
-            var cells = lines[i].replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|");
-            var tr = document.createElement("tr");
-            for (var c = 0; c < cells.length; c++) {
-              // First non-separator row is the header, which is what makes a
-              // pinout readable at a glance.
-              var cell = document.createElement(first ? "th" : "td");
-              cell.innerHTML = mdInline(cells[c].replace(/^\s+|\s+$/g, ""));
-              tr.appendChild(cell);
-            }
-            tbl.appendChild(tr);
-            first = false;
-          }
+          if (MD_SEP.test(lines[i])) separators = mdTableCells(lines[i]);
+          else rows.push(mdTableCells(lines[i]));
           i++;
         }
+        if (!rows.length) continue;
+
+        // The header defines the grid. Extra cells are prose that leaked onto
+        // a row and must not stretch every other row into empty columns.
+        var columnCount = rows[0].length;
+        var overflow = [];
+        for (var r = 0; r < rows.length; r++) {
+          if (rows[r].length > columnCount) {
+            if (r > 0) overflow.push(rows[r].slice(columnCount).join(" | "));
+            rows[r] = rows[r].slice(0, columnCount);
+          }
+        }
+        var aligns = [];
+        for (var a = 0; a < columnCount; a++) aligns.push(mdAlignment(separators && separators[a] || ""));
+        var wrap = document.createElement("div");
+        wrap.className = "go-md-tw";
+        wrap.setAttribute("role", "region");
+        wrap.setAttribute("aria-label", "Scrollable table");
+        wrap.setAttribute("tabindex", "0");
+        var tbl = document.createElement("table");
+        tbl.className = "go-md-table";
+        var thead = document.createElement("thead");
+        var tbody = document.createElement("tbody");
+        for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+          var tr = document.createElement("tr");
+          for (var c = 0; c < columnCount; c++) {
+            var isHeader = rowIndex === 0;
+            var tableCell = document.createElement(isHeader ? "th" : "td");
+            if (isHeader) tableCell.setAttribute("scope", "col");
+            tableCell.style.textAlign = aligns[c];
+            tableCell.innerHTML = mdInline(rows[rowIndex][c] || "");
+            tr.appendChild(tableCell);
+          }
+          (isHeader ? thead : tbody).appendChild(tr);
+        }
+        tbl.appendChild(thead);
+        tbl.appendChild(tbody);
         wrap.appendChild(tbl);
         into.appendChild(wrap);
+        for (var x = 0; x < overflow.length; x++) {
+          if (!overflow[x]) continue;
+          var extra = document.createElement("p");
+          extra.className = "go-md-p";
+          extra.innerHTML = mdInline(overflow[x]);
+          into.appendChild(extra);
+        }
         continue;
       }
 
@@ -496,7 +735,8 @@
       var para = [];
       while (i < lines.length && lines[i].replace(/\s/g, "")
              && !MD_BULLET.test(lines[i]) && !MD_NUM.test(lines[i])
-             && !MD_ROW.test(lines[i])) {
+             && !MD_ROW.test(lines[i]) && !MD_HEADING.test(lines[i])
+             && !MD_BOLD_HEADING.test(lines[i])) {
         para.push(lines[i]); i++;
       }
       var p = document.createElement("p");
@@ -524,8 +764,12 @@
       txt.textContent = msg.text;
     } else {
       renderMd(msg.text, txt);
+      if (txt.querySelector(".go-md-table")) b.className += " has-table";
     }
     b.appendChild(txt);
+    // Handed back so revealInto() can re-render into this exact node while
+    // the answer types out, rather than rebuilding the bubble each frame.
+    row._txt = txt;
 
     if (msg.sources && msg.sources.length) {
       // COLLAPSED by default, and short when open. It used to be an always-
@@ -539,8 +783,14 @@
       var s = document.createElement("details");
       s.className = "go-src";
       var n = Math.min(msg.sources.length, 4);
-      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + "Sources (" +
-        n + ")</summary>";
+      // 8.12: one source on a generated answer is the manual it was checked
+      // against, so say that. A curated answer (badge) was not checked here.
+      var one = msg.sources[0];
+      var summaryText = n === 1 && !msg.badge
+        ? "Verified against " + esc(pretty(one.source)) +
+          (one.page_label ? ", " + esc(one.page_label) : "")
+        : "Sources (" + n + ")";
+      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + summaryText + "</summary>";
       msg.sources.slice(0, 4).forEach(function (x) {
         var i = document.createElement("div");
         i.className = "go-srci";
@@ -559,7 +809,35 @@
           ? ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>'
           : "";
         i.innerHTML = head + dl;
+        // The pictures that sat beside the cited text: a wiring diagram is
+        // the answer to "where does pin 3 go" in a way prose is not. Loaded
+        // with the bearer token, like the download: /figure is gated and an
+        // <img src> cannot carry a header. Click toggles full size.
+        if (x.figures && x.figures.length) {
+          var strip = document.createElement("div");
+          strip.className = "go-figs";
+          x.figures.slice(0, 4).forEach(function (f) {
+            var im = document.createElement("img");
+            im.className = "go-fig";
+            im.alt = f.caption || ("Figure, page " + f.page);
+            im.title = (f.caption ? f.caption + " — " : "") + "page " + f.page;
+            im.setAttribute("data-fig", f.url);
+            im.addEventListener("click", function () {
+              im.classList.toggle("big");
+            });
+            strip.appendChild(im);
+          });
+          i.appendChild(strip);
+        }
         s.appendChild(i);
+      });
+      s.querySelectorAll("[data-fig]").forEach(function (im) {
+        var headers = {};
+        if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+        fetch(cfg.api + im.getAttribute("data-fig"), { headers: headers })
+          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+          .then(function (blob) { im.src = URL.createObjectURL(blob); })
+          .catch(function () { im.remove(); });
       });
       s.querySelectorAll("[data-dl]").forEach(function (a) {
         a.addEventListener("click", function (ev) {
@@ -587,8 +865,42 @@
       bd.textContent = msg.badge;
       b.appendChild(bd);
     }
+    if (msg.requestId) b.appendChild(voteRow(msg));
     row.appendChild(b);
     return row;
+  }
+
+  /** 8.10: thumbs up/down under a generated answer. The vote is kept on the
+   *  message, so a resumed chat shows it and does not offer it again. */
+  function voteRow(msg) {
+    var wrap = document.createElement("div");
+    wrap.className = "go-vote";
+    [["up", "\ud83d\udc4d", "Helpful"], ["down", "\ud83d\udc4e", "Not helpful"]]
+      .forEach(function (v) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = v[1];
+        btn.setAttribute("aria-label", v[2]);
+        btn.setAttribute("aria-pressed", msg.vote === v[0] ? "true" : "false");
+        btn.disabled = !!msg.vote;
+        btn.addEventListener("click", function () {
+          msg.vote = v[0];
+          save();
+          wrap.querySelectorAll("button").forEach(function (x) {
+            x.disabled = true;
+            x.setAttribute("aria-pressed", x === btn ? "true" : "false");
+          });
+          fetch(cfg.api + "/widget/feedback", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ request_id: msg.requestId, vote: v[0],
+                                   session_id: state.sessionId,
+                                   visitor_id: visitorId() }),
+          }).catch(function () {});
+        });
+        wrap.appendChild(btn);
+      });
+    return wrap;
   }
 
   /** Fetch the caller's tier and remaining allowance. Shown in the
@@ -660,12 +972,91 @@
     });
   }
 
+  /* Characters a second while an answer types out. Fast enough to stay
+   * ahead of a reader, slow enough that the answer arrives rather than
+   * appearing. */
+  var REVEAL_CPS = 260;
+
+  /* Type an answer in instead of pasting it whole.
+   *
+   * This is PRESENTATION, not transport, and the distinction is worth being
+   * honest about: the pipeline produces the whole answer before it sends
+   * anything, and /widget/ask/stream does too -- its own docstring says it
+   * "does not lower time-to-first-token". So streaming the response over SSE
+   * would look exactly like this while also touching the gated, paid path,
+   * which widget_api.py explicitly warns is not a change to make unverified.
+   * Real token streaming needs the generation call pushed below the quota
+   * gates first; that is a separate piece of work.
+   *
+   * What this does buy: the answer lands the way a person reads it, and the
+   * wait no longer ends with a wall of text appearing at once.
+   */
+  function revealInto(row, text) {
+    var el = row && row._txt;
+    if (!el) return;
+    var reduced = window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A markdown table revealed a character at a time renders as broken
+    // pipe syntax for most of its life. Tables arrive whole.
+    if (reduced || /\n\s*\|/.test(text) || text.length < 40) return;
+
+    // textContent, NOT renderMd, for the growing text: renderMd APPENDS into
+    // the node (it is a sequence of into.appendChild calls) and never clears,
+    // so re-rendering each frame stacked every partial copy on top of the
+    // last -- the answer arrived as a staircase of itself, under a complete
+    // copy that bubble() had already rendered. textContent replaces, so each
+    // frame supersedes the one before.
+    //
+    // It also removes the partial-markdown problem entirely: raw syntax is
+    // never half-parsed, because nothing is parsed until the end.
+    var shown = 0, last = 0, finished = false;
+    el.textContent = "";
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      clearTimeout(safety);
+      el.textContent = "";
+      renderMd(text, el);
+      scrollDown();
+    }
+
+    /* requestAnimationFrame STOPS in a background tab. Without this the
+     * answer freezes wherever it had got to -- observed stuck at "The SMART"
+     * -- and only resumes if the visitor comes back to the tab. A visitor who
+     * switches away and returns later should find a finished answer, not a
+     * severed one, so a timer well past the expected duration completes it
+     * regardless. setTimeout is throttled in the background too, but it
+     * still fires; rAF does not. */
+    var safety = setTimeout(finish,
+                            Math.ceil(text.length / REVEAL_CPS * 1000) + 3000);
+
+    function step(ts) {
+      if (finished) return;
+      if (!row.isConnected) { clearTimeout(safety); return; }  // removed mid-reveal
+      if (!last) last = ts;
+      shown = Math.min(text.length,
+                       shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS)));
+      last = ts;
+      if (shown >= text.length) { finish(); return; }
+      el.textContent = text.slice(0, shown);
+      scrollDown();
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
   function say(text, extra) {
     var m = Object.assign({ role: "bot", text: text }, extra || {});
     state.messages.push(m);
-    $log.appendChild(bubble(m));
+    var row = bubble(m);
+    $log.appendChild(row);
     scrollDown();
     save();
+    // Only a freshly-arrived answer types out. Restoring a saved
+    // conversation re-renders every past turn, and replaying those would be
+    // absurd -- so the flag is set at the answer call site, not here.
+    if (extra && extra.reveal) revealInto(row, m.text);
   }
 
   function heard(text) {
@@ -703,6 +1094,88 @@
     return d;
   }
 
+  /* What the wait says while it waits. One frozen line ("Checking the
+   * documentation") for what can be twenty seconds reads as a stall; these
+   * move, and they move in the order the pipeline actually works in -- find
+   * the pages, read them, then check the answer against them -- so the line
+   * is a rough progress report rather than decoration.
+   *
+   * Sixteen lines on a 2.2s loop was too much of both. The status changed
+   * before it could be read, and past ~35 seconds it WRAPPED back to "Sifting
+   * through the documentation" -- a progress report that starts over reads as
+   * a stall, which is the exact opposite of what it is there to say. Four
+   * steps now, each held long enough to read, ending on a line that STAYS.
+   * Most answers land inside the first dwell, so the common case is one
+   * steady line that never moves at all. */
+  var WAIT_LINES = [
+    "Searching the documentation",
+    "Reading the pages that matched",
+    "Drafting an answer",
+    "Checking it against the source",
+    "Still working — this one is taking a moment",
+  ];
+
+  /* Long enough to read the line and look away. Under about 3s the eye
+   * catches the change as movement rather than as information. */
+  var WAIT_DWELL = 4500;
+
+  /* Returns the same node status() does, so every caller still just removes
+   * it. The timer stops itself once the node leaves the log rather than
+   * being cleared by hand: the status line is removed on an answer, on a
+   * failure and on a reset, and one missed clear would leave a detached
+   * node ticking for the life of the page. */
+  function waiting() {
+    var d = status(WAIT_LINES[0]);
+    var label = d.lastChild, i = 0;
+
+    /* Elapsed seconds, ticking. A wait carrying a number reads as work in
+     * progress; the same wait without one reads as a hang, and these waits
+     * are long -- generation alone is 2.5-8s. Captured AFTER label, because
+     * status() leaves the text span as lastChild and appending here would
+     * otherwise steal it. Starts blank rather than at "0s", so a fast answer
+     * never flashes a counter on its way past. */
+    var clock = document.createElement("span");
+    clock.className = "go-elapsed";
+    d.appendChild(clock);
+    var t0 = Date.now();
+    var tick = setInterval(function () {
+      if (!d.parentNode) { clearInterval(tick); return; }
+      var secs = Math.floor((Date.now() - t0) / 1000);
+      clock.textContent = secs >= 1 ? secs + "s" : "";
+    }, 250);
+    /* Chained timeouts rather than an interval, because the sequence has to
+     * be able to STOP: it holds on the last line instead of looping round to
+     * claim it is starting the search again. */
+    /* 8.11: the stream reports the real stage. Once one arrives the timed
+     * lines stop, and the wait shows what is actually happening. */
+    var real = false;
+    function show(text) {
+      label.textContent = text;
+      label.className = "";
+      void label.offsetWidth;
+      label.className = "go-waitin";
+    }
+    d.setStage = function (text) {
+      if (!text || !d.parentNode) return;
+      real = true;
+      if (label.textContent !== text) show(text);
+    };
+    function step() {
+      if (real || !d.parentNode || i >= WAIT_LINES.length - 1) return;
+      i += 1;
+      label.textContent = WAIT_LINES[i];
+      /* Restart the fade: drop the class, force a reflow, put it back.
+       * Without the reflow the browser coalesces remove+add and the
+       * animation never re-runs. */
+      label.className = "";
+      void label.offsetWidth;
+      label.className = "go-waitin";
+      setTimeout(step, WAIT_DWELL);
+    }
+    setTimeout(step, WAIT_DWELL);
+    return d;
+  }
+
   /** Render a set of tappable pointers. Chips are ephemeral UI derived
    *  from the current stage — deliberately NOT stored in messages, so a
    *  resumed conversation doesn't show stale buttons for choices that
@@ -736,6 +1209,21 @@
     Array.prototype.forEach.call($log.querySelectorAll("[data-chips]"), function (n) {
       n.remove();
     });
+    clearGhost();
+  }
+
+  /** The reply the assistant expects next, shown in the empty composer.
+   *  Right arrow accepts it into the field and Enter sends it, so answering
+   *  "Would you like them?" is two keys. Lives and dies with the chips. */
+  var ghostReply = null;
+  function setGhost(text) {
+    ghostReply = text;
+    $in.placeholder = text + "  (→ to accept)";
+  }
+  function clearGhost() {
+    if (ghostReply === null) return;
+    ghostReply = null;
+    if (!$in.disabled) unlockComposer();
   }
 
   function renderScopeBar() {
@@ -754,8 +1242,7 @@
       state.stage = "category";
       renderScopeBar();
       lockComposer();
-      say("No problem — which product range would you like to ask about?");
-      askCategory();
+      askCategory("No problem — which product range would you like to ask about?");
     });
   }
 
@@ -822,7 +1309,7 @@
       if (cfg.signInUrl) {
         chips([{
           label: "Sign in for full AI support",
-          onClick: function () { window.open(cfg.signInUrl, "_blank"); },
+          onClick: function () { goSignIn(cfg.signInUrl); },
         }], null);
       }
     };
@@ -839,8 +1326,7 @@
         onClick: function () {
           heard("Request technical support");
           state.intent = "support";
-          say("I can answer technical questions from our product documentation. First, which product range?");
-          askCategory();
+          askCategory("I can answer technical questions from our product documentation. First, which product range?");
         },
       },
       {
@@ -848,8 +1334,7 @@
         onClick: function () {
           heard("Find a product");
           state.intent = "product";
-          say("Let's find the right one. Which range are you interested in?");
-          askCategory();
+          askCategory("Let's find the right one. Which range are you interested in?");
         },
       },
       {
@@ -857,8 +1342,7 @@
         onClick: function () {
           heard("Get spare parts & accessories");
           state.intent = "parts";
-          say("I can look up parts and accessories referenced in the documentation. Which product is it for?");
-          askCategory();
+          askCategory("I can look up parts and accessories referenced in the documentation. Which product is it for?");
         },
       },
       {
@@ -908,8 +1392,7 @@
     // "product" and anything unrecognised: the safe path is the one that
     // asks which product, since every answer is scoped to one.
     state.intent = "product";
-    say("Which product range is this about?");
-    askCategory();
+    askCategory("Which product range is this about?");
   }
 
   // ── contact forms (sales / support) ───────────────────────────────────
@@ -1175,8 +1658,7 @@
     if (form.cc_visitor) {
       var ccNote = document.createElement("div");
       ccNote.className = "go-fnote";
-      ccNote.textContent = "We will copy you in on the reply, so you have the "
-        + "thread and can chase it directly.";
+      ccNote.textContent = "Our team will reply to the email address above.";
       wrap.appendChild(ccNote);
     }
 
@@ -1224,6 +1706,7 @@
           transcript: form.allow_summary ? transcriptForServer() : [],
           enquiry: enqBox ? enqBox.value.trim() : "",
           summary_source: enqBox && enqBox.value.trim() ? source : "none",
+          visitor_id: visitorId(),
         }),
       })
         .then(function (r) {
@@ -1232,11 +1715,12 @@
           });
           return r.json();
         })
-        .then(function () {
+        .then(function (d) {
           wrap.remove();
+          var ref = d && d.reference ? " Your reference is " + d.reference + "." : "";
           say("Thanks — that's been recorded and our " +
               (kind === "sales" ? "sales" : "support") +
-              " team will be in touch. Anything else I can help with?");
+              " team will be in touch." + ref + " Anything else I can help with?");
           chips([
             {
               label: "Ask a question",
@@ -1274,7 +1758,11 @@
       });
   }
 
-  function askCategory() {
+  // `prompt` is the "which range?" line. It is only said when there is a
+  // real choice: a deployment with ONE documented range picks it silently,
+  // rather than asking a question with one possible answer (askProduct
+  // already does the same for a range with one product).
+  function askCategory(prompt) {
     state.stage = "category";
     lockComposer();
     save();
@@ -1291,6 +1779,17 @@
           say("I don't have any product documentation loaded yet, so I can't answer questions right now. Please contact us directly and we'll help.", { flagged: true });
           return;
         }
+        // Only when that range has a documented product: askProduct sends an
+        // empty range back here, and skipping again would loop forever.
+        if (usable.length === 1 && (usable[0].products || []).some(function (p) {
+          return (p.doc_count || 0) > 0;
+        })) {
+          state.category = { key: usable[0].key, name: usable[0].name };
+          renderScopeBar();
+          askProduct(usable[0]);
+          return;
+        }
+        if (prompt) say(prompt);
         chips(
           usable.map(function (c) {
             return {
@@ -1386,7 +1885,8 @@
    *  Picking one usually resolves against the curated answer with no LLM
    *  call at all. Failure here is non-fatal — the visitor can still type. */
   function suggestQuestions() {
-    fetch(cfg.api + "/widget/faq?product=" + encodeURIComponent(state.product.key))
+    fetch(cfg.api + "/widget/faq?product=" + encodeURIComponent(state.product.key)
+          + "&language=" + encodeURIComponent(detectedLanguage()))
       .then(function (r) {
         return r.ok ? r.json() : { faq: [] };
       })
@@ -1403,7 +1903,7 @@
               label: f.question,
               style: "q",
               onClick: function () {
-                ask(f.question);
+                ask(f.question, { faqId: f.id });
               },
             };
           }),
@@ -1445,8 +1945,7 @@
               unlockComposer();
               scrollDown();
             } else {
-              say("Before we continue — which product range is this about?");
-              askCategory();
+              askCategory("Before we continue — which product range is this about?");
             }
             save();
           },
@@ -1455,6 +1954,26 @@
       ],
       null
     );
+  }
+
+  /** Back from sign-in with a question parked: restore the conversation
+   *  without the "carry on or start again?" prompt — they obviously want to
+   *  carry on — and ask it again with the token this page now has. Returns
+   *  false when there is nothing valid to replay, so the normal open runs. */
+  function resumeAfterSignIn() {
+    var p = takePendingAsk();
+    var saved = loadSaved();
+    if (!p || !saved || !saved.product || saved.sessionId !== p.sessionId) return false;
+    state = saved;
+    state.stage = "chat";
+    renderLog();
+    renderScopeBar();
+    save();
+    say("You're signed in now, so here's the full answer.");
+    // Quota first: ask() picks faq_only vs standard from it, and on a fresh
+    // page it has not been fetched yet.
+    refreshQuota().then(function () { ask(p.q, { silent: true }); });
+    return true;
   }
 
   // ── query ─────────────────────────────────────────────────────────────
@@ -1537,20 +2056,19 @@
     // Belt-and-braces: the composer is disabled without a scope, but a
     // chip callback or a future code path could still get here.
     if (!state.product) {
-      say("Let me get the right documentation first — which product range?");
-      askCategory();
+      askCategory("Let me get the right documentation first — which product range?");
       return;
     }
     busy = true;
     $send.disabled = true;
     clearChips();
     heard(q);
-    var s = status("Checking the documentation");
+    var s = waiting();
 
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
 
-    fetch(cfg.api + "/widget/ask", {
+    fetch(cfg.api + "/widget/ask/stream", {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
@@ -1562,6 +2080,7 @@
         category: state.category ? state.category.key : null,
         skip_faq: !!opts.skipFaq,
         faq_id: opts.faqId || null,
+        language: detectedLanguage(),
       }),
     })
       .then(function (r) {
@@ -1579,7 +2098,7 @@
             throw err;
           });
         }
-        return r.json();
+        return readAnswerStream(r, s);
       })
       .then(function (d) {
         s.remove();
@@ -1596,10 +2115,15 @@
         // Backend says a full answer needs an account.
         if (d.needs_sign_in) {
           say(d.answer, { flagged: false });
-          if (d.sign_in_url || cfg.signInUrl) {
+          // The page's own URL first: WordPress builds it with redirect_to
+          // pointing back at this page, which is where the replay has to
+          // happen. The backend's WIDGET_SIGN_IN_URL has no idea which page
+          // the visitor was on.
+          var signIn = cfg.signInUrl || secureUrl(d.sign_in_url);
+          if (signIn) {
             chips([{
               label: "Sign in for a full answer",
-              onClick: function () { window.open(d.sign_in_url || cfg.signInUrl, "_blank"); },
+              onClick: function () { goSignIn(signIn, q); },
             }], null);
           }
           return;
@@ -1626,10 +2150,60 @@
           return;
         }
         say(d.answer || "No answer returned.", {
+          // Only a real answer types out.
+          //  - a curated FAQ answer returns in ~0.08s, so revealing it would
+          //    ADD delay to the one path that is genuinely instant;
+          //  - a refusal or a service-outage notice is not an answer being
+          //    composed, and typing out "the answering service isn't
+          //    reachable" one character at a time is a slow way to deliver
+          //    bad news.
+          reveal: !d.from_faq && !d.flagged && !d.service_degraded,
           sources: d.flagged ? null : d.sources,
           flagged: !!d.flagged,
-          badge: d.from_faq ? "Reviewed answer" : null,
+          badge: d.from_faq ? (d.faq_reviewed ? "Reviewed answer" : "From our FAQ") : null,
+          // Only a generated answer can be voted on: a curated one has been
+          // reviewed, and a refusal or clarify question is not an answer.
+          requestId: (!d.from_faq && !d.flagged && !d.offer_support &&
+                      !d.needs_clarification && !d.service_degraded &&
+                      d.request_id) || null,
         });
+
+        // The answer asked a yes/no question ("Would you like them?") and
+        // sent the replies it can honour. Tap one, or right arrow + Enter.
+        var replies = d.suggested_replies || [];
+        if (replies.length) {
+          chips(replies.map(function (opt, i) {
+            return {
+              label: opt,
+              style: i ? "alt" : null,
+              onClick: function () { ask(opt); },
+            };
+          }), null);
+          setGhost(replies[0]);
+          return;
+        }
+
+        // The assistant asked a question back. It has always ALSO sent the
+        // answers it would accept -- product labels drawn from the documents
+        // it just searched -- and this client dropped them, so "which model
+        // did you mean?" arrived as prose and the visitor had to type a name
+        // they may not know. Tapping one sends it as the next message, which
+        // is the same path as typing it: the backend resolves a short
+        // fragment against the previous turn.
+        var clarifyOpts = d.needs_clarification ? (d.clarification_options || []) : [];
+        if (clarifyOpts.length) {
+          chips(
+            clarifyOpts.map(function (opt) {
+              return {
+                label: opt,
+                style: "q",
+                onClick: function () { ask(opt); },
+              };
+            }),
+            "Which did you mean?"
+          );
+          return;
+        }
 
         // A refusal with no next step leaves the visitor stuck: the
         // documentation genuinely does not cover it, and the widget just says
@@ -1642,15 +2216,19 @@
           // knows. The backend's refusal text is accurate but bare, and
           // "I cannot answer that" with no route onward reads as a brush-off.
           var sForm = formFor("support");
-          var offer = "That is not something I have in my knowledge base, so I "
+          // A handoff turn ("I want to talk to a person") has already said
+          // what happens next; repeating "that is not in my knowledge base"
+          // under it would contradict the answer. Only the route is added.
+          var offer = d.role === "handoff" ? ""
+            : "That is not something I have in my knowledge base, so I "
             + "would rather point you at someone than guess.";
           if (sForm.phone) {
-            offer += " You can email our support team, or call them on "
+            offer += (offer ? " You" : "You") + " can email our support team, or call them on "
                    + sForm.phone + ".";
-          } else {
+          } else if (offer) {
             offer += " I can pass it to our support team by email.";
           }
-          say(offer);
+          if (offer) say(offer);
 
           var supportChips = [{
             // The support form, not a mailto: — it collects the configured
@@ -1666,12 +2244,20 @@
             style: "alt",
             onClick: function () { $in.focus(); },
           });
+          // 8.12: the closest page the search did find, when there is one.
+          var nearDoc = docChip(d.more_context);
+          if (nearDoc) supportChips.splice(1, 0, nearDoc);
           chips(supportChips, "What would you like to do?");
+        } else if (!d.flagged && !d.service_degraded && !d.needs_sign_in) {
+          afterAnswer(d);
         }
       })
       .catch(function (e) {
         s.remove();
-        var detail = e && e.status === 429 && e.body ? e.body : null;
+        // FastAPI wraps an HTTPException as {"detail": {...}}; the stream's
+        // error event sends the inner object. Reading e.body.error directly
+        // missed every 429, so a quota limit read as "check your connection".
+        var detail = e && e.status === 429 && e.body ? (e.body.detail || e.body) : null;
         if (detail && detail.error === "quota_exceeded") {
           var msg = detail.message || "You have reached your limit for now.";
           if (detail.reset_at) msg += " " + resetsAt(detail.reset_at);
@@ -1697,10 +2283,172 @@
       });
   }
 
+  /** 8.12: what the server sent to go with an answer, as chips: more from
+   *  the manual, the manual itself at the page, and up to three related
+   *  questions. Nothing is added to state.messages: the passages are
+   *  document text, not the assistant's answer, and history is what the
+   *  next question is condensed against. */
+  function afterAnswer(d) {
+    var mc = d.more_context || {};
+    var items = [];
+    if (mc.kind === "detail" && (mc.passages || []).length) {
+      items.push({
+        label: "Show more from the manual",
+        onClick: function () { showPassages(mc.passages); },
+      });
+    }
+    var doc = docChip(mc);
+    if (doc) items.push(doc);
+    var turn = state.messages.length;
+    relatedQuestions().then(function (rel) {
+      // Not if the visitor has already moved on.
+      if (busy || state.messages.length !== turn) return;
+      rel.forEach(function (f) {
+        items.push({ label: f.question, style: "q",
+                     onClick: function () { ask(f.question, { faqId: f.id }); } });
+      });
+      if (items.length) chips(items, rel.length ? "Related questions" : null);
+    });
+  }
+
+  /** "Open <manual>, page N". Signed-in only: /source_file is token gated,
+   *  so for a guest the chip could only fail. */
+  function docChip(mc) {
+    var doc = mc && mc.document;
+    if (!cfg.token || !doc || !doc.download_url) return null;
+    var pages = doc.pages || [];
+    return {
+      label: "Open " + pretty(doc.source) + (pages.length ? ", page " + pages[0] : ""),
+      style: "alt",
+      onClick: function () { openDoc(doc.download_url, pages[0]); },
+    };
+  }
+
+  function openDoc(url, page) {
+    // Opened now, while the click still counts, or the browser blocks it.
+    var w = window.open("", "_blank");
+    var headers = {};
+    if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+    fetch(cfg.api + url, { headers: headers })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then(function (blob) {
+        var u = URL.createObjectURL(blob) + (page ? "#page=" + page : "");
+        if (w) w.location.href = u; else window.open(u, "_blank");
+      })
+      .catch(function () {
+        if (w) w.close();
+        say("That document could not be opened just now.", { flagged: true });
+      });
+  }
+
+  /** Document excerpts, labelled with where they came from. Shown as a
+   *  quote, not as the assistant speaking: relevance was ranked, not
+   *  checked against the question. */
+  function showPassages(passages) {
+    var row = document.createElement("div");
+    row.className = "go-row";
+    var b = document.createElement("div");
+    b.className = "go-b bot";
+    passages.forEach(function (p) {
+      var h = document.createElement("div");
+      h.className = "go-srcn";
+      h.textContent = "From " + pretty(p.source) + (p.page ? ", page " + p.page : "");
+      var t = document.createElement("blockquote");
+      t.className = "go-quote";
+      t.textContent = p.text;
+      b.appendChild(h);
+      b.appendChild(t);
+    });
+    row.appendChild(b);
+    $log.appendChild(row);
+    scrollDown();
+  }
+
+  /** Curated questions for this product the visitor has not asked yet,
+   *  reviewed ones first. */
+  function relatedQuestions() {
+    if (!state.product) return Promise.resolve([]);
+    var asked = {};
+    state.messages.forEach(function (m) {
+      if (m.role === "user") asked[(m.text || "").trim().toLowerCase()] = true;
+    });
+    return fetch(cfg.api + "/widget/faq?limit=10&product=" + encodeURIComponent(state.product.key)
+                 + "&language=" + encodeURIComponent(detectedLanguage()))
+      .then(function (r) { return r.ok ? r.json() : { faq: [] }; })
+      .then(function (d) {
+        return (d.faq || [])
+          .filter(function (f) {
+            return f.question && (f.answer || "").trim()
+              && !asked[f.question.trim().toLowerCase()];
+          })
+          .sort(function (a, b) { return (b.edited ? 1 : 0) - (a.edited ? 1 : 0); })
+          .slice(0, 3);
+      })
+      .catch(function () { return []; });
+  }
+
+  /** 8.11: read /widget/ask/stream's server-sent events into the object
+   *  /widget/ask returns, showing each real stage on the wait line.
+   *  EventSource is GET-only, so the POST body is parsed here; with no
+   *  ReadableStream the whole body is read at the end instead. */
+  function readAnswerStream(r, wait) {
+    var d = null, text = "", fail = null, buf = "";
+    function frame(raw) {
+      var ev = "message", data = "";
+      raw.split("\n").forEach(function (line) {
+        if (line.indexOf("event: ") === 0) ev = line.slice(7).trim();
+        else if (line.indexOf("data: ") === 0) data += line.slice(6);
+      });
+      if (!data) return;
+      var v = JSON.parse(data);
+      if (ev === "status") { if (wait.setStage) wait.setStage(v.stage); }
+      else if (ev === "meta") d = v;
+      else if (ev === "delta") text += v.text;
+      else if (ev === "error") {
+        fail = new Error("HTTP " + v.status);
+        fail.status = v.status;
+        fail.body = v.detail;
+      }
+    }
+    function feed(chunk) {
+      buf += chunk.replace(/\r/g, "");
+      var i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        frame(buf.slice(0, i));
+        buf = buf.slice(i + 2);
+      }
+    }
+    function finish() {
+      if (buf.trim()) frame(buf);
+      if (fail) throw fail;
+      if (!d) throw new Error("the answer stream ended early");
+      d.answer = text;
+      return d;
+    }
+    if (!r.body || !r.body.getReader || typeof TextDecoder === "undefined") {
+      return r.text().then(function (all) { feed(all); return finish(); });
+    }
+    var reader = r.body.getReader(), dec = new TextDecoder();
+    function pump() {
+      return reader.read().then(function (res) {
+        if (res.done) { feed(dec.decode()); return finish(); }
+        feed(dec.decode(res.value, { stream: true }));
+        return pump();
+      });
+    }
+    return pump();
+  }
+
   // ── events ────────────────────────────────────────────────────────────
-  $launch.addEventListener("click", function () {
+  function openPanel(firstScreen) {
     root.classList.add("go-open");
     $launch.setAttribute("aria-expanded", "true");
+    // $launch (which held focus) becomes display:none the instant "go-open"
+    // is applied, and a display:none element cannot hold focus -- the
+    // browser drops it to <body> with nothing announced. Move it into the
+    // dialog explicitly instead of leaving a keyboard/screen-reader user
+    // stranded with no sense of where they landed.
+    $panel.focus();
     if (!opened) {
       opened = true;
       // Config must be applied before the first screen is drawn: the welcome
@@ -1708,17 +2456,25 @@
       // built-in ones first would show a flash of the wrong wording. The
       // fetch resolves even on failure, so this cannot leave the panel blank.
       loadConfig().then(function () {
+        if (firstScreen && firstScreen()) return;
         var saved = loadSaved();
         if (saved) offerResume(saved);
         else startFresh();
       });
     }
-  });
+  }
+  $launch.addEventListener("click", function () { openPanel(); });
 
   // Warm the config as soon as the script runs rather than on first open, so
   // the panel is usually ready instantly. Harmless if never opened: one
   // small GET.
   loadConfig();
+
+  // Landed back from sign-in: open straight onto the answer. Only with a
+  // token — without one the sign-in did not complete, and replaying would
+  // just show the same "sign in" wall again. The parked question is left
+  // for a later signed-in page load until it expires.
+  if (cfg.token && hasPendingAsk()) openPanel(resumeAfterSignIn);
 
   function close() {
     root.classList.remove("go-open");
@@ -1743,6 +2499,12 @@
     $send.disabled = !$in.value.trim() || busy || $in.disabled;
   });
   $in.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowRight" && ghostReply && !$in.value) {
+      e.preventDefault();
+      $in.value = ghostReply;
+      $send.disabled = busy || $in.disabled;
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       $form.requestSubmit();

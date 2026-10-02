@@ -21,9 +21,22 @@ pypdf
 # into space-joined cells, which made spec tables unusable. MIT, unlike
 # PyMuPDF which is AGPL-3.0 without a commercial licence.
 pdfplumber
+# OCR for scanned / image-only pages (ocr.py), run only on pages an admin
+# approves. Apache-2.0, ONNX models, no system binary -- Tesseract would
+# need installing beside the exe. onnxruntime is already a dependency.
+# 3.x, not rapidocr-onnxruntime 1.x: only 3.x offers the English
+# recogniser, and the Chinese default drops the spaces between words.
+rapidocr>=3.4
 python-docx
 
 cryptography
 
 streamlit
 requests
+
+# Local (no model call, no network) language guess for an anonymous
+# visitor's question when the widget itself sent no language hint
+# (language.py's detect_language_no_llm). Pure Python, no model download --
+# unlike the FAQ-multilingual feature's own translation calls, this one
+# runs on every unhinted anonymous question, so it must not cost a request.
+langdetect

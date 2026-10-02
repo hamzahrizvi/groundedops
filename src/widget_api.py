@@ -21,15 +21,21 @@ Endpoints
     POST /widget/ask      ask a question (costs credits)
 """
 import asyncio
+import collections
 import re
+import threading
+import uuid
 import logging
 import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
+from typing import Literal
 
 import faq_store
+import jsonstore
 import quota
 
 logger = logging.getLogger(__name__)
@@ -54,6 +60,67 @@ class AskRequest(BaseModel):
     # FAQ disambiguation passthrough.
     faq_id: str | None = None
     skip_faq: bool = False
+    # The visitor's language, as the widget itself determined it (an
+    # explicit embed override, the host page's own declared locale, or the
+    # browser's) -- see groundedops-widget.js's detectedLanguage(). Used
+    # only on the anonymous FAQ-only path; the signed-in pipeline has its
+    # own, LLM-based language handling (language.py's looks_foreign/
+    # to_english). Any shape survives here -- normalized once, in
+    # _resolve_anon_language.
+    language: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=64)
+    session_id: str | None = None
+    visitor_id: str | None = None
+    vote: Literal["up", "down"]
+    note: str = Field("", max_length=280)
+
+
+# 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
+# made-up ids. Filled when /ask returns a pipeline answer.
+# ponytail: in memory, so a restart forgets them and a vote on an answer
+# given before it is refused with 404; persist if that starts to matter.
+_RECENT_ANSWERS: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
+_RECENT_MAX = 5000
+_recent_lock = threading.Lock()
+_FEEDBACK_PATH = os.getenv("WIDGET_FEEDBACK_PATH", "widget_feedback.json")
+_feedback_lock = threading.Lock()
+
+
+def _remember_answer(request_id, q, scope, session_id, answer="") -> None:
+    if not request_id:
+        return
+    with _recent_lock:
+        _RECENT_ANSWERS[request_id] = {"q": q, "scope": scope,
+                                       "session_id": session_id,
+                                       "answer": (answer or "")[:4000]}
+        while len(_RECENT_ANSWERS) > _RECENT_MAX:
+            _RECENT_ANSWERS.popitem(last=False)
+
+
+def _save_vote(request_id: str, row: dict) -> None:
+    """One row per answer, so a changed mind replaces the first vote."""
+    with _feedback_lock:
+        data = jsonstore.load(_FEEDBACK_PATH, {}, label="widget feedback")
+        if not isinstance(data, dict):
+            data = {}
+        data[request_id] = row
+        jsonstore.save(_FEEDBACK_PATH, data, label="widget feedback")
+
+
+# 8.11: what the visitor is told while the pipeline runs. A stage is marked
+# when it FINISHES, so each one names the step that starts next. Stages not
+# listed say nothing new and are not sent.
+PROGRESS_LINES = {
+    "condense":   "Searching the manuals",
+    "retrieve":   "Reading the pages that matched",
+    "procedures": "Writing the answer",
+    "generate":   "Checking the answer against the manual",
+    "escalate":   "Trying our backup service",
+    "retry":      "Rewriting the answer and checking it again",
+}
 
 
 def _client_ip(request: Request) -> str:
@@ -120,36 +187,22 @@ def widget_catalog():
             "message": "Product list is temporarily unavailable.",
         })
 
-    # Count distinct ingested sources per product/category.
-    #
-    # Reads BOTH "products" and "product" metadata keys: ingest.py writes
-    # the plural, while the admin catalog endpoint reads the singular, so
-    # doc_count there is 0 for everything ingested normally. Accepting both
-    # keeps this correct regardless of which path wrote the document.
-    prod_sources, cat_sources = {}, {}
+    # Distinct ingested sources per product/category, from the shared
+    # inventory (docindex) -- the same numbers the admin /catalog shows.
     try:
-        from db import get_collection
-        got = get_collection().get(include=["metadatas"])
-        for m in (got.get("metadatas") or []):
-            src = m.get("source")
-            if not src:
-                continue
-            raw = m.get("products") or m.get("product") or ""
-            for key in [k.strip() for k in str(raw).split(",") if k.strip()]:
-                prod_sources.setdefault(key, set()).add(src)
-            ckey = (m.get("category") or "").strip()
-            if ckey:
-                cat_sources.setdefault(ckey, set()).add(src)
+        from docindex import doc_counts
+        prod_counts, cat_counts = doc_counts()
     except Exception as e:
         logger.warning(f"widget catalog doc_count failed (non-fatal): {e}")
+        prod_counts, cat_counts = {}, {}
 
     cats = []
     for c in (cat.get("categories") or []):
         prods = [{"key": p["key"], "name": p["name"],
-                  "doc_count": len(prod_sources.get(p["key"], set()))}
+                  "doc_count": prod_counts.get(p["key"], 0)}
                  for p in (c.get("products") or [])]
         prods = [p for p in prods if p["doc_count"] > 0]
-        ccount = len(cat_sources.get(c["key"], set()))
+        ccount = cat_counts.get(c["key"], 0)
         # Keep a range if either it or any of its products has documents -
         # a document tagged only at category level still makes the range
         # answerable.
@@ -165,7 +218,8 @@ def widget_catalog():
 
 
 @router.get("/faq")
-def widget_faq(product: str | None = None, limit: int = 4):
+def widget_faq(product: str | None = None, limit: int = 4,
+              language: str | None = None):
     """Curated questions for a product, shown as starting suggestions.
 
     Only entries with a human-reviewed answer are returned - an unanswered
@@ -174,18 +228,30 @@ def widget_faq(product: str | None = None, limit: int = 4):
     """
     try:
         import faq_store
+        # No question text to run the no-LLM detector on here (this is a
+        # GET with no visitor input), so only the widget's own explicit
+        # hint is honoured, and only once the feature is actually on --
+        # same gate as the ask path. Always resolves to a CONCRETE code
+        # (never None/"no filter"): starter suggestions must be one
+        # language, not English and translations mixed together.
+        lang = "en"
+        if quota.multilingual_faq_enabled():
+            code = _normalize_lang(language)
+            if code and (code == "en" or code in quota.faq_enabled_languages()):
+                lang = code
         # display_only: on guest chat this list IS the interface, so a
         # harvested table caption ("Operation: Temperature, Humidity") shown
         # as a suggested question is worse than one fewer suggestion. Those
         # entries stay fully searchable -- see faq_store.is_displayable.
         items = [f for f in faq_store.list_for_product(product,
-                                                       display_only=True)
+                                                       display_only=True,
+                                                       language=lang)
                  if (f.get("answer") or "").strip()]
     except Exception as e:
         logger.error(f"widget faq failed: {e}")
         return {"faq": []}
     return {"faq": [{"id": f["id"], "question": f["question"],
-                     "answer": f["answer"]}
+                     "answer": f["answer"], "edited": bool(f.get("edited"))}
                     for f in items[:max(1, min(limit, 10))]]}
 
 
@@ -197,6 +263,9 @@ def _public_sources(sources) -> list:
         "page_label": s.get("page_label"),
         "snippet": s.get("snippet"),
         "download_url": s.get("download_url"),
+        # Crops from the cited pages: url, page, caption. Already public
+        # in form -- no chunk ids, no scores.
+        "figures": s.get("figures") or [],
     } for s in (sources or [])]
 
 
@@ -218,13 +287,67 @@ def _public_more_context(mc) -> dict | None:
     }
 
 
+_LANG_CODE_RE = re.compile(r"^[a-z]{2}$")
+
+
+def _normalize_lang(code: str | None) -> str:
+    c = (code or "").strip().lower().split("-")[0]
+    return c if _LANG_CODE_RE.match(c) else ""
+
+
+def _resolve_anon_language(payload_language: str | None, question: str) -> str:
+    """Which FAQ-language pool an anonymous question should match against.
+
+    "en" (the default, always allowed) unless the feature is switched on
+    AND the visitor's language -- from the widget's own hint, or failing
+    that a local no-LLM guess -- is one the operator has enabled. A guess
+    that doesn't match an enabled language falls back to "en" rather than
+    matching nothing: the pool is scoped, not the visitor turned away.
+    """
+    if not quota.multilingual_faq_enabled():
+        return "en"
+    code = _normalize_lang(payload_language)
+    if not code:
+        import language
+        code = language.detect_language_no_llm(question) or "en"
+    return code if (code == "en" or code in quota.faq_enabled_languages()) else "en"
+
+
+def _faq_turn(payload, *args, **kwargs) -> dict:
+    """_faq_response for a guest turn, logged. These returns never reach
+    query(), so no trace is open and nothing used to record them; the row
+    carries M2's field names (session_id, origin, outcome) so the guest
+    funnel reads from logs.jsonl like every other turn."""
+    resp = _faq_response(*args, **kwargs)
+    try:
+        import pipeline_trace as ptrace
+        from logger import log_interaction
+        outcome = ("clarify" if resp["needs_clarification"] else
+                   ("faq.picked" if payload.faq_id else "faq.answer")
+                   if resp["from_faq"] else "refusal")
+        tok = ptrace.start()
+        try:
+            ptrace.set_meta(surface="widget", session_id=payload.session_id,
+                            origin=ptrace.origin_for(payload.session_id, "widget"))
+            ptrace.mark(outcome)
+            log_interaction(payload.q, resp["answer"], role="faq_only")
+        finally:
+            ptrace.reset(tok)
+    except Exception as exc:
+        logger.warning(f"guest FAQ turn not logged: {exc}")
+    return resp
+
+
 def _faq_response(answer: str, caller: dict, matched: str | None = None,
                   candidates: list | None = None, clarify: bool = False,
-                  needs_sign_in: bool = False) -> dict:
+                  needs_sign_in: bool = False, faq_language: str = "en",
+                  reviewed: bool = False) -> dict:
     return {
         "answer": answer,
         "sources": [],
         "from_faq": not needs_sign_in and not clarify,
+        # 9.6: the widget shows "Reviewed answer" only when this is true.
+        "faq_reviewed": reviewed,
         "faq_matched_question": matched,
         "faq_candidates": candidates,
         # A curated FAQ answer ran no retrieval, so there is no spare
@@ -237,11 +360,20 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
             "passages": [], "label": "Contact support for more information",
         },
         "needs_clarification": clarify,
+        # Always present so a client can read it unconditionally. The FAQ
+        # path disambiguates through faq_candidates, which carry ids; these
+        # are the free-text options the generation path builds, and there
+        # are none here.
+        "clarification_options": [],
+        "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
         "effort": "faq_only",
         "quota": quota.status(caller),
         "sign_in_url": os.getenv("WIDGET_SIGN_IN_URL", "") if needs_sign_in else "",
+        # Which language pool actually answered -- transparency for anyone
+        # debugging a "wrong language" report, not read by the widget itself.
+        "faq_language": faq_language,
     }
 
 
@@ -331,8 +463,10 @@ def register(app, answer_query, draft_enquiry=None):
         assembled = _assemble_enquiry(payload.kind, payload.product or "",
                                       notes, transcript)
 
-        anon_ok = os.getenv("WIDGET_AI_DRAFT_ANONYMOUS", "").strip().lower() \
-            in ("1", "true", "yes")
+        # The console switch, or the env the site-bot instance sets: the
+        # env alone left drafting shut after the console opened /ask.
+        anon_ok = quota.anon_llm_enabled() or os.getenv(
+            "WIDGET_AI_DRAFT_ANONYMOUS", "").strip().lower() in ("1", "true", "yes")
         if draft_enquiry is None or (tier == "anonymous" and not anon_ok):
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
@@ -373,7 +507,11 @@ def register(app, answer_query, draft_enquiry=None):
         # allowance there is no point resolving effort or touching the FAQ.
         # A 429 with a distinct reason, so the widget can say "this chat has
         # reached its limit, start a new one" rather than the daily wording.
-        sess = quota.session_check(payload.session_id)
+        # This handler is `async`, so anything that blocks here blocks EVERY
+        # other request on the event loop: the quota sqlite calls (a new
+        # connection each), and the FAQ lookup, which embeds the question
+        # and can rebuild the FAQ vector cache after an edit. Threadpool.
+        sess = await run_in_threadpool(quota.session_check, payload.session_id)
         if not sess["allowed"]:
             raise HTTPException(status_code=429, detail={
                 "error": "quota_exceeded",
@@ -393,8 +531,14 @@ def register(app, answer_query, draft_enquiry=None):
         # path. An operator can lift it from the console (policy.py's
         # anon_llm_enabled) — a deliberate choice with a bill attached, which
         # is why it is off until someone turns it on.
-        if tier == "anonymous" and not quota.anon_llm_enabled():
-            gate = quota.check_faq_lookup(caller)
+        # 9.4: a guest who reaches the site-wide daily cap is served exactly
+        # as if the switch were off -- never a 429 for the site's own spend.
+        guest_capped = (tier == "anonymous" and quota.anon_llm_enabled()
+                        and (await run_in_threadpool(
+                            quota.check, caller, spec["credits"]))["reason"]
+                        == "global_quota")
+        if tier == "anonymous" and (not quota.anon_llm_enabled() or guest_capped):
+            gate = await run_in_threadpool(quota.check_faq_lookup, caller)
             if not gate["allowed"]:
                 raise HTTPException(status_code=429, detail={
                     "error": "quota_exceeded",
@@ -405,35 +549,59 @@ def register(app, answer_query, draft_enquiry=None):
                     "message": "You have reached today's limit for FAQ lookups.",
                 })
 
-            quota.consume_faq_lookup(caller)
+            await run_in_threadpool(quota.consume_faq_lookup, caller)
 
-            # Selecting a specific curated question is served by id.
+            # Selecting a specific curated question is served by id -- the
+            # id already came from a language-scoped suggest_candidates call
+            # in an earlier turn, so no language re-check is needed here.
             if payload.faq_id:
                 entry = faq_store.get_by_id(payload.faq_id)
                 if entry:
-                    return _faq_response(entry["answer"], caller,
-                                         matched=entry["question"])
+                    return _faq_turn(payload, 
+                        entry["answer"], caller, matched=entry["question"],
+                        faq_language=faq_store.norm_lang(entry.get("language")) or "en",
+                        reviewed=faq_store.is_reviewed(entry))
                 raise HTTPException(status_code=404, detail={
                     "error": "not_found", "message": "That answer is no longer available."})
 
-            faq = faq_store.suggest_candidates(payload.q, payload.product or payload.category)
+            lang = _resolve_anon_language(payload.language, payload.q)
+            faq = await run_in_threadpool(
+                faq_store.suggest_candidates, payload.q,
+                payload.product or payload.category, True, lang)
 
             if faq["mode"] == "answer":
-                return _faq_response(faq["entry"]["answer"], caller,
-                                     matched=faq["entry"]["question"])
+                return _faq_turn(payload, faq["entry"]["answer"], caller,
+                                     matched=faq["entry"]["question"],
+                                     faq_language=lang,
+                                     reviewed=faq_store.is_reviewed(faq["entry"]))
+
+            # "Can I have the MyCheckr manual?" -- the file is member-only
+            # (/source_file is token gated), so say that plainly rather than
+            # the generic "no reviewed answer", which reads as "we have no
+            # manual". A curated FAQ about manuals still wins, above.
+            import doc_request
+            if doc_request.document_request(payload.q):
+                return _faq_turn(payload, 
+                    "Product manuals and documents are available to account "
+                    "holders. Sign in and I can give you the download link.",
+                    caller, needs_sign_in=True, faq_language=lang)
 
             if faq["mode"] == "disambiguate":
-                return _faq_response(
+                return _faq_turn(payload, 
                     "These FAQs match your query - please select the one you meant:",
-                    caller, candidates=faq["candidates"], clarify=True)
+                    caller, candidates=faq["candidates"], clarify=True,
+                    faq_language=lang)
 
-            # Nothing curated covers it. This is the upsell moment, and the
-            # honest one: we are not refusing, we simply have no reviewed
-            # answer and a full answer needs an account.
-            return _faq_response(
+            # Nothing curated covers it in this language. Not a fall-through
+            # to the English pool: scoring non-English text against
+            # English-worded entries is exactly the "same topic, wrong
+            # answer" failure suggest_candidates's own design exists to
+            # prevent. record_gap (inside suggest_candidates) already
+            # captured this as language-tagged demand.
+            return _faq_turn(payload, 
                 "I don't have a reviewed answer for that yet. Sign in to your "
                 "account and I can search the full product documentation for you.",
-                caller, needs_sign_in=True)
+                caller, needs_sign_in=True, faq_language=lang)
 
         # ── Member / staff: full pipeline, charged in credits ─────────
         gate = quota.check(caller, spec["credits"])
@@ -445,7 +613,10 @@ def register(app, answer_query, draft_enquiry=None):
                 "limit": gate["limit"],
                 "remaining": gate["remaining"],
                 "reset_at": gate["reset_at"],
-                "message": "You have used your allowance for today. It resets in 24 hours.",
+                "message": ("The assistant has reached its limit for today. "
+                            "Please try again tomorrow, or contact our team."
+                            if gate["reason"] == "global_quota" else
+                            "You have used your allowance for today. It resets in 24 hours."),
             })
 
         started = time.time()
@@ -475,7 +646,11 @@ def register(app, answer_query, draft_enquiry=None):
         # Curated answers and disambiguation prompts involve no LLM call,
         # so they cost nothing - cheap for us, and it steers people towards
         # the reviewed answers.
-        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")) \
+        # ...and neither is our own outage: service_degraded means no
+        # provider answered, and quota.py promises a failed request does not
+        # burn the visitor's allowance.
+        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
+                        or result.get("service_degraded")) \
                   else spec["credits"]
         state = quota.consume(caller, charged) if charged else quota.status(caller)
 
@@ -486,6 +661,15 @@ def register(app, answer_query, draft_enquiry=None):
             quota.session_record(payload.session_id,
                                  tokens_used=int(result.get("total_tokens") or 0))
 
+        # The shortcut replies (steps, "tell me more", handoff) return before
+        # main.query mints a request_id; a vote still needs one to name.
+        if not result.get("request_id"):
+            result["request_id"] = uuid.uuid4().hex[:12]
+        if not (result.get("from_faq") or result.get("faq_candidates")):
+            _remember_answer(result.get("request_id"), payload.q,
+                             payload.product or payload.category,
+                             payload.session_id, result.get("answer"))
+
         logger.info(f"widget ask tier={tier} effort={level} charged={charged} "
                     f"remaining={state['remaining']} "
                     f"ms={round((time.time() - started) * 1000)}")
@@ -494,7 +678,21 @@ def register(app, answer_query, draft_enquiry=None):
             "answer": result.get("answer"),
             "sources": _public_sources(result.get("sources")),
             "from_faq": bool(result.get("from_faq")),
+            "faq_reviewed": bool(result.get("faq_reviewed")),
             "faq_candidates": result.get("faq_candidates"),
+            # 8.1: /query decided these but this endpoint builds its own dict,
+            # so they never reached the surface customers actually use. Most
+            # visibly, a handoff turn's own "I'll hand this over to a person"
+            # was followed by the widget's own "that is not something I have
+            # in my knowledge base" -- the offer_support refusal copy -- since
+            # the widget could not tell a handoff from a plain refusal without
+            # `role`. `reason` and `service_degraded` are the same drop for
+            # the console's/instrumentation's sake; `request_id` lets a
+            # visitor's report be matched to a log line.
+            "role": result.get("role"),
+            "reason": result.get("reason"),
+            "request_id": result.get("request_id"),
+            "service_degraded": bool(result.get("service_degraded")),
             # v15.2: passed through so the widget can offer a human instead of
             # dead-ending on a refusal. It was already computed by /query but
             # this endpoint builds its own response dict, so it never reached
@@ -512,6 +710,21 @@ def register(app, answer_query, draft_enquiry=None):
             # with _public_sources; the passages carry the text instead.
             "more_context": _public_more_context(result.get("more_context")),
             "needs_clarification": bool(result.get("needs_clarification")),
+            # The options themselves, not just the boolean. They have been
+            # built on every clarify turn since v12 and dropped here ever
+            # since -- so the widget rendered "which did you mean?" as prose
+            # and the visitor had to type the answer to a question we had
+            # already enumerated. Strings only, and short ones: they are
+            # product labels or the visitor's own earlier questions, so
+            # nothing here is new information leaving the backend.
+            "clarification_options": [
+                str(o)[:120] for o in
+                (result.get("clarification_options") or [])[:5]],
+            # Replies the answer asked for ("Would you like them?"), shown as
+            # buttons and as the composer's right-arrow suggestion.
+            "suggested_replies": [
+                str(o)[:80] for o in
+                (result.get("suggested_replies") or [])[:3]],
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
@@ -519,6 +732,45 @@ def register(app, answer_query, draft_enquiry=None):
             "session": quota.session_check(payload.session_id),
         }
 
+
+    @router.post("/feedback")
+    def widget_feedback(payload: FeedbackRequest, request: Request):
+        """PUBLIC -- a thumbs up or down on one answer.
+
+        Only for an answer this process gave, in the same conversation, and
+        capped by the same limiter as the contact form. A down vote also
+        flags the question on the console's FAQs-from-customers page.
+        """
+        with _recent_lock:
+            seen = _RECENT_ANSWERS.get(payload.request_id)
+        if not seen or (seen["session_id"] or None) != (payload.session_id or None):
+            raise HTTPException(status_code=404, detail="No such answer.")
+        gate = quota.check_public_write("feedback", payload.visitor_id,
+                                        _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429,
+                                detail="Too many votes today. Thank you, though.")
+        from datetime import datetime, timezone
+        _save_vote(payload.request_id, {
+            "vote": payload.vote,
+            "note": payload.note.strip(),
+            "question": seen["q"],
+            "answer": seen.get("answer", ""),
+            "scope": seen["scope"],
+            "session_id": payload.session_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        if payload.vote == "down":
+            faq_store.record_gap(seen["q"], seen["scope"],
+                                 reason="visitor_flagged", flag=True)
+            # 10.2: the reviewer needs to see what the visitor was shown.
+            if seen.get("answer"):
+                faq_store.stamp_gap({"flagged_answer": seen["answer"]},
+                                    question=seen["q"])
+        import logger as interaction_log
+        interaction_log.log_feedback(payload.request_id, payload.vote,
+                                     payload.session_id)
+        return {"received": True}
 
     @router.post("/ask/stream")
     async def widget_ask_stream(payload: AskRequest, request: Request):
@@ -551,28 +803,64 @@ def register(app, answer_query, draft_enquiry=None):
                     + "data: " + _json.dumps(data) + "\n\n")
 
         async def run():
-            yield sse("status", {"stage": "searching the documentation"})
+            yield sse("status", {"stage": "Searching the documentation",
+                                 "id": "entry", "at_ms": 0})
+            # The pipeline reports each stage through pipeline_trace's
+            # listener; the answer runs as a task so its progress can be
+            # sent while it is still working.
+            import contextvars
+            import pipeline_trace
+            loop = asyncio.get_running_loop()
+            progress: asyncio.Queue = asyncio.Queue()
+            ctx = contextvars.copy_context()
+            ctx.run(pipeline_trace.listen, loop, progress.put_nowait)
+            task = loop.create_task(widget_ask(payload, request), context=ctx)
+            sent = set()
+            while not task.done():
+                getter = asyncio.ensure_future(progress.get())
+                await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+                if not getter.done():
+                    getter.cancel()
+                    continue
+                stage = getter.result()
+                line = PROGRESS_LINES.get(stage.get("id"))
+                if line and line not in sent:
+                    sent.add(line)
+                    yield sse("status", {"stage": line, "id": stage["id"],
+                                         "at_ms": stage.get("at_ms")})
             try:
-                result = await widget_ask(payload, request)
+                result = task.result()
             except HTTPException as e:
                 yield sse("error", {"status": e.status_code,
                                     "detail": e.detail})
                 return
-            except Exception as e:
+            except Exception:
+                # This one is the PUBLIC surface, so the rule matters most
+                # here: an anonymous visitor gets a status and nothing else.
+                # The traceback is already in the log via logger.exception.
                 logger.exception("widget ask/stream failed")
-                yield sse("error", {"status": 503, "detail": str(e)[:160]})
+                yield sse("error", {"status": 503, "detail":
+                                    "The assistant is temporarily "
+                                    "unavailable. Please try again."})
                 return
 
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
-                               ("sources", "from_faq", "faq_candidates",
+                               ("sources", "from_faq", "faq_reviewed", "faq_candidates",
+                                "request_id", "role", "reason",
+                                "needs_sign_in", "sign_in_url",
+                                "service_degraded", "more_context",
                                 "offer_support", "needs_clarification",
+                                "clarification_options", "suggested_replies",
                                 "flagged", "quota", "session")})
 
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would
             # show text that has not been checked.
-            _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*\s*|\n+")
+            # Lossless: the widget rebuilds the answer from these pieces, and
+            # the old pattern dropped a leading "." (".NET") or a "?" after a
+            # newline.
+            _SENTENCE = re.compile(r"[^\n]*?(?:[.!?]+(?:\s+|$)|\n+|$)")
             for part in _SENTENCE.findall(answer) or [answer]:
                 if part:
                     yield sse("delta", {"text": part})

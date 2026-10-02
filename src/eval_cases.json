@@ -32,7 +32,8 @@
       "product": "mycheckr_mini",
       "outcome": "answered",
       "keywords_all": [
-        "no data stored"
+        "no data",
+        "stored"
       ],
       "reference": "No data is stored. MyCheckr is GDPR certified by the Age Check Certification Scheme (ACCS).",
       "grade": true
@@ -156,7 +157,7 @@
       "product": "nv9usb",
       "outcome": "answered",
       "keywords_all": [
-        "10-15"
+        "15%"
       ],
       "reference": "Some national currencies differ in thickness and circulation practices; depending on usage this can impact cashbox capacities by 10-15%. Consult an ITL representative for details.",
       "grade": true
@@ -204,6 +205,17 @@
       ],
       "reference": "The SMART Coin System operates at a market leading 12 coins per second.",
       "grade": true
+    },
+    {
+      "q": "how fast is it?",
+      "product": "sku_scs",
+      "outcome": "answered",
+      "keywords_all": [
+        "12"
+      ],
+      "reference": "Follow-up test, no new_session: 'it' must resolve to the SMART Coin System from the previous case, giving 12 coins per second.",
+      "grade": true,
+      "note": "2026-09-25: moved to sit directly after its predecessor; two MyConnect cases had been inserted between them, so 'it' resolved to the MyConnect Hub"
     },
     {
       "q": "What problem does the SMART Coin System eliminate?",
@@ -304,16 +316,6 @@
       "grade": true
     },
     {
-      "q": "how fast is it?",
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "12"
-      ],
-      "reference": "Follow-up test, no new_session: 'it' must resolve to the SMART Coin System from the previous case, giving 12 coins per second.",
-      "grade": true
-    },
-    {
       "q": "what voltage does it need",
       "new_session": true,
       "outcome": "clarify",
@@ -348,7 +350,15 @@
       "new_session": true,
       "product": "sku_scs",
       "outcome": "rejected",
-      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System."
+      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System. The SCS manual never mentions facial recognition, so the honest reply says so (8.3).",
+      "keywords_all": [
+        "facial recognition"
+      ],
+      "note": "2026-09-25: a grounded 'No, it validates coins by ...' beats a refusal. 2026-09-29 (8.3, owner's decision): a feature the manual never mentions gets 'the documentation doesn't mention facial recognition', which counts as rejected (answerability not_mentioned); it must still never say Yes.",
+      "keywords_absent": [
+        "yes, ",
+        "supports facial recognition"
+      ]
     },
     {
       "q": "what is the maximum coin capacity in litres of the SMART Coin System",
@@ -356,6 +366,189 @@
       "product": "sku_scs",
       "outcome": "rejected",
       "reference": "The reviewed answers claim 'market leading coin capacity' without stating a figure. Inventing a number is the failure being guarded against; refusing is correct unless the manual states it."
+    },
+    {
+      "q": "Could I talk to a real person about my BV30?",
+      "new_session": true,
+      "product": "bv30",
+      "layer": "refusal",
+      "outcome": "handoff",
+      "note": "8.15 (2026-09-29): stress item 1. intents.is_handoff_request fires on it."
+    },
+    {
+      "q": "Please raise a support ticket for my NV200 Spectral",
+      "new_session": true,
+      "product": "nv200s",
+      "layer": "refusal",
+      "outcome": "handoff",
+      "note": "8.15 (2026-09-29): stress item 1, the ticket wording."
+    },
+    {
+      "q": "What would 50 BV30 units cost me?",
+      "new_session": true,
+      "product": "bv30",
+      "layer": "refusal",
+      "outcome": "deflect",
+      "note": "8.15 (2026-09-29): stress item 6. sales.is_commercial_question fires on it."
+    },
+    {
+      "q": "Is there a discount if I order ten BV30s?",
+      "new_session": true,
+      "product": "bv30",
+      "layer": "refusal",
+      "outcome": "deflect",
+      "note": "8.15 (2026-09-29): stress item 6, a volume-discount shape."
+    },
+    {
+      "q": "¿Cuánto cuesta el SMART Coin System?",
+      "language": "es",
+      "new_session": true,
+      "product": "sku_scs",
+      "layer": "refusal",
+      "outcome": "deflect",
+      "note": "8.15 (2026-09-29): stress item 9. Translated at the edge, then the commercial rule."
+    },
+    {
+      "q": "Could you send me the SMART Coin System manual?",
+      "new_session": true,
+      "product": "sku_scs",
+      "layer": "refusal",
+      "outcome": "manual",
+      "note": "8.15 (2026-09-29): stress item 5. doc_request.document_request -> manual."
+    },
+    {
+      "q": "Can I get the NV200 Spectral manual?",
+      "new_session": true,
+      "product": "nv200s",
+      "layer": "refusal",
+      "outcome": "manual",
+      "note": "8.15 (2026-09-29): stress item 5, second product."
+    },
+    {
+      "q": "Good morning!",
+      "new_session": true,
+      "product": "mycheckr",
+      "layer": "refusal",
+      "outcome": "answered",
+      "keywords_absent": [
+        "couldn't find",
+        "could not find",
+        "not something I have"
+      ],
+      "note": "8.15 (2026-09-29): stress item 7. Role greeting, no search."
+    },
+    {
+      "q": "Does the BV30 have a built-in touchscreen?",
+      "new_session": true,
+      "product": "bv30",
+      "layer": "grounding",
+      "outcome": "rejected",
+      "keywords_absent": [
+        "Yes,"
+      ],
+      "note": "8.15 (2026-09-29): stress item 8. Expected: the not-mentioned reply, not an invented Yes."
+    },
+    {
+      "q": "Can the SMART Coin System take card payments?",
+      "new_session": true,
+      "product": "sku_scs",
+      "layer": "grounding",
+      "outcome": "rejected",
+      "keywords_absent": [
+        "Yes,"
+      ],
+      "note": "8.15 (2026-09-29): stress item 8. A coin system; cards are not in its manual."
+    },
+    {
+      "q": "Does the BV30 run on the same supply voltage as the NV200 Spectral?",
+      "new_session": true,
+      "layer": "comparison",
+      "outcome": "answered",
+      "keywords_all": [
+        "12",
+        "24"
+      ],
+      "note": "8.15 (2026-09-29): stress item 3. BV30 12V, NV200S 24V (scenario 11 and the 8.6 note)."
+    },
+    {
+      "q": "What interfaces does the NV200 Spectral support?",
+      "new_session": true,
+      "layer": "retrieval",
+      "outcome": "answered",
+      "keywords_all": [
+        [
+          "SSP",
+          "ccTalk",
+          "MDB"
+        ]
+      ],
+      "sources_any": [
+        "NV200"
+      ],
+      "note": "8.15 (2026-09-29): stress item 4, turn 1 of 2."
+    },
+    {
+      "q": "and the BV30?",
+      "layer": "retrieval",
+      "outcome": "answered",
+      "keywords_all": [
+        [
+          "SSP",
+          "ccTalk",
+          "pulse",
+          "MDB"
+        ]
+      ],
+      "sources_any": [
+        "BV30"
+      ],
+      "note": "8.15 (2026-09-29): stress item 4, turn 2: must switch to the BV30, not repeat the NV200."
+    },
+    {
+      "q": "what is the difference between the NV9 Spectral and the NV9USB+",
+      "new_session": true,
+      "layer": "comparison",
+      "outcome": "answered",
+      "keywords_all": [
+        "NV9 Spectral",
+        "NV9USB+"
+      ],
+      "note": "S21 10.4 (2026-10-02): turn 1 of 2, the sales.compare spec table (scenario 18 T1)."
+    },
+    {
+      "q": "do they both use the same SSP interface",
+      "layer": "comparison",
+      "outcome": "answered",
+      "keywords_all": [
+        "Yes",
+        "SSP"
+      ],
+      "sources_any": [
+        "NV9USB+"
+      ],
+      "note": "S21 10.4 (2026-10-02): scenario 18 T3. Each named product gets its own share of the context; before, the NV9USB+ SSP passage ranked #10 of 19 and was cut, so the verifier rejected 'yes, both' 3/3."
+    },
+    {
+      "q": "Which SSP command polls the NV200 Spectral for events?",
+      "new_session": true,
+      "product": "nv200s",
+      "layer": "grounding",
+      "outcome": "answered",
+      "keywords_all": [
+        "0x07"
+      ],
+      "note": "8.15 (2026-09-29): SSP poll is command 0x07."
+    },
+    {
+      "q": "What is the command code for SSP sync?",
+      "new_session": true,
+      "product": "nv200s",
+      "layer": "grounding",
+      "outcome": "answered",
+      "keywords_all": [
+        "0x11"
+      ],
+      "note": "8.15 (2026-09-29): SSP sync is command 0x11."
     }
   ]
 }

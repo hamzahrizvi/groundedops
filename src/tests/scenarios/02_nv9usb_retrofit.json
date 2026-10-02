@@ -1,0 +1,48 @@
+{
+  "id": "02_nv9usb_retrofit",
+  "product": "NV9USB+",
+  "product_key": "nv9usb",
+  "source": "NV9USB+ Range User Manual-v1.pdf",
+  "persona": "Engineer retrofitting an existing machine.",
+  "expect_labels": [
+    "NV9USB+"
+  ],
+  "turns": [
+    {
+      "q": "can the NV9USB+ be mounted upside down in a wall unit",
+      "followup": false,
+      "commercial": false,
+      "note": "orientation, standalone"
+    },
+    {
+      "q": "what baud rate does the serial link default to",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone"
+    },
+    {
+      "q": "is that configurable from the host or only in firmware",
+      "followup": true,
+      "commercial": false,
+      "note": "'that' refers to the previous answer"
+    },
+    {
+      "q": "which pinout do I need for the IF5 interface cable",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone despite naming no product"
+    },
+    {
+      "q": "can two units share one RS232 bus",
+      "followup": false,
+      "commercial": false,
+      "note": "contains no reference marker"
+    },
+    {
+      "q": "ok and what about powering them from one PSU",
+      "followup": true,
+      "commercial": false,
+      "note": "stacked opener -- the gap found 19 Sep"
+    }
+  ]
+}

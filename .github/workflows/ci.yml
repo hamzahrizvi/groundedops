@@ -1,21 +1,32 @@
 name: CI — test & build
 
-# Runs on every push and PR to main. Real gates (a failure fails the run):
-#   1. unit  — the pure-logic test suite (no ML deps, no corpus needed)
-#   2. build — both Docker images must build
-#
-# Advisory (visible warning, does not fail the run):
-#   3. eval-selfcheck — validates the eval suite schema. The locked
-#      baseline is gitignored, so it can't be fully checked in CI; the
-#      full eval runs locally where the corpus exists.
+# Runs on every push and PR to main or an experimental/** branch (M11: 89
+# commits on experimental/v16.4-logic-and-latency had never been seen by
+# CI before this). Real gates (a failure fails the run):
+#   1. unit           — the pure-logic test suite (no ML deps, no corpus
+#                        needed) plus the scenario routing suite, gated on
+#                        the committed floor (run_scenarios.py --min-pass)
+#   2. build           — both Docker images must build
+#   3. eval-selfcheck — validates every eval suite's schema and that its
+#                        committed baseline parses (eval_baseline*.json are
+#                        NOT gitignored, .gitignore:46, so this is a real
+#                        gate, not advisory — continue-on-error dropped)
 #
 # Deployment is STAGE 2 below — commented out until a target exists.
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "experimental/**" ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, "experimental/**" ]
+  # 10.3: nightly run of every gate above, including the Docker start-up
+  # test, so a dependency or base-image change that breaks the build is seen
+  # the next morning, not at the next push. GitHub runs scheduled workflows
+  # on the DEFAULT branch only; to run another branch, use "Run workflow"
+  # (workflow_dispatch) and pick it in the branch dropdown.
+  schedule:
+    - cron: "17 2 * * *"   # 02:17 UTC, off the top of the hour
+  workflow_dispatch:
 
 # Least privilege, set once at the top so every job inherits it. Without an
 # explicit block a job gets the token's default permissions, which on some
@@ -77,6 +88,14 @@ jobs:
         run: |
           cd src
           python run_tests.py
+      - name: Run scenario routing suite (M11)
+        # 148 is the current committed count (24 scenarios, 160 checks);
+        # a handful of misses are known/documented, not silently accepted
+        # by relabelling them out -- see PENDING.md's M10 section. Raise
+        # this number when a real fix earns it, never to paper over a drop.
+        run: |
+          cd src
+          python tests/run_scenarios.py --min-pass 148
 
   # ── Gate 2: images build ─────────────────────────────────────────────
   build:
@@ -86,17 +105,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build backend image
         run: docker build -f docker/Dockerfile.backend -t groundedops-backend ./src
+      # 10.3: building is not starting. Run the image with no index or key and
+      # check it comes up, finishes warm-up, and does not claim to be ready.
+      - name: Start the image and check health
+        run: bash tools/docker_startup_check.sh groundedops-backend
       # The frontend image was removed in v15.2 with the React SPA. The admin
       # console is served by the backend image; the widget is plain static
       # files with no build step, so there is nothing left to compile here.
 
-  # ── Advisory: eval suite schema ──────────────────────────────────────
-  # continue-on-error surfaces a visible warning instead of silently
-  # swallowing the result with `|| echo`, which made the old workflow
-  # green regardless of outcome.
+  # ── Gate 3: eval suite schema ─────────────────────────────────────────
+  # Real gate, not advisory (M11): eval_baseline*.json are committed, not
+  # gitignored (.gitignore:46), so a broken suite or an unparsable baseline
+  # is exactly the kind of thing this should catch before merge.
+  # `--selfcheck` needs no backend and no corpus, only every case file's
+  # schema and its baseline's JSON — so it runs over the four suites now
+  # the "blind" layer exists (M1), not just eval_cases.json.
   eval-selfcheck:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -108,12 +133,14 @@ jobs:
         run: |
           cd src
           pip install -r requirements.txt
-      - name: Validate eval suite schema
+      - name: Validate eval suite schemas
         env:
           GENERATION_MODE: local
         run: |
           cd src
-          python eval.py --selfcheck
+          for f in eval_cases.json eval_cases_blind.json eval_cases_blind2.json eval_cases_retrieval.json; do
+            python eval.py --selfcheck --cases "$f"
+          done
 
   # ── STAGE 2: DEPLOY (uncomment once a target exists) ─────────────────
   # deploy:

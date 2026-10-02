@@ -41,6 +41,7 @@ retrieval, so no extra model and no extra memory. Where it isn't
 importable, lexical ranking alone still produces a usable shortlist —
 which is acceptable now precisely BECAUSE the user confirms.
 """
+import hashlib
 import json
 import os
 import re
@@ -138,8 +139,28 @@ _STOP = {
 # UnicodeDecodeError, the bare except swallowed it, and the FAQ store silently
 # read as EMPTY -- every curated answer gone with no error surfaced anywhere.
 
+# Parsed once and served from memory until the file changes (mtime and
+# size), which every writer here does through _save. Each caller gets its
+# own copies: entries are flat, so a per-entry dict() is enough, and it
+# costs a third of the parse it replaces on every query and console load.
+_store_cache: dict = {"key": None, "items": []}
+
+
+def _store_key():
+    try:
+        st = os.stat(_PATH)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
 def _load() -> list[dict]:
-    return jsonstore.load(_PATH, [], label="FAQ store")
+    key = _store_key()
+    if key is None or key != _store_cache["key"]:
+        _store_cache["items"] = jsonstore.load(_PATH, [], label="FAQ store")
+        _store_cache["key"] = key
+    return [dict(it) if isinstance(it, dict) else it
+            for it in _store_cache["items"]]
 
 
 def _save(items: list[dict]) -> None:
@@ -147,6 +168,7 @@ def _save(items: list[dict]) -> None:
     jsonstore. This store is the one that nearly proved why: read it as
     cp1252, get [], write it back, and every curated answer is gone."""
     jsonstore.save(_PATH, items, label="FAQ store")
+    _store_cache["key"] = None
 
 
 def record_questions(source: str, products: str, qa_pairs: list[dict],
@@ -194,6 +216,40 @@ def _norm_q(q: str | None) -> str:
     return t.rstrip("?.! ")
 
 
+_LANG_RE = re.compile(r"^[a-z]{2}$")
+
+
+def norm_lang(code: str | None) -> str:
+    """A bare lowercase ISO 639-1 code ("fr", not "fr-CA" or "French"), or
+    "" if `code` isn't one. An entry with no `language` field is implicitly
+    "en" -- every FAQ before this feature existed is English -- so callers
+    compare against `norm_lang(entry.get("language")) or "en"`, never the
+    raw field."""
+    c = (code or "").strip().lower().split("-")[0]
+    return c if _LANG_RE.match(c) else ""
+
+
+def hash_answer(text: str) -> str:
+    """Fingerprint of an answer's text, used to tell whether a translation
+    still matches the English source it was made from."""
+    return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
+
+
+def is_stale_translation(entry: dict, by_id: dict | None = None) -> bool:
+    """True when `entry` is a translation whose English source has changed
+    (or vanished) since the translation was made. `by_id` lets a caller
+    checking many entries load the store once instead of once per entry."""
+    src_id = entry.get("translation_of")
+    if not src_id:
+        return False
+    if by_id is None:
+        by_id = {it["id"]: it for it in _load()}
+    src = by_id.get(src_id)
+    if src is None:
+        return True
+    return hash_answer(src.get("answer") or "") != entry.get("source_answer_sha256")
+
+
 def merge_questions(source: str, products: str, qa_pairs: list[dict],
                     category: str = "") -> dict:
     """NON-DESTRUCTIVE generate (v3.4.0).
@@ -208,7 +264,16 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
     regenerated "Does it need WiFi?" won't be stored again alongside an
     existing "does it need wifi".
 
-    Returns {"added": n, "skipped_duplicates": n, "total": n}.
+    A `qa` dict may also carry `language`, `translation_of` (the id of the
+    English entry it translates) and `source_answer_sha256`. Those don't
+    text-dedupe -- a translated question doesn't resemble its English
+    source -- they upsert by `(translation_of, language)` instead: a
+    refreshed translation replaces the old one in place, UNLESS an admin
+    has since hand-edited it. `edited` is sacred everywhere else in this
+    file (see update_entry/record_questions); a silent re-translate must
+    not be the one place that overwrites a human's correction.
+
+    Returns {"added", "updated", "skipped_duplicates", "skipped_edited", "total"}.
     """
     with _lock:
         items = _load()
@@ -217,6 +282,7 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
         # duplicate to the person reading the FAQ list.
         want = _norm_key(products)
         existing = set()
+        by_translation_key = {}
         for it in items:
             prods = [_norm_key(p) for p in (it.get("products") or "").split(",")]
             if want in prods or want == _norm_key(it.get("category")):
@@ -228,18 +294,37 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
                 # comes back as a "new" near-duplicate every time.
                 if it.get("original_question"):
                     existing.add(_norm_q(it["original_question"]))
+            if it.get("translation_of"):
+                key = (it["translation_of"], norm_lang(it.get("language")) or "en")
+                by_translation_key[key] = it
 
         added = 0
+        updated = 0
         skipped = 0
+        skipped_edited = 0
         for qa in qa_pairs:
             q = (qa.get("question") or "").strip()
             if not q:
                 continue
-            if _norm_q(q) in existing:
+            translation_of = qa.get("translation_of")
+            lang = norm_lang(qa.get("language")) or "en"
+            if translation_of:
+                prior = by_translation_key.get((translation_of, lang))
+                if prior is not None:
+                    if prior.get("edited"):
+                        skipped_edited += 1
+                        continue
+                    prior["question"] = q
+                    prior["answer"] = qa.get("answer", "")
+                    if qa.get("source_answer_sha256"):
+                        prior["source_answer_sha256"] = qa["source_answer_sha256"]
+                    updated += 1
+                    continue
+            elif _norm_q(q) in existing:
                 skipped += 1
                 continue
             existing.add(_norm_q(q))
-            items.append({
+            entry = {
                 "id": str(uuid.uuid4()),
                 "source": source,
                 "products": products,
@@ -251,12 +336,25 @@ def merge_questions(source: str, products: str, qa_pairs: list[dict],
                 # overview) is not curated Q&A and must not outrank it when
                 # matching -- see HARVEST_MIN_SCORE in suggest_candidates.
                 "origin": qa.get("origin", "generated"),
-            })
+            }
+            if qa.get("reviewed"):
+                entry["reviewed"] = True
+            if lang != "en":
+                entry["language"] = lang
+            if translation_of:
+                entry["translation_of"] = translation_of
+                if qa.get("source_answer_sha256"):
+                    entry["source_answer_sha256"] = qa["source_answer_sha256"]
+                by_translation_key[(translation_of, lang)] = entry
+            items.append(entry)
             added += 1
         _save(items)
     _invalidate_cache()
-    logger.info(f"FAQ merge for '{source}': +{added}, {skipped} duplicates skipped")
-    return {"added": added, "skipped_duplicates": skipped, "total": added + skipped}
+    logger.info(f"FAQ merge for '{source}': +{added}, {updated} updated, "
+                f"{skipped} duplicates skipped, {skipped_edited} edited translations kept")
+    return {"added": added, "updated": updated, "skipped_duplicates": skipped,
+            "skipped_edited": skipped_edited,
+            "total": added + updated + skipped + skipped_edited}
 
 
 def add_entry(question: str, answer: str, products: str = "",
@@ -292,11 +390,27 @@ def add_entry(question: str, answer: str, products: str = "",
     return entry
 
 
+def is_reviewed(entry: dict) -> bool:
+    """9.6: may this entry wear the "Reviewed answer" badge? Only when a
+    person provably read it (approved as a draft, written or edited by hand,
+    or a pre-origin curated entry) or verify_faq_entries.py found it
+    supported by its own manual 3 times out of 3. /autogenerate saves
+    drafts nobody read, and harvested entries are raw manual text."""
+    return bool(entry.get("reviewed") or entry.get("verified") is True
+                or entry.get("edited")
+                or entry.get("origin") in ("manual", "curated", None))
+
+
 def update_entry(faq_id: str, question: str | None = None,
-                 answer: str | None = None) -> dict | None:
-    """Edit the question text and/or the answer. update_answer() could
-    only change the answer, so a badly-worded generated question could
-    only be deleted and retyped."""
+                 answer: str | None = None,
+                 products: str | None = None) -> dict | None:
+    """Edit the question text, the answer, and/or which products it applies to.
+
+    `products` is a comma-joined list because that is how this store has
+    always held it -- every reader here already splits on commas, so an
+    answer covering three products needed no migration, only a way to say so.
+    An empty string is meaningful and different from None: it means "all
+    products", which is what an answer with no scope has always meant."""
     with _lock:
         items = _load()
         for it in items:
@@ -311,6 +425,9 @@ def update_entry(faq_id: str, question: str | None = None,
                     it["question"] = new_q
                 if answer is not None:
                     it["answer"] = answer
+                if products is not None:
+                    it["products"] = ",".join(
+                        _norm_key(p) for p in products.split(",") if p.strip())
                 it["edited"] = True
                 _save(items)
                 _invalidate_cache()
@@ -479,17 +596,26 @@ def _for_display(items: list[dict]) -> list[dict]:
     return out
 
 
-def list_for_product(scope_key: str | None,
-                     display_only: bool = False) -> list[dict]:
+def list_for_product(scope_key: str | None, display_only: bool = False,
+                     language: str | None = None) -> list[dict]:
     """Match by PRODUCT or CATEGORY key (case/format tolerant).
 
     display_only is for the surfaces a visitor reads -- the suggestion menu
     and the disambiguation list. Retrieval must NOT pass it: an entry being
     unpresentable is no reason to stop it answering a question.
+
+    `language` is an additive filter, not a replacement for the product
+    scope: `language=None` (the default) means "don't filter by language at
+    all", which is what every caller written before this field existed
+    still gets. A caller opts into language scoping by passing a code.
     """
     items = _load()
     if display_only:
         items = _for_display(items)
+    if language is not None:
+        want_lang = norm_lang(language) or "en"
+        items = [it for it in items
+                if (norm_lang(it.get("language")) or "en") == want_lang]
     if not scope_key or _norm_key(scope_key) == "all":
         return items
     want = _norm_key(scope_key)
@@ -507,19 +633,6 @@ def get_by_id(faq_id: str) -> dict | None:
     for it in _load():
         if it["id"] == faq_id and (it.get("answer") or "").strip():
             return it
-    return None
-
-
-def update_answer(faq_id: str, answer: str) -> dict | None:
-    with _lock:
-        items = _load()
-        for it in items:
-            if it["id"] == faq_id:
-                it["answer"] = answer
-                it["edited"] = True
-                _save(items)
-                _invalidate_cache()
-                return it
     return None
 
 
@@ -619,7 +732,8 @@ def is_curatable_question(question: str) -> bool:
 
 
 def record_gap(question: str, scope_key: str | None,
-               shown: list[str] | None = None, reason: str = "") -> None:
+               shown: list[str] | None = None, reason: str = "",
+               language: str | None = None, flag: bool = False) -> None:
     """Record a question the FAQ could not answer.
 
     Two distinct causes land here, kept separable via `reason`:
@@ -630,6 +744,10 @@ def record_gap(question: str, scope_key: str | None,
         retrieval confidence, or an answer that failed grounding and was
         suppressed (reason e.g. "low_retrieval_confidence",
         "ungrounded_answer_suppressed")
+
+    `flag` is a visitor's thumbs-down on the answer they got (8.10): it
+    counts in `flagged_by_visitor`, not `times_asked`, since the question
+    was already counted when it was asked.
 
     Either way, this is the most valuable by-product of asking instead of
     guessing: an explicit list of questions your documentation is being
@@ -646,6 +764,17 @@ def record_gap(question: str, scope_key: str | None,
     if not key:
         return
     now = __import__("time").time()
+    # 10.2: who asked (M2's origin: widget/console/eval/live/preflight), so
+    # the console can hide harness asks, and the gap's id on the trace, so
+    # main._traced_query can stamp it with how the turn then ended.
+    origin = None
+    if not flag:
+        try:
+            import pipeline_trace
+            origin = pipeline_trace.get_meta("origin")
+            pipeline_trace.set_meta(gap_id=key)
+        except Exception:
+            pass
     try:
         with _lock:
             gaps = []
@@ -662,17 +791,25 @@ def record_gap(question: str, scope_key: str | None,
                     # into the existing entry instead of piling up one row
                     # per ask, so times_asked means what the admin page
                     # implies it means.
-                    g["times_asked"] = int(g.get("times_asked", 1)) + 1
+                    if flag:
+                        g["flagged_by_visitor"] = int(g.get("flagged_by_visitor", 0)) + 1
+                    else:
+                        g["times_asked"] = int(g.get("times_asked", 1)) + 1
+                    if origin:
+                        o = g.setdefault("origins", {})
+                        o[origin] = int(o.get(origin, 0)) + 1
                     g["ts"] = now
                     if scope_key and not g.get("scope"):
                         # Keep the most specific scope seen — a gap first
                         # asked with no product and later inside one belongs
                         # to that product.
                         g["scope"] = scope_key
-                    if reason and not g.get("reason"):
+                    if reason and (flag or not g.get("reason")):
                         g["reason"] = reason
                     if shown:
                         g["suggestions_shown"] = shown
+                    if not g.get("language"):
+                        g["language"] = norm_lang(language) or "en"
                     with open(_GAP_PATH, "w", encoding="utf-8") as f:
                         json.dump(gaps, f, indent=2)
                     return
@@ -687,6 +824,9 @@ def record_gap(question: str, scope_key: str | None,
                 "resolved": False,
                 "resolved_faq_id": None,
                 "spam": False,
+                "language": norm_lang(language) or "en",
+                "flagged_by_visitor": 1 if flag else 0,
+                "origins": {origin: 1} if origin else {},
             })
             if len(gaps) > 500:
                 gaps = gaps[-500:]            # keep it bounded
@@ -694,6 +834,39 @@ def record_gap(question: str, scope_key: str | None,
                 json.dump(gaps, f, indent=2)
     except Exception as e:
         logger.warning(f"could not record FAQ gap (non-fatal): {e}")
+
+
+def stamp_gap(fields: dict, gap_id: str | None = None,
+              question: str | None = None) -> bool:
+    """10.2: write `fields` onto one gap entry (by id, or by the question's
+    key) -- how the turn that recorded it ended (main._traced_query), or the
+    answer a visitor voted down (widget_api). Never creates an entry."""
+    key = gap_id or _gap_key((question or "").strip())
+    if not key or not os.path.exists(_GAP_PATH):
+        return False
+    try:
+        with _lock:
+            with open(_GAP_PATH, encoding="utf-8") as f:
+                gaps = json.load(f)
+            for g in gaps:
+                if g.get("id") == key:
+                    g.update(fields)
+                    with open(_GAP_PATH, "w", encoding="utf-8") as f:
+                        json.dump(gaps, f, indent=2)
+                    return True
+    except Exception as e:
+        logger.warning(f"could not stamp FAQ gap (non-fatal): {e}")
+    return False
+
+
+TEST_ORIGINS = {"eval", "live", "preflight"}
+
+
+def is_test_only(g: dict) -> bool:
+    """Every recorded ask came from a harness session. Entries from before
+    origins were stamped have none and count as real: nothing says otherwise."""
+    o = g.get("origins") or {}
+    return bool(o) and all(k in TEST_ORIGINS for k in o)
 
 
 def _normalize_gap(g: dict) -> dict:
@@ -706,11 +879,12 @@ def _normalize_gap(g: dict) -> dict:
     g.setdefault("resolved_faq_id", None)
     g.setdefault("reason", "")
     g.setdefault("spam", False)
+    g.setdefault("language", "en")
     return g
 
 
 def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
-              include_spam: bool = False) -> list[dict]:
+              include_spam: bool = False, language: str | None = None) -> list[dict]:
     """Most-asked first — the order the console presents as a to-do list.
 
     spam is excluded by default same as resolved — it's still being
@@ -731,6 +905,9 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
         gaps = [g for g in gaps if not g.get("spam")]
     if scope_key:
         gaps = [g for g in gaps if g.get("scope") == scope_key]
+    if language is not None:
+        want_lang = norm_lang(language) or "en"
+        gaps = [g for g in gaps if g.get("language", "en") == want_lang]
     return sorted(gaps, key=lambda g: (-int(g.get("times_asked", 1)), -g.get("ts", 0)))
 
 
@@ -767,35 +944,104 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
 GAP_CLUSTER_THRESHOLD = float(os.getenv("GAP_CLUSTER_THRESHOLD", "0.90"))
 
 _gap_cache_lock = threading.Lock()
-_gap_cache_mtime = None
-_gap_cache_vecs = None
-_gap_cache_texts: list[str] = []
+# question text -> vector. Keyed by the QUESTION, not by the list and its
+# mtime, because /faq/gaps is called with a product filter as often as
+# without one, and the arrival of a single new gap must not invalidate the
+# other three hundred.
+_gap_vec_by_text: dict | None = None
+# Above this many remembered questions the cache is pruned to the set last
+# asked for. Gaps get resolved and stop being asked, and without a bound the
+# file would carry every question the widget has ever failed to answer.
+_GAP_VEC_MAX = 5000
 
 
-def _gap_store_mtime() -> float:
+def _gap_vector_cache_file() -> str:
+    return os.getenv("FAQ_GAP_VECTOR_CACHE") or (_GAP_PATH + ".vectors.npz")
+
+
+def _load_gap_vectors() -> dict:
+    """question -> vector, from disk. {} when there is nothing usable, which
+    is a cache miss and never an error."""
+    path = _gap_vector_cache_file()
+    if not os.path.exists(path):
+        return {}
     try:
-        return os.path.getmtime(_GAP_PATH)
-    except OSError:
-        return 0.0
+        import numpy as np
+        from embeddings import EMBED_MODEL
+        with np.load(path, allow_pickle=False) as z:
+            if str(z["model"]) != EMBED_MODEL:
+                return {}          # different embedder, different vectors
+            texts, vecs = list(z["texts"]), z["vecs"]
+        return {t: vecs[i] for i, t in enumerate(texts)}
+    except Exception as exc:
+        logger.warning(f"gap vector cache unreadable ({exc}); rebuilding")
+        return {}
+
+
+def _save_gap_vectors(by_text: dict) -> None:
+    path = _gap_vector_cache_file()
+    try:
+        import numpy as np
+        from embeddings import EMBED_MODEL
+        texts = list(by_text)
+        tmp = path + ".tmp"
+        # Through a FILE OBJECT, not a path: np.savez appends ".npz" to a
+        # path that lacks it, and the os.replace would then look for a file
+        # that does not exist. Same trap as the FAQ vector cache above.
+        with open(tmp, "wb") as fh:
+            np.savez(fh,
+                     vecs=np.array([by_text[t] for t in texts]),
+                     texts=np.array(texts, dtype="U"),
+                     model=np.array(EMBED_MODEL, dtype="U"))
+        os.replace(tmp, path)
+    except Exception as exc:
+        # Non-fatal: without it the next cold start pays the embeddings again.
+        logger.warning(f"could not write the gap vector cache: {exc}")
 
 
 def _gap_vectors(questions: list[str]):
-    """Embeddings for the gap questions, cached on the gap file's mtime -
-    same pattern as _build_cache above. Returns None if embeddings are
-    unavailable, and the caller falls back to lexical grouping."""
-    global _gap_cache_mtime, _gap_cache_vecs, _gap_cache_texts
+    """Embeddings for the gap questions. Returns None if embeddings are
+    unavailable, and the caller falls back to lexical grouping.
+
+    WHY THIS IS PER-QUESTION AND ON DISK. It was neither, and both cost the
+    same two minutes. GET /faq/gaps runs on EVERY console sign-in (it is one
+    of the seven reads the console opens with), clustering is on by default,
+    and the cache lived only in this process -- so the first sign-in after a
+    restart embedded all 344 gap questions through gte-modernbert-base on
+    CPU. Measured: 121.6 seconds, during which the sign-in appeared to hang
+    and the first question of the day queued behind it for the same model.
+
+    The old key made it worse than once per restart: it compared the WHOLE
+    question list, so one visitor asking one new unanswered question threw
+    away the other 343 vectors and re-embedded them on the next sign-in.
+
+    Keyed on the question text, a question is embedded once, ever. A new gap
+    costs one embedding; a restart costs a file read.
+    """
+    global _gap_vec_by_text
     if _semantic_available is False:
         return None
     try:
+        import numpy as np
         from embeddings import embed_texts
         with _gap_cache_lock:
-            mt = _gap_store_mtime()
-            if (_gap_cache_vecs is None or _gap_cache_mtime != mt
-                    or _gap_cache_texts != questions):
-                _gap_cache_vecs = embed_texts(questions)
-                _gap_cache_texts = list(questions)
-                _gap_cache_mtime = mt
-            return _gap_cache_vecs
+            if _gap_vec_by_text is None:
+                _gap_vec_by_text = _load_gap_vectors()
+            # dict.fromkeys, not set: embedding order has to match `missing`,
+            # and duplicates would be embedded twice for nothing.
+            missing = [q for q in dict.fromkeys(questions)
+                       if q not in _gap_vec_by_text]
+            if missing:
+                for q, v in zip(missing, embed_texts(missing)):
+                    _gap_vec_by_text[q] = v
+                if len(_gap_vec_by_text) > _GAP_VEC_MAX:
+                    keep = set(questions)
+                    _gap_vec_by_text = {t: v for t, v in
+                                        _gap_vec_by_text.items() if t in keep}
+                _save_gap_vectors(_gap_vec_by_text)
+                logger.info("gap vectors: %d embedded, %d cached",
+                            len(missing), len(_gap_vec_by_text))
+            return np.array([_gap_vec_by_text[q] for q in questions])
     except Exception as e:
         logger.warning(f"gap clustering: embeddings unavailable, "
                        f"falling back to lexical ({e})")
@@ -833,10 +1079,13 @@ def cluster_gaps(gaps: list[dict],
     on short questions does not justify, and makes the result depend on
     ordering in ways that are harder to explain to whoever reads the list.
 
-    Only gaps sharing a scope are ever compared. Two products can
-    legitimately be asked the same question and they are separate backlog
-    items -- merging them across products would hide which product is
-    underserved, which is what the page exists to show.
+    Only gaps sharing a scope AND a language are ever compared. Two
+    products can legitimately be asked the same question and they are
+    separate backlog items -- merging them across products would hide
+    which product is underserved, which is what the page exists to show.
+    The same applies across languages: a French and an English gap that
+    happen to vectorise close together are still two different pieces of
+    demand to act on separately.
     """
     if not gaps:
         return []
@@ -855,6 +1104,8 @@ def cluster_gaps(gaps: list[dict],
         for ci, hi in enumerate(heads):
             if (g.get("scope") or "") != (ordered[hi].get("scope") or ""):
                 continue
+            if g.get("language", "en") != ordered[hi].get("language", "en"):
+                continue
             if vecs is not None:
                 sim = float(vecs[i] @ vecs[hi])
             else:
@@ -869,6 +1120,8 @@ def cluster_gaps(gaps: list[dict],
                     "similarity": round(sim, 3),
                 })
                 c["times_asked"] += int(g.get("times_asked", 1))
+                c["flagged_by_visitor"] = (int(c.get("flagged_by_visitor", 0))
+                                           + int(g.get("flagged_by_visitor", 0)))
                 c["cluster_size"] += 1
                 # The cluster's timestamp is the most RECENT ask in it, so
                 # "sort by latest" means what a reader expects.
@@ -1165,6 +1418,20 @@ def lexical_score(a: str, b: str) -> float:
     return inter / smaller
 
 
+def _strip_trailing_scope(question: str) -> str:
+    """Drop a trailing "(Product Name)" of 1-60 chars, e.g. the scope the
+    pipeline appends. Plain string ops, not a regex: the old
+    `\\s*\\([^()]{1,60}\\)\\s*$` backtracked quadratically on long runs of
+    spaces in customer input (CodeQL polynomial-ReDoS)."""
+    s = (question or "").rstrip()
+    if s.endswith(")"):
+        i = s.rfind("(")
+        inner = s[i + 1:-1] if i >= 0 else ""
+        if i >= 0 and 1 <= len(inner) <= 60 and "(" not in inner and ")" not in inner:
+            return s[:i].strip()
+    return s.strip()
+
+
 def verbatim_score(a: str, b: str) -> float:
     """Symmetric overlap, for deciding two questions are THE SAME question.
 
@@ -1329,10 +1596,16 @@ def warm_cache() -> int:
     visitor never pays for it. Returns the number of cached questions."""
     try:
         _semantic_scores("warm up", _load())
-        return len(_cache_ids)
     except Exception as exc:
         logger.warning(f"FAQ cache warmup skipped: {exc}")
-        return 0
+    # The gap vectors too, for the same reason and in the same place: the
+    # console's own sign-in reads /faq/gaps, so leaving this cold just moves
+    # the bill from a visitor to whoever opens the console.
+    try:
+        _gap_vectors([g.get("question", "") for g in list_gaps(None)])
+    except Exception as exc:
+        logger.warning(f"gap vector warmup skipped: {exc}")
+    return len(_cache_ids)
 
 
 def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:
@@ -1358,8 +1631,69 @@ def _semantic_scores(question: str, items: list[dict]) -> dict[str, float]:
 
 # ── the entry point ───────────────────────────────────────────────────
 
-def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
+_CONTENT_STOP = frozenset("""
+what which does the for with can how are is a an of and to in on it its this
+that do i my be there any have has you your use used using range system
+please me we our about will would could should may might tell give not
+""".split())
+
+
+def _norm_word(w: str) -> str:
+    """Enough stemming for two phrasings of one question to meet: "notes"
+    and "note" both become "not", "recycle" and "recycling" "recycl".
+    text_utils.stem keeps the final "e", which is exactly the case that
+    kept them apart."""
+    w = w.lower()
+    for suf in ("ings", "ing", "ers", "er", "ies", "es", "ed", "s", "e"):
+        if len(w) - len(suf) >= 3 and w.endswith(suf):
+            return w[:-len(suf)]
+    return w
+
+
+def _product_terms() -> set[str]:
+    """Stemmed words of every product and category name, key and alias in
+    the catalogue: the words two questions about the same product share
+    without being about the same thing. Read per call; the catalogue is a
+    small file and its cache is invalidated on save."""
+    out: set[str] = set()
+    try:
+        import catalog
+        stem = _norm_word
+        for c in (catalog.catalog().get("categories") or []):
+            names = [c.get("key") or "", c.get("name") or ""]
+            for p in (c.get("products") or []):
+                names += [p.get("key") or "", p.get("name") or ""]
+                names += list(p.get("aliases") or [])
+            for n in names:
+                out |= {stem(w) for w in re.findall(r"[a-z0-9]+", n.lower())}
+    except Exception as exc:
+        logger.debug(f"product terms unavailable: {exc}")
+    return out
+
+
+def _content_stems(text: str) -> set[str]:
+    """The stemmed content words of a question: no stopwords, no product or
+    category names. What is left is what the question is ABOUT."""
+    stem = _norm_word
+    terms = _product_terms()
+    return {stem(w) for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+            if len(w) >= 3 and w not in _CONTENT_STOP and stem(w) not in terms}
+
+
+def suggest_candidates(question: str, scope_key: str | None = None,
+                       record: bool = True, language: str | None = None) -> dict:
     """Decide what to do with an incoming question.
+
+    `language` scopes the candidate pool to entries tagged with that
+    language. Default None means NO filtering -- every entry regardless of
+    language is eligible, which is exactly today's behaviour (there is
+    nothing to filter against before any entry carries a language field)
+    and keeps every caller written before this field existed unaffected. A
+    caller that wants only same-language matches (the widget's anonymous
+    path) passes a resolved code explicitly. Threaded through to
+    list_for_product and to every record_gap call below, so a gap opened
+    by, say, a Spanish question is recorded as Spanish demand rather than
+    silently merged into the English backlog.
 
     Returns one of:
 
@@ -1382,12 +1716,23 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     if not FAQ_ENABLED or not (question or "").strip():
         return {"mode": "none"}
 
-    pool = [it for it in list_for_product(scope_key)
+    pool = [it for it in list_for_product(scope_key, language=language)
             if (it.get("answer") or "").strip()]
     if not pool:
         return {"mode": "none"}
 
-    sem = _semantic_scores(question, pool)
+
+    # In a product chat the pipeline hands us the question with the product
+    # name appended -- "what is the weight of the NV9S? (NV9 Spectral)" --
+    # which is right for retrieval and wrong for a verbatim comparison: the
+    # curated question typed word for word scored 0.50 against itself and
+    # was offered back as "is this what you meant?" instead of answered.
+    # Every widget chat is scoped, so that was every customer.
+    bare = _strip_trailing_scope(question)
+    # Both scores see the question the visitor typed: the pool is already
+    # scoped to the product, so the appended name adds nothing and cost the
+    # paraphrase auto-serve (0.996 bare, under the 0.98 bar with the suffix).
+    sem = _semantic_scores(bare or question, pool)
 
     scored = []
     for it in pool:
@@ -1398,6 +1743,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
         # question" -- see verbatim_score for what went wrong when it did
         # not. s_lex keeps its recall-oriented job of shortlisting.
         s_verb = verbatim_score(question, it["question"])
+        if bare and bare != question:
+            s_verb = max(s_verb, verbatim_score(bare, it["question"]))
         # (a) the same string, or (b) a paraphrase the semantic model is
         # near-certain about AND that shares most of its words. See the
         # AUTO_SERVE_* block above for why both halves of (b) are required.
@@ -1432,7 +1779,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
             scored.append((max(s_sem, s_verb), it, s_sem, s_lex))
 
     if not scored:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: no candidates for {question!r} — going to retrieval")
         return {"mode": "none"}
 
@@ -1507,7 +1855,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     scored = _curated + _harvest
 
     if not scored:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: only weak harvested matches for {question!r} "
                     f"- going to retrieval")
         return {"mode": "none"}
@@ -1531,7 +1880,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     _best_score, _, _best_sem, _best_lex = scored[0]
     _sem_only_min = float(os.getenv("FAQ_SEMANTIC_ONLY_MIN", "0.85"))
     if _best_lex <= 0.0 and _best_sem < _sem_only_min:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: top match {_best_sem:.3f} semantic with no lexical "
                     f"overlap for {question!r} - going to retrieval")
         return {"mode": "none"}
@@ -1555,7 +1905,8 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # choice, for a question whose answer is not in the corpus at all.
     _floor = float(os.getenv("FAQ_CANDIDATE_MIN_SCORE", "0.92"))
     if scored[0][0] < _floor:
-        record_gap(question, scope_key, [])
+        if record:
+            record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: best candidate {scored[0][0]:.3f} < {_floor} for "
                     f"{question!r} - going to retrieval")
         return {"mode": "none"}
@@ -1563,6 +1914,64 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     # Relative cut: keep only what's competitive with the best match.
     _best = scored[0][0]
     scored = [t for t in scored if t[0] >= _best - CANDIDATE_RELATIVE_MARGIN]
+
+    # SAME PRODUCT, DIFFERENT QUESTION -- per candidate this time. The
+    # lexical check above looks only at the best match, and lexical_score
+    # counts the product's own name as overlap, so "How does the NV9USB+
+    # communicate with a host?" was offered "What are typical applications
+    # for the NV9USB+?" (0.930), "What is the NV9USB+ Range?" (0.911) and
+    # "What is the NV9 USB+ Range and what does it do?" (0.899): three
+    # entries that share nothing with the question but the product, and a
+    # menu instead of the answer retrieval had. Measured on the 34-case
+    # eval, 2026-09-25: every wrong candidate shared no stemmed content
+    # word with its question once product and category names were
+    # excluded; every right one did, except a paraphrase at 0.974
+    # ("operating speed" for "coins per second"), which the semantic
+    # exemption keeps.
+    _q_content = _content_stems(question)
+    _sole_min = float(os.getenv("FAQ_SEMANTIC_SOLE_MIN", "0.95"))
+    if _q_content:
+        _kept = []
+        _top_sem = max(t[2] for t in scored)
+        for t in scored:
+            _shared = _content_stems(t[1].get("question") or "") & _q_content
+            # The exemption is for a close PARAPHRASE that happens to use
+            # other words ("operating speed" for "coins per second"), so it
+            # is for the entry at the top and never for a product overview
+            # -- "What is the MyCheckr Mini and what does it do?" scores
+            # 0.96 against anything that names the Mini.
+            _paraphrase = (t[2] >= _sole_min and t[2] >= _top_sem - 0.02
+                           and not _is_definitional(t[1]))
+            if _shared or _paraphrase:
+                _kept.append(t)
+            else:
+                logger.info(f"FAQ: dropped {(t[1].get('question') or '')[:40]!r} "
+                            f"({t[2]:.3f}): no content word shared with {question!r}")
+        if not _kept:
+            if record:
+                record_gap(question, scope_key, [], language=language)
+            logger.info(f"FAQ: every candidate shared only the product name "
+                        f"for {question!r} - going to retrieval")
+            return {"mode": "none"}
+        scored = _kept
+
+    # ONE candidate left, close, and about the same thing: serve it. The
+    # menu exists to let the visitor choose between candidates; with one,
+    # "These FAQs match your query - please select the one you meant" is a
+    # click that only ever has one answer. "Can the NV9USB+ recycle
+    # notes?" -> "Can the NV9USB+ Range provide note recycling?" (0.927,
+    # shares recycl/note) is that case. Harvested reference material is
+    # excluded: it earns a place as a fallback, never a confident answer.
+    _sole_serve = float(os.getenv("FAQ_AUTO_SERVE_SOLE", "0.92"))
+    if (len(scored) == 1 and scored[0][2] >= _sole_serve
+            and scored[0][1].get("origin") != "harvested"
+            and (not _q_content
+                 or _content_stems(scored[0][1].get("question") or "") & _q_content
+                 or scored[0][2] >= _sole_min)):
+        _s, _it, _sem_s, _ = scored[0]
+        logger.info(f"FAQ auto-serve (sole candidate sem={_sem_s:.3f}) for "
+                    f"{question!r}: {(_it.get('question') or '')[:50]!r}")
+        return {"mode": "answer", "entry": _it, "score": round(_s, 3)}
 
     # Only question-shaped entries may be OFFERED. A harvested table caption
     # is a good match key and an unusable menu item, so the two roles split
@@ -1589,16 +1998,3 @@ def suggest_candidates(question: str, scope_key: str | None = None) -> dict:
     logger.info(f"FAQ disambiguate {question!r} -> "
                 + "; ".join(f"{c['question'][:40]} ({c['score']})" for c in cands))
     return {"mode": "disambiguate", "candidates": cands}
-
-
-# Back-compat shim: older callers expect match_answer(). It now only ever
-# returns a NEAR-VERBATIM hit, never a guess — anything ambiguous returns
-# None so the caller falls through rather than silently asserting.
-def match_answer(question: str, scope_key: str | None = None,
-                 min_score: float | None = None) -> dict | None:
-    r = suggest_candidates(question, scope_key)
-    if r["mode"] == "answer":
-        e = r["entry"]
-        return {"answer": e["answer"], "question": e["question"],
-                "score": r["score"], "mode": "answer"}
-    return None

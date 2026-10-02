@@ -1,6 +1,6 @@
+import functools
 import os
 
-from sentence_transformers import SentenceTransformer
 import numpy as np
 
 # v15: was all-MiniLM-L6-v2, whose 256-token limit was the binding constraint
@@ -39,6 +39,10 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
+        # Imported here, not at the top: sentence_transformers brings torch
+        # and transformers with it (~8s), which nothing needs until the
+        # first encode -- and every CLI tool and test imports this module.
+        from sentence_transformers import SentenceTransformer
         # trust_remote_code is required by gte-modernbert and harmless for
         # models that ship no custom code.
         _model = SentenceTransformer(EMBED_MODEL, trust_remote_code=True)
@@ -47,18 +51,6 @@ def _get_model():
 
 def _query_prefix() -> str:
     return _BGE_QUERY_PREFIX if "bge" in EMBED_MODEL.lower() else ""
-
-
-def embedding_dim() -> int:
-    """Dimension of the active model. Used by reindex to detect that an
-    existing collection was built with a different model and must be
-    rebuilt rather than appended to."""
-    m = _get_model()
-    for attr in ("get_embedding_dimension", "get_sentence_embedding_dimension"):
-        fn = getattr(m, attr, None)
-        if callable(fn):
-            return int(fn())
-    return int(m.encode(["x"], convert_to_numpy=True).shape[1])
 
 
 def embed_texts(texts: list[str]) -> np.ndarray:
@@ -70,8 +62,20 @@ def embed_texts(texts: list[str]) -> np.ndarray:
 
 
 def embed_query(query: str) -> np.ndarray:
+    """The query vector, memoised on the exact text.
+
+    One turn embeds the same resolved query three times -- FAQ ranking,
+    retrieval and routing -- and the console's Pipeline check repeats a
+    question verbatim. The model is a process-level constant (EMBED_MODEL),
+    so a cached vector can never go stale. A copy is returned because a
+    caller may normalise or slice in place."""
+    return _embed_query_cached(_query_prefix() + query).copy()
+
+
+@functools.lru_cache(maxsize=512)
+def _embed_query_cached(text: str) -> np.ndarray:
     return _get_model().encode(
-        [_query_prefix() + query],
+        [text],
         convert_to_numpy=True,
         normalize_embeddings=True
     )[0]

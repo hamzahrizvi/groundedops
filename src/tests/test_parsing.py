@@ -158,3 +158,90 @@ def test_pdfplumber_is_the_active_reader():
     by pypdf -- which is the failure mode this module exists to fix. Assert the
     install is present so a dropped dependency is loud, not silent."""
     assert parsing.pdfplumber is not None, "pdfplumber not installed"
+
+
+# ── headings vs wrapped prose ──────────────────────────────────────────────
+# Bug 4: the opening paragraph of the NV4000 Development Kit is set larger
+# than body text, so both of its wrapped lines passed _is_heading -- short
+# enough, alphabetic, no terminal full stop. The first became a section
+# heading with the second as the next heading, leaving it with an empty body
+# that dropped out at ingest. The phrase "multi note recycler and bill
+# validator" was in the document and absent from the index, so the one
+# question every product gets asked -- what is it? -- could not be answered
+# from the document that says.
+
+def test_line_starting_lower_case_is_prose_not_a_heading():
+    assert parsing._continues_previous(
+        "validator. To help you with your integration we have provided")
+
+
+def test_line_spanning_a_sentence_break_is_prose_not_a_heading():
+    assert parsing._continues_previous("Ready to run. Connect the unit")
+
+
+def test_real_headings_are_not_mistaken_for_prose():
+    for heading in ("Currency Datasets", "3D CAD Files", "Contact Us",
+                    "Software Development Kit", "NV4000 Manual"):
+        assert not parsing._continues_previous(heading), heading
+
+
+def test_abbreviation_mid_line_is_not_a_sentence_break():
+    # "Fig. 3" and "e.g. the bezel" are followed by a digit or lower case,
+    # so requiring a capital after the stop leaves them alone.
+    assert not parsing._continues_previous("Fig. 3 shows the bezel")
+
+
+# ── tables keep their own heading ──────────────────────────────────────────
+# Bug 5: every table was appended after ALL of the page's prose, so each one
+# landed under the LAST heading on its page. The 3D CAD table was filed under
+# "Software Development Kit"; "3D CAD Files" kept nothing and never reached
+# the index; and a question about the CAD files could not find the rows that
+# answer it while one naming a part number could.
+
+class _FakeTable:
+    def __init__(self, top, rows):
+        self.bbox = (0, top, 500, top + 40)
+        self._rows = rows
+
+    def extract(self):
+        return self._rows
+
+
+class _FakePage:
+    """Enough of a pdfplumber page for _page_blocks: text lines with tops."""
+
+    def __init__(self, lines):
+        self._lines = lines
+
+    def extract_text_lines(self):
+        return [{"text": t, "top": top} for t, top in self._lines]
+
+
+def test_each_table_stays_under_its_own_heading():
+    page = _FakePage([("3D CAD Files", 100), ("Software Development Kit", 300)])
+    prose = "3D CAD Files\nSoftware Development Kit"
+    tables = [_FakeTable(200, [["NV4000-00000", "1000 Note Cashbox"]]),
+              _FakeTable(400, [["ITL SDK Package Manual", "REST API endpoints"]])]
+
+    blocks = parsing._page_blocks(page, prose, tables)
+    kinds = [k for k, _ in blocks]
+    assert kinds == ["prose", "table", "prose", "table"], blocks
+    assert "3D CAD Files" in blocks[0][1]
+    assert "NV4000-00000" in blocks[1][1]
+    assert "Software Development Kit" in blocks[2][1]
+    assert "ITL SDK Package Manual" in blocks[3][1]
+
+
+def test_page_blocks_falls_back_when_lines_do_not_line_up():
+    # One line object, two lines of text: the split cannot be trusted, so the
+    # old order is kept rather than risking a dropped or duplicated line.
+    page = _FakePage([("Heading", 100)])
+    blocks = parsing._page_blocks(page, "Heading\nand more prose",
+                                  [_FakeTable(50, [["a", "b"]])])
+    assert [k for k, _ in blocks] == ["prose", "table"]
+
+
+def test_page_blocks_with_no_tables_is_one_prose_block():
+    page = _FakePage([("Contact Us", 100)])
+    blocks = parsing._page_blocks(page, "Contact Us", [])
+    assert blocks == [("prose", "Contact Us")]

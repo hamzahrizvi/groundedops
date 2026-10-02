@@ -1,0 +1,48 @@
+{
+  "id": "06_mycheckr_retail",
+  "product": "MyCheckr",
+  "product_key": "mycheckr",
+  "source": "MyCheckr User Manual-v7.pdf",
+  "persona": "Convenience store manager buying age verification.",
+  "expect_labels": [
+    "MyCheckr"
+  ],
+  "turns": [
+    {
+      "q": "what is MyCheckr used for",
+      "followup": false,
+      "commercial": false,
+      "note": "opening"
+    },
+    {
+      "q": "does it need an internet connection in the shop",
+      "followup": true,
+      "commercial": false,
+      "note": "short, pronoun"
+    },
+    {
+      "q": "can my staff use it without any training",
+      "followup": false,
+      "commercial": false,
+      "note": "'it' buried, self-contained"
+    },
+    {
+      "q": "can I get the age of a person from the device",
+      "followup": false,
+      "commercial": false,
+      "note": "names the device, standalone"
+    },
+    {
+      "q": "what about under-18s trying it twice",
+      "followup": true,
+      "commercial": false,
+      "note": "'what about' opener"
+    },
+    {
+      "q": "are there any recurring fees for using it",
+      "followup": false,
+      "commercial": true,
+      "note": "fees -> commercial deflect"
+    }
+  ]
+}

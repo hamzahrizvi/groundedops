@@ -111,8 +111,21 @@ def anon_ip_limit() -> int:
     return int(_policy("anon_ip_daily", ANON_IP_LIMIT))
 
 
+def global_llm_limit() -> int:
+    return int(_policy("global_llm_daily", 0))
+
+
 def anon_llm_enabled() -> bool:
     return bool(_policy("anon_llm_enabled", False))
+
+
+def multilingual_faq_enabled() -> bool:
+    return bool(_policy("multilingual_faq_enabled", False))
+
+
+def faq_enabled_languages() -> set[str]:
+    return {c.strip() for c in str(_policy("faq_enabled_languages", "")).split(",")
+            if c.strip()}
 
 # FAQ lookups are cheap (no LLM, no external call), so anonymous visitors
 # get a generous allowance - enough that a real person never hits it, low
@@ -300,21 +313,73 @@ def resolve_effort(requested: str | None, tier: str) -> tuple[str, dict]:
 
 def check_faq_lookup(caller: dict) -> dict:
     """Abuse ceiling for anonymous FAQ retrieval. Members are not counted
-    here - their credit budget already bounds them."""
+    here - their credit budget already bounds them.
+
+    Checked per visitor AND per IP. The visitor id comes from the browser, so
+    a per-visitor count alone resets whenever someone clears site data or
+    sends a new id -- as does starting a new conversation for the session
+    caps. The per-IP count is the one a determined caller cannot reset.
+    consume_faq_lookup always wrote it; until 2026-09-24 nothing read it, so
+    in the default guest mode (FAQ only) the per-IP ceiling the console
+    describes did not exist.
+    """
     if caller["tier"] != "anonymous":
         return {"allowed": True, "remaining": None, "limit": None,
                 "reset_at": _window_start() + WINDOW_SECONDS, "reason": None}
     win = _window_start()
     key = caller["identity"] + ":faq"
+    ip_key = caller["ip_identity"] + ":faq" if caller.get("ip_identity") else None
     with _lock, _conn() as c:
         used = _used(c, key, win)
+        ip_used = _used(c, ip_key, win) if ip_key else 0
     faq_cap = anon_faq_limit()
     if used >= faq_cap:
         return {"allowed": False, "remaining": 0, "limit": faq_cap,
                 "reset_at": win + WINDOW_SECONDS, "reason": "faq_quota"}
-    return {"allowed": True, "remaining": faq_cap - used,
+    remaining = faq_cap - used
+    if ip_key:
+        ip_cap = anon_ip_limit()
+        if ip_used >= ip_cap:
+            return {"allowed": False, "remaining": 0, "limit": faq_cap,
+                    "reset_at": win + WINDOW_SECONDS, "reason": "ip_faq_quota"}
+        remaining = min(remaining, ip_cap - ip_used)
+    return {"allowed": True, "remaining": remaining,
             "limit": faq_cap, "reset_at": win + WINDOW_SECONDS,
             "reason": None}
+
+
+# Daily caps on the public write routes (contact form, answer votes), as
+# (per visitor, per IP). One limiter for both. The visitor id comes from the
+# browser, so the per-IP count is the one a script cannot reset; it is kept
+# loose because behind a tunnel without CF-Connecting-IP or TRUST_PROXY every
+# visitor shares one IP.
+PUBLIC_WRITE_LIMITS = {
+    "lead": (int(os.getenv("QUOTA_LEADS_PER_VISITOR", "5")),
+             int(os.getenv("QUOTA_LEADS_PER_IP", "30"))),
+    "feedback": (int(os.getenv("QUOTA_VOTES_PER_VISITOR", "50")),
+                 int(os.getenv("QUOTA_VOTES_PER_IP", "300"))),
+}
+
+
+def check_public_write(kind: str, visitor_id: str | None, client_ip: str) -> dict:
+    """Count one public write of `kind` if it fits under both daily caps.
+
+    Checks and counts in one step, so two racing posts cannot both take the
+    last slot. A refused write is not counted. Returns {allowed, reason}.
+    """
+    per_visitor, per_ip = PUBLIC_WRITE_LIMITS[kind]
+    who = identify(None, visitor_id, client_ip)
+    v_key = f"{who['identity']}:{kind}"
+    i_key = f"{who['ip_identity']}:{kind}"
+    win = _window_start()
+    with _lock, _conn() as c:
+        if _used(c, v_key, win) >= per_visitor:
+            return {"allowed": False, "reason": f"{kind}_quota"}
+        if _used(c, i_key, win) >= per_ip:
+            return {"allowed": False, "reason": f"ip_{kind}_quota"}
+        _add(c, v_key, win, 1)
+        _add(c, i_key, win, 1)
+    return {"allowed": True, "reason": None}
 
 
 def consume_faq_lookup(caller: dict) -> None:
@@ -347,6 +412,12 @@ def check(caller: dict, cost: int) -> dict:
             if ip_used + cost > anon_ip_limit():
                 return {"allowed": False, "remaining": 0, "limit": limit,
                         "reset_at": win + WINDOW_SECONDS, "reason": "ip_quota"}
+        # The site's own bill, shared by every non-staff caller.
+        cap = global_llm_limit()
+        if (cap and caller["tier"] != "staff"
+                and _used(c, GLOBAL_IDENTITY, win) + cost > cap):
+            return {"allowed": False, "remaining": 0, "limit": limit,
+                    "reset_at": win + WINDOW_SECONDS, "reason": "global_quota"}
     return {"allowed": True, "remaining": remaining, "limit": limit,
             "reset_at": win + WINDOW_SECONDS, "reason": None}
 
@@ -360,6 +431,8 @@ def consume(caller: dict, cost: int) -> dict:
         _add(c, caller["identity"], win, cost)
         if caller.get("ip_identity"):
             _add(c, caller["ip_identity"], win, cost)
+        if caller["tier"] != "staff":
+            _add(c, GLOBAL_IDENTITY, win, cost)
         _purge_old(c)
         used = _used(c, caller["identity"], win)
     limit = limit_for(caller["tier"])
@@ -426,6 +499,9 @@ def status(caller: dict) -> dict:
         "standard_cost": EFFORT["standard"]["credits"],
         "deep_cost": EFFORT["deep"]["credits"],
     }
+
+
+GLOBAL_IDENTITY = "global:llm"
 
 
 def _used(c, identity: str, win: int) -> int:
@@ -516,9 +592,14 @@ def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
     identity = "v:" + _h(f"{visitor_id}|{client_ip}")
     ip_identity = "i:" + _h(client_ip) if client_ip else None
     with _lock, _conn() as c:
-        keys = [identity, identity + ":faq"]
+        suffixes = ["", ":faq"] + [":" + k for k in PUBLIC_WRITE_LIMITS]
+        keys = [identity + s for s in suffixes]
         if ip_identity:
-            keys.append(ip_identity + ":faq")
+            # Every per-IP counter: credits (guest AI on), FAQ lookups and
+            # the public writes. Only the FAQ one used to be cleared, so a
+            # guest blocked on ip_quota stayed blocked after the console
+            # said it had reset.
+            keys += [ip_identity + s for s in suffixes]
         c.execute(f"DELETE FROM usage WHERE identity IN ({','.join('?' * len(keys))})",
                   keys)
 

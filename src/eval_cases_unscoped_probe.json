@@ -1,0 +1,262 @@
+{
+  "_README": "Probes ONE behaviour: what the support chatbot does with a question when the customer has NOT selected a product in the widget (no product field is set on any case here). 'clarify' cases are vague/ambiguous across the product range and the bot should ask which product before answering. 'answered' cases name no product but only one product's manual can answer them, so the bot should just answer (verified by skimming the source PDFs with pdfplumber; keywords_all lists short substrings any correct answer should contain, graded automatically). 'rejected' cases are plausible widget messages that no manual in this corpus answers (other brands, general IT/consumer tech, shipping/pricing/general knowledge) and should get a polite out-of-scope response, not a hallucinated answer or a clarify prompt. All cases use new_session true and omit the product field on purpose.",
+  "cases": [
+    {
+      "q": "it keeps beeping and won't stop, what do i do?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Beep patterns and their causes differ across the coin, note and camera product lines, so the bot needs to know which device before it can give the right steps."
+    },
+    {
+      "q": "the light on my machine turned orange, is that bad?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Status LED colour meanings are device-specific across the validator and hopper ranges, so 'orange' means something different on each product's manual."
+    },
+    {
+      "q": "how do I clean this thing",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Cleaning procedures differ between a coin hopper, a note validator and a camera unit, so the bot cannot answer without knowing which product 'this thing' refers to."
+    },
+    {
+      "q": "how do i change the threshold on my device",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "A 'threshold' means an age-decision threshold on the camera products but an acceptance/validation threshold on the coin and note products, so the setting steps differ by product."
+    },
+    {
+      "q": "my unit just stopped accepting stuff, any idea why",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Reasons a unit stops accepting input (coins, notes, or faces) and the fix are unique to each product's service guide, so which product is needed first."
+    },
+    {
+      "q": "can you walk me through resetting it",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Reset procedures (hardware button, software command, power cycle) are documented differently per product, so the bot should ask which device before answering."
+    },
+    {
+      "q": "wat does a flashing red light mean on my machien",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Even with typos the question is still about a device-specific indicator light, and the meaning of a flashing red light differs by product line."
+    },
+    {
+      "q": "how often should i service my equipment",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Recommended service intervals live in each product's own Service Guide section and are not the same across ranges, so the bot needs the product named first."
+    },
+    {
+      "q": "the display is frozen, what should i try first",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Only some products in the range have a physical display at all, and troubleshooting a frozen screen is device-specific, so the bot must ask which unit."
+    },
+    {
+      "q": "how do i update the firmware on my device",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "clarify",
+      "reference": "Firmware/software update methods (SD card, USB, app-based) differ by product, so the correct instructions depend on which device the customer means."
+    },
+    {
+      "q": "is there an add-on that raises the coin payout height so it's easier to reach for accessibility compliance?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "Coin Elevator"
+      ],
+      "reference": "Only the SMART Coin System Range manual describes the Coin Elevator add-on module, which repositions coin input/output for ADA/DDA accessibility (SMART Coin System Range User Manual-v1.pdf, p.6).",
+      "grade": true
+    },
+    {
+      "q": "which age-check device has no screen at all and just needs to be plugged into a USB-A port to work?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "USB",
+        "screen"
+      ],
+      "reference": "Only the MyCheckr Mini manual describes a version of the device with no physical screen that powers and runs from any USB A-type port (MyCheckr Mini User Manual-v5.pdf, p.4).",
+      "grade": true
+    },
+    {
+      "q": "which part of the setup is responsible for managing the onboard relays used for access-control decisions?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "Hub",
+        "relays"
+      ],
+      "reference": "Only the MyConnect Environment document states that the MyConnect Hub controls onboard relays for access control based on device inputs (MyConnect Environment-v4.pdf, p.4).",
+      "grade": true
+    },
+    {
+      "q": "what's the exact JSON field path that holds the returned age value in the status response?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "Detections",
+        "Age"
+      ],
+      "reference": "Only the ICU Local API Quick Guide gives the result field as Detections[0].Age (ICU_Age_Result_Quick_Guide_v1_1.pdf, p.1).",
+      "grade": true
+    },
+    {
+      "q": "which bill acceptor has no built-in cashbox and just drops notes out the back into a bag underneath?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "cashbox",
+        "free fall"
+      ],
+      "reference": "Only the BV30 User Manual describes a stacker-less/free-fall design with no built-in cashbox, requiring a bag placed underneath to catch notes (BV30 User Manual-v1.pdf, p.6).",
+      "grade": true
+    },
+    {
+      "q": "what's the note capacity of the optional recycler module for the USB-connected banknote validator range?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "30 notes"
+      ],
+      "reference": "Only the NV9USB+ Range manual lists the add-on Note Float recycler (NV11+) capacity as 30 notes (NV9USB+ Range User Manual-v1.pdf, p.4).",
+      "grade": true
+    },
+    {
+      "q": "how many data points does the mid-range spectral banknote validator's sensor scan per note?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "1.28 million"
+      ],
+      "reference": "Only the NV9 Spectral Range manual states its spectral sensors scan 1.28 million data points per note (NV9 Spectral Range User Manual-v1.pdf, p.4).",
+      "grade": true
+    },
+    {
+      "q": "what's the maximum capacity of the optional payout module on the high-security 4.8-million-data-point validator?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "80",
+        "banknotes"
+      ],
+      "reference": "Only the NV200 Spectral Range manual states the payout module capacity is up to 80 mixed banknotes (NV200S Range User Manual-v1.pdf, p.4).",
+      "grade": true
+    },
+    {
+      "q": "which age-check camera can display targeted digital advertising and demographic analytics on its own screen?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "advertising",
+        "demographics"
+      ],
+      "reference": "Only the MyCheckr manual (not the Mini) lists consumer-targeted digital advertising and consumer demographics/analytics among its additional features (MyCheckr User Manual-v7.pdf, p.5).",
+      "grade": true
+    },
+    {
+      "q": "does the coin machine sort coins into genuine, counterfeit and unknown, or only two categories?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "answered",
+      "keywords_all": [
+        "recognized",
+        "unrecognized"
+      ],
+      "reference": "Only the SMART Coin System Range manual explicitly states the system does not use three categories and instead sorts coins as recognized (real) or unrecognized (unknown) (SMART Coin System Range User Manual-v1.pdf, p.5).",
+      "grade": true
+    },
+    {
+      "q": "can you tell me how to fix my Ingenico card payment terminal, it's not reading chip cards?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "A third-party card payment terminal is a different product category entirely, not covered by any manual in this corpus."
+    },
+    {
+      "q": "how much does a can of Coke cost from a vending machine these days?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Retail pricing of vended goods is unrelated to the product manuals, which cover the payment hardware inside vending machines, not the goods sold."
+    },
+    {
+      "q": "my wifi router keeps dropping every few hours, any idea what's wrong?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "General home networking troubleshooting is outside the scope of the product manuals, which only cover device networking as it relates to their own hardware."
+    },
+    {
+      "q": "how do I factory reset my iPhone?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Consumer smartphone support is unrelated to any product in the manual set."
+    },
+    {
+      "q": "do you sell replacement parts for a Coinco coin changer?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Coinco is a competitor's coin mechanism, not one of the manufacturer's own products, so no manual here covers it."
+    },
+    {
+      "q": "quick one, what's the capital of France?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "General knowledge trivia has nothing to do with the product manuals."
+    },
+    {
+      "q": "can you tell me where my shipping order is, it hasn't arrived yet?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Order/shipment tracking is a logistics question, not something answered by any product manual."
+    },
+    {
+      "q": "my HP printer keeps jamming on page 2, how do I fix that?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "An office printer is an unrelated consumer device with no coverage in this manual set."
+    },
+    {
+      "q": "what's today's exchange rate for USD to EUR?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "Currency exchange rates are general financial information, not something in a hardware manual."
+    },
+    {
+      "q": "is there a warranty on a JCM bill validator I bought recently?",
+      "new_session": true,
+      "layer": "blind",
+      "outcome": "rejected",
+      "reference": "JCM is a competing banknote validator manufacturer, so warranty terms for its product are not covered by this company's manuals."
+    }
+  ]
+}

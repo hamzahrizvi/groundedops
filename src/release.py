@@ -44,11 +44,10 @@ LEGACY = os.path.join(HERE, "legacy")
 # Never snapshot these: runtime state, secrets, or the drops themselves.
 SKIP_PREFIXES = ("src/legacy/", "documents/", "corpus/")
 SKIP_NAMES = {"logs.jsonl", "handover.txt", "conversations.db", "quota.db",
-              "VERSION", "before.json", "after.json", "after_bge.json",
-              "minilm18.json",
+              "VERSION",
               # Deliberately untracked: it enumerates this system's weaknesses
               # (default admin password, unfixed history) and the repo is public.
-              "HANDOFF_console_ux.md"}
+              "HANDOFF.md"}
 
 
 def sh(*args: str) -> str:

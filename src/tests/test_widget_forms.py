@@ -124,7 +124,7 @@ check(latest.get("summary_source") == "chat",
 check(latest.get("notify_email") == "support@example.com",
       "the destination is recorded on the lead")
 check(latest.get("notified") is False,
-      "and it is honestly marked as not emailed — there is no mail server yet")
+      "and it is marked not emailed, since no mail server is set here")
 
 r = client.post("/widget/lead", json={"kind": "support", "values": {}})
 check(r.status_code == 400, f"a submission missing required fields is refused ({r.status_code})")

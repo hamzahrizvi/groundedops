@@ -1,0 +1,161 @@
+{
+  "_README": "Image-retrieval eval: each answer is visible only inside a figure (labelled photo or dimension drawing) in the product manual, not in the PDF text layer. Written blind from the cropped figures and pdfplumber page text; the figures.json OCR 'text' fields were not read. For every case the keyword was searched case-insensitively (plus spacing/unit variants) across the extracted text of every page of the source PDF and was absent. 'figure' is the crop file name under documents/figures/<source document>/. 12 cases, 6 products.",
+  "cases": [
+    {
+      "q": "Which Smart Hopper model is fitted in the SMART Coin System?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "SH4"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "Labelled product photo: the lower unit is called out as 'Smart Hopper (SH4)' (SMART Coin System Range User Manual-v1.pdf p.5, figure p5_1.png; not in the page text, 'SH4' appears in no page text of the document)",
+      "figure": "p5_1.png"
+    },
+    {
+      "q": "How tall is the SMART Hopper on its own, in mm?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "285"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "SMART Hopper dimension drawing: overall height 285 (275 to the lid), width 134, depth 286 (SMART Coin System Range User Manual-v1.pdf p.18, figure p18_2.png; not in the page text, page 18 text is only headings)",
+      "figure": "p18_2.png"
+    },
+    {
+      "q": "What is the coin lift height of the SMART Coin System coin elevator?",
+      "product": "sku_scs",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "194.9"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "Coin Elevator dimension drawing: 'COIN LIFT HEIGHT' 194.9, overall height 442.6 (SMART Coin System Range User Manual-v1.pdf p.19, figure p19_1.png; not in the page text)",
+      "figure": "p19_1.png"
+    },
+    {
+      "q": "What is the red lever on the side of the NV9USB+ called?",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "Bezel release arm"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "Labelled component photo of the NV9USB+: red lever called out as 'Bezel release arm' (NV9USB+ Range User Manual-v1.pdf p.5, figure p5_1.png; not in the page text)",
+      "figure": "p5_1.png"
+    },
+    {
+      "q": "What size screws do I need to mount the NV9USB+ so they clear the cashbox?",
+      "product": "nv9usb",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "M5"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "NV9USB+ horizontal dimension drawing note: 'M5 SCREW CLEARANCE. MUST BE PAN HEAD TO CLEAR CASHBOX.' (NV9USB+ Range User Manual-v1.pdf p.10, figure p10_1.png; not in the page text)",
+      "figure": "p10_1.png"
+    },
+    {
+      "q": "On the NV22 with the Multi Note Float, what is the window on the top of the float for?",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "Last note window"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "Labelled NV22 component photo: top of the MNF called out as 'Last note window (TOP)' (NV9 Spectral Range User Manual-v1.pdf p.5, figure p5_2.png; not in the page text)",
+      "figure": "p5_2.png"
+    },
+    {
+      "q": "How long is the NV9 Spectral validator from the bezel to the back, in mm?",
+      "product": "nv9_spectral",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "221.5"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "NV9 Spectral dimension drawing: length 221.5 (plus 12.0 bezel lip, 5.0 rear), width 104.0, height 155.0 (NV9 Spectral Range User Manual-v1.pdf p.21, figure p21_1.png; not in the page text)",
+      "figure": "p21_1.png"
+    },
+    {
+      "q": "How much height does the NV200 Spectral need when the validator head is opened up?",
+      "product": "nv200s",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "422.7"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "NV200 Spectral (500 note cashbox) dimension drawing: side view with head tilted open, overall height 422.7 (NV200S Range User Manual-v1.pdf p.19, figure p19_1.png; not in the page text)",
+      "figure": "p19_1.png"
+    },
+    {
+      "q": "What is the overall height of the BV30 including the mounting flanges?",
+      "product": "bv30",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "132"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "BV30 dimension drawing, front view: overall height 132 (116 between mounting holes), width 97.6 (BV30 User Manual-v1.pdf p.7, figure p7_1.png; not in the page text)",
+      "figure": "p7_1.png"
+    },
+    {
+      "q": "How tall is the MyCheckr?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "220mm"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "MyCheckr component overview drawing: height 220mm, width 120mm, depth 50mm (MyCheckr User Manual-v7.pdf p.5, figure p5_1.png; not in the page text, which only refers to the technical data)",
+      "figure": "p5_1.png"
+    },
+    {
+      "q": "How many pins does the MyCheckr power connector have?",
+      "product": "mycheckr",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "4 pin"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "MyCheckr component overview, rear view: connector called out as '4 pin Power Connector' next to OSDP Port, Ethernet, 2x USB A and 1x USB B (MyCheckr User Manual-v7.pdf p.5, figure p5_1.png; not in the page text)",
+      "figure": "p5_1.png"
+    },
+    {
+      "q": "What is the maximum thread depth for the screw in the bottom of the MyCheckr Mini?",
+      "product": "mycheckr_mini",
+      "new_session": true,
+      "outcome": "answered",
+      "keywords_all": [
+        "12MM"
+      ],
+      "grade": true,
+      "layer": "blind",
+      "reference": "MyCheckr Mini dimension drawing note: '1/4 20 UNC THREAD, MAX THREAD DEPTH 12MM'; width 95.91, height 46.01 (MyCheckr Mini User Manual-v5.pdf p.29, figure p29_1.png; not in the page text)",
+      "figure": "p29_1.png"
+    }
+  ]
+}

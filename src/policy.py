@@ -15,10 +15,14 @@ Persisted to policy.json (gitignored like the other runtime stores). Losing
 it falls back to the env/default values, so it is not catastrophic to lose,
 unlike accounts.json.
 """
-import json
 import logging
 import os
+import re
 import threading
+
+import jsonstore
+
+_LANG_CODE_RE = re.compile(r"^[a-z]{2}$")
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +49,27 @@ _DEFAULTS = {
     # anon_llm_enabled is on. Kept small: this is the public internet.
     "anon_llm_credits": int(os.getenv("QUOTA_ANON_LLM", "3")),
 
+    # ── Multilingual FAQs for anonymous visitors ────────────────────────
+    # Separate from anon_llm_enabled: curating/translating FAQs costs
+    # nothing at query time (no model call is ever made to serve one, only
+    # to draft one in the console), so this switch is its own decision, not
+    # a consequence of turning on guest LLM access.
+    "multilingual_faq_enabled": os.getenv("MULTILINGUAL_FAQ_ENABLED", "").strip().lower()
+                                in ("1", "true", "yes"),
+    # Comma-joined ISO 639-1 codes, e.g. "es,de,fr" -- same convention as a
+    # curated FAQ entry's own `products` field. English is always
+    # implicitly allowed regardless of this list; the list only ever adds
+    # languages on top of it, never removes English matching.
+    "faq_enabled_languages": os.getenv("FAQ_ENABLED_LANGUAGES", ""),
+
     # ── Daily allowances (per quota window) ────────────────────────────
     "member_daily_credits": int(os.getenv("QUOTA_MEMBER", "25")),
     "staff_daily_credits": int(os.getenv("QUOTA_STAFF", "500")),
     "anon_faq_daily": int(os.getenv("QUOTA_ANON_FAQ", "60")),
     "anon_ip_daily": int(os.getenv("QUOTA_ANON_IP", "200")),
+    # Site-wide credits per window across every non-staff caller: the bill
+    # ceiling a per-visitor cap cannot give. 0 = off.
+    "global_llm_daily": int(os.getenv("QUOTA_GLOBAL_LLM", "0")),
 
     # ── Per-conversation caps ──────────────────────────────────────────
     # Distinct from the daily allowance: these bound a single sitting, so one
@@ -81,31 +101,83 @@ _DEFAULTS = {
     # upload, so changing this only affects documents indexed afterwards.
     "dedupe_shadowed_chunks": True,
 
-    # ── Sales questions ────────────────────────────────────────────────
-    # "which products run on 24V?" ranges across the catalogue, so no single
-    # manual answers it. sales.py can answer that shape from the catalogue
-    # and the spec tables, but an operator may not want the assistant
-    # speaking for the sales department at all.
+    # ── Commercial questions ───────────────────────────────────────────
+    # Governs COMMERCIAL questions only (price, fees, buying, stock,
+    # resellers -- sales.is_commercial_question). Cross-product catalogue and
+    # spec questions ("which products run on 24V?") are technical and always
+    # answered from the catalogue; see main._sales_answer for why.
     #
-    #   answer     build the answer from the catalogue (the default)
+    #   answer     say sales_reply (kept for old configs; same as deflect)
     #   deflect    say sales_reply and nothing else
-    #   documents  ignore the question's shape and search the manuals
+    #   documents  search the manuals anyway
     "sales_mode": os.getenv("WIDGET_SALES_MODE", "answer"),
     "sales_reply": (
         "I can only answer technical questions from our product "
         "documentation. For sales enquiries please contact our team."
     ),
+
+    # ── Reranker ────────────────────────────────────────────────────────
+    # Which cross-encoder orders the retrieved passages. Benchmarked over
+    # the 19-case retrieval suite (tools/bench_reranker.py), identical
+    # candidate sets, ground truth from the suite's own keywords:
+    #
+    #   fast     ms-marco-MiniLM-L-6-v2   r@1 68%  r@3 94%  r@8 100%
+    #   accurate BAAI/bge-reranker-base   r@1 73%  r@3 94%  r@8 100%
+    #
+    # `accurate` is five points better at putting the right passage first
+    # and roughly 8x the compute. On the CPU-only dev box that measured
+    # 17.1s per query against 2.0s, which is why `fast` is the default --
+    # but the numbers are hardware, not quality, and a GPU server changes
+    # them completely. Switch this there and re-run the benchmark.
+    #
+    # Safe to change at any time: reranking happens at query time, so no
+    # reindex is needed and nothing stored changes. The first query after a
+    # switch pays the model load (a download, the very first time).
+    "reranker_profile": os.getenv("RERANKER_PROFILE", "fast"),
+    # ── The inference contract (contract 2) ────────────────────────────
+    #
+    #   off    every answer must be ENTAILED by a retrieved passage. The
+    #          behaviour this system was built on and the reason it can be
+    #          trusted on a fact lookup.
+    #   on     an answer may additionally draw ONE hedged, attributed
+    #          conclusion from premises that are all themselves entailed,
+    #          using no word the passages do not contain.
+    #
+    # OFF by default, and this default is not a formality. Contract 2 is
+    # the point at which a grounded system starts being able to be
+    # confidently wrong: "the documentation doesn't cover Windows, but it
+    # is reachable over HTTP on a static IP, so a Windows host should
+    # manage it" is genuinely useful and is not in any manual. Whether
+    # that trade is worth making is an operator's call about their own
+    # liability, not a default we can pick for them.
+    #
+    # It is also UNMEASURED. eval_baseline_retrieval.json is not armed and
+    # the gateway does not resolve, so no one has yet shown that this
+    # helps more than it hurts on real questions. Turning it on before
+    # that is a decision to ship an inference mode that cannot be told
+    # apart from a hallucination mode that has been lucky.
+    #
+    # Safe to change at any time: it affects only how an answer is
+    # verified, so nothing is reindexed and no stored data changes.
+    "inference_mode": os.getenv("INFERENCE_MODE", "off"),
 }
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
                "anon_faq_daily", "anon_ip_daily", "questions_per_session",
-               "tokens_per_session", "grounding_retries")
-_BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks")
+               "tokens_per_session", "grounding_retries", "global_llm_daily")
+_BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks",
+               "multilingual_faq_enabled")
 _TEXT_FIELDS = ("anon_notice", "sales_reply")
+# faq_enabled_languages is text-shaped (a comma list) but needs its own
+# validation -- a typo'd code would otherwise silently produce a language
+# nobody can ever match a translated FAQ against.
+_LANG_LIST_FIELDS = ("faq_enabled_languages",)
 # Fields that accept one of a fixed set of values. Rejecting anything else
 # keeps a typo out of the request path: an unrecognised sales_mode would
 # otherwise silently fall through to whichever branch the code checked last.
-_CHOICE_FIELDS = {"sales_mode": ("answer", "deflect", "documents")}
+_CHOICE_FIELDS = {"sales_mode": ("answer", "deflect", "documents"),
+                  "reranker_profile": ("fast", "accurate"),
+                  "inference_mode": ("off", "on")}
 
 MAX_NOTICE_CHARS = 400
 # Ceilings on what an operator can set through the console. Not security --
@@ -117,6 +189,7 @@ _MAX = {
     "staff_daily_credits": 100000,
     "anon_faq_daily": 100000,
     "anon_ip_daily": 100000,
+    "global_llm_daily": 1000000,
     "questions_per_session": 1000,
     "tokens_per_session": 2000000,
     # More than a handful of regenerations is a bill, not a retry strategy.
@@ -126,16 +199,11 @@ _MAX = {
 
 def _load() -> dict:
     out = dict(_DEFAULTS)
-    if os.path.exists(_PATH):
-        try:
-            with open(_PATH, encoding="utf-8") as f:
-                saved = json.load(f)
-            if isinstance(saved, dict):
-                for k, v in saved.items():
-                    if k in out:
-                        out[k] = v
-        except Exception as e:
-            logger.warning(f"policy read failed, using defaults: {e}")
+    saved = jsonstore.load(_PATH, {}, label="access policy")
+    if isinstance(saved, dict):
+        for k, v in saved.items():
+            if k in out:
+                out[k] = v
     return out
 
 
@@ -178,6 +246,14 @@ def _coerce(key: str, raw):
         return v
     if key in _TEXT_FIELDS:
         return str(raw or "").strip()[:MAX_NOTICE_CHARS]
+    if key in _LANG_LIST_FIELDS:
+        codes = [c.strip().lower() for c in str(raw or "").split(",") if c.strip()]
+        bad = [c for c in codes if not _LANG_CODE_RE.match(c)]
+        if bad:
+            raise PolicyError(
+                f"'{key}' must be a comma-separated list of two-letter "
+                f"language codes; not valid: {', '.join(bad)}")
+        return ",".join(codes)
     raise PolicyError(f"unknown setting '{key}'")
 
 
@@ -195,10 +271,7 @@ def update(changes: dict, actor: str = "") -> dict:
     with _lock:
         current = _load()
         current.update(clean)
-        tmp = _PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(current, f, indent=2)
-        os.replace(tmp, _PATH)
+        jsonstore.save(_PATH, current, label="access policy")
     for k, v in clean.items():
         logger.info(f"policy: {k} -> {v!r} by {actor or 'unknown'}")
     return current
