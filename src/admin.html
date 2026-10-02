@@ -3434,14 +3434,15 @@ function viewAdvanced() {
     rrHint.textContent = RR_HINT[e.target.value] || "";
   } },
     el("option", { value: "fast" }, "Fast — MiniLM (default)"),
-    el("option", { value: "accurate" }, "Accurate — BGE reranker"));
+    el("option", { value: "accurate" }, "Accurate — BGE reranker (slow: ~28s per answer on CPU)"));
   rrSel.value = p.reranker_profile || "fast";
   const RR_HINT = {
     fast: "Puts the right passage first 68% of the time. ~2s per question "
         + "on the dev box.",
     accurate: "73% — five points better — for roughly 8x the compute. "
-        + "That measured 17s per question on a CPU-only machine and will be "
-        + "far quicker on a GPU server. Benchmark it there before leaving it on.",
+        + "Every answer takes about 28 seconds on a CPU-only machine, so "
+        + "visitors wait. Only for a GPU server, and benchmark it there "
+        + "before leaving it on.",
   };
   const rrHint = el("p", { class: "sec-hint" }, RR_HINT[rrSel.value]);
   const rerankCard = el("div", { class: "card elev-sm",

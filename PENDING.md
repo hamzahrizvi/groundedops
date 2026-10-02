@@ -358,7 +358,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 13 | Opus | 38, 39 | **Done 2026-09-29** (`b2cb5dc`, `912239b`, `ca0d6e2` + this); full suite 312 passed (1 skipped). 9.6: the "Reviewed answer" badge now appears on 168/406 entries, down from all 406. The audit checked the 157 unedited generated entries: 110 verified 3/3, 8 unstable, 39 stable rejects (list in `eval_runs/faq_audit_9.6.log`). 9.14: figure chunks carry their page heading. On a scratch index, the case's figure chunk is retrieved for 4/12 image cases, up from 3/12. The new chunks reach the live index only through the 9.7 rebuild (S14). Left for you: read the 39 rejects against the PDFs, then edit or delete them (9.6). |
 | 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. **Done 2026-09-30** (`b91a6a5`, `05fac34` + plan commits): decisions 1-4 taken and applied, index rebuilt 1749 -> 1668 chunks, footer-tailed 500 -> 0, retrieval R@1 up with no regression, full suite 315 passed (1 skipped); details under 9.7. Baselines re-armed from `eval_runs/20260930_2105` (tuned 45/49 x5, retrieval 32/35 x3). Left for you: rule on the one rebuild-caused flip ("how do I mount it" now answers instead of asking; keep `AMBIGUOUS_CEILING` 0.65 or raise it, see 9.7); delete `src/chroma_db.before-9.7-20260930_2100` when satisfied; try the upload form's new "Also file under" picker once. |
 | 15 | Fable | 42, 43 | **Done 2026-10-01** (`c868dd6` + this). 9.9 was mostly built (8.14 found it); added the numeric translation check, the logged language, the 10-case es/de/fr parity suite (30/30 same document, 0.82 page overlap over 3 runs) and scenario 24 tightened. 9.10: 3 flips in 1,024 case-runs, all sampled-model (2 generation, 2 grader), none deterministic. |
-| 16 | Sonnet | 44 | |
+| 16 | Sonnet | 44 | **Done 2026-10-02**: label only, one admin.html edit. |
 | 17 | Opus + you | 45 | |
 | 18 | shell, then Fable | 46 | |
 | 19 | Opus | 47, 48 | |
@@ -1314,8 +1314,12 @@ exactly, we cannot tell whether a fix helped.
   flips at a confident retrieval, 2 of the 3 are grader flips (one case
   is both). The M4 "+/-3" label in `--compare-results` stays as the
   ceiling; the measured band is 0-2 cases per suite per 3 runs.
-- [ ] **9.11 Label or hide the "accurate" reranker option** - it makes every
-  answer take about 28 seconds.
+- [x] **9.11 Label or hide the "accurate" reranker option** - it makes every
+  answer take about 28 seconds. (2026-10-02) Labelled, not hidden: the
+  option text now reads "slow: ~28s per answer on CPU" and the hint says
+  visitors wait and it is for a GPU server only. Kept because the policy
+  value is a real profile (`reranker.PROFILES`) and `policy.json` is on
+  "fast".
 - [ ] **9.12 Write FAQ answers for about 10 questions** that keep being asked
   and refused.
 - [ ] **9.13 Test whether a stronger model rescues flagged answers.**
