@@ -359,7 +359,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. **Done 2026-09-30** (`b91a6a5`, `05fac34` + plan commits): decisions 1-4 taken and applied, index rebuilt 1749 -> 1668 chunks, footer-tailed 500 -> 0, retrieval R@1 up with no regression, full suite 315 passed (1 skipped); details under 9.7. Baselines re-armed from `eval_runs/20260930_2105` (tuned 45/49 x5, retrieval 32/35 x3). Left for you: rule on the one rebuild-caused flip ("how do I mount it" now answers instead of asking; keep `AMBIGUOUS_CEILING` 0.65 or raise it, see 9.7); delete `src/chroma_db.before-9.7-20260930_2100` when satisfied; try the upload form's new "Also file under" picker once. |
 | 15 | Fable | 42, 43 | **Done 2026-10-01** (`c868dd6` + this). 9.9 was mostly built (8.14 found it); added the numeric translation check, the logged language, the 10-case es/de/fr parity suite (30/30 same document, 0.82 page overlap over 3 runs) and scenario 24 tightened. 9.10: 3 flips in 1,024 case-runs, all sampled-model (2 generation, 2 grader), none deterministic. |
 | 16 | Sonnet | 44 | **Done 2026-10-02**: label only, one admin.html edit. |
-| 17 | Opus + you | 45 | |
+| 17 | Opus + you | 45 | **Done 2026-10-02**: 2 FAQs added, 2 truncated ones repaired, refusals on the repeat phrasings 3 -> 1 (the one left is the intended litres absence refusal); table under 9.12. |
 | 18 | shell, then Fable | 46 | |
 | 19 | Opus | 47, 48 | |
 | 20 | Sonnet | 49 | |
@@ -1320,8 +1320,44 @@ exactly, we cannot tell whether a fix helped.
   visitors wait and it is for a GPU server only. Kept because the policy
   value is a real profile (`reranker.PROFILES`) and `policy.json` is on
   "fast".
-- [ ] **9.12 Write FAQ answers for about 10 questions** that keep being asked
-  and refused.
+- [x] **9.12 Write FAQ answers for about 10 questions** that keep being asked
+  and refused. (2026-10-02) Re-mined `logs.jsonl` (non-eval rows, >= 4
+  asks, refused or clarified at least half the time, not verbatim in an
+  eval case or test). Two of the plan's three examples were wrong about
+  being non-harness: the litres question is an eval absence case, and the
+  multicast one is only a `router.py` example. Context-dependent follow-ups
+  ("does it need a static ip", "which device is that for") were dropped:
+  a FAQ can't serve them alone. `tools/faq_gap_pass.py` sends the 11
+  standalone phrasings through `/query` once. Most of the logged refusals
+  came from older builds; on this build:
+
+  | Phrasing | Logged (asks / refused) | Before | After |
+  |---|---|---|---|
+  | why is multicast required for hub discovery | 11 / 11 | answer | answer |
+  | steps to change the protocol on the nv9 spectral to cctalk | 11 / 7 | refuse | **faq** (new) |
+  | operating temperature table for mycheckr mini | 11 / 4 (+3 clarify) | answer | answer |
+  | cashbox capacity of the bv30 | 8 / 8 | refuse | **faq** (new) |
+  | what is mycheckr and what does it do | 7 / 6 | faq, cut off mid-sentence | **faq** (repaired) |
+  | anything that sorts and pays out coins | 7 / 5 | answer | answer |
+  | installer checklist for myconnect | 6 / 4 | answer | answer |
+  | coin media requirements table | 5 / 4 | answer | answer |
+  | default wifi password | 5 / 0 (+5 clarify) | clarify | clarify |
+  | years of warranty and what it covers | 5 / 5 | sales hand-off | sales hand-off |
+  | coin capacity in litres of the SMART Coin System | eval case | refuse (names SCS) | refuse (names SCS) |
+
+  Refusals 3 -> 1. The one left is correct: the manual gives no litres
+  figure, and eval_cases.json guards that refusal. Honest corpus gaps, no FAQ:
+  warranty terms (in no manual, so the sales hand-off is right) and a default
+  Wi-Fi password (no manual gives one, so asking which product is right).
+  FAQ changes, drafted from the manuals and approved by the operator: added
+  "What are the steps to change the protocol on the NV9 Spectral to ccTalk?"
+  (nv9_spectral; the manual has no step list, so the answer gives the
+  interface check, the >3s SSP toggle and Validator Manager, pp. 11/40-41/60)
+  and "What is the cashbox capacity of the BV30?" (bv30; no built-in
+  cashbox, free fall, pp. 6/38). Repaired the two harvested "What is the
+  MyCheckr and what does it do?" entries (`064e4b35`, `1263559d`), whose
+  answers stopped at a PDF line break ("to assist with the sale of"). These
+  were the only two truncated answers among the 406 existing entries.
 - [ ] **9.13 Test whether a stronger model rescues flagged answers.**
 
 ### Tier 9 -> 10 - it improves itself from real use
