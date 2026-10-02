@@ -4964,7 +4964,18 @@ function viewFaq() {
 /* ---------------- unanswered (gaps) ---------------- */
 // Filter/sort state for the customer-questions page. Module-level so it
 // survives render(), which rebuilds the whole view on every change.
-let gapFilter = { scope: "", sort: "demand", grouped: true, language: "", flagged: false };
+let gapFilter = { scope: "", sort: "demand", grouped: true, language: "", status: "", tests: false };
+
+// 10.2: what happened when the question was asked. A gap is recorded when no
+// reviewed FAQ matched; the pipeline may still have answered from the
+// documents, and the entry is stamped with how that turn ended (last_kind).
+const GAP_REFUSAL_REASONS = ["low_retrieval_confidence", "ungrounded_answer_suppressed",
+                             "not_mentioned", "generation_failed", "template_leak"];
+const gapStatus = g => g.flagged_by_visitor ? "flagged"
+  : g.last_kind === "answered" ? "answered"
+  : (g.last_kind || GAP_REFUSAL_REASONS.includes(g.reason)) ? "unanswered" : "";
+const GAP_STATUS = { "": "All", unanswered: "Not answered",
+                     answered: "Answered, no FAQ yet", flagged: "Flagged by visitors" };
 
 // How many questions a product group shows before asking. 256 gaps across
 // six products meant 256 rows, each with a checkbox, a details element and
@@ -5017,8 +5028,8 @@ function viewGaps() {
   // with no product selected are their own group rather than being
   // hidden or forced under an arbitrary product.
   const groups = new Map();
-  // 8.10: "Flagged by visitors" is a view of the same list, filtered here.
-  cache.gaps.filter(g => !gapFilter.flagged || g.flagged_by_visitor).forEach(g => {
+  // 8.10/10.2: the status filter is a view of the same list, filtered here.
+  cache.gaps.filter(g => !gapFilter.status || gapStatus(g) === gapFilter.status).forEach(g => {
     const key = g.scope || "";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(g);
@@ -5071,10 +5082,29 @@ function viewGaps() {
             el("p", {}, (g.flagged_by_visitor
                 ? "Answered, but " + g.flagged_by_visitor + (g.flagged_by_visitor === 1 ? " visitor" : " visitors")
                   + " marked the answer not helpful."
+                : g.last_kind === "answered"
+                ? "Answered from the documents, but there is no reviewed answer for it yet."
+                : g.last_kind === "clarify"
+                ? "The assistant asked which product or detail they meant."
                 : g.reason === "ungrounded_answer_suppressed"
                 ? "The documents nearly cover this \u2014 an answer was found but could not be verified."
-                : "Nothing in the documents matched.")
+                : g.last_kind || GAP_REFUSAL_REASONS.includes(g.reason)
+                ? "Nothing in the documents matched."
+                : "No reviewed answer matched.")
               + (g.ts ? " Last asked " + shortDate(new Date(g.ts * 1000).toISOString()) + "." : "")),
+            // 10.2: what the visitor actually saw, so a reviewer can judge it
+            // without opening the logs.
+            (g.flagged_answer || g.last_answer)
+              ? el("details", { style: "margin-top:4px" },
+                  el("summary", { style: "cursor:pointer;font-size:12px;color:var(--color-accent-ink)" },
+                    g.flagged_answer ? "What the visitor was told" : "What the assistant said"),
+                  el("p", { style: "font-size:12.5px;white-space:pre-wrap;margin:4px 0" },
+                    g.flagged_answer || g.last_answer),
+                  (g.last_pages && g.last_pages.length && !g.flagged_answer)
+                    ? el("p", { class: "sec-hint", style: "margin:0" }, "Cited: " + g.last_pages.map(p =>
+                        p.source + (p.pages && p.pages.length ? " p" + p.pages.join(", ") : "")).join("; "))
+                    : null)
+              : null,
             draftBox),
           el("div", { class: "gap-actions" },
             el("button", { class: "btn btn-secondary", onclick: async e => {
@@ -5134,7 +5164,8 @@ function viewGaps() {
       const qs = "?sort=" + encodeURIComponent(gapFilter.sort)
                + "&group_similar=" + gapFilter.grouped
                + (gapFilter.scope ? "&product=" + encodeURIComponent(gapFilter.scope) : "")
-               + (gapFilter.language ? "&language=" + encodeURIComponent(gapFilter.language) : "");
+               + (gapFilter.language ? "&language=" + encodeURIComponent(gapFilter.language) : "")
+               + (gapFilter.tests ? "&include_tests=true" : "");
       const r = await api("/faq/gaps" + qs);
       cache.gaps = r.gaps || [];
       cache.gapScopes = r.scopes || [];
@@ -5269,10 +5300,14 @@ function viewGaps() {
   const groupCb = el("input", { type: "checkbox",
     onchange: () => { gapFilter.grouped = groupCb.checked; reload(); } });
   groupCb.checked = gapFilter.grouped;
-  const flaggedN = cache.gaps.filter(g => g.flagged_by_visitor).length;
-  const flaggedCb = el("input", { type: "checkbox",
-    onchange: () => { gapFilter.flagged = flaggedCb.checked; render(); } });
-  flaggedCb.checked = gapFilter.flagged;
+  const statusN = k => cache.gaps.filter(g => !k || gapStatus(g) === k).length;
+  const statusSel = el("select", { class: "input", style: "width:auto",
+      onchange: () => { gapFilter.status = statusSel.value; render(); } },
+    Object.entries(GAP_STATUS).map(([k, t]) => el("option",
+      { value: k, selected: gapFilter.status === k ? "true" : null }, t + " (" + statusN(k) + ")")));
+  const testsCb = el("input", { type: "checkbox",
+    onchange: () => { gapFilter.tests = testsCb.checked; reload(); } });
+  testsCb.checked = gapFilter.tests;
 
   // Only shown once there is more than English to filter by -- an install
   // that has never touched the multilingual FAQ feature should see nothing
@@ -5298,8 +5333,10 @@ function viewGaps() {
     el("label", { class: "flabel", style: "margin:0" }, "Sort"), sortSel,
     el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
       groupCb, "Group similar wordings"),
-    el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer" },
-      flaggedCb, "Flagged by visitors (" + flaggedN + ")"),
+    el("label", { class: "flabel", style: "margin:0" }, "Show"), statusSel,
+    el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer",
+                  title: "Questions asked only by the test harness (eval, live and preflight runs)" },
+      testsCb, "Include test runs"),
     langFilterSel ? el("label", { class: "flabel", style: "margin:0" }, "Language") : null,
     langFilterSel,
     el("span", { style: "flex:1" }),
@@ -5308,7 +5345,7 @@ function viewGaps() {
 
   return [
     el("h1", {}, "FAQs from customers"),
-    el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover. Rewordings of the same question are counted together, so the number beside each one is how many people asked it \u2014 not how many ways they phrased it."),
+    el("p", { class: "lede" }, "Questions real visitors asked that the reviewed answers did not cover. Rewordings of the same question are counted together, so the number beside each one is how many people asked it \u2014 not how many ways they phrased it. Open a question to see what the assistant told them; questions only our test runs asked are hidden."),
     scopeChips,
     controls,
     cache.gaps.length ? el("div", { class: "card elev-sm", style: "padding:12px 20px;margin-bottom:12px;display:flex;flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap" },

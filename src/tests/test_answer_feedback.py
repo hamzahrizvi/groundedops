@@ -59,7 +59,8 @@ def test_unknown_or_missing_ids_are_refused():
 
 def test_a_down_vote_is_stored_logged_and_flags_the_question():
     q = "How do I reset the fingerprint reader on the MyCheckr?"
-    widget_api._remember_answer("rid-down", q, "mycheckr", "fb-1")
+    widget_api._remember_answer("rid-down", q, "mycheckr", "fb-1",
+                                "Hold the button for five seconds.")
     faq_store.record_gap(q, "mycheckr")          # asked once already
     logged = []
     with patch.object(interaction_log, "log_feedback",
@@ -73,6 +74,9 @@ def test_a_down_vote_is_stored_logged_and_flags_the_question():
     assert gap["flagged_by_visitor"] == 1
     assert gap["times_asked"] == 1, "a vote is not another ask"
     assert gap["reason"] == "visitor_flagged"
+    # 10.2: the reviewer sees what the visitor was shown.
+    assert gap["flagged_answer"] == "Hold the button for five seconds."
+    assert stored["rid-down"]["answer"] == "Hold the button for five seconds."
 
 
 def test_the_logger_mirror_row_has_the_outcome():

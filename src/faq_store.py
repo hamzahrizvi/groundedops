@@ -764,6 +764,17 @@ def record_gap(question: str, scope_key: str | None,
     if not key:
         return
     now = __import__("time").time()
+    # 10.2: who asked (M2's origin: widget/console/eval/live/preflight), so
+    # the console can hide harness asks, and the gap's id on the trace, so
+    # main._traced_query can stamp it with how the turn then ended.
+    origin = None
+    if not flag:
+        try:
+            import pipeline_trace
+            origin = pipeline_trace.get_meta("origin")
+            pipeline_trace.set_meta(gap_id=key)
+        except Exception:
+            pass
     try:
         with _lock:
             gaps = []
@@ -784,6 +795,9 @@ def record_gap(question: str, scope_key: str | None,
                         g["flagged_by_visitor"] = int(g.get("flagged_by_visitor", 0)) + 1
                     else:
                         g["times_asked"] = int(g.get("times_asked", 1)) + 1
+                    if origin:
+                        o = g.setdefault("origins", {})
+                        o[origin] = int(o.get(origin, 0)) + 1
                     g["ts"] = now
                     if scope_key and not g.get("scope"):
                         # Keep the most specific scope seen — a gap first
@@ -812,6 +826,7 @@ def record_gap(question: str, scope_key: str | None,
                 "spam": False,
                 "language": norm_lang(language) or "en",
                 "flagged_by_visitor": 1 if flag else 0,
+                "origins": {origin: 1} if origin else {},
             })
             if len(gaps) > 500:
                 gaps = gaps[-500:]            # keep it bounded
@@ -819,6 +834,39 @@ def record_gap(question: str, scope_key: str | None,
                 json.dump(gaps, f, indent=2)
     except Exception as e:
         logger.warning(f"could not record FAQ gap (non-fatal): {e}")
+
+
+def stamp_gap(fields: dict, gap_id: str | None = None,
+              question: str | None = None) -> bool:
+    """10.2: write `fields` onto one gap entry (by id, or by the question's
+    key) -- how the turn that recorded it ended (main._traced_query), or the
+    answer a visitor voted down (widget_api). Never creates an entry."""
+    key = gap_id or _gap_key((question or "").strip())
+    if not key or not os.path.exists(_GAP_PATH):
+        return False
+    try:
+        with _lock:
+            with open(_GAP_PATH, encoding="utf-8") as f:
+                gaps = json.load(f)
+            for g in gaps:
+                if g.get("id") == key:
+                    g.update(fields)
+                    with open(_GAP_PATH, "w", encoding="utf-8") as f:
+                        json.dump(gaps, f, indent=2)
+                    return True
+    except Exception as e:
+        logger.warning(f"could not stamp FAQ gap (non-fatal): {e}")
+    return False
+
+
+TEST_ORIGINS = {"eval", "live", "preflight"}
+
+
+def is_test_only(g: dict) -> bool:
+    """Every recorded ask came from a harness session. Entries from before
+    origins were stamped have none and count as real: nothing says otherwise."""
+    o = g.get("origins") or {}
+    return bool(o) and all(k in TEST_ORIGINS for k in o)
 
 
 def _normalize_gap(g: dict) -> dict:

@@ -161,6 +161,7 @@ def faq_gaps(product: str | None = None,
              sort: str = "demand",
              group_similar: bool = True,
              language: str | None = None,
+             include_tests: bool = False,
              x_admin_password: str | None = Header(default=None)):
     """Questions the FAQ could not answer — either nothing was close enough
     to suggest, or the user rejected the suggestions (v12.0). This is the
@@ -196,6 +197,11 @@ def faq_gaps(product: str | None = None,
                 if (g.get("scope") or "") in wanted]
     else:
         gaps = faq_store.list_gaps(product)
+
+    # 10.2: asks from eval/live/preflight sessions are not demand. Entries
+    # from before origins were stamped stay (faq_store.is_test_only).
+    if not include_tests:
+        gaps = [g for g in gaps if not faq_store.is_test_only(g)]
 
     if language:
         want_lang = faq_store.norm_lang(language) or "en"

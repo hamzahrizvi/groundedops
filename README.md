@@ -166,7 +166,14 @@ rebuild.
 
 The **gap log** is the useful by-product of asking rather than guessing:
 a user-confirmed list of questions your documentation is being asked but
-your FAQ doesn't cover, prioritised by real demand.
+your FAQ doesn't cover, prioritised by real demand. Each entry records how
+the turn then ended (answered from the documents, refused, or asked back)
+and what the assistant said, so the console can show "not answered",
+"answered, no FAQ yet" and "flagged by visitors" separately. Questions
+asked only by test runs (eval/live/preflight sessions) are hidden unless
+"Include test runs" is ticked. `python -m log_report --since 7d` (or GET
+`/admin/report`, the Overview's "Last 7 days" row) gives the weekly
+resolved / refused / handed-off / speed counts.
 
 > **Writing curated answers:** make them self-contained statements. "No,
 > instant results with no internet requirement" reads as a fragment

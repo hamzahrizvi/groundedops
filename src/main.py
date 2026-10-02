@@ -2345,6 +2345,7 @@ def _traced_query(payload: QueryRequest, x_user_id: str | None = None,
     try:
         ptrace.set_meta(surface=surface)
         result = query_any_language(payload, x_user_id)
+        _stamp_gap(result)
         if attach:
             try:
                 if isinstance(result, dict):
@@ -2354,6 +2355,34 @@ def _traced_query(payload: QueryRequest, x_user_id: str | None = None,
         return result
     finally:
         ptrace.reset(_tok)
+
+
+def _stamp_gap(result) -> None:
+    """10.2: if this turn recorded an FAQ gap, write on it how the turn then
+    ended, so the console can tell "nothing matched" from "answered, but no
+    reviewed FAQ yet". After query() returns and outside every gate; a
+    bookkeeping failure must never cost an answer."""
+    try:
+        gap_id = ptrace.get_meta("gap_id")
+        if not gap_id or not isinstance(result, dict):
+            return
+        import log_report
+        exit_stage = (ptrace.snapshot() or {}).get("exit") or {}
+        kind = log_report.turn_kind({
+            "role": result.get("role"), "outcome": exit_stage.get("id"),
+            "answer": result.get("answer_english") or result.get("answer") or ""})
+        faq_store.stamp_gap({
+            "last_kind": kind,
+            "last_role": result.get("role"),
+            "last_grounding": result.get("grounding_score"),
+            "last_pages": [{"source": s.get("source"), "pages": s.get("pages") or []}
+                           for s in (result.get("sources") or [])
+                           if isinstance(s, dict)][:4],
+            "last_answer": (result.get("answer") or "")[:4000],
+            "last_ts": time.time(),
+        }, gap_id=gap_id)
+    except Exception as exc:
+        logger.debug("gap stamp skipped: %s", exc)
 
 
 def query_any_language(payload: QueryRequest, x_user_id: str | None = None):

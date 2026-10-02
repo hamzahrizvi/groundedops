@@ -89,12 +89,13 @@ _FEEDBACK_PATH = os.getenv("WIDGET_FEEDBACK_PATH", "widget_feedback.json")
 _feedback_lock = threading.Lock()
 
 
-def _remember_answer(request_id, q, scope, session_id) -> None:
+def _remember_answer(request_id, q, scope, session_id, answer="") -> None:
     if not request_id:
         return
     with _recent_lock:
         _RECENT_ANSWERS[request_id] = {"q": q, "scope": scope,
-                                       "session_id": session_id}
+                                       "session_id": session_id,
+                                       "answer": (answer or "")[:4000]}
         while len(_RECENT_ANSWERS) > _RECENT_MAX:
             _RECENT_ANSWERS.popitem(last=False)
 
@@ -667,7 +668,7 @@ def register(app, answer_query, draft_enquiry=None):
         if not (result.get("from_faq") or result.get("faq_candidates")):
             _remember_answer(result.get("request_id"), payload.q,
                              payload.product or payload.category,
-                             payload.session_id)
+                             payload.session_id, result.get("answer"))
 
         logger.info(f"widget ask tier={tier} effort={level} charged={charged} "
                     f"remaining={state['remaining']} "
@@ -754,6 +755,7 @@ def register(app, answer_query, draft_enquiry=None):
             "vote": payload.vote,
             "note": payload.note.strip(),
             "question": seen["q"],
+            "answer": seen.get("answer", ""),
             "scope": seen["scope"],
             "session_id": payload.session_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -761,6 +763,10 @@ def register(app, answer_query, draft_enquiry=None):
         if payload.vote == "down":
             faq_store.record_gap(seen["q"], seen["scope"],
                                  reason="visitor_flagged", flag=True)
+            # 10.2: the reviewer needs to see what the visitor was shown.
+            if seen.get("answer"):
+                faq_store.stamp_gap({"flagged_answer": seen["answer"]},
+                                    question=seen["q"])
         import logger as interaction_log
         interaction_log.log_feedback(payload.request_id, payload.vote,
                                      payload.session_id)
