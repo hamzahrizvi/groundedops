@@ -87,16 +87,18 @@ def _invalidate_derived() -> None:
     process: the product terms the follow-up gate reads (text_utils) and
     the product->category map that scopes shared documents (retrieval_db).
     Neither knew about a product added or renamed in the console until a
-    restart. Lazy imports: both modules import this one."""
+    restart. Only a module already loaded can hold a stale view, so this
+    never imports one: importing retrieval_db just to clear its cache
+    pulled in rank_bm25 and numpy, and the shared-process test runner then
+    dropped numpy from sys.modules with its C extension still loaded, so
+    the next `import numpy` failed with "cannot load module more than once
+    per process" (test_reindex_safety, after test_catalog_multi_product)."""
+    import sys
     for mod, attr in (("text_utils", "_PRODUCT_TERMS"),
                       ("retrieval_db", "_PRODUCT_CATEGORY")):
-        try:
-            import importlib
-            m = importlib.import_module(mod)
-            if hasattr(m, attr):
-                setattr(m, attr, None)
-        except Exception:
-            pass
+        m = sys.modules.get(mod)
+        if m is not None and hasattr(m, attr):
+            setattr(m, attr, None)
 
 
 def catalog() -> dict:
