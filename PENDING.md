@@ -362,7 +362,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 17 | Opus + you | 45 | **Done 2026-10-02**: 2 FAQs added, 2 truncated ones repaired, refusals on the repeat phrasings 3 -> 1 (the one left is the intended litres absence refusal); table under 9.12. |
 | 18 | shell, then Fable | 46 | **Done 2026-10-02**: escalation on flag rejected. Rebuilt population (the 79 logged turns were lost): 3 of 196 replayed questions are still flagged; V4 Pro (thinking on) passed the verifier on all 3, but only 1 was right. The other 2 turned honest refusals into wrong answers. Detail under 9.13. |
 | 19 | Opus | 47, 48 | **Done 2026-10-02** (`a8adf82`, `63496d2`); full suite 321/322 (1 skipped; the 1 failure, test_reindex_safety numpy double-load, also fails at `a1a62f4`, so it predates S19). Left for you: see 10.1/10.2. |
-| 20 | Sonnet | 49 | |
+| 20 | Sonnet | 49 | **Done 2026-10-02**: `ci.yml` gains a nightly cron and a Docker start-up step; not yet run (see 10.3). |
 | 21 | Fable | 50 | Only if still needed after 8.6. |
 | 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
 | 23 | Opus (medium) | HC1 | Recurring corpus + RAG health check. Independent of S1-S22. One attended session, no subagents. Opening prompt below. |
@@ -1452,7 +1452,20 @@ exactly, we cannot tell whether a fix helped.
   see "(OCR)" in a widget answer (it changes the live index, so not done
   here); (3) `logger.MAX_ANSWER_LEN` is still 500 -- the gap entry now
   stores the full answer, so the review loop no longer needs it raised.
-- [ ] **10.3 Nightly automatic test runs**, and a Docker start-up test.
+- [x] **10.3 Nightly automatic test runs**, and a Docker start-up test.
+  **Done 2026-10-02 (S20), unexercised.** `.github/workflows/ci.yml` gets
+  `schedule` (02:17 UTC) and `workflow_dispatch`, so all three existing gates
+  run nightly. New `tools/docker_startup_check.sh` runs after the image
+  build: starts the container with no index or key, asserts `/health` 200,
+  `/health?deep=1` warm-up turns ready (baked models load), and deep health
+  is 503/not-ready on the empty index. Not run anywhere yet: Docker Desktop's
+  daemon was down here, so only `bash -n` and the YAML parse were checked.
+  Left for you: (1) scheduled workflows run on the default branch only, so
+  nothing fires nightly until this reaches `main`; test it first via Actions
+  -> CI -> Run workflow on this branch; (2) the check's first real run may
+  need `WAIT` raised on a cold runner. The eval suites are not in the
+  nightly (they need a corpus, a backend and a provider key; S23's
+  `health_check.py` is the place for that).
 - [ ] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
   comparisons still refused.
 - [ ] 10.5-10.9 Deferred until needed: richer memory, figures beside
