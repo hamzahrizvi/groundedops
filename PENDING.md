@@ -363,7 +363,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 18 | shell, then Fable | 46 | **Done 2026-10-02**: escalation on flag rejected. Rebuilt population (the 79 logged turns were lost): 3 of 196 replayed questions are still flagged; V4 Pro (thinking on) passed the verifier on all 3, but only 1 was right. The other 2 turned honest refusals into wrong answers. Detail under 9.13. |
 | 19 | Opus | 47, 48 | **Done 2026-10-02** (`a8adf82`, `63496d2`); full suite 321/322 (1 skipped; the 1 failure, test_reindex_safety numpy double-load, also fails at `a1a62f4`, so it predates S19). Left for you: see 10.1/10.2. |
 | 20 | Sonnet | 49 | **Done 2026-10-02**: `ci.yml` gains a nightly cron and a Docker start-up step; not yet run (see 10.3). |
-| 21 | Fable | 50 | Only if still needed after 8.6. |
+| 21 | Fable | 50 | **Measured 2026-10-02**, not built: comparisons are no longer refused as a class; one deterministic miss left (18 T3, SSP). Decision under 10.4. |
 | 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
 | 23 | Opus (medium) | HC1 | Recurring corpus + RAG health check. Independent of S1-S22. One attended session, no subagents. Opening prompt below. |
 
@@ -1468,6 +1468,33 @@ exactly, we cannot tell whether a fix helped.
   `health_check.py` is the place for that).
 - [ ] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
   comparisons still refused.
+  **Measured 2026-10-02 (S21), nothing built.** `tools/comparison_probe.py`
+  replays every comparison turn in the suites (scenario 18 T1-T3, 14 T4,
+  07 T1, the extensive MyCheckr-vs-Mini case, the tuned BV30-vs-NV200S
+  case, and the 8.15 "which validates notes faster" phrasing) in-process
+  through the production `query()`, one session per conversation. 3 runs,
+  every turn identical each time (`eval_runs/s21_comparisons*.json`):
+
+  | turn | result x3 | right? |
+  |---|---|---|
+  | 18 T1 difference NV9S vs NV9USB+ | answered, `sales.compare` table, 0.1s | yes (4 shared spec rows) |
+  | 18 T2 which validates notes faster | asked back | **yes**: neither manual states a speed (index grep: no per-second/ms figure; the 8.15 note below claiming "both manuals hold the figure" was wrong) |
+  | 18 T3 do they both use the same SSP | asked back | **no**: NV9S p4 lists SSP, NV9USB+ p37-38 has an SSP section, and retrieval returned both manuals plus the NV200 SSP manual; the model still asked which model |
+  | 14 T4 which of the two takes more notes | answered from NV9USB+ only ("600 takes more than 300") | wrong referent: "the two" are the products; both offer 300 and 600 cashboxes, so the honest answer is "the same" |
+  | 07 T1 Mini vs full | answered | yes |
+  | ext MyCheckr vs Mini | answered, cites both manuals | yes |
+  | tuned BV30 vs NV200S voltage | answered 12V vs 24V | yes |
+  | 8.15 notes faster, single turn | refused | yes (no figure) |
+
+  So 5/8 answered, and 2 of the 3 non-answers are honest. The one real
+  comparison-synthesis miss is 18 T3: both passages retrieved, the model
+  will not say "yes, both". A full side-by-side prompt is too much
+  machinery for one deterministic turn; the lazy fix to try first is one
+  line in the answer prompt when two catalogue products are in play
+  ("answer for each product from its own manual"), measured with the probe
+  (`--repeats 3`) on 18 T3 and 14 T4. 14 T4 is follow-up resolution ("the
+  two" after a product switch), not synthesis. Your call whether either is
+  worth a step; the 10.4 box stays open until then.
 - [ ] 10.5-10.9 Deferred until needed: richer memory, figures beside
   procedures, true word-by-word streaming, translated widget text, test
   cases for the "inference" mode.
@@ -1721,6 +1748,8 @@ the classifier calls standalone — left as the engineer wrote them).
   SSP interface" reach the model and are refused (18 T2/T3 after-run):
   both manuals hold the figure, in different passages. A comparison prompt
   presenting the two products' passages side by side is the next path.
+  *(Corrected 2026-10-02, S21: no validation-speed figure exists in either
+  manual, so T2's refusal is right; only T3 (SSP) is a real miss. See 10.4.)*
 - **"and step 3?"** re-serves the whole procedure (13 T2, before and
   after). Wants the previous answer's numbered list, not retrieval —
   `_expand_previous`-style on `is_more_request`.
