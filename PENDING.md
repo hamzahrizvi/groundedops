@@ -361,7 +361,7 @@ the ~50 human labels (15), the MCP access and data decision (51).
 | 16 | Sonnet | 44 | **Done 2026-10-02**: label only, one admin.html edit. |
 | 17 | Opus + you | 45 | **Done 2026-10-02**: 2 FAQs added, 2 truncated ones repaired, refusals on the repeat phrasings 3 -> 1 (the one left is the intended litres absence refusal); table under 9.12. |
 | 18 | shell, then Fable | 46 | **Done 2026-10-02**: escalation on flag rejected. Rebuilt population (the 79 logged turns were lost): 3 of 196 replayed questions are still flagged; V4 Pro (thinking on) passed the verifier on all 3, but only 1 was right. The other 2 turned honest refusals into wrong answers. Detail under 9.13. |
-| 19 | Opus | 47, 48 | |
+| 19 | Opus | 47, 48 | **Done 2026-10-02** (`a8adf82`, `63496d2`); full suite 321/322 (1 skipped; the 1 failure, test_reindex_safety numpy double-load, also fails at `a1a62f4`, so it predates S19). Left for you: see 10.1/10.2. |
 | 20 | Sonnet | 49 | |
 | 21 | Fable | 50 | Only if still needed after 8.6. |
 | 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
@@ -1420,10 +1420,38 @@ exactly, we cannot tell whether a fix helped.
 
 ### Tier 9 -> 10 - it improves itself from real use
 
-- [ ] **10.1 A weekly report**: how many questions were resolved, refused,
-  handed off, and how fast.
-- [ ] **10.2 Console review loop**: see unanswered and thumbs-down questions
+- [x] **10.1 A weekly report**: how many questions were resolved, refused,
+  handed off, and how fast. **Done 2026-10-02 (S19, `a8adf82`).**
+  `python -m log_report --since 7d [--all] [--json]` (src/log_report.py),
+  GET `/admin/report`, and a "Last 7 days" tile row on the Overview.
+  Refused = gate exits, role rejected, or refusal text (the model declining
+  ends at "respond", so the outcome alone undercounts). Resolved is
+  provisional: last turn answered, no handoff, no repeated question; no
+  thumbs-down term yet. Today every logs.jsonl row predates M2 (the
+  rebuilt file ends 09-25), so "resolved" reads 0 of 0 until new widget
+  turns are logged; over all rows: 2,282 turns, 1,358 answered, 765
+  refused, 159 asked back, p50 6.9s / p90 32.6s (n=251 with total_time).
+  Left for you: point the Friday review task at the CLI output.
+- [x] **10.2 Console review loop**: see unanswered and thumbs-down questions
   and turn them into FAQs in one click; verify OCR end to end.
+  **Done 2026-10-02 (S19, `63496d2`).** Gap entries now carry per-origin
+  ask counts and, after query() returns, how that turn ended (answered /
+  refused / asked back, role, cited pages, the answer); a down vote keeps
+  the answer the visitor saw. The gaps page filters Not answered /
+  Answered, no FAQ yet / Flagged by visitors, hides test-only entries, and
+  each row opens what was said; "Answer with AI" -> "Use this" stays the
+  promote path. OCR: route test (engine mocked), the real rapidocr engine
+  reading a pixels-only page, and the "(OCR)" source label; tests
+  `test_gap_review.py`, `test_ocr_end_to_end.py`. Queue composition today:
+  498 open entries / 3,037 asks; reasons 406 none, 50 low retrieval, 35
+  suppressed, 5 generation failed, 2 not mentioned; 165 entries / 1,631
+  asks (54%) are verbatim eval or test text, and 0 have origins yet, so
+  nothing is hidden until new asks arrive. Left for you: (1) whether to
+  backfill those 165 as test-only (a real visitor could have typed the
+  same words); (2) one manual console walk: OCR a real scanned page and
+  see "(OCR)" in a widget answer (it changes the live index, so not done
+  here); (3) `logger.MAX_ANSWER_LEN` is still 500 -- the gap entry now
+  stores the full answer, so the review loop no longer needs it raised.
 - [ ] **10.3 Nightly automatic test runs**, and a Docker start-up test.
 - [ ] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
   comparisons still refused.
