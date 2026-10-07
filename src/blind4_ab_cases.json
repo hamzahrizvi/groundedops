@@ -1,0 +1,729 @@
+{
+ "cases": [
+  {
+   "id": "B4-01",
+   "product": "bv30",
+   "q": "if the machine never confirms the vend while the bv30 is holding a note in escrow, how long till it hands the note back?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The BV30 has a single-note escrow: if no vend confirmation is received the note is returned to the user after 30 seconds. If the host aborts the transaction by setting the corresponding inhibit input high, the note is returned immediately.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p40",
+    "BV30 User Manual-v1.pdf p23"
+   ],
+   "must_include": [
+    "30 seconds",
+    "inhibit"
+   ]
+  },
+  {
+   "id": "B4-02",
+   "product": "nv9usb",
+   "q": "lost the little screw that locks the lozenge in on an nv9usb+. whats the part number / size so i can order one?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "A retaining screw must be used to lock the lozenge: ITL screw reference SC00101, which is a NO6 x 12.5 Pozi domed screw.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p26",
+    "NV9USB+ Range User Manual-v1.pdf p65"
+   ],
+   "must_include": [
+    "SC00101",
+    "Pozi"
+   ]
+  },
+  {
+   "id": "B4-03",
+   "product": "nv9_spectral",
+   "q": "where's the micro sd slot on the nv9 spectral? cant find it anywhere",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The microSD card slot is on the exterior side of the housing assembly and is reached after the bezel has been removed. The internal bezel (or the rainbow bezel if fitted) flashes once when the card is detected.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p19"
+   ],
+   "must_include": [
+    "bezel has been removed",
+    "flashes once"
+   ]
+  },
+  {
+   "id": "B4-04",
+   "product": "nv9_spectral",
+   "q": "what do i need to put a door lock on the moulded nv9s cashbox? parts and tools",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The lock is only possible on the moulded cashbox and needs the PA04388 moulded cashbox door lock assembly (requires the MC02186 locking clip and the PA04349 rear housing assembly) plus a T6 Torx screwdriver. Open the door, remove the two Torx 6 screws and pull the latch out, fit the lock into the shared slot with its two holes facing down, then refit the two screws.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p34",
+    "NV9 Spectral Range User Manual-v1.pdf p18",
+    "NV9 Spectral Range User Manual-v1.pdf p69"
+   ],
+   "must_include": [
+    "PA04388",
+    "T6 Torx"
+   ]
+  },
+  {
+   "id": "B4-05",
+   "product": "nv200s",
+   "q": "how good does the earth bond on the nv200 spectral need to be, is there a max resistance?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The NV200 Spectral must be properly bonded to earth using one of the earth tabs (on the standard chassis any of the screw mounting points at the side of the unit). The resistance between the chassis and Earth should be less than 0.7 ohm; poor bonding can cause communication issues and other failures.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p54"
+   ],
+   "must_include": [
+    "0.7"
+   ]
+  },
+  {
+   "id": "B4-06",
+   "product": "nv200s",
+   "q": "writing our own ssp driver for the nv200 spectral. how long should the host wait for a reply before it resends, and when do we give up on it?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "After sending a command the master waits 1 second for a reply; if none arrives it retransmits the command with the same sequence flag. After twenty retries the master assumes the secondary has crashed (the secondary itself has no time-out or retry limit).",
+   "pages": [
+    "NV200 Spectral SSP Manual v.1.pdf p12",
+    "NV200 Spectral SSP Manual v.1.pdf p13"
+   ],
+   "must_include": [
+    "1 second",
+    "twenty"
+   ]
+  },
+  {
+   "id": "B4-07",
+   "product": "sku_scs",
+   "q": "how often does the coin sorting disk need swapping on the smart coin system?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The Coin Feeder's coin sorting disk should be exchanged every 250,000 cycles. The SMART Hopper's coin sorting disk is exchanged every 1,000,000 cycles, but that task needs repair training, so contact the Support team for it.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p77"
+   ],
+   "must_include": [
+    "250,000",
+    "1,000,000"
+   ]
+  },
+  {
+   "id": "B4-08",
+   "product": "mycheckr",
+   "q": "what ethernet speed does the mycheckr do, and is there any rule about the network cable?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The MyCheckr RJ45 port supports 10Base-T and 100Base-T. UL requires a telecommunication line cord of at least 26 AWG (Annex DVI of UL 62368-1) to guard against fire from overvoltage on power line crosses.",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p29"
+   ],
+   "must_include": [
+    "100Base-T",
+    "26 AWG"
+   ]
+  },
+  {
+   "id": "B4-09",
+   "product": "mycheckr_mini",
+   "q": "how do you fix the mini down? dont really want to drill into the counter",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The MyCheckr Mini comes with a detachable mount that attaches to the body with a 1/4\"-20 thread screw. The mount comes with an adhesive pad, so it can be stuck down instead of being screwed through its three holes.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p7"
+   ],
+   "must_include": [
+    "adhesive pad"
+   ]
+  },
+  {
+   "id": "B4-10",
+   "product": "myconnect",
+   "q": "if nobody on the till answers an underage alert on the tablet, what happens to it?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "An alert left for 10 minutes (changeable to a custom time via the Hub's Alert Timeout) disappears automatically and is logged as 'Left pending for more than 10 minutes'. The captured images are not saved in the logs; they are only kept in temporary memory for GDPR compliance.",
+   "pages": [
+    "MyConnect Environment-v4.pdf p24",
+    "MyConnect Environment-v4.pdf p36"
+   ],
+   "must_include": [
+    "10 minutes",
+    "Left pending"
+   ]
+  },
+  {
+   "id": "B4-11",
+   "product": "nv9usb",
+   "q": "can i run the nv9usb+ straight off the 24v rail in our vending machine?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "Not directly: the NV9USB+ supply range is 10.8V to 13.2V DC (12V nominal, max ripple 0.25V @ 100Hz). A higher machine voltage is only supported through an IF5, which accepts 18V DC up to 48V DC or 34V AC and drops it to the required level.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p14",
+    "NV9USB+ Range User Manual-v1.pdf p44"
+   ],
+   "must_include": [
+    "13.2V",
+    "IF5",
+    "48V DC"
+   ]
+  },
+  {
+   "id": "B4-12",
+   "product": "nv9_spectral",
+   "q": "our 20s are about 81mm wide. nv9 spectral with the multi note float - will it recycle them?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "The NV9 Spectral accepts notes 60-82mm wide (115-167mm long), so an 81mm note can be taken in, but the Multi Note Float only handles 62-80mm wide (115-160mm long). A note routed to the recycler that exceeds the maximum width is sent to the cashbox automatically, so 81mm notes will not be recycled.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p28"
+   ],
+   "must_include": [
+    "80mm",
+    "cashbox"
+   ]
+  },
+  {
+   "id": "B4-13",
+   "product": "sku_scs",
+   "q": "putting the feeder disk screw back in after cleaning, what torque does it want?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "Put a small amount of thread-lock or stud-lock glue on the end of the (T30) screw and tighten it to 1 N/m +/-5%, or 0.60 N/m +/-5% on Type A/C units.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p98"
+   ],
+   "must_include": [
+    "1 N/m",
+    "0.60",
+    "Type A/C"
+   ]
+  },
+  {
+   "id": "B4-14",
+   "product": "mycheckr",
+   "q": "how hot does the mycheckr case get when its working flat out? its going next to some plastic trim",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "At Max Load (max operating while scanning for faces, with both USB Type-A ports drawing 0.5A each) the glass casing reaches 43C (21C above ambient) and the plastic casing 49C (27C above ambient).",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p38"
+   ],
+   "must_include": [
+    "43",
+    "49",
+    "Max Load"
+   ]
+  },
+  {
+   "id": "B4-15",
+   "product": "mycheckr_mini",
+   "q": "mini is plugged into a pc streaming video to IMS - how much current does it pull at peak?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "In Normal Operating mode (connected to a PC, application running, streaming video) the Mini draws 500mA RMS / 870mA peak while scanning for faces and 480mA RMS / 855mA peak while analysing a face. Stand-alone on a USB supply it is 450mA / 840mA scanning and 445mA / 830mA analysing.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p30",
+    "MyCheckr Mini User Manual-v5.pdf p31"
+   ],
+   "must_include": [
+    "870mA",
+    "500mA"
+   ]
+  },
+  {
+   "id": "B4-16",
+   "product": "nv200s",
+   "q": "how heavy is an nv200 spectral with the 2200 note cashbox once its full? need it for the shelf rating",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "The NV200 Spectral with standard bezel weighs 1.20 kg; the 2200 note cashbox with chassis weighs 3.15 kg empty and 4.99 kg full. So a full unit is about 6.19 kg (about 4.35 kg empty).",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p19",
+    "NV200S Range User Manual-v1.pdf p20"
+   ],
+   "must_include": [
+    "4.99",
+    "6.19"
+   ]
+  },
+  {
+   "id": "B4-17",
+   "product": "bv30",
+   "q": "bv30 on pulse in a pool table. can a punter put a $5 in and have it release one game at a time instead of all the credit at once?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "Yes, enable the Credit Hold function. The BV30 takes the note normally, then waits for the escrow line to be toggled low/high before giving out the pulses for one denomination step, and waits for another low/high toggle each time until the full credit has been paid (e.g. at 2 pulses per dollar a $5 note gives 2 pulses five times). The busy line stays low throughout and the BV30 stays inhibited until all pulses are given.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p28"
+   ],
+   "must_include": [
+    "Credit Hold",
+    "escrow line"
+   ]
+  },
+  {
+   "id": "B4-18",
+   "product": "nv9usb",
+   "q": "the light behind the red button on our nv11+ recycler is blinking steady, about once a second. whats up",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "A constant 1Hz flash on the Note Float status LED means a Note Transport Error (jam) in the Note Float. Clear the jam, then press the red configuration button once to acknowledge that it has been cleared.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p56",
+    "NV9USB+ Range User Manual-v1.pdf p57"
+   ],
+   "must_include": [
+    "Note Transport Error",
+    "press"
+   ]
+  },
+  {
+   "id": "B4-19",
+   "product": "nv9_spectral",
+   "q": "nv9 spectral bezel keeps doing 2 long flashes then 1 short and wont take anything",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "2 long + 1 short means 'Plastic cashbox removed': insert the cashbox. (The moulded cashbox presence sensor needs firmware >= 1.20 and build revision >= 8 and can be configured with Validator Manager's 'NV9S Cashbox Detect' option or SSP commands.)",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p61",
+    "NV9 Spectral Range User Manual-v1.pdf p17"
+   ],
+   "must_include": [
+    "cashbox removed",
+    "insert the cashbox"
+   ]
+  },
+  {
+   "id": "B4-20",
+   "product": "nv200s",
+   "q": "bunch note feeder lights are going 2 yellow 3 cyan over and over",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "Yellow 2 / Cyan 3 on the BNF is a Motor Stall. Open the feeder lid, clear the notes out from under the tongue, and close the lid to reset.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p86"
+   ],
+   "must_include": [
+    "Motor Stall",
+    "tongue"
+   ]
+  },
+  {
+   "id": "B4-21",
+   "product": "sku_scs",
+   "q": "support want the last error codes off our smart coin system. how do i pull them with an sd card?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "This needs firmware 1.21 or later. Insert the prepared SD card (ITL-tested part IC02017) into the slot, perform a power reset, wait until the setup routine has finished (all motors stopped) and remove the card. On a PC open EVENT.LOG, which holds the firmware/dataset version, serial and hardware type, the last 8 system error codes and device statistics (CALIB.LOG and DEBUG.LOG are also written). On a Twin, primary and secondary data must be collected separately.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p86",
+    "SMART Coin System Range User Manual-v1.pdf p87"
+   ],
+   "must_include": [
+    "1.21",
+    "EVENT.LOG",
+    "last 8"
+   ]
+  },
+  {
+   "id": "B4-22",
+   "product": "mycheckr_mini",
+   "q": "mini is in a really dark back bar and struggles to pick up faces. any setting for that?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "In IMS, on the Camera Configuration & Live View page, change Camera Operation from Normal Exposure (recommended for normal lighting) to Dark-room Enhancement, which optimises the camera for very low-light installations. Use the live view, pose guidance and Display Box to confirm detection afterwards.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p13",
+    "MyCheckr Mini User Manual-v5.pdf p14"
+   ],
+   "must_include": [
+    "Dark-room Enhancement"
+   ]
+  },
+  {
+   "id": "B4-23",
+   "product": "myconnect",
+   "q": "we've got 6 mycheckrs. can i set the age threshold on all of them at once in the connect app instead of one by one?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "Yes, use Device Groups: from the Devices menu go to Manage Groups, tap Add Group, enter a name, pick a colour and save, then select the devices to include. The group's Threshold, Distance, Spoof/Spoof (T) and screen edits apply to every member, and group-level changes override individual device settings; removing the group returns the devices to standalone management.",
+   "pages": [
+    "MyConnect Environment-v4.pdf p29"
+   ],
+   "must_include": [
+    "Manage Groups",
+    "override"
+   ]
+  },
+  {
+   "id": "B4-24",
+   "product": "nv200s",
+   "q": "someone changed the eSSP fixed key on our nv200 spectral and nobody knows what it is now. how do i get it back to default, and what is the default?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "With firmware >= 4.30, having DIP switch 8 up at power-up resets the keys (both SSP and CCT). The SSP command 0x61 also resets the fixed key to default and reboots the unit, but it must be sent encrypted. The default fixed key is 0x0123456701234567 (01 23 45 67 01 23 45 67).",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p63",
+    "NV200 Spectral SSP Manual v.1.pdf p107",
+    "NV200 Spectral SSP Manual v.1.pdf p16"
+   ],
+   "must_include": [
+    "DIP switch 8",
+    "4.30",
+    "0123456701234567"
+   ]
+  },
+  {
+   "id": "B4-25",
+   "product": "nv200s",
+   "q": "support want logs from an nv200 spectral. can i pull them over ssp from the host instead of going to the machine with an sd card?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Yes. Locally: insert a blank FAT32/MBR SD card in the front slot; the bezel flashes alternating colours while it copies from the 128MB internal memory and turns solid green when done (usually 1-2 minutes). Remotely: SSP command 0x83 Log Extraction (start extraction, get available logs, read, finish) works on NV200 Spectral firmware >= 4.27; with no SD card inserted the data comes from internal memory, and a USB connection is recommended for speed.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p90",
+    "NV200 Spectral SSP Manual v.1.pdf p129"
+   ],
+   "must_include": [
+    "0x83",
+    "4.27",
+    "SD card"
+   ]
+  },
+  {
+   "id": "B4-26",
+   "product": "mycheckr",
+   "q": "how high should the mycheckr go? we stuck one up high over the till and IMS keeps showing Spoof 4",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Mount it at around 1.5m with an unobstructed field of view and no direct bright lights on the camera. Spoof 4 means the device is mounted too high or at an extreme angle; reposition it at a height/angle that captures the torso and face.",
+   "pages": [
+    "CS-MyCheckr Installation & MyConnect App Pre-Requisites Checklist-170925-134345.pdf p2",
+    "MyCheckr User Manual-v7.pdf p18"
+   ],
+   "must_include": [
+    "1.5m",
+    "torso and face"
+   ]
+  },
+  {
+   "id": "B4-27",
+   "product": "mycheckr",
+   "q": "our kiosk reads the age off the mycheckr api. what should it do when a spoof is flagged, and can the device itself just stop processing on a spoof?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Per the local API decision rule, only Age >= the host's threshold is a PASS; a detected spoof (like an underage result, rejected face, zero or multiple faces, or poll timeout) should return fail/refer per host policy. On the device, enable Spoof Detection and Spoof Terminate, which stops processing immediately when a spoof attempt is detected; both are off/disabled by default.",
+   "pages": [
+    "ICU_Age_Result_Quick_Guide_v1_1.pdf p2",
+    "MyCheckr User Manual-v7.pdf p11",
+    "MyCheckr User Manual-v7.pdf p25"
+   ],
+   "must_include": [
+    "fail/refer",
+    "Spoof Terminate"
+   ]
+  },
+  {
+   "id": "B4-28",
+   "product": "mycheckr_mini",
+   "q": "need to run a mini off a linux box, no IMS. how do i get the network side talking to it?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Connect the Mini with its pre-attached USB-A cable (data and power; it needs a USB 3.0 port on the host). On Linux set up RNDIS: create /etc/udev/rules.d/80-local.rules with ACTION==\"add\", ATTRS{idVendor}==\"191c\", RUN+=\"/usr/bin/icuif.sh\"; create /usr/bin/icuif.sh to bring the enx interface up and add 192.168.137.1/24, make it executable, then reboot or restart udev and check with ip addr show. The device is static at 192.168.137.8 and must be in Local API mode.",
+   "pages": [
+    "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf p1",
+    "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf p2",
+    "MyCheckr Mini User Manual-v5.pdf p24"
+   ],
+   "must_include": [
+    "191c",
+    "192.168.137.8",
+    "USB 3.0"
+   ]
+  },
+  {
+   "id": "B4-29",
+   "product": "myconnect",
+   "q": "a regular wants to be enrolled as premium but doesnt want his face stored. any way round that?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Yes, enrol him with a QR code instead of a face. In the MyConnect App tap + under the group and choose 'QR Only' (registers the user with a QR code and no face data); in IMS enable 'Process as QR Code' during enrolment, enter his details and assign the Premium group. He then presents the QR code on future visits and is identified without a facial template being stored.",
+   "pages": [
+    "MyConnect Environment-v4.pdf p31",
+    "MyCheckr User Manual-v7.pdf p21",
+    "MyCheckr User Manual-v7.pdf p22"
+   ],
+   "must_include": [
+    "QR",
+    "facial template"
+   ]
+  },
+  {
+   "id": "B4-30",
+   "product": "bv30",
+   "q": "ok to wipe the bv30 sensors with isopropyl wipes?",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. Solvent-based cleaners such as alcohol, petrol, methylated spirits, white spirit or PCB cleaner permanently damage the BV30. Disconnect power first and use only a clean dry cloth, or a mild detergent where absolutely necessary.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p29"
+   ],
+   "must_include": [
+    "No",
+    "alcohol",
+    "dry cloth"
+   ]
+  },
+  {
+   "id": "B4-31",
+   "product": "sku_scs",
+   "q": "can our host software talk to the smart coin system through the usb socket on the base in normal use?",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. Direct USB should not be used for host communications; the USB socket is for programming and bench testing (shielded cable under 5 metres). If the host needs USB, use an IF17 (TTL to USB).",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p70"
+   ],
+   "must_include": [
+    "No",
+    "IF17"
+   ]
+  },
+  {
+   "id": "B4-32",
+   "product": "myconnect",
+   "q": "can a manager login in the connect app delete the admin account?",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. Manager accounts can manage alerts, logs, analytics and devices but cannot delete admin accounts; only Admin has full access, including creating, editing and deleting any account.",
+   "pages": [
+    "MyConnect Environment-v4.pdf p34"
+   ],
+   "must_include": [
+    "No",
+    "Admin"
+   ]
+  },
+  {
+   "id": "B4-33",
+   "product": "nv9usb",
+   "q": "can the nv9usb+ go in vertically? the only space in the cabinet is upright",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "Yes, the NV9USB+ can be mounted horizontally or vertically. Clip-on cashboxes are mainly used for vertical mounting (slide cashboxes are for horizontal), and the vertical bezels have mounting locations for fixing the unit to the back of the door.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p4",
+    "NV9USB+ Range User Manual-v1.pdf p21",
+    "NV9USB+ Range User Manual-v1.pdf p25"
+   ],
+   "must_include": [
+    "Yes",
+    "clip-on"
+   ]
+  },
+  {
+   "id": "B4-34",
+   "product": "nv9usb",
+   "q": "does the nv9usb+ catch dye-stained notes from cash box robberies?",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "The NV9USB+ manual does not mention stained or dye-stained note detection, so it can't be confirmed from the documentation; refer to ITL support.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B4-35",
+   "product": "myconnect",
+   "q": "can the hub send a text or email to the manager when an underage alert goes off?",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "The MyConnect documentation never mentions SMS or email alerts. It only describes alerts in the Android app (with push notifications when the tablet is locked) and GPIO relay or API (HTTP POST) actions.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B4-36",
+   "product": "mycheckr_mini",
+   "q": "whats the camera field of view on the mini, in degrees?",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "The manuals don't give a field-of-view angle for the MyCheckr Mini camera (only positioning advice and camera rotation options); refer to ITL support.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B4-37",
+   "product": "sku_scs",
+   "q": "how noisy is the smart coin system when its running? need a dB figure for a quiet venue",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "The SMART Coin System manual gives no noise or dB rating; refer to ITL support.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B4-38",
+   "product": "nv9_spectral",
+   "q": "we clean the lenses on our nv9usb+ every month. do the nv9 spectrals need it that often?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "No. The NV9USB+ recommends cleaning the optical lenses every month (or as required), while the NV9 Spectral recommends every 6 months, or more often if the unit is in a particularly harsh environment.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p52",
+    "NV9 Spectral Range User Manual-v1.pdf p56"
+   ],
+   "must_include": [
+    "month",
+    "6 months"
+   ]
+  },
+  {
+   "id": "B4-39",
+   "product": null,
+   "q": "do the nv200 spectral and the smart coin system have the same earthing requirement? fitting both in one cabinet",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "Both must be bonded to earth with less than 0.7 ohm. The NV200 Spectral is bonded via one of its earth tabs (any side screw mounting point on the standard chassis). The SMART Coin System is bonded via any of the 6 holes in the bottom of the base plate to mains earth, typically through the PSU, measured between the base plate and the mains plug earth pin.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p54",
+    "SMART Coin System Range User Manual-v1.pdf p54"
+   ],
+   "must_include": [
+    "0.7",
+    "base plate"
+   ]
+  },
+  {
+   "id": "B4-40",
+   "product": "bv30",
+   "q": "customer has notes about 155mm x 75mm. will the bv30 take them or do we need the nv9usb+?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "The BV30 takes notes 150-180mm long but only 57-72mm wide (limited by its 72mm bezel), so a 75mm-wide note won't fit. The NV9USB+ accepts 90-170mm long and 62-82mm wide, so 155 x 75mm is within its spec.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p9",
+    "NV9USB+ Range User Manual-v1.pdf p17"
+   ],
+   "must_include": [
+    "72mm",
+    "82mm"
+   ]
+  },
+  {
+   "id": "B4-41",
+   "product": null,
+   "q": "need to wire an age camera into our access controller over OSDP. does the mycheckr mini do OSDP or only the full mycheckr?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "Only the full MyCheckr: it has a 3-pin OSDP port running RS-485 (A, B and GND, screw terminals). The MyCheckr Mini has no connection ports apart from its pre-attached USB-A cable, which carries data and power.",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p30",
+    "MyCheckr Mini User Manual-v5.pdf p4",
+    "MyCheckr Mini User Manual-v5.pdf p24"
+   ],
+   "must_include": [
+    "OSDP",
+    "RS-485",
+    "USB-A"
+   ]
+  },
+  {
+   "id": "B4-42",
+   "product": "nv200s",
+   "q": "how many notes does the recycler hold on the nv200 spectral compared with the nv9 spectral one?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "The NV200 Spectral's Spectral Payout module holds up to 80 mixed banknotes; the NV9 Spectral's Multi Note Float recycler holds 40 mixed-denomination notes.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p4",
+    "NV9 Spectral Range User Manual-v1.pdf p4"
+   ],
+   "must_include": [
+    "80",
+    "40"
+   ]
+  },
+  {
+   "id": "B4-43",
+   "product": "sku_scs",
+   "q": "and the least i should keep in it?",
+   "turn1": "whats the most coins the smart coin system hopper can hold?",
+   "type": "followup",
+   "expected": "answered",
+   "reference": "Keep at least the recommended minimum of 20 coins of each denomination; the absolute minimum is 10 of each denomination or 50 coins, whichever is less. Going below this causes extended search times for the right coin or even time-outs.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p64"
+   ],
+   "must_include": [
+    "20",
+    "10",
+    "50 coins"
+   ]
+  },
+  {
+   "id": "B4-44",
+   "product": "nv9_spectral",
+   "q": "can i put a few different currencies on the one card for different machines?",
+   "turn1": "how do i update the nv9 spectral off a micro sd card?",
+   "type": "followup",
+   "expected": "answered",
+   "reference": "Yes, from firmware 1.21 onwards. Copy several currency files into the nv9s folder; the unit then does a matched download and only updates when the currency and dataset code match the one already in the unit (e.g. EUR01). If there's only one file in the folder it is loaded as a normal override download.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p43"
+   ],
+   "must_include": [
+    "1.21",
+    "match"
+   ]
+  },
+  {
+   "id": "B4-45",
+   "product": "mycheckr",
+   "q": "ok its booted now. what does solid yellow mean?",
+   "turn1": "what are the coloured lights on the mycheckr doing when it boots up?",
+   "type": "followup",
+   "expected": "answered",
+   "reference": "With the default age-detection reactions, solid yellow means a spoof was detected (solid red = not enrolled/underage, solid green = enrolled/overage). These reactions can be changed in the ICU Management Suite.",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p32"
+   ],
+   "must_include": [
+    "Spoof"
+   ]
+  },
+  {
+   "id": "B4-46",
+   "product": "nv200s",
+   "q": "does the NV300 Spectral take the same 2200 note cashbox as this one?",
+   "type": "phantom_or_offtopic",
+   "expected": "rejected",
+   "reference": "There is no NV300 Spectral in the documentation; the manuals only cover the NV200 Spectral range, so this can't be answered.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B4-47",
+   "product": "mycheckr",
+   "q": "whats the legal age for buying alcohol in scotland?",
+   "type": "phantom_or_offtopic",
+   "expected": "rejected",
+   "reference": "Off-topic legal question not covered by the manuals (they only mention typical thresholds of 18, 21 or 25 and that the operator is responsible for lawful use).",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B4-48",
+   "product": null,
+   "q": "how do i switch it over to ssp?",
+   "type": "vague",
+   "expected": "clarify",
+   "reference": "Ambiguous: the way to switch to SSP differs per product (e.g. configuration button on the BV30/NV9 range, DIP switch 8 on the NV200 Spectral, the function button on the SMART Coin System). Ask which device.",
+   "pages": [],
+   "must_include": []
+  }
+ ]
+}

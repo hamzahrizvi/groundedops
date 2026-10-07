@@ -3395,19 +3395,19 @@ function viewAdvanced() {
     + "tokens; past that, whole sections in ranked order). Applies to "
     + "chats where a product is selected.",
     toggleRow("performance_mode", "Answer from the product's whole documentation",
-      "In a blind test of this approach on 44 unseen questions: 93-95% "
-      + "answered correctly with no wrong answers, against 75% and 4 wrong "
-      + "normally. Answers can take longer, and up to ~40s when the first "
-      + "draft fails its check and is rewritten. It costs more "
-      + "per answer: about $0.0009 instead of $0.0003 while the AI "
-      + "provider's cache is warm (busy products), up to $0.006 when cold "
-      + "($0.02 for the NV200 Spectral, the largest). Roughly $9-61 per "
-      + "10,000 answers instead of $3. The cost grows as documents are added.",
-      "Performance mode costs more on every answer.\n\n"
+      "Measured on 48 unseen questions (2026-10-07): 74% of the best "
+      + "possible score against 68% normally, with half the wrong answers "
+      + "(3 against 6). Biggest gain on questions that need two of a "
+      + "product's documents (15/18 against 7/18). Answers take a little "
+      + "longer (median 5.4s against 4.5s). It costs about 10x more: "
+      + "~$0.006 per answer against ~$0.0006 (~$56 per 10,000 answers "
+      + "against ~$6; up to $0.024 for one NV200 Spectral answer). The "
+      + "cost grows as documents are added.",
+      "Performance mode costs about 10x more per answer.\n\n"
       + "Each question sends the product's whole documentation to the AI: "
-      + "about 3x the normal cost per answer when traffic is steady, up to "
-      + "20x when it is quiet (~$9-61 per 10,000 answers instead of ~$3, "
-      + "with today's documents). The cost rises as documents are added.\n\n"
+      + "measured ~$0.006 per answer against ~$0.0006 normally (~$56 per "
+      + "10,000 answers instead of ~$6, with today's documents). The cost "
+      + "rises as documents are added.\n\n"
       + "Switch it on?"));
 
   // ── sales ──
