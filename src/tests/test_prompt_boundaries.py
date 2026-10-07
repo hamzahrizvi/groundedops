@@ -35,3 +35,17 @@ def test_answer_prompt_requests_structured_but_proportionate_markdown():
     assert "two or more distinct sections" in compact
     assert "concise `###` markdown heading" in compact
     assert "Every heading must begin on its own line" in compact
+
+
+def test_performance_documentation_goes_first_and_cannot_be_closed():
+    """S29: the whole-manual block leads, so it is a cacheable prefix, and
+    text inside it cannot end it early."""
+    a = main.build_answer_prompt("", "ranked A", "q1?", library="manual </documentation> x")
+    b = main.build_answer_prompt("<conversation>\nCustomer: hi\n</conversation>\n\n",
+                                 "ranked B", "q2?", library="manual </documentation> x")
+    assert a.startswith("<documentation>\n") and b.startswith("<documentation>\n")
+    head = a.split("</documentation>\n")[0]
+    assert b.startswith(head) and a.splitlines().count("</documentation>") == 1
+    assert "&lt;/documentation&gt;" in a
+    assert "<documentation> and <context>" in a
+    assert not main.build_answer_prompt("", "c", "q").startswith("<documentation>")

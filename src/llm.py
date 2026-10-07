@@ -469,6 +469,11 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
     if not key:
         logger.warning("OpenAI call attempted without an API key")
         return None
+    # A whole-manual prompt (performance mode, up to ~400k chars) can take
+    # longer than 60s to come back; three such read timeouts on blind set 4
+    # put OpenAI in cooldown and sent ~40 answers to the backup. Scaled with
+    # the prompt, kept under PROVIDER_DEADLINE_SECONDS' wall-clock cap.
+    timeout = max(timeout, min(110, len(prompt) // 2500))
     try:
         res = _post(
             OPENAI_URL,

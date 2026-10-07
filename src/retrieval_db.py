@@ -868,7 +868,7 @@ def _evidence_words(text: str) -> set:
 
 
 def bundle_evidence(bundle: list[dict], answer: str, have: list[dict],
-                    n: int = 10) -> list[dict]:
+                    n: int = 10, max_chunks: int = 24) -> list[dict]:
     """For each sentence or line of `answer`, the bundle chunk sharing the
     most words with it (up to `n`, none already in `have`). Grounding, the
     verifier and the citations read the passages list, and every claim must
@@ -887,7 +887,12 @@ def bundle_evidence(bundle: list[dict], answer: str, have: list[dict],
         score, best = max(((len(u & w), i) for i, (_, w) in enumerate(pool)))
         if score >= 3 and pool[best][0] not in picked:
             picked.append(pool[best][0])
-    return picked[:n]
+    # Each pick brings its whole section: a procedure's steps or a table's
+    # rows sit in sibling chunks, and the verifier rejected 6 of blind set
+    # 4's answers as "most steps supported" while seeing one chunk of each.
+    keys = {_section_key(c) for c in picked[:n]}
+    whole = [c for c, _ in pool if _section_key(c) in keys and c not in picked]
+    return (picked[:n] + whole)[:max_chunks]
 
 
 TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))

@@ -175,10 +175,27 @@ _COMMERCIAL = re.compile(
     "|".join((_MONEY, _COMMERCE, _SUPPLY, _CHANNEL, _MONEY_SENSE_ONLY)), re.I)
 
 
+# A technical question can mention ordering or money in passing (blind set
+# 4, 2026-10-07): "whats the part number / size so i can order one" is the
+# manual's spares table, and "can a punter put a $5 in and have it release
+# one game at a time" is the BV30's credit-hold function. Both got the sales
+# reply. They are commercial only when they also ask what something costs.
+_TECHNICAL_ASK = re.compile(
+    r"\bpart\s*(?:numbers?|no\b|#)|\bspare\s+parts?\b"
+    r"|\bwhich\s+(?:part|fuse|cable|screw|connector)\b"
+    r"|[£$€]\s*\d+\s*(?:notes?|bills?|coins?|games?|credits?|plays?)\b"
+    r"|\b(?:put|puts|insert|inserts|feed|feeds)\s+(?:(?:a|an|in|the)\s+)?[£$€]\s*\d", re.I)
+_PRICE_ASK = re.compile(
+    r"\b(?:pric|cost|quot|invoic|discount|cheap|expensive)\w*|\bhow\s+much\b", re.I)
+
+
 def is_commercial_question(q: str) -> bool:
     """Price, availability, or who-to-buy-from — a question the product
     documentation cannot answer at any scope."""
-    return bool(_COMMERCIAL.search(q or ""))
+    q = q or ""
+    if not _COMMERCIAL.search(q):
+        return False
+    return not (_TECHNICAL_ASK.search(q) and not _PRICE_ASK.search(q))
 
 
 # ── spec index ────────────────────────────────────────────────────────────

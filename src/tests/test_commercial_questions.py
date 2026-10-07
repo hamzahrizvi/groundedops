@@ -41,6 +41,20 @@ def test_spec_questions_are_not_commercial():
         assert not sales.is_commercial_question(q), q
 
 
+def test_money_or_ordering_in_passing_is_still_technical():
+    """Blind set 4 (2026-10-07): both of these got the sales reply."""
+    for q in ("lost the little screw that locks the lozenge in on an nv9usb+. "
+              "whats the part number / size so i can order one",
+              "bv30 on pulse in a pool table. can a punter put a $5 in and have "
+              "it release one game at a time",
+              "which fuse do I order for the hopper"):
+        assert not sales.is_commercial_question(q), q
+    # ...unless they also ask what it costs.
+    for q in ("whats the part number and price so i can order one",
+              "how much is a spare part for the bezel"):
+        assert sales.is_commercial_question(q), q
+
+
 def test_catalogue_navigation_is_not_commercial():
     """"which products run on 24V" IS answerable from the documents and must
     keep going to the catalogue route, not the deflect."""
