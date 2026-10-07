@@ -198,6 +198,28 @@ def is_commercial_question(q: str) -> bool:
     return not (_TECHNICAL_ASK.search(q) and not _PRICE_ASK.search(q))
 
 
+# A PRICE question is the one commercial shape no manual answers and that
+# the model will invent for ("offered at a mid-range price"), so it still
+# gets the sales reply before any search. Every other commercial wording --
+# buy, order, stock, budget, pay for, a lead time, a reseller -- searches the
+# manuals first: blind sets 4, 5 and NV4000 (2026-10-07) got the sales reply
+# for "what do i need to buy", "budgeting power supplies", "quoting a job",
+# "order one off RS" and "do we have to pay" (the manual says free), all of
+# which the manuals answer. main._friendly_refusal gives the sales reply when
+# that search finds nothing.
+_PRICE = re.compile(
+    r"\b(?:pric|cost|discount|cheap|expensive|invoic|tariff|rebate|surcharg)\w*"
+    r"|\bquot(?:e|es|ations?)\b|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will|for)\b"
+    r"|\bper\s+(?:unit|device|licence|license|seat|month|year)\b", re.I)
+
+
+def is_price_question(q: str) -> bool:
+    """A commercial question that asks what something costs: deflected
+    before retrieval. Other commercial questions search first."""
+    q = q or ""
+    return is_commercial_question(q) and bool(_PRICE.search(q))
+
+
 # ── spec index ────────────────────────────────────────────────────────────
 
 _INDEX: list[dict] | None = None
@@ -563,8 +585,23 @@ def _is_spec_row(row: dict) -> bool:
     return True
 
 
+# Words a comparison uses that name no attribute: "what's the main
+# difference between the two models".
+_OPEN_WORDS = {_stem(w) for w in (
+    "between", "main", "key", "big", "biggest", "real", "plain", "one", "two",
+    "both", "model", "models", "unit", "units", "version", "versions", "range",
+    "them", "these", "those", "they", "differ", "different", "much")}
+
+
+def _asked(question: str, names_text: str = "") -> set:
+    """What a comparison asks about: its terms minus the product names and
+    the comparison wording. Empty for an open "what's the difference"."""
+    return (_terms(_COMPARE.sub(" ", question or "")) - _stems_in(names_text)
+            - _OPEN_WORDS)
+
+
 def _shared_differences(named: list[str], index: list[dict],
-                        question: str) -> list:
+                        question: str, names_text: str = "") -> list:
     """(attribute, {product: value}) for attributes every named product has
     and does not agree on."""
     wanted = set(named)
@@ -606,11 +643,14 @@ def _shared_differences(named: list[str], index: list[dict],
     # manuals say +5°C to +50°C has the answer "there is none", and that is
     # worth saying: dropping equal rows here made the pipeline refuse a
     # question whose answer was sitting in both tables.
-    terms = _terms(question)
+    #
+    # A named dimension no shared row covers is not answered here (S30):
+    # "MCBF on the NV4000 vs a plain NV200 Spectral?" matched a junk row on
+    # "spectral" and the recycler-capacity question got the temperature row.
+    # Retrieval reads the manuals for it instead.
+    terms = _asked(question, names_text + " " + " ".join(named))
     if terms:
-        focused = [(a, v) for a, v in documented if terms & _terms(a)]
-        if focused:
-            return focused
+        return [(a, v) for a, v in documented if terms & _terms(a)]
     # Open-ended: the rows they disagree on ARE the difference.
     return differing[:12]                 # a table nobody reads is not an answer
 
@@ -628,7 +668,16 @@ def compare(question: str, index: list[dict], named: list,
     names = product_names or {}
 
     # Shape 1: one table already puts them side by side.
+    names_text = " ".join(list(names.values()) + list(named or []))
     rows = _same_table_rows(question, index)
+    # The table names both products but must also hold what was asked: the
+    # NV200 SSP manual's product-range list (p7) names every validator and
+    # answered MCBF and recycler-capacity comparisons with it (B4-42, N4-32).
+    if rows and _asked(question, names_text + " " + " ".join(
+            r["attribute"] for r in rows)) - _stems_in(" ".join(
+            " ".join([r.get("table") or "", r["attribute"]] + list(r["values"]))
+            for r in rows)):
+        rows = []
     if rows:
         head = rows[0]
         # The source and page, not the table caption: structures.py takes the
@@ -645,7 +694,7 @@ def compare(question: str, index: list[dict], named: list,
     # Shape 2: ask each product separately, keep what they disagree on.
     if len(named) < 2:
         return None
-    diffs = _shared_differences(named, index, question)
+    diffs = _shared_differences(named, index, question, names_text)
     if not diffs:
         return None
     labels = [names.get(k, k) for k in named]

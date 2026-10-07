@@ -51,6 +51,26 @@ def test_compare_builds_a_table_from_case_mismatched_manuals():
     assert "| Technical Specifications › Weight | 1.05 kg | 0.9 kg |" in out["answer"]
 
 
+def test_an_attribute_no_table_holds_falls_through_to_retrieval():
+    """S30 (N4-32, B4-42): a product-range list names both products, and a
+    junk row matched on "spectral"; neither answers MCBF or capacity."""
+    names = {"a": "NV4000", "b": "NV200 Spectral"}
+    index = [
+        _row("x", "Range of devices", "NV4000", "Coin recycler", page=7),
+        _row("x", "Range of devices", "NV200 Spectral Range",
+             "Banknote validator", page=7),
+        _row("a", "Bezel", "Spectral is shown below", "Red"),
+        _row("b", "Bezel", "Spectral is shown below", "Blue"),
+        _row("a", "Technical Specifications", "MCBF", "100,000"),
+    ]
+    assert sales.compare("MCBF on the NV4000 vs a plain NV200 Spectral?",
+                         index, ["a", "b"], names) is None
+    index.append(_row("b", "Technical Specifications", "MCBF", "200,000"))
+    out = sales.compare("MCBF on the NV4000 vs a plain NV200 Spectral?",
+                        index, ["a", "b"], names)
+    assert out and "| Technical Specifications › MCBF | 100,000 | 200,000 |" in out["answer"]
+
+
 def test_two_named_products_widen_a_product_chat_to_both_manuals():
     # Patched by hand: this file imports main, so the suite runs it in its
     # own process without pytest fixtures.

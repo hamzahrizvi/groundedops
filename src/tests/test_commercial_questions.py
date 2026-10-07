@@ -55,6 +55,27 @@ def test_money_or_ordering_in_passing_is_still_technical():
         assert sales.is_commercial_question(q), q
 
 
+def test_only_a_price_question_deflects_before_the_search():
+    """Blind sets 4, 5 and NV4000 (2026-10-07): the manuals answer these, so
+    they search first; _friendly_refusal deflects them only on a refusal."""
+    for q in ("mounting screws weren't in the box. what do i need to buy for "
+              "the bezel and for the cashbox?",
+              "budgeting power supplies for a twin smart coin system. what "
+              "rating do i need?",
+              "quoting a mycheckr + connect hub job for a pub. whats in the box",
+              "lost a few £10s to people fishing notes back out",
+              "we already stock PA00650 locks. do i have to buy cams separately",
+              "which PSU do you recommend? I'd like to just order one off RS",
+              "do we have to pay for validator manager?"):
+        assert not sales.is_price_question(q), q
+    for q in ("what is the price for a nv9 st",
+              "how much does the NV200 cost",
+              "can I get a quote for 50 units",
+              "price for 50 units",
+              "do you offer a discount for volume"):
+        assert sales.is_price_question(q), q
+
+
 def test_catalogue_navigation_is_not_commercial():
     """"which products run on 24V" IS answerable from the documents and must
     keep going to the catalogue route, not the deflect."""

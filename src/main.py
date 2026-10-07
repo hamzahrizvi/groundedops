@@ -1333,6 +1333,19 @@ def _friendly_refusal(scope_key: str | None, product_label: str = "",
     configured support email and phone when offer_support is set, and
     hardcoding them here would give a visitor two versions to reconcile.
     """
+    # A commercial question that searched first (sales.is_price_question
+    # deflects the rest before retrieval) and found nothing: the operator's
+    # sales reply, not a documentation refusal.
+    try:
+        import sales, policy
+        if (query and sales.is_commercial_question(query)
+                and (policy.value("sales_mode") or "answer").strip().lower() != "documents"):
+            _reply = (policy.value("sales_reply") or "").strip()
+            if _reply:
+                return _reply
+    except Exception as exc:
+        logger.debug(f"refusal sales reply skipped: {exc}")
+
     what = f" about the {product_label}" if product_label else ""
     lines = [f"I don't have that in the product documentation{what}."]
 
@@ -1568,7 +1581,10 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         # catalogue-navigation vocabulary, so "what is the price for a nv9 st"
         # returned None here and the operator's configured deflect was never
         # consulted at all.
-        commercial = sales.is_commercial_question(q)
+        # Only a PRICE question deflects before the search; buy/order/stock/
+        # budget wordings search first and _friendly_refusal deflects them
+        # when nothing answers (S30, blind sets 4-5).
+        commercial = sales.is_commercial_question(q) and sales.is_price_question(q)
         if not (sales.is_sales_question(q) or sales.is_comparison(q)
                 or commercial):
             return None
