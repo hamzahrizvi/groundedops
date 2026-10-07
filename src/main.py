@@ -3581,9 +3581,28 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     except Exception as _exc:
         logger.warning(f"table completion skipped: {_exc}")
 
+    # PERFORMANCE MODE (S29): a product chat reads the product's whole
+    # documentation. The ranked passages stay first, so "Passage 1 is the
+    # likeliest" still holds; the rest follow in document order.
+    # A comparison reads each named product's documents, budget split.
+    _bundle: list[dict] = []
+    _perf = (_both_named if len(_both_named) >= 2
+             else [payload.product] if payload.product else [])
+    if _perf and _policy_setting("performance_mode", False):
+        from retrieval_db import product_bundle, PERFORMANCE_BUDGET_CHARS
+        _ids = {c.get("id") for c in top_chunks}
+        for _k in _perf:
+            for c in product_bundle(_k, _retrieved,
+                                    budget=PERFORMANCE_BUDGET_CHARS // len(_perf),
+                                    excluded=EXCLUDED_SOURCES):
+                if c.get("id") not in _ids:
+                    _ids.add(c.get("id"))
+                    _bundle.append(c)
+        ptrace.mark("performance", f"{len(_bundle)} more passages from {_perf}")
+    _ctx = top_chunks + _bundle
     context = "\n\n".join(
-        f"[Passage {i} of {len(top_chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
-        for i, r in enumerate(top_chunks, 1))
+        f"[Passage {i} of {len(_ctx)}]\n" + r["text"][:CHUNK_CHAR_CAP]
+        for i, r in enumerate(_ctx, 1))
 
     # v15: history reached the query REWRITER but never the answering prompt,
     # so the model could not see what it had just said. "is the pinout above
@@ -3655,6 +3674,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             output, raw_text = _again, _again_text
             answer = normalize_markdown_tables(_strip_meta(_strip_preamble(raw_text)))
     llm_time = time.time() - t3
+    # The checks and citations below read top_chunks; give them the bundle
+    # passages this answer drew on. ponytail: picked from the first answer
+    # only, so a grounding retry that writes from other sections is checked
+    # against these; pick per attempt if that shows up as false refusals.
+    if _bundle and not generation_failed:
+        from retrieval_db import bundle_evidence
+        top_chunks = top_chunks + bundle_evidence(_bundle, answer, top_chunks)
 
     # ── Grounding check ──────────────────────
     # Two clocks, because one was measuring the wrong thing. `t_grounding`

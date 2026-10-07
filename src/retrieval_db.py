@@ -716,11 +716,11 @@ PROCEDURE_COMPLETION_CHARS = int(
 
 
 def _order_key(chunk_id: str) -> int:
-    """Document order, from the `<source>_<n>` id ingest assigns."""
-    try:
-        return int(str(chunk_id).rsplit("_", 1)[1])
-    except (IndexError, ValueError):
-        return 0
+    """Document order: the trailing number of the id. Ingest has assigned
+    `<source>_<n>` and, now, `<source>:<hash>:<n>`; reading only the `_`
+    form ranked every current chunk 0."""
+    m = re.search(r"(\d+)$", str(chunk_id))
+    return int(m.group(1)) if m else 0
 
 
 def complete_procedures(chunks: list[dict],
@@ -811,6 +811,83 @@ def complete_procedures(chunks: list[dict],
     except Exception as exc:
         logger.warning(f"procedure completion skipped: {exc}")
         return chunks
+
+
+# ── Performance mode: the product's own documents as context ─────────────
+#
+# Blind set 3 (2026-10-07, PENDING "Market-relative rating"): gpt-5-mini
+# given the selected product's whole documentation scored 93-95% with no
+# wrong answers; the same model on 8 retrieved chunks scored 75% with 4.
+# The misses were retrieval: the right section cut into chunks and only its
+# intro ranked, or one product of a comparison missing. ~100k tokens.
+PERFORMANCE_BUDGET_CHARS = int(os.getenv("PERFORMANCE_BUDGET_CHARS", "400000"))
+
+
+def _section_key(c: dict) -> tuple:
+    # A chunk with no section heading stands alone; grouping every such
+    # chunk of a document would pull in the whole document.
+    return (c.get("source"), c.get("section") or c.get("id"))
+
+
+def product_bundle(product: str, ranked: list[dict],
+                   budget: int = PERFORMANCE_BUDGET_CHARS,
+                   excluded=()) -> list[dict]:
+    """Every chunk in `product`'s scope, in document order, when they fit
+    `budget` characters. Otherwise whole SECTIONS, in the order their best
+    chunk ranked in `ranked`, until the budget is spent -- so a product
+    that outgrows the window degrades to section-level retrieval instead
+    of failing. [] (never raises) means "use the normal passages"."""
+    try:
+        _, all_chunks = _get_bm25_index(get_collection())
+    except Exception as exc:
+        logger.warning(f"performance bundle skipped: {exc}")
+        return []
+    mine = sorted((c for c in all_chunks
+                   if _matches_scope(c, None, {"product": product})
+                   and not any(ex in (c.get("source") or "").lower() for ex in excluded)),
+                  key=lambda c: (c.get("source") or "", _order_key(c["id"])))
+    if sum(len(c.get("text") or "") for c in mine) <= budget:
+        return mine
+    size: dict[tuple, int] = {}
+    for c in mine:
+        size[_section_key(c)] = size.get(_section_key(c), 0) + len(c.get("text") or "")
+    keep, spent = set(), 0
+    for r in ranked:                      # best-first: the first hit ranks its section
+        k = _section_key(r)
+        if k in keep or k not in size or spent + size[k] > budget:
+            continue
+        keep.add(k)
+        spent += size[k]
+    return [c for c in mine if _section_key(c) in keep]
+
+
+def _evidence_words(text: str) -> set:
+    # Numbers are kept whatever their length: "12", "5V" are the facts.
+    return {w for w in re.findall(r"[a-z0-9.]+", (text or "").lower())
+            if len(w) > 2 or any(ch.isdigit() for ch in w)}
+
+
+def bundle_evidence(bundle: list[dict], answer: str, have: list[dict],
+                    n: int = 10) -> list[dict]:
+    """For each sentence or line of `answer`, the bundle chunk sharing the
+    most words with it (up to `n`, none already in `have`). Grounding, the
+    verifier and the citations read the passages list, and every claim must
+    be found there; an answer written from a section retrieval never ranked
+    would otherwise be refused as unsupported (S29: MyCheckr vs Mini power,
+    rejected twice with the 10.8-26.4V row unseen)."""
+    # ponytail: word overlap, not entailment -- the verifiers still judge
+    # support; this only decides which passages they are shown.
+    ids = {c.get("id") for c in have}
+    pool = [(c, _evidence_words(c.get("text"))) for c in bundle if c.get("id") not in ids]
+    picked: list[dict] = []
+    for unit in re.split(r"(?<=[.!?])\s+|\n+", answer or ""):
+        u = _evidence_words(unit)
+        if len(u) < 3 or not pool:
+            continue
+        score, best = max(((len(u & w), i) for i, (_, w) in enumerate(pool)))
+        if score >= 3 and pool[best][0] not in picked:
+            picked.append(pool[best][0])
+    return picked[:n]
 
 
 TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))

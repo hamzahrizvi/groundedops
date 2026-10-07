@@ -3340,10 +3340,14 @@ function viewAdvanced() {
 
   const hintLine = t => el("div", { class: "row-hint" }, t);
 
-  const toggleRow = (key, label, hint) => {
+  // `warnOn`: switching ON first asks this question; cancel leaves it off.
+  const toggleRow = (key, label, hint, warnOn) => {
     const box = el("input", { type: "checkbox" });
     box.checked = !!p[key];
-    box.addEventListener("change", () => { p[key] = box.checked; });
+    box.addEventListener("change", () => {
+      if (box.checked && warnOn && !confirm(warnOn)) box.checked = false;
+      p[key] = box.checked;
+    });
     return el("div", { style: "margin-top:14px" },
       el("label", { style: "display:flex;align-items:center;gap:8px;"
         + "font-size:13.5px;cursor:pointer" }, box, label),
@@ -3382,6 +3386,29 @@ function viewAdvanced() {
       + "Each retry is a full AI call, so keep it low — 1 is plenty "
       + "with the second opinion switched on. 0 means never retry.",
       "attempts", 5));
+
+  // ── performance mode (S29) ──
+  const perfCard = card("Performance mode|Performance",
+    "Normally an answer is written from the 8 passages the search ranks "
+    + "highest. Performance mode gives the AI the selected product's whole "
+    + "documentation instead (all its manuals and guides, up to about 100k "
+    + "tokens; past that, whole sections in ranked order). Applies to "
+    + "chats where a product is selected.",
+    toggleRow("performance_mode", "Answer from the product's whole documentation",
+      "In a blind test of this approach on 44 unseen questions: 93-95% "
+      + "answered correctly with no wrong answers, against 75% and 4 wrong "
+      + "normally. Answers can take longer, and up to ~40s when the first "
+      + "draft fails its check and is rewritten. It costs more "
+      + "per answer: about $0.0009 instead of $0.0003 while the AI "
+      + "provider's cache is warm (busy products), up to $0.006 when cold "
+      + "($0.02 for the NV200 Spectral, the largest). Roughly $9-61 per "
+      + "10,000 answers instead of $3. The cost grows as documents are added.",
+      "Performance mode costs more on every answer.\n\n"
+      + "Each question sends the product's whole documentation to the AI: "
+      + "about 3x the normal cost per answer when traffic is steady, up to "
+      + "20x when it is quiet (~$9-61 per 10,000 answers instead of ~$3, "
+      + "with today's documents). The cost rises as documents are added.\n\n"
+      + "Switch it on?"));
 
   // ── sales ──
   const salesReply = el("textarea", { class: "input", rows: "3" },
@@ -3522,7 +3549,7 @@ function viewAdvanced() {
     el("p", { class: "lede" },
       "How answers are produced and checked. Changes apply to the next "
       + "question — no restart. Only root accounts see this page."),
-    verifyCard, rerankCard, inferCard, salesCard, indexCard, saveBtn,
+    verifyCard, perfCard, rerankCard, inferCard, salesCard, indexCard, saveBtn,
   ];
 }
 

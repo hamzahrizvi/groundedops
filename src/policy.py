@@ -160,13 +160,22 @@ _DEFAULTS = {
     # Safe to change at any time: it affects only how an answer is
     # verified, so nothing is reindexed and no stored data changes.
     "inference_mode": os.getenv("INFERENCE_MODE", "off"),
+    # ── Performance mode (S29) ─────────────────────────────────────────
+    # A product-scoped question is answered from the product's whole
+    # documentation (up to ~100k tokens; past that, whole sections in
+    # ranked order) instead of 8 retrieved passages. Measured on blind set
+    # 3: 93-95% vs 75%, 0 wrong answers vs 4. Costs about 3x per answer
+    # with the provider's prompt cache warm and up to 20x cold, so OFF by
+    # default and the console warns before it is switched on.
+    "performance_mode": os.getenv("PERFORMANCE_MODE", "0").strip().lower()
+                        in ("1", "true", "yes"),
 }
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
                "anon_faq_daily", "anon_ip_daily", "questions_per_session",
                "tokens_per_session", "grounding_retries", "global_llm_daily")
 _BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks",
-               "multilingual_faq_enabled")
+               "multilingual_faq_enabled", "performance_mode")
 _TEXT_FIELDS = ("anon_notice", "sales_reply")
 # faq_enabled_languages is text-shaped (a comma list) but needs its own
 # validation -- a typo'd code would otherwise silently produce a language
