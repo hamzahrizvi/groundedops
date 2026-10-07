@@ -130,16 +130,33 @@ def _code_labels(header: list[str], sub: list[str] | None
             and not any(sub[2:])
             and all(len(c) <= 15 and not _is_int(c) for c in sub[:2])):
         return (f"{sub[0]} {header[0]}", f"{sub[1]} {header[0]}"), 2
-    if (header[1] and not _is_int(header[0]) and not _is_int(header[1])
-            and _CODE_AXIS.search(header[0]) and _CODE_AXIS.search(header[1])):
-        return (header[0], header[1]), 1
+    # The two count columns need not come first: the NV4000 conveyor table
+    # is "Green LED | Red LED | Orange LED | Description", green a state
+    # (Solid/Flashing) and red/orange the counts. Read as columns 0-1 it gave
+    # nothing, and performance mode answered red 1 + orange 2 with the
+    # "2 | 1" row (S30, N4-21). The pair is the last two code columns before
+    # the description; the columns before them lead each read-out line.
+    for i in range(len(header) - 2):
+        if (header[i] and header[i + 1] and not _is_int(header[i])
+                and not _is_int(header[i + 1])
+                and _CODE_AXIS.search(header[i]) and _CODE_AXIS.search(header[i + 1])
+                and not _CODE_AXIS.search(header[i + 2])):
+            if i == 0:
+                return (header[0], header[1]), 1
+            return (header[i], header[i + 1], i, tuple(header[:i])), 1
     return None
 
 
-def _code_readout(labels: tuple[str, str], rows: list[list[str]]) -> list[str]:
-    return [f"{labels[0]} {r[0]} and {labels[1]} {r[1]}: {r[2]}"
-            for r in rows
-            if len(r) >= 3 and _is_int(r[0]) and _is_int(r[1]) and r[2]]
+def _code_readout(labels: tuple, rows: list[list[str]]) -> list[str]:
+    i = labels[2] if len(labels) > 2 else 0
+    lead = labels[3] if len(labels) > 3 else ()
+    out = []
+    for r in rows:
+        if len(r) >= i + 3 and _is_int(r[i]) and _is_int(r[i + 1]) and r[i + 2]:
+            pre = ", ".join(f"{h} {r[j]}" for j, h in enumerate(lead) if r[j])
+            out.append((pre + ", " if pre else "")
+                       + f"{labels[0]} {r[i]} and {labels[1]} {r[i + 1]}: {r[i + 2]}")
+    return out
 
 
 def _context_above(above: str | None):

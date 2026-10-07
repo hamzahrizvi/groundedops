@@ -440,7 +440,31 @@ def _strip_preamble(answer: str) -> str:
     first character of what remains."""
     stripped = _PREAMBLE_RE.sub("", answer.strip(), count=1)
     if stripped and stripped != answer.strip():
-        return stripped[0].upper() + stripped[1:]
+        return _agree_verdict(stripped[0].upper() + stripped[1:])
+    return _agree_verdict(answer)
+
+
+# "Yes. Logic High is +3.7V to +12V, so a 3.3V drive does not meet the
+# minimum" (S30, N4-15): the explanation is right and the opener says the
+# opposite; a prompt rule did not stop gpt-5-mini doing it, and the verifier
+# then refused the whole answer. A stated (not conditional) failure to meet
+# a documented limit in the first two sentences makes the opener No.
+_YES_OPENER = re.compile(r"^(\W{0,3})Yes\b", re.I)
+_FAILS_LIMIT = re.compile(
+    r"\b(?:does\s+not|doesn't|will\s+not|won't|would\s+not|wouldn't)\s+(?:meet|reach|satisfy)\b"
+    r"|\b(?:is|are|falls?)\s+(?:below|under)\s+the\s+(?:[\w-]+\s+){0,4}(?:minimum|range|threshold)\b"
+    r"|\b(?:is|are|falls?)\s+(?:above|over|outside)\s+the\s+(?:[\w-]+\s+){0,4}(?:maximum|range|limit|threshold)\b"
+    r"|\bexceeds\s+the\s+(?:[\w-]+\s+){0,4}(?:maximum|limit)\b", re.I)
+_CONDITIONAL = re.compile(r"\b(?:if|unless|as\s+long\s+as|provided|must|should)\b", re.I)
+
+
+def _agree_verdict(answer: str) -> str:
+    m = _YES_OPENER.match(answer or "")
+    if not m:
+        return answer
+    head = " ".join(re.split(r"(?<=[.!?])\s+", answer)[:2])
+    if _FAILS_LIMIT.search(head) and not _CONDITIONAL.search(head):
+        return m.group(1) + "No" + answer[m.end():]
     return answer
 
 
@@ -807,6 +831,7 @@ Write the answer as a product expert would state it to a customer.
 NEVER refer to the source material or to your own reasoning. Do not write "the context", "the document", "the provided information", "as indicated by", "as shown in", "according to the", or "the section". The reader cannot see the context and does not know what it is; sources are attached separately, so you never need to point at them.
 Answer directly and factually, then stop. No preamble, no meta-commentary.
 If the question asks whether something exists, is supported, or works with something else, begin with a plain Yes or No, then give the specifics. A question asking what, which, how or how much ("What voltage is supported?") is not a yes/no question; never open its answer with Yes or No. Answer No only when the context says the thing is absent or unsupported; when the context simply never mentions it, that is not a No, so respond with the exact sentence below. A passage that merely MENTIONS both things — a table listing them side by side, a specification they share — is not an answer to that question; keep looking for a passage that states whether it is supported.
+When the Yes or No turns on whether a value falls inside a documented range or limit (an input voltage against the logic-high minimum, a note length against the maximum), compare the two numbers before writing the first word, and make the Yes or No agree with that comparison: below a minimum or above a maximum is No.
 Support is often conditional. When the context qualifies it by firmware version, model variant, region or configuration, say so in the first sentence ("Yes, but only on firmware below 1.21"), because an unqualified Yes is wrong the moment the condition applies.
 A value read from a table is conditional in the same way. When its row or cell carries a condition — an operating mode or load, a product variant with its own column, a minimum or maximum, a tolerance, "if no other coins in device", "whichever is greater" — give the value together with that condition, in the manual's own words, even if the question did not ask about it. A figure quoted without the condition it depends on is a wrong answer, not a shorter one.
 The passages are numbered in the order a retrieval system ranked them, so [Passage 1] is the most likely to contain the answer. That is a hint, not a rule: use whichever passage actually answers the question, and prefer an earlier one when two say the same thing.
@@ -830,6 +855,9 @@ Never use a generic heading such as "Answer", "Response", or "Details".
 If the context makes clear which product the answer applies to, name that
 product in the first sentence, so the reader is never left guessing which one
 they were told about.
+A passage marked "from the X documentation" is about product X, whatever
+other product names its text uses (a manual can call a module or head by
+another product's name).
 If the question names a product or model that none of the context is about,
 do not answer with another product's facts; respond with the exact sentence
 above. A shortened or informal name for a product the context does cover
@@ -1904,6 +1932,19 @@ def _catalogue_terms() -> list[str]:
     except Exception as exc:
         logger.warning(f"catalogue terms unavailable: {exc}")
     return [t for t in out if t]
+
+
+def _passage_product(chunk: dict, names: dict) -> str:
+    """", from the NV4000 documentation" for a passage filed under exactly
+    one product, else "". The text alone can name another product: the
+    NV4000 manual calls its head "NV200 Spectral" throughout, so its
+    passages read as NV200 Spectral facts and NV4000 questions were refused
+    (S30, N4-29/N4-30)."""
+    import catalog
+    tags = [k.strip() for k in (chunk.get("product") or "").split(",") if k.strip()]
+    if len(tags) != 1 or catalog.is_shared_product(tags[0]) or tags[0] not in names:
+        return ""
+    return f", from the {names[tags[0]]} documentation"
 
 
 def _product_names() -> dict[str, str]:
@@ -3625,11 +3666,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 if c.get("id") not in _ids:
                     _ids.add(c.get("id"))
                     _bundle.append(c)
-        _library = "\n\n".join(f"[{c.get('source')} p{c.get('page')}]\n{c.get('text') or ''}"
-                               for c in _bundle)
+        # Flash-code tables read out row by row here too: the bundle reached
+        # the model raw, and it mispaired the NV4000 conveyor codes (N4-21).
+        import tables as _tables
+        _library = "\n\n".join(
+            f"[{c.get('source')} p{c.get('page')}]\n{_tables.spell_out(c.get('text') or '')}"
+            for c in _bundle)
         ptrace.mark("performance", f"{len(_bundle)} passages from {_perf}")
+    _names_now = _product_names()
     context = "\n\n".join(
-        f"[Passage {i} of {len(top_chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
+        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}]\n"
+        + r["text"][:CHUNK_CHAR_CAP]
         for i, r in enumerate(top_chunks, 1))
 
     # v15: history reached the query REWRITER but never the answering prompt,
@@ -3701,6 +3748,23 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             ptrace.mark("regen.nohist", "refused with history, answered without")
             output, raw_text = _again, _again_text
             answer = normalize_markdown_tables(_strip_meta(_strip_preamble(raw_text)))
+    # A REFUSAL WITH THE WHOLE DOCUMENTATION ATTACHED: ask once more with the
+    # ranked passages alone, i.e. as normal mode would. B5-17 (S30): with the
+    # NV9 Spectral bundle, gpt-5-mini refused the SD-card logging question
+    # that the same top passages answer without it. Answered -> the rest of
+    # the turn (checks, retries, citations) runs as normal mode.
+    if (_library and top_chunks and role != "rethink" and not generation_failed
+            and is_refusal(answer) and confidence != "none"):
+        _plain = build_answer_prompt(_hist, context, resolved_query)
+        _again = generate_with_fallback(role, _plain, deepseek_api_key=deepseek_api_key,
+                                        api_keys=api_keys)
+        _again_text = ((_again or {}).get("text") or "").strip()
+        if _again_text and (_again or {}).get("model") != "none" \
+                and not is_refusal(_again_text):
+            ptrace.mark("regen.nolib", "refused with the documentation, answered from the passages")
+            output, raw_text = _again, _again_text
+            answer = normalize_markdown_tables(_strip_meta(_strip_preamble(raw_text)))
+            _bundle, _library, prompt = [], "", _plain
     llm_time = time.time() - t3
     # The checks and citations below read top_chunks; give them the bundle
     # passages this answer drew on. ponytail: picked from the first answer

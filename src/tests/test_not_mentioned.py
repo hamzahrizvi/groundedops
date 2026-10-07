@@ -147,3 +147,14 @@ def test_kill_switch():
         os.environ.pop("NOT_MENTIONED_CHECK", None)
         if before is not None:
             os.environ["NOT_MENTIONED_CHECK"] = before
+
+
+def test_an_auxiliary_verb_asks_about_no_feature():
+    """S30, B5-19: "No, that's normal" to "have i put it in wrong?" became
+    "doesn't mention i put it"."""
+    q = ("fitted a lock to the front of the nv200 spectral head and the key "
+         "only turns about 45 degrees. have i put it in wrong?")
+    a = ("No. With the lock correctly fitted to the NV200 Spectral, the key will "
+         "only turn to around 45 degrees. That is normal.")
+    assert mentions.denied_feature(a, q) is None
+    assert mentions.denied_feature("No.", "does it have a backup battery") == "backup battery"

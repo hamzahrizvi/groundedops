@@ -140,6 +140,8 @@ def _tokens(phrase: str) -> list[str]:
     return _WORD.findall((phrase or "").lower())
 
 
+_AUXILIARY_SUBJECT = re.compile(r"(?:i|you|we|they|he|she|it)\b", re.I)
+
 _CONFESSED = re.compile(r"\b(?:no mention|not mentioned|no information)\b", re.I)
 
 
@@ -170,6 +172,11 @@ def denied_feature(answer: str, question: str = "") -> str | None:
         # the first object: matching from every verb was quadratic.
         for v in reversed(list(_ASKED_VERB.finditer(question))):
             o = _asked_object(question[v.end():])
+            # A pronoun after the verb makes it an auxiliary, not a feature
+            # verb: "HAVE i put it in wrong?" asked nothing about a feature
+            # and its right "No, that's normal" was replaced (S30, B5-19).
+            if _AUXILIARY_SUBJECT.match(o):
+                continue
             if o.strip():
                 phrase = o
                 break

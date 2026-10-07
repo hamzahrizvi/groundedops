@@ -130,6 +130,21 @@ def test_a_continuation_borrows_labels_and_merged_cells_from_the_chunk_above():
     assert tables.READ_MARK not in alone
 
 
+def test_count_columns_after_a_state_column_are_read_out():
+    """S30, N4-21: NV4000 conveyor, green is a state and red/orange count."""
+    t = ("[NV4000 Range User Manual-v2 — Conveyor Module]\n"
+         "Green LED | Red LED | Orange LED | Description of Error\n"
+         "Solid |  |  | Device in Service\n"
+         "Flashing | 1 | 2 | Belt Missing\n"
+         "Flashing | 2 | 1 | Belt failed to move\n"
+         "Flashing | 2 | 2-4 | Internal Comms")
+    out = tables.spell_out(t)
+    assert "Green LED Flashing, Red LED 1 and Orange LED 2: Belt Missing" in out
+    assert "Green LED Flashing, Red LED 2 and Orange LED 1: Belt failed to move" in out
+    assert "Internal Comms" not in out.split(tables.READ_MARK)[1]
+    assert tables.spell_out(out) == out
+
+
 def test_non_flash_two_column_tables_get_no_readout():
     t = "[Doc — Pins]\nPin | Signal | Direction\n1 | 12V | In\n2 | 0V | In"
     assert tables.READ_MARK not in tables.spell_out(t)
