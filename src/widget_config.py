@@ -59,7 +59,7 @@ import uuid
 import logging
 
 import jsonstore
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ def add_lead(kind: str, values: dict, product: str | None = None,
         items = _load_leads()
         # Full: refuse rather than drop the oldest. Trimming used to delete
         # real enquiries silently, so a bot flood could wipe the store.
-        if len(items) >= MAX_LEADS:
+        if sum(1 for l in items if not l.get("notified")) >= MAX_LEADS:
             logger.warning(f"widget leads store is full ({MAX_LEADS}); "
                            "refusing a new enquiry. Delete handled ones in the console.")
             raise LeadStoreFull(f"the enquiry store is full ({MAX_LEADS})")
@@ -419,20 +419,36 @@ def lead_ref(lead_id: str) -> str:
     return "GO-" + (lead_id or "")[:8].upper()
 
 
+# What survives of an emailed enquiry: enough for the weekly report to count
+# it, nothing that identifies the visitor. Sales and support own it from the
+# email on (it opens a Jira ticket), so the console keeps no second copy.
+_SENT_KEEP = ("id", "kind", "created_at")
+_SENT_KEEP_DAYS = 400
+
+
 def mark_notified(lead_id: str) -> bool:
+    """The enquiry reached its team: cut it to a contact-free stub."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=_SENT_KEEP_DAYS)).isoformat()
     with _leads_lock:
         items = _load_leads()
-        for l in items:
+        for i, l in enumerate(items):
             if l.get("id") == lead_id:
-                l["notified"] = True
+                items[i] = {**{k: l.get(k) for k in _SENT_KEEP},
+                            "notified": True, "handled": True}
+                items = [x for x in items if not x.get("notified")
+                         or (x.get("created_at") or "") >= cutoff]
                 _save_leads(items)
                 return True
     return False
 
 
 def list_leads(kind: str | None = None, include_handled: bool = True,
-               limit: int = 200) -> list[dict]:
+               limit: int = 200, include_sent: bool = False) -> list[dict]:
+    """The console's list: enquiries not yet emailed. `include_sent` adds the
+    stubs of emailed ones, for counting (log_report)."""
     items = _load_leads()
+    if not include_sent:
+        items = [l for l in items if not l.get("notified")]
     if kind:
         items = [l for l in items if l.get("kind") == kind]
     if not include_handled:
@@ -462,7 +478,7 @@ def delete_lead(lead_id: str) -> bool:
 
 
 def lead_stats() -> dict:
-    items = _load_leads()
+    items = [l for l in _load_leads() if not l.get("notified")]
     return {
         "total": len(items),
         "unhandled": len([l for l in items if not l.get("handled")]),

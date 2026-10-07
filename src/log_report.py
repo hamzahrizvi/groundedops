@@ -165,7 +165,7 @@ def load_rows(log_dir: str = LOG_DIR) -> list[dict]:
 def load_leads() -> list[dict]:
     try:
         import widget_config
-        return widget_config.list_leads(None, True)
+        return widget_config.list_leads(None, True, limit=10**9, include_sent=True)
     except Exception:
         return []
 

@@ -46,14 +46,15 @@ def post(**extra):
 
 
 def stored(lead_id):
-    return next((l for l in widget_config.list_leads(limit=10_000)
+    return next((l for l in widget_config.list_leads(limit=10_000, include_sent=True)
                  if l["id"] == lead_id), None)
 
 
 print("\n== the reference and the email ==")
 sent = []
 with patch.object(mailer, "is_configured", lambda: True), \
-     patch.object(mailer, "send", lambda to, subject, body: sent.append((to, subject, body))):
+     patch.object(mailer, "send", lambda to, subject, body, reply_to="":
+                  sent.append((to, subject, body, reply_to))):
     r = post(transcript=[{"role": "user", "text": "it will not power on"}])
 check(r.status_code == 200, f"a valid lead is accepted ({r.status_code})")
 d = r.json()
@@ -66,7 +67,41 @@ check(sent and ref in sent[0][1], "the subject carries the reference")
 check(sent and "visitor@example.org" not in sent[0][0],
       "the visitor-typed address is never a recipient (no open relay)")
 check(sent and "it will not power on" in sent[0][2], "the body carries the chat")
-check(stored(d["id"])["notified"] is True, "the lead is marked notified")
+check(sent and sent[0][3] == "visitor@example.org",
+      "the visitor's address is the Reply-To, so the team's reply reaches them")
+stub = stored(d["id"])
+check(stub["notified"] is True and "values" not in stub and "transcript" not in stub
+      and "cc_email" not in stub,
+      f"an emailed lead is cut to a contact-free stub ({sorted(stub)})")
+listed = client.get("/admin/leads", headers=ADMIN).json()["leads"]
+check(all(l["id"] != d["id"] for l in listed),
+      "and the console no longer lists it")
+import log_report
+check(any(l["id"] == d["id"] for l in log_report.load_leads()),
+      "but the weekly report still counts it")
+
+print("\n== the message headers ==")
+import smtplib
+got = []
+class FakeSMTP:
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def ehlo(self): pass
+    def starttls(self, **k): pass
+    def login(self, *a): pass
+    def send_message(self, msg): got.append(msg)
+smtp = {"host": "smtp.example.com", "port": 587, "security": "starttls",
+        "user": "", "sender": "noreply@example.com"}
+with patch.object(mailer.keystore, "get_smtp_settings", lambda: smtp), \
+     patch.object(smtplib, "SMTP", FakeSMTP):
+    mailer.send(["support@example.com"], "s", "b", reply_to="visitor@example.org")
+    mailer.send(["support@example.com"], "s", "b", reply_to="bad\r\nBcc: x@y.z")
+check(got[0]["Auto-Submitted"] == "auto-generated",
+      "every message is marked automated (no helpdesk auto-reply loop)")
+check(got[0]["Reply-To"] == "visitor@example.org", "Reply-To is set")
+check(got[1]["Reply-To"] is None and got[1]["Bcc"] is None,
+      "a malformed address is dropped, not injected as headers")
 
 print("\n== a failed send keeps the lead ==")
 def boom(*a, **k):

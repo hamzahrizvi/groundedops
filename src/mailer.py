@@ -13,6 +13,7 @@ an operator can see why their settings do not work.
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
 import ssl
 from email.message import EmailMessage
@@ -35,7 +36,12 @@ def is_configured() -> bool:
     return bool(s["host"] and (s["sender"] or s["user"]))
 
 
-def send(to: list[str], subject: str, body: str) -> None:
+# Good enough to put in a Reply-To header and nothing more: the header is
+# a hint for whoever replies, never a recipient, so a typo costs nothing.
+_ADDRESS = re.compile(r"[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+")
+
+
+def send(to: list[str], subject: str, body: str, reply_to: str = "") -> None:
     to = [a.strip() for a in (to or []) if a and a.strip()]
     if not to:
         raise MailError("no recipients")
@@ -52,6 +58,12 @@ def send(to: list[str], subject: str, body: str) -> None:
     msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[-1] or None)
+    # RFC 3834: helpdesk auto-responders (Jira's included) do not answer a
+    # message marked automated, so a ticket inbox cannot start a reply loop
+    # with the From address -- which costs money on a per-email relay.
+    msg["Auto-Submitted"] = "auto-generated"
+    if reply_to and _ADDRESS.fullmatch(reply_to.strip()):
+        msg["Reply-To"] = reply_to.strip()
     msg.set_content(body)
 
     port = int(s["port"])

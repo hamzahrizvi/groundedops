@@ -251,10 +251,15 @@ def _notify_lead(lead: dict) -> None:
         lines += [("Visitor: " if t.get("role") == "user" or t.get("q") else "Assistant: ")
                   + str(t.get("text") or t.get("q") or t.get("a") or "")
                   for t in lead["transcript"]]
-    lines += ["", "Reply to the visitor directly, then mark it handled under "
-                  "Enquiries in the console."]
+    lines += ["", "Replying to this email goes to the visitor's address above."
+              if lead.get("cc_email") else
+              "Reply to the visitor at the address above."]
     try:
-        mailer.send([to], f"[{ref}] New {lead['kind']} enquiry", "\n".join(lines))
+        # The visitor's address only as Reply-To, never a recipient: the
+        # team's reply (and the ticket Jira opens) reaches the customer,
+        # and the form still cannot be used to mail a stranger.
+        mailer.send([to], f"[{ref}] New {lead['kind']} enquiry", "\n".join(lines),
+                    reply_to=lead.get("cc_email") or "")
     except Exception as e:
         logger.warning(f"lead {ref} not emailed: {e}")
         return
