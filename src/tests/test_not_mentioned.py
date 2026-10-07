@@ -158,3 +158,10 @@ def test_an_auxiliary_verb_asks_about_no_feature():
          "only turn to around 45 degrees. That is normal.")
     assert mentions.denied_feature(a, q) is None
     assert mentions.denied_feature("No.", "does it have a backup battery") == "backup battery"
+
+
+def test_a_bare_pronoun_object_names_no_feature():
+    """S30, N4-30: "No, the maximum is 165mm" to "will it still accept them"."""
+    q = ("this takes our 168mm long notes fine. if we move to the NV4000 will it "
+         "still accept them?")
+    assert mentions.denied_feature("No. The NV4000 maximum note length is 165mm.", q) is None

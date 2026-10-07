@@ -84,6 +84,44 @@ def _phrase_runs(query: str) -> list[list[str]]:
     return runs
 
 
+# QUANTITY ARM (S30). "this takes our 168mm long notes, will the NV4000
+# accept them?" and "can the nv4000 go on our 12v rail?" are answered by a
+# min/max spec row ("Length | 110mm | 165mm", "Supply Voltage (VDC) |
+# +21.6VDC | +24VDC | +26.4VDC"). BM25 sees "168mm" and "12v" as tokens no
+# chunk holds, dense ranked the rows 62nd and 19th, and the cross-encoder
+# scores table rows near 0. So a question carrying a measured value also
+# gets the in-scope limit rows in the same unit, in dense order, flagged
+# `quantity_match` so main.py gives them a context slot past the floor.
+QUANTITY_ARM = int(os.getenv("RETRIEVAL_QUANTITY_ARM", "3"))
+_QTY = re.compile(r"(\d+(?:\.\d+)?)\s*(mm|cm|vdc|vac|v|ma|a|w|kg|°c|hz|ms)\b", re.I)
+_UNIT_NORM = {"vdc": "v", "vac": "v"}
+_LIMIT_WORD = re.compile(r"\b(?:min(?:imum)?|max(?:imum)?|nominal)\b", re.I)
+
+
+def _units(text: str) -> set:
+    return {_UNIT_NORM.get(u.lower(), u.lower()) for _, u in _QTY.findall(text or "")}
+
+
+def _quantity_ranking(query: str, collection, limit: int,
+                      source_filter: str | None, scope: dict | None) -> list[str]:
+    """In-scope chunk ids holding a min/max/nominal row in a unit the
+    question gives a value in, best dense rank first."""
+    units = _units(query)
+    if not units or limit <= 0:
+        return []
+    _, chunks = _get_bm25_index(collection)
+    by_id = {c["id"]: c for c in chunks}
+    out = []
+    for cid in _dense_ranking(query, collection, min(collection.count(), 400),
+                              source_filter, scope):
+        text = (by_id.get(cid) or {}).get("text") or ""
+        if _LIMIT_WORD.search(text) and units & _units(text):
+            out.append(cid)
+            if len(out) >= limit:
+                break
+    return out
+
+
 def _phrase_ranking(query: str, collection, limit: int,
                     source_filter: str | None, scope: dict | None) -> list[str]:
     """Chunk ids containing a >= 3-word run of the query verbatim."""
@@ -486,9 +524,15 @@ def retrieve_from_db(
             guarantee=RETRIEVAL_ARM_GUARANTEE,
         )
         keep_n = len(ranked_ids)
+    try:
+        qty_ids = _quantity_ranking(query, collection, QUANTITY_ARM,
+                                    source_filter, scope)
+    except Exception as exc:
+        logger.debug(f"quantity arm skipped: {exc}")
+        qty_ids = []
     # Phrase hits are added, never substituted: they only widen what the
     # reranker is shown, and it decides.
-    _extra = [i for i in phrase_ids if i not in ranked_ids]
+    _extra = [i for i in list(phrase_ids) + qty_ids if i not in ranked_ids]
     if _extra:
         ranked_ids = list(ranked_ids) + _extra
         keep_n = len(ranked_ids)
@@ -534,6 +578,8 @@ def retrieve_from_db(
             # reads the parent/child relation off it.
             "section": entry.get("section", ""),
             "retrieval_score": round(scores[doc_id], 6),
+            **({"quantity_match": qty_ids.index(doc_id) + 1}
+               if doc_id in qty_ids else {}),
         })
         if len(results) >= keep_n:
             break
@@ -628,6 +674,10 @@ def fuse_ranked_results(result_sets, guarantee=RETRIEVAL_ARM_GUARANTEE):
     others = [[r["id"] for r in rs] for rs in result_sets[1:]]
     ranked_ids = apply_arm_guarantee(primary, len(primary), *others,
                                      guarantee=guarantee)
+    # Quantity-arm rows survive fusion from any phrasing: they sit at the end
+    # of their list, outside the guarantee window (S30).
+    ranked_ids = list(ranked_ids) + [cid for cid, r in by_id.items()
+                                     if r.get("quantity_match") and cid not in ranked_ids]
     return [by_id[cid] for cid in ranked_ids if cid in by_id]
 
 

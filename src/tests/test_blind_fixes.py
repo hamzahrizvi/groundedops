@@ -38,6 +38,15 @@ def test_a_passage_is_labelled_with_its_documents_product():
         assert main._passage_product(chunk, names) == "", chunk
 
 
+def test_the_quantity_arm_matches_the_unit_asked():
+    """N4-29/N4-30: "12v rail" finds "+24VDC", "168mm" finds "165mm"."""
+    import retrieval_db as R
+    assert R._units("can the nv4000 go on the same 12v rail?") == {"v"}
+    assert R._units("Supply Voltage (VDC) | +21.6VDC | +24VDC") == {"v"}
+    assert R._units("our 168mm long notes") == {"mm"}
+    assert R._units("error 5 after 3 flashes") == set()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

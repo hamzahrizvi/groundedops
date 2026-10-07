@@ -3562,6 +3562,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _picked:
             top_chunks = [_strip_breadcrumb(_retrieved[i]) for i in sorted(_picked)]
             ptrace.mark("retrieve.pair", f"{len(top_chunks)} passages over {_both_named}")
+    # A VALUE IN THE QUESTION, A LIMIT ROW IN THE MANUAL (S30, N4-29/N4-30).
+    # The quantity arm's min/max rows score near 0 with the cross-encoder,
+    # which cannot read a table row, so the floor above drops them. They
+    # take a slot each regardless, best dense rank first, up to the arm's
+    # size per product.
+    _have = {c.get("id") for c in top_chunks}
+    _qty = sorted((r for r in _retrieved
+                   if r.get("quantity_match") and r.get("id") not in _have),
+                  key=lambda r: r["quantity_match"])
+    if _qty:
+        _qty = _qty[:3 * max(1, len(_both_named))]
+        top_chunks = top_chunks + [_strip_breadcrumb(r) for r in _qty]
+        ptrace.mark("retrieve.quantity", f"{len(_qty)} limit row(s) for the value asked")
     # Was a flat 1200, which silently clipped anything larger. Tied to the
     # chunk size now so a whole chunk always survives into the prompt.
     #

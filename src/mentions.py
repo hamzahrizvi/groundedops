@@ -141,6 +141,7 @@ def _tokens(phrase: str) -> list[str]:
 
 
 _AUXILIARY_SUBJECT = re.compile(r"(?:i|you|we|they|he|she|it)\b", re.I)
+_PRONOUN_OBJECT = re.compile(r"(?:them|these|those|this|that|ones?)", re.I)
 
 _CONFESSED = re.compile(r"\b(?:no mention|not mentioned|no information)\b", re.I)
 
@@ -175,8 +176,12 @@ def denied_feature(answer: str, question: str = "") -> str | None:
             # A pronoun after the verb makes it an auxiliary, not a feature
             # verb: "HAVE i put it in wrong?" asked nothing about a feature
             # and its right "No, that's normal" was replaced (S30, B5-19).
-            if _AUXILIARY_SUBJECT.match(o):
-                continue
+            # Nor does a bare pronoun object: "will it still accept THEM"
+            # (N4-30, 168mm notes).
+            # The innermost verb is the question's own: stop, do not fall
+            # back to an earlier verb ("TAKES our 168mm notes").
+            if _AUXILIARY_SUBJECT.match(o) or _PRONOUN_OBJECT.fullmatch(o.strip()):
+                break
             if o.strip():
                 phrase = o
                 break
