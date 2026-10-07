@@ -146,6 +146,48 @@ refusal, cannot compare two products properly, and has no real customers
 yet. Almost everything in the logs is our own testing, so every score we
 have is a test score.
 
+### Market-relative rating: 6/10 (2026-10-07, gpt-5-mini, after S26)
+
+Blind set 3: 44 new questions written by an agent that read only the
+manual text (never the repo, eval cases or FAQs). Cases are in
+`src/blind3_ab_cases.json`; results and the runner are in
+`eval_runs/20261007_blind3/`. Each question went to this bot and to a
+market-style baseline: gpt-5-mini with the selected product's whole
+manual pasted in, as if the PDF were uploaded to ChatGPT. gpt-5 graded
+each pair 0-3 without knowing which system wrote which answer.
+
+| | This bot | Whole manual, medium reasoning | Whole manual, minimal reasoning |
+|---|---|---|---|
+| Score (% of max) | 75% (74% on regrade) | 95% | 93% |
+| Wrong answers | 4/44 | 0 | 0 |
+| Grader preferred | 9 / 6 | 27 | 23 (8 and 15 ties) |
+| Median / p90 latency | 4.4s / 6.6s | 7.7s / 15.9s | 2.1s / 11.0s |
+
+By question type (bot vs baseline, out of 3 x n):
+- Ahead on absent features, 12 vs 10-11.
+- Level on documented yes/no, 12 vs 12.
+- Behind on comparisons, 2 vs 8-9, the biggest gap. B3-34 gave the NV9USB+ 90mm minimum note length for the NV9 Spectral (115mm).
+- Behind on procedures and troubleshooting, 12-13 vs 18. Asked about "hub not found", it gave setup steps.
+- Behind on table conditions, 13 vs 16-18, and on follow-ups, 8-9 vs 11-12.
+
+Why 6, measured against market leaders: Intercom Fin, Zendesk AI agents
+and Kapa run frontier models with agentic retrieval, so they should match
+or beat the naive whole-manual baseline. A 20-point gap to that baseline,
+plus a 9% wrong-answer rate on unseen questions, puts this bot below them
+on accuracy. It matches or beats them on:
+- honest refusals,
+- latency against a reasoning baseline,
+- on-premises control of keys and data,
+- the admin console, gap capture and lead routing.
+
+It lags on:
+- comparisons and procedures,
+- having no real customer traffic and no resolution analytics,
+- picture-only questions.
+
+The biggest available lever is S29. The 7/10 below was an absolute
+rating; this one is relative to the market.
+
 ### Latest rating: 7/10, up from 6.5 (2026-09-27)
 
 This is the first rise backed by questions nobody tuned against. The gain
@@ -369,7 +411,8 @@ access and data decision (51).
 | 23 | Opus (medium) | HC1 | Recurring corpus + RAG health check. Independent of S1-S22. One attended session, no subagents. Opening prompt below. |
 | 24 | Opus | (ad hoc) | **Done 2026-10-06/07** (`b0a3b31`, `48eb66f`). (a) MyConnect iPad/iOS refusals: no code bug; the documents never say "Android only", so the model refused or inferred by phrasing. Fixed with a reviewed FAQ ("Does MyConnect support iOS, iPad or iPhone?"). (b) Enquiry email: customer's address as Reply-To, `Auto-Submitted: auto-generated` on every mail; a sent enquiry is cut to a contact-free stub (id/kind/date) and leaves the console, failed sends stay; report counts all leads (was capped at 200). (c) OpenAI slot repointed from the gateway to api.openai.com and renamed "OpenAI"; `llm._openai_sampling`: gpt-5/o-series get no temperature (400 otherwise) and minimal reasoning. (d) Model comparison, 51 eval cases x1 through the real pipeline: DeepSeek 47/51 (3.5s median), gpt-5-mini 46/51 (3.2s), gpt-5-nano 47/51 (20.8s median, rejected on speed). (e) **Main model switched to gpt-5-mini** (company OpenAI account); DeepSeek (personal key) stays backup for now. Tests: lead_handoff, credit_alerts, email_links, log_report, gap_review, llm pass. |
 | 25 | Opus + you | email API | **Waiting on IT.** IT replaces SMTP with an internal email API (per-email charge, flood detection). Swap `mailer.send`'s transport only; keep reply_to + Auto-Submitted as API fields; map their flood response (e.g. 429) to a logged "blocked" error. You: confirm the Jira support/sales channels accept mail from noreply@ and take the reporter from Reply-To; if not, create tickets through the Jira API instead. |
-| 26 | Opus | mini tuning | Prompt tuning, not fine-tuning. gpt-5-mini's two misses vs DeepSeek: a wrong-product answer ("NV9ST voltage" answered from the NV9USB+ manual, passed grounding) and a follow-up sent to clarify ("do they both use the same SSP interface"). Re-run the comparison x3 first (`scratchpad/modelcmp.py` pattern: in-process, main thread), fix the product-name and follow-up instructions, then re-arm the tuned/retrieval baselines on gpt-5-mini. |
+| 26 | Opus | mini tuning | Prompt tuning, not fine-tuning. gpt-5-mini's two misses vs DeepSeek: a wrong-product answer ("NV9ST voltage" answered from the NV9USB+ manual, passed grounding) and a follow-up sent to clarify ("do they both use the same SSP interface"). Re-run the comparison x3 first (`scratchpad/modelcmp.py` pattern: in-process, main thread), fix the product-name and follow-up instructions, then re-arm the tuned/retrieval baselines on gpt-5-mini. **Done 2026-10-07** (`e077ae1`, `64bab88`). x3 comparison, 51 cases: mini 45/45/48 -> 48/48/49, DeepSeek 47/47/48. The SSP follow-up was a retrieval miss, not a clarify fault: mini's rewrite never fetched the NV9USB+ protocols page, and mini then inferred SSP support from a "fitting replacement" line. Fix: when a question names two products, each manual is also searched on its own. Prompt changes: a product named in the question but in no document gets a refusal, and the bracketed picker product does not override it; no fact is carried between products; a what/which question never opens with Yes/No; "No" only when the documents say so. mentions.py now checks the asked feature when an answer admits "no mention". The NV9ST eval case expects the refusal. Full suite 323 passed. The 2 test_widget_walk failures come from the uncommitted 10-02 widget edit, which folds Related questions behind a pill. Baselines re-armed from `eval_runs/20261007_1142`: tuned 46/51 x5, retrieval 32/35 x3, blind1 29/34, blind2 28/34. Open: the NV9USB+ protocol list is a separate short chunk, so SSP answers are sometimes thin. |
+| 29 | Opus + you | long context (proposed) | **From the blind A/B (see "Market-relative rating" above).** Each product's whole manual is 11k-75k tokens. gpt-5-mini given the whole manual scored 93-95% with 0 wrong answers, against 75% and 4 wrong for this pipeline, at a 2.1s median. Prototype: for a product-scoped chat, send the product's full manual text (cached prompt prefix) in place of the retrieved passages; keep RAG for unscoped chats. Keep the switchboard, refusals, FAQ layer and sources (cite from page markers). Gate: blind3 A/B >= 90%, 0 wrong, tuned suite no regression, cost per answer measured. You: accept the per-answer token cost. |
 | 27 | Opus + you | 9.1 (replaced) | **Hosting, replaces the internal-server plan.** IT will not host it (strictly internal network). Hetzner CX43 (8 vCPU, 16 GB, ~EUR16/mo, +~EUR3 backups) running the Docker setup; Cloudflare named tunnel on the box (no open web ports, keeps CF-Connecting-IP trustworthy); Cloudflare Access on `/admin`; one rate-limit rule on the contact form; Hetzner firewall SSH-only from the office IP; nightly `manage_backup.py` via cron (backup_daily.ps1 is Windows-only). Rent it for a day first and time some answers. You: Hetzner account, Cloudflare DNS access, office IP. |
 | 28 | Opus + you | 9.3 (redo) | Outage drill against the new main (OpenAI). You decide the backup: keep DeepSeek (personal key, a second company) or none. Then black-hole the main for 30 minutes with run_live; gate: 0 service_degraded. |
 
