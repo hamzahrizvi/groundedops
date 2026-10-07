@@ -132,7 +132,12 @@ def classify_outcome(data: dict) -> str:
     # rule, which is how the stress test scores the same turns; without it
     # eval.py counted these as "answered" purely because role never changed.
     if data.get("offer_support") and (
-            not data.get("sources") or (data.get("answerability") or "") == "unanswerable"):
+            not data.get("sources") or (data.get("answerability") or "") == "unanswerable"
+            # main._friendly_refusal's first line. The capability-gap form
+            # keeps a source and an "inferable" verdict (S26: "does the SMART
+            # Coin System support facial recognition").
+            or (data.get("answer") or "").startswith(
+                "I don't have that in the product documentation")):
         return "rejected"
     if role in ANSWERED_ROLES or (role not in ("none", "") and data.get("answer")):
         return "answered"

@@ -111,12 +111,11 @@
       "q": "What voltage is supported on the NV9ST?",
       "new_session": true,
       "product": "nv9usb",
-      "outcome": "answered",
-      "keywords_all": [
+      "outcome": "rejected",
+      "keywords_absent": [
         "12"
       ],
-      "reference": "The NV9ST supports 12VDC.",
-      "grade": true
+      "note": "S26 (2026-10-07): 'NV9ST' appears in no document (see PENDING, 'One eval case asks about a product name that is in no document'). The honest reply is a refusal; gpt-5-mini used to answer it from the NV9USB+ manual ('No. The NV9USB+ ... 12V DC')."
     },
     {
       "q": "How does the NV9USB+ communicate with a host?",

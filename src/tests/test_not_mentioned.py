@@ -46,6 +46,16 @@ def test_a_worded_no_names_what_it_denies():
                                         lookup=has(NV9USB)) == "coins"
 
 
+def test_a_no_that_confesses_the_absence_checks_what_was_asked():
+    """S26, gpt-5-mini: the No denies a documented thing first, then admits
+    the asked one is never mentioned. The asked feature is what is checked."""
+    q = "Does the BV30 have a built-in touchscreen? (BV30)"
+    a = ("No. The BV30 does not have a built-in cashbox and there is no "
+         "mention of any built-in touchscreen; it is fitted with a 72mm bezel.")
+    assert mentions.unmentioned_feature(a, q, "bv30", {"bv30"},
+                                        lookup=has(BV30 + " cashbox")) == "touchscreen"
+
+
 def test_a_no_the_manual_documents_stands():
     """#45: the Mini manual names Ethernet and Wi-Fi (as unavailable), so
     "No" is documented and must not become "not mentioned"."""

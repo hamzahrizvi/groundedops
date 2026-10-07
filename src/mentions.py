@@ -140,6 +140,9 @@ def _tokens(phrase: str) -> list[str]:
     return _WORD.findall((phrase or "").lower())
 
 
+_CONFESSED = re.compile(r"\b(?:no mention|not mentioned|no information)\b", re.I)
+
+
 def enabled() -> bool:
     """Kill switch. NOT_MENTIONED_CHECK=off restores the plain "No"."""
     return os.getenv("NOT_MENTIONED_CHECK", "on").strip().lower() not in (
@@ -155,7 +158,10 @@ def denied_feature(answer: str, question: str = "") -> str | None:
     first = " ".join(answer.strip().split("\n", 1)[0].split())
     question = " ".join((question or "").split())
     m = _DENIED.search(first)
-    phrase = m.group(1) if m else None
+    # An answer that says the absence itself ("No. It has no cashbox, and
+    # there is no mention of a touchscreen", gpt-5-mini, S26) may deny some
+    # OTHER, documented thing first; the feature in doubt is the one asked.
+    phrase = m.group(1) if m and not _CONFESSED.search(first) else None
     if not phrase and question:
         # The LAST verb, which is the innermost: "Does the MyCheckr have a
         # backup battery" has a verb at "does" (whose object would be the
