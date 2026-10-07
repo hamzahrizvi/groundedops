@@ -1,5 +1,5 @@
 {
-  "pass_rate": 0.9183673469387755,
+  "pass_rate": 0.9019607843137255,
   "repeats": 5,
   "cases": {
     "faq::What is MyCheckr?": true,
@@ -14,7 +14,7 @@
     "faq::What voltage is supported on the NV9ST?": false,
     "faq::How does the NV9USB+ communicate with a host?": true,
     "faq::Can the NV9 USB+ be mounted vertically?": true,
-    "faq::What is the note capacity of the NV11+ Note Float recycler?": true,
+    "faq::What is the note capacity of the NV11+ Note Float recycler?": false,
     "faq::Can national currency differences affect cashbox capacity on the NV9USB+?": true,
     "faq::What are typical applications for the NV9USB+ range?": true,
     "faq::Can the NV9USB+ recycle notes?": true,
@@ -49,8 +49,10 @@
     "comparison::Does the BV30 run on the same supply voltage as the NV200 Spectral?": true,
     "retrieval::What interfaces does the NV200 Spectral support?": false,
     "retrieval::and the BV30?": true,
+    "comparison::what is the difference between the NV9 Spectral and the NV9USB+": true,
+    "comparison::do they both use the same SSP interface": true,
     "grounding::Which SSP command polls the NV200 Spectral for events?": true,
     "grounding::What is the command code for SSP sync?": true
   },
-  "source": "eval_runs/20260930_2105/m4_tuned.json"
+  "source": "eval_runs/20261007_1142/m4_tuned.json"
 }
