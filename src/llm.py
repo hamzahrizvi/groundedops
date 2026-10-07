@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import threading
 import time
 import requests
@@ -70,6 +71,18 @@ def provider_cooling(provider: str) -> bool:
     ts = _provider_down.get(provider)
     return ts is not None and (time.time() - ts) < PROVIDER_COOLDOWN_SECONDS
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+
+
+def _openai_sampling(model: str) -> dict:
+    """OpenAI's reasoning models (gpt-5*, o-series) reject temperature 0 with
+    a 400 -- only their default is accepted -- and think before answering,
+    billed as output. So they get no temperature and minimal reasoning
+    (measured 2026-10-06: gpt-5-mini answers in ~1s with 0 reasoning
+    tokens). Everything else, the on-prem gateway models included, keeps
+    temperature 0."""
+    if re.match(r"(gpt-5|o\d)", (model or "").lower()):
+        return {"reasoning_effort": "minimal"}
+    return {"temperature": 0}
 
 
 def _deepseek_extra() -> dict:
@@ -460,7 +473,7 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         res = _post(
             OPENAI_URL,
             headers={"Authorization": f"Bearer {key}"},
-            json={"model": model, "temperature": 0,
+            json={"model": model, **_openai_sampling(model),
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
@@ -742,9 +755,9 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
                      "Content-Type": "application/json"},
             json={"model": model,
                   "messages": [{"role": "user", "content": prompt}],
-                  "temperature": 0,
                   "stream": True,
-                  **(_deepseek_extra() if provider == "deepseek" else {})},
+                  **(_openai_sampling(model) if provider == "openai"
+                     else {"temperature": 0, **_deepseek_extra()})},
             stream=True,
             timeout=timeout,
         ) as res:
