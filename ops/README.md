@@ -27,11 +27,17 @@ order above, and runs the first one that fits the budget itself, by following
 that department's task prompt (a scheduled run cannot start another scheduled
 task: run_scheduled_task is blocked in unattended sessions): the 5-hour window
 stays at or under 70%, and the weekly window may be used only as far as the
-week has gone since the Friday reset, so it can be used up by Friday. One
-department per tick; a tick that finds the last one still running is skipped.
+week has gone since the Friday reset, so it can be used up by Friday. After
+each department it checks again and runs the next ready one, up to 4 per tick,
+so work flows without waiting for the next hour; a tick that finds the last
+one still running is skipped.
 Usage comes from the app's own samples (`plan-usage-history.json`), so the
-runner's one command never changes. `OPS/state/hold` (one department per line)
-pauses a department.
+runner's one command never changes. `OPS/state/hold` pauses a department:
+`<department> [<ISO end time>]` per line; a line without an end time lapses 4
+hours after the file was written. Never hold without an end in mind: on
+2026-10-08 a hand-set hold plus a missed notice idled the office for 80 minutes.
+Nothing in the office may depend on an interactive session noticing a run end;
+task completion notices to a session did not arrive.
 
 Scheduled tasks are named `groundedops-office-<department>`. Their prompts
 live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,

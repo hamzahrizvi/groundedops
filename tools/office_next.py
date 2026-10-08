@@ -103,12 +103,27 @@ def over_budget(dept, five, week, resets, now):
     return None
 
 
+def holds(ops, now):
+    """Departments held now. OPS/state/hold has '<dept> [<ISO end time>]' per line; a line
+    without an end time lapses 4 hours after the file was written, so a forgotten hold
+    cannot stall the office (it did for 80 minutes on 2026-10-08)."""
+    p = os.path.join(ops, "state", "hold")
+    try:
+        lines, written = open(p, encoding="utf-8").read().splitlines(), os.path.getmtime(p)
+    except OSError:
+        return set()
+    held = set()
+    for dept, *until in (line.split() for line in lines if line.strip()):
+        end = (datetime.datetime.fromisoformat(until[0].replace("Z", "+00:00")) if until
+               else datetime.datetime.fromtimestamp(written + 4 * 3600, datetime.timezone.utc))
+        if now < end:
+            held.add(dept)
+    return held
+
+
 def plan(ops, repo, five, week, resets, now):
     lines = []
-    try:
-        held = set(open(os.path.join(ops, "state", "hold"), encoding="utf-8").read().split())
-    except OSError:
-        held = set()
+    held = holds(ops, now)
     for dept, why in waiting(ops, repo, now):
         stop = "held (OPS/state/hold)" if dept in held else over_budget(dept, five, week, resets, now)
         lines.append(f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}")
@@ -136,6 +151,8 @@ def selftest():
         assert "pace" in plan(ops, ops, 11, 92, resets, now)[0], "weekly pace"
         w("state/hold", "product-owner\n")
         assert plan(ops, ops, 11, 38, resets, now)[0].endswith("held (OPS/state/hold)"), "hold"
+        w("state/hold", "product-owner 2026-10-08T06:00Z\n")
+        assert plan(ops, ops, 11, 38, resets, now)[0].startswith("RUN"), "an expired hold lapses"
         os.remove(os.path.join(ops, "state/hold"))
         w("inbox/audit/20261009-cheaper-reranker.md")                   # a proposal, unlike the weekly note
         assert "1 new findings" in plan(ops, ops, 11, 38, resets, now)[0], "new finding wakes the product owner"
