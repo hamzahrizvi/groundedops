@@ -14,7 +14,9 @@ not find out.
 
 The prompt gives you a RUN folder and a job. Read ONLY:
 - `RUN/manuals/*.txt` - the product documentation, one file per product key
-- `RUN/cases.json`, `RUN/cases_state.json`, `RUN/widget_feedback.json` (if present)
+- `RUN/cases.json`, `RUN/cases_state.json`, `RUN/widget_feedback.json` and
+  `RUN/real_questions.json` (if present: the website questions of the week)
+- `C:/Users/hrizvi/groundedops-ops/categories.json`, your category list (read and update)
 - earlier sets `C:/Users/hrizvi/groundedops-ops/runs/*/cases.json`, only to avoid repeating questions
 - `OFFICE/ops/proposal_template.md`, the format for findings (OFFICE is named in the prompt)
 
@@ -46,6 +48,15 @@ Each case:
  "reference": "MCBI 25,000 and MCBF 100,000 cycles; a cycle is one note stacked, stored or paid out.",
  "pages": ["NV4000 Range User Manual-v2.pdf p20"], "must_include": ["MCBI 25,000", "MCBF 100,000"]}
 ```
+- `category`: what kind of customer need this is, from YOUR OWN category list
+  in `C:/Users/hrizvi/groundedops-ops/categories.json` (`{"name": "one-line
+  meaning"}`). It started as simple (one plain fact), technical (specs,
+  protocols, wiring, error codes, configuration), conversational (follow-ups,
+  vague or chatty messages, several asks at once) and commercial (price,
+  ordering, stock, support contracts). Reuse a category whenever one fits;
+  add a new one only when a question genuinely fits none (short lowercase
+  name, one-line meaning). In WRITE-PART, put new ones in the part file as
+  `"new_categories": {...}` beside `"cases"` instead of editing the list.
 - `product`: a manuals file stem, or null for an unscoped chat.
 - `type`, about 4 of each: lookup, yes_no_documented, table_condition,
   procedure_or_troubleshoot, comparison (add `"compare_with": ["<other key>"]`),
@@ -60,7 +71,20 @@ Each case:
   context they would give. Vary products: every product file gets at least 3.
 - Do not repeat or lightly reword a question from an earlier set.
 
+## Job CATEGORISE - label questions that have no category yet
+
+Read only `RUN/cases.json`, `RUN/real_questions.json` (if present) and the
+category list. Add `category` to every case in `RUN/cases.json` that lacks
+one (change nothing else), and write `RUN/real_categorised.json`: one entry per
+real question, `{"q", "category", "type", "outcome"}` (`type` from the ten
+types above; `outcome` copied). Add any new category to the list.
+
 ## Job REVIEW - check the answers
+
+First, if `RUN/real_questions.json` exists and `RUN/real_categorised.json`
+does not, do Job CATEGORISE for the real questions (they are what customers
+actually asked on the website this week).
+
 
 `RUN/cases_state.json` holds, per case, the bot's answer (`sys_normal`), a
 whole-manual baseline answer (`baseline`) and the grader's 0-3 scores

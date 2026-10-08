@@ -80,6 +80,17 @@ A fix passes only if (`tools/retrofit_gate.py`):
 The siblings are the point. Dev sees the failing questions, so passing them
 proves little; passing questions it never saw proves the fix generalises.
 
+## Product status (the pivot)
+
+Customer files every question under a category from its own list
+(`OPS/categories.json`; it started with simple, technical, conversational and
+commercial, and Customer adds one when a question fits none). Every Monday,
+`tools/ops_pivot.py` rolls the graded runs up by category, question type and
+product, week by week (bot score, gap to an AI given the whole manual,
+wrong answers, wrong "not in the manual" replies, question counts), plus the
+week's real website questions by category and how each ended. The office's
+**Product status** tab pivots it live; click a row for the questions behind it.
+
 ## Boards and rewards
 
 `tools/ops_ledger.py` builds three things from the files below and from git,

@@ -10,16 +10,17 @@
 :root{
   --bg:#E6ECEE; --surface:#F6F8F9; --ink:#17212B; --muted:#56656F; --line:#C5D0D6;
   --accent:#E9A92B; --accent-ink:#3A2A05; --ok:#23895A; --crit:#C8433A; --facade:#2E3A44; --facade-ink:#E9EEF1;
+  --seq:#2B6CB0; --div-neg:#C2410C; --div-pos:#2B6CB0;
   --display:"Silkscreen","Courier New",monospace;
   --body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
   --data:"VT323","Consolas",ui-monospace,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0D1317; --surface:#141C22; --ink:#E2E9EE; --muted:#8C9CA7; --line:#25313A;
-  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --crit:#EE6A5E; --facade:#0A0F13; --facade-ink:#C9D4DB; color-scheme:dark}}
+  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --crit:#EE6A5E; --facade:#0A0F13; --facade-ink:#C9D4DB; --seq:#6AA9EC; --div-neg:#F08A4B; --div-pos:#6AA9EC; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0D1317; --surface:#141C22; --ink:#E2E9EE; --muted:#8C9CA7; --line:#25313A;
-  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --crit:#EE6A5E; --facade:#0A0F13; --facade-ink:#C9D4DB; color-scheme:dark}
+  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --crit:#EE6A5E; --facade:#0A0F13; --facade-ink:#C9D4DB; --seq:#6AA9EC; --div-neg:#F08A4B; --div-pos:#6AA9EC; color-scheme:dark}
 
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -116,6 +117,31 @@ button{font:inherit;color:inherit}
 .rtable tr.lead td{background:color-mix(in srgb,var(--accent) 18%,transparent)}
 .rscroll{overflow-x:auto}
 .rules{margin:12px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px;margin-bottom:12px}
+.tile{background:var(--bg);border-radius:4px;padding:10px 12px;min-width:0}
+.tile .k{font:11px/1.3 var(--display);letter-spacing:.05em;color:var(--muted)}
+.tile .v{font:34px/1.05 var(--data);font-variant-numeric:tabular-nums;margin-top:4px}
+.tile .d{font-size:13px;color:var(--muted)}
+.pvbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:6px}
+.pvbar .lbl,.seg .lbl{font:11px/1 var(--display);letter-spacing:.05em;color:var(--muted)}
+.seg{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.seg button{border:1px solid var(--line);background:var(--bg);padding:6px 9px;border-radius:3px;cursor:pointer;font-size:13.5px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+#pvMetric{font:inherit;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface);color:var(--ink);max-width:100%}
+.pivot{width:100%;border-collapse:separate;border-spacing:2px;font-size:14px;font-variant-numeric:tabular-nums}
+.pivot th{font:11px/1.4 var(--display);letter-spacing:.04em;color:var(--muted);text-align:right;padding:6px 8px;white-space:nowrap}
+.pivot th:first-child{text-align:left}
+.pivot td{padding:7px 9px;text-align:right;border-radius:3px;white-space:nowrap}
+.pivot td.g{text-align:left;white-space:normal;min-width:150px;cursor:pointer}
+.pivot td.g:hover{text-decoration:underline}
+.pivot td.g .m{display:block;font-size:12.5px;color:var(--muted)}
+.pivot tr.drill td{background:var(--bg);text-align:left;white-space:normal}
+.drill ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.drill li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:baseline;font-size:13.5px}
+.vpill{font:10px/1 var(--display);letter-spacing:.04em;padding:3px 5px;border-radius:2px;border:1px solid var(--line);white-space:nowrap}
+.vpill.ok{border-color:var(--ok);color:var(--ok)} .vpill.warn{border-color:var(--accent);color:var(--ink)} .vpill.bad{border-color:var(--crit);color:var(--crit)}
+.pvh{font-size:13px;letter-spacing:.06em;margin:16px 0 6px}
+.pvtip{position:fixed;z-index:5;pointer-events:none;background:var(--ink);color:var(--bg);font-size:13px;line-height:1.35;padding:6px 8px;border-radius:3px;max-width:260px}
 
 .rail{display:grid;gap:14px;min-width:0}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
@@ -178,13 +204,39 @@ button{font:inherit;color:inherit}
       <section class="roster" id="roster" aria-label="Departments"></section>
       <section class="boards" id="boards" aria-label="Boards">
         <div class="tabs" role="tablist">
-          <button type="button" role="tab" id="t-plan" aria-selected="true" aria-controls="p-plan">Plan board</button>
+          <button type="button" role="tab" id="t-status" aria-selected="true" aria-controls="p-status">Product status</button>
+          <button type="button" role="tab" id="t-plan" aria-selected="false" aria-controls="p-plan">Plan board</button>
           <button type="button" role="tab" id="t-depts" aria-selected="false" aria-controls="p-depts">Department boards</button>
           <button type="button" role="tab" id="t-rewards" aria-selected="false" aria-controls="p-rewards">Improvement of the month</button>
           <span class="chip" id="ledgerChip">Sample</span>
         </div>
         <p class="lnote" id="ledgerNote"></p>
-        <div role="tabpanel" id="p-plan" aria-labelledby="t-plan" class="lanes"></div>
+        <div role="tabpanel" id="p-status" aria-labelledby="t-status">
+          <div class="tiles" id="pvTiles"></div>
+          <div class="pvbar">
+            <div class="seg" role="group" aria-label="Group by">
+              <span class="lbl">Group by</span>
+              <button type="button" data-dim="category" aria-pressed="true">Category</button>
+              <button type="button" data-dim="type" aria-pressed="false">Question type</button>
+              <button type="button" data-dim="product" aria-pressed="false">Product</button>
+            </div>
+            <label class="lbl" for="pvMetric">Show</label>
+            <select id="pvMetric">
+              <option value="score">Bot score</option>
+              <option value="gap">Gap to an AI given the whole manual</option>
+              <option value="wrong">Wrong answers</option>
+              <option value="declined">Said "not in the manual" when it was</option>
+              <option value="n">Questions asked</option>
+            </select>
+          </div>
+          <p class="lnote" id="pvLegend"></p>
+          <div class="rscroll"><table class="pivot" id="pvTable"></table></div>
+          <h3 class="pvh">What customers asked on the website</h3>
+          <div class="rscroll"><table class="pivot real" id="pvReal"></table></div>
+          <p class="lnote" id="pvCats"></p>
+          <div class="pvtip" id="pvTip" hidden></div>
+        </div>
+        <div role="tabpanel" id="p-plan" aria-labelledby="t-plan" class="lanes" hidden></div>
         <div role="tabpanel" id="p-depts" aria-labelledby="t-depts" class="dboards" hidden></div>
         <div role="tabpanel" id="p-rewards" aria-labelledby="t-rewards" hidden></div>
       </section>
@@ -534,13 +586,14 @@ const SAMPLE_LEDGER = {sample:true, cards:[
     security:{capacity:2, doing:[], queue:[], done:0, load:0}, audit:{capacity:2, doing:[], queue:[], done:0, load:0}},
   rewards:{month:"sample", leader:"customer", table:[{dept:"customer", points:13, all_time:13, approved:3, merged:1, fixed:3}, {dept:"dev", points:8, all_time:8, approved:0, merged:1, fixed:3},
     {dept:"security", points:2, all_time:2, approved:1, merged:0, fixed:0}, {dept:"po", points:1, all_time:1, approved:0, merged:0, fixed:0}]}};
-let tab = "plan";
+let tab = "status";
 function showTab(name, scroll){
   tab = name;
-  for(const n of ["plan","depts","rewards"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
+  for(const n of ["status","plan","depts","rewards"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
+  renderBoards();
   if(scroll) document.getElementById("boards").scrollIntoView({behavior: reduce ? "auto" : "smooth", block:"start"});
 }
-for(const n of ["plan","depts","rewards"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
+for(const n of ["status","plan","depts","rewards"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
 const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
 const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
 function renderBoards(){
@@ -590,7 +643,108 @@ function renderBoards(){
                   "The leader's findings go first in Dev's queue. Points only come from gate results and git, never from an agent's own report."]){
     const li = document.createElement("li"); li.textContent = t; rules.append(li); }
   document.getElementById("p-rewards").replaceChildren(wrap, rules);
+  renderPivot();
 }
+
+/* ---------- product status pivot (tools/ops_pivot.py -> pivot/current) ---------- */
+const SAMPLE_PIVOT = {sample:true, runs:["20261001","20261008"], categories:{simple:"One plain fact", technical:"Specs, wiring, error codes, set-up", conversational:"Follow-ups, vague, several asks", commercial:"Price, ordering, stock"},
+  overall:{"20261001":{n:40,bot_pct:70,base_pct:89,right:17,wrong:2,declined:8}, "20261008":{n:40,bot_pct:76,base_pct:90,right:21,wrong:1,declined:5}},
+  blind:{category:{technical:{"20261001":{n:22,bot_pct:64,base_pct:90,right:8,wrong:2,declined:5},"20261008":{n:22,bot_pct:70,base_pct:91,right:10,wrong:1,declined:3}},
+    simple:{"20261001":{n:8,bot_pct:92,base_pct:92,right:7,wrong:0,declined:0},"20261008":{n:8,bot_pct:96,base_pct:92,right:7,wrong:0,declined:0}},
+    conversational:{"20261001":{n:9,bot_pct:63,base_pct:85,right:2,wrong:0,declined:3},"20261008":{n:9,bot_pct:70,base_pct:85,right:4,wrong:0,declined:2}},
+    commercial:{"20261008":{n:1,bot_pct:67,base_pct:67,right:0,wrong:0,declined:0}}}, type:{}, product:{}},
+  real:{"20261008":{simple:{answered:4,refused:1},technical:{answered:1},conversational:{clarify:1}}}, latest:{run:"20261008", cases:[]}};
+let pv = {dim:"category", metric:"score", open:null};
+const runLabel = r => { const d = new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8)); return d.toLocaleDateString(undefined, {day:"numeric", month:"short"}); };
+const TYPE_NAMES = {lookup:"Look up a fact", yes_no_documented:"Yes/no from the manual", table_condition:"A limit in a table", procedure_or_troubleshoot:"How-to and troubleshooting",
+  comparison:"Two products compared", followup:"Follow-up in a chat", multi_document:"Several asks in one message", absent_feature:"A feature it doesn't have",
+  phantom_or_offtopic:"Made-up product or off-topic", vague:"Too vague to answer"};
+const groupName = (dim, g) => dim === "type" ? (TYPE_NAMES[g] || g) : dim === "product" ? (g === "none" ? "No product chosen" : g) : g.charAt(0).toUpperCase() + g.slice(1);
+const mix = (tok, p) => `color-mix(in srgb, var(${tok}) ${Math.round(Math.max(0, Math.min(1, p))*50)}%, var(--surface))`;
+const METRICS = {
+  score: {val:a => a.bot_pct, fmt:v => v + "%", worstFirst:"asc", shade:v => mix("--seq", (100-v)/100), legend:"Share of the marks the bot earned (0-3 per question). Darker = more marks lost."},
+  gap: {val:a => a.base_pct == null ? null : Math.round((a.bot_pct - a.base_pct)*10)/10, fmt:v => (v > 0 ? "+" : "") + v, worstFirst:"asc",
+        shade:v => v < 0 ? mix("--div-neg", -v/30) : mix("--div-pos", v/30), legend:"Points ahead (+) or behind (−) an AI given the whole manual for the same questions. Orange = behind, blue = ahead."},
+  wrong: {val:a => a.wrong, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx : 0), legend:"Answers that stated something wrong. Darker = more."},
+  declined: {val:a => a.declined, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx : 0), legend:"Said \"not in the manual\" when the manual had the answer. Darker = more."},
+  n: {val:a => a.n, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx*.6 : 0), legend:"How many of the week's test questions fell in each group."}
+};
+const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
+const pvTip = document.getElementById("pvTip");
+function renderPivot(){
+  const P = live.pivot || SAMPLE_PIVOT, M = METRICS[pv.metric], runs = (P.runs || []).slice(-8), last = runs[runs.length-1], prev = runs[runs.length-2];
+  if(tab === "status"){ const chip = document.getElementById("ledgerChip"); chip.textContent = P.sample ? "Sample" : "Live"; chip.className = "chip " + (P.sample ? "sample" : "live"); }
+  document.getElementById("ledgerNote").hidden = tab === "status";
+  // tiles
+  const o = (P.overall || {})[last], op = prev && P.overall[prev];
+  const realLast = P.real && Object.keys(P.real).sort().pop(), realN = realLast ? Object.values(P.real[realLast]).reduce((t, c) => t + Object.values(c).reduce((a, b) => a + b, 0), 0) : 0;
+  const delta = (a, b, unit) => b == null ? "" : a === b ? "same as last run" : `${a > b ? "up" : "down"} ${Math.abs(Math.round((a-b)*10)/10)}${unit} on ${runLabel(prev)}`;
+  const tiles = !o ? [] : [
+    ["Bot score", o.bot_pct + "%", op ? delta(o.bot_pct, op.bot_pct, " pts") : `${o.n} questions, ${runLabel(last)}`],
+    ["AI given the whole manual", o.base_pct + "%", "same questions, for comparison"],
+    ["Fully right", `${o.right} of ${o.n}`, op ? delta(o.right, op.right, "") : ""],
+    ["Wrong answers", String(o.wrong), op ? delta(o.wrong, op.wrong, "") : "stated something false"],
+    ["Said \"not found\" wrongly", String(o.declined), op ? delta(o.declined, op.declined, "") : "the manual had it"],
+    ["Website questions", String(realN), realLast ? `week to ${runLabel(realLast)}` : "none logged yet"]];
+  document.getElementById("pvTiles").replaceChildren(...tiles.map(([k, v, d]) => { const t = document.createElement("div"); t.className = "tile";
+    t.innerHTML = '<div class="k"></div><div class="v"></div><div class="d"></div>'; t.children[0].textContent = k; t.children[1].textContent = v; t.children[2].textContent = d; return t; }));
+  document.getElementById("pvLegend").textContent = (P.sample ? "Sample figures, made up to show the layout; the real ones appear after Customer's first categorised run. " : "") + M.legend + " Worst first. Click a row to see its questions.";
+  for(const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.dim === pv.dim));
+  // pivot rows
+  const groups = Object.entries((P.blind || {})[pv.dim] || {});
+  const mx = Math.max(1, ...groups.flatMap(([, byRun]) => runs.map(r => byRun[r] ? M.val(byRun[r]) : 0)).filter(v => v != null));
+  const sortVal = byRun => { const a = byRun[last]; const v = a ? M.val(a) : null; return v == null ? (M.worstFirst === "asc" ? 1e9 : -1e9) : v; };
+  groups.sort((x, y) => M.worstFirst === "asc" ? sortVal(x[1]) - sortVal(y[1]) : sortVal(y[1]) - sortVal(x[1]));
+  const tbl = document.getElementById("pvTable"); tbl.replaceChildren();
+  const head = document.createElement("tr"), th0 = document.createElement("th"); th0.textContent = {category:"Category", type:"Question type", product:"Product"}[pv.dim]; head.append(th0);
+  for(const r of runs){ const th = document.createElement("th"); th.textContent = runLabel(r); head.append(th); }
+  const thn = document.createElement("th"); thn.textContent = "Questions"; head.append(thn); tbl.append(head);
+  if(!groups.length){ const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan = runs.length + 2; td.className = "g"; td.textContent = "No graded questions yet."; tr.append(td); tbl.append(tr); }
+  for(const [g, byRun] of groups){
+    const tr = document.createElement("tr"), tg = document.createElement("td"); tg.className = "g"; tg.tabIndex = 0;
+    tg.textContent = groupName(pv.dim, g);
+    if(pv.dim === "category" && P.categories && P.categories[g]){ const m = document.createElement("span"); m.className = "m"; m.textContent = P.categories[g]; tg.append(m); }
+    const toggle = () => { pv.open = pv.open === g ? null : g; renderPivot(); };
+    tg.addEventListener("click", toggle); tg.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); } });
+    tr.append(tg);
+    for(const r of runs){
+      const td = document.createElement("td"), a = byRun[r], v = a ? M.val(a) : null;
+      td.textContent = v == null ? "–" : M.fmt(v);
+      if(v != null){ td.style.background = M.shade(v, mx);
+        td.addEventListener("mouseenter", e => { pvTip.hidden = false; pvTip.textContent = `${groupName(pv.dim, g)}, ${runLabel(r)}: score ${a.bot_pct}%` + (a.base_pct != null ? ` (whole-manual AI ${a.base_pct}%)` : "") + `, ${a.n} questions, ${a.right} right, ${a.wrong} wrong, ${a.declined} said not found`; });
+        td.addEventListener("mousemove", e => { pvTip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; pvTip.style.top = (e.clientY + 14) + "px"; });
+        td.addEventListener("mouseleave", () => { pvTip.hidden = true; }); }
+      tr.append(td);
+    }
+    const tn = document.createElement("td"); tn.textContent = byRun[last] ? byRun[last].n : 0; tr.append(tn); tbl.append(tr);
+    if(pv.open === g){
+      const dr = document.createElement("tr"), dd = document.createElement("td"); dr.className = "drill"; dd.colSpan = runs.length + 2;
+      const cases = ((P.latest || {}).cases || []).filter(c => c[pv.dim] === g);
+      if(!cases.length){ dd.textContent = "The questions behind these figures appear once the live figures are in."; }
+      else { const ul = document.createElement("ul");
+        for(const c of cases.sort((x, y) => x.bot - y.bot)){ const li = document.createElement("li"), p = document.createElement("span"), q = document.createElement("span"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
+          p.className = "vpill " + cls; p.textContent = lab; q.textContent = `${c.q}  (${c.product}, ${c.bot}/3)`; li.append(p, q); ul.append(li); }
+        const cap = document.createElement("div"); cap.className = "lbl"; cap.textContent = `${runLabel(P.latest.run)}: the test questions in this group, weakest first`; dd.append(cap, ul); }
+      dr.append(dd); tbl.append(dr);
+    }
+  }
+  // real website questions
+  const rt = document.getElementById("pvReal"); rt.replaceChildren();
+  const OUT = [["answered","Answered"],["refused","Couldn't answer"],["clarify","Asked back"],["handoff","Handed to a person"]];
+  const rh = document.createElement("tr"); for(const t of ["Category", ...OUT.map(o => o[1]), "Total"]){ const th = document.createElement("th"); th.textContent = t; rh.append(th); } rt.append(rh);
+  const rows = realLast ? Object.entries(P.real[realLast]) : [];
+  if(!rows.length){ const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan = 6; td.className = "g"; td.textContent = "No website questions logged yet."; tr.append(td); rt.append(tr); }
+  const rmx = Math.max(1, ...rows.map(([, c]) => Math.max(...Object.values(c))));
+  for(const [cat, c] of rows.sort((x, y) => (y[1].refused || 0) - (x[1].refused || 0))){
+    const tr = document.createElement("tr"), tg = document.createElement("td"); tg.className = "g"; tg.textContent = groupName("category", cat); tr.append(tg);
+    let tot = 0;
+    for(const [k] of OUT){ const td = document.createElement("td"), v = c[k] || 0; tot += v; td.textContent = v || "–"; if(v && k !== "answered") td.style.background = mix("--seq", v/rmx); tr.append(td); }
+    const tt = document.createElement("td"); tt.textContent = tot; tr.append(tt); rt.append(tr);
+  }
+  document.getElementById("pvCats").textContent = "Categories are Customer's own: " + Object.entries(P.categories || {}).map(([k, v]) => `${k} (${v.toLowerCase()})`).join("; ") + ". Customer adds one when a question fits none.";
+}
+for(const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => { pv.dim = b.dataset.dim; pv.open = null; renderPivot(); });
+document.getElementById("pvMetric").addEventListener("change", e => { pv.metric = e.target.value; renderPivot(); });
 
 function select(id){ selected = id; renderDetail(); renderRoster(true); }
 const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked", off:"Off duty"};
@@ -716,6 +870,7 @@ setInterval(sampleStep, 9000);
     }, () => {});
     db.doc("board/ceo").onSnapshot(d => { live.waiting = (d.exists && d.data().waiting) || []; if(mode === "live") renderTray(); }, () => {});
     db.doc("ledger/current").onSnapshot(d => { live.ledger = d.exists ? d.data() : null; renderBoards(); }, () => {});
+    db.doc("pivot/current").onSnapshot(d => { live.pivot = d.exists ? d.data() : null; renderPivot(); }, () => {});
   } catch(e) { live.available = false; }
   decideMode();
 })();
