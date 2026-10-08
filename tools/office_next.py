@@ -1,11 +1,13 @@
 """Which office task should run next, within the usage budget?
 
-  python tools/office_next.py --five 11 --week 38 --resets 2026-10-09T18:59:59Z [--ops ...] [--repo ...]
+  python tools/office_next.py [--five 11 --week 38] [--resets 2026-10-09T18:59:59Z] [--ops ...] [--repo ...]
   python tools/office_next.py --selftest
 
---five / --week are the plan's "5-hour limit" and "Weekly · all models"
-percentUsed, --resets that weekly window's resetsAt (the dispatcher reads them
-with get_usage). Prints one line per office task with work waiting, most
+--five / --week are the plan's "5-hour limit" and "Weekly - all models"
+percentUsed (get_usage); by default they come from the desktop app's own
+15-minute samples in %APPDATA%/Claude/plan-usage-history.json, so the
+dispatcher's command never changes and one "always allow" covers it. --resets
+is the weekly window's resetsAt; by default the next Friday 19:00 UTC. Prints one line per office task with work waiting, most
 urgent first:
   RUN  <task-id>  <why>    fits the budget: start it
   WAIT <task-id>  <why>    has work, but would break the budget
@@ -21,10 +23,12 @@ reset to the next, at most x% used - so it can be used up by the Friday reset.
 import argparse
 import datetime
 import glob
+import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import NOTES, decisions, git_sets, stage_of  # noqa: E402
@@ -33,6 +37,19 @@ TASK = "groundedops-office-"
 # ponytail: guessed (5-hour %, weekly %) per run; tune from plan-usage-history.json once each has run a few times
 COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security": (15, 3), "audit": (3, 1)}
 WEEK = datetime.timedelta(days=7)
+HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-history.json")
+RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
+
+
+def latest_usage(path=HISTORY):
+    """(5-hour %, weekly %, minutes old) from the app's newest usage sample."""
+    s = json.load(open(path, encoding="utf-8"))["samples"][-1]
+    return s["u"].get("fh", 0), s["u"].get("sd", 0), (time.time() - s["t"] / 1000) / 60
+
+
+def next_reset(now):
+    d = now.replace(hour=RESET[1], minute=0, second=0, microsecond=0) + datetime.timedelta(days=(RESET[0] - now.weekday()) % 7)
+    return d if d > now else d + WEEK
 
 
 def _mtime(pattern):
@@ -120,6 +137,9 @@ def selftest():
         os.remove(os.path.join(ops, "state/hold"))
         w("inbox/audit/20261009-cheaper-reranker.md")                   # a proposal, unlike the weekly note
         assert "1 new findings" in plan(ops, ops, 11, 38, resets, now)[0], "new finding wakes the product owner"
+        assert next_reset(now) == resets and next_reset(resets + datetime.timedelta(hours=1)) == resets + WEEK
+        w("h.json", json.dumps({"samples": [{"t": time.time() * 1000, "u": {"fh": 12, "sd": 40}}]}))
+        assert latest_usage(os.path.join(ops, "h.json"))[:2] == (12, 40)
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
         assert any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "no test run yet"
     print("selftest ok")
@@ -137,10 +157,14 @@ def main():
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    if a.five is None or a.week is None or not a.resets:
-        ap.error("--five, --week and --resets are required")
-    resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00"))
-    print("\n".join(plan(a.ops, a.repo, a.five, a.week, resets, datetime.datetime.now(datetime.timezone.utc))))
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if a.five is None or a.week is None:
+        a.five, a.week, old = latest_usage()
+        if old > 60:
+            return print(f"STALE usage figures are {old:.0f} minutes old; start nothing")
+    resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
+    print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC")
+    print("\n".join(plan(a.ops, a.repo, a.five, a.week, resets, now)))
 
 
 if __name__ == "__main__":
