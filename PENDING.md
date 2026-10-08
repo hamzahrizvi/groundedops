@@ -132,6 +132,23 @@ dated section below).
 
 ---
 
+## 2026-10-08 - the agent office (branch experimental/agent-org-phase1)
+
+Scheduled Claude departments now test, triage, build and report weekly; the
+handbook is `ops/README.md`, the live office is
+https://claude.ai/artifact/XeDaMgpcp1foLDuX9N8KMD. Their work queue lives in
+`C:/Users/hrizvi/groundedops-ops/decisions/`, not here; an item they finish
+lands here as a normal commit on a merged `agents/dev-<id>` branch.
+- [ ] **You:** merge the branch, then press "Run now" once on each
+  `groundedops-office-*` task so later runs don't stop on tool prompts.
+- [ ] Phase 2 (Audit, Security) and phase 3 (R&D, Marketing) are built and
+  paused. Switch on phase 2 after two clean phase-1 weeks, phase 3 after the
+  first gated merge.
+- First live week ran early on 2026-10-08 (run `runs/20261008`); its
+  Customer pass found the manuals disagree on the SCS power supply next to an
+  NV4000 (7.5 A in the NV4000 manual, 6.5 A in the SCS manual), joining the
+  MyCheckr Mini weight and hub relay pin conflicts. Needs the product team.
+
 ## 2026-09-27 - the 7 -> 10 plan, in plain English (all open)
 
 The full plan, with file:line anchors, tests to keep green and the exact
