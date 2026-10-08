@@ -1,0 +1,605 @@
+<title>GroundedOps HQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Silkscreen:wght@400;700&family=VT323&display=swap">
+<style>
+/* Layout: a cutaway office building (three floors of pixel-art rooms) beside a side rail
+   for the CEO's tray, the activity feed and the selected room; the week's rhythm underneath. */
+:root{
+  --bg:#E6ECEE; --surface:#F6F8F9; --ink:#17212B; --muted:#56656F; --line:#C5D0D6;
+  --accent:#E9A92B; --accent-ink:#3A2A05; --ok:#23895A; --warn:#C7741F; --crit:#C8433A;
+  --facade:#2E3A44; --facade-ink:#E9EEF1;
+  --wall:#D9E4E1; --wallshade:#C3D2CE; --floor:#B88A5D; --floorline:#9E7349;
+  --desk:#7E5236; --desktop:#9C6A46; --metal:#5D6873; --metaldark:#353E47;
+  --board:#F3F5F6; --sheet:#E9EDF0; --glow:#BFE8FF; --dim:rgba(230,236,238,.42); --is-dark:0;
+  --display:"Silkscreen","Courier New",monospace;
+  --body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --data:"VT323","Consolas",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D1317; --surface:#141C22; --ink:#E2E9EE; --muted:#8C9CA7; --line:#25313A;
+  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --warn:#E39545; --crit:#EE6A5E;
+  --facade:#0A0F13; --facade-ink:#C9D4DB;
+  --wall:#1D2A31; --wallshade:#16222A; --floor:#3B2B20; --floorline:#2F2219;
+  --desk:#4A3122; --desktop:#5E3F2C; --metal:#3D4751; --metaldark:#20272E;
+  --board:#C9D1D6; --sheet:#8E9AA2; --glow:#7FD0FF; --dim:rgba(8,12,15,.45); --is-dark:1; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D1317; --surface:#141C22; --ink:#E2E9EE; --muted:#8C9CA7; --line:#25313A;
+  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --warn:#E39545; --crit:#EE6A5E;
+  --facade:#0A0F13; --facade-ink:#C9D4DB;
+  --wall:#1D2A31; --wallshade:#16222A; --floor:#3B2B20; --floorline:#2F2219;
+  --desk:#4A3122; --desktop:#5E3F2C; --metal:#3D4751; --metaldark:#20272E;
+  --board:#C9D1D6; --sheet:#8E9AA2; --glow:#7FD0FF; --dim:rgba(8,12,15,.45); --is-dark:1; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding-inline:16px;padding-block:20px 40px}
+h1,h2,h3{font-family:var(--display);font-weight:400;text-wrap:balance;margin:0}
+button{font:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;justify-content:space-between;margin-bottom:14px}
+.top h1{font-size:clamp(28px,5vw,44px);line-height:1;letter-spacing:.02em}
+.top p{margin:6px 0 0;color:var(--muted);max-width:60ch}
+.shift{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.clock{font:26px/1 var(--data);color:var(--muted);font-variant-numeric:tabular-nums}
+.chip{font:12px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:3px;border:1px solid var(--line);background:var(--surface);color:var(--muted);white-space:nowrap}
+.chip.live{background:var(--ok);border-color:var(--ok);color:#fff}
+.chip.sample{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn{border:2px solid var(--ink);background:var(--surface);color:var(--ink);padding:6px 12px;border-radius:3px;cursor:pointer;font-family:var(--display);font-size:13px;letter-spacing:.04em;box-shadow:3px 3px 0 var(--ink)}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink)}
+.btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+.banner{margin:0 0 14px;padding:10px 14px;border-left:4px solid var(--accent);background:var(--surface);color:var(--ink);font-size:15px}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+@media (max-width:1020px){.grid{grid-template-columns:minmax(0,1fr)}}
+
+.building{position:relative;background:var(--facade);border-radius:6px 6px 2px 2px;padding:14px 12px 10px;box-shadow:0 2px 0 var(--line)}
+.roofline{display:flex;justify-content:space-between;align-items:center;color:var(--facade-ink);font:13px/1 var(--display);letter-spacing:.12em;margin:0 4px 12px}
+.roofline .sign{background:var(--accent);color:var(--accent-ink);padding:5px 9px;border-radius:2px}
+.floor{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;margin-bottom:10px}
+.floor:last-of-type{margin-bottom:0}
+.flabel{writing-mode:vertical-rl;transform:rotate(180deg);color:var(--facade-ink);opacity:.75;font:11px/1 var(--display);letter-spacing:.14em;text-align:center}
+.rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:8px}
+.floor.small .rooms{grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr))}
+.room{background:var(--surface);border:2px solid var(--metaldark);border-radius:3px;cursor:pointer;display:flex;flex-direction:column;min-width:0;transition:border-color .2s}
+.room:hover{border-color:var(--muted)}
+.room[aria-pressed="true"]{border-color:var(--accent)}
+.room.ping{animation:ping .9s ease-out}
+@keyframes ping{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 10px transparent}}
+.stage{position:relative;line-height:0}
+.stage canvas{width:100%;height:auto;aspect-ratio:160/110;image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+.bubble{position:absolute;top:4%;left:58%;transform:translateX(-50%);max-width:88%;background:var(--surface);color:var(--ink);border:2px solid var(--ink);border-radius:3px;padding:3px 6px 4px;font:17px/1.05 var(--data);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;box-shadow:2px 2px 0 var(--ink);animation:pop .25s ease-out}
+.bubble.wait{border-style:dashed}
+@keyframes pop{from{transform:translateX(-50%) scale(.85);opacity:0}to{transform:translateX(-50%) scale(1);opacity:1}}
+.plate{padding:7px 9px 9px;display:grid;gap:3px;min-width:0}
+.plate .row{display:flex;gap:6px;align-items:center;justify-content:space-between;min-width:0}
+.plate .name{font:14px/1.1 var(--display);letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plate .model{font:16px/1 var(--data);color:var(--muted)}
+.plate .task{font-size:13.5px;line-height:1.35;color:var(--muted);min-height:2.7em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.state{font:11px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:4px 6px;border-radius:2px;white-space:nowrap;border:1px solid transparent}
+.state.working{background:var(--ok);color:#fff}
+.state.waiting{background:var(--accent);color:var(--accent-ink)}
+.state.idle{border-color:var(--line);color:var(--muted)}
+.state.planned{border:1px dashed var(--muted);color:var(--muted)}
+.state.blocked{background:var(--crit);color:#fff}
+
+.papers{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.paper{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px;will-change:transform}
+.paper i{width:14px;height:17px;background:#FBFBF7;border:2px solid #22282E;box-shadow:2px 2px 0 rgba(0,0,0,.35);
+  background-image:repeating-linear-gradient(#FBFBF7 0 3px,#9AA5AE 3px 4px);background-clip:padding-box;flex:none}
+.paper span{font:16px/1 var(--data);background:var(--accent);color:var(--accent-ink);padding:3px 6px;border-radius:2px;white-space:nowrap;box-shadow:2px 2px 0 rgba(0,0,0,.3)}
+
+.rail{display:grid;gap:14px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
+.panel h2{font-size:15px;letter-spacing:.06em;margin-bottom:10px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.count{font:12px/1 var(--display);background:var(--accent);color:var(--accent-ink);padding:4px 7px;border-radius:2px}
+.count.zero{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.tray{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.tray li{border-left:3px solid var(--accent);padding:2px 0 2px 10px}
+.tray strong{display:block;font-size:15px}
+.tray span{color:var(--muted);font-size:14px}
+.empty{color:var(--muted);font-size:14px;margin:0}
+.feed{list-style:none;margin:0;padding:0;display:grid;gap:9px;max-height:330px;overflow:auto}
+.feed li{display:grid;grid-template-columns:50px minmax(0,1fr);gap:8px;font-size:14px;line-height:1.35}
+.feed time{font:18px/1.1 var(--data);color:var(--muted);font-variant-numeric:tabular-nums}
+.route{font:11px/1 var(--display);letter-spacing:.05em;color:var(--muted);display:block;margin-bottom:2px}
+.tag{font:10px/1 var(--display);letter-spacing:.06em;border:1px dashed var(--muted);color:var(--muted);padding:2px 4px;border-radius:2px;margin-left:4px;vertical-align:1px}
+.detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:10px 0 0;font-size:14px}
+.detail dt{color:var(--muted);font:12px/1.6 var(--display);letter-spacing:.04em}
+.detail dd{margin:0}
+.detail p{margin:0;font-size:14.5px}
+
+.rhythm{margin-top:20px}
+.rhythm h2{font-size:15px;letter-spacing:.06em;margin-bottom:10px}
+.days{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media (max-width:640px){.days{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.day{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:10px;min-width:0}
+.day.today{border-color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
+.day h3{font-size:13px;letter-spacing:.08em;margin-bottom:8px}
+.slot{display:block;font-size:13.5px;line-height:1.35;margin-bottom:6px}
+.slot b{font:16px/1 var(--data);font-weight:400;color:var(--muted);margin-right:4px}
+.foot{margin-top:18px;color:var(--muted);font-size:14px;max-width:80ch}
+@media (prefers-reduced-motion: reduce){.bubble,.room.ping{animation:none}.btn:hover{transform:none}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>GroundedOps HQ</h1>
+      <p>The agent departments that test the chatbot, fix what they find and report to you every week.</p>
+    </div>
+    <div class="shift">
+      <span class="clock" id="clock">--:--</span>
+      <span class="chip" id="modeChip">Sample week</span>
+      <button class="btn" id="modeBtn" type="button" hidden>Show live office</button>
+    </div>
+  </header>
+  <p class="banner" id="banner">Connecting to the office…</p>
+
+  <div class="grid">
+    <section class="building" id="building" aria-label="Office floors">
+      <div class="roofline"><span>GROUNDEDOPS</span><span class="sign">OPEN</span></div>
+      <div class="floor"><div class="flabel">3F Leadership</div><div class="rooms" data-floor="0"></div></div>
+      <div class="floor"><div class="flabel">2F Shop floor</div><div class="rooms" data-floor="1"></div></div>
+      <div class="floor small"><div class="flabel">1F Opening soon</div><div class="rooms" data-floor="2"></div></div>
+      <div class="papers" id="papers" aria-hidden="true"></div>
+    </section>
+
+    <aside class="rail">
+      <section class="panel" aria-labelledby="trayH">
+        <h2 id="trayH">Waiting for you <span class="count zero" id="trayCount">0</span></h2>
+        <ul class="tray" id="tray"></ul>
+        <p class="empty" id="trayEmpty">Nothing needs your yes right now.</p>
+      </section>
+      <section class="panel detail" aria-live="polite" id="detail"></section>
+      <section class="panel" aria-labelledby="feedH">
+        <h2 id="feedH">Activity</h2>
+        <ul class="feed" id="feed"></ul>
+        <p class="empty" id="feedEmpty">No activity yet. The first run is Monday at 01:00.</p>
+      </section>
+    </aside>
+  </div>
+
+  <section class="rhythm" aria-labelledby="weekH">
+    <h2 id="weekH">The week</h2>
+    <div class="days" id="days"></div>
+  </section>
+  <p class="foot">Phase 1 runs Customer, the test lab, the product owner and Dev. The ground floor opens later: Audit and Security in phase 2, R&amp;D and Marketing in phase 3. Approve work by ticking the box in the decisions file, or by telling Claude "approve D-…".</p>
+</div>
+
+<script>
+(() => {
+const W = 160, H = 110;
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const ROOMS = [
+  {id:"ceo", floor:0, name:"You (CEO)", model:"Approves and merges", sched:"When the report lands",
+   role:"Reads the product owner's report, approves what changes for customers, and merges finished branches.",
+   person:{shirt:"#25345E", hair:"#2A1D14", skin:0, suit:true}, board:"chart"},
+  {id:"po", floor:0, name:"Product owner", model:"Fable 5.1 · high", sched:"Tue and Fri 08:00",
+   role:"Scores every finding, turns down patches that only fix one question, decides what Dev builds and writes your report. The safe holds the hidden sibling questions.",
+   person:{shirt:"#2F7556", hair:"#6B3E22", skin:1, blazer:true, long:true}, board:"kanban", safe:true},
+  {id:"customer", floor:1, name:"Customer", model:"Sonnet 5.5 · medium", sched:"Mon 01:00",
+   role:"Writes 40 new customer questions a week from the manuals alone, re-checks every miss against the manual, and files one finding per type of failure.",
+   person:{shirt:"#D9644B", hair:"#1E1A17", skin:2, headset:true, long:true}, board:"chat"},
+  {id:"lab", floor:1, name:"Test lab", model:"Shell jobs, no AI", sched:"After Customer; before each product owner run",
+   role:"Asks the chatbot the week's questions, grades every answer against a whole-manual baseline, and runs the retrofit gate on Dev's branches.",
+   lab:true},
+  {id:"dev", floor:1, name:"Dev", model:"Opus 5.5 · high", sched:"Weekdays 20:00, when work is approved",
+   role:"Builds one approved work order at a time in its own branch, runs the tests and hands back. Never merges.",
+   person:{shirt:"#237E78", shirt2:"#1B625D", hair:"#3B2A1E", skin:0, hoodie:true}, board:"code"},
+  {id:"audit", floor:2, name:"Audit", model:"Sonnet 5.5 · low", sched:"Weekly, from phase 2", planned:"Opens in phase 2",
+   role:"Cost per answer and latency, and what the agents themselves cost. Every cost cut goes through the same gate."},
+  {id:"security", floor:2, name:"Security", model:"Opus 5.5 · high", sched:"Fortnightly, from phase 2", planned:"Opens in phase 2",
+   role:"Reviews each change for security, audits dependencies and secrets, and checks where customer text is sent."},
+  {id:"rnd", floor:2, name:"R&D", model:"Opus 5.5 · high", sched:"Monthly, from phase 3", planned:"Opens in phase 3",
+   role:"Researches infrastructure and new features that would move the product forward as a whole."},
+  {id:"marketing", floor:2, name:"Marketing", model:"Sonnet 5.5 · medium", sched:"Monthly, from phase 3", planned:"Opens in phase 3",
+   role:"Compares the product with market leaders and suggests look-and-feel improvements."}
+];
+const byId = Object.fromEntries(ROOMS.map(r => [r.id, r]));
+const CRON = {customer:{d:[1], h:1}, po:{d:[2,5], h:8}, dev:{d:[1,2,3,4,5], h:20}};
+
+function nextRun(id){
+  const c = CRON[id]; if(!c) return null;
+  const d = new Date(); d.setMinutes(0,0,0);
+  for(let i = 0; i < 24*8; i++){ d.setHours(d.getHours()+1); if(c.d.includes(d.getDay()) && d.getHours() === c.h) return new Date(d); }
+  return null;
+}
+const fmtWhen = d => d ? d.toLocaleString(undefined,{weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "";
+const fmtTime = d => d.toLocaleTimeString(undefined,{hour:"2-digit", minute:"2-digit"});
+
+/* ---------- state ---------- */
+const live = {workers:{}, events:[], waiting:[], available:false, loaded:false};
+const sample = {workers:{}, events:[], waiting:[], step:0};
+let mode = "sample", forced = null, selected = "customer";
+const view = () => mode === "live" ? live : sample;
+
+function worker(id){
+  const r = byId[id];
+  if(r.planned) return {state:"planned", task:r.planned};
+  const w = view().workers[id] || {};
+  const fallback = mode === "live" ? "No run yet" : "Off shift";
+  return {state: w.state || "idle", task: w.task || fallback, last: w.last || "", next: w.next || "", updated: w.updated || ""};
+}
+
+/* ---------- DOM: rooms ---------- */
+const els = {};
+for(const r of ROOMS){
+  const a = document.createElement("article");
+  a.className = "room"; a.tabIndex = 0; a.setAttribute("role","button"); a.dataset.id = r.id;
+  a.innerHTML = '<div class="stage"><canvas width="160" height="110"></canvas><div class="bubble" hidden></div></div>' +
+    '<div class="plate"><div class="row"><span class="name"></span><span class="state"></span></div>' +
+    '<span class="model"></span><span class="task"></span></div>';
+  a.querySelector(".name").textContent = r.name;
+  a.querySelector(".model").textContent = r.model;
+  document.querySelector(`.rooms[data-floor="${r.floor}"]`).appendChild(a);
+  const pick = () => { selected = r.id; renderDetail(); renderRooms(); };
+  a.addEventListener("click", pick);
+  a.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(); } });
+  els[r.id] = {room:a, canvas:a.querySelector("canvas"), ctx:a.querySelector("canvas").getContext("2d"),
+    bubble:a.querySelector(".bubble"), state:a.querySelector(".state"), task:a.querySelector(".task")};
+  els[r.id].ctx.imageSmoothingEnabled = false;
+}
+
+const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked"};
+function renderRooms(){
+  for(const r of ROOMS){
+    const w = worker(r.id), e = els[r.id];
+    e.state.className = "state " + w.state; e.state.textContent = STATE_LABEL[w.state] || w.state;
+    e.task.textContent = w.task;
+    e.room.setAttribute("aria-pressed", String(selected === r.id));
+    e.room.setAttribute("aria-label", `${r.name}: ${STATE_LABEL[w.state] || w.state}. ${w.task}`);
+    const show = w.state === "working" || w.state === "waiting" || w.state === "blocked";
+    if(show){
+      const txt = w.state === "waiting" ? "… " + w.task : w.task;
+      if(e.bubble.hidden || e.bubble.textContent !== txt){ e.bubble.hidden = false; e.bubble.textContent = txt; e.bubble.style.animation = "none"; void e.bubble.offsetWidth; e.bubble.style.animation = ""; }
+      e.bubble.classList.toggle("wait", w.state !== "working");
+    } else e.bubble.hidden = true;
+  }
+  if(reduce) drawAll(0);
+}
+
+function renderDetail(){
+  const r = byId[selected], w = worker(r.id), d = document.getElementById("detail");
+  const next = w.next || fmtWhen(nextRun(r.id)) || r.sched;
+  d.innerHTML = '<h2></h2><p class="role"></p><dl></dl>';
+  d.querySelector("h2").textContent = r.name;
+  d.querySelector(".role").textContent = r.role;
+  const rows = [["Model", r.model], ["Runs", r.sched], ["Now", `${STATE_LABEL[w.state] || w.state}: ${w.task}`]];
+  if(w.last) rows.push(["Last result", w.last]);
+  if(!r.planned && CRON[r.id]) rows.push(["Next run", next]);
+  if(mode === "live" && w.updated) rows.push(["Updated", new Date(w.updated).toLocaleString()]);
+  const dl = d.querySelector("dl");
+  for(const [k, v] of rows){ const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; dl.append(dt, dd); }
+}
+
+function renderTray(){
+  const items = view().waiting || [], ul = document.getElementById("tray"), c = document.getElementById("trayCount");
+  ul.replaceChildren(...items.map(it => { const li = document.createElement("li"), s = document.createElement("strong"), sp = document.createElement("span");
+    s.textContent = it.title || it.id; sp.textContent = it.why || ""; li.append(s, sp); return li; }));
+  c.textContent = items.length; c.classList.toggle("zero", !items.length);
+  document.getElementById("trayEmpty").hidden = items.length > 0;
+}
+
+function renderFeed(){
+  const items = view().events.slice(0, 20), ul = document.getElementById("feed");
+  ul.replaceChildren(...items.map(ev => {
+    const li = document.createElement("li"), t = document.createElement("time"), div = document.createElement("div"), route = document.createElement("span");
+    const at = new Date(ev.at); t.dateTime = at.toISOString(); t.textContent = fmtTime(at);
+    route.className = "route"; route.textContent = `${(byId[ev.from] || {name: ev.from}).name} → ${(byId[ev.to] || {name: ev.to}).name}`;
+    div.append(route, document.createTextNode(ev.text));
+    if(ev.sample){ const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "sample"; div.append(tag); }
+    li.append(t, div); return li; }));
+  document.getElementById("feedEmpty").hidden = items.length > 0;
+}
+
+function renderWeek(){
+  const plan = [
+    ["Mon", [["01:00","Customer writes 40 new questions"],["after","Test lab asks and grades them"],["after","Customer files findings"],["20:00","Dev, if work is approved"]]],
+    ["Tue", [["08:00","Product owner decides, writes your report"],["day","You approve or decline"],["20:00","Dev builds approved work"]]],
+    ["Wed", [["20:00","Dev builds approved work"]]],
+    ["Thu", [["20:00","Dev builds approved work"]]],
+    ["Fri", [["08:00","Test lab runs the gate; product owner judges it"],["day","You merge what passed"],["20:00","Dev"]]]
+  ];
+  const today = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()];
+  document.getElementById("days").replaceChildren(...plan.map(([day, slots]) => {
+    const div = document.createElement("div"); div.className = "day" + (day === today ? " today" : "");
+    const h = document.createElement("h3"); h.textContent = day; div.append(h);
+    for(const [t, txt] of slots){ const s = document.createElement("span"); s.className = "slot"; const b = document.createElement("b"); b.textContent = t; s.append(b, document.createTextNode(txt)); div.append(s); }
+    return div; }));
+}
+
+function renderMode(){
+  const chip = document.getElementById("modeChip"), btn = document.getElementById("modeBtn"), banner = document.getElementById("banner");
+  chip.className = "chip " + mode; chip.textContent = mode === "live" ? "Live" : "Sample week";
+  btn.hidden = !live.available;
+  btn.textContent = mode === "live" ? "Watch a sample week" : "Show live office";
+  if(!live.loaded){ banner.textContent = "Connecting to the office…"; }
+  else if(!live.available) banner.textContent = "Live status is not available in this view, so this is a sample week: made-up work showing how a week runs.";
+  else if(mode === "sample") banner.textContent = "Nobody is on shift right now, so this is a sample week: made-up work showing how a week runs. The live office takes over as soon as a run starts.";
+  else banner.textContent = "Live: each room shows its department's real status, written by its last scheduled run.";
+}
+
+function renderAll(){ renderMode(); renderRooms(); renderDetail(); renderTray(); renderFeed(); }
+
+function decideMode(){
+  const working = Object.values(live.workers).some(w => w.state === "working" || w.state === "waiting");
+  const want = forced || (live.available && working ? "live" : "sample");
+  if(want !== mode){ mode = want; renderAll(); } else renderMode();
+}
+document.getElementById("modeBtn").addEventListener("click", () => { forced = mode === "live" ? "sample" : "live"; decideMode(); });
+
+/* ---------- papers ---------- */
+const building = document.getElementById("building"), layer = document.getElementById("papers");
+function flash(id){ const r = els[id] && els[id].room; if(!r) return; r.classList.remove("ping"); void r.offsetWidth; r.classList.add("ping"); }
+function fly(from, to, text){
+  if(!els[from] || !els[to]) return;
+  if(reduce){ flash(to); return; }
+  const br = building.getBoundingClientRect();
+  const a = els[from].canvas.getBoundingClientRect(), b = els[to].canvas.getBoundingClientRect();
+  const x0 = a.left - br.left + a.width*.55, y0 = a.top - br.top + a.height*.55;
+  const x1 = b.left - br.left + b.width*.55, y1 = b.top - br.top + b.height*.55;
+  const mx = (x0 + x1)/2, my = Math.min(y0, y1) - 70;
+  const el = document.createElement("div"); el.className = "paper";
+  const i = document.createElement("i"), s = document.createElement("span"); s.textContent = text; el.append(i, s); layer.append(el);
+  const anim = el.animate([
+    {transform:`translate(${x0}px,${y0}px) rotate(-10deg) scale(.6)`, opacity:0},
+    {transform:`translate(${x0}px,${y0-14}px) rotate(-6deg) scale(1)`, opacity:1, offset:.12},
+    {transform:`translate(${mx}px,${my}px) rotate(8deg)`, offset:.55},
+    {transform:`translate(${x1}px,${y1}px) rotate(0deg)`, opacity:1, offset:.9},
+    {transform:`translate(${x1}px,${y1+6}px) scale(.7)`, opacity:0}
+  ], {duration:2000, easing:"cubic-bezier(.45,0,.3,1)"});
+  anim.onfinish = () => { el.remove(); flash(to); };
+}
+
+/* ---------- sample week (clearly labelled) ---------- */
+const SAMPLE = [
+  {s:{customer:["working","Reading the manuals and writing 40 new customer questions"]}},
+  {s:{customer:["waiting","Waiting for the chatbot to answer all 40"], lab:["working","Asking the chatbot 40 questions"]}, p:["customer","lab","40 new questions"]},
+  {s:{lab:["working","Grading every answer against the manual"]}},
+  {s:{lab:["idle","Graded: 29 right, 8 partly right, 3 wrong"], customer:["working","Checking each miss against the manual"]}, p:["lab","customer","Graded answers"]},
+  {s:{customer:["idle","Filed 2 findings; locked 8 hidden questions in the safe"], po:["working","Real fix, or a patch for one question?"]}, p:["customer","po","Comparisons use the wrong manual"]},
+  {s:{po:["idle","Approved 1, deferred 1, report written"], ceo:["waiting","1 decision needs your yes"]}, p:["po","ceo","Report and 1 decision"], w:[{title:"Fix how comparisons pick each product's manual", why:"3 wrong answers this week came from it. No extra cost per answer."}]},
+  {s:{ceo:["idle","Approved the comparison fix"], dev:["working","Fixing how comparisons pick each manual"]}, p:["ceo","dev","Approved"], w:[]},
+  {s:{dev:["working","Running the tests, then the failing questions again"]}},
+  {s:{dev:["idle","Handed back for the check"], lab:["working","Asking the 8 hidden questions against the fix"]}, p:["dev","lab","Ready for the check"]},
+  {s:{lab:["idle","Hidden questions: 8 of 8 right, nothing new wrong"], po:["working","Reading the gate result"]}, p:["lab","po","Gate passed"]},
+  {s:{po:["idle","Ready to merge; weekly report written"], ceo:["waiting","1 branch ready to merge"]}, p:["po","ceo","Ready to merge"], w:[{title:"Merge the comparison fix", why:"Passed the hidden questions. 3 wrong answers become right."}]},
+  {s:{ceo:["idle","Merged. Next week starts Monday 01:00"]}, w:[]}
+];
+function sampleStep(){
+  const st = SAMPLE[sample.step % SAMPLE.length];
+  if(sample.step % SAMPLE.length === 0){ sample.workers = {}; sample.waiting = []; }
+  for(const [id, [state, task]] of Object.entries(st.s)) sample.workers[id] = {state, task, last: state === "idle" ? task : (sample.workers[id] || {}).last};
+  if(st.w) sample.waiting = st.w;
+  if(st.p){ sample.events.unshift({at: new Date().toISOString(), from: st.p[0], to: st.p[1], text: st.p[2], sample: true}); sample.events.length = Math.min(sample.events.length, 20); }
+  sample.step++;
+  if(mode === "sample"){ renderRooms(); renderDetail(); renderTray(); renderFeed(); if(st.p) fly(st.p[0], st.p[1], st.p[2]); }
+}
+sampleStep();
+setInterval(sampleStep, reduce ? 6000 : 3800);
+
+/* ---------- live data ---------- */
+(async () => {
+  let db = null;
+  try { db = window.claude && await window.claude.use("db"); } catch(e) { db = null; }
+  live.loaded = true;
+  if(!db){ renderMode(); return; }
+  live.available = true;
+  let firstEvents = true;
+  try {
+    db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRooms(); renderDetail(); } }, () => {});
+    db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
+      live.events = s.docs.map(d => d.data());
+      if(!firstEvents && mode === "live") for(const ch of s.docChanges()) if(ch.type === "added"){ const ev = ch.doc.data(); fly(ev.from, ev.to, ev.text); }
+      firstEvents = false; if(mode === "live") renderFeed();
+    }, () => {});
+    db.doc("board/ceo").onSnapshot(d => { live.waiting = (d.exists && d.data().waiting) || []; if(mode === "live") renderTray(); }, () => {});
+  } catch(e) { live.available = false; }
+  decideMode();
+})();
+setTimeout(() => { if(!live.loaded){ live.loaded = true; renderMode(); } }, 10500);
+
+/* ---------- pixel drawing ---------- */
+let P = {};
+const KEYS = ["wall","wallshade","floor","floorline","desk","desktop","metal","metaldark","board","sheet","glow","accent","ok","crit","dim","is-dark"];
+function readPalette(){ const cs = getComputedStyle(document.documentElement); for(const k of KEYS) P[k] = cs.getPropertyValue("--" + k).trim(); P.dark = P["is-dark"] === "1"; }
+readPalette();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readPalette(); if(reduce) drawAll(0); });
+new MutationObserver(() => { readPalette(); if(reduce) drawAll(0); }).observe(document.documentElement, {attributes:true, attributeFilter:["data-theme"]});
+
+const SKIN = ["#F2C9A8","#C88E63","#8B5A3C"];
+const px = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
+const hash = n => { const s = Math.sin(n*127.1 + 311.7)*43758.5453; return s - Math.floor(s); };
+
+function drawWindow(c, x, y, w, h, t){
+  const hr = new Date().getHours(), day = hr >= 7 && hr < 18, dusk = hr >= 18 && hr < 20;
+  px(c, x-2, y-2, w+4, h+4, P.metaldark);
+  const g = c.createLinearGradient(0, y, 0, y+h);
+  if(day){ g.addColorStop(0,"#6FB9E6"); g.addColorStop(1,"#CBE8F6"); }
+  else if(dusk){ g.addColorStop(0,"#34356A"); g.addColorStop(1,"#EE9466"); }
+  else { g.addColorStop(0,"#081127"); g.addColorStop(1,"#1B2850"); }
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  if(day){
+    const cx = x + ((t*3) % (w+14)) - 8; px(c, cx, y+5, 9, 2, "#FFFFFF"); px(c, cx+2, y+4, 5, 1, "#FFFFFF");
+  } else {
+    for(let i = 0; i < 8; i++) if(hash(i + Math.floor(t*1.5)*0.01) > .2) px(c, x + Math.floor(hash(i+2)*w), y + Math.floor(hash(i+7)*(h-12)), 1, 1, "#FFF3CF");
+    px(c, x+w-9, y+3, 4, 4, "#F1EBC9");
+  }
+  const sky = day ? ["#8FA9BB","#7F9AAE","#9AB2C2"] : ["#0B1124","#101831","#0B1124"];
+  const bl = [[0,7,6],[7,11,6],[14,6,8],[23,13,6],[30,5,8]];
+  bl.forEach(([bx, bh, bw], i) => { if(bx >= w) return; px(c, x+bx, y+h-bh, Math.min(bw, w-bx), bh, sky[i%3]);
+    if(!day) for(let k = 0; k < 3; k++) if(hash(i*9+k) > .45) px(c, x+bx+1+k*2, y+h-bh+2+(k%2)*3, 1, 1, "#F6D77A"); });
+  px(c, x+Math.floor(w/2), y, 1, h, P.metaldark); px(c, x, y+Math.floor(h/2)-2, w, 1, P.metaldark);
+  px(c, x-3, y+h+2, w+6, 2, P.wallshade);
+}
+
+function drawClock(c, cx, cy, t, fast){
+  c.fillStyle = "#F4F4F0"; c.beginPath(); c.arc(cx, cy, 5.5, 0, Math.PI*2); c.fill();
+  c.strokeStyle = P.metaldark; c.lineWidth = 1; c.stroke();
+  const now = new Date(), m = fast ? t*2 : (now.getMinutes()/60)*Math.PI*2, hh = ((now.getHours()%12)/12)*Math.PI*2;
+  c.strokeStyle = "#1B1B1B"; c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.sin(m)*4, cy - Math.cos(m)*4);
+  c.moveTo(cx, cy); c.lineTo(cx + Math.sin(hh)*2.5, cy - Math.cos(hh)*2.5); c.stroke();
+}
+
+function drawBoard(c, kind, x, y, w, h, t, on, waiting){
+  px(c, x-1, y-1, w+2, h+2, P.metaldark);
+  if(kind === "code"){
+    px(c, x, y, w, h, "#0E1A21");
+    const cols = ["#6FD3A8","#7FB2FF","#F2B33D","#C8D3DA","#E58C7A"], off = on ? Math.floor(t*5) : 0;
+    for(let i = 0; i < 7; i++){ const n = i + off; px(c, x+3 + (hash(n*3)>.6?4:0), y+3+i*4, 6 + Math.floor(hash(n)*(w-16)), 2, cols[n % cols.length]); }
+    if(on && Math.floor(t*3)%2) px(c, x+3, y+h-4, 3, 2, "#FFFFFF");
+    return;
+  }
+  px(c, x, y, w, h, P.board);
+  if(kind === "chat"){
+    const n = on ? (Math.floor(t*1.6) % 5) + 2 : 4;
+    for(let i = 0; i < Math.min(n, 6); i++){ const right = i % 2, bw = 12 + Math.floor(hash(i+1)*14);
+      px(c, right ? x+w-bw-3 : x+3, y+3+i*5, bw, 3, right ? "#E9A92B" : "#AEBBC4"); }
+  } else if(kind === "kanban"){
+    for(let k = 1; k < 3; k++) px(c, x + Math.floor(w*k/3), y+2, 1, h-4, "#AEBBC4");
+    const notes = [[0,0,"#F7D55C"],[0,1,"#8ED1B5"],[1,0,"#F49C8A"],[2,0,"#8ED1B5"],[2,1,"#F7D55C"],[2,2,"#F49C8A"]];
+    notes.forEach(([col, row, color]) => px(c, x+3+col*Math.floor(w/3), y+4+row*8, 9, 6, color));
+    if(on){ const p = (t*0.45) % 2, col = Math.floor(p), f = p - col; px(c, x+3 + (col+f)*Math.floor(w/3), y+h-9 - Math.sin(f*Math.PI)*4, 9, 6, "#7FB2FF"); }
+  } else if(kind === "chart"){
+    px(c, x+3, y+h-4, w-6, 1, "#7C8A94"); px(c, x+3, y+3, 1, h-6, "#7C8A94");
+    const v = [.25,.3,.28,.42,.47,.58,.66,.74]; c.strokeStyle = "#23895A"; c.lineWidth = 1; c.beginPath();
+    v.forEach((p, i) => { const X = x+5 + i*((w-10)/(v.length-1)), Y = y+h-5 - p*(h-10); i ? c.lineTo(X, Y) : c.moveTo(X, Y); }); c.stroke();
+    if(waiting && Math.floor(t*2)%2){ px(c, x+w-9, y+3, 6, 6, "#C8433A"); px(c, x+w-7, y+4, 2, 2, "#FFFFFF"); px(c, x+w-7, y+7, 2, 1, "#FFFFFF"); }
+  }
+}
+
+function drawPlant(c, x, y, t){
+  px(c, x, y+10, 11, 9, "#B5653E"); px(c, x-1, y+9, 13, 2, "#9C5434");
+  const sway = Math.round(Math.sin(t*1.3)*1);
+  [[3,0,3,10],[0,3,3,6],[7,2,3,8],[5,-3,2,6]].forEach(([dx, dy, w, h], i) => px(c, x+dx + (i%2 ? sway : 0), y+dy, w, h, i%2 ? "#3F8F5A" : "#2F7247"));
+}
+
+function drawPerson(c, r, w, t){
+  const p = r.person, skin = SKIN[p.skin], cx = 92, seed = r.id.length*1.7;
+  const st = w.state, working = st === "working";
+  const y = 48 + (working ? Math.floor(t*2.5 + seed) % 2 : 0);
+  px(c, cx-8, y+6, 16, 22, "#2B3138"); px(c, cx-7, y+5, 14, 1, "#2B3138");             // chair back
+  px(c, cx-6, y+10, 12, 14, p.shirt);                                                  // torso
+  if(p.suit){ px(c, cx-2, y+10, 4, 3, "#F2F2F2"); px(c, cx-1, y+11, 2, 7, "#E0A526"); }
+  if(p.blazer){ px(c, cx-1, y+10, 2, 9, "#EDEDED"); px(c, cx-3, y+12, 1, 6, "#24563F"); px(c, cx+2, y+12, 1, 6, "#24563F"); }
+  if(p.hoodie){ px(c, cx-6, y+9, 12, 2, p.shirt2); px(c, cx-2, y+11, 1, 4, "#E6EEF0"); px(c, cx+1, y+11, 1, 4, "#E6EEF0"); }
+  px(c, cx-1, y+9, 2, 1, skin); px(c, cx-4, y+1, 8, 8, skin);                          // neck, head
+  px(c, cx-5, y, 10, 3, p.hair); px(c, cx-5, y+3, 1, p.long ? 7 : 3, p.hair); px(c, cx+4, y+3, 1, p.long ? 7 : 3, p.hair);
+  if(p.hoodie){ px(c, cx-6, y+1, 1, 9, p.shirt2); px(c, cx+5, y+1, 1, 9, p.shirt2); px(c, cx-5, y-1, 10, 1, p.shirt2); }
+  const blink = ((t*1000 + seed*937) % 4300) < 140, look = st === "waiting" ? -1 : 0;
+  px(c, cx-2+look, y+4, 1, blink ? 0 : 1, "#161616"); px(c, cx+1+look, y+4, 1, blink ? 0 : 1, "#161616");
+  px(c, cx-1, y+7, 2, 1, working ? "#8E4B3E" : "#A0604E");
+  if(p.headset){ px(c, cx-5, y-1, 10, 1, "#262626"); px(c, cx-6, y+3, 2, 3, "#262626"); px(c, cx+4, y+3, 2, 3, "#262626"); px(c, cx-5, y+6, 1, 2, "#262626"); px(c, cx-4, y+8, 2, 1, working ? "#E9A92B" : "#262626"); }
+  px(c, cx-7, 71, 14, 1, "#3A424C");                                                    // keyboard
+  px(c, cx-8, y+11, 2, 9, p.shirt); px(c, cx+6, y+11, 2, 9, p.shirt);                   // upper arms
+  if(working){
+    const ph = Math.floor(t*9 + seed) % 2;
+    px(c, cx-6, 69 + ph, 3, 2, skin); px(c, cx+3, 70 - ph, 3, 2, skin);
+  } else if(st === "waiting"){
+    px(c, cx-3, y+8, 3, 2, skin); px(c, cx+3, 70, 3, 2, skin);
+  } else {
+    const sip = ((t + seed) % 7) < 1.3;
+    px(c, cx-6, 70, 3, 2, skin);
+    if(sip){ px(c, cx+3, y+7, 3, 2, skin); px(c, cx+4, y+3, 4, 5, "#F4F4F4"); px(c, cx+8, y+4, 1, 2, "#F4F4F4"); }
+    else { px(c, cx+3, 70, 3, 2, skin); }
+    return !sip;
+  }
+  return true;
+}
+
+function drawDesk(c){ px(c, 44, 72, 84, 3, P.desktop); px(c, 46, 75, 80, 21, P.desk); px(c, 46, 82, 80, 1, P.desktop); px(c, 84, 86, 6, 1, P.metal); }
+
+function drawMonitor(c, t, on){
+  px(c, 56, 54, 22, 16, P.metal); px(c, 56, 54, 22, 1, P.metaldark); px(c, 66, 70, 3, 2, P.metaldark);
+  px(c, 60, 58, 3, 3, P.metaldark); px(c, 75, 67, 1, 1, on && Math.floor(t*4)%2 ? "#5BE39A" : "#2B6B4A");
+  if(on){ c.globalAlpha = P.dark ? .26 : .16; c.fillStyle = P.glow; c.beginPath(); c.moveTo(78, 55); c.lineTo(100, 44); c.lineTo(100, 74); c.lineTo(78, 70); c.fill(); c.globalAlpha = 1; }
+}
+
+function drawRoomBase(c, t){
+  px(c, 0, 0, W, 78, P.wall); px(c, 0, 0, W, 2, P.wallshade); px(c, 0, 74, W, 4, P.wallshade);
+  px(c, 0, 78, W, 32, P.floor);
+  for(let r = 0, y = 84; y < H; y += 6, r++){ px(c, 0, y, W, 1, P.floorline); for(let x = (r%2)*14; x < W; x += 28) px(c, x, y-5, 1, 5, P.floorline); }
+  drawWindow(c, 10, 12, 34, 26, t);
+}
+
+function drawLamp(c){
+  if(!P.dark) return;
+  px(c, 91, 0, 1, 5, P.metaldark); px(c, 87, 5, 9, 3, "#4A545E");
+  c.globalAlpha = .07; c.fillStyle = "#FFE6A3"; c.beginPath(); c.moveTo(87, 8); c.lineTo(96, 8); c.lineTo(122, 96); c.lineTo(62, 96); c.fill(); c.globalAlpha = 1;
+}
+
+function drawLab(c, t, w){
+  const on = w.state === "working";
+  for(let k = 0; k < 3; k++){
+    const x = 52 + k*26;
+    px(c, x, 20, 22, 58, P.metaldark); px(c, x+1, 21, 20, 1, P.metal);
+    for(let u = 0; u < 7; u++){
+      px(c, x+2, 24 + u*7, 18, 5, "#262D34");
+      for(let l = 0; l < 3; l++){
+        const lit = on ? hash(k*31 + u*7 + l + Math.floor(t*10)) > .45 : ((Math.floor(t) + u + l + k) % 6 === 0);
+        px(c, x+12 + l*3, 26 + u*7, 2, 1, lit ? (l === 2 ? "#F2B33D" : "#5BE39A") : "#33403A");
+      }
+    }
+  }
+  px(c, 132, 16, 22, 16, P.metaldark); px(c, 133, 17, 20, 14, "#0E1A21");
+  const prog = on ? (t*0.18) % 1 : 1; px(c, 135, 26, 16, 2, "#26343C"); px(c, 135, 26, Math.max(1, Math.round(16*prog)), 2, on ? "#5BE39A" : "#7FB2FF");
+  px(c, 135, 20, 10, 1, "#7FB2FF"); px(c, 135, 22, 6, 1, "#C8D3DA");
+  px(c, 130, 64, 24, 14, "#D8DDE1"); px(c, 130, 64, 24, 2, "#AEB7BE"); px(c, 134, 70, 16, 1, "#7C8A94");
+  if(!on && w.last){ px(c, 135, 58, 14, 7, "#FBFBF7"); px(c, 137, 60, 9, 1, "#9AA5AE"); px(c, 137, 62, 7, 1, "#9AA5AE"); }
+  for(let i = 0; i < 4; i++) px(c, 60 + i*20, 79 + (i%2), 14, 1, "#1E242A");
+}
+
+function drawSafe(c, t){
+  px(c, 128, 58, 20, 20, "#4C5761"); px(c, 129, 59, 18, 18, "#5F6B76"); px(c, 129, 59, 18, 1, "#7A8792");
+  c.fillStyle = "#2A3138"; c.beginPath(); c.arc(138, 68, 3.5, 0, Math.PI*2); c.fill();
+  const a = t*0.6; px(c, 138 + Math.round(Math.cos(a)*2), 68 + Math.round(Math.sin(a)*2), 1, 1, "#E9A92B");
+  px(c, 144, 64, 2, 8, "#2A3138"); px(c, 131, 61, 6, 1, "#E9A92B");
+}
+
+function drawPlanned(c, t){
+  px(c, 44, 60, 84, 36, P.sheet); px(c, 50, 66, 1, 30, P.wallshade); px(c, 78, 62, 1, 34, P.wallshade); px(c, 104, 65, 1, 31, P.wallshade); px(c, 44, 60, 84, 2, P.wallshade);
+  px(c, 10, 84, 22, 14, "#C59A62"); px(c, 10, 84, 22, 2, "#A97F4C"); px(c, 20, 84, 2, 14, "#E3C89A");
+  px(c, 14, 72, 16, 12, "#BF935B"); px(c, 14, 72, 16, 2, "#A07646"); px(c, 21, 72, 2, 12, "#E3C89A");
+  px(c, 134, 30, 18, 12, P.accent); px(c, 142, 42, 2, 10, P.metaldark);
+  for(let i = 0; i < 3; i++) px(c, 137 + i*5, 35, 3, 2, "#3A2A05");
+  c.fillStyle = P.dim; c.fillRect(0, 0, W, H);
+}
+
+function drawRoom(r, t){
+  const c = els[r.id].ctx, w = worker(r.id);
+  c.clearRect(0, 0, W, H);
+  drawRoomBase(c, t);
+  if(r.planned){ drawPlanned(c, t); return; }
+  drawClock(c, 62, 16, t, w.state === "waiting");
+  if(r.lab){ drawLab(c, t, w); drawLamp(c); return; }
+  drawBoard(c, r.board, 104, 12, 46, 32, t, w.state === "working", (view().waiting || []).length > 0);
+  drawLamp(c);
+  const mugOnDesk = drawPerson(c, r, w, t);
+  drawDesk(c);
+  drawMonitor(c, t, w.state === "working");
+  if(r.id === "ceo"){
+    const n = Math.min((view().waiting || []).length, 4);
+    px(c, 104, 68, 16, 4, "#2B3138");
+    for(let i = 0; i < n; i++) px(c, 105, 67 - i, 14, 1, i === n-1 ? "#F6E7B8" : "#FBFBF7");
+    if(n && Math.floor(t*2)%2) px(c, 123, 68, 2, 2, "#E5483C");
+  } else if(mugOnDesk) { px(c, 110, 67, 4, 5, "#F4F4F4"); px(c, 114, 68, 1, 2, "#F4F4F4"); }
+  if(r.safe) drawSafe(c, t); else drawPlant(c, 136, 77, t);
+}
+
+function drawAll(t){ for(const r of ROOMS) drawRoom(r, t); }
+let lastFrame = 0;
+function loop(ts){
+  if(!document.hidden && ts - lastFrame > 83){ lastFrame = ts; drawAll(ts/1000); }
+  requestAnimationFrame(loop);
+}
+if(reduce) drawAll(0); else requestAnimationFrame(loop);
+
+function tick(){ document.getElementById("clock").textContent = new Date().toLocaleTimeString(undefined, {hour:"2-digit", minute:"2-digit"}); }
+tick(); setInterval(tick, 15000);
+renderWeek(); renderAll();
+})();
+</script>
