@@ -7,7 +7,7 @@ OPS    = C:\Users\hrizvi\groundedops-ops
 PURGE: Dev works in three phases, PLAN, BUILD and CHECK, each in a fresh subagent that starts from a cleared context. Only the hand-off files Dev writes (OPS/inbox/dev/<id>.plan.md, <id>.build.md, <id>.md) cross between phases.
 
 0. Move the session to OFFICE with the change_directory tool. If OFFICE/.claude/agents/dev.md is missing, stop with one line.
-1. Find work: in OPS/decisions/*.md, items marked AUTO-APPROVED or carrying a ticked "- [x] CEO approved" line, whose Assigned is dev (or missing), with no OPS/inbox/dev/<id>.md yet and not yet merged (`git -C "<REPO>" branch --merged HEAD --list "agents/dev-<id>"` is empty). Take the oldest one, except that items found by this month's rewards leader ("rewards" -> "leader" in OPS/ledger.json) go first.
+1. Find work: the dispatcher's RUN line for this department reads "build <id>": take that id. Run on your own, run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/office_next.py" --five 0 --week 0` and take the id after "build" on its dev line. office_next.py orders the queue (security findings first, then the oldest) and reads every later verdict, such as a CEO approval of a deferred item or a later DEFER, so never pick an item by hand.
    None: stop with the line "Nothing approved." Do not touch the office.
    Otherwise use the OFFICE STATUS section at the end for every "status" and "event" below.
 2. Event po -> dev "Work order <id>".

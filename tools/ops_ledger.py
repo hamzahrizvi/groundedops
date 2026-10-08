@@ -25,7 +25,7 @@ from collections import defaultdict
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
 CAPACITY = {"dev": 3, "po": 8}          # ponytail: everyone else 2; tune when a board shows real overload
 NOTES = re.compile(r"(-weekly|-market)\.md$|^review-")
-PAST, FUTURE = {"merged", "rejected", "reverted"}, {"proposed", "waiting for CEO", "deferred"}
+PAST, FUTURE = {"merged", "rejected", "reverted", "done"}, {"proposed", "waiting for CEO", "deferred"}
 
 
 def _read(p):
@@ -75,6 +75,8 @@ def stage_of(it, ops, merged, reverted):
         return "reverted"
     if it["id"] in merged:
         return "merged"
+    if latest == "DONE":   # a CEO action ticked off on the office page (tools/ceo_inbox.py)
+        return "done"
     if latest == "REJECT":
         return "rejected"
     if latest == "DEFER":
@@ -104,7 +106,7 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
                       "decided": it["decided"]})
     for path in sorted(glob.glob(os.path.join(ops, "inbox", "*", "*.md"))):
         dept, name = os.path.basename(os.path.dirname(path)), os.path.basename(path)
-        if dept == "dev" or NOTES.search(name) or f"inbox/{dept}/{name}" in cited:
+        if dept in ("dev", "ceo") or NOTES.search(name) or f"inbox/{dept}/{name}" in cited:   # ceo: notes, answered in the report
             continue
         m = re.search(r"(?m)^#\s+(.+)$", _read(path))
         cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept,

@@ -43,9 +43,20 @@ HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-hist
 RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
 
 
-def latest_usage(path=HISTORY):
-    """(5-hour %, weekly %, minutes old) from the app's newest usage sample."""
-    s = json.load(open(path, encoding="utf-8"))["samples"][-1]
+def latest_usage(path=HISTORY, fallback=None):
+    """(5-hour %, weekly %, minutes old) from the freshest sample: the app's own, or the one the
+    dispatcher writes to OPS/state/usage.json from get_usage when the app stops recording (it
+    recorded nothing 12:50-20:54 on 2026-10-08 and the office sat idle all afternoon)."""
+    samples = []
+    for p in (path, fallback):
+        try:
+            d = json.load(open(p, encoding="utf-8"))
+            samples.append(d["samples"][-1] if "samples" in d else {"t": os.path.getmtime(p) * 1000, **d})   # usage.json: {"u": {...}}, timed by its write
+        except (OSError, TypeError, ValueError, KeyError, IndexError):
+            pass
+    if not samples:
+        return 0, 0, float("inf")
+    s = max(samples, key=lambda s: s["t"])
     return s["u"].get("fh", 0), s["u"].get("sd", 0), (time.time() - s["t"] / 1000) / 60
 
 
@@ -177,6 +188,10 @@ def selftest():
         assert next_reset(now) == resets and next_reset(resets + datetime.timedelta(hours=1)) == resets + WEEK
         w("h.json", json.dumps({"samples": [{"t": time.time() * 1000, "u": {"fh": 12, "sd": 40}}]}))
         assert latest_usage(os.path.join(ops, "h.json"))[:2] == (12, 40)
+        w("u.json", json.dumps({"u": {"fh": 13, "sd": 47}}))
+        os.utime(os.path.join(ops, "u.json"), (time.time() + 5, time.time() + 5))
+        assert latest_usage(os.path.join(ops, "h.json"), os.path.join(ops, "u.json"))[:2] == (13, 47), "fresher fallback wins"
+        assert latest_usage(os.path.join(ops, "nope.json"))[2] == float("inf"), "no figures at all is stale"
         os.makedirs(os.path.join(ops, "inbox/dev/D-20261008-01.gate"))
         w("inbox/dev/D-20261008-01.gate/gate.json", '{"verdict": "PASS"}')
         w("decisions/20261009.md", "## D-20261008-01 | Two products\n- Verdict: READY TO MERGE\n")
@@ -206,9 +221,10 @@ def main():
         return selftest()
     now = datetime.datetime.now(datetime.timezone.utc)
     if a.five is None or a.week is None:
-        a.five, a.week, old = latest_usage()
+        a.five, a.week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
         if old > 60:
-            return print(f"STALE usage figures are {old:.0f} minutes old; start nothing")
+            return print(f"STALE usage figures are {old:.0f} minutes old; start nothing"
+                         ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}} from get_usage to OPS/state/usage.json and run again)')
     resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
     print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC")
     print("\n".join(plan(a.ops, a.repo, a.five, a.week, resets, now)))

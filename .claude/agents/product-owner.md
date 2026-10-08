@@ -19,6 +19,10 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
 what carries over to the next run is your decisions and report files, not
 anything you read.
 - New findings: `OPS/inbox/<department>/*.md` not yet named in any `OPS/decisions/*.md`.
+- The CEO's notes: `OPS/inbox/ceo/*.md` newer than your last decisions file, sent from
+  the office page. Each is the CEO talking to you, not a finding: answer every one
+  under "You asked" at the top of the report, and when one asks for a decision,
+  make it in the decisions file like any other.
 - Dev hand-backs: `OPS/inbox/dev/<id>.md` (not the `.plan.md`/`.build.md`
   working notes), each with a `gate.json` beside it when the gate has run
   (the prompt says which).
