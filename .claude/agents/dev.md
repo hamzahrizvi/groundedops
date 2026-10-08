@@ -25,6 +25,15 @@ Always, in every phase:
   guessing when the work needs credentials, an outside service, a reindex,
   an .exe rebuild, or a decision that belongs to the CEO, or when a test
   still fails after two tries. Never push, merge, tag or publish a release.
+- Never end your turn while a job you started is still running: you are a
+  subagent, so ending your turn ends your run and your results are lost (on
+  2026-10-08 round 3 of D-20261008-01 handed back with nothing measured that
+  way). Run long jobs in the foreground with a long timeout (the full suite
+  takes ~9 minutes; the Bash limit is 10). A job that may take longer: start
+  it in the background writing a log, then wait in the foreground with
+  `until grep -q <done marker> <log>; do sleep 30; done` (under 10 minutes per
+  call, repeated) and read the log. A BLOCKED hand-back is for real blockers,
+  not for work you did not get to finish.
 
 ## Phase PLAN
 Read: the work order in `OPS/decisions/*.md`, the finding it cites in
