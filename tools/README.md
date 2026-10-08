@@ -24,7 +24,7 @@ runs, then lock it separately with `--baseline eval_baseline_retrieval.json
 | `overnight_eval.sh` | PENDING.md session 4 as one unattended job: starts its **own** HEAD backend and proves it is HEAD, runs the M4 repeats, `run_live --path both`, the v16.3 blind2 side on a copied index, and the M13 sweep, then writes `eval_runs/<stamp>/summary.json`. `STEPS="m4 summary"` runs a subset. |
 | `eval_batch_summary.py` | Turns one batch directory into that `summary.json`: flip tables, blind per-case flips, widget agreement, and the M2-labelled log window. Offline. |
 | `export_manuals.py` | Writes each product's manual text from the index, one file per product (run from `src/`). The blind question writer reads only these; the whole-manual baseline pastes them in. |
-| `blind_eval.py` | The blind runner (was copied into each `eval_runs/` folder): this bot vs a whole-manual gpt-5-mini baseline, graded blind by gpt-5. `GO_CODE`/`GO_DATA` run a Dev worktree's code on the live index; `reset` re-measures a copied run. |
+| `blind_eval.py` | The blind runner (was copied into each `eval_runs/` folder): this bot vs a whole-manual gpt-5-mini baseline, graded blind by gpt-5. `GO_CODE`/`GO_DATA` run a Dev worktree's code on the live index; `reset` re-measures a copied run. The grader also sees the full text of each case's cited pages; `prompt <case_id>` prints a grading prompt without calling the API. |
 | `retrofit_gate.py` | Pass/fail for a fix: hidden sibling questions >= 2/3, nothing right became wrong, no drop beyond noise. `--selftest`. |
 | `weekly_blind.sh`, `gate_run.sh` | The agent office's shell jobs (`ops/README.md`): the weekly blind run, and the gate on a Dev branch. |
 

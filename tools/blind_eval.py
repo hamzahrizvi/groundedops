@@ -3,6 +3,7 @@
 Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
 
   python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | reset
+  python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
 
 <run_dir> holds <SET>.json ({"cases": [...]}) and manuals/<product>.txt
 (tools/export_manuals.py). Each phase caches into <run_dir>/<SET>_state.json, so a
@@ -17,6 +18,8 @@ Env:
   GO_DATA  src/ used as cwd: chroma_db, .env and the JSON stores (default GO_CODE)
   reset    drops every sys_* answer, the grades and the summary but keeps the
            baseline answers, so a copied run dir re-measures new code cheaply.
+  grade    shows the grader the full text of each case's cited pages (manuals/,
+           capped at 30000 chars) and stores the blind A/B labels per case.
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -130,7 +133,7 @@ elif phase == "baseline":
         for cid, out in ex.map(run, [c for c in cases if c["id"] not in rows]):
             rows[cid] = out; save(); print("baseline", cid, out["wall"], flush=True)
 
-elif phase == "grade":
+elif phase in ("grade", "prompt"):
     L = "ABCDEFG"[:len(SYSTEMS)]
     G = """You are grading {n} customer-support answers to the same question, written by {n} different systems. You do not know which system wrote which. Judge only substance against the reference; ignore formatting, length, citations, tone and any offer to contact support or list of suggested questions.
 
@@ -141,32 +144,51 @@ EXPECTED BEHAVIOUR: {expected}
 REFERENCE (from the manual, {pages}): {reference}
 KEY FACTS A CORRECT ANSWER CONTAINS: {must}
 
+CITED PAGES (full text of the manual pages the reference comes from): {cited}
+
+The reference is an extract, not the whole manual. A figure or fact the reference does not quote is fine if it appears in the cited pages, or if it contradicts neither the reference nor the question. Deduct only for a contradiction, or for a figure found in neither the reference nor the cited pages.
+
 Score each answer 0-3:
-- expected "answered": 3 = correct and complete, including any condition/qualifier the reference carries; 2 = core fact right but misses a qualifier or adds a minor inaccuracy; 1 = declines, says it cannot find it, or only asks a question (safe but unhelpful); 0 = states something wrong or invented, or answers about the wrong product.
-- expected "rejected" (not documented / product does not exist / off-topic): 3 = clearly says it is not documented or it cannot help, asserting nothing; 2 = declines but adds speculation; 0 = asserts a Yes/No or a fact as if documented.
-- expected "clarify" (too vague): 3 = asks which product/what is meant, or briefly covers each candidate correctly; 2 = answers for one product but states which; 0 = answers confidently for an unstated or wrong product.
+- expected "answered": 3 = correct and complete, including any condition/qualifier the question needs; also 3 when every key fact is present and only a qualifier the question did not ask for is left out; 2 = core fact right but misses a qualifier the question needs, or adds a minor inaccuracy; 1 = declines, says it cannot find it, or only asks a question (safe but unhelpful), or gives a wrong method or wrong fact for one of several parts the question asks; 0 = states something wrong or invented as the main answer, or answers about the wrong product.
+- expected "rejected" (not documented / product does not exist / off-topic): 3 = clearly says it is not documented or it cannot help, asserting nothing; 2 = says it is not documented but adds speculation or an overreaching conclusion; 0 = the main answer asserts a Yes/No or a fact as if documented.
+- expected "clarify" (too vague): verdict "clarified" and 3 only if the answer asks the customer which product/what is meant, or briefly and correctly covers each candidate. An answer that asks nothing is graded as an answer: a long dump or one that picks a single product scores at most 2 (2 only if it states which product and is correct); any mislabelled product or wrong part = 1; answers confidently for an unstated or wrong product = 0.
 Verdict per answer, one of: correct, partial, safe_decline, wrong, correct_refusal, clarified.
 
 {answers}
 
 Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
+    MAN, CAP = os.path.join(RUN, "manuals"), 30000
+    pages = {}   # "<file>.pdf pN" -> every chunk of that page
+    if os.path.isdir(MAN):
+        for f in sorted(os.listdir(MAN)):
+            for chunk in open(os.path.join(MAN, f), encoding="utf-8").read().split("\n\n["):
+                chunk = chunk.lstrip("[")
+                pages.setdefault(chunk.split("]", 1)[0], []).append("[" + chunk)
+    def cited(c):
+        text = "\n\n".join(ch for p in c.get("pages") or [] for ch in pages.get(p, []))
+        return "\n" + text[:CAP] if text else "n/a"
     rng = random.Random(4)
     order = {c["id"]: rng.sample(SYSTEMS, len(SYSTEMS)) for c in cases}
+    def prompt(c):
+        return G.format(n=len(SYSTEMS), product=c.get("product") or "none (unscoped chat)",
+                        turn1=f"EARLIER MESSAGE IN THIS CHAT: {c['turn1']}\n" if c.get("turn1") else "",
+                        q=c["q"], type=c["type"], expected=c["expected"], pages=", ".join(c.get("pages") or []) or "n/a",
+                        reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a", cited=cited(c),
+                        answers="\n\n".join(f"ANSWER {k}:\n{state.get(s, {}).get(c['id'], {}).get('answer', '(no answer yet)')}"
+                                             for k, s in zip(L, order[c["id"]])),
+                        shape=", ".join(f'"{k}": {{"score": n, "verdict": "..."}}' for k in L),
+                        best=" | ".join(f'"{k}"' for k in L) + ' | "tie"')
+    if phase == "prompt":
+        sys.stdout.reconfigure(encoding="utf-8")  # manuals carry symbols cp1252 cannot print
+        print(prompt(next(c for c in cases if c["id"] == sys.argv[3]))); sys.exit(0)
     def grade(c):
         o = order[c["id"]]
-        p = G.format(n=len(SYSTEMS), product=c.get("product") or "none (unscoped chat)",
-                     turn1=f"EARLIER MESSAGE IN THIS CHAT: {c['turn1']}\n" if c.get("turn1") else "",
-                     q=c["q"], type=c["type"], expected=c["expected"], pages=", ".join(c.get("pages") or []) or "n/a",
-                     reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a",
-                     answers="\n\n".join(f"ANSWER {k}:\n{state[s][c['id']]['answer']}" for k, s in zip(L, o)),
-                     shape=", ".join(f'"{k}": {{"score": n, "verdict": "..."}}' for k in L),
-                     best=" | ".join(f'"{k}"' for k in L) + ' | "tie"')
-        raw, _ = chat("gpt-5", [{"role": "user", "content": p}], effort="medium")
+        raw, _ = chat("gpt-5", [{"role": "user", "content": prompt(c)}], effort="medium")
         try:
             g = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
         except Exception:
             return c["id"], {"raw": raw}
-        return c["id"], {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"),
+        return c["id"], {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best"))}
     grades = state.setdefault("grades", {})
     with ThreadPoolExecutor(6) as ex:
