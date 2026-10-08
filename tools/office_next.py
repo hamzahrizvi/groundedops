@@ -26,6 +26,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -64,10 +65,17 @@ def waiting(ops, repo, now):
     dev = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") == "dev"}
     check = [i for i, s in dev.items() if s == "built, waiting for the check"]
     build = [i for i, s in dev.items() if s in ("approved, queued", "sent back, rebuilding")]
-    out = []
+    review = lambda i: os.path.join(ops, "inbox", "security", f"review-{i}.md")
+    def verdict(i):   # Security's review of the branch: CLEAR, BLOCK or ""
+        if not os.path.exists(review(i)):
+            return ""
+        m = re.search(r"(?mi)^Verdict:\s*(CLEAR|BLOCK)", open(review(i), encoding="utf-8").read())
+        return m.group(1).upper() if m else ""
+    out = [("merge", i) for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"]   # tools/office_merge.py
     blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
+    blocked += [review(i) for i, s in dev.items() if s in ("check passed", "ready to merge") and verdict(i) == "BLOCK"]
     findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
-                if (p in blocked or os.path.basename(os.path.dirname(p)) != "dev") and not NOTES.search(os.path.basename(p))
+                if p in blocked or (os.path.basename(os.path.dirname(p)) != "dev" and not NOTES.search(os.path.basename(p)))
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
     if check or findings:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
@@ -125,6 +133,10 @@ def plan(ops, repo, five, week, resets, now):
     lines = []
     held = holds(ops, now)
     for dept, why in waiting(ops, repo, now):
+        if dept == "merge":
+            lines.append(f"WAIT merge {why}  held (OPS/state/hold)" if "merge" in held
+                         else f"MERGE {why}  gate PASS, READY TO MERGE, Security CLEAR")
+            continue
         stop = "held (OPS/state/hold)" if dept in held else over_budget(dept, five, week, resets, now)
         lines.append(f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}")
     return lines or ["IDLE"]
@@ -161,6 +173,16 @@ def selftest():
         assert next_reset(now) == resets and next_reset(resets + datetime.timedelta(hours=1)) == resets + WEEK
         w("h.json", json.dumps({"samples": [{"t": time.time() * 1000, "u": {"fh": 12, "sd": 40}}]}))
         assert latest_usage(os.path.join(ops, "h.json"))[:2] == (12, 40)
+        os.makedirs(os.path.join(ops, "inbox/dev/D-20261008-01.gate"))
+        w("inbox/dev/D-20261008-01.gate/gate.json", '{"verdict": "PASS"}')
+        w("decisions/20261009.md", "## D-20261008-01 | Two products\n- Verdict: READY TO MERGE\n")
+        assert any("security" in x and "review D-20261008-01" in x for x in plan(ops, ops, 11, 38, resets, now)), "review first"
+        os.makedirs(os.path.join(ops, "inbox/security"))
+        w("inbox/security/review-D-20261008-01.md", "# Review\nVerdict: CLEAR\n")
+        assert plan(ops, ops, 69, 99, resets, now)[0].startswith("MERGE D-20261008-01"), "merge first, whatever the budget"
+        w("inbox/security/review-D-20261008-01.md", "Verdict: BLOCK\n")
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert not any(x.startswith("MERGE") for x in p) and "new findings" in p[0], p   # a BLOCK wakes the product owner
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
         assert any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "no test run yet"
     print("selftest ok")

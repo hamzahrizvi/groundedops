@@ -17,7 +17,7 @@ proposals through the product owner.
 | Security | `.claude/agents/security.md` | Opus 5.5, high | every 2nd week, or when a passed branch waits | phase 2, on since 2026-10-08 |
 | R&D | `.claude/agents/rnd.md` | Opus 5.5, high | 1st of the month | phase 3, built, switched off |
 | Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | 15th of the month | phase 3, built, switched off |
-| CEO (you) | - | - | when the report lands | ticks approvals, merges branches |
+| CEO (you) | - | - | when the report lands | ticks approvals; merging is automatic (below) |
 
 **When things run (since 2026-10-08).** No department has a fixed time any
 more (their crons are parked on 29 February). The hourly
@@ -100,7 +100,8 @@ weeks, phase 3 once Dev has merged a gated fix.
    the tests, hands back. Never merges.
 5. **Fri 08:00, Product owner.** The test lab runs the gate on each hand-back;
    Security's branch review (phase 2) can block it; the product owner marks it
-   READY TO MERGE or sends it back. You merge.
+   READY TO MERGE or sends it back. Once Security has cleared the branch, the
+   dispatcher merges it (`tools/office_merge.py`).
 
 ## The retrofit gate
 
@@ -172,7 +173,12 @@ When nobody is on shift it plays a sample week, labelled as one.
 ## Rules every agent follows
 
 - Only Dev changes code, only in its own worktree (CLAUDE.md P1).
-- Nobody pushes, merges, tags or publishes a release. You merge.
+- Merging is automatic, on the CEO's standing instruction (2026-10-08): the
+  dispatcher runs `tools/office_merge.py <id>` once a branch has a gate PASS,
+  the product owner's READY TO MERGE and Security's CLEAR, and only if no
+  uncommitted change in the target checkout touches the same files; it reverts
+  a merge whose Python does not compile. No agent merges any other way.
+- Nobody pushes, tags or publishes a release.
 - No reindex, no .exe rebuild, no credentials, no personal DeepSeek key.
 - Blind runs pin every provider role to the company OpenAI model.
 - A step that needs a person stops and says so; it never guesses.

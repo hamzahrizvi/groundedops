@@ -53,7 +53,7 @@ the weakest.
 ## Judge Dev's finished work
 For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
 - PASS -> `READY TO MERGE`: tell the CEO the branch name and what changes for
-  customers. If `OPS/inbox/security/review-<id>.md` exists and its first line
+  customers. The dispatcher merges it once Security clears it; you do not merge. If `OPS/inbox/security/review-<id>.md` exists and its first line
   is `Verdict: BLOCK`, it is not ready: send it back with Security's reasons.
 - FAIL -> send it back with the gate's reasons (`- Verdict: SENT BACK`). If
   the only reason is "became wrong" on one or two cases, say they may be
