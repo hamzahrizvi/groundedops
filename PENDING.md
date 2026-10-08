@@ -57,6 +57,15 @@ MyCheckr-scoped retrieval (dense arm only), and /widget/ask never forwards
 /query. Every number in this file is a harness number until the bot has a
 host and an origin field in the log.
 
+**2026-10-08 — v17.0 is tagged** (local tag only: not pushed, not published;
+no `src/legacy` snapshot, because `release.py` still refuses on the README
+basename clash, as for v16.3). It closes `experimental/v16.4-logic-and-latency`:
+140 commits since v16.3, including S21-S30 (two named products each get their
+context, gpt-5-mini tuning, performance mode, the blind-set fixes), the NV4000
+product, the M-series measurement fixes and steps 8.x-10.x. Work after it is on
+`experimental/v17.1-office-fixes`, where the agent office merges its gated fixes.
+The public GO_ name, if it is ever published, is the CEO's to choose.
+
 Last hand-updated: 2026-09-25 (night) — the four follow-ups from the
 v16.3 rating are done: graded eval **20/34 -> 32/34 (94%)** with the answer
 baseline re-armed, the gateway models measured (like-for-like on quality,
