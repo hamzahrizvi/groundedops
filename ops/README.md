@@ -23,10 +23,15 @@ proposals through the product owner.
 more (their crons are parked on 29 February). The hourly
 `groundedops-office-dispatch` task reads the plan usage (get_usage) and runs
 `tools/office_next.py`, which lists the departments with work waiting, in the
-order above, and starts the first one that fits the budget: the 5-hour window
+order above, and runs the first one that fits the budget itself, by following
+that department's task prompt (a scheduled run cannot start another scheduled
+task: run_scheduled_task is blocked in unattended sessions): the 5-hour window
 stays at or under 70%, and the weekly window may be used only as far as the
-week has gone since the Friday reset, so it can be used up by Friday. One task
-starts per tick; a task already running is skipped.
+week has gone since the Friday reset, so it can be used up by Friday. One
+department per tick; a tick that finds the last one still running is skipped.
+Usage comes from the app's own samples (`plan-usage-history.json`), so the
+runner's one command never changes. `OPS/state/hold` (one department per line)
+pauses a department.
 
 Scheduled tasks are named `groundedops-office-<department>`. Their prompts
 live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,

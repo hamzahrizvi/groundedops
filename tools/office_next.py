@@ -11,8 +11,9 @@ is the weekly window's resetsAt; by default the next Friday 19:00 UTC. Prints on
 urgent first:
   RUN  <task-id>  <why>    fits the budget: start it
   WAIT <task-id>  <why>    has work, but would break the budget
-or IDLE when nothing waits. The hourly dispatcher starts the first RUN line the
-app accepts (a task already running is refused, so it tries the next).
+or IDLE when nothing waits. The hourly runner (groundedops-office-dispatch) does
+the first RUN line itself by following that task's prompt: scheduled runs
+cannot start other scheduled tasks.
 
 A department named on a line of OPS/state/hold is held: WAIT, whatever it has.
 
