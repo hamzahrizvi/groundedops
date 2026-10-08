@@ -62,6 +62,11 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
   `<id>.gate.<n>` (n = next free number), so Dev picks the item up again and
   the next hand-back gets a fresh gate. Leave `<id>.plan.md` and
   `<id>.build.md`; Dev's next PLAN phase starts from them plus your reasons.
+- `Status: BLOCKED` (Dev stopped itself; no gate) -> read its Reason and
+  "Decision needed". Either pick an option and send it back the same way
+  (`- Verdict: SENT BACK` with the option as the new instruction, then rename
+  `<id>.md` to `<id>.md.<n>`), or `DEFER` / `REJECT` it with a reason. Tell
+  the CEO in plain words what was found and what you chose.
 
 ## Write
 1. `OPS/decisions/<YYYYMMDD>.md`: one section per item, in exactly this shape

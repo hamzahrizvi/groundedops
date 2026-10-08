@@ -65,8 +65,9 @@ def waiting(ops, repo, now):
     check = [i for i, s in dev.items() if s == "built, waiting for the check"]
     build = [i for i, s in dev.items() if s in ("approved, queued", "sent back, rebuilding")]
     out = []
-    findings = [p for p in glob.glob(os.path.join(ops, "inbox", "*", "*.md"))
-                if os.path.basename(os.path.dirname(p)) != "dev" and not NOTES.search(os.path.basename(p))
+    blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
+    findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
+                if (p in blocked or os.path.basename(os.path.dirname(p)) != "dev") and not NOTES.search(os.path.basename(p))
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
     if check or findings:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
@@ -138,6 +139,8 @@ def selftest():
         os.remove(os.path.join(ops, "state/hold"))
         w("inbox/audit/20261009-cheaper-reranker.md")                   # a proposal, unlike the weekly note
         assert "1 new findings" in plan(ops, ops, 11, 38, resets, now)[0], "new finding wakes the product owner"
+        w("inbox/dev/D-20261008-02.md", "Status: BLOCKED\nReason: regression\n")
+        assert "2 new findings" in plan(ops, ops, 11, 38, resets, now)[0], "a BLOCKED hand-back wakes the product owner"
         assert next_reset(now) == resets and next_reset(resets + datetime.timedelta(hours=1)) == resets + WEEK
         w("h.json", json.dumps({"samples": [{"t": time.time() * 1000, "u": {"fh": 12, "sd": 40}}]}))
         assert latest_usage(os.path.join(ops, "h.json"))[:2] == (12, 40)
