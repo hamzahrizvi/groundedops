@@ -12,6 +12,8 @@ urgent first:
 or IDLE when nothing waits. The hourly dispatcher starts the first RUN line the
 app accepts (a task already running is refused, so it tries the next).
 
+A department named on a line of OPS/state/hold is held: WAIT, whatever it has.
+
 Budget (the CEO's rule, 2026-10-08): the 5-hour window stays at or under 70%,
 and the weekly window keeps pace with the week - x% of the way from the last
 reset to the next, at most x% used - so it can be used up by the Friday reset.
@@ -84,8 +86,12 @@ def over_budget(dept, five, week, resets, now):
 
 def plan(ops, repo, five, week, resets, now):
     lines = []
+    try:
+        held = set(open(os.path.join(ops, "state", "hold"), encoding="utf-8").read().split())
+    except OSError:
+        held = set()
     for dept, why in waiting(ops, repo, now):
-        stop = over_budget(dept, five, week, resets, now)
+        stop = "held (OPS/state/hold)" if dept in held else over_budget(dept, five, week, resets, now)
         lines.append(f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}")
     return lines or ["IDLE"]
 
@@ -109,6 +115,9 @@ def selftest():
         assert len(got) == 2, got                                       # D-07 is the CEO's; tests, reviews not due
         assert plan(ops, ops, 55, 38, resets, now)[1].startswith("WAIT groundedops-office-dev"), "5-hour cap"
         assert "pace" in plan(ops, ops, 11, 92, resets, now)[0], "weekly pace"
+        w("state/hold", "product-owner\n")
+        assert plan(ops, ops, 11, 38, resets, now)[0].endswith("held (OPS/state/hold)"), "hold"
+        os.remove(os.path.join(ops, "state/hold"))
         w("inbox/audit/20261009-cheaper-reranker.md")                   # a proposal, unlike the weekly note
         assert "1 new findings" in plan(ops, ops, 11, 38, resets, now)[0], "new finding wakes the product owner"
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
