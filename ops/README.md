@@ -9,15 +9,24 @@ proposals through the product owner.
 
 | Department | Agent | Model, effort | When | Status |
 |---|---|---|---|---|
-| Customer | `.claude/agents/customer.md` | Sonnet 5.5, medium | Mon 01:00 | on |
+| Customer | `.claude/agents/customer.md` | Sonnet 5.5, medium | weekly, or after a fix merges | on |
 | Test lab | `tools/weekly_blind.sh`, `tools/gate_run.sh` | no model (shell) | after Customer; before each PO run | on |
-| Product owner | `.claude/agents/product-owner.md` | Fable 5.1, high | Tue and Fri 08:00 | on |
-| Dev | `.claude/agents/dev.md` | Opus 5.5, high | weekdays 20:00, only when something is approved | on |
-| Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | Wed 09:00 | phase 2, on since 2026-10-08 |
-| Security | `.claude/agents/security.md` | Opus 5.5, high | Wed 14:00, acts every 2nd week or when a branch waits | phase 2, on since 2026-10-08 |
+| Product owner | `.claude/agents/product-owner.md` | Fable 5.1, high | when a hand-back or a new finding waits | on |
+| Dev | `.claude/agents/dev.md` | Opus 5.5, high | when an approved work order waits | on |
+| Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | weekly | phase 2, on since 2026-10-08 |
+| Security | `.claude/agents/security.md` | Opus 5.5, high | every 2nd week, or when a passed branch waits | phase 2, on since 2026-10-08 |
 | R&D | `.claude/agents/rnd.md` | Opus 5.5, high | 1st of the month | phase 3, built, switched off |
 | Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | 15th of the month | phase 3, built, switched off |
 | CEO (you) | - | - | when the report lands | ticks approvals, merges branches |
+
+**When things run (since 2026-10-08).** No department has a fixed time any
+more (their crons are parked on 29 February). The hourly
+`groundedops-office-dispatch` task reads the plan usage (get_usage) and runs
+`tools/office_next.py`, which lists the departments with work waiting, in the
+order above, and starts the first one that fits the budget: the 5-hour window
+stays at or under 70%, and the weekly window may be used only as far as the
+week has gone since the Friday reset, so it can be used up by Friday. One task
+starts per tick; a task already running is skipped.
 
 Scheduled tasks are named `groundedops-office-<department>`. Their prompts
 live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
@@ -63,7 +72,7 @@ crosses a phase boundary:
 Claude "switch on phase 2". Suggested: phase 2 once phase 1 has had two clean
 weeks, phase 3 once Dev has merged a gated fix.
 
-## The week
+## The week (the order; timing is the dispatcher's)
 
 1. **Mon 01:00, Customer.** Exports each product's manual text from the index
    (`tools/export_manuals.py`), writes 40 new blind questions from that text
