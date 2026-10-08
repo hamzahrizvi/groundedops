@@ -35,6 +35,11 @@ Started anywhere else, the agent files are not loaded, departments fall back to
 general-purpose and run at the orchestrator's effort, not their own: step 0's
 change_directory only applies after the turn ends. `tools/agent_wiring.py`
 checks what really ran; Audit runs it weekly.
+Scheduled runs start in whatever permission mode the app defaults to, and in
+`default` mode the first unapproved command waits for a click that never comes
+(the tracker sync sat on one from 2026-10-07 23:18). Unattended runs need
+`permissions.defaultMode` set to a mode that does not ask (e.g. `auto`) for
+sessions started in OFFICE; that is the CEO's setting to make, not an agent's.
 Don't remove that worktree; if it moves, change OFFICE in the seven task
 prompts and their start folders. Dev branches product fixes from REPO's HEAD, and office-tooling fixes
 from `experimental/agent-org-phase1`.
