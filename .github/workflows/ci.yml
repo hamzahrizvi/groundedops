@@ -11,6 +11,8 @@ name: CI — test & build
 #                        committed baseline parses (eval_baseline*.json are
 #                        NOT gitignored, .gitignore:46, so this is a real
 #                        gate, not advisory — continue-on-error dropped)
+#                        plus pip-audit of the deps it installed
+#   4. secret-scan    — gitleaks over the checked-out tree (.gitleaks.toml)
 #
 # Deployment is STAGE 2 below — commented out until a target exists.
 
@@ -133,6 +135,25 @@ jobs:
         run: |
           cd src
           pip install -r requirements.txt
+      - name: Audit installed deps for known vulnerabilities
+        # Audits the environment requirements.txt just resolved to. Not
+        # `pip-audit -r requirements.txt`: with unpinned requirements that
+        # builds a second venv with torch/chromadb and doubles the job.
+        # A vuln with no fixed version gets `--ignore-vuln <ID>` here with a
+        # comment naming the package and why; never ignored silently.
+        #
+        # Ignored (chromadb 1.5.9, no fixed version as of 2026-10-08): all four
+        # are in the Chroma *server* (/api/v2 endpoints, SimpleRBAC provider).
+        # We only use the embedded chromadb.PersistentClient (src/db.py) and
+        # never run or expose a Chroma server. Drop each once a fix ships.
+        #   PYSEC-2026-311  (CVE-2026-45829) pre-auth code injection via /api/v2
+        #   PYSEC-2026-3814 (CVE-2026-45833) authed code injection via /api/v2
+        #   PYSEC-2026-3815 (CVE-2026-45831) SimpleRBAC ignores tenant scope
+        #   PYSEC-2026-3813 (CVE-2026-45830) cross-tenant collection access
+        run: |
+          cd src
+          pip install -r requirements-dev.txt
+          pip-audit --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815 --ignore-vuln PYSEC-2026-3813
       - name: Validate eval suite schemas
         env:
           GENERATION_MODE: local
@@ -141,6 +162,17 @@ jobs:
           for f in eval_cases.json eval_cases_blind.json eval_cases_blind2.json eval_cases_retrieval.json; do
             python eval.py --selfcheck --cases "$f"
           done
+
+  # ── Gate 4: no secrets in the tree ────────────────────────────────────
+  # Two live provider keys sat in the public repo unnoticed (D-20261008-08).
+  # `dir` scans the checked-out files, not history: old branches still hold
+  # the revoked keys and would fail every run. Image pinned to a release.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gitleaks
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 dir /repo --config /repo/.gitleaks.toml --redact --no-banner
 
   # ── STAGE 2: DEPLOY (uncomment once a target exists) ─────────────────
   # deploy:
