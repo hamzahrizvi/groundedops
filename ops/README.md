@@ -29,17 +29,19 @@ live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
 run from that branch's checkout (OFFICE =
 `C:/Users/hrizvi/Downloads/Git/groundedops/.claude/worktrees/agent-org`) and
 test the product in the main checkout (REPO, whatever branch it is on).
-Each task's start folder must be OFFICE too (the `cwd` of its entry in the
-desktop app's `scheduled-tasks.json`; the scheduled-tasks tool cannot set it).
-Started anywhere else, the agent files are not loaded, departments fall back to
-general-purpose and run at the orchestrator's effort, not their own: step 0's
-change_directory only applies after the turn ends. `tools/agent_wiring.py`
-checks what really ran; Audit runs it weekly.
-Scheduled runs start in whatever permission mode the app defaults to, and in
-`default` mode the first unapproved command waits for a click that never comes
-(the tracker sync sat on one from 2026-10-07 23:18). Unattended runs need
-`permissions.defaultMode` set to a mode that does not ask (e.g. `auto`) for
-sessions started in OFFICE; that is the CEO's setting to make, not an agent's.
+Each task's start folder must be OFFICE too. A task keeps the folder of the
+session that created it, and hand edits to the app's `scheduled-tasks.json`
+are undone on restart, so create (or recreate) the tasks from a session in
+OFFICE. Started anywhere else, the agent files are not loaded, departments
+fall back to general-purpose and run at the orchestrator's effort, not their
+own: step 0's change_directory only applies after the turn ends.
+`tools/agent_wiring.py` checks what really ran; Audit runs it weekly.
+Each task also needs its permission mode set to Auto on the task itself (its
+`permissionMode` in that file). Changing the mode inside one run's session
+changes only that run. In manual mode the first unapproved command waits for a
+click that never comes (the tracker sync sat on one from 2026-10-07 23:18).
+A recreated task starts in manual again. Setting the mode is the CEO's job,
+not an agent's.
 Don't remove that worktree; if it moves, change OFFICE in the seven task
 prompts and their start folders. Dev branches product fixes from REPO's HEAD, and office-tooling fixes
 from `experimental/agent-org-phase1`.
