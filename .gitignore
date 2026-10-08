@@ -153,3 +153,8 @@ backups/
 
 # rollback copies kept beside the live index (9.7)
 src/chroma_db.before-*/
+
+# Never commit provider keys (a DeepSeek key was removed from src/legacy/v3 in Oct 2026)
+*deepseek_key*
+*_env_*.txt
+.env
