@@ -101,7 +101,7 @@ Operator console (internal)
 6. **How it works.** A 3-step strip: *Upload your manuals → we index, search and rerank → a verified, cited answer.* Links to /how-it-works.
 7. **Gets better every week.** Split visual: the FAQ approval screen and the "unanswered questions" list. *"Approve answers to your top questions once. See exactly what your docs are missing."*
 8. **Your models, your rules.** Three tiles: *Bring your own key* (DeepSeek, OpenAI, Claude) · *Included credits* (we handle it) · *Fully offline* (your hardware, nothing leaves).
-9. **Security strip.** *Only the widget is public · Admin stays on your network · SSO with Microsoft or Google · Role-based access.* Links to /security.
+9. **Security strip.** *Only the widget is public · Admin is never public · SSO with Microsoft or Google · Role-based access.* Links to /security.
 10. **ROI calculator.** Inputs: monthly support tickets, % that are "it's in the manual" questions, cost per ticket. Output: an estimated monthly saving, with the assumption shown and labelled as an estimate.
 11. **Pricing teaser** with 3 plan cards linking to /pricing.
 12. **FAQ accordion.** 6 to 8 buyer objections (see 4.5).
@@ -116,7 +116,31 @@ Highlight the two points where the system *stops* rather than guesses.
 Grouped cards: **Answering** (scoped search, cross-product/spec-table answers, deep answers, clarifying questions, follow-up memory) · **Curation** (FAQ approval, gaps log, catalogue of categories → products → documents) · **Embedding** (script tag, WordPress plugin, branding, visitor tiers) · **Control** (credits, caps, provider alerts, model routing) · **Admin** (roles, SSO, audit).
 
 ### 4.4 Security & deployment
-Comparison table of three deployment modes, with columns *Hosted by us*, *Self-hosted*, *Self-hosted offline*. Rows: where documents live, where the AI model runs, what's public, who holds the keys, internet required. Then sections on access control, what data is logged and for how long, and subprocessors per mode. Do not show certification badges.
+Use this copy as written (approved by the CEO 2026-10-08, decision D-20261008-09). Do not show certification badges. "On-premises control of keys and data" may be said of the two self-hosted modes only, never as a general claim.
+
+> Not live until two things ship, both conditions of the hosted launch: the backup AI provider moves from DeepSeek to Anthropic, and question logs are deleted after 90 days (D-20261008-15). Until then the hosted column is not true.
+
+**Where your data goes**
+
+| | Hosted by us | Self-hosted | Self-hosted offline |
+|---|---|---|---|
+| Your documents are stored | On our server in Germany | On your server | On your server |
+| Searching your documents | On that server, by no outside service | On your server | On your server |
+| Answers are written by | OpenAI (USA); if OpenAI is unavailable, Anthropic (USA) | The AI provider you pick, with your own key: OpenAI, Anthropic, DeepSeek, or your company's own AI gateway | Models running on your own hardware |
+| What the AI provider sees | The visitor's question, the recent conversation, and the manual passages used for the answer | The same, sent to your provider | Nothing leaves your network |
+| What's public | The chat widget only | The chat widget only | The chat widget only |
+| The admin console | Never public: approved accounts only, checked before traffic reaches the server | On your network | On your network |
+| Who holds the AI keys | We do | You do | No keys needed |
+| Internet needed | Yes | Yes, to reach your AI provider | No |
+
+**Visitors who aren't signed in** get answers from your approved FAQ only. By default their questions go to no AI model.
+
+**What we keep.** Every question is logged with its answer and the pages it cited, on the server where GroundedOps runs, so your team can check answers and see what the manuals are missing. Logs are deleted after 90 days. If a visitor asks to speak to a person, their message and contact details are emailed to your team through [mail provider, per S25].
+
+**Subprocessors**
+- *Hosted by us:* Hetzner (server hosting, Germany) · Cloudflare (network edge and admin sign-in; traffic passes through its network on the way to us) · OpenAI (writes answers, USA) · Anthropic (writes answers only when OpenAI is unavailable, USA) · [mail provider] (lead emails) · Microsoft or Google, only if you sign admins in with them; they never see visitors' questions.
+- *Self-hosted:* none from us. Your AI provider works under your own agreement with them.
+- *Self-hosted offline:* none.
 
 ### 4.5 Pricing page
 Plan cards (section 5), a full feature comparison table, a monthly/annual toggle (annual shows "2 months free"), a credit explainer ("1 credit = 1 standard answer · approved FAQ answers are free · deep answers cost 4"), and a pricing FAQ:
