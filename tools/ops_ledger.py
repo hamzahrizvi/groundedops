@@ -66,8 +66,7 @@ def git_sets(repo):
 
 
 def stage_of(it, ops, merged, reverted):
-    v0 = it["history"][0] if it["history"] else ""
-    latest = it["history"][-1] if it["history"] else ""
+    latest = it["history"][-1] if it["history"] else ""   # a later verdict overrides: DEFER then CEO-approved, or SENT BACK then DEFER
     dev = os.path.join(ops, "inbox", "dev", it["id"])
     attempts = len(glob.glob(dev + ".gate.*"))
     gate = json.load(open(dev + ".gate/gate.json", encoding="utf-8")) if os.path.exists(dev + ".gate/gate.json") else None
@@ -76,11 +75,11 @@ def stage_of(it, ops, merged, reverted):
         return "reverted"
     if it["id"] in merged:
         return "merged"
-    if v0 == "REJECT":
+    if latest == "REJECT":
         return "rejected"
-    if v0 == "DEFER":
+    if latest == "DEFER":
         return "deferred"
-    if v0 == "NEEDS CEO" and not it.get("ceo_approved"):
+    if "NEEDS CEO" in it["history"] and not it.get("ceo_approved"):
         return "waiting for CEO"
     if os.path.exists(dev + ".md"):
         if re.search(r"(?m)^Status:\s*BLOCKED", _read(dev + ".md")):
@@ -125,10 +124,10 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
     pts = {"month": defaultdict(int), "all": defaultdict(int)}
     stats = defaultdict(lambda: {"approved": 0, "merged": 0, "fixed": 0})
     for it in items.values():
-        v0 = it["history"][0] if it["history"] else ""
+        h = it["history"]
         frm, asg = it.get("from", ""), it.get("assigned", "dev")
         award = []
-        if v0 == "AUTO-APPROVED" or (v0 == "NEEDS CEO" and it.get("ceo_approved")):
+        if "AUTO-APPROVED" in h or ("NEEDS CEO" in h and it.get("ceo_approved")):
             award.append((frm, 2)); stats[frm]["approved"] += 1
         gate = it.get("gate") or {}
         if it["id"] in merged and it["id"] not in reverted and gate.get("verdict") == "PASS":
@@ -165,22 +164,24 @@ def _selftest():
     w("inbox/audit/20261014-cache.md", "# Cache repeated questions\n")
     w("decisions/20261013.md", "## D-20261013-01 | Fix comparisons\n- Source: inbox/customer/20261012-comparisons.md\n"
       "- From: customer\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
-      "## D-20261013-02 | Procedures\n- Source: inbox/customer/20261012-procedures.md\n- From: customer\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n")
-    w("decisions/20261016.md", "## D-20261013-01 | Fix comparisons\n- Verdict: READY TO MERGE\n")
+      "## D-20261013-02 | Procedures\n- Source: inbox/customer/20261012-procedures.md\n- From: customer\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n\n"
+      "## D-20261013-03 | Vague\n- From: customer\n- Assigned: dev\n- Verdict: DEFER\n")
+    w("decisions/20261016.md", "## D-20261013-01 | Fix comparisons\n- Verdict: READY TO MERGE\n\n"
+      "## D-20261013-03 | Vague\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")   # a deferred item the CEO approves later
     w("inbox/dev/D-20261013-01.md", "Status: READY\nBranch: agents/dev-D-20261013-01\n")
     os.makedirs(os.path.join(ops, "inbox/dev/D-20261013-01.gate"))
     w("inbox/dev/D-20261013-01.gate/gate.json", json.dumps({"verdict": "PASS", "fixed": ["C-03", "C-14", "C-22"]}))
     day = datetime.date(2026, 10, 20)
     r = ledger(ops, today=day)
     st = {c["id"]: c["stage"] for c in r["cards"]}
-    assert st == {"D-20261013-01": "ready to merge", "D-20261013-02": "waiting for CEO",
+    assert st == {"D-20261013-01": "ready to merge", "D-20261013-02": "waiting for CEO", "D-20261013-03": "approved, queued",
                   "audit/20261014-cache": "proposed"}, st
     assert r["boards"]["dev"]["doing"] == ["Fix comparisons"] and r["boards"]["po"]["queue"] == ["Cache repeated questions"]
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
-    assert pts["customer"] == 2 and pts["dev"] == 0, pts            # approved, not merged yet
+    assert pts["customer"] == 4 and pts["dev"] == 0, pts            # two approved, none merged yet
     r = ledger(ops, merged={"D-20261013-01"}, today=day)
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
-    assert (pts["customer"], pts["dev"], pts["po"]) == (2 + 5 + 3, 5 + 3, 1), pts
+    assert (pts["customer"], pts["dev"], pts["po"]) == (4 + 5 + 3, 5 + 3, 1), pts
     assert r["rewards"]["leader"] == "customer" and r["cards"][0]["lane"] in ("past", "future", "ongoing")
     r = ledger(ops, merged={"D-20261013-01"}, reverted={"D-20261013-01"}, today=day)
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
