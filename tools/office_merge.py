@@ -35,7 +35,15 @@ def git(cwd, *args):
 
 
 def merge(did, ops, repo, office=OFFICE):
-    branch = f"agents/dev-{did}"
+    """The product branch, then any office-tooling companion Dev made for the same work order."""
+    first = merge_branch(did, f"agents/dev-{did}", ops, repo, office)
+    companion = f"agents/office-{did}"
+    if not first.startswith("MERGED") or git(repo, "rev-parse", "--verify", "-q", companion)[0]:
+        return first
+    return first + "\n" + merge_branch(did, companion, ops, repo, office)
+
+
+def merge_branch(did, branch, ops, repo, office=OFFICE):
     gate = os.path.join(ops, "inbox", "dev", did + ".gate", "gate.json")
     if not os.path.exists(gate) or json.load(open(gate, encoding="utf-8")).get("verdict") != "PASS":
         return "WAIT no gate PASS"
@@ -50,6 +58,8 @@ def merge(did, ops, repo, office=OFFICE):
     target = min((c for c, r in ahead.items() if r[0] == 0), key=lambda c: int(ahead[c][1]), default=None)
     if target is None:
         return f"FAILED no branch {branch}"
+    if ahead[target][1] == "0":
+        return f"MERGED {branch} already"
     changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
     dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=no")[1].splitlines()}
     if changed & dirty:
@@ -90,6 +100,9 @@ def selftest():
             run("add", "."), run("commit", "-qm", did)
             w(os.path.join(ops, "inbox", "dev", did + ".gate", "gate.json"), '{"verdict": "PASS"}')
             w(os.path.join(ops, "inbox", "security", f"review-{did}.md"), "# Review\nVerdict: CLEAR\n")
+        run("checkout", "-qb", "agents/office-D-20261008-91", "main")                  # its tooling companion
+        w(os.path.join(repo, "tools", "t.py"), "z = 4\n")
+        run("add", "."), run("commit", "-qm", "companion")
         run("checkout", "-q", "main")
         w(os.path.join(ops, "decisions", "20261008.md"), "".join(
             f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93")))
@@ -98,7 +111,8 @@ def selftest():
             f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93")))
         w(os.path.join(repo, "a.py"), "x = 1  # someone's work in progress\n")         # dirty, not in D-1
         r = merge("D-20261008-91", ops, repo, repo)
-        assert r.startswith("MERGED"), r
+        assert r.count("MERGED") == 2 and os.path.exists(os.path.join(repo, "tools", "t.py")), r   # companion too
+        assert merge("D-20261008-91", ops, repo, repo) == "MERGED agents/dev-D-20261008-91 already\nMERGED agents/office-D-20261008-91 already"
         assert "work in progress" in open(os.path.join(repo, "a.py")).read(), "their edit is untouched"
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
         assert merge("D-20261008-93", ops, repo, repo).startswith("FAILED"), "broken code is reverted"
