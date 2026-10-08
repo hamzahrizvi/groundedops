@@ -64,7 +64,8 @@ def waiting(ops, repo, now):
     merged, reverted = git_sets(repo)
     dev = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") == "dev"}
     check = [i for i, s in dev.items() if s == "built, waiting for the check"]
-    build = [i for i, s in dev.items() if s in ("approved, queued", "sent back, rebuilding")]
+    build = sorted((i for i, s in dev.items() if s in ("approved, queued", "sent back, rebuilding")),
+                   key=lambda i: items[i].get("from") != "security")   # security fixes first, then id order
     review = lambda i: os.path.join(ops, "inbox", "security", f"review-{i}.md")
     def verdict(i):   # Security's review of the branch: CLEAR, BLOCK or ""
         if not os.path.exists(review(i)):
@@ -159,6 +160,9 @@ def selftest():
         assert got[0].startswith("RUN  groundedops-office-product-owner  check D-20261008-01"), got
         assert got[1].startswith("RUN  groundedops-office-dev  build D-20261008-02"), got
         assert len(got) == 2, got                                       # D-07 is the CEO's; tests, reviews not due
+        w("decisions/20261008b.md", "## D-20261008-08 | Key leak\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        assert "build D-20261008-08 (+1 queued)" in plan(ops, ops, 11, 38, resets, now)[1], "security first"
+        os.remove(os.path.join(ops, "decisions/20261008b.md"))
         assert plan(ops, ops, 55, 38, resets, now)[1].startswith("WAIT groundedops-office-dev"), "5-hour cap"
         assert "pace" in plan(ops, ops, 11, 92, resets, now)[0], "weekly pace"
         w("state/hold", "product-owner\n")
