@@ -1,0 +1,1210 @@
+<title>GroundedOps HQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Silkscreen:wght@400;700&family=VT323&display=swap">
+<style>
+/* Layout: one open-plan office floor (top-down pixel art, people walking between desks, meeting room,
+   kitchen, lounge and terrace) with a roster underneath; a side rail for the CEO's tray, the selected
+   person and the activity feed; the week's rhythm at the bottom. The floor itself is one fixed
+   illustration whose lighting follows the real clock; the page chrome follows the theme. */
+:root{
+  --bg:#E6ECEE; --surface:#F6F8F9; --ink:#17212B; --muted:#56656F; --line:#C5D0D6;
+  --accent:#E9A92B; --accent-ink:#3A2A05; --ok:#23895A; --crit:#C8433A; --facade:#2E3A44; --facade-ink:#E9EEF1;
+  --seq:#2B6CB0; --div-neg:#C2410C; --div-pos:#2B6CB0;
+  --display:"Silkscreen","Courier New",monospace;
+  --body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --data:"VT323","Consolas",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D1317; --surface:#141C22; --ink:#E2E9EE; --muted:#8C9CA7; --line:#25313A;
+  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --crit:#EE6A5E; --facade:#0A0F13; --facade-ink:#C9D4DB; --seq:#6AA9EC; --div-neg:#F08A4B; --div-pos:#6AA9EC; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D1317; --surface:#141C22; --ink:#E2E9EE; --muted:#8C9CA7; --line:#25313A;
+  --accent:#F3BD48; --accent-ink:#2A1E02; --ok:#4CC08A; --crit:#EE6A5E; --facade:#0A0F13; --facade-ink:#C9D4DB; --seq:#6AA9EC; --div-neg:#F08A4B; --div-pos:#6AA9EC; color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);margin:0}
+.wrap{max-width:1280px;margin:0 auto;padding-inline:16px;padding-block:20px 40px}
+h1,h2,h3{font-family:var(--display);font-weight:400;text-wrap:balance;margin:0}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;justify-content:space-between;margin-bottom:14px}
+.top h1{font-size:clamp(28px,5vw,44px);line-height:1;letter-spacing:.02em}
+.top p{margin:6px 0 0;color:var(--muted);max-width:62ch}
+.shift{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.clock{font:26px/1 var(--data);color:var(--muted);font-variant-numeric:tabular-nums}
+.chip{font:12px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:3px;border:1px solid var(--line);background:var(--surface);color:var(--muted);white-space:nowrap}
+.chip.live{background:var(--ok);border-color:var(--ok);color:#fff}
+.chip.sample{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn{border:2px solid var(--ink);background:var(--surface);color:var(--ink);padding:6px 12px;border-radius:3px;cursor:pointer;font-family:var(--display);font-size:13px;letter-spacing:.04em;box-shadow:3px 3px 0 var(--ink)}
+.btn:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink)}
+.btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+.banner{margin:0 0 14px;padding:10px 14px;border-left:4px solid var(--accent);background:var(--surface);font-size:15px}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+@media (max-width:1180px){.grid{grid-template-columns:minmax(0,1fr)}}
+.main{display:grid;gap:14px;min-width:0}
+
+.building{background:var(--facade);border-radius:6px;padding:12px 12px 14px;min-width:0}
+.roofline{display:flex;justify-content:space-between;align-items:center;color:var(--facade-ink);font:13px/1 var(--display);letter-spacing:.12em;margin:0 2px 10px;gap:8px;flex-wrap:wrap}
+.roofline .sign{background:var(--accent);color:var(--accent-ink);padding:5px 9px;border-radius:2px}
+.roofline .hint{font:16px/1 var(--data);letter-spacing:0;opacity:.75}
+.scroller{overflow-x:auto;overflow-y:hidden;border-radius:3px;-webkit-overflow-scrolling:touch}
+.floorwrap{position:relative;margin:0 auto;line-height:0}
+.floorwrap canvas{width:100%;height:auto;aspect-ratio:416/272;image-rendering:pixelated;image-rendering:crisp-edges;display:block;cursor:pointer}
+.overlay{position:absolute;inset:0;pointer-events:none;line-height:1.1}
+.zl{position:absolute;transform:translate(-50%,-50%);font-family:var(--display);font-size:max(9px,calc(var(--s,2)*3.4px));letter-spacing:.08em;color:#F3F6F8;background:rgba(18,24,30,.62);padding:.2em .45em;border-radius:2px;white-space:nowrap}
+.zl.soon{background:rgba(233,169,43,.92);color:#2A1E02}
+.tag{position:absolute;transform:translate(-50%,-100%);font-family:var(--display);font-size:max(9px,calc(var(--s,2)*3.5px));letter-spacing:.04em;color:#fff;background:rgba(18,24,30,.78);padding:.15em .4em;border-radius:2px;white-space:nowrap}
+.tag.sel{background:#E9A92B;color:#2A1E02}
+.bub{position:absolute;transform:translate(var(--tx,-50%),var(--ty,calc(-100% - max(14px,calc(var(--s,2)*6px)))));max-width:max(130px,calc(var(--s,2)*66px));width:max-content;background:#FFFFFF;color:#17212B;border:2px solid #17212B;border-radius:3px;padding:2px 6px 3px;font:max(15px,calc(var(--s,2)*6.4px))/1 var(--data);box-shadow:2px 2px 0 #17212B;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bub.l{--tx:-12px}
+.bub.r{--tx:calc(-100% + 12px)}
+.bub.below{--ty:max(12px,calc(var(--s,2)*16px))}
+.bub.paper{background:#F6E7B8}
+.bub.wait{border-style:dashed}
+.bub.block{background:#FBD9D5}
+
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:9px 10px;text-align:left;cursor:pointer;display:grid;gap:3px;min-width:0}
+.card:hover{border-color:var(--muted)}
+.card[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
+.card.ping{animation:ping .9s ease-out}
+@keyframes ping{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 10px transparent}}
+.card .row{display:flex;gap:6px;align-items:center;justify-content:space-between;min-width:0}
+.card .name{font:13px/1.1 var(--display);letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .model{font:16px/1 var(--data);color:var(--muted)}
+.card .task{font-size:13.5px;line-height:1.35;min-height:2.7em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .now{font:16px/1 var(--data);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.state{font:10.5px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:4px 6px;border-radius:2px;white-space:nowrap;border:1px solid transparent}
+.state.working{background:var(--ok);color:#fff}
+.state.waiting{background:var(--accent);color:var(--accent-ink)}
+.state.idle{border-color:var(--line);color:var(--muted)}
+.state.planned{border:1px dashed var(--muted);color:var(--muted)}
+.state.blocked{background:var(--crit);color:#fff}
+.state.off{border:1px solid var(--line);color:var(--muted);background:var(--bg)}
+
+.boards{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.tabs [role=tab]{border:1px solid var(--line);background:var(--bg);padding:7px 10px;border-radius:3px;cursor:pointer;font:12px/1 var(--display);letter-spacing:.05em}
+.tabs [role=tab][aria-selected="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tabs .chip{margin-left:auto}
+.lnote{margin:0 0 12px;color:var(--muted);font-size:14px}
+.lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:720px){.lanes{grid-template-columns:minmax(0,1fr)}}
+.lane{background:var(--bg);border-radius:4px;padding:10px;min-width:0}
+.lane h3{font-size:12px;letter-spacing:.08em;margin-bottom:8px;display:flex;justify-content:space-between}
+.lane ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.kcard{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:3px;padding:7px 9px;font-size:14px;line-height:1.35}
+.kcard.s-merged{border-left-color:var(--ok)} .kcard.s-ready{border-left-color:var(--ok)}
+.kcard.s-ceo{border-left-color:var(--accent)} .kcard.s-bad{border-left-color:var(--crit)}
+.kmeta{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px;font:15px/1 var(--data);color:var(--muted)}
+.kstage{font:10px/1 var(--display);letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--line);padding:3px 5px;border-radius:2px}
+.dboards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px}
+.dboard{background:var(--bg);border-radius:4px;padding:10px;min-width:0;font-size:14px}
+.dboard h3{font-size:12px;letter-spacing:.06em;display:flex;justify-content:space-between;gap:6px;margin-bottom:6px}
+.bar{height:8px;background:var(--line);border-radius:2px;overflow:hidden;margin:4px 0 8px}
+.bar i{display:block;height:100%;background:var(--ok)}
+.bar.full i{background:var(--crit)}
+.dboard ul{margin:2px 0 6px;padding-left:18px}
+.dboard .lbl{font:11px/1.6 var(--display);letter-spacing:.05em;color:var(--muted)}
+.rtable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.rtable th{font:11px/1.4 var(--display);letter-spacing:.05em;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.rtable td{padding:7px 8px;border-bottom:1px solid var(--line)}
+.rtable td.n{text-align:right}
+.rtable tr.lead td{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+.rscroll{overflow-x:auto}
+.rules{margin:12px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px;margin-bottom:12px}
+.tile{background:var(--bg);border-radius:4px;padding:10px 12px;min-width:0}
+.tile .k{font:11px/1.3 var(--display);letter-spacing:.05em;color:var(--muted)}
+.tile .v{font:34px/1.05 var(--data);font-variant-numeric:tabular-nums;margin-top:4px}
+.tile .d{font-size:13px;color:var(--muted)}
+.pvbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:6px}
+.pvbar .lbl,.seg .lbl{font:11px/1 var(--display);letter-spacing:.05em;color:var(--muted)}
+.seg{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.seg button{border:1px solid var(--line);background:var(--bg);padding:6px 9px;border-radius:3px;cursor:pointer;font-size:13.5px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+#pvMetric{font:inherit;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface);color:var(--ink);max-width:100%}
+.pivot{width:100%;border-collapse:separate;border-spacing:2px;font-size:14px;font-variant-numeric:tabular-nums}
+.pivot th{font:11px/1.4 var(--display);letter-spacing:.04em;color:var(--muted);text-align:right;padding:6px 8px;white-space:nowrap}
+.pivot th:first-child{text-align:left}
+.pivot td{padding:7px 9px;text-align:right;border-radius:3px;white-space:nowrap}
+.pivot td.g{text-align:left;white-space:normal;min-width:150px;cursor:pointer}
+.pivot td.g:hover{text-decoration:underline}
+.pivot td.g .m{display:block;font-size:12.5px;color:var(--muted)}
+.pivot tr.drill td{background:var(--bg);text-align:left;white-space:normal}
+.drill ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.drill li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:baseline;font-size:13.5px}
+.vpill{font:10px/1 var(--display);letter-spacing:.04em;padding:3px 5px;border-radius:2px;border:1px solid var(--line);white-space:nowrap}
+.vpill.ok{border-color:var(--ok);color:var(--ok)} .vpill.warn{border-color:var(--accent);color:var(--ink)} .vpill.bad{border-color:var(--crit);color:var(--crit)}
+.pvh{font-size:13px;letter-spacing:.06em;margin:16px 0 6px}
+.pvtip{position:fixed;z-index:5;pointer-events:none;background:var(--ink);color:var(--bg);font-size:13px;line-height:1.35;padding:6px 8px;border-radius:3px;max-width:260px}
+
+.rail{display:grid;gap:14px;min-width:0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
+.panel h2{font-size:15px;letter-spacing:.06em;margin-bottom:10px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.count{font:12px/1 var(--display);background:var(--accent);color:var(--accent-ink);padding:4px 7px;border-radius:2px}
+.count.zero{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.tray{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.tray li{border-left:3px solid var(--accent);padding:2px 0 2px 10px}
+.tray strong{display:block;font-size:15px}
+.tray span{color:var(--muted);font-size:14px}
+.empty{color:var(--muted);font-size:14px;margin:0}
+.feed{list-style:none;margin:0;padding:0;display:grid;gap:9px;max-height:330px;overflow:auto}
+.feed li{display:grid;grid-template-columns:50px minmax(0,1fr);gap:8px;font-size:14px;line-height:1.35}
+.feed time{font:18px/1.1 var(--data);color:var(--muted);font-variant-numeric:tabular-nums}
+.route{font:11px/1 var(--display);letter-spacing:.05em;color:var(--muted);display:block;margin-bottom:2px}
+.tagx{font:10px/1 var(--display);letter-spacing:.06em;border:1px dashed var(--muted);color:var(--muted);padding:2px 4px;border-radius:2px;margin-left:4px;vertical-align:1px}
+.detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:10px 0 0;font-size:14px}
+.detail dt{color:var(--muted);font:12px/1.6 var(--display);letter-spacing:.04em}
+.detail dd{margin:0}
+.detail p{margin:0;font-size:14.5px}
+
+.rhythm{margin-top:20px}
+.rhythm h2{font-size:15px;letter-spacing:.06em;margin-bottom:10px}
+.days{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media (max-width:640px){.days{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.day{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:10px;min-width:0}
+.day.today{border-color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
+.day h3{font-size:13px;letter-spacing:.08em;margin-bottom:8px}
+.slot{display:block;font-size:13.5px;line-height:1.35;margin-bottom:6px}
+.slot b{font:16px/1 var(--data);font-weight:400;color:var(--muted);margin-right:4px}
+.foot{margin-top:18px;color:var(--muted);font-size:14px;max-width:80ch}
+@media (prefers-reduced-motion: reduce){.card.ping{animation:none}.btn:hover{transform:none}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>GroundedOps HQ</h1>
+      <p>The agent departments that test the chatbot, fix what they find and report to you. Working people sit at their desks; everyone else is on a break somewhere in the building.</p>
+    </div>
+    <div class="shift">
+      <span class="clock" id="clock">--:--</span>
+      <span class="chip" id="modeChip">Sample week</span>
+      <button class="btn" id="modeBtn" type="button" hidden>Show live office</button>
+    </div>
+  </header>
+  <p class="banner" id="banner">Connecting to the office…</p>
+
+  <div class="grid">
+    <div class="main">
+      <section class="building" aria-label="Office floor">
+        <div class="roofline"><span>GROUNDEDOPS · FLOOR 1</span><span class="hint">Click anyone to see what they are doing</span><span class="sign">OPEN</span></div>
+        <div class="scroller" id="scroller">
+          <div class="floorwrap" id="floorwrap">
+            <canvas id="floor" width="416" height="272" aria-label="Animated office floor plan"></canvas>
+            <div class="overlay" id="overlay" aria-hidden="true"></div>
+          </div>
+        </div>
+      </section>
+      <section class="roster" id="roster" aria-label="Departments"></section>
+      <section class="boards" id="boards" aria-label="Boards">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" id="t-status" aria-selected="true" aria-controls="p-status">Product status</button>
+          <button type="button" role="tab" id="t-plan" aria-selected="false" aria-controls="p-plan">Plan board</button>
+          <button type="button" role="tab" id="t-depts" aria-selected="false" aria-controls="p-depts">Department boards</button>
+          <button type="button" role="tab" id="t-rewards" aria-selected="false" aria-controls="p-rewards">Improvement of the month</button>
+          <span class="chip" id="ledgerChip">Sample</span>
+        </div>
+        <p class="lnote" id="ledgerNote"></p>
+        <div role="tabpanel" id="p-status" aria-labelledby="t-status">
+          <div class="tiles" id="pvTiles"></div>
+          <div class="pvbar">
+            <div class="seg" role="group" aria-label="Group by">
+              <span class="lbl">Group by</span>
+              <button type="button" data-dim="category" aria-pressed="true">Category</button>
+              <button type="button" data-dim="type" aria-pressed="false">Question type</button>
+              <button type="button" data-dim="product" aria-pressed="false">Product</button>
+            </div>
+            <label class="lbl" for="pvMetric">Show</label>
+            <select id="pvMetric">
+              <option value="score">Bot score</option>
+              <option value="gap">Gap to an AI given the whole manual</option>
+              <option value="wrong">Wrong answers</option>
+              <option value="declined">Said "not in the manual" when it was</option>
+              <option value="n">Questions asked</option>
+            </select>
+          </div>
+          <p class="lnote" id="pvLegend"></p>
+          <div class="rscroll"><table class="pivot" id="pvTable"></table></div>
+          <h3 class="pvh">What customers asked on the website</h3>
+          <div class="rscroll"><table class="pivot real" id="pvReal"></table></div>
+          <p class="lnote" id="pvCats"></p>
+          <div class="pvtip" id="pvTip" hidden></div>
+        </div>
+        <div role="tabpanel" id="p-plan" aria-labelledby="t-plan" class="lanes" hidden></div>
+        <div role="tabpanel" id="p-depts" aria-labelledby="t-depts" class="dboards" hidden></div>
+        <div role="tabpanel" id="p-rewards" aria-labelledby="t-rewards" hidden></div>
+      </section>
+    </div>
+
+    <aside class="rail">
+      <section class="panel" aria-labelledby="trayH">
+        <h2 id="trayH">Waiting for you <span class="count zero" id="trayCount">0</span></h2>
+        <ul class="tray" id="tray"></ul>
+        <p class="empty" id="trayEmpty">Nothing needs your yes right now.</p>
+      </section>
+      <section class="panel detail" aria-live="polite" id="detail"></section>
+      <section class="panel" aria-labelledby="feedH">
+        <h2 id="feedH">Activity</h2>
+        <ul class="feed" id="feed"></ul>
+        <p class="empty" id="feedEmpty">No activity yet. The first run is Monday at 01:00.</p>
+      </section>
+    </aside>
+  </div>
+
+  <section class="rhythm" aria-labelledby="weekH">
+    <h2 id="weekH">The week</h2>
+    <div class="days" id="days"></div>
+  </section>
+  <p class="foot">Phase 1 runs Customer, the test lab, the product owner and Dev. Audit and Security (phase 2) and R&amp;D and Marketing (phase 3) are hired and scheduled but off duty until you switch their tasks on. Approve work by ticking the box in the decisions file, or by telling Claude "approve D-…".</p>
+</div>
+
+<script>
+(() => {
+const T = 8, MW = 52, MH = 34, W = MW*T, H = MH*T;
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ================= departments ================= */
+const DEPTS = [
+  {id:"customer", name:"Customer", tag:"Customer", model:"Sonnet 5.5 · medium", sched:"Mon 01:00",
+   role:"Writes 40 new customer questions a week from the manuals alone, re-checks every miss against the manual, and files one finding per type of failure."},
+  {id:"lab", name:"Test lab", tag:"Lab bot", model:"Shell jobs, no AI", sched:"After Customer; before each product owner run",
+   role:"A machine, not an agent: asks the chatbot the week's questions, grades every answer against a whole-manual baseline, and runs the retrofit gate. Its robot carries the results."},
+  {id:"po", name:"Product owner", tag:"PO", model:"Fable 5.1 · high", sched:"Tue and Fri 08:00",
+   role:"Scores every finding, turns down patches that only fix one question, decides what Dev builds and writes your report. Keeps the hidden sibling questions locked away."},
+  {id:"dev", name:"Dev", tag:"Dev", model:"Opus 5.5 · high", sched:"Weekdays 20:00, when work is approved",
+   role:"Builds one approved work order at a time in its own branch, runs the tests and hands back. Never merges."},
+  {id:"ceo", name:"You (CEO)", tag:"You", model:"Approves and merges", sched:"When the report lands",
+   role:"Reads the product owner's report, approves what changes for customers, and merges finished branches."},
+  {id:"audit", name:"Audit", tag:"Audit", model:"Sonnet 5.5 · low", sched:"Wed 09:00 (phase 2)", planned:"Desk ready, opens in phase 2",
+   role:"Cost per answer and latency, and what the agents themselves cost. Every cost cut goes through the same gate."},
+  {id:"security", name:"Security", tag:"Security", model:"Opus 5.5 · high", sched:"Every 2nd Wed 14:00 (phase 2)", planned:"Desk ready, opens in phase 2",
+   role:"Reviews each change and every branch waiting to merge, audits dependencies and secrets, and checks where customer text is sent."},
+  {id:"rnd", name:"R&D", tag:"R&D", model:"Opus 5.5 · high", sched:"1st of the month (phase 3)", planned:"Desk ready, opens in phase 3",
+   role:"Researches infrastructure and new features that would move the product forward as a whole."},
+  {id:"marketing", name:"Marketing", tag:"Marketing", model:"Sonnet 5.5 · medium", sched:"15th of the month (phase 3)", planned:"Desk ready, opens in phase 3",
+   role:"Compares the product with market leaders and suggests look-and-feel improvements."}
+];
+const D = Object.fromEntries(DEPTS.map(d => [d.id, d]));
+const CRON = {customer:{d:[1], h:1}, po:{d:[2,5], h:8}, dev:{d:[1,2,3,4,5], h:20}};
+function nextRun(id){
+  const c = CRON[id]; if(!c) return null;
+  const d = new Date(); d.setMinutes(0,0,0);
+  for(let i = 0; i < 24*8; i++){ d.setHours(d.getHours()+1); if(c.d.includes(d.getDay()) && d.getHours() === c.h) return new Date(d); }
+  return null;
+}
+const fmtWhen = d => d ? d.toLocaleString(undefined,{weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "";
+const fmtTime = d => d.toLocaleTimeString(undefined,{hour:"2-digit", minute:"2-digit"});
+
+/* ================= state (live + sample) ================= */
+const live = {workers:{}, events:[], waiting:[], available:false, loaded:false};
+const sample = {workers:{}, events:[], waiting:[], step:0};
+let mode = "sample", forced = null, selected = "customer";
+const view = () => mode === "live" ? live : sample;
+/* phase 2-3 departments exist once their worker row does (written when they are hired) */
+const hired = id => !D[id].planned || !!live.workers[id];
+function worker(id){
+  const d = D[id];
+  if(!hired(id)) return {state:"planned", task:d.planned};
+  const w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
+  const fallback = d.planned ? "Off duty until switched on" : mode === "live" ? "No run yet" : "Off shift";
+  return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || fallback, last: w.last || "", next: w.next || "", updated: w.updated || ""};
+}
+
+/* ================= the floor: grid, walls, furniture ================= */
+const grid = () => Array.from({length:MH}, () => new Array(MW).fill(null));
+const BLOCK = grid(), WALL = grid();
+function setWall(x, y, k){ WALL[y][x] = k; BLOCK[y][x] = true; }
+for(let x = 0; x < MW; x++){ setWall(x, 0, "face"); setWall(x, 1, "face"); }
+for(let y = 2; y <= 26; y++){ setWall(0, y, "outer"); setWall(MW-1, y, "outer"); }
+for(let x = 1; x < MW-1; x++) if(x !== 20 && x !== 21) setWall(x, 26, "outer");
+function line(x0, y0, x1, y1, k, gaps = []){
+  for(let y = y0; y <= y1; y++) for(let x = x0; x <= x1; x++) if(!gaps.includes(x0 === x1 ? y : x)) setWall(x, y, k);
+}
+line(12,2,12,10,"glass"); line(26,2,26,10,"glass"); line(36,2,36,10,"solid");
+line(1,10,11,10,"glass",[6]); line(13,10,25,10,"glass",[19,20]); line(27,10,35,10,"glass",[31]);
+line(37,13,50,13,"low",[43,44]); line(36,13,36,25,"low",[17,18,19]);
+
+function zone(x, y){
+  if(y >= 27) return (x >= 12 && x <= 38 && y <= 32) ? "pave" : "grass";
+  if(x >= 1 && x <= 11 && y >= 2 && y <= 9) return "ceo";
+  if(x >= 13 && x <= 25 && y >= 2 && y <= 9) return "meet";
+  if(x >= 27 && x <= 35 && y >= 2 && y <= 9) return "server";
+  if(x >= 37 && x <= 50 && y >= 2 && y <= 12) return "kitchen";
+  if(x >= 37 && x <= 50 && y >= 14 && y <= 25) return "lounge";
+  return "open";
+}
+
+const OBJ = [];
+function obj(x, y, w, h, kind, o = {}){
+  const it = Object.assign({x, y, w, h, kind, block:true}, o);
+  if(it.sort == null) it.sort = y + h;
+  OBJ.push(it);
+  if(it.block) for(let yy = y; yy < y+h; yy++) for(let xx = x; xx < x+w; xx++) BLOCK[yy][xx] = true;
+  return it;
+}
+// your office
+obj(1,2,3,1,"shelf"); obj(10,2,1,1,"plant"); obj(1,9,1,1,"plant");
+obj(4,5,4,1,"desk",{screen:"back", tray:true, owner:"ceo"}); obj(5,4,1,1,"chair",{block:false, face:"down", sort:4.1});
+obj(7,8,3,1,"sofa",{block:false, face:"down", sort:8.05});
+// meeting room
+obj(15,5,9,2,"mtable");
+for(const x of [16,18,20,22]){ obj(x,4,1,1,"chair",{block:false, face:"down", sort:4.1}); obj(x,7,1,1,"chair",{block:false, face:"up", sort:7.95}); }
+obj(25,2,1,1,"plant");
+// test lab
+obj(28,3,7,1,"racks"); obj(28,6,7,1,"racks"); obj(33,8,2,1,"terminal"); obj(28,8,1,1,"dock",{block:false, sort:8.05});
+// kitchen
+obj(37,2,11,1,"counter"); obj(48,2,2,2,"fridge"); obj(50,2,1,2,"vending");
+obj(39,6,2,2,"ktable"); obj(45,6,2,2,"ktable"); obj(50,10,1,1,"cooler");
+// lounge
+obj(38,13,4,1,"tv",{block:true, sort:13.9}); obj(38,16,4,1,"sofa",{block:false, face:"up"});
+obj(43,18,5,3,"pool"); obj(50,15,1,1,"arcade"); obj(39,22,2,1,"foos");
+obj(45,24,1,1,"beanbag",{block:false, sort:24.1, color:"#C4572F"}); obj(48,24,1,1,"beanbag",{block:false, sort:24.1, color:"#3E7CB1"});
+obj(50,25,1,1,"plant"); obj(37,25,1,1,"plant");
+// open plan: phase 1 pod
+for(const x of [3,7,11,15]){ obj(x,15,2,1,"desk",{screen:"back"}); obj(x,14,1,1,"chair",{block:false, face:"down", sort:14.1}); }
+const DESKS = {customer:3, dev:11};
+for(const x of [3,7,11,15]){
+  const owner = Object.keys(DESKS).find(k => DESKS[k] === x) || null;
+  obj(x,16,2,1,"desk",{screen: owner ? "front" : "off", owner}); obj(x,17,1,1,"chair",{block:false, face:"up", sort:17.95});
+}
+// opening-soon pod
+for(const x of [3,7,11,15]){ obj(x,20,2,1,"desk",{screen:"back"}); obj(x,19,1,1,"chair",{block:false, face:"down", sort:19.1}); }
+[["audit",3],["security",7],["rnd",11],["marketing",15]].forEach(([id, x]) => { obj(x,21,2,1,"desk",{screen:"boxes", owner:id}); obj(x,22,1,1,"chair",{block:false, face:"up", sort:22.95}); });
+// product owner's corner
+obj(21,12,7,1,"planboard"); obj(24,16,2,1,"desk",{screen:"front", owner:"po"}); obj(24,17,1,1,"chair",{block:false, face:"up", sort:17.95});
+obj(28,15,1,1,"safe");
+obj(31,12,2,1,"printer"); obj(32,18,3,3,"booth");
+obj(24,23,4,1,"reception"); obj(30,24,3,1,"sofa",{block:false, face:"up"});
+for(const [x, y] of [[19,11],[35,11],[35,25],[1,25],[1,11],[19,23]]) obj(x,y,1,1,"plant");
+// terrace
+obj(28,30,5,1,"bench"); obj(33,29,1,1,"ashtray"); obj(27,28,7,3,"shelter",{block:false, sort:31.5});
+obj(4,28,2,2,"tree"); obj(44,29,2,2,"tree"); obj(8,31,2,2,"tree");
+obj(17,30,2,1,"picnic"); obj(36,28,3,1,"bikes"); obj(23,28,1,1,"lamp");
+OBJ.sort((a, b) => a.sort - b.sort);
+
+/* ================= spots people walk to ================= */
+const S = (id, x, y, f, act, o = {}) => Object.assign({id, x, y, f, act, occ:null}, o);
+const SPOTS = [
+  S("coffee",39,3,"up","coffee",{w:3}), S("snack1",38,6,"right","snack",{w:1}), S("snack2",41,7,"left","snack",{w:1}),
+  S("snack3",44,6,"right","snack",{w:1}), S("snack4",47,7,"left","snack",{w:1}), S("cooler",49,10,"right","cooler",{w:1.5}),
+  S("sofa1",38,16,"up","tv",{sit:true, w:1.2}), S("sofa2",39,16,"up","tv",{sit:true, w:1.2}), S("sofa3",40,16,"up","tv",{sit:true, w:1}), S("sofa4",41,16,"up","tv",{sit:true, w:1}),
+  S("poolA",42,19,"right","pool",{w:2.5, pool:true}), S("poolB",48,19,"left","pool",{w:2.5, pool:true}),
+  S("arcade",50,16,"up","arcade",{w:1.5}), S("footA",39,21,"down","foos",{w:1.2, foos:true}), S("footB",40,23,"up","foos",{w:1.2, foos:true}),
+  S("bean1",45,24,"up","bean",{sit:true, w:1}), S("bean2",48,24,"up","bean",{sit:true, w:1}),
+  S("smoke1",28,29,"down","smoke",{w:1.3}), S("smoke2",30,29,"down","smoke",{w:1.3}), S("smoke3",32,29,"down","smoke",{w:1}),
+  S("pic1",16,30,"right","picnic",{sit:true, w:1}), S("pic2",19,30,"left","picnic",{sit:true, w:1}),
+  S("board",24,13,"up","plan",{w:0.6, po:4}), S("ceosofa",8,8,"down","rest",{sit:true, w:0, ceo:2}),
+  S("ceodesk",5,4,"down","office",{sit:true, w:0, ceo:6})
+];
+const SP = Object.fromEntries(SPOTS.map(s => [s.id, s]));
+const MEET = [S("m1",16,4,"down","meeting",{sit:true}), S("m2",18,4,"down","meeting",{sit:true}), S("m3",16,7,"up","meeting",{sit:true}), S("m4",18,7,"up","meeting",{sit:true})];
+const RACK = [S("r1",29,4,"up","rack"), S("r2",33,4,"up","rack"), S("r3",31,5,"down","rack"), S("r4",33,7,"up","rack"), S("r5",30,5,"down","rack")];
+const DOCK = S("dock",28,8,"down","charge");
+const ACT = {type:"At the desk, working", wait:"At the desk, waiting", blocked:"At the desk, stuck", office:"In the office", rest:"On the office sofa",
+  coffee:"Making a coffee", snack:"Having a snack", cooler:"At the water cooler", tv:"Watching TV", pool:"Playing pool", arcade:"On the arcade machine",
+  foos:"Playing table football", bean:"On a beanbag", smoke:"At the smoking shelter", picnic:"Sitting outside", plan:"At the plan board",
+  meeting:"In a meeting", rack:"Running tests in the lab", charge:"Charging"};
+
+/* ================= people ================= */
+const SKIN = ["#F2C9A8","#C88E63","#8B5A3C"];
+const AG = {
+  customer:{id:"customer", desk:S("d-c",3,17,"up","type",{sit:true}), look:{shirt:"#D9644B", pants:"#2E3440", hair:"#1E1A17", skin:2, headset:true, long:true}},
+  dev:{id:"dev", desk:S("d-d",11,17,"up","type",{sit:true}), look:{shirt:"#237E78", shirt2:"#1B625D", pants:"#3B3F4A", hair:"#3B2A1E", skin:0, hood:true}},
+  po:{id:"po", desk:S("d-p",24,17,"up","type",{sit:true}), look:{shirt:"#2F7556", pants:"#2B2F36", hair:"#6B3E22", skin:1, long:true, blazer:true}},
+  ceo:{id:"ceo", desk:SP.ceodesk, look:{shirt:"#25345E", pants:"#25345E", hair:"#2A1D14", skin:0, tie:true}},
+  lab:{id:"lab", robot:true, desk:DOCK},
+  audit:{id:"audit", desk:S("d-a",3,22,"up","type",{sit:true}), look:{shirt:"#7A5BA6", pants:"#2E3440", hair:"#A3A7AB", skin:1, glasses:true}},
+  security:{id:"security", desk:S("d-s",7,22,"up","type",{sit:true}), look:{shirt:"#22272E", pants:"#22272E", hair:"#121212", skin:2, beanie:"#C8433A"}},
+  rnd:{id:"rnd", desk:S("d-r",11,22,"up","type",{sit:true}), look:{shirt:"#EEF1F3", pants:"#3B3F4A", hair:"#B5651D", skin:0, long:true, coat:true}},
+  marketing:{id:"marketing", desk:S("d-m",15,22,"up","type",{sit:true}), look:{shirt:"#E58A2E", pants:"#2B2F36", hair:"#E2B95A", skin:0, long:true}}
+};
+const AGENTS = Object.values(AG);
+AGENTS.forEach((a, i) => { a.x = a.desk.x; a.y = a.desk.y; a.face = a.desk.f; a.path = []; a.spot = null; a.arrived = false;
+  a.queue = []; a.errand = null; a.seed = i*1.37 + .4; a.brkUntil = 0; a.gotUntil = 0; a.got = ""; });
+
+/* ================= pathfinding (BFS on the tile grid) ================= */
+const walk = (x, y) => x >= 0 && y >= 0 && x < MW && y < MH && !BLOCK[y][x];
+function bfs(sx, sy, goal){
+  if(goal(sx, sy)) return [];
+  const prev = new Int32Array(MW*MH).fill(-1), q = [sy*MW+sx]; prev[q[0]] = q[0];
+  for(let h = 0; h < q.length; h++){
+    const i = q[h], x = i % MW, y = (i - x) / MW;
+    for(const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx = x+dx, ny = y+dy, ni = ny*MW+nx;
+      if(!walk(nx, ny) || prev[ni] !== -1) continue;
+      prev[ni] = i;
+      if(goal(nx, ny)){ const path = []; for(let k = ni; k !== q[0]; k = prev[k]) path.push([k % MW, Math.floor(k/MW)]); return path.reverse(); }
+      q.push(ni);
+    }
+  }
+  return null;
+}
+
+let now = 0;
+const rnd = (a, b) => a + Math.random()*(b-a);
+const tileOf = a => [Math.round(a.x), Math.round(a.y)];
+function release(a){ if(a.spot && a.spot.occ === a.id) a.spot.occ = null; }
+function goTo(a, spot){
+  release(a); a.spot = spot; if(spot.occ !== undefined) spot.occ = a.id;
+  const [sx, sy] = tileOf(a);
+  const p = bfs(sx, sy, (x, y) => x === spot.x && y === spot.y);
+  a.path = p || []; a.arrived = false; a.sitting = false;
+  if(!p || reduce){ a.x = spot.x; a.y = spot.y; a.path = []; }
+}
+function goNear(a, target){
+  release(a);
+  const [sx, sy] = tileOf(a), [tx, ty] = tileOf(target);
+  const p = bfs(sx, sy, (x, y) => Math.abs(x-tx) + Math.abs(y-ty) === 1);
+  const end = p && p.length ? p[p.length-1] : [sx, sy];
+  const dx = tx - end[0], dy = ty - end[1];
+  a.spot = {x:end[0], y:end[1], f: Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up"), act:"deliver"};
+  a.path = p || []; a.arrived = false; a.sitting = false;
+  if(reduce){ a.x = end[0]; a.y = end[1]; a.path = []; }
+}
+
+function pickBreak(a){
+  const pool = SPOTS.filter(s => (s.occ === null || s.occ === a.id) && (a.id === "ceo" ? (s.ceo || s.w) : !s.ceo));
+  const poolBusy = SP.poolA.occ || SP.poolB.occ, footBusy = SP.footA.occ || SP.footB.occ;
+  const weights = pool.map(s => {
+    let w = a.id === "ceo" ? (s.ceo || s.w*0.35) : (a.id === "po" && s.po ? s.po : s.w);
+    if(s.pool && poolBusy) w *= 4;
+    if(s.foos && footBusy) w *= 4;
+    if(a.spot && a.spot.id === s.id) w *= 0.15;
+    return w;
+  });
+  let r = Math.random() * weights.reduce((t, w) => t + w, 0);
+  for(let i = 0; i < pool.length; i++){ r -= weights[i]; if(r <= 0) return pool[i]; }
+  return pool[0] || a.desk;
+}
+let rackIdx = 0, rackUntil = 0;
+function desired(a){
+  const w = worker(a.id);
+  if(a.robot){
+    if(w.state !== "working") return DOCK;
+    if(now > rackUntil || !RACK.includes(a.spot)){ rackIdx = (rackIdx+1) % RACK.length; rackUntil = now + rnd(3,5); }
+    return RACK[rackIdx];
+  }
+  if(w.state === "working" || w.state === "waiting" || w.state === "blocked") return a.desk;
+  if(a.spot && a.spot.act !== "deliver" && a.spot.act !== "meeting" && now < a.brkUntil) return a.spot;
+  a.brkUntil = now + (mode === "sample" ? rnd(7,14) : rnd(14,30));
+  return pickBreak(a);
+}
+
+/* hand-offs: someone walks a paper over; the PO's report becomes a meeting with you */
+const meeting = {on:false};
+function trigger(from, to, text){
+  flash(to);
+  const A = AG[from], B = AG[to];
+  if(!A || !B || from === to) return;
+  if(from === "po" && to === "ceo"){ AG.po.queue.push({kind:"meet", seat:MEET[2], text}); AG.ceo.queue.push({kind:"meet", seat:MEET[0], text}); return; }
+  A.queue.push({kind:"give", to, text});
+}
+function startErrand(a){
+  const e = a.errand = a.queue.shift(); e.tries = 0;
+  if(e.kind === "meet"){ goTo(a, e.seat); meeting.on = true; meeting.until = 0; meeting.text = e.text; }
+  else { a.carry = e.text; goNear(a, AG[e.to]); }
+}
+function arrive(a){
+  const e = a.errand;
+  if(!e) return;
+  if(e.kind === "give"){
+    const B = AG[e.to], [bx, by] = tileOf(B), [ax, ay] = tileOf(a);
+    if(Math.abs(bx-ax) + Math.abs(by-ay) > 1 && e.tries++ < 2){ goNear(a, B); return; }
+    B.got = e.text; B.gotUntil = now + 3.2; a.carry = null; a.errand = null; a.spot = null; flash(e.to);
+  }
+}
+function tickMeeting(){
+  if(!meeting.on) return;
+  const m = [AG.po, AG.ceo];
+  if(!meeting.until && m.every(a => a.errand && a.errand.kind === "meet" && a.arrived)) meeting.until = now + 7;
+  if(meeting.until && now > meeting.until){ m.forEach(a => { if(a.errand && a.errand.kind === "meet"){ a.errand = null; a.spot = null; } }); meeting.on = false; }
+}
+
+function update(a, dt){
+  if(!a.errand && a.queue.length) startErrand(a);
+  if(!a.errand){ const want = desired(a); if(want !== a.spot) goTo(a, want); }
+  if(a.path.length){
+    const [nx, ny] = a.path[0], dx = nx - a.x, dy = ny - a.y, d = Math.hypot(dx, dy), sp = (a.robot ? 3.6 : 4.6) * dt;
+    if(d > 0.001) a.face = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up");
+    if(d <= sp){ a.x = nx; a.y = ny; a.path.shift(); } else { a.x += dx/d*sp; a.y += dy/d*sp; }
+    a.moving = true;
+  } else {
+    a.moving = false;
+    if(!a.arrived && a.spot){ a.arrived = true; a.x = a.spot.x; a.y = a.spot.y; a.face = a.spot.f || a.face; a.sitting = !!a.spot.sit; a.since = now; arrive(a); }
+  }
+}
+
+function activity(a){
+  if(!a) return "";
+  if(a.errand) return a.errand.kind === "meet" ? (a.arrived ? "In a meeting with " + (a.id === "ceo" ? "the product owner" : "you") : "Walking to the meeting room")
+                                               : "Taking work to " + D[a.errand.to].name;
+  if(a.moving) return a.spot && a.spot.act ? "Walking to: " + (ACT[a.spot.act] || "somewhere").replace(/^At the desk, \w+$/, "the desk").toLowerCase() : "Walking";
+  if(!a.spot) return "";
+  if(a.spot === a.desk && !a.robot){ const s = worker(a.id).state; return s === "waiting" ? ACT.wait : s === "blocked" ? ACT.blocked : a.id === "ceo" && s === "idle" ? ACT.office : ACT.type; }
+  return ACT[a.spot.act] || "";
+}
+
+/* ================= DOM: roster, overlay ================= */
+const roster = document.getElementById("roster"), overlay = document.getElementById("overlay");
+const cards = {}, tags = {}, bubs = {};
+for(const d of DEPTS){
+  const b = document.createElement("button"); b.type = "button"; b.className = "card"; b.dataset.id = d.id;
+  b.innerHTML = '<div class="row"><span class="name"></span><span class="state"></span></div><span class="model"></span><span class="task"></span><span class="now"></span>';
+  b.querySelector(".name").textContent = d.name; b.querySelector(".model").textContent = d.model;
+  b.addEventListener("click", () => select(d.id));
+  roster.append(b);
+  cards[d.id] = {el:b, state:b.querySelector(".state"), task:b.querySelector(".task"), now:b.querySelector(".now")};
+}
+for(const a of AGENTS){
+  const t = document.createElement("span"); t.className = "tag"; t.textContent = D[a.id].tag; overlay.append(t); tags[a.id] = t;
+  const b = document.createElement("span"); b.className = "bub"; b.hidden = true; overlay.append(b); bubs[a.id] = b;
+}
+const ZL = [["YOUR OFFICE",6,9.3],["MEETING ROOM",19.5,9.3],["TEST LAB",31.5,9.3],["KITCHEN",43.5,12.3],["LOUNGE",43.5,25.3],
+  ["PLAN BOARD",24.5,11.3,1],["OPENING SOON",9.5,23.6,1],["SMOKING SHELTER",30.5,32.4],["TERRACE",20.5,33.4]];
+const zl = {};
+for(const [txt, x, y, soon] of ZL){ const s = document.createElement("span"); s.className = "zl" + (soon ? " soon" : ""); s.textContent = txt;
+  s.style.left = (x*T/W*100) + "%"; s.style.top = (y*T/H*100) + "%"; overlay.append(s); zl[txt] = s; }
+function updateZones(){ zl["OPENING SOON"].textContent = ["audit","security","rnd","marketing"].some(hired) ? "PHASE 2–3 TEAM" : "OPENING SOON"; }
+
+/* ================= boards: plan board, department boards, improvement of the month ================= */
+const SAMPLE_LEDGER = {sample:true, cards:[
+  {id:"D-1", title:"Fix how comparisons pick each product's manual", from:"customer", assigned:"dev", stage:"merged", lane:"past"},
+  {id:"D-2", title:"Price questions get the sales reply before the manual is searched", from:"customer", assigned:"dev", stage:"rejected", lane:"past"},
+  {id:"D-3", title:"Procedures answered with setup steps instead of troubleshooting", from:"customer", assigned:"dev", stage:"built, waiting for the check", lane:"ongoing"},
+  {id:"D-4", title:"Cap the size of lead-form transcripts", from:"security", assigned:"dev", stage:"approved, queued", lane:"ongoing"},
+  {id:"D-5", title:"Follow-ups lose the product after a switch", from:"customer", assigned:"dev", stage:"waiting for CEO", lane:"future"},
+  {id:"audit/cache", title:"Reuse answers to repeated questions", from:"audit", assigned:"po", stage:"proposed", lane:"future"},
+  {id:"rnd/rerank", title:"Try a stronger reranker on table questions", from:"rnd", assigned:"po", stage:"deferred", lane:"future"}],
+  boards:{customer:{capacity:2, doing:[], queue:[], done:1, load:0}, po:{capacity:8, doing:[], queue:["Reuse answers to repeated questions"], done:1, load:.13},
+    dev:{capacity:3, doing:["Procedures answered with setup steps instead of troubleshooting"], queue:["Cap the size of lead-form transcripts"], done:1, load:.67},
+    security:{capacity:2, doing:[], queue:[], done:0, load:0}, audit:{capacity:2, doing:[], queue:[], done:0, load:0}},
+  rewards:{month:"sample", leader:"customer", table:[{dept:"customer", points:13, all_time:13, approved:3, merged:1, fixed:3}, {dept:"dev", points:8, all_time:8, approved:0, merged:1, fixed:3},
+    {dept:"security", points:2, all_time:2, approved:1, merged:0, fixed:0}, {dept:"po", points:1, all_time:1, approved:0, merged:0, fixed:0}]}};
+let tab = "status";
+function showTab(name, scroll){
+  tab = name;
+  for(const n of ["status","plan","depts","rewards"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
+  renderBoards();
+  if(scroll) document.getElementById("boards").scrollIntoView({behavior: reduce ? "auto" : "smooth", block:"start"});
+}
+for(const n of ["status","plan","depts","rewards"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
+const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
+const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
+function renderBoards(){
+  const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
+  const chip = document.getElementById("ledgerChip"); chip.textContent = isSample ? "Sample" : "Live"; chip.className = "chip " + (isSample ? "sample" : "live");
+  document.getElementById("ledgerNote").textContent = isSample
+    ? "Sample boards, made up to show the layout. The real ones appear after the product owner's first run."
+    : `Updated ${new Date(L.updated).toLocaleString()} by the product owner's run. Every card and point comes from the departments' files and git, never from what an agent says about itself.`;
+  const lanes = [["future","Coming up"],["ongoing","In progress"],["past","Done"]];
+  document.getElementById("p-plan").replaceChildren(...lanes.map(([k, title]) => {
+    const cards = L.cards.filter(c => c.lane === k), lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
+    lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
+    if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
+    for(const c of cards){
+      const li = document.createElement("li"); li.className = "kcard " + STAGE_CLS(c.stage); li.textContent = c.title;
+      const meta = document.createElement("div"); meta.className = "kmeta";
+      const st = document.createElement("span"); st.className = "kstage"; st.textContent = c.stage;
+      const who = document.createElement("span"); who.textContent = `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
+      meta.append(st, who); li.append(meta); ul.append(li);
+    }
+    lane.append(h, ul); return lane; }));
+  document.getElementById("p-depts").replaceChildren(...Object.entries(L.boards || {}).filter(([id]) => D[id] || id === "po").map(([id, b]) => {
+    const el = document.createElement("div"), h = document.createElement("h3"), bar = document.createElement("div"), fill = document.createElement("i");
+    el.className = "dboard"; h.textContent = nameOf(id);
+    const load = document.createElement("span"); load.textContent = `${id === "po" ? b.queue.length : b.doing.length + b.queue.length} of ${b.capacity}`; h.append(load);
+    bar.className = "bar" + (b.load >= 1 ? " full" : ""); fill.style.width = Math.min(100, Math.round(b.load*100)) + "%"; bar.append(fill);
+    el.append(h, bar);
+    const list = (label, items) => { const l = document.createElement("div"); l.className = "lbl"; l.textContent = label; el.append(l);
+      if(!items.length){ const p = document.createElement("p"); p.className = "empty"; p.textContent = "None"; el.append(p); return; }
+      const ul = document.createElement("ul"); for(const it of items){ const li = document.createElement("li"); li.textContent = it; ul.append(li); } el.append(ul); };
+    list(id === "po" ? "To triage" : "Doing", id === "po" ? b.queue : b.doing);
+    if(id !== "po") list("Queued", b.queue);
+    const done = document.createElement("div"); done.className = "lbl"; done.textContent = `Merged so far: ${b.done}` + (b.load >= 1 ? " · Full: new approvals wait" : ""); el.append(done);
+    return el; }));
+  const R = L.rewards || {table:[]}, wrap = document.createElement("div"); wrap.className = "rscroll";
+  const tbl = document.createElement("table"); tbl.className = "rtable";
+  tbl.innerHTML = "<thead><tr><th>#</th><th>Department</th><th>Points this month</th><th>All time</th><th>Approved</th><th>Merged</th><th>Wrong answers fixed</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  R.table.forEach((r, i) => { const tr = document.createElement("tr"); if(r.dept === R.leader) tr.className = "lead";
+    [i+1, nameOf(r.dept) + (r.dept === R.leader ? "  ★ improvement of the month" : ""), r.points, r.all_time, r.approved, r.merged, r.fixed].forEach((v, k) => {
+      const td = document.createElement("td"); td.textContent = v; if(k !== 1) td.className = "n"; tr.append(td); }); tb.append(tr); });
+  tbl.append(tb); wrap.append(tbl);
+  const rules = document.createElement("ul"); rules.className = "rules";
+  for(const t of ["Finder: 2 points when its finding is approved, 5 when the fix merges after passing the gate, plus 1 per wrong answer it fixed.",
+                  "Builder: 5 points for a fix that merges after passing first time (3 after a send-back), plus 1 per wrong answer fixed.",
+                  "Product owner: 1 point per merged fix, minus 3 for a fix that gets reverted (the builder loses 3 too).",
+                  "The leader's findings go first in Dev's queue. Points only come from gate results and git, never from an agent's own report."]){
+    const li = document.createElement("li"); li.textContent = t; rules.append(li); }
+  document.getElementById("p-rewards").replaceChildren(wrap, rules);
+  renderPivot();
+}
+
+/* ---------- product status pivot (tools/ops_pivot.py -> pivot/current) ---------- */
+const SAMPLE_PIVOT = {sample:true, runs:["20261001","20261008"], categories:{simple:"One plain fact", technical:"Specs, wiring, error codes, set-up", conversational:"Follow-ups, vague, several asks", commercial:"Price, ordering, stock"},
+  overall:{"20261001":{n:40,bot_pct:70,base_pct:89,right:17,wrong:2,declined:8}, "20261008":{n:40,bot_pct:76,base_pct:90,right:21,wrong:1,declined:5}},
+  blind:{category:{technical:{"20261001":{n:22,bot_pct:64,base_pct:90,right:8,wrong:2,declined:5},"20261008":{n:22,bot_pct:70,base_pct:91,right:10,wrong:1,declined:3}},
+    simple:{"20261001":{n:8,bot_pct:92,base_pct:92,right:7,wrong:0,declined:0},"20261008":{n:8,bot_pct:96,base_pct:92,right:7,wrong:0,declined:0}},
+    conversational:{"20261001":{n:9,bot_pct:63,base_pct:85,right:2,wrong:0,declined:3},"20261008":{n:9,bot_pct:70,base_pct:85,right:4,wrong:0,declined:2}},
+    commercial:{"20261008":{n:1,bot_pct:67,base_pct:67,right:0,wrong:0,declined:0}}}, type:{}, product:{}},
+  real:{"20261008":{simple:{answered:4,refused:1},technical:{answered:1},conversational:{clarify:1}}}, latest:{run:"20261008", cases:[]}};
+let pv = {dim:"category", metric:"score", open:null};
+const runLabel = r => { const d = new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8)); return d.toLocaleDateString(undefined, {day:"numeric", month:"short"}); };
+const TYPE_NAMES = {lookup:"Look up a fact", yes_no_documented:"Yes/no from the manual", table_condition:"A limit in a table", procedure_or_troubleshoot:"How-to and troubleshooting",
+  comparison:"Two products compared", followup:"Follow-up in a chat", multi_document:"Several asks in one message", absent_feature:"A feature it doesn't have",
+  phantom_or_offtopic:"Made-up product or off-topic", vague:"Too vague to answer"};
+const groupName = (dim, g) => dim === "type" ? (TYPE_NAMES[g] || g) : dim === "product" ? (g === "none" ? "No product chosen" : g) : g.charAt(0).toUpperCase() + g.slice(1);
+const mix = (tok, p) => `color-mix(in srgb, var(${tok}) ${Math.round(Math.max(0, Math.min(1, p))*50)}%, var(--surface))`;
+const METRICS = {
+  score: {val:a => a.bot_pct, fmt:v => v + "%", worstFirst:"asc", shade:v => mix("--seq", (100-v)/100), legend:"Share of the marks the bot earned (0-3 per question). Darker = more marks lost."},
+  gap: {val:a => a.base_pct == null ? null : Math.round((a.bot_pct - a.base_pct)*10)/10, fmt:v => (v > 0 ? "+" : "") + v, worstFirst:"asc",
+        shade:v => v < 0 ? mix("--div-neg", -v/30) : mix("--div-pos", v/30), legend:"Points ahead (+) or behind (−) an AI given the whole manual for the same questions. Orange = behind, blue = ahead."},
+  wrong: {val:a => a.wrong, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx : 0), legend:"Answers that stated something wrong. Darker = more."},
+  declined: {val:a => a.declined, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx : 0), legend:"Said \"not in the manual\" when the manual had the answer. Darker = more."},
+  n: {val:a => a.n, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx*.6 : 0), legend:"How many of the week's test questions fell in each group."}
+};
+const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
+const pvTip = document.getElementById("pvTip");
+function renderPivot(){
+  const P = live.pivot || SAMPLE_PIVOT, M = METRICS[pv.metric], runs = (P.runs || []).slice(-8), last = runs[runs.length-1], prev = runs[runs.length-2];
+  if(tab === "status"){ const chip = document.getElementById("ledgerChip"); chip.textContent = P.sample ? "Sample" : "Live"; chip.className = "chip " + (P.sample ? "sample" : "live"); }
+  document.getElementById("ledgerNote").hidden = tab === "status";
+  // tiles
+  const o = (P.overall || {})[last], op = prev && P.overall[prev];
+  const realLast = P.real && Object.keys(P.real).sort().pop(), realN = realLast ? Object.values(P.real[realLast]).reduce((t, c) => t + Object.values(c).reduce((a, b) => a + b, 0), 0) : 0;
+  const delta = (a, b, unit) => b == null ? "" : a === b ? "same as last run" : `${a > b ? "up" : "down"} ${Math.abs(Math.round((a-b)*10)/10)}${unit} on ${runLabel(prev)}`;
+  const tiles = !o ? [] : [
+    ["Bot score", o.bot_pct + "%", op ? delta(o.bot_pct, op.bot_pct, " pts") : `${o.n} questions, ${runLabel(last)}`],
+    ["AI given the whole manual", o.base_pct + "%", "same questions, for comparison"],
+    ["Fully right", `${o.right} of ${o.n}`, op ? delta(o.right, op.right, "") : ""],
+    ["Wrong answers", String(o.wrong), op ? delta(o.wrong, op.wrong, "") : "stated something false"],
+    ["Said \"not found\" wrongly", String(o.declined), op ? delta(o.declined, op.declined, "") : "the manual had it"],
+    ["Website questions", String(realN), realLast ? `week to ${runLabel(realLast)}` : "none logged yet"]];
+  document.getElementById("pvTiles").replaceChildren(...tiles.map(([k, v, d]) => { const t = document.createElement("div"); t.className = "tile";
+    t.innerHTML = '<div class="k"></div><div class="v"></div><div class="d"></div>'; t.children[0].textContent = k; t.children[1].textContent = v; t.children[2].textContent = d; return t; }));
+  document.getElementById("pvLegend").textContent = (P.sample ? "Sample figures, made up to show the layout; the real ones appear after Customer's first categorised run. " : "") + M.legend + " Worst first. Click a row to see its questions.";
+  for(const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.dim === pv.dim));
+  // pivot rows
+  const groups = Object.entries((P.blind || {})[pv.dim] || {});
+  const mx = Math.max(1, ...groups.flatMap(([, byRun]) => runs.map(r => byRun[r] ? M.val(byRun[r]) : 0)).filter(v => v != null));
+  const sortVal = byRun => { const a = byRun[last]; const v = a ? M.val(a) : null; return v == null ? (M.worstFirst === "asc" ? 1e9 : -1e9) : v; };
+  groups.sort((x, y) => M.worstFirst === "asc" ? sortVal(x[1]) - sortVal(y[1]) : sortVal(y[1]) - sortVal(x[1]));
+  const tbl = document.getElementById("pvTable"); tbl.replaceChildren();
+  const head = document.createElement("tr"), th0 = document.createElement("th"); th0.textContent = {category:"Category", type:"Question type", product:"Product"}[pv.dim]; head.append(th0);
+  for(const r of runs){ const th = document.createElement("th"); th.textContent = runLabel(r); head.append(th); }
+  const thn = document.createElement("th"); thn.textContent = "Questions"; head.append(thn); tbl.append(head);
+  if(!groups.length){ const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan = runs.length + 2; td.className = "g"; td.textContent = "No graded questions yet."; tr.append(td); tbl.append(tr); }
+  for(const [g, byRun] of groups){
+    const tr = document.createElement("tr"), tg = document.createElement("td"); tg.className = "g"; tg.tabIndex = 0;
+    tg.textContent = groupName(pv.dim, g);
+    if(pv.dim === "category" && P.categories && P.categories[g]){ const m = document.createElement("span"); m.className = "m"; m.textContent = P.categories[g]; tg.append(m); }
+    const toggle = () => { pv.open = pv.open === g ? null : g; renderPivot(); };
+    tg.addEventListener("click", toggle); tg.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); } });
+    tr.append(tg);
+    for(const r of runs){
+      const td = document.createElement("td"), a = byRun[r], v = a ? M.val(a) : null;
+      td.textContent = v == null ? "–" : M.fmt(v);
+      if(v != null){ td.style.background = M.shade(v, mx);
+        td.addEventListener("mouseenter", e => { pvTip.hidden = false; pvTip.textContent = `${groupName(pv.dim, g)}, ${runLabel(r)}: score ${a.bot_pct}%` + (a.base_pct != null ? ` (whole-manual AI ${a.base_pct}%)` : "") + `, ${a.n} questions, ${a.right} right, ${a.wrong} wrong, ${a.declined} said not found`; });
+        td.addEventListener("mousemove", e => { pvTip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; pvTip.style.top = (e.clientY + 14) + "px"; });
+        td.addEventListener("mouseleave", () => { pvTip.hidden = true; }); }
+      tr.append(td);
+    }
+    const tn = document.createElement("td"); tn.textContent = byRun[last] ? byRun[last].n : 0; tr.append(tn); tbl.append(tr);
+    if(pv.open === g){
+      const dr = document.createElement("tr"), dd = document.createElement("td"); dr.className = "drill"; dd.colSpan = runs.length + 2;
+      const cases = ((P.latest || {}).cases || []).filter(c => c[pv.dim] === g);
+      if(!cases.length){ dd.textContent = "The questions behind these figures appear once the live figures are in."; }
+      else { const ul = document.createElement("ul");
+        for(const c of cases.sort((x, y) => x.bot - y.bot)){ const li = document.createElement("li"), p = document.createElement("span"), q = document.createElement("span"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
+          p.className = "vpill " + cls; p.textContent = lab; q.textContent = `${c.q}  (${c.product}, ${c.bot}/3)`; li.append(p, q); ul.append(li); }
+        const cap = document.createElement("div"); cap.className = "lbl"; cap.textContent = `${runLabel(P.latest.run)}: the test questions in this group, weakest first`; dd.append(cap, ul); }
+      dr.append(dd); tbl.append(dr);
+    }
+  }
+  // real website questions
+  const rt = document.getElementById("pvReal"); rt.replaceChildren();
+  const OUT = [["answered","Answered"],["refused","Couldn't answer"],["clarify","Asked back"],["handoff","Handed to a person"]];
+  const rh = document.createElement("tr"); for(const t of ["Category", ...OUT.map(o => o[1]), "Total"]){ const th = document.createElement("th"); th.textContent = t; rh.append(th); } rt.append(rh);
+  const rows = realLast ? Object.entries(P.real[realLast]) : [];
+  if(!rows.length){ const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan = 6; td.className = "g"; td.textContent = "No website questions logged yet."; tr.append(td); rt.append(tr); }
+  const rmx = Math.max(1, ...rows.map(([, c]) => Math.max(...Object.values(c))));
+  for(const [cat, c] of rows.sort((x, y) => (y[1].refused || 0) - (x[1].refused || 0))){
+    const tr = document.createElement("tr"), tg = document.createElement("td"); tg.className = "g"; tg.textContent = groupName("category", cat); tr.append(tg);
+    let tot = 0;
+    for(const [k] of OUT){ const td = document.createElement("td"), v = c[k] || 0; tot += v; td.textContent = v || "–"; if(v && k !== "answered") td.style.background = mix("--seq", v/rmx); tr.append(td); }
+    const tt = document.createElement("td"); tt.textContent = tot; tr.append(tt); rt.append(tr);
+  }
+  document.getElementById("pvCats").textContent = "Categories are Customer's own: " + Object.entries(P.categories || {}).map(([k, v]) => `${k} (${v.toLowerCase()})`).join("; ") + ". Customer adds one when a question fits none.";
+}
+for(const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => { pv.dim = b.dataset.dim; pv.open = null; renderPivot(); });
+document.getElementById("pvMetric").addEventListener("change", e => { pv.metric = e.target.value; renderPivot(); });
+
+function select(id){ selected = id; renderDetail(); renderRoster(true); }
+const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked", off:"Off duty"};
+function renderRoster(force){
+  for(const d of DEPTS){
+    const w = worker(d.id), c = cards[d.id];
+    const label = STATE_LABEL[w.state] || w.state, cls = "state " + w.state;
+    if(c.state.className !== cls) c.state.className = cls;
+    if(c.state.textContent !== label) c.state.textContent = label;
+    if(c.task.textContent !== w.task) c.task.textContent = w.task;
+    const nowTxt = AG[d.id] && hired(d.id) ? "Now: " + activity(AG[d.id]) : "Empty desk";
+    if(c.now.textContent !== nowTxt) c.now.textContent = nowTxt;
+    if(force) c.el.setAttribute("aria-pressed", String(selected === d.id));
+  }
+}
+function flash(id){ const c = cards[id]; if(!c) return; c.el.classList.remove("ping"); void c.el.offsetWidth; c.el.classList.add("ping"); }
+
+function renderDetail(){
+  const d = D[selected], w = worker(d.id), el = document.getElementById("detail");
+  el.innerHTML = '<h2></h2><p class="role"></p><dl></dl>';
+  el.querySelector("h2").textContent = d.name; el.querySelector(".role").textContent = d.role;
+  const rows = [["Model", d.model], ["Runs", d.sched], ["Status", `${STATE_LABEL[w.state] || w.state}: ${w.task}`]];
+  if(AG[d.id] && hired(d.id)) rows.push(["Doing now", activity(AG[d.id])]);
+  if(w.last) rows.push(["Last result", w.last]);
+  if(CRON[d.id]) rows.push(["Next run", w.next || fmtWhen(nextRun(d.id))]);
+  if(mode === "live" && w.updated) rows.push(["Updated", new Date(w.updated).toLocaleString()]);
+  const dl = el.querySelector("dl");
+  for(const [k, v] of rows){ const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; if(k === "Doing now") dd.id = "doingNow"; dl.append(dt, dd); }
+}
+function renderTray(){
+  const items = view().waiting || [], ul = document.getElementById("tray"), c = document.getElementById("trayCount");
+  ul.replaceChildren(...items.map(it => { const li = document.createElement("li"), s = document.createElement("strong"), sp = document.createElement("span");
+    s.textContent = it.title || it.id; sp.textContent = it.why || ""; li.append(s, sp); return li; }));
+  c.textContent = items.length; c.classList.toggle("zero", !items.length);
+  document.getElementById("trayEmpty").hidden = items.length > 0;
+}
+function renderFeed(){
+  const items = view().events.slice(0, 20), ul = document.getElementById("feed");
+  ul.replaceChildren(...items.map(ev => {
+    const li = document.createElement("li"), t = document.createElement("time"), div = document.createElement("div"), route = document.createElement("span");
+    const at = new Date(ev.at); t.dateTime = at.toISOString(); t.textContent = fmtTime(at);
+    route.className = "route"; route.textContent = `${(D[ev.from] || {name: ev.from}).name} → ${(D[ev.to] || {name: ev.to}).name}`;
+    div.append(route, document.createTextNode(ev.text));
+    if(ev.sample){ const tg = document.createElement("span"); tg.className = "tagx"; tg.textContent = "sample"; div.append(tg); }
+    li.append(t, div); return li; }));
+  document.getElementById("feedEmpty").hidden = items.length > 0;
+}
+function renderWeek(){
+  const plan = [
+    ["Mon", [["01:00","Customer writes 40 new questions"],["after","Lab bot asks and grades them"],["after","Customer files findings"],["20:00","Dev, if work is approved"]]],
+    ["Tue", [["08:00","Product owner decides, then meets you with the report"],["day","You approve or decline"],["20:00","Dev builds approved work"]]],
+    ["Wed", [["20:00","Dev builds approved work"]]],
+    ["Thu", [["20:00","Dev builds approved work"]]],
+    ["Fri", [["08:00","Lab bot runs the gate; product owner judges it"],["day","You merge what passed"],["20:00","Dev"]]]
+  ];
+  const today = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()];
+  document.getElementById("days").replaceChildren(...plan.map(([day, slots]) => {
+    const div = document.createElement("div"); div.className = "day" + (day === today ? " today" : "");
+    const h = document.createElement("h3"); h.textContent = day; div.append(h);
+    for(const [t, txt] of slots){ const s = document.createElement("span"); s.className = "slot"; const b = document.createElement("b"); b.textContent = t; s.append(b, document.createTextNode(txt)); div.append(s); }
+    return div; }));
+}
+function renderMode(){
+  const chip = document.getElementById("modeChip"), btn = document.getElementById("modeBtn"), banner = document.getElementById("banner");
+  chip.className = "chip " + mode; chip.textContent = mode === "live" ? "Live" : "Sample week";
+  btn.hidden = !live.available; btn.textContent = mode === "live" ? "Watch a sample week" : "Show live office";
+  updateZones();
+  if(!live.loaded) banner.textContent = "Connecting to the office…";
+  else if(!live.available) banner.textContent = "Live status is not available in this view, so this is a sample week: made-up work showing how a week runs.";
+  else if(mode === "sample") banner.textContent = "Nobody is on shift right now, so this is a sample week: made-up work showing how a week runs. The live office takes over as soon as a run starts.";
+  else banner.textContent = "Live: everyone's status is real, written by their last scheduled run. Off-shift, they take their breaks around the building.";
+}
+function renderAll(){ renderMode(); renderRoster(true); renderDetail(); renderTray(); renderFeed(); renderBoards(); }
+function decideMode(){
+  const busy = Object.values(live.workers).some(w => w.state === "working" || w.state === "waiting");
+  const want = forced || (live.available && busy ? "live" : "sample");
+  if(want !== mode){ mode = want; AGENTS.forEach(a => { a.queue = []; a.brkUntil = 0; }); renderAll(); } else renderMode();
+}
+document.getElementById("modeBtn").addEventListener("click", () => { forced = mode === "live" ? "sample" : "live"; decideMode(); });
+
+/* ================= sample week (labelled as such on the page) ================= */
+const SAMPLE = [
+  {s:{customer:["working","Reading the manuals and writing 40 new customer questions"]}},
+  {s:{customer:["waiting","Waiting for the chatbot to answer all 40"], lab:["working","Asking the chatbot 40 questions"]}, p:["customer","lab","40 new questions"]},
+  {s:{lab:["working","Grading every answer against the manual"]}},
+  {s:{lab:["idle","Graded: 29 right, 8 partly right, 3 wrong"], customer:["working","Checking each miss against the manual"]}, p:["lab","customer","Graded answers"]},
+  {s:{customer:["idle","Filed 2 findings; 8 hidden questions locked away"], po:["working","Real fix, or a patch for one question?"]}, p:["customer","po","Comparisons use the wrong manual"]},
+  {s:{po:["idle","Approved 1, deferred 1, report written"], ceo:["waiting","1 decision needs your yes"]}, p:["po","ceo","Weekly report"], w:[{title:"Fix how comparisons pick each product's manual", why:"3 wrong answers this week came from it. No extra cost per answer."}]},
+  {s:{ceo:["idle","Approved the comparison fix"], dev:["working","Fixing how comparisons pick each manual"]}, p:["ceo","dev","Approved: comparison fix"], w:[]},
+  {s:{dev:["working","Running the tests, then the failing questions again"]}},
+  {s:{dev:["idle","Handed back for the check"], lab:["working","Asking the 8 hidden questions against the fix"]}, p:["dev","lab","Ready for the check"]},
+  {s:{lab:["idle","Hidden questions: 8 of 8 right, nothing new wrong"], po:["working","Reading the gate result"]}, p:["lab","po","Gate passed"]},
+  {s:{po:["idle","Ready to merge; report written"], ceo:["waiting","1 branch ready to merge"]}, p:["po","ceo","Ready to merge"], w:[{title:"Merge the comparison fix", why:"Passed the hidden questions. 3 wrong answers become right."}]},
+  {s:{ceo:["idle","Merged. Next week starts Monday 01:00"]}, w:[]},
+  {s:{}}, {s:{}}
+];
+function sampleStep(){
+  const i = sample.step % SAMPLE.length, st = SAMPLE[i];
+  if(i === 0){ sample.workers = {}; sample.waiting = []; }
+  for(const [id, [state, task]] of Object.entries(st.s)) sample.workers[id] = {state, task, last: state === "idle" ? task : (sample.workers[id] || {}).last};
+  if(st.w) sample.waiting = st.w;
+  if(st.p){ sample.events.unshift({at: new Date().toISOString(), from: st.p[0], to: st.p[1], text: st.p[2], sample: true}); sample.events.length = Math.min(sample.events.length, 20); }
+  sample.step++;
+  if(mode === "sample"){ renderRoster(); renderDetail(); renderTray(); renderFeed(); if(st.p) trigger(st.p[0], st.p[1], st.p[2]); }
+}
+sampleStep();
+setInterval(sampleStep, 9000);
+
+/* ================= live data ================= */
+(async () => {
+  let db = null;
+  try { db = window.claude && await window.claude.use("db"); } catch(e) { db = null; }
+  live.loaded = true;
+  if(!db){ renderMode(); return; }
+  live.available = true;
+  let firstEvents = true;
+  try {
+    db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
+    db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
+      live.events = s.docs.map(d => d.data());
+      if(!firstEvents && mode === "live") for(const ch of s.docChanges()) if(ch.type === "added"){ const ev = ch.doc.data(); trigger(ev.from, ev.to, ev.text); }
+      firstEvents = false; if(mode === "live") renderFeed();
+    }, () => {});
+    db.doc("board/ceo").onSnapshot(d => { live.waiting = (d.exists && d.data().waiting) || []; if(mode === "live") renderTray(); }, () => {});
+    db.doc("ledger/current").onSnapshot(d => { live.ledger = d.exists ? d.data() : null; renderBoards(); }, () => {});
+    db.doc("pivot/current").onSnapshot(d => { live.pivot = d.exists ? d.data() : null; renderPivot(); }, () => {});
+  } catch(e) { live.available = false; }
+  decideMode();
+})();
+setTimeout(() => { if(!live.loaded){ live.loaded = true; renderMode(); } }, 10500);
+
+/* ================= drawing ================= */
+const cv = document.getElementById("floor"), c = cv.getContext("2d"); c.imageSmoothingEnabled = false;
+const px = (x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
+const hash = n => { const s = Math.sin(n*127.1 + 311.7)*43758.5453; return s - Math.floor(s); };
+function light(){ const h = new Date().getHours() + new Date().getMinutes()/60; return h >= 7.5 && h < 17.5 ? "day" : (h >= 6.5 && h < 7.5) || (h >= 17.5 && h < 19.5) ? "dusk" : "night"; }
+
+/* floor + walls, drawn once */
+const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
+(function paintBg(){
+  const g = bg.getContext("2d"), P = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+  for(let y = 0; y < MH; y++) for(let x = 0; x < MW; x++){
+    const X = x*T, Y = y*T, z = zone(x, y), k = (x + y) % 2;
+    if(z === "open"){ P(X, Y, T, T, k ? "#8FA3AE" : "#899DA8"); P(X, Y, T, 1, "#83969F"); }
+    else if(z === "ceo"){ P(X, Y, T, T, "#B5835A"); P(X, Y + (x % 2 ? 3 : 7), T, 1, "#9C6C47"); }
+    else if(z === "meet"){ P(X, Y, T, T, k ? "#5C6B88" : "#586683"); }
+    else if(z === "server"){ P(X, Y, T, T, "#7E878F"); P(X, Y, T, 1, "#6C757D"); P(X, Y, 1, T, "#6C757D"); }
+    else if(z === "kitchen"){ P(X, Y, T, T, k ? "#E9E5DA" : "#D3CEC2"); }
+    else if(z === "lounge"){ P(X, Y, T, T, "#A8734B"); P(X, Y + ((x*3) % 8), T, 1, "#92603C"); }
+    else if(z === "pave"){ P(X, Y, T, T, "#BEB9AE"); P(X, Y, T, 1, "#A9A498"); P(X + (y % 2 ? 4 : 0), Y, 1, T, "#A9A498"); }
+    else { P(X, Y, T, T, k ? "#6FA35A" : "#6A9C55"); if(hash(x*7+y*13) > .7) P(X + 2, Y + 3, 1, 2, "#58884A"); }
+  }
+  // rugs
+  P(38*T+2, 15*T+2, 4*T-4, 3*T, "#B4553F"); P(38*T+4, 15*T+4, 4*T-8, 3*T-4, "#C66A50");
+  P(4*T, 6*T+4, 4*T, 3*T-4, "#8E3B3B"); P(4*T+2, 6*T+6, 4*T-4, 3*T-8, "#A44A47");
+  P(20*T, 14*T, 10*T, 8*T, "#7E93A0"); P(20*T+2, 14*T+2, 10*T-4, 8*T-4, "#8599A6");
+  P(20*T, 25*T, 2*T, T, "#6E5A44");                       // door mat
+  // walls
+  for(let y = 0; y < MH; y++) for(let x = 0; x < MW; x++){
+    const k = WALL[y][x], X = x*T, Y = y*T; if(!k) continue;
+    if(k === "face"){ P(X, Y, T, T, y === 0 ? "#3E4852" : "#D8E1DB"); if(y === 1) P(X, Y+6, T, 2, "#AFC0B6"); if(y === 0) P(X, Y+6, T, 2, "#55606B"); }
+    else if(k === "outer" || k === "solid"){ P(X, Y, T, T, "#4A5561"); P(X, Y, T, 2, "#5F6B78"); }
+    else if(k === "glass"){ P(X, Y, T, T, "rgba(190,226,240,.55)"); const v = WALL[y-1] && WALL[y-1][x] === "glass" || WALL[y+1] && WALL[y+1][x] === "glass";
+      if(v && !(WALL[y][x-1] === "glass" || WALL[y][x+1] === "glass")){ P(X+3, Y, 2, T, "#7FA6B6"); } else { P(X, Y+3, T, 2, "#7FA6B6"); } }
+    else if(k === "low"){ P(X, Y, T, T, "#7C5A3F"); P(X, Y, T, 2, "#A07A58"); }
+  }
+  P(20*T, 26*T, 2*T, T, "#8C7A62"); P(20*T, 26*T+3, 2*T, 1, "#6E5E4A");   // terrace door
+})();
+
+function drawWindows(t){
+  const L = light(), sky = L === "day" ? ["#6FB9E6","#BFE3F6"] : L === "dusk" ? ["#3A3A70","#EE9466"] : ["#0A132C","#1B2850"];
+  const spans = [[4,9],[13,14],[38,47]];
+  for(const [x0, x1] of spans) for(let x = x0; x <= x1; x += 2){
+    const X = x*T + 2, Y = 3, w = 2*T - 4, h = 9;
+    const g = c.createLinearGradient(0, Y, 0, Y+h); g.addColorStop(0, sky[0]); g.addColorStop(1, sky[1]); c.fillStyle = g; c.fillRect(X, Y, w, h);
+    if(L === "day"){ const cx = X + ((t*2 + x*9) % (w+8)) - 4; px(cx, Y+3, 5, 1, "#FFFFFF"); }
+    else if(L === "night" && hash(x) > .4) px(X + 3 + Math.floor(hash(x+1)*8), Y + 2, 1, 1, "#FFF3CF");
+    px(X + w/2, Y, 1, h, "#55606B"); px(X-1, Y-1, w+2, 1, "#55606B"); px(X-1, Y+h, w+2, 1, "#55606B");
+  }
+  // meeting room whiteboard and screen, lab pipes, CEO certificate
+  px(15*T, 2, 6*T, 12, "#F4F6F7"); px(15*T, 2, 6*T, 1, "#9AA5AE");
+  for(let i = 0; i < 6; i++) px(15*T + 4 + i*7, 5 + (i%2)*3, 5, 1, ["#2F6FD0","#D9483B","#23895A"][i%3]);
+  px(22*T, 3, 3*T, 10, "#1D2329"); px(22*T+2, 5, 3*T-4, 6, Math.floor(t*0.5) % 2 ? "#2F6FD0" : "#3B7DE0");
+  px(27*T, 4, 9*T, 2, "#6B747C"); px(27*T, 9, 9*T, 2, "#6B747C"); for(let x = 28; x < 36; x += 3) px(x*T, 3, 2, 10, "#59626A");
+  px(1*T + 4, 4, 10, 8, "#F4EFD9"); px(1*T + 5, 5, 8, 6, "#D9C27A");
+}
+
+const SCREEN = {
+  customer: (X, Y, w, h, t, on) => { for(let i = 0; i < 3; i++){ const r = i % 2, bw = 2 + Math.floor(hash(i + (on ? Math.floor(t*1.5) : 0))*3); px(r ? X+w-bw-1 : X+1, Y+1+i*2 - (on ? 0 : 0), bw, 1, r ? "#E9A92B" : "#AEBBC4"); } },
+  dev: (X, Y, w, h, t, on) => { const off = on ? Math.floor(t*5) : 0; for(let i = 0; i < 3; i++) px(X+1, Y+1+i*2, 1 + Math.floor(hash(i+off)*(w-2)), 1, ["#6FD3A8","#7FB2FF","#F2B33D"][(i+off)%3]); },
+  po: (X, Y, w, h, t, on) => { const k = on ? Math.floor(t*1.2) % 3 : 0; for(let i = 0; i < 3; i++) px(X+1+i*2, Y+1+((i+k)%2), 1, 2, ["#F7D55C","#8ED1B5","#F49C8A"][i]); },
+  audit: (X, Y, w, h, t, on) => { for(let i = 0; i < 3; i++){ const v = 1 + Math.floor(hash(i + (on ? Math.floor(t) : 0))*3); px(X+1+i*2, Y+h-1-v, 1, v, "#6FD3A8"); } },
+  security: (X, Y, w, h, t, on) => { px(X+2, Y+2, 3, 2, on && Math.floor(t*2)%2 ? "#5BE39A" : "#F2B33D"); px(X+3, Y+1, 1, 1, "#C8D3DA"); },
+  rnd: (X, Y, w, h, t, on) => { for(let i = 0; i < 4; i++) px(X+1 + Math.floor(hash(i*3 + (on ? Math.floor(t*2) : 0))*5), Y+1 + Math.floor(hash(i*7)*3), 1, 1, ["#7FB2FF","#F49C8A","#6FD3A8","#F2B33D"][i]); },
+  marketing: (X, Y, w, h, t, on) => { for(let i = 0; i < 3; i++) px(X+1+i*2, Y+1, 2, 3, ["#E58A2E","#2F6FD0","#F7D55C"][(i + (on ? Math.floor(t) : 0)) % 3]); }
+};
+const DRAW = {
+  desk(o, t){
+    const X = o.x*T, Y = o.y*T, w = o.w*T;
+    px(X, Y+1, w, 6, "#A06B47"); px(X, Y+6, w, 2, "#7E5236"); px(X, Y+1, w, 1, "#B8805A");
+    if(o.screen === "front" || (o.screen === "boxes" && hired(o.owner))){
+      const st = worker(o.owner).state, on = st === "working";
+      px(X+4, Y-5, 9, 7, "#262D34"); px(X+5, Y-4, 7, 5, on ? "#0E1A21" : "#1A2329"); px(X+8, Y+2, 2, 1, "#262D34");
+      if(on) SCREEN[o.owner](X+5, Y-4, 7, 5, t, true); else if(st === "waiting" || st === "blocked") SCREEN[o.owner](X+5, Y-4, 7, 5, t, false);
+      else px(X+5 + Math.floor((t*2) % 6), Y-2, 1, 1, "#3B7DE0");
+      px(X+2, Y+3, 4, 2, "#D8DDE1");
+    } else if(o.screen === "off"){
+      px(X+4, Y-4, 9, 6, "#262D34"); px(X+5, Y-3, 7, 4, "#1A2329"); px(X+10, Y+2, 3, 2, "#F4F4F4");
+    } else if(o.screen === "back"){
+      px(X+4, Y+1, 9, 3, "#3A424C"); px(X+5, Y+1, 7, 1, "#4A545E");
+      if(o.tray){ px(X+20, Y+2, 7, 3, "#2B3138"); const n = Math.min((view().waiting || []).length, 3); for(let i = 0; i < n; i++) px(X+21, Y+2-i, 5, 1, "#FBFBF7"); if(n && Math.floor(t*2)%2) px(X+28, Y+2, 2, 2, "#E5483C"); }
+    } else if(o.screen === "boxes"){
+      px(X+1, Y-4, 7, 6, "#C59A62"); px(X+1, Y-4, 7, 1, "#A97F4C"); px(X+4, Y-4, 1, 6, "#E3C89A");
+      px(X+9, Y-2, 6, 4, "#BF935B"); px(X+11, Y-2, 1, 4, "#E3C89A");
+      px(X+3, Y-11, 11, 6, "#E9A92B"); px(X+8, Y-5, 1, 2, "#3A2A05"); for(let i = 0; i < 3; i++) px(X+4+i*3, Y-9, 2, 2, "#3A2A05");
+    }
+  },
+  chair(o){ const X = o.x*T, Y = o.y*T;
+    if(o.face === "down"){ px(X+1, Y, 6, 3, "#2B3138"); px(X+1, Y+3, 6, 4, "#3A424C"); }
+    else { px(X+1, Y+2, 6, 4, "#3A424C"); px(X+1, Y+5, 6, 3, "#2B3138"); px(X+3, Y+8, 2, 0, "#000"); } },
+  sofa(o){ const X = o.x*T, Y = o.y*T, w = o.w*T;
+    if(o.face === "down"){ px(X, Y-2, w, 4, "#4D6B8A"); px(X, Y+2, w, 5, "#5D7FA2"); px(X-1, Y-1, 2, 8, "#4D6B8A"); px(X+w-1, Y-1, 2, 8, "#4D6B8A"); }
+    else { px(X, Y+1, w, 4, "#B9693F"); px(X, Y+4, w, 4, "#9E5733"); px(X-1, Y, 2, 8, "#9E5733"); px(X+w-1, Y, 2, 8, "#9E5733"); } },
+  shelf(o){ const X = o.x*T, Y = o.y*T; px(X, Y-6, o.w*T, 13, "#6E4A30"); for(let r = 0; r < 3; r++) for(let i = 0; i < 9; i++) px(X+1+i*2.5, Y-5+r*4, 2, 3, ["#C8433A","#2F6FD0","#E9A92B","#23895A","#EDEDED"][(i+r)%5]); },
+  plant(o, t){ const X = o.x*T, Y = o.y*T, s = Math.round(Math.sin(t*1.2 + o.x)*0.6);
+    px(X+2, Y+3, 5, 5, "#B5653E"); px(X+1, Y+3, 7, 1, "#9C5434");
+    px(X+3+s, Y-4, 3, 7, "#2F7247"); px(X+1, Y-1, 3, 3, "#3F8F5A"); px(X+5+s, Y-2, 3, 3, "#3F8F5A"); px(X+3, Y-6, 2, 3, "#3F8F5A"); },
+  mtable(o){ const X = o.x*T, Y = o.y*T; px(X, Y+2, o.w*T, 2*T-3, "#7A5136"); px(X+1, Y+3, o.w*T-2, 2*T-6, "#93653F");
+    for(let i = 0; i < 4; i++) px(X + 10 + i*16, Y+7, 4, 3, "#F4F4F4"); },
+  racks(o, t){
+    const X = o.x*T, Y = o.y*T, on = worker("lab").state === "working";
+    for(let k = 0; k < o.w; k++){
+      px(X + k*T, Y-6, T-1, 13, "#2A3138"); px(X + k*T, Y-6, T-1, 1, "#4A545E");
+      for(let u = 0; u < 4; u++) for(let l = 0; l < 2; l++){
+        const lit = on ? hash(k*13 + u*5 + l + Math.floor(t*10 + o.y)) > .45 : (Math.floor(t + k + u + l + o.y) % 5 === 0);
+        px(X + k*T + 2 + l*3, Y-4 + u*3, 2, 1, lit ? (l ? "#F2B33D" : "#5BE39A") : "#33403A");
+      }
+    } },
+  terminal(o, t){ const X = o.x*T, Y = o.y*T, on = worker("lab").state === "working";
+    px(X, Y+1, 2*T, 6, "#59636E"); px(X+3, Y-5, 10, 7, "#20272E"); px(X+4, Y-4, 8, 5, "#0E1A21");
+    px(X+4, Y-1, on ? 1 + Math.floor((t*0.25 % 1)*8) : 8, 1, on ? "#5BE39A" : "#7FB2FF"); px(X+5, Y-3, 4, 1, "#7FB2FF"); },
+  dock(o, t){ const X = o.x*T, Y = o.y*T; px(X, Y+5, T, 3, "#3A424C"); px(X+2, Y+5, 4, 1, Math.floor(t*2)%2 ? "#5BE39A" : "#2B6B4A"); },
+  counter(o, t){ const X = o.x*T, Y = o.y*T, w = o.w*T;
+    px(X, Y-4, w, 12, "#E6E8EA"); px(X, Y-4, w, 2, "#C9CED3"); px(X, Y+6, w, 2, "#AEB6BD");
+    px(X+2*T, Y-8, 6, 9, "#2B3138"); px(X+2*T+1, Y-6, 4, 2, "#C8433A"); px(X+2*T+2, Y-1, 2, 2, "#F4F4F4");
+    px(X+4*T, Y-5, 5, 6, "#C9CED3"); px(X+7*T, Y-2, 10, 5, "#B3BCC4"); px(X+7*T+4, Y-6, 2, 4, "#8D979F");
+    px(X+9*T+2, Y-4, 7, 5, "#D9DDE0"); px(X+9*T+3, Y-6, 2, 2, "#C59A62"); },
+  fridge(o){ const X = o.x*T, Y = o.y*T; px(X, Y-6, 2*T, 2*T+5, "#DADFE3"); px(X, Y-6, 2*T, 1, "#F0F2F4"); px(X+2, Y+2, 2*T-4, 1, "#AEB6BD"); px(X+2*T-3, Y-3, 1, 4, "#8D979F"); px(X+2*T-3, Y+4, 1, 5, "#8D979F"); },
+  vending(o, t){ const X = o.x*T, Y = o.y*T; px(X, Y-6, T, 2*T+5, "#C8433A"); px(X+1, Y-4, 5, 10, "#1D2329");
+    for(let r = 0; r < 4; r++) for(let i = 0; i < 2; i++) px(X+2+i*2, Y-3+r*2, 1, 1, ["#F2C14E","#2F6FD0","#6FD3A8","#F49C8A"][(r+i)%4]); px(X+2, Y+8, 3, 1, "#111"); },
+  ktable(o){ const X = o.x*T, Y = o.y*T; px(X+1, Y+1, 2*T-2, 2*T-4, "#D4B48C"); px(X+1, Y+2*T-4, 2*T-2, 2, "#B39470"); px(X+5, Y+5, 3, 3, "#F4F4F4"); },
+  cooler(o, t){ const X = o.x*T, Y = o.y*T; px(X+1, Y-2, 6, 9, "#E6E8EA"); px(X+2, Y-8, 4, 6, "#9FD3EE"); px(X+2, Y-8, 4, 1, "#C6E8F7"); px(X+3, Y+2, 2, 1, "#2F6FD0"); },
+  tv(o, t){ const X = o.x*T, Y = o.y*T; px(X+2, Y-6, o.w*T-4, 11, "#151A1F");
+    const k = Math.floor(t*1.3); px(X+3, Y-5, o.w*T-6, 9, ["#2F6FD0","#23895A","#C8433A","#7B4FB8"][k % 4]); px(X+6 + (k*5) % 14, Y-3, 5, 3, "#F4F4F4"); },
+  pool(o, t){ const X = o.x*T, Y = o.y*T; px(X, Y, 5*T, 3*T, "#6B4226"); px(X+2, Y+2, 5*T-4, 3*T-4, "#2C8A57");
+    for(const [dx, dy] of [[2,2],[19,2],[37,2],[2,21],[19,21],[37,21]]) px(X+dx, Y+dy, 2, 2, "#111");
+    for(const b of POOL.balls) px(X + 3 + b.x, Y + 3 + b.y, 2, 2, b.col); },
+  arcade(o, t){ const X = o.x*T, Y = o.y*T; px(X, Y-8, T, 15, "#2A2140"); px(X+1, Y-7, 6, 5, "#0B0B18");
+    px(X+2 + Math.floor(t*4) % 4, Y-5, 1, 1, "#F2C14E"); px(X+1, Y-7, 6, 1, "#E5487C"); px(X+2, Y, 1, 1, "#C8433A"); px(X+4, Y, 1, 1, "#2F6FD0"); },
+  foos(o, t){ const X = o.x*T, Y = o.y*T; px(X, Y, 2*T, T, "#6B4226"); px(X+1, Y+1, 2*T-2, T-2, "#3FA36A");
+    for(let i = 0; i < 4; i++){ px(X+2+i*4, Y-1, 1, T+2, "#B3BCC4"); px(X+2+i*4, Y+2 + Math.round(Math.sin(t*6+i)*1), 1, 2, i%2 ? "#C8433A" : "#2F6FD0"); }
+    px(X+7 + Math.round(Math.sin(t*3)*5), Y+3, 1, 1, "#F4F4F4"); },
+  beanbag(o){ const X = o.x*T, Y = o.y*T; px(X, Y+2, T, 6, o.color); px(X+1, Y+1, T-2, 1, o.color); px(X+1, Y+6, T-2, 2, "rgba(0,0,0,.18)"); },
+  planboard(o, t){ const X = o.x*T, Y = o.y*T, w = o.w*T;
+    px(X, Y-8, w, 13, "#F4F6F7"); px(X, Y-8, w, 1, "#9AA5AE"); px(X+3, Y+5, 1, 3, "#59636E"); px(X+w-4, Y+5, 1, 3, "#59636E");
+    for(let k = 1; k < 3; k++) px(X + Math.floor(w*k/3), Y-6, 1, 10, "#AEBBC4");
+    [[0,0],[0,1],[1,0],[2,0],[2,1],[2,2],[1,2]].forEach(([col, row], i) => px(X+3+col*Math.floor(w/3)+(i%2)*6, Y-6+row*3, 5, 2, ["#F7D55C","#8ED1B5","#F49C8A"][i%3]));
+    if(AG.po.spot === SP.board && AG.po.arrived){ const p = (t*0.4) % 1; px(X+3 + p*(w-10), Y-5, 5, 2, "#7FB2FF"); } },
+  safe(o, t){ const X = o.x*T, Y = o.y*T; px(X, Y-3, T, 10, "#4C5761"); px(X+1, Y-2, T-2, 8, "#5F6B76"); px(X+3, Y+1, 2, 2, "#2A3138"); px(X+3 + Math.round(Math.cos(t)*1), Y+1, 1, 1, "#E9A92B"); },
+  printer(o, t){ const X = o.x*T, Y = o.y*T; px(X+1, Y-2, 2*T-2, 9, "#D8DDE1"); px(X+1, Y-2, 2*T-2, 2, "#AEB7BE"); px(X+4, Y+2, 8, 1, "#7C8A94"); px(X+3, Y-1, 1, 1, Math.floor(t*2)%2 ? "#5BE39A" : "#2B6B4A"); },
+  booth(o){ const X = o.x*T, Y = o.y*T; px(X, Y, 3*T, 3*T, "rgba(190,226,240,.45)"); px(X, Y, 3*T, 2, "#7FA6B6"); px(X, Y, 2, 3*T, "#7FA6B6"); px(X+3*T-2, Y, 2, 3*T, "#7FA6B6"); px(X+8, Y+3*T-2, 3*T-8, 2, "#7FA6B6"); px(X+8, Y+8, 8, 4, "#A06B47"); px(X+10, Y+6, 4, 2, "#262D34"); },
+  reception(o){ const X = o.x*T, Y = o.y*T, w = o.w*T; px(X, Y-1, w, 9, "#3D4A57"); px(X, Y-1, w, 2, "#E9A92B"); px(X+w-10, Y-5, 6, 4, "#262D34"); px(X+4, Y+3, 18, 1, "#2E3A44"); },
+  bench(o){ const X = o.x*T, Y = o.y*T; px(X, Y+2, o.w*T, 3, "#8C6A4A"); px(X, Y+5, o.w*T, 1, "#6E5236"); px(X+2, Y+6, 1, 2, "#3A424C"); px(X+o.w*T-3, Y+6, 1, 2, "#3A424C"); },
+  ashtray(o){ const X = o.x*T, Y = o.y*T; px(X+2, Y-1, 4, 8, "#59636E"); px(X+2, Y-1, 4, 1, "#8D979F"); px(X+3, Y-2, 2, 1, "#2A3138"); },
+  shelter(o, t){ const X = o.x*T, Y = o.y*T, w = o.w*T;
+    px(X, Y-6, 2, 3*T+6, "#3A424C"); px(X+w-2, Y-6, 2, 3*T+6, "#3A424C");
+    c.globalAlpha = .35; px(X-2, Y-8, w+4, 10, "#9FC7D8"); c.globalAlpha = 1; px(X-2, Y-8, w+4, 1, "#3A424C"); px(X-2, Y+2, w+4, 1, "#3A424C");
+    px(X+w/2-10, Y-7, 20, 5, "#C8433A"); for(let i = 0; i < 4; i++) px(X+w/2-8+i*5, Y-6, 3, 3, "#F4F4F4"); },
+  tree(o, t){ const X = o.x*T, Y = o.y*T, s = Math.round(Math.sin(t*0.8 + o.x)*0.7);
+    px(X+6, Y+6, 4, 10, "#6B4226"); c.globalAlpha = .2; px(X, Y+13, 16, 3, "#000"); c.globalAlpha = 1;
+    px(X+1+s, Y-6, 14, 12, "#2F7247"); px(X+3+s, Y-9, 10, 4, "#3F8F5A"); px(X+s, Y-2, 4, 6, "#3F8F5A"); px(X+11+s, Y-3, 5, 6, "#28643E"); },
+  picnic(o){ const X = o.x*T, Y = o.y*T; px(X, Y+1, 2*T, 6, "#A97F4C"); px(X, Y+1, 2*T, 1, "#C49A64"); px(X+2, Y+7, 1, 1, "#6B4226"); px(X+13, Y+7, 1, 1, "#6B4226"); },
+  bikes(o){ const X = o.x*T, Y = o.y*T; for(let i = 0; i < 3; i++){ px(X+i*8+1, Y+1, 6, 6, "#2F6FD0"); px(X+i*8+2, Y+2, 4, 4, "#BEB9AE"); px(X+i*8, Y+4, 8, 1, "#3A424C"); } },
+  lamp(o, t){ const X = o.x*T, Y = o.y*T; px(X+3, Y-10, 2, 17, "#3A424C"); px(X+1, Y-12, 6, 3, "#59636E"); if(light() !== "day") px(X+2, Y-9, 4, 1, "#FFE6A3"); }
+};
+
+/* pool table physics */
+const POOL = {w:5*T-6, h:3*T-6, balls:[], next:0};
+["#FFFFFF","#F2C14E","#2F6FD0","#D9483B","#7B4FB8","#E58A2E","#2E9E6A","#1B1B1B"].forEach((col, i) =>
+  POOL.balls.push({col, x: i ? 22 + (i%3)*3 : 8, y: i ? 6 + Math.floor(i/3)*3 + (i%2) : 8, vx:0, vy:0}));
+function poolStep(dt){
+  const players = [SP.poolA, SP.poolB].filter(s => s.occ && AG[s.occ].arrived && AG[s.occ].spot === s);
+  if(players.length && now > POOL.next){
+    const cb = POOL.balls[0], tg = POOL.balls[1 + Math.floor(Math.random()*7)];
+    const dx = tg.x - cb.x, dy = tg.y - cb.y, d = Math.hypot(dx, dy) || 1; cb.vx = dx/d*45; cb.vy = dy/d*45; POOL.next = now + rnd(3, 5); POOL.strike = now;
+  }
+  for(const b of POOL.balls){
+    b.x += b.vx*dt; b.y += b.vy*dt; const f = Math.pow(.4, dt); b.vx *= f; b.vy *= f;
+    if(b.x < 0){ b.x = 0; b.vx = -b.vx; } if(b.x > POOL.w-2){ b.x = POOL.w-2; b.vx = -b.vx; }
+    if(b.y < 0){ b.y = 0; b.vy = -b.vy; } if(b.y > POOL.h-2){ b.y = POOL.h-2; b.vy = -b.vy; }
+  }
+  for(let i = 0; i < 8; i++) for(let j = i+1; j < 8; j++){
+    const a = POOL.balls[i], b = POOL.balls[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+    if(d < 2 && d > 0){ [a.vx, b.vx] = [b.vx, a.vx]; [a.vy, b.vy] = [b.vy, a.vy]; const k = (2 - d)/2; a.x -= dx/d*k; a.y -= dy/d*k; b.x += dx/d*k; b.y += dy/d*k; }
+  }
+}
+
+/* particles: smoke and steam */
+const PARTS = [];
+function puff(x, y, col, n = 1){ for(let i = 0; i < n; i++) PARTS.push({x: x + rnd(-1,1), y, vy: -rnd(4,7), vx: rnd(-1.5,1.5), life: 0, max: rnd(1.4, 2.4), col}); }
+function partsStep(dt){
+  for(const a of AGENTS){
+    if(!a.arrived || !a.spot || a.robot) continue;
+    const X = a.x*T + T/2, Y = a.y*T + T - 14;
+    if(a.spot.act === "smoke" && hash(Math.floor(now*3) + a.seed) > .8 && (now*3 % 1) < dt*3) puff(X + 3, Y + 4, "#D6DADD", 2);
+    if(a.spot.act === "coffee" && (now*4 % 1) < dt*4) puff(X + 3, Y + 7, "#F4F4F4");
+  }
+  for(let i = PARTS.length - 1; i >= 0; i--){ const p = PARTS[i]; p.life += dt; p.x += p.vx*dt; p.y += p.vy*dt; if(p.life > p.max) PARTS.splice(i, 1); }
+}
+function drawParts(){ for(const p of PARTS){ c.globalAlpha = Math.max(0, .7*(1 - p.life/p.max)); px(p.x, p.y, p.life > .6 ? 2 : 1, p.life > .6 ? 2 : 1, p.col); } c.globalAlpha = 1; }
+
+/* people and the robot */
+function drawPerson(a, t){
+  const L = a.look, skin = SKIN[L.skin], X = Math.round(a.x*T + T/2), Y = Math.round(a.y*T + T - 1);
+  const f = a.face, sit = a.sitting && !a.moving, stp = a.moving ? Math.floor(t*9 + a.seed) % 2 : 0;
+  const top = Y - 13 + (sit ? 3 : 0) - (a.moving && stp ? 1 : 0);
+  const act = a.arrived && a.spot ? a.spot.act : "";
+  const st = worker(a.id).state, atDesk = a.arrived && a.spot === a.desk;
+  if(!sit){ c.globalAlpha = .22; px(X-3, Y, 7, 1, "#000"); c.globalAlpha = 1; }
+  if(selected === a.id){ px(X-4, Y+1, 9, 1, "#E9A92B"); px(X-5, Y, 1, 1, "#E9A92B"); px(X+5, Y, 1, 1, "#E9A92B"); }
+  if(!sit){ px(X-2, top+11, 2, 3 - stp, L.pants); px(X+1, top+11, 2, 2 + stp, L.pants); px(X-2, top+13 - stp, 2, 1, "#1B1B1B"); px(X+1, top+12 + stp, 2, 1, "#1B1B1B"); }
+  px(X-3, top+6, 6, 5, L.shirt);
+  if(f === "down"){
+    if(L.tie){ px(X-1, top+6, 3, 1, "#F2F2F2"); px(X, top+7, 1, 3, "#E0A526"); }
+    if(L.blazer){ px(X-1, top+6, 2, 4, "#EDEDED"); }
+    if(L.hood){ px(X-1, top+7, 1, 2, "#E6EEF0"); px(X+1, top+7, 1, 2, "#E6EEF0"); }
+  }
+  // arms
+  const sw = a.moving ? (stp ? 1 : -1) : 0, typing = atDesk && st === "working";
+  const handUp = (act === "coffee" || act === "snack" || act === "cooler" || act === "smoke") && ((now + a.seed) % 4) < 1.4;
+  const ph = Math.floor(t*10 + a.seed) % 2;
+  if(f === "left" || f === "right"){
+    const ax = f === "left" ? X-1 : X;
+    if(act === "pool" || act === "foos" || act === "arcade"){ px(f === "left" ? X-4 : X+2, top+7, 3, 1, L.shirt); px(f === "left" ? X-5 : X+4, top+7, 1, 1, skin); }
+    else { px(ax, top+7 + sw, 1, 3, L.shirt); px(ax, top+10 + sw, 1, 1, skin); }
+  } else {
+    if(typing && f === "up"){ px(X-4, top+5 + ph, 1, 3, L.shirt); px(X+3, top+6 - ph, 1, 3, L.shirt); }
+    else if(handUp){ px(X-4, top+6, 1, 4, L.shirt); px(X-4, top+10, 1, 1, skin); px(X+3, top+4, 1, 3, L.shirt); px(X+3, top+3, 1, 1, skin);
+      if(act === "smoke"){ px(X+3, top+2, 2, 1, "#F4F4F4"); px(X+5, top+2, 1, 1, "#FF8A3D"); } else px(X+3, top+1, 2, 2, "#F4F4F4"); }
+    else { px(X-4, top+6 - sw, 1, 4, L.shirt); px(X+3, top+6 + sw, 1, 4, L.shirt); px(X-4, top+10 - sw, 1, 1, skin); px(X+3, top+10 + sw, 1, 1, skin);
+      if(act === "coffee" || act === "cooler") px(X+3, top+9, 2, 2, "#F4F4F4"); }
+  }
+  // head
+  px(X-3, top, 6, 6, skin);
+  const hair = L.hair, lg = L.long ? 4 : 2;
+  const blink = ((t*1000 + a.seed*937) % 4300) < 140;
+  if(f === "down"){ px(X-3, top, 6, 2, hair); px(X-3, top+2, 1, lg, hair); px(X+2, top+2, 1, lg, hair);
+    if(!blink){ px(X-2, top+3, 1, 1, "#161616"); px(X+1, top+3, 1, 1, "#161616"); } px(X-1, top+5, 2, 1, "#B0705C"); }
+  else if(f === "up"){ px(X-3, top, 6, 5, hair); if(L.long) px(X-3, top+5, 6, 2, hair); }
+  else if(f === "left"){ px(X-3, top, 6, 2, hair); px(X, top+2, 3, L.long ? 5 : 3, hair); if(!blink) px(X-2, top+3, 1, 1, "#161616"); }
+  else { px(X-3, top, 6, 2, hair); px(X-3, top+2, 3, L.long ? 5 : 3, hair); if(!blink) px(X+1, top+3, 1, 1, "#161616"); }
+  if(L.headset){ px(X-3, top-1, 6, 1, "#262626"); if(f !== "right") px(X-4, top+2, 1, 3, "#262626"); if(f !== "left") px(X+3, top+2, 1, 3, "#262626");
+    if(f === "down"){ px(X-3, top+5, 2, 1, typing ? "#E9A92B" : "#262626"); } }
+  if(L.hood && f !== "down"){ px(X-3, top+5, 6, 1, L.shirt2); }
+  if(L.hood && f === "down"){ px(X-4, top+1, 1, 5, L.shirt2); px(X+3, top+1, 1, 5, L.shirt2); }
+  if(L.glasses && f === "down"){ px(X-3, top+3, 6, 1, "#2B2B2B"); px(X-2, top+3, 1, 1, "#9FD3EE"); px(X+1, top+3, 1, 1, "#9FD3EE"); }
+  if(L.beanie){ px(X-3, top-1, 6, 3, L.beanie); px(X-3, top+1, 6, 1, "#A23329"); }
+  if(L.coat && f === "down"){ px(X+1, top+7, 1, 2, "#2F6FD0"); px(X-1, top+6, 1, 5, "#C9D1D6"); }
+  // pool cue
+  if(act === "pool" && a.arrived){ const back = POOL.strike && now - POOL.strike < .3 ? 2 : 0, dir = f === "left" ? -1 : 1;
+    for(let i = 0; i < 11; i++) px(X + dir*(3 + i - back), top + 7 + Math.floor(i/4), 1, 1, i > 8 ? "#F4F4F4" : "#C49A64"); }
+  if(a.carry){ px(X-2, top-7, 6, 6, "#FBFBF7"); px(X-2, top-7, 6, 1, "#22282E"); px(X-1, top-5, 4, 1, "#9AA5AE"); px(X-1, top-3, 3, 1, "#9AA5AE"); }
+  if(atDesk && st === "blocked" && Math.floor(t*2) % 2){ px(X-1, top-9, 2, 4, "#E5483C"); px(X-1, top-4, 2, 1, "#E5483C"); }
+}
+function drawRobot(a, t){
+  const X = Math.round(a.x*T + T/2), Y = Math.round(a.y*T + T - 1), bob = a.moving ? Math.floor(t*8) % 2 : 0, f = a.face;
+  c.globalAlpha = .25; px(X-4, Y, 9, 1, "#000"); c.globalAlpha = 1;
+  if(selected === a.id){ px(X-5, Y+1, 11, 1, "#E9A92B"); }
+  px(X-4, Y-2, 2, 2, "#1E242A"); px(X+3, Y-2, 2, 2, "#1E242A");
+  px(X-4, Y-8 - bob, 9, 6, "#AEB7BE"); px(X-4, Y-8 - bob, 9, 1, "#D3D9DE"); px(X-4, Y-3 - bob, 9, 1, "#7C8A94");
+  px(X-3, Y-12 - bob, 7, 4, "#C9D1D6"); px(X-2, Y-13 - bob, 5, 1, "#C9D1D6");
+  const ex = f === "left" ? -2 : f === "right" ? 1 : -1;
+  if(f !== "up") px(X + ex, Y-11 - bob, 3, 1, worker("lab").state === "working" ? "#5BE39A" : "#4FC3F7");
+  px(X, Y-15 - bob, 1, 2, "#59636E"); px(X, Y-16 - bob, 1, 1, Math.floor(t*2) % 2 ? "#E5483C" : "#7A2A25");
+  px(X-2, Y-6 - bob, 5, 2, "#59636E");
+  if(a.carry){ px(X-2, Y-20 - bob, 6, 5, "#FBFBF7"); px(X-2, Y-20 - bob, 6, 1, "#22282E"); px(X-1, Y-18 - bob, 4, 1, "#9AA5AE"); }
+}
+
+function drawLights(t){
+  const L = light(); if(L === "day") return;
+  c.fillStyle = L === "night" ? "rgba(8,14,36,.5)" : "rgba(60,40,90,.18)"; c.fillRect(0, 0, W, H);
+  c.globalCompositeOperation = "lighter";
+  const glow = (x, y, r, rgb, a) => { const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, `rgba(${rgb},${a})`); g.addColorStop(1, `rgba(${rgb},0)`); c.fillStyle = g; c.fillRect(x-r, y-r, 2*r, 2*r); };
+  const k = L === "night" ? 1 : .5;
+  for(const [x, y, r] of [[6,6,46],[19,6,50],[43,7,52],[43,19,56],[9,18,60],[24,18,56],[9,22,40],[30,20,40]]) glow(x*T, y*T, r, "255,214,150", .16*k);
+  glow(31*T, 6*T, 44, "90,220,170", .14*k);
+  glow(39.5*T, 13*T, 26, "90,140,255", .22*k); glow(50.5*T, 15*T, 16, "240,80,150", .25*k); glow(50.5*T, 2.5*T, 16, "255,255,255", .2*k);
+  glow(23.5*T, 27*T, 40, "255,220,150", .26*k); glow(30.5*T, 28.5*T, 30, "255,210,140", .2*k);
+  for(const id of ["customer","dev","po","audit","security","rnd","marketing"]){ const a = AG[id]; if(hired(id) && a.arrived && a.spot === a.desk && worker(id).state === "working") glow((a.x+0.6)*T, (a.y-0.6)*T, 18, "130,210,255", .32*k); }
+  c.globalCompositeOperation = "source-over";
+}
+
+function draw(t){
+  c.drawImage(bg, 0, 0);
+  drawWindows(t);
+  const list = OBJ.map(o => ({s:o.sort, o})).concat(AGENTS.filter(a => hired(a.id)).map(a => ({s:a.y + 0.5 + (a.sitting ? 0 : 0.02), a})));
+  list.sort((p, q) => p.s - q.s);
+  for(const it of list){ if(it.o) DRAW[it.o.kind](it.o, t); else if(it.a.robot) drawRobot(it.a, t); else drawPerson(it.a, t); }
+  drawParts();
+  drawLights(t);
+}
+
+/* overlay tags and bubbles follow people */
+function placeOverlay(){
+  for(const a of AGENTS){
+    if(!hired(a.id)){ tags[a.id].hidden = true; bubs[a.id].hidden = true; continue; }
+    tags[a.id].hidden = false;
+    const sit = a.sitting && !a.moving, hx = (a.x*T + T/2)/W*100, hy = (a.y*T + T - (a.robot ? 18 : 15) + (sit ? 3 : 0) - (a.carry ? 7 : 0))/H*100;
+    const tg = tags[a.id]; tg.style.left = hx + "%"; tg.style.top = hy + "%"; tg.classList.toggle("sel", selected === a.id);
+    const w = worker(a.id), b = bubs[a.id];
+    let txt = "", cls = "bub";
+    if(a.carry && a.moving){ txt = a.carry; cls += " paper"; }
+    else if(a.gotUntil > now){ txt = "Got it: " + a.got; cls += " paper"; }
+    else if(a.errand && a.errand.kind === "meet" && a.arrived && a.id === "po"){ txt = meeting.text || "The weekly report"; }
+    else if(a.arrived && a.spot === a.desk && (w.state === "working" || w.state === "waiting" || w.state === "blocked")){
+      txt = (w.state === "waiting" ? "… " : w.state === "blocked" ? "! " : "") + w.task; if(w.state === "waiting") cls += " wait"; if(w.state === "blocked") cls += " block"; }
+    else if(a.robot && w.state === "working"){ txt = w.task; }
+    cls += hx < 14 ? " l" : hx > 86 ? " r" : "";
+    if(hy < 16) cls += " below";
+    if(txt){ if(b.textContent !== txt) b.textContent = txt; if(b.className !== cls) b.className = cls; b.hidden = false; b.style.left = hx + "%"; b.style.top = hy + "%"; }
+    else b.hidden = true;
+  }
+}
+
+/* sizing: whole-pixel scale when it fits, scroll sideways on phones */
+const scroller = document.getElementById("scroller"), floorwrap = document.getElementById("floorwrap");
+function fit(){ const r = scroller.clientWidth / W, s = r >= 2 ? Math.floor(r) : Math.max(1.6, r); floorwrap.style.width = (W*s) + "px"; floorwrap.style.setProperty("--s", s); }
+new ResizeObserver(fit).observe(scroller); fit();
+
+cv.addEventListener("click", e => {
+  const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left)/r.width*MW, my = (e.clientY - r.top)/r.height*MH;
+  let best = null, bd = 2.2;
+  for(const a of AGENTS){ if(!hired(a.id)) continue; const d = Math.hypot(mx - (a.x + .5), my - (a.y + .2)); if(d < bd){ bd = d; best = a; } }
+  if(best) select(best.id);
+  else if(mx >= 20 && mx <= 29 && my >= 10.5 && my <= 13.5) showTab("plan", true);
+});
+
+let last = 0, lastUi = 0, lastFrame = 0;
+function loop(ts){
+  const t = ts/1000, dt = Math.min(.1, (ts - (last || ts))/1000); last = ts; now = t;
+  for(const a of AGENTS) if(hired(a.id)) update(a, reduce ? 1 : dt);
+  tickMeeting(); poolStep(dt); partsStep(dt);
+  if(!document.hidden && (ts - lastFrame > (reduce ? 1000 : 60))){ lastFrame = ts; draw(reduce ? 0 : t); placeOverlay(); }
+  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function tick(){ document.getElementById("clock").textContent = new Date().toLocaleTimeString(undefined, {hour:"2-digit", minute:"2-digit"}); }
+tick(); setInterval(tick, 15000);
+renderWeek(); renderAll();
+})();
+</script>

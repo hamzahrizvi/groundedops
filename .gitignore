@@ -141,7 +141,9 @@ src/*.vectors.npz
 build/
 dist/
 # Per-developer editor/agent settings, not project configuration.
-.claude/
+# .claude/agents/ is project configuration: the agent departments (ops/README.md).
+.claude/*
+!.claude/agents/
 # Video/promo renders and demo media (hyperframes output, node_modules, mp4s).
 brag-output/
 promo-output/
