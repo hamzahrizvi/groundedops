@@ -58,6 +58,10 @@ if phase == "reset":
 if phase in ("system", "baseline"):
     sys.path.insert(0, CODE); os.chdir(DATA)
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    # docstore.store_dir() resolves <GO_CODE>/../documents, which a Dev
+    # worktree does not have: point it at GO_DATA's.
+    if CODE != DATA:
+        os.environ.setdefault("SOURCE_FILE_DIR", os.path.join(os.path.dirname(DATA), "documents"))
     # Every role pinned, or the DeepSeek backup leaks in (S29 run 1).
     for _r in ("DEFAULT", "ADVANCED", "BACKUP"):
         os.environ[f"PROVIDER_ROLE_{_r}"] = "openai"; os.environ[f"MODEL_ROLE_{_r}"] = "gpt-5-mini"
