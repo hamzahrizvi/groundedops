@@ -58,8 +58,8 @@ def git_sets(repo):
             return subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True, timeout=30).stdout
         except Exception:
             return ""
-    merged = {b.strip().lstrip("* ").replace("agents/dev-", "") for b in
-              run("branch", "--merged", "HEAD", "--list", "agents/dev-*").splitlines() if b.strip()}
+    merged = {b.strip().lstrip("*+ ").replace("agents/dev-", "") for into in ("HEAD", "experimental/agent-org-phase1")
+              for b in run("branch", "--merged", into, "--list", "agents/dev-*").splitlines() if b.strip()}  # product or office fix
     reverts = run("log", "--oneline", "-i", "--grep=revert")
     reverted = set(re.findall(r"D-\d{8}-\d+", reverts))
     return merged, reverted
