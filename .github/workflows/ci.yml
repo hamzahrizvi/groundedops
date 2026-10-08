@@ -141,10 +141,19 @@ jobs:
         # builds a second venv with torch/chromadb and doubles the job.
         # A vuln with no fixed version gets `--ignore-vuln <ID>` here with a
         # comment naming the package and why; never ignored silently.
+        #
+        # Ignored (chromadb 1.5.9, no fixed version as of 2026-10-08): all four
+        # are in the Chroma *server* (/api/v2 endpoints, SimpleRBAC provider).
+        # We only use the embedded chromadb.PersistentClient (src/db.py) and
+        # never run or expose a Chroma server. Drop each once a fix ships.
+        #   PYSEC-2026-311  (CVE-2026-45829) pre-auth code injection via /api/v2
+        #   PYSEC-2026-3814 (CVE-2026-45833) authed code injection via /api/v2
+        #   PYSEC-2026-3815 (CVE-2026-45831) SimpleRBAC ignores tenant scope
+        #   PYSEC-2026-3813 (CVE-2026-45830) cross-tenant collection access
         run: |
           cd src
           pip install -r requirements-dev.txt
-          pip-audit
+          pip-audit --ignore-vuln PYSEC-2026-311 --ignore-vuln PYSEC-2026-3814 --ignore-vuln PYSEC-2026-3815 --ignore-vuln PYSEC-2026-3813
       - name: Validate eval suite schemas
         env:
           GENERATION_MODE: local
