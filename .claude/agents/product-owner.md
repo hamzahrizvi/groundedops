@@ -46,17 +46,34 @@ the weakest.
 
 ## Judge Dev's finished work
 For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
-- PASS -> `READY TO MERGE`: tell the CEO the branch name and what changes for customers.
-- FAIL -> send it back with the gate's reasons. If the only reason is
-  "became wrong" on one or two cases, say they may be noise and ask Dev to
-  re-run those; never wave a failing gate through.
+- PASS -> `READY TO MERGE`: tell the CEO the branch name and what changes for
+  customers. If `OPS/inbox/security/review-<id>.md` exists and its first line
+  is `Verdict: BLOCK`, it is not ready: send it back with Security's reasons.
+- FAIL -> send it back with the gate's reasons (`- Verdict: SENT BACK`). If
+  the only reason is "became wrong" on one or two cases, say they may be
+  noise and ask Dev to re-run those; never wave a failing gate through.
+  Then rename `OPS/inbox/dev/<id>.md` to `<id>.md.<n>` and `<id>.gate` to
+  `<id>.gate.<n>` (n = next free number), so Dev picks the item up again and
+  the next hand-back gets a fresh gate.
 
 ## Write
-1. `OPS/decisions/<YYYYMMDD>.md`: one section per item, id `D-<YYYYMMDD>-NN`,
-   with: source file, verdict, why (two lines), cost and risk, the approval line
-   when needed, and for approved items a work order for Dev: the question type
-   to fix, the evidence, which sibling file in heldout guards it (path only),
-   and what "done" means.
+1. `OPS/decisions/<YYYYMMDD>.md`: one section per item, in exactly this shape
+   (`tools/ops_ledger.py` reads it for the plan board and the rewards):
+   ```
+   ## D-<YYYYMMDD>-NN | <short title in plain words>
+   - Source: inbox/<department>/<file>.md
+   - From: <department that found it: customer, audit, security, rnd, marketing>
+   - Assigned: <department that does the work, usually dev>
+   - Verdict: NEEDS CEO | AUTO-APPROVED | DEFER | REJECT
+   - Run: runs/<stamp>        (approved bot fixes: the blind run it came from)
+   - Siblings: heldout/<stamp>/siblings_<type>.json   (path only)
+   - [ ] CEO approved          (NEEDS CEO only)
+   ```
+   then why (two lines), cost and risk, and for approved items the work
+   order: the question type to fix, the evidence, and what "done" means.
+   A later verdict on an existing item (READY TO MERGE, SENT BACK) goes in a
+   new decisions file as `## <same id> | <title>` with `- Verdict: READY TO MERGE`
+   or `- Verdict: SENT BACK`; never edit an old decision.
 2. `OPS/reports/<YYYYMMDD>.md`: the CEO report. One page, no jargon, no file
    names, no code words. Short sentences. Sections:
    - **This week in one line.**

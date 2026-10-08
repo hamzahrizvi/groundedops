@@ -15,6 +15,8 @@ OPS  = C:\Users\hrizvi\groundedops-ops
    Prompt: "Triage. REPO = <REPO>. OPS = <OPS>. Today = <YYYYMMDD>. Gates run this time: <ids or none>."
 4. Read OPS/decisions/<today>.md. Build the CEO tray: every item with an unticked "- [ ] CEO approved" line, and every READY TO MERGE item whose branch is not yet merged (`git branch --merged HEAD` in REPO), at most 6, each {id, title, why} in plain words.
    Update board ceo with that list. Status po idle with last "<n> decided, <k> need you". If k > 0: status ceo waiting "<k> things need your yes", and event po -> ceo "Report: <k> need your yes"; otherwise event po -> ceo "Weekly report".
-5. Finish with the product owner's final message.
+5. Boards and rewards: run `.venv/Scripts/python.exe tools/ops_ledger.py --ops "<OPS>" --repo "<REPO>" > "<OPS>/ledger.json"`.
+   Upload it to the office: `get` collection "ledger", doc_id "current"; then `set` it with file_path "<OPS>/ledger.json" (pass if_version = the version you got, or none if it did not exist).
+6. Finish with the product owner's final message.
 
 CONSTRAINTS: never edit, stage or commit repo files; never reindex, rebuild an .exe, push, or use the DeepSeek key.

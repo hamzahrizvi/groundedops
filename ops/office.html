@@ -83,6 +83,39 @@ button{font:inherit;color:inherit}
 .state.idle{border-color:var(--line);color:var(--muted)}
 .state.planned{border:1px dashed var(--muted);color:var(--muted)}
 .state.blocked{background:var(--crit);color:#fff}
+.state.off{border:1px solid var(--line);color:var(--muted);background:var(--bg)}
+
+.boards{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.tabs [role=tab]{border:1px solid var(--line);background:var(--bg);padding:7px 10px;border-radius:3px;cursor:pointer;font:12px/1 var(--display);letter-spacing:.05em}
+.tabs [role=tab][aria-selected="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.tabs .chip{margin-left:auto}
+.lnote{margin:0 0 12px;color:var(--muted);font-size:14px}
+.lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:720px){.lanes{grid-template-columns:minmax(0,1fr)}}
+.lane{background:var(--bg);border-radius:4px;padding:10px;min-width:0}
+.lane h3{font-size:12px;letter-spacing:.08em;margin-bottom:8px;display:flex;justify-content:space-between}
+.lane ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.kcard{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:3px;padding:7px 9px;font-size:14px;line-height:1.35}
+.kcard.s-merged{border-left-color:var(--ok)} .kcard.s-ready{border-left-color:var(--ok)}
+.kcard.s-ceo{border-left-color:var(--accent)} .kcard.s-bad{border-left-color:var(--crit)}
+.kmeta{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px;font:15px/1 var(--data);color:var(--muted)}
+.kstage{font:10px/1 var(--display);letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--line);padding:3px 5px;border-radius:2px}
+.dboards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px}
+.dboard{background:var(--bg);border-radius:4px;padding:10px;min-width:0;font-size:14px}
+.dboard h3{font-size:12px;letter-spacing:.06em;display:flex;justify-content:space-between;gap:6px;margin-bottom:6px}
+.bar{height:8px;background:var(--line);border-radius:2px;overflow:hidden;margin:4px 0 8px}
+.bar i{display:block;height:100%;background:var(--ok)}
+.bar.full i{background:var(--crit)}
+.dboard ul{margin:2px 0 6px;padding-left:18px}
+.dboard .lbl{font:11px/1.6 var(--display);letter-spacing:.05em;color:var(--muted)}
+.rtable{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.rtable th{font:11px/1.4 var(--display);letter-spacing:.05em;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.rtable td{padding:7px 8px;border-bottom:1px solid var(--line)}
+.rtable td.n{text-align:right}
+.rtable tr.lead td{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+.rscroll{overflow-x:auto}
+.rules{margin:12px 0 0;padding-left:18px;color:var(--muted);font-size:13.5px}
 
 .rail{display:grid;gap:14px;min-width:0}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px;min-width:0}
@@ -143,6 +176,18 @@ button{font:inherit;color:inherit}
         </div>
       </section>
       <section class="roster" id="roster" aria-label="Departments"></section>
+      <section class="boards" id="boards" aria-label="Boards">
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" id="t-plan" aria-selected="true" aria-controls="p-plan">Plan board</button>
+          <button type="button" role="tab" id="t-depts" aria-selected="false" aria-controls="p-depts">Department boards</button>
+          <button type="button" role="tab" id="t-rewards" aria-selected="false" aria-controls="p-rewards">Improvement of the month</button>
+          <span class="chip" id="ledgerChip">Sample</span>
+        </div>
+        <p class="lnote" id="ledgerNote"></p>
+        <div role="tabpanel" id="p-plan" aria-labelledby="t-plan" class="lanes"></div>
+        <div role="tabpanel" id="p-depts" aria-labelledby="t-depts" class="dboards" hidden></div>
+        <div role="tabpanel" id="p-rewards" aria-labelledby="t-rewards" hidden></div>
+      </section>
     </div>
 
     <aside class="rail">
@@ -164,7 +209,7 @@ button{font:inherit;color:inherit}
     <h2 id="weekH">The week</h2>
     <div class="days" id="days"></div>
   </section>
-  <p class="foot">Phase 1 runs Customer, the test lab, the product owner and Dev. The desks with boxes open later: Audit and Security in phase 2, R&amp;D and Marketing in phase 3. Approve work by ticking the box in the decisions file, or by telling Claude "approve D-…".</p>
+  <p class="foot">Phase 1 runs Customer, the test lab, the product owner and Dev. Audit and Security (phase 2) and R&amp;D and Marketing (phase 3) are hired and scheduled but off duty until you switch their tasks on. Approve work by ticking the box in the decisions file, or by telling Claude "approve D-…".</p>
 </div>
 
 <script>
@@ -184,13 +229,13 @@ const DEPTS = [
    role:"Builds one approved work order at a time in its own branch, runs the tests and hands back. Never merges."},
   {id:"ceo", name:"You (CEO)", tag:"You", model:"Approves and merges", sched:"When the report lands",
    role:"Reads the product owner's report, approves what changes for customers, and merges finished branches."},
-  {id:"audit", name:"Audit", model:"Sonnet 5.5 · low", sched:"Weekly, from phase 2", planned:"Desk ready, opens in phase 2",
+  {id:"audit", name:"Audit", tag:"Audit", model:"Sonnet 5.5 · low", sched:"Wed 09:00 (phase 2)", planned:"Desk ready, opens in phase 2",
    role:"Cost per answer and latency, and what the agents themselves cost. Every cost cut goes through the same gate."},
-  {id:"security", name:"Security", model:"Opus 5.5 · high", sched:"Fortnightly, from phase 2", planned:"Desk ready, opens in phase 2",
-   role:"Reviews each change for security, audits dependencies and secrets, and checks where customer text is sent."},
-  {id:"rnd", name:"R&D", model:"Opus 5.5 · high", sched:"Monthly, from phase 3", planned:"Desk ready, opens in phase 3",
+  {id:"security", name:"Security", tag:"Security", model:"Opus 5.5 · high", sched:"Every 2nd Wed 14:00 (phase 2)", planned:"Desk ready, opens in phase 2",
+   role:"Reviews each change and every branch waiting to merge, audits dependencies and secrets, and checks where customer text is sent."},
+  {id:"rnd", name:"R&D", tag:"R&D", model:"Opus 5.5 · high", sched:"1st of the month (phase 3)", planned:"Desk ready, opens in phase 3",
    role:"Researches infrastructure and new features that would move the product forward as a whole."},
-  {id:"marketing", name:"Marketing", model:"Sonnet 5.5 · medium", sched:"Monthly, from phase 3", planned:"Desk ready, opens in phase 3",
+  {id:"marketing", name:"Marketing", tag:"Marketing", model:"Sonnet 5.5 · medium", sched:"15th of the month (phase 3)", planned:"Desk ready, opens in phase 3",
    role:"Compares the product with market leaders and suggests look-and-feel improvements."}
 ];
 const D = Object.fromEntries(DEPTS.map(d => [d.id, d]));
@@ -209,11 +254,14 @@ const live = {workers:{}, events:[], waiting:[], available:false, loaded:false};
 const sample = {workers:{}, events:[], waiting:[], step:0};
 let mode = "sample", forced = null, selected = "customer";
 const view = () => mode === "live" ? live : sample;
+/* phase 2-3 departments exist once their worker row does (written when they are hired) */
+const hired = id => !D[id].planned || !!live.workers[id];
 function worker(id){
   const d = D[id];
-  if(d.planned) return {state:"planned", task:d.planned};
-  const w = view().workers[id] || {};
-  return {state: w.state || "idle", task: w.task || (mode === "live" ? "No run yet" : "Off shift"), last: w.last || "", next: w.next || "", updated: w.updated || ""};
+  if(!hired(id)) return {state:"planned", task:d.planned};
+  const w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
+  const fallback = d.planned ? "Off duty until switched on" : mode === "live" ? "No run yet" : "Off shift";
+  return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || fallback, last: w.last || "", next: w.next || "", updated: w.updated || ""};
 }
 
 /* ================= the floor: grid, walls, furniture ================= */
@@ -318,7 +366,11 @@ const AG = {
   dev:{id:"dev", desk:S("d-d",11,17,"up","type",{sit:true}), look:{shirt:"#237E78", shirt2:"#1B625D", pants:"#3B3F4A", hair:"#3B2A1E", skin:0, hood:true}},
   po:{id:"po", desk:S("d-p",24,17,"up","type",{sit:true}), look:{shirt:"#2F7556", pants:"#2B2F36", hair:"#6B3E22", skin:1, long:true, blazer:true}},
   ceo:{id:"ceo", desk:SP.ceodesk, look:{shirt:"#25345E", pants:"#25345E", hair:"#2A1D14", skin:0, tie:true}},
-  lab:{id:"lab", robot:true, desk:DOCK}
+  lab:{id:"lab", robot:true, desk:DOCK},
+  audit:{id:"audit", desk:S("d-a",3,22,"up","type",{sit:true}), look:{shirt:"#7A5BA6", pants:"#2E3440", hair:"#A3A7AB", skin:1, glasses:true}},
+  security:{id:"security", desk:S("d-s",7,22,"up","type",{sit:true}), look:{shirt:"#22272E", pants:"#22272E", hair:"#121212", skin:2, beanie:"#C8433A"}},
+  rnd:{id:"rnd", desk:S("d-r",11,22,"up","type",{sit:true}), look:{shirt:"#EEF1F3", pants:"#3B3F4A", hair:"#B5651D", skin:0, long:true, coat:true}},
+  marketing:{id:"marketing", desk:S("d-m",15,22,"up","type",{sit:true}), look:{shirt:"#E58A2E", pants:"#2B2F36", hair:"#E2B95A", skin:0, long:true}}
 };
 const AGENTS = Object.values(AG);
 AGENTS.forEach((a, i) => { a.x = a.desk.x; a.y = a.desk.y; a.face = a.desk.f; a.path = []; a.spot = null; a.arrived = false;
@@ -462,12 +514,86 @@ for(const a of AGENTS){
   const b = document.createElement("span"); b.className = "bub"; b.hidden = true; overlay.append(b); bubs[a.id] = b;
 }
 const ZL = [["YOUR OFFICE",6,9.3],["MEETING ROOM",19.5,9.3],["TEST LAB",31.5,9.3],["KITCHEN",43.5,12.3],["LOUNGE",43.5,25.3],
-  ["PLAN BOARD · PHASE 4",24.5,11.3,1],["OPENING SOON",9.5,23.6,1],["SMOKING SHELTER",30.5,32.4],["TERRACE",20.5,33.4]];
+  ["PLAN BOARD",24.5,11.3,1],["OPENING SOON",9.5,23.6,1],["SMOKING SHELTER",30.5,32.4],["TERRACE",20.5,33.4]];
+const zl = {};
 for(const [txt, x, y, soon] of ZL){ const s = document.createElement("span"); s.className = "zl" + (soon ? " soon" : ""); s.textContent = txt;
-  s.style.left = (x*T/W*100) + "%"; s.style.top = (y*T/H*100) + "%"; overlay.append(s); }
+  s.style.left = (x*T/W*100) + "%"; s.style.top = (y*T/H*100) + "%"; overlay.append(s); zl[txt] = s; }
+function updateZones(){ zl["OPENING SOON"].textContent = ["audit","security","rnd","marketing"].some(hired) ? "PHASE 2–3 TEAM" : "OPENING SOON"; }
+
+/* ================= boards: plan board, department boards, improvement of the month ================= */
+const SAMPLE_LEDGER = {sample:true, cards:[
+  {id:"D-1", title:"Fix how comparisons pick each product's manual", from:"customer", assigned:"dev", stage:"merged", lane:"past"},
+  {id:"D-2", title:"Price questions get the sales reply before the manual is searched", from:"customer", assigned:"dev", stage:"rejected", lane:"past"},
+  {id:"D-3", title:"Procedures answered with setup steps instead of troubleshooting", from:"customer", assigned:"dev", stage:"built, waiting for the check", lane:"ongoing"},
+  {id:"D-4", title:"Cap the size of lead-form transcripts", from:"security", assigned:"dev", stage:"approved, queued", lane:"ongoing"},
+  {id:"D-5", title:"Follow-ups lose the product after a switch", from:"customer", assigned:"dev", stage:"waiting for CEO", lane:"future"},
+  {id:"audit/cache", title:"Reuse answers to repeated questions", from:"audit", assigned:"po", stage:"proposed", lane:"future"},
+  {id:"rnd/rerank", title:"Try a stronger reranker on table questions", from:"rnd", assigned:"po", stage:"deferred", lane:"future"}],
+  boards:{customer:{capacity:2, doing:[], queue:[], done:1, load:0}, po:{capacity:8, doing:[], queue:["Reuse answers to repeated questions"], done:1, load:.13},
+    dev:{capacity:3, doing:["Procedures answered with setup steps instead of troubleshooting"], queue:["Cap the size of lead-form transcripts"], done:1, load:.67},
+    security:{capacity:2, doing:[], queue:[], done:0, load:0}, audit:{capacity:2, doing:[], queue:[], done:0, load:0}},
+  rewards:{month:"sample", leader:"customer", table:[{dept:"customer", points:13, all_time:13, approved:3, merged:1, fixed:3}, {dept:"dev", points:8, all_time:8, approved:0, merged:1, fixed:3},
+    {dept:"security", points:2, all_time:2, approved:1, merged:0, fixed:0}, {dept:"po", points:1, all_time:1, approved:0, merged:0, fixed:0}]}};
+let tab = "plan";
+function showTab(name, scroll){
+  tab = name;
+  for(const n of ["plan","depts","rewards"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
+  if(scroll) document.getElementById("boards").scrollIntoView({behavior: reduce ? "auto" : "smooth", block:"start"});
+}
+for(const n of ["plan","depts","rewards"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
+const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
+const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
+function renderBoards(){
+  const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
+  const chip = document.getElementById("ledgerChip"); chip.textContent = isSample ? "Sample" : "Live"; chip.className = "chip " + (isSample ? "sample" : "live");
+  document.getElementById("ledgerNote").textContent = isSample
+    ? "Sample boards, made up to show the layout. The real ones appear after the product owner's first run."
+    : `Updated ${new Date(L.updated).toLocaleString()} by the product owner's run. Every card and point comes from the departments' files and git, never from what an agent says about itself.`;
+  const lanes = [["future","Coming up"],["ongoing","In progress"],["past","Done"]];
+  document.getElementById("p-plan").replaceChildren(...lanes.map(([k, title]) => {
+    const cards = L.cards.filter(c => c.lane === k), lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
+    lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
+    if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
+    for(const c of cards){
+      const li = document.createElement("li"); li.className = "kcard " + STAGE_CLS(c.stage); li.textContent = c.title;
+      const meta = document.createElement("div"); meta.className = "kmeta";
+      const st = document.createElement("span"); st.className = "kstage"; st.textContent = c.stage;
+      const who = document.createElement("span"); who.textContent = `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
+      meta.append(st, who); li.append(meta); ul.append(li);
+    }
+    lane.append(h, ul); return lane; }));
+  document.getElementById("p-depts").replaceChildren(...Object.entries(L.boards || {}).filter(([id]) => D[id] || id === "po").map(([id, b]) => {
+    const el = document.createElement("div"), h = document.createElement("h3"), bar = document.createElement("div"), fill = document.createElement("i");
+    el.className = "dboard"; h.textContent = nameOf(id);
+    const load = document.createElement("span"); load.textContent = `${id === "po" ? b.queue.length : b.doing.length + b.queue.length} of ${b.capacity}`; h.append(load);
+    bar.className = "bar" + (b.load >= 1 ? " full" : ""); fill.style.width = Math.min(100, Math.round(b.load*100)) + "%"; bar.append(fill);
+    el.append(h, bar);
+    const list = (label, items) => { const l = document.createElement("div"); l.className = "lbl"; l.textContent = label; el.append(l);
+      if(!items.length){ const p = document.createElement("p"); p.className = "empty"; p.textContent = "None"; el.append(p); return; }
+      const ul = document.createElement("ul"); for(const it of items){ const li = document.createElement("li"); li.textContent = it; ul.append(li); } el.append(ul); };
+    list(id === "po" ? "To triage" : "Doing", id === "po" ? b.queue : b.doing);
+    if(id !== "po") list("Queued", b.queue);
+    const done = document.createElement("div"); done.className = "lbl"; done.textContent = `Merged so far: ${b.done}` + (b.load >= 1 ? " · Full: new approvals wait" : ""); el.append(done);
+    return el; }));
+  const R = L.rewards || {table:[]}, wrap = document.createElement("div"); wrap.className = "rscroll";
+  const tbl = document.createElement("table"); tbl.className = "rtable";
+  tbl.innerHTML = "<thead><tr><th>#</th><th>Department</th><th>Points this month</th><th>All time</th><th>Approved</th><th>Merged</th><th>Wrong answers fixed</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  R.table.forEach((r, i) => { const tr = document.createElement("tr"); if(r.dept === R.leader) tr.className = "lead";
+    [i+1, nameOf(r.dept) + (r.dept === R.leader ? "  ★ improvement of the month" : ""), r.points, r.all_time, r.approved, r.merged, r.fixed].forEach((v, k) => {
+      const td = document.createElement("td"); td.textContent = v; if(k !== 1) td.className = "n"; tr.append(td); }); tb.append(tr); });
+  tbl.append(tb); wrap.append(tbl);
+  const rules = document.createElement("ul"); rules.className = "rules";
+  for(const t of ["Finder: 2 points when its finding is approved, 5 when the fix merges after passing the gate, plus 1 per wrong answer it fixed.",
+                  "Builder: 5 points for a fix that merges after passing first time (3 after a send-back), plus 1 per wrong answer fixed.",
+                  "Product owner: 1 point per merged fix, minus 3 for a fix that gets reverted (the builder loses 3 too).",
+                  "The leader's findings go first in Dev's queue. Points only come from gate results and git, never from an agent's own report."]){
+    const li = document.createElement("li"); li.textContent = t; rules.append(li); }
+  document.getElementById("p-rewards").replaceChildren(wrap, rules);
+}
 
 function select(id){ selected = id; renderDetail(); renderRoster(true); }
-const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked"};
+const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked", off:"Off duty"};
 function renderRoster(force){
   for(const d of DEPTS){
     const w = worker(d.id), c = cards[d.id];
@@ -475,7 +601,7 @@ function renderRoster(force){
     if(c.state.className !== cls) c.state.className = cls;
     if(c.state.textContent !== label) c.state.textContent = label;
     if(c.task.textContent !== w.task) c.task.textContent = w.task;
-    const nowTxt = AG[d.id] ? "Now: " + activity(AG[d.id]) : "Empty desk";
+    const nowTxt = AG[d.id] && hired(d.id) ? "Now: " + activity(AG[d.id]) : "Empty desk";
     if(c.now.textContent !== nowTxt) c.now.textContent = nowTxt;
     if(force) c.el.setAttribute("aria-pressed", String(selected === d.id));
   }
@@ -487,7 +613,7 @@ function renderDetail(){
   el.innerHTML = '<h2></h2><p class="role"></p><dl></dl>';
   el.querySelector("h2").textContent = d.name; el.querySelector(".role").textContent = d.role;
   const rows = [["Model", d.model], ["Runs", d.sched], ["Status", `${STATE_LABEL[w.state] || w.state}: ${w.task}`]];
-  if(AG[d.id]) rows.push(["Doing now", activity(AG[d.id])]);
+  if(AG[d.id] && hired(d.id)) rows.push(["Doing now", activity(AG[d.id])]);
   if(w.last) rows.push(["Last result", w.last]);
   if(CRON[d.id]) rows.push(["Next run", w.next || fmtWhen(nextRun(d.id))]);
   if(mode === "live" && w.updated) rows.push(["Updated", new Date(w.updated).toLocaleString()]);
@@ -531,12 +657,13 @@ function renderMode(){
   const chip = document.getElementById("modeChip"), btn = document.getElementById("modeBtn"), banner = document.getElementById("banner");
   chip.className = "chip " + mode; chip.textContent = mode === "live" ? "Live" : "Sample week";
   btn.hidden = !live.available; btn.textContent = mode === "live" ? "Watch a sample week" : "Show live office";
+  updateZones();
   if(!live.loaded) banner.textContent = "Connecting to the office…";
   else if(!live.available) banner.textContent = "Live status is not available in this view, so this is a sample week: made-up work showing how a week runs.";
   else if(mode === "sample") banner.textContent = "Nobody is on shift right now, so this is a sample week: made-up work showing how a week runs. The live office takes over as soon as a run starts.";
   else banner.textContent = "Live: everyone's status is real, written by their last scheduled run. Off-shift, they take their breaks around the building.";
 }
-function renderAll(){ renderMode(); renderRoster(true); renderDetail(); renderTray(); renderFeed(); }
+function renderAll(){ renderMode(); renderRoster(true); renderDetail(); renderTray(); renderFeed(); renderBoards(); }
 function decideMode(){
   const busy = Object.values(live.workers).some(w => w.state === "working" || w.state === "waiting");
   const want = forced || (live.available && busy ? "live" : "sample");
@@ -588,6 +715,7 @@ setInterval(sampleStep, 9000);
       firstEvents = false; if(mode === "live") renderFeed();
     }, () => {});
     db.doc("board/ceo").onSnapshot(d => { live.waiting = (d.exists && d.data().waiting) || []; if(mode === "live") renderTray(); }, () => {});
+    db.doc("ledger/current").onSnapshot(d => { live.ledger = d.exists ? d.data() : null; renderBoards(); }, () => {});
   } catch(e) { live.available = false; }
   decideMode();
 })();
@@ -652,16 +780,20 @@ function drawWindows(t){
 const SCREEN = {
   customer: (X, Y, w, h, t, on) => { for(let i = 0; i < 3; i++){ const r = i % 2, bw = 2 + Math.floor(hash(i + (on ? Math.floor(t*1.5) : 0))*3); px(r ? X+w-bw-1 : X+1, Y+1+i*2 - (on ? 0 : 0), bw, 1, r ? "#E9A92B" : "#AEBBC4"); } },
   dev: (X, Y, w, h, t, on) => { const off = on ? Math.floor(t*5) : 0; for(let i = 0; i < 3; i++) px(X+1, Y+1+i*2, 1 + Math.floor(hash(i+off)*(w-2)), 1, ["#6FD3A8","#7FB2FF","#F2B33D"][(i+off)%3]); },
-  po: (X, Y, w, h, t, on) => { const k = on ? Math.floor(t*1.2) % 3 : 0; for(let i = 0; i < 3; i++) px(X+1+i*2, Y+1+((i+k)%2), 1, 2, ["#F7D55C","#8ED1B5","#F49C8A"][i]); }
+  po: (X, Y, w, h, t, on) => { const k = on ? Math.floor(t*1.2) % 3 : 0; for(let i = 0; i < 3; i++) px(X+1+i*2, Y+1+((i+k)%2), 1, 2, ["#F7D55C","#8ED1B5","#F49C8A"][i]); },
+  audit: (X, Y, w, h, t, on) => { for(let i = 0; i < 3; i++){ const v = 1 + Math.floor(hash(i + (on ? Math.floor(t) : 0))*3); px(X+1+i*2, Y+h-1-v, 1, v, "#6FD3A8"); } },
+  security: (X, Y, w, h, t, on) => { px(X+2, Y+2, 3, 2, on && Math.floor(t*2)%2 ? "#5BE39A" : "#F2B33D"); px(X+3, Y+1, 1, 1, "#C8D3DA"); },
+  rnd: (X, Y, w, h, t, on) => { for(let i = 0; i < 4; i++) px(X+1 + Math.floor(hash(i*3 + (on ? Math.floor(t*2) : 0))*5), Y+1 + Math.floor(hash(i*7)*3), 1, 1, ["#7FB2FF","#F49C8A","#6FD3A8","#F2B33D"][i]); },
+  marketing: (X, Y, w, h, t, on) => { for(let i = 0; i < 3; i++) px(X+1+i*2, Y+1, 2, 3, ["#E58A2E","#2F6FD0","#F7D55C"][(i + (on ? Math.floor(t) : 0)) % 3]); }
 };
 const DRAW = {
   desk(o, t){
     const X = o.x*T, Y = o.y*T, w = o.w*T;
     px(X, Y+1, w, 6, "#A06B47"); px(X, Y+6, w, 2, "#7E5236"); px(X, Y+1, w, 1, "#B8805A");
-    if(o.screen === "front"){
+    if(o.screen === "front" || (o.screen === "boxes" && hired(o.owner))){
       const st = worker(o.owner).state, on = st === "working";
       px(X+4, Y-5, 9, 7, "#262D34"); px(X+5, Y-4, 7, 5, on ? "#0E1A21" : "#1A2329"); px(X+8, Y+2, 2, 1, "#262D34");
-      if(on) SCREEN[o.owner](X+5, Y-4, 7, 5, t, true); else if(st !== "idle") SCREEN[o.owner](X+5, Y-4, 7, 5, t, false);
+      if(on) SCREEN[o.owner](X+5, Y-4, 7, 5, t, true); else if(st === "waiting" || st === "blocked") SCREEN[o.owner](X+5, Y-4, 7, 5, t, false);
       else px(X+5 + Math.floor((t*2) % 6), Y-2, 1, 1, "#3B7DE0");
       px(X+2, Y+3, 4, 2, "#D8DDE1");
     } else if(o.screen === "off"){
@@ -823,6 +955,9 @@ function drawPerson(a, t){
     if(f === "down"){ px(X-3, top+5, 2, 1, typing ? "#E9A92B" : "#262626"); } }
   if(L.hood && f !== "down"){ px(X-3, top+5, 6, 1, L.shirt2); }
   if(L.hood && f === "down"){ px(X-4, top+1, 1, 5, L.shirt2); px(X+3, top+1, 1, 5, L.shirt2); }
+  if(L.glasses && f === "down"){ px(X-3, top+3, 6, 1, "#2B2B2B"); px(X-2, top+3, 1, 1, "#9FD3EE"); px(X+1, top+3, 1, 1, "#9FD3EE"); }
+  if(L.beanie){ px(X-3, top-1, 6, 3, L.beanie); px(X-3, top+1, 6, 1, "#A23329"); }
+  if(L.coat && f === "down"){ px(X+1, top+7, 1, 2, "#2F6FD0"); px(X-1, top+6, 1, 5, "#C9D1D6"); }
   // pool cue
   if(act === "pool" && a.arrived){ const back = POOL.strike && now - POOL.strike < .3 ? 2 : 0, dir = f === "left" ? -1 : 1;
     for(let i = 0; i < 11; i++) px(X + dir*(3 + i - back), top + 7 + Math.floor(i/4), 1, 1, i > 8 ? "#F4F4F4" : "#C49A64"); }
@@ -853,14 +988,14 @@ function drawLights(t){
   glow(31*T, 6*T, 44, "90,220,170", .14*k);
   glow(39.5*T, 13*T, 26, "90,140,255", .22*k); glow(50.5*T, 15*T, 16, "240,80,150", .25*k); glow(50.5*T, 2.5*T, 16, "255,255,255", .2*k);
   glow(23.5*T, 27*T, 40, "255,220,150", .26*k); glow(30.5*T, 28.5*T, 30, "255,210,140", .2*k);
-  for(const id of ["customer","dev","po"]){ const a = AG[id]; if(a.arrived && a.spot === a.desk && worker(id).state === "working") glow((a.x+0.6)*T, (a.y-0.6)*T, 18, "130,210,255", .32*k); }
+  for(const id of ["customer","dev","po","audit","security","rnd","marketing"]){ const a = AG[id]; if(hired(id) && a.arrived && a.spot === a.desk && worker(id).state === "working") glow((a.x+0.6)*T, (a.y-0.6)*T, 18, "130,210,255", .32*k); }
   c.globalCompositeOperation = "source-over";
 }
 
 function draw(t){
   c.drawImage(bg, 0, 0);
   drawWindows(t);
-  const list = OBJ.map(o => ({s:o.sort, o})).concat(AGENTS.map(a => ({s:a.y + 0.5 + (a.sitting ? 0 : 0.02), a})));
+  const list = OBJ.map(o => ({s:o.sort, o})).concat(AGENTS.filter(a => hired(a.id)).map(a => ({s:a.y + 0.5 + (a.sitting ? 0 : 0.02), a})));
   list.sort((p, q) => p.s - q.s);
   for(const it of list){ if(it.o) DRAW[it.o.kind](it.o, t); else if(it.a.robot) drawRobot(it.a, t); else drawPerson(it.a, t); }
   drawParts();
@@ -870,6 +1005,8 @@ function draw(t){
 /* overlay tags and bubbles follow people */
 function placeOverlay(){
   for(const a of AGENTS){
+    if(!hired(a.id)){ tags[a.id].hidden = true; bubs[a.id].hidden = true; continue; }
+    tags[a.id].hidden = false;
     const sit = a.sitting && !a.moving, hx = (a.x*T + T/2)/W*100, hy = (a.y*T + T - (a.robot ? 18 : 15) + (sit ? 3 : 0) - (a.carry ? 7 : 0))/H*100;
     const tg = tags[a.id]; tg.style.left = hx + "%"; tg.style.top = hy + "%"; tg.classList.toggle("sel", selected === a.id);
     const w = worker(a.id), b = bubs[a.id];
@@ -895,14 +1032,15 @@ new ResizeObserver(fit).observe(scroller); fit();
 cv.addEventListener("click", e => {
   const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left)/r.width*MW, my = (e.clientY - r.top)/r.height*MH;
   let best = null, bd = 2.2;
-  for(const a of AGENTS){ const d = Math.hypot(mx - (a.x + .5), my - (a.y + .2)); if(d < bd){ bd = d; best = a; } }
+  for(const a of AGENTS){ if(!hired(a.id)) continue; const d = Math.hypot(mx - (a.x + .5), my - (a.y + .2)); if(d < bd){ bd = d; best = a; } }
   if(best) select(best.id);
+  else if(mx >= 20 && mx <= 29 && my >= 10.5 && my <= 13.5) showTab("plan", true);
 });
 
 let last = 0, lastUi = 0, lastFrame = 0;
 function loop(ts){
   const t = ts/1000, dt = Math.min(.1, (ts - (last || ts))/1000); last = ts; now = t;
-  for(const a of AGENTS) update(a, reduce ? 1 : dt);
+  for(const a of AGENTS) if(hired(a.id)) update(a, reduce ? 1 : dt);
   tickMeeting(); poolStep(dt); partsStep(dt);
   if(!document.hidden && (ts - lastFrame > (reduce ? 1000 : 60))){ lastFrame = ts; draw(reduce ? 0 : t); placeOverlay(); }
   if(ts - lastUi > 600){ lastUi = ts; renderRoster(); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }

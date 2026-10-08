@@ -4,7 +4,7 @@ REPO = C:\Users\hrizvi\Downloads\Git\groundedops (the main checkout)
 OPS  = C:\Users\hrizvi\groundedops-ops
 
 0. Move the session to REPO with the change_directory tool. If REPO/.claude/agents/dev.md is missing, the office branch is not merged yet: stop with one line.
-1. Find work: in OPS/decisions/*.md, items marked AUTO-APPROVED or carrying a ticked "- [x] CEO approved" line, with no OPS/inbox/dev/<id>.md yet. Take the oldest one.
+1. Find work: in OPS/decisions/*.md, items marked AUTO-APPROVED or carrying a ticked "- [x] CEO approved" line, whose Assigned is dev (or missing), with no OPS/inbox/dev/<id>.md yet and not yet merged. Take the oldest one, except that items found by this month's rewards leader ("rewards" -> "leader" in OPS/ledger.json) go first.
    None: stop with the line "Nothing approved." Do not touch the office.
    Otherwise read REPO/ops/schedules/office-status.md and use it for every "status" and "event" below.
 2. Status dev working "<the work order's title, in plain words>". Event po -> dev "Work order <id>".

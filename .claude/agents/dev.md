@@ -34,8 +34,14 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout the prompt nam
   `reset` first). Report them case by case, never as a total.
 
 ## Hand back
-Write `OPS/inbox/dev/<id>.md`:
-- branch, worktree path, commit hashes
+Write `OPS/inbox/dev/<id>.md` starting with these lines exactly:
+```
+Status: READY | BLOCKED
+Branch: agents/dev-<id>
+Worktree: <absolute path>
+```
+then:
+- commit hashes
 - what changed and why it fixes the whole type of question
 - tests: counts before and after; the finding's cases before -> after
 - risks the product owner should weigh
