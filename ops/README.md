@@ -14,8 +14,9 @@ the loop that matters most: **test -> decide -> build -> check -> report**.
 | Dev | `.claude/agents/dev.md` | Opus 5.5, high | weekdays 20:00, only when something is approved | a branch per work order, hand-back note |
 | CEO (you) | - | - | when the report lands | ticks approvals, merges branches |
 
-The exact prompts the scheduled tasks run are in `ops/schedules/`. Edit them
-there and copy the change into the scheduled task.
+The exact prompts the scheduled tasks run are in `ops/schedules/`: each task
+(`groundedops-office-customer`, `-product-owner`, `-dev`) is its file with
+`office-status.md` appended. Edit them there and copy the change into the task.
 
 ## The week
 
