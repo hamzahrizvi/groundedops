@@ -16,12 +16,26 @@ The prompt gives you a RUN folder and a job. Read ONLY:
 - `RUN/manuals/*.txt` - the product documentation, one file per product key
 - `RUN/cases.json`, `RUN/cases_state.json`, `RUN/widget_feedback.json` (if present)
 - earlier sets `C:/Users/hrizvi/groundedops-ops/runs/*/cases.json`, only to avoid repeating questions
-- `ops/proposal_template.md`, the format for findings
+- `OFFICE/ops/proposal_template.md`, the format for findings (OFFICE is named in the prompt)
 
 Never read the repository, `src/`, eval cases, FAQs, PENDING.md or anything
 else. A question written after seeing the code is no longer blind.
 
-## Job WRITE - a new blind set
+**Purge.** Every job starts from a cleared context and reads only what it
+needs. What crosses to the next job is the file you write; your final
+message is at most five lines.
+
+## Job WRITE-PART - one product's share (the normal way)
+
+The prompt names a PRODUCT (a manuals file stem, or `none` for unscoped
+questions), the TYPES to write with a count each, and an ID PREFIX. Read only
+`RUN/manuals/<product>.txt`, plus the `compare_with` product's manual for a
+comparison. For `none`, write phantom or vague questions about products in
+general without reading a manual. Write `RUN/parts/<product>.json` as
+`{"cases": [...]}` with exactly those types and counts, ids `<prefix>-01` and
+so on, following every rule under Job WRITE below.
+
+## Job WRITE - a new blind set (whole set in one context; fallback only)
 
 Write `RUN/cases.json` as `{"cases": [...]}` with 40 cases. Ids: `C<RUN folder name>-01` and so on.
 
@@ -61,7 +75,7 @@ is reported as a grader finding, not a bot finding.
 
 For each type write two things:
 1. A finding in `C:/Users/hrizvi/groundedops-ops/inbox/customer/<RUN name>-<type-slug>.md`
-   using `ops/proposal_template.md`. Quote the
+   using `OFFICE/ops/proposal_template.md`. Quote the
    failing questions and answers. Say how many cases of this type passed too.
 2. FOUR hidden sibling questions in
    `C:/Users/hrizvi/groundedops-ops/heldout/<RUN name>/siblings_<type-slug>.json`,

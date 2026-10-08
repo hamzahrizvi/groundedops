@@ -24,6 +24,28 @@ live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
 `dev-approved.md`, and `department.md` for the other four), each with
 `office-status.md` appended. Edit them there and copy the change into the task.
 
+**Where it runs.** The office stays on its own branch,
+`experimental/agent-org-phase1`, and is never merged into `main`. The tasks
+run from that branch's checkout (OFFICE =
+`C:/Users/hrizvi/Downloads/Git/groundedops/.claude/worktrees/agent-org`) and
+test the product in the main checkout (REPO, whatever branch it is on).
+Don't remove that worktree; if it moves, change OFFICE in the seven task
+prompts. Dev branches product fixes from REPO's HEAD, and office-tooling fixes
+from `experimental/agent-org-phase1`.
+
+**Purge.** Context costs tokens on every turn, so no phase inherits another
+phase's reading. Each scheduled run starts cleared; inside a run every phase
+is a fresh subagent; only a short file on disk or a five-line message
+crosses a phase boundary:
+- Customer writes questions with one fresh context per product (in
+  parallel), then reviews in another fresh context.
+- Dev works in three fresh contexts: PLAN writes `<id>.plan.md`, BUILD reads
+  only that and writes `<id>.build.md`, CHECK reads only those two and writes
+  the hand-back.
+- The product owner greps PENDING.md instead of reading it, and never reads
+  Dev's working notes.
+- The orchestrating session reads summaries only, never answers, logs or diffs.
+
 **Switching a phase on:** enable its tasks in the Scheduled sidebar, or tell
 Claude "switch on phase 2". Suggested: phase 2 once phase 1 has had two clean
 weeks, phase 3 once Dev has merged a gated fix.

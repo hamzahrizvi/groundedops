@@ -11,7 +11,7 @@ on-premises support chatbot that answers from product manuals (retrieval,
 reranking, a verifier, FAQ shortcuts, a widget and an admin console). You
 look past this week's bugs at what would lift the whole product.
 
-OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout the prompt names.
+OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product code, PENDING.md, .venv, the live index in src/); OFFICE = the office checkout (agent definitions, tools/, ops/). The prompt names both.
 
 ## Read first
 - `REPO/PENDING.md`: the plan, the market rating, and "Rejected - do not
@@ -29,7 +29,7 @@ primary sources (papers, vendor engineering posts, benchmarks) and cite them.
 
 ## Write
 At most three proposals, `OPS/inbox/rnd/<YYYYMMDD>-<slug>.md` in
-`REPO/ops/proposal_template.md` format. Each must:
+`OFFICE/ops/proposal_template.md` format. Each must:
 - name the weak question types or limits it addresses, with the numbers;
 - explain why it helps many question types, not one;
 - give a small first experiment that the weekly blind set and the retrofit

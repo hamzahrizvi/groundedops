@@ -139,8 +139,10 @@ handbook is `ops/README.md`, the live office is
 https://claude.ai/artifact/XeDaMgpcp1foLDuX9N8KMD. Their work queue lives in
 `C:/Users/hrizvi/groundedops-ops/decisions/`, not here; an item they finish
 lands here as a normal commit on a merged `agents/dev-<id>` branch.
-- [ ] **You:** merge the branch, then press "Run now" once on each
-  `groundedops-office-*` task so later runs don't stop on tool prompts.
+The office branch stays experimental and is not merged into main (CEO,
+2026-10-08); the tasks run from its worktree and test the main checkout.
+- [ ] **You:** press "Run now" once on each `groundedops-office-*` task so
+  later runs don't stop on tool prompts.
 - [ ] Phase 2 (Audit, Security) and phase 3 (R&D, Marketing) are built and
   paused. Switch on phase 2 after two clean phase-1 weeks, phase 3 after the
   first gated merge.
