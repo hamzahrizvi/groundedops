@@ -13,8 +13,8 @@ proposals through the product owner.
 | Test lab | `tools/weekly_blind.sh`, `tools/gate_run.sh` | no model (shell) | after Customer; before each PO run | on |
 | Product owner | `.claude/agents/product-owner.md` | Fable 5.1, high | Tue and Fri 08:00 | on |
 | Dev | `.claude/agents/dev.md` | Opus 5.5, high | weekdays 20:00, only when something is approved | on |
-| Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | Wed 09:00 | phase 2, built, switched off |
-| Security | `.claude/agents/security.md` | Opus 5.5, high | Wed 14:00, acts every 2nd week or when a branch waits | phase 2, built, switched off |
+| Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | Wed 09:00 | phase 2, on since 2026-10-08 |
+| Security | `.claude/agents/security.md` | Opus 5.5, high | Wed 14:00, acts every 2nd week or when a branch waits | phase 2, on since 2026-10-08 |
 | R&D | `.claude/agents/rnd.md` | Opus 5.5, high | 1st of the month | phase 3, built, switched off |
 | Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | 15th of the month | phase 3, built, switched off |
 | CEO (you) | - | - | when the report lands | ticks approvals, merges branches |
@@ -29,8 +29,14 @@ live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
 run from that branch's checkout (OFFICE =
 `C:/Users/hrizvi/Downloads/Git/groundedops/.claude/worktrees/agent-org`) and
 test the product in the main checkout (REPO, whatever branch it is on).
+Each task's start folder must be OFFICE too (the `cwd` of its entry in the
+desktop app's `scheduled-tasks.json`; the scheduled-tasks tool cannot set it).
+Started anywhere else, the agent files are not loaded, departments fall back to
+general-purpose and run at the orchestrator's effort, not their own: step 0's
+change_directory only applies after the turn ends. `tools/agent_wiring.py`
+checks what really ran; Audit runs it weekly.
 Don't remove that worktree; if it moves, change OFFICE in the seven task
-prompts. Dev branches product fixes from REPO's HEAD, and office-tooling fixes
+prompts and their start folders. Dev branches product fixes from REPO's HEAD, and office-tooling fixes
 from `experimental/agent-org-phase1`.
 
 **Purge.** Context costs tokens on every turn, so no phase inherits another

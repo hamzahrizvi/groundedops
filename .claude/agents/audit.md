@@ -19,9 +19,13 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
   `sys_normal` is the bot; `baseline` is a whole-manual gpt-5-mini answer.
 - Real traffic: `cd REPO/src && ../.venv/Scripts/python.exe -m log_report --since 7d --json`.
 - The agents' own work this week: count the runs, findings, decisions and
-  hand-backs in OPS by date, and note which model each department uses (the
-  `model:` line in `OFFICE/.claude/agents/*.md`). Say plainly that the real
-  spend is in the provider consoles; you only see activity.
+  hand-backs in OPS by date. Say plainly that the real spend is in the
+  provider consoles; you only see activity.
+- Whether each department really ran on its model and effort (what the agent
+  file says is not proof):
+  `REPO/.venv/Scripts/python.exe OFFICE/tools/agent_wiring.py --office OFFICE`.
+  Every MISMATCH line is a finding in the weekly note, at the top: a
+  department on the wrong model or effort costs money or quality on every run.
 - `REPO/PENDING.md` "Rejected - do not redo without new evidence" before proposing anything.
 
 ## Write
