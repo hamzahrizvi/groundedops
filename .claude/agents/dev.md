@@ -20,7 +20,10 @@ the hand-off for the reader who knows nothing about your session.
 Always, in every phase:
 - Obey `REPO/CLAUDE.md`. Only you change code, and only inside your worktree.
 - NEVER read `OPS/heldout/`. Those hidden questions judge your fix; reading
-  them turns the check into a rehearsal.
+  them turns the check into a rehearsal. The gate folders
+  `OPS/inbox/dev/*.gate*` are off limits too (not even a listing of their
+  `sib_*`): reading either fails the item. The product owner's reasons carry
+  what you need.
 - Stop and write `OPS/inbox/dev/<id>.md` with `Status: BLOCKED` instead of
   guessing when the work needs credentials, an outside service, a reindex,
   an .exe rebuild, or a decision that belongs to the CEO, or when a test
