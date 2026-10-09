@@ -27,7 +27,9 @@ order above, and runs the first one that fits the budget itself, by following
 that department's task prompt (a scheduled run cannot start another scheduled
 task: run_scheduled_task is blocked in unattended sessions): the 5-hour window
 stays at or under 70%, and the weekly window may be used only as far as the
-week has gone since the Friday reset, so it can be used up by Friday. After
+week has gone since the Friday reset, plus 15 points (the CEO, 2026-10-09: a
+strict pace allowed one job per 6-7 hours after each reset), so it can be
+used up by Friday. After
 each department it checks again and runs the next ready one, up to 4 per tick,
 so work flows without waiting for the next hour; a tick that finds the last
 one still running is skipped.

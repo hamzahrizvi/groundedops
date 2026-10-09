@@ -28,6 +28,8 @@ other lanes are running counts against the budget. tools/blind_eval.py makes tes
 Budget (the CEO's rule, 2026-10-08): the 5-hour window stays at or under 70%,
 and the weekly window keeps pace with the week - x% of the way from the last
 reset to the next, at most x% used - so it can be used up by the Friday reset.
+Since 2026-10-09 it may run up to AHEAD points ahead of that pace (the CEO's
+choice): a strict pace allowed one job per 6-7 hours after each reset.
 """
 import argparse
 import datetime
@@ -49,6 +51,7 @@ COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security
 WEEK = datetime.timedelta(days=7)
 HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-history.json")
 RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
+AHEAD = 15            # weekly points the office may run ahead of the week's pace (the CEO, 2026-10-09)
 CLAIMS = ("state", "claims")
 MAX_DEV = 2           # ponytail: Dev builds at once; each has its own worktree, merges are serialized
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
@@ -176,8 +179,8 @@ def over_budget(dept, five, week, resets, now):
     pace = 100 * (now - (resets - WEEK)) / WEEK
     if five + c5 > 70:
         return f"5-hour window {five}% + ~{c5}% would pass 70%"
-    if week + cw > pace:
-        return f"weekly {week}% + ~{cw}% is ahead of the week's pace ({pace:.0f}%)"
+    if week + cw > pace + AHEAD:
+        return f"weekly {week}% + ~{cw}% is more than {AHEAD} points ahead of the week's pace ({pace:.0f}%)"
     return None
 
 
@@ -226,7 +229,7 @@ def plan(ops, repo, five, week, resets, now, taken=None):
 
 def selftest():
     now = datetime.datetime(2026, 10, 8, 7, 0, tzinfo=datetime.timezone.utc)
-    resets = datetime.datetime(2026, 10, 9, 19, 0, tzinfo=datetime.timezone.utc)   # pace ~93%
+    resets = datetime.datetime(2026, 10, 9, 19, 0, tzinfo=datetime.timezone.utc)   # pace ~79%, so up to ~94% with AHEAD
     with tempfile.TemporaryDirectory() as ops:
         for d in ("decisions", "inbox/dev", "inbox/audit", "runs/20261008", "state"):
             os.makedirs(os.path.join(ops, d))
@@ -258,7 +261,8 @@ def selftest():
         assert claims(ops) == {}, claims(ops)
         os.remove(os.path.join(ops, "decisions/20261008c.md"))
         assert plan(ops, ops, 55, 38, resets, now)[1].startswith("WAIT groundedops-office-dev"), "5-hour cap"
-        assert "pace" in plan(ops, ops, 11, 92, resets, now)[0], "weekly pace"
+        assert "pace" in plan(ops, ops, 11, 107, resets, now)[0], "weekly pace"
+        assert plan(ops, ops, 11, 90, resets, now)[0].startswith("RUN"), "up to AHEAD points ahead of pace is fine"
         w("state/hold", "product-owner\n")
         assert plan(ops, ops, 11, 38, resets, now)[0].endswith("held (OPS/state/hold)"), "hold"
         w("state/hold", "product-owner 2026-10-08T06:00Z\n")
