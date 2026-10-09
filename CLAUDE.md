@@ -23,3 +23,7 @@ Other traps when committing in this repo:
 `PENDING.md` is the single source of what to do next. Its section "How to run
 the plan: sessions, not steps" says which steps each session does and on which
 model.
+
+`PENDING.md` is also the product owner's diary: the PO edits it by hand and
+works through it too. Uncommitted changes to it may be the PO's, so keep
+them: edit around them, never revert them, and ask before committing them.

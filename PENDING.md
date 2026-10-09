@@ -6,6 +6,13 @@ what "done" looks like. Move an item to **Resolved** with the commit/PR that
 closed it — don't delete history, since the Monday report reads this file to
 know what changed since last week.
 
+**This is also the product owner's diary (from 2026-10-10).** The PO
+reads it, edits it by hand and works items off it alongside the Claude
+sessions. So write for a reader who was not in the session, in plain
+English. A session that finds edits here it did not make keeps them: it
+edits around them, never reverts or rewrites them, and asks before
+committing them.
+
 **Friday review.** Once a week this file gets a pass, not just additions:
 
 1. Tick off anything now done — strike it through, name the commit or PR,
@@ -39,6 +46,23 @@ is not a regression. `1f594c0` moved `test_llm` into its own process, so its
 16 functions now count as one entry. The run was against the working tree,
 which also holds another session's uncommitted OCR/table work
 (`src/ocr.py`, `src/tables.py`, `src/tests/test_ocr.py`), not HEAD alone.
+
+**Friday review 2026-10-09 (automated, not yet reviewed by hand).** 29
+commits since 10-02 (S24, S26, S29, S30, the v17.0 tag, then office work
+orders for keys, CI gates, route guards and retention); the S-session rows
+above already record their own work. Ticked off: the NV9ST eval case (now
+expects a refusal, 4/5). Obsolete: "a person to write the third blind set"
+under Waiting. Corrected: 10.3's nightly CI is no longer unexercised (it
+passed on `main` 10-09, Docker check included). Added: the weekly
+`log_report` counts blind/probe runs as real use (about 1956 of 1963 rows).
+Checked in this review: `run_tests.py` **329/330 passed, 1 skipped, 1
+failed**: `test_widget_walk`, the two cases broken by the uncommitted
+widget edit that has sat in the tree since 10-02 (still uncommitted,
+`src/widget/groundedops-widget.js`, plus untracked `src/widget_feedback.json`).
+Retrieval baseline `--selfcheck` OK (35 cases, armed). The LiteLLM gateway
+is **still NXDOMAIN**. `log_report --since 7d`: 1963 questions, 1469
+answered, 387 refused, 107 asked back, 0 handoffs, 0 votes, p50 5.26s /
+p90 17.25s. All of these are harness numbers (see the new item).
 
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
@@ -361,6 +385,9 @@ Only one session changes code at a time (step P1).
 | 52 | MCP1 | Read-only MCP server: `ask`, `list_products`, `search_faqs` on existing endpoints, stdio. | Opus |
 | 53 | MCP2 | `search_docs` route, token auth, `get_source_excerpt`, HTTP transport, eval cases. | Opus |
 | 54 | MCP3 | Optional: Jira support history; generic open-source version with no ITL code or data. | Opus + you |
+| **Extra - Confluence sync (outside the 7 -> 10 plan)** | | | |
+| 55 | CF0 | Service account + read-only token; say pages or PDF attachments, which spaces map to which product, and what a deleted page does. | You |
+| 56 | CF1 | `confluence_sync.py`: weekly pull of changed manuals into the catalogue through `ingest_file`, plus a "Sync now" button. | Opus |
 
 ### How to run the plan: sessions, not steps
 
@@ -1525,6 +1552,11 @@ exactly, we cannot tell whether a fix helped.
   need `WAIT` raised on a cold runner. The eval suites are not in the
   nightly (they need a corpus, a backend and a provider key; S23's
   `health_check.py` is the place for that).
+  **Corrected, Friday review 2026-10-09: now exercised.** The workflow
+  reached `main`, and the scheduled run of 2026-10-09 (run 37909500703,
+  started 09:09 UTC, not 02:17: GitHub delays cron) passed all three jobs,
+  `build` including `docker_startup_check.sh`. The secret-scan job
+  (`e3c7a1f`) is not on `main` yet, so it does not run nightly.
 - [x] **10.4 Full side-by-side comparison answers** - only if 8.6 leaves
   comparisons still refused.
   **Done 2026-10-02 (S21).** Measured first (below), then the one real
@@ -1629,6 +1661,51 @@ admin or key tools, ever.
 Measure: weekly active users, share of `ask` calls answered vs refused,
 lookup time saved for support staff (a small before/after sample).
 
+### Extra - Confluence sync (CF0-CF1, added 2026-10-10)
+
+Manuals are written and updated in Confluence
+(`innovative-technology.atlassian.net`); today someone re-uploads them by
+hand. A weekly job pulls what changed and refreshes the catalogue. Works on
+the Standard plan at no extra cost: the REST API is on every plan, and an
+Atlassian service account takes no paid seat (five free per organisation).
+Jira is not part of this; issues are not manuals (that is MCP3).
+
+- [ ] **CF0 Decisions and access (you).**
+  - Create a service account with read-only access to the manual spaces;
+    put its email and API token in `.env`. The token lasts at most a year:
+    note who renews it.
+  - Pages or PDFs? If the manuals are PDFs attached to pages, they ingest
+    as they are. If they are Confluence pages, CF1 needs an HTML-to-text
+    step that keeps headings (the parser reads only .pdf/.docx/.txt,
+    `parsing.py` `extract_pages`). Confluence Cloud has no official
+    page-to-PDF API; do not build on the unofficial one.
+  - Which space or page tree goes to which catalogue product.
+  - A page deleted or archived in Confluence: remove it from the corpus,
+    or keep it and flag it in the console?
+  - If the server runs inside the office network, IT allows outbound
+    HTTPS to `*.atlassian.net`.
+  - The Atlassian MCP connector answers Confluence searches with 403 "The
+    app is not installed on this instance"; an Atlassian admin approving
+    it lets a session inspect the spaces before CF1 (optional).
+- [ ] **CF1 The sync.** Most of it exists already:
+  - `ingest_file` skips unchanged content by sha256 and, with
+    `replace_existing=True`, swaps a new version in before dropping the
+    old chunks (`routes_documents._ingest_worker`).
+  - `catalog.attach_source` files the document under its product.
+  - `retention.py` is the daily-thread pattern to copy:
+    `CONFLUENCE_SYNC_DAYS=7`, 0 = off, also off in `_harness.py`.
+  - New: `confluence_sync.py` reads a small mapping file (space or
+    ancestor page -> category/product), lists content changed since the
+    last run with CQL `lastmodified`, downloads it, and ingests it under a
+    filename stable across page renames (keep page/attachment id ->
+    filename in the mapping state). Back off on HTTP 429. An admin-only
+    "Sync now" route and console button, results on the existing
+    `/upload/status` job view.
+  - Check: one test with a stubbed Confluence response: a changed page
+    re-ingests, an unchanged one is skipped, a renamed one does not
+    duplicate. Then one live sync against a single test space.
+  About 150-200 lines plus the test; one session.
+
 ### Rejected - do not redo without new evidence
 
 - Escalating a flagged answer to a stronger model (V4 Pro, thinking on):
@@ -1645,8 +1722,9 @@ lookup time saved for support staff (a small before/after sample).
 ### Waiting on things outside the code
 
 SMTP login details (emails), a server and web address, a second AI
-vendor's key, a person to label answers and write
-the third blind set, and real visitors.
+vendor's key, a person to label answers, and real visitors. (Blind sets
+3-6 were written by fresh agents from the manual text only, so "a person
+to write the third blind set" is no longer needed. Friday review 10-09.)
 
 The two MyCheckr manuals disagree on the Mini's weight: MyCheckr User
 Manual-v7 p36 says "MyCheckr Mini: 186 g", MyCheckr Mini User Manual-v5 p29
@@ -2246,17 +2324,6 @@ see *Shipped — the four follow-ups* above; kept for the record.
   from. Deletion now requires the caller to say whether content is
   reassigned or deleted, and refuses to default.
 
-- **One eval case asks about a product name that is in no document.**
-  "What voltage is supported on the NV9ST?" still fails after the retag —
-  correctly, because the string "NV9ST" appears nowhere in the corpus. The
-  question itself is wrong, not its tag. Either reword it to name a real
-  product, or drop it. Until then the suite has one permanently-failing
-  case, which is worse than 26 cases because it trains people to ignore a
-  red result.
-  **Still open, Friday review 2026-09-25:** the case is unchanged at
-  `src/eval_cases.json:111` and was one of the two failures in the 32/34
-  run.
-
 - **One answer is genuinely ungrounded, and the gate is catching it.**
   "Does MyCheckr require integration with other systems?" scores **0.0051**
   — near-zero entailment against its retrieved context — while every other
@@ -2277,6 +2344,29 @@ see *Shipped — the four follow-ups* above; kept for the record.
   worth the one look, but it needs `skip_faq: true` to reproduce.
 
 ## In progress / known gaps
+
+- **The weekly "real use" report counts our own test runs as customers.**
+  Found in the Friday review 2026-10-09. `python -m log_report --since 7d`
+  (src/) reported 1963 questions, 1469 answered, 387 refused, 0 votes,
+  0 handoffs, p50 5.26s / p90 17.25s, "real use; tests excluded". Grouping
+  those 1963 rows by session-id prefix: `cases-` 1239, `blind4-` 384,
+  `blind6-` 102, `probe-` 93, `blind3-` 48, `probelat-` 36, `diag-` 18,
+  `perf-` 14, `cost-` 12, and **about 7 rows** with no harness-looking
+  prefix. So the real-use count is in single digits, and every number in
+  that report this week is a harness number. Cause:
+  `pipeline_trace.origin_for` treats only `eval-`, `live-` and
+  `preflight-` as tests; `blind_eval.py` (in `eval_runs/2026100*_blind*/`
+  and the office worktrees' `tools/`) and ad-hoc scratch runners call
+  `main._traced_query` in-process with their own prefixes, so they log as
+  `origin: console`. Why it matters: 10.1's weekly report, the gap review
+  and D-15's retention all key on origin, and the console shows these as
+  people. Done looks like: the blind/probe runners send an `eval-` prefixed
+  session id (smallest fix; `eval-blind6-...` keeps the set name), or
+  `origin_for` gains those prefixes; `log_report --since 7d` then shows
+  single digits for real use, with the harness rows under `--include-tests`.
+  Optional: relabel the existing rows offline so last week's report is
+  honest. No week-on-week comparison is possible: no earlier Friday review
+  recorded log_report numbers, and these are not a baseline.
 
 - **Staging deploy is prepared but has never been run.** `STAGING.md` is the
   runbook; `docker/.env.example` is the template. **Carries two deferred
@@ -3112,6 +3202,26 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   running before).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-10-09 (Friday review) — ticked off from the open list:**
+  - ~~**One eval case asks about a product name that is in no document.**~~
+    `e077ae1` (S26, 2026-10-07): "What voltage is supported on the NV9ST?"
+    (`src/eval_cases.json:111`) now expects `outcome: rejected` with "12"
+    absent, and the prompt refuses a product named in no document. Checked
+    in `eval_runs/20261007_1142/m4_tuned.json`: it passes **4/5**, the fifth
+    run answers "12V DC" from the NV9USB+ manual. So it is no longer a
+    permanent red; it is a sampled flip and is left out of the pass mark
+    (`eval_baseline.json`: false). If it ever passes 5/5, put it in.
+- **Landed this week but never listed here** (office work orders, for the
+  Monday diff): two revoked DeepSeek keys removed from `src/legacy/v3`
+  (`bea9a3c`; still in history, dead); CI secret scan (gitleaks) and
+  pip-audit gates (`e3c7a1f`, `d9804ab`; four chromadb HTTP-server CVEs
+  ignored, we use the embedded client); admin guard on the document and
+  settings routes plus a test that every route 401/403s without a session
+  unless named public (`49eb9dd`, `56b1b2f`, `761a012`); visitor text
+  deleted after `RETENTION_DAYS` (default 90, `2183620`). Retention matters
+  to measurement: any re-measurement that needs log rows older than 90 days
+  (as M7/M13 did) must copy `logs.jsonl` first.
 
 - **2026-09-25 (Friday review) — ticked off from the open list:**
   - ~~**PR for branch `fix/wire-faq-choices` → `main` not yet opened.**~~
