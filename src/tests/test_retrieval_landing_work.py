@@ -170,3 +170,68 @@ def test_complete_tables_never_raises_on_a_broken_chunk_cache():
     top_chunks = [{"id": "bv30_5", "text": TABLE_P1, "source": "BV30.pdf", "page": 31}]
     with patch.object(rdb, "get_collection", _boom):
         assert rdb.complete_tables(top_chunks) == top_chunks
+
+
+# ── live ids "<file>:<hash16>:<n>" and tables announced at a chunk's end ──
+# D-20261008-04: the neighbour lookup read "_<n>" only, so table completion
+# never fired on the live index; and a prose chunk ending "...the following
+# currencies:" with the rows on the next page was never completed.
+
+def _complete(prev, nxt, prev_section="S", nxt_section=""):
+    all_chunks = [
+        {"id": "NV.pdf:abc:38", "text": prev, "source": "NV.pdf", "page": 22,
+         "section": prev_section},
+        {"id": "NV.pdf:abc:39", "text": nxt, "source": "NV.pdf", "page": 23,
+         "section": nxt_section},
+    ]
+    top = [dict(all_chunks[0])]
+    with patch.object(rdb, "get_collection", lambda: object()), \
+         patch.object(rdb, "_get_bm25_index", lambda collection: (None, all_chunks)):
+        return rdb.complete_tables(top)
+
+
+DELAY_PROSE = """[NV200S Manual — Anti-Stringing]
+The validator adds a delay that depends on the notes counted for the previous 45 minutes:"""
+
+DELAY_ROWS = """[NV200S Manual]
+Notes Counted: Delay Added
+0 – 250: 0 seconds
+400: 1 second
+Further prose about the feature follows here."""
+
+
+def test_complete_tables_appends_label_value_rows_announced_by_prose():
+    out = _complete(DELAY_PROSE, DELAY_ROWS)
+    assert [c["id"] for c in out] == ["NV.pdf:abc:38", "NV.pdf:abc:39"]
+    assert out[1]["fetched_by"] == "table_completion"
+
+
+def test_complete_tables_appends_pipe_table_announced_by_the_following():
+    prose = "[SMART Coin — Currencies]\nThe unit is supplied for the following currencies"
+    rows = "[SMART Coin]\nCurrency | Coin | Diameter\nEUR | 1.00 | 23.25\nGBP | 1.00 | 22.50"
+    assert len(_complete(prose, rows)) == 2
+
+
+def test_complete_tables_ignores_a_colon_before_a_heading_or_figure_caption():
+    prose = "[NV200S Manual — Bezel]\nTo remove the bezel, do this:"
+    heading = ("[NV200S Manual]\nBezel Removal\nThe bezel is held by four clips "
+               "that release when pressed in from the rear of the unit.\nPress them.")
+    caption = ("[NV200S Manual]\nFigure 12: Bezel removal\nThe bezel is held by four "
+               "clips that release when pressed in from the rear of the unit.\nPress them.")
+    assert len(_complete(prose, heading)) == 1
+    assert len(_complete(prose, caption)) == 1
+
+
+def test_complete_tables_reads_live_ids_for_a_pipe_continuation():
+    out = _complete(TABLE_P1, TABLE_P2, prev_section="Bezel Flash Codes")
+    assert [c["id"] for c in out] == ["NV.pdf:abc:38", "NV.pdf:abc:39"]
+
+
+def test_chunks_before_reads_live_ids():
+    all_chunks = [{"id": "NV.pdf:abc:38", "text": "first"},
+                  {"id": "NV.pdf:abc:39", "text": "second"}]
+    with patch.object(rdb, "get_collection", lambda: object()), \
+         patch.object(rdb, "_get_bm25_index", lambda collection: (None, all_chunks)):
+        got = rdb.chunks_before([{"id": "NV.pdf:abc:39"}, {"id": "NV.pdf:abc:38"},
+                                 {"id": "no-number"}])
+    assert got == ["first", None, None]

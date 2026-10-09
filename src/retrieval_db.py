@@ -959,11 +959,30 @@ def chunks_before(chunks: list[dict]) -> list[str | None]:
     except Exception as exc:
         logger.warning(f"chunks_before skipped: {exc}")
         return [None] * len(chunks)
-    out = []
-    for c in chunks:
-        base, _, n = (c.get("id") or "").rpartition("_")
-        out.append(by_id.get(f"{base}_{int(n) - 1}") if n.isdigit() else None)
-    return out
+    return [by_id.get(_neighbour_id(c.get("id") or "", -1)) for c in chunks]
+
+
+def _neighbour_id(cid: str, step: int) -> str | None:
+    """The id `step` chunks away in the same document, or None. Live ids are
+    "<file>:<hash16>:<n>" (ingest.py); older ones and tests use "<doc>_<n>"."""
+    m = re.match(r"(.*[:_])(\d+)$", cid)
+    return f"{m.group(1)}{int(m.group(2)) + step}" if m else None
+
+
+# A chunk whose last line announces what follows: "...for the following
+# currencies:", "...as follows." The rows are then the next chunk.
+_ANNOUNCES = re.compile(r"(:|\bas follows\.?|\bthe following\b[^.!?|]*)\s*$", re.I)
+
+
+def _opens_like_table(body: str) -> bool:
+    """Pipe rows, or "label: value" lines (NV200S delay table) that are
+    short: a heading or a figure caption followed by prose is not."""
+    import tables as _tables
+    if _tables._starts_with_rows(body):
+        return True
+    lines = [l.strip() for l in body.split("\n") if l.strip()][:3]
+    return len(lines) == 3 and all(len(l) <= 80 and (": " in l or "|" in l)
+                                   for l in lines)
 
 
 def complete_tables(chunks: list[dict],
@@ -977,6 +996,13 @@ def complete_tables(chunks: list[dict],
     rows under the same section (tables.carry_table_context sets that).
     Appended after, like procedure completion, and marked
     fetched_by="table_completion". Never raises.
+
+    A prose chunk qualifies too when its last line announces a table
+    ("...counted for the previous 45 minutes:", "...the following
+    currencies:") and the next chunk opens like one (_opens_like_table):
+    the rows sit on the next page. Neighbours are found by _neighbour_id,
+    which reads the live "<file>:<hash>:<n>" ids; until 2026-10-09 this
+    looked for "_<n>" only and never fired on the live index.
     """
     if not chunks:
         return chunks
@@ -988,19 +1014,20 @@ def complete_tables(chunks: list[dict],
         have = {c.get("id") for c in chunks}
         out, spent = list(chunks), 0
         for c in chunks:
-            cid, text = c.get("id") or "", c.get("text") or ""
-            if "|" not in text or "_" not in cid:
-                continue
-            base, _, n = cid.rpartition("_")
-            if not n.isdigit():
-                continue
-            nxt = by_id.get(f"{base}_{int(n) + 1}")
+            text = c.get("text") or ""
+            nxt = by_id.get(_neighbour_id(c.get("id") or "", 1))
             if not nxt or nxt["id"] in have:
                 continue
             _, body = _tables.split_prefix(nxt.get("text") or "")
             same = ((nxt.get("section") or "") == (c.get("section") or "")
                     or not (nxt.get("section") or ""))
-            if not (same and _tables._starts_with_rows(body)):
+            if not same:
+                continue
+            lines = [l for l in _tables.split_prefix(text)[1].split("\n") if l.strip()]
+            continues = "|" in text and _tables._starts_with_rows(body)
+            announced = bool(lines) and bool(_ANNOUNCES.search(lines[-1])) \
+                and _opens_like_table(body)
+            if not (continues or announced):
                 continue
             if spent + len(nxt.get("text") or "") > budget:
                 break
