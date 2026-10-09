@@ -166,7 +166,9 @@ touch the shared working tree, and the hidden questions are not in git):
 ```
 OPS/runs/<YYYYMMDD>/       manuals/, cases.json, cases_state.json, run.log, DONE
 OPS/heldout/<YYYYMMDD>/    siblings_<type>.json   (Dev must never read)
-OPS/inbox/<department>/    findings and proposals; inbox/dev/ holds hand-backs and gates;
+OPS/heldout/gates/<id>.gate-<ts>/  the gate's hidden pass: gate.log, sib_*/ states (Dev never reads)
+OPS/inbox/<department>/    findings and proposals; inbox/dev/ holds hand-backs and gates
+                           (<id>.gate/: gate.json, gate.log of the open set only, after/);
                            inbox/security/review-<id>.md holds branch reviews
 OPS/decisions/<date>.md    verdicts, work orders, approval boxes
 OPS/reports/<date>.md      the CEO report
