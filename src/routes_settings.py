@@ -3,6 +3,9 @@ and saved conversations, and the odd status endpoint.
 
 Moved out of main.py verbatim (2026-09-25). Registered on the app through
 app.include_router; paths, parameters and responses are unchanged.
+
+Every route here is admin-only (_require_admin, support or root); since
+D-20261008-16 none of them answers a caller without a session.
 """
 
 import logging
@@ -25,12 +28,13 @@ router = APIRouter()
 
 
 @router.get("/stats")
-def stats():
+def stats(x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     return get_stats()
 
 
 @router.get("/rethink_options")
-def rethink_options():
+def rethink_options(x_admin_password: str | None = Header(default=None)):
     """Models available for the 'rethink with a different model' feature.
 
     Filtered by what is actually reachable. Unfiltered, this offered two
@@ -38,6 +42,7 @@ def rethink_options():
     options, none of which could answer, presented as the remedy for an answer
     the user was already unhappy with.
     """
+    _require_admin(x_admin_password)
     from llm import _rethink_options
     reachable = {p["key"] for p in _available_providers()}
     opts = [{"provider": p, "model": m} for p, m in _rethink_options()
@@ -46,9 +51,10 @@ def rethink_options():
 
 
 @router.post("/reset")
-def reset():
+def reset(x_admin_password: str | None = Header(default=None)):
     """Full reset: wipes the document collection AND every conversation
     session's memory."""
+    _require_admin(x_admin_password)
     reset_collection()
     clear_memory()
     return {"status": "reset"}
@@ -59,16 +65,19 @@ class ClearSessionRequest(BaseModel):
 
 
 @router.post("/clear_session")
-def clear_session(payload: ClearSessionRequest):
+def clear_session(payload: ClearSessionRequest,
+                  x_admin_password: str | None = Header(default=None)):
     """Clear one conversation's memory without touching the document
     collection — backs a "New conversation" button."""
+    _require_admin(x_admin_password)
     clear_memory(payload.session_id)
     return {"status": "cleared", "session_id": payload.session_id}
 
 
 @router.get("/settings")
-def settings():
+def settings(x_admin_password: str | None = Header(default=None)):
     """Current runtime settings for the UI (mode toggle, model state)."""
+    _require_admin(x_admin_password)
     return get_settings()
 
 
@@ -77,9 +86,11 @@ class ModeRequest(BaseModel):
 
 
 @router.post("/settings/mode")
-def set_mode(payload: ModeRequest):
+def set_mode(payload: ModeRequest,
+             x_admin_password: str | None = Header(default=None)):
     """Live mode switch driven by the UI's online/free toggle (v8.6).
     No restart required; router and condensation read the mode per-call."""
+    _require_admin(x_admin_password)
     try:
         mode = set_generation_mode(payload.mode)
     except ValueError as e:
@@ -97,8 +108,10 @@ class ProviderRequest(BaseModel):
 
 
 @router.post("/settings/online_provider")
-def set_provider(payload: ProviderRequest):
+def set_provider(payload: ProviderRequest,
+                 x_admin_password: str | None = Header(default=None)):
     """v9.1.1: choose which API answers in Online mode."""
+    _require_admin(x_admin_password)
     try:
         p = set_online_provider(payload.provider)
     except ValueError as e:
@@ -124,8 +137,9 @@ def _ollama_base() -> str:
 
 
 @router.get("/models/status")
-def models_status():
+def models_status(x_admin_password: str | None = Header(default=None)):
     """Which local models are installed in Ollama (and is Ollama up)."""
+    _require_admin(x_admin_password)
     import requests as _requests
     try:
         r = _requests.get(f"{_ollama_base()}/api/tags", timeout=5)
@@ -175,9 +189,11 @@ def _pull_worker(model: str):
 
 
 @router.post("/models/pull")
-def models_pull(payload: ModelsRequest = None):
+def models_pull(payload: ModelsRequest = None,
+                x_admin_password: str | None = Header(default=None)):
     """Download missing local models via Ollama, in the background.
     Poll /models/pull_status for progress."""
+    _require_admin(x_admin_password)
     models = (payload.models if payload and payload.models else ["phi", "mistral"])
     models = [m for m in models if m in ("phi", "mistral")]
     with _PULL_LOCK:
@@ -189,16 +205,19 @@ def models_pull(payload: ModelsRequest = None):
 
 
 @router.get("/models/pull_status")
-def models_pull_status():
+def models_pull_status(x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     with _PULL_LOCK:
         return dict(_PULL_STATE)
 
 
 @router.post("/models/warmup")
-def models_warmup(payload: ModelsRequest = None):
+def models_warmup(payload: ModelsRequest = None,
+                  x_admin_password: str | None = Header(default=None)):
     """Manually load selected local models into Ollama (v8.6.1: the UI's
     mode dialog lets the user choose which to load). Startup no longer
     warms anything automatically."""
+    _require_admin(x_admin_password)
     models = (payload.models if payload and payload.models else ["phi", "mistral"])
     models = [m for m in models if m in ("phi", "mistral")]
     results = warmup_local_models(models)
@@ -208,9 +227,11 @@ def models_warmup(payload: ModelsRequest = None):
 
 
 @router.post("/models/unload")
-def models_unload(payload: ModelsRequest = None):
+def models_unload(payload: ModelsRequest = None,
+                  x_admin_password: str | None = Header(default=None)):
     """Unload selected local models from Ollama memory (keep_alive=0).
     v8.6.1: the UI's mode dialog lets the user choose which to unload."""
+    _require_admin(x_admin_password)
     import requests as _requests
     from llm import OLLAMA_URL
     models = (payload.models if payload and payload.models else ["phi", "mistral"])
@@ -237,7 +258,9 @@ def models_unload(payload: ModelsRequest = None):
 # never hit this store; their history stays browser-local.
 
 @router.get("/conversations")
-def conversations_list(x_user_id: str | None = Header(default=None)):
+def conversations_list(x_user_id: str | None = Header(default=None),
+                       x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     uid = convo_store.resolve_user_id(x_user_id)
     if not uid:
         return {"conversations": [], "authenticated": False}
@@ -245,7 +268,9 @@ def conversations_list(x_user_id: str | None = Header(default=None)):
 
 
 @router.get("/conversations/{convo_id}")
-def conversations_get(convo_id: str, x_user_id: str | None = Header(default=None)):
+def conversations_get(convo_id: str, x_user_id: str | None = Header(default=None),
+                      x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     uid = convo_store.resolve_user_id(x_user_id)
     if not uid:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -256,7 +281,9 @@ def conversations_get(convo_id: str, x_user_id: str | None = Header(default=None
 
 
 @router.delete("/conversations/{convo_id}")
-def conversations_delete(convo_id: str, x_user_id: str | None = Header(default=None)):
+def conversations_delete(convo_id: str, x_user_id: str | None = Header(default=None),
+                         x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     uid = convo_store.resolve_user_id(x_user_id)
     if not uid:
         raise HTTPException(status_code=401, detail="Not authenticated")
