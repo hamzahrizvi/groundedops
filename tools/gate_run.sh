@@ -34,3 +34,4 @@ done
 "$PY" "$REPO/tools/retrofit_gate.py" --before "$RUN/cases_state.json" \
   --after "$OUT/after/cases_state.json" --siblings "${SIBS[@]}" > "$OUT/gate.json"
 cat "$OUT/gate.json"
+"$PY" "$REPO/tools/gate_rerun.py" "$DEV" "$RUN" "$OUT"   # 1-2 case "became wrong": re-ask 6x branch vs base
