@@ -110,6 +110,22 @@ def _save_vote(request_id: str, row: dict) -> None:
         jsonstore.save(_FEEDBACK_PATH, data, label="widget feedback")
 
 
+def prune_before(cutoff) -> int:
+    """D-15: drop votes (question, answer, note) older than `cutoff`, an
+    aware datetime. Returns how many went."""
+    from datetime import timezone
+    key = cutoff.astimezone(timezone.utc).isoformat()
+    with _feedback_lock:
+        data = jsonstore.load(_FEEDBACK_PATH, {}, label="widget feedback")
+        if not isinstance(data, dict):
+            return 0
+        kept = {k: v for k, v in data.items()
+                if isinstance(v, dict) and (v.get("created_at") or "") >= key}
+        if len(kept) < len(data):
+            jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
+        return len(data) - len(kept)
+
+
 # 8.11: what the visitor is told while the pipeline runs. A stage is marked
 # when it FINISHES, so each one names the step that starts next. Stages not
 # listed say nothing new and are not sent.

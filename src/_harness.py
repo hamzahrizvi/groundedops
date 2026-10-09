@@ -119,6 +119,8 @@ os.environ["POLICY_PATH"] = _scratch("policy.json")
 # making real provider calls from inside a test run.
 os.environ["CREDIT_ALERT_STATE_PATH"] = _scratch("credit_alerts.json")
 os.environ["CREDIT_CHECK_HOURS"] = "0"
+# retention: no daily pruning thread inside a test run.
+os.environ["RETENTION_DAYS"] = "0"
 os.environ["AUTH_TOKENS_PATH"] = _scratch("auth_tokens.json")
 # quota.py resolves its sqlite path at import. Without this, tests write
 # usage rows into the REAL src/quota.db -- which both pollutes live counters

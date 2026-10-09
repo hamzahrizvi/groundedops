@@ -1297,6 +1297,27 @@ def gap_stats() -> dict:
     }
 
 
+def prune_before(cutoff) -> int:
+    """D-15: drop gaps last asked before `cutoff` (an aware datetime). The
+    gap vector cache is keyed by question text, so it is deleted when any
+    gap goes and rebuilds on the next /faq/gaps. Returns how many went."""
+    global _gap_vec_by_text
+    ts = cutoff.timestamp()
+    with _lock:
+        gaps = _read_gaps()
+        kept = [g for g in gaps if float(g.get("ts") or 0) >= ts]
+        if len(kept) == len(gaps):
+            return 0
+        _write_gaps(kept)
+    with _gap_cache_lock:
+        _gap_vec_by_text = None
+        try:
+            os.remove(_gap_vector_cache_file())
+        except FileNotFoundError:
+            pass
+    return len(gaps) - len(kept)
+
+
 def dismiss_gap(gap_id: str) -> bool:
     """Hard-delete every recorded entry for one normalized question — a
     one-off clear. Unlike mark_spam, a dismissed question that gets asked

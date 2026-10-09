@@ -79,6 +79,29 @@ function Log($msg) {
     Write-Host $line
 }
 
+# D-15: archives hold visitor text, which is deleted after RETENTION_DAYS
+# (default 90, 0 = never), so an archive older than that goes too. This runs
+# on EVERY run, before the export and even if it then fails: the age limit is
+# a promise about the data, unlike the -Keep count below.
+$days = $env:RETENTION_DAYS
+$envPath = Join-Path $src ".env"
+if (-not $days -and (Test-Path $envPath)) {
+    $m = Select-String -Path $envPath -Pattern '^\s*RETENTION_DAYS\s*=\s*(\d+)' |
+         Select-Object -First 1
+    if ($m) { $days = $m.Matches[0].Groups[1].Value }
+}
+$n = 0
+if (-not [int]::TryParse("$days", [ref]$n) -or $n -lt 0) { $n = 90 }
+if ($n -gt 0) {
+    $limit = (Get-Date).AddDays(-$n)
+    Get-ChildItem $Dest -Filter "groundedops-*.gobk" |
+        Where-Object { $_.LastWriteTime -lt $limit } |
+        ForEach-Object {
+            Remove-Item $_.FullName -Force
+            Log "pruned $($_.Name) (older than $n days)"
+        }
+}
+
 # manage_backup.py reads src\.env itself, so the passphrase does not need to
 # be in this process's environment - but fail early and clearly if it is
 # absent, rather than letting the CLI stop to prompt a scheduler that has no

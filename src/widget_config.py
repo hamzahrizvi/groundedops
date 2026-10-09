@@ -442,6 +442,20 @@ def mark_notified(lead_id: str) -> bool:
     return False
 
 
+def prune_before(cutoff) -> int:
+    """D-15: delete enquiries never emailed that are older than `cutoff`, an
+    aware datetime. Emailed stubs hold no visitor text and keep their own
+    400-day rule above. Returns how many went."""
+    key = cutoff.astimezone(timezone.utc).isoformat()
+    with _leads_lock:
+        items = _load_leads()
+        kept = [l for l in items if l.get("notified")
+                or (l.get("created_at") or "") >= key]
+        if len(kept) < len(items):
+            _save_leads(kept)
+        return len(items) - len(kept)
+
+
 def list_leads(kind: str | None = None, include_handled: bool = True,
                limit: int = 200, include_sent: bool = False) -> list[dict]:
     """The console's list: enquiries not yet emailed. `include_sent` adds the
