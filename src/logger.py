@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 LOG_FILE      = "logs.jsonl"
 MAX_LOG_BYTES = 10 * 1024 * 1024   # 10 MB
@@ -155,3 +155,57 @@ def log_feedback(request_id: str, vote: str, session_id: str | None = None) -> N
                 f.write(json.dumps(entry) + "\n")
         except IOError as exc:
             _logger.error(f"Failed to write log: {exc}")
+
+
+def prune_before(cutoff) -> int:
+    """D-15: drop every row older than `cutoff` (an aware UTC datetime)
+    from logs.jsonl, the rotated logs_*.jsonl beside it and a legacy
+    logs.json array. A rotated file left empty is deleted. Rows carry naive
+    UTC ISO timestamps, so a string compare is a time compare; a row with no
+    timestamp is dropped. Returns how many rows went."""
+    import glob
+    key = cutoff.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+    folder = os.path.dirname(os.path.abspath(LOG_FILE))
+    removed = 0
+    with _lock:
+        for path in sorted(glob.glob(os.path.join(folder, "logs_*.jsonl"))) + [
+                os.path.abspath(LOG_FILE)]:
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+            kept = []
+            for line in lines:
+                try:
+                    ts = json.loads(line).get("timestamp") or ""
+                except ValueError:
+                    ts = ""            # a torn line from a crash mid-write
+                if ts >= key:
+                    kept.append(line)
+            if len(kept) == len(lines):
+                continue
+            removed += len(lines) - len(kept)
+            if not kept and path != os.path.abspath(LOG_FILE):
+                os.remove(path)
+                continue
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+            os.replace(tmp, path)
+        legacy = os.path.join(folder, "logs.json")
+        if os.path.exists(legacy):
+            try:
+                with open(legacy, encoding="utf-8") as f:
+                    rows = json.load(f)
+            except ValueError:
+                rows = None
+            if isinstance(rows, list):
+                kept = [r for r in rows if isinstance(r, dict)
+                        and (r.get("timestamp") or "") >= key]
+                if len(kept) < len(rows):
+                    removed += len(rows) - len(kept)
+                    tmp = legacy + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(kept, f)
+                    os.replace(tmp, legacy)
+    return removed

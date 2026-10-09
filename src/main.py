@@ -979,6 +979,8 @@ def startup_event():
     thread.start()
     import credit_watch
     credit_watch.start()
+    import retention   # D-15: visitor text deleted after RETENTION_DAYS
+    retention.start()
 
 
 @app.get("/status")
