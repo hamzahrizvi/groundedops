@@ -62,7 +62,8 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
 - FAIL -> send it back with the gate's reasons (`- Verdict: SENT BACK`). If
   the only reason was "became wrong" on one or two cases, the gate has
   already re-asked them 6 times on the branch and on base (`gate.json`
-  "rerun"): a FAIL that survives that is real, so do not ask Dev to re-run;
+  "rerun"): a FAIL that survives that is real, so do not ask Dev to re-run
+  (a "rerun" holding only an "error" means the re-run broke: say so);
   never wave a failing gate through.
   Then rename `OPS/inbox/dev/<id>.md` to `<id>.md.<n>` and `<id>.gate` to
   `<id>.gate.<n>` (n = next free number), so Dev picks the item up again and
