@@ -60,8 +60,10 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
   customers. The dispatcher merges it once Security clears it; you do not merge. If `OPS/inbox/security/review-<id>.md` exists and its first line
   is `Verdict: BLOCK`, it is not ready: send it back with Security's reasons.
 - FAIL -> send it back with the gate's reasons (`- Verdict: SENT BACK`). If
-  the only reason is "became wrong" on one or two cases, say they may be
-  noise and ask Dev to re-run those; never wave a failing gate through.
+  the only reason was "became wrong" on one or two cases, the gate has
+  already re-asked them 6 times on the branch and on base (`gate.json`
+  "rerun"): a FAIL that survives that is real, so do not ask Dev to re-run;
+  never wave a failing gate through.
   Then rename `OPS/inbox/dev/<id>.md` to `<id>.md.<n>` and `<id>.gate` to
   `<id>.gate.<n>` (n = next free number), so Dev picks the item up again and
   the next hand-back gets a fresh gate. Leave `<id>.plan.md` and

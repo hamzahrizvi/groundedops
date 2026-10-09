@@ -123,7 +123,9 @@ weeks, phase 3 once Dev has merged a gated fix.
 A fix passes only if (`tools/retrofit_gate.py`):
 1. every **hidden sibling question** (same weakness, other products and
    wording, written by Customer, never shown to Dev) scores at least 2 of 3;
-2. no question that was right before is now **wrong**;
+2. no question that was right before is now **wrong** (when only one or two
+   are, `tools/gate_rerun.py` asks each 6 times on the branch and 6 on its base
+   code: it stays wrong only if the branch is wrong at least 2 passes more often);
 3. the overall score does not drop by more than the noise (3 points).
 
 The siblings are the point. Dev sees the failing questions, so passing them

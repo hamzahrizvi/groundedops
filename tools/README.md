@@ -26,6 +26,7 @@ runs, then lock it separately with `--baseline eval_baseline_retrieval.json
 | `export_manuals.py` | Writes each product's manual text from the index, one file per product (run from `src/`). The blind question writer reads only these; the whole-manual baseline pastes them in. |
 | `blind_eval.py` | The blind runner (was copied into each `eval_runs/` folder): this bot vs a whole-manual gpt-5-mini baseline, graded blind by gpt-5. `GO_CODE`/`GO_DATA` run a Dev worktree's code on the live index; `reset` re-measures a copied run. The grader also sees the full text of each case's cited pages; `prompt <case_id>` prints a grading prompt without calling the API. |
 | `retrofit_gate.py` | Pass/fail for a fix: hidden sibling questions >= 2/3, nothing right became wrong, no drop beyond noise. `--selftest`. |
+| `gate_rerun.py` | Run by `gate_run.sh`: a FAIL whose only reason is 1-2 cases "became wrong" is re-asked 6x on branch and base; kept only if the branch is wrong 2+ passes more often. `--selftest`. |
 | `weekly_blind.sh`, `gate_run.sh` | The agent office's shell jobs (`ops/README.md`): the weekly blind run, and the gate on a Dev branch. |
 
 ## The throwaway console
