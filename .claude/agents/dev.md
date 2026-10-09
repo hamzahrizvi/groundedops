@@ -47,14 +47,29 @@ asked for already exists.
 Find the root cause for the TYPE of question in the work order, in the code
 path every caller shares. No special case for one phrasing, product or case id.
 
-Write `OPS/inbox/dev/<id>.plan.md`: the root cause with file:line evidence,
-the change (files and functions), the tests to add or run, the finding's
-case ids to re-run, and the risks. Make the worktree now:
+You are the senior; a junior (agent `dev-junior`, a cheaper model) can do
+the BUILD. Decide who builds. Junior is the default: it saves cost on every
+work order. Keep the build only when it needs judgement a written plan cannot
+carry: a change across several modules, retrieval or scoring logic whose
+effect you must weigh while editing, concurrency, or a round after a junior
+build of this item failed the gate on how it was built.
+
+Write `OPS/inbox/dev/<id>.plan.md`. Its first line is exactly
+`Builder: junior` or `Builder: senior`, the second `Why: <one line>`. Then: the
+root cause with file:line evidence, the change (files and functions), the
+tests to add or run, the finding's case ids to re-run, and the risks. For a
+junior build, write each edit concretely (file, function, what changes) and
+the exact test commands, so it can be followed without judgement calls. Make
+the worktree now:
 `git -C REPO worktree add REPO/.claude/worktrees/dev-<id> -b agents/dev-<id>` from
 REPO's current HEAD. A work order that changes the office's own tooling
 (OFFICE `tools/` or `ops/`) branches from `experimental/agent-org-phase1` instead.
 
 ## Phase BUILD
+You run it when the plan says `Builder: senior`, or when the junior's
+`<id>.build.md` starts `Stuck:` (then read that too, keep the junior's good
+commits, finish the work, and replace its first line with
+`Built: taken over from junior`).
 Read: `OPS/inbox/dev/<id>.plan.md`, then only the files it names. Implement
 it in the worktree. Commit rules from CLAUDE.md: whole files or real hunks,
 `py_compile` each staged `.py`, no `git commit -- <path>`. Run the targeted
@@ -64,6 +79,10 @@ counts, anything that differs from the plan and why.
 
 ## Phase CHECK
 Read: `OPS/inbox/dev/<id>.plan.md` and `<id>.build.md` only. In the worktree:
+- quick review before you tick it off: read the branch's diff against its
+  base and hold it to the plan. Fix small defects yourself (a missed case, a
+  wrong condition, a test that does not test the change) as your own commit.
+  Larger trouble is yours to finish too, but say so. Count what you fixed.
 - full suite once: `cd src && REPO/.venv/Scripts/python.exe run_tests.py`;
 - re-run the finding's cases with `OFFICE/tools/blind_eval.py`
   (`GO_CODE=<worktree>/src GO_DATA=REPO/src`, on a COPY of the run folder,
@@ -75,6 +94,8 @@ Write `OPS/inbox/dev/<id>.md` starting with these lines exactly:
 Status: READY | BLOCKED
 Branch: agents/dev-<id>
 Worktree: <absolute path>
+Builder: junior | senior | junior, taken over by senior
+Senior fixes: <count>[: <each, a few words>]
 ```
 then: commit hashes; what changed and why it fixes the whole type of
 question; tests before and after; the finding's cases before -> after; risks

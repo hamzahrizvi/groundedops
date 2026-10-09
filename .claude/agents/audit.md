@@ -26,6 +26,17 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
   `REPO/.venv/Scripts/python.exe OFFICE/tools/agent_wiring.py --office OFFICE`.
   Every MISMATCH line is a finding in the weekly note, at the top: a
   department on the wrong model or effort costs money or quality on every run.
+- Junior vs senior Dev builds (since 2026-10-10 the senior Dev hands routine
+  builds to `dev-junior`, a cheaper model, to save cost; you watch that quality
+  holds). Per work order: `grep -H "^Builder:\|^Senior fixes:" OPS/inbox/dev/D-*.md`,
+  its rounds (count of `OPS/inbox/dev/<id>.md.N` archives, plus one), and its
+  gate verdicts (`"verdict"` in `OPS/inbox/dev/<id>.gate*/gate.json`; you may
+  read these, Dev may not). Compare junior against senior builds: share passing
+  the gate on the first round, rounds per item, senior fixes per item, and how
+  often the junior was taken over. Items before 2026-10-10 are all senior: the
+  baseline. With fewer than three junior items, report the counts only and say
+  it is too early to judge. If junior builds clearly do worse, propose which
+  kinds of work go back to the senior.
 - `REPO/PENDING.md` "Rejected - do not redo without new evidence" before proposing anything.
 
 ## Write
