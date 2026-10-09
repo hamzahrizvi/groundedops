@@ -95,8 +95,12 @@ if phase in ("system", "baseline"):
     if phase == "system":
         os.environ["PERFORMANCE_MODE"] = "1" if sys.argv[3] == "perf" else "0"
         LAB = lab_lock()
+    # The app's own question log and FAQ-gap list stay in this run folder, not in GO_DATA's
+    # production files (hidden gate questions were landing in REPO/src/logs.jsonl, D-20261009-01).
+    os.environ.setdefault("FAQ_GAP_PATH", os.path.join(RUN, "app_faq_gaps.json"))
     import torch  # noqa: F401  main thread first
-    import main, llm
+    import main, llm, logger
+    logger.LOG_FILE = os.path.join(RUN, "app_logs.jsonl")
     main.capability = lambda *_a, **_k: True
 import requests
 
