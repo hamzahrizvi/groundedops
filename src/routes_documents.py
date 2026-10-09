@@ -35,7 +35,9 @@ class SourceChunksRequest(BaseModel):
 
 
 @router.post("/delete_source")
-def remove_source(payload: DeleteSourceRequest):
+def remove_source(payload: DeleteSourceRequest,
+                  x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     removed = delete_source(payload.source)
     clear_memory()
     try:
@@ -47,9 +49,11 @@ def remove_source(payload: DeleteSourceRequest):
 
 
 @router.post("/source_chunks")
-def source_chunks(payload: SourceChunksRequest):
+def source_chunks(payload: SourceChunksRequest,
+                  x_admin_password: str | None = Header(default=None)):
     """Fetch full chunk text for the given chunk ids — backs the
     clickable "view source" feature in the UI."""
+    _require_admin(x_admin_password)
     return {"chunks": get_chunks_by_ids(payload.chunk_ids)}
 
 
@@ -185,7 +189,8 @@ def _existing_source_like(filename: str) -> str | None:
 @router.post("/upload")
 async def upload(request: Request,
                  file: UploadFile = File(...),
-                 x_user_id: str | None = Header(default=None)):
+                 x_user_id: str | None = Header(default=None),
+                 x_admin_password: str | None = Header(default=None)):
     """v10.x: ASYNC ingest. Returns a job_id immediately; the document is
     indexed in a background thread. Poll /upload/status/{job_id}.
 
@@ -199,6 +204,7 @@ async def upload(request: Request,
     _ingest_worker was skipped silently, and the document then appeared in
     the "needs assignment" list despite a category having been chosen.
     """
+    _require_admin(x_admin_password)
     # Indexing needs the database and the embedding model. It does NOT need
     # the reranker, the grounding model or the spec index, and waiting for
     # those put a two-minute 503 in front of the first upload after a
@@ -264,7 +270,8 @@ async def upload(request: Request,
 
 
 @router.get("/upload/status/{job_id}")
-def upload_status(job_id: str):
+def upload_status(job_id: str, x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
     with _INGEST_LOCK:
         job = _INGEST_JOBS.get(job_id)
     if not job:
@@ -391,9 +398,10 @@ _INGEST_STAMP_PATH = os.getenv("INGEST_STAMP_PATH", "ingest_stamp.txt")
 
 
 @router.get("/ingest/version")
-def ingest_version():
+def ingest_version(x_admin_password: str | None = Header(default=None)):
     """Compare the fingerprint the DB was built with against the current
     code. UI shows a 're-ingest recommended' banner when they differ."""
+    _require_admin(x_admin_password)
     current = _ingest_fingerprint()
     built_with = None
     if os.path.exists(_INGEST_STAMP_PATH):

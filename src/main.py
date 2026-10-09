@@ -143,6 +143,9 @@ MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", str(2 * 1024 * 1024)))
 # archives. Exempt from MAX_BODY_BYTES, not from authentication -- both are
 # admin-gated, and backup import is root-only. backup.py applies its own
 # ceiling (BACKUP_MAX_BYTES) to what an archive may expand to.
+# The admin guard is a call inside each handler (_require_admin), so FastAPI
+# has already read the multipart body to a temp file before it runs: an
+# unauthenticated caller is refused, but only after the upload is received.
 _LARGE_BODY_PATHS = ("/upload", "/admin/backup/import", "/admin/backup/inspect")
 
 
@@ -150,7 +153,8 @@ _LARGE_BODY_PATHS = ("/upload", "/admin/backup/import", "/admin/backup/inspect")
 async def _limit_body_size(request, call_next):
     if request.method in ("POST", "PUT", "PATCH"):
         cl = request.headers.get("content-length")
-        # Uploads are admin-only and LAN-only, so they are exempt. So is
+        # Uploads are admin-only (guarded in the handler) and LAN-only, so
+        # they are exempt. So is
         # restoring a backup: an archive is ~100MB of documents by design,
         # and it is root-gated. Both are held to _LARGE_BODY_PATHS rather
         # than being unbounded.
