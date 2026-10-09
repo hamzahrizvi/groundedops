@@ -31,6 +31,21 @@ week has gone since the Friday reset, so it can be used up by Friday. After
 each department it checks again and runs the next ready one, up to 4 per tick,
 so work flows without waiting for the next hour; a tick that finds the last
 one still running is skipped.
+
+**Lanes (since 2026-10-09).** One runner meant one long job (a 3-hour build,
+a gate) held up every other department. Three lanes now run the same steps
+(`ops/schedules/dispatch.md`): `groundedops-office-dispatch` is lane 1 at :08,
+`groundedops-office-lane-2` and `-lane-3` run at about :25 and :52. Each lane
+takes work with `office_next.py --lane N --take`, which claims it with an
+O_EXCL file in `OPS/state/claims`, so no two lanes ever start the same thing.
+Up to two Dev work orders build at once, each in its own worktree on its own
+branch, so no commits collide; merges and every other department run one at a
+time; work running in other lanes counts against the budget. Test runs take
+turns (`blind_eval.py` locks the lab for its "system" phase) so timings stay
+honest. A branch that conflicts with a fix merged first is sent back to Dev for
+a rebase by `office_merge.py`, and the gate and Security run again on it.
+New lanes start with manual permissions: set them to Auto in the app before
+switching them on, or the first command waits forever.
 Usage comes from the app's own samples (`plan-usage-history.json`), so the
 runner's one command never changes. `OPS/state/hold` pauses a department:
 `<department> [<ISO end time>]` per line; a line without an end time lapses 4

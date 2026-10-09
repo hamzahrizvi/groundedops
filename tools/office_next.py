@@ -17,6 +17,14 @@ cannot start other scheduled tasks.
 
 A department named on a line of OPS/state/hold is held: WAIT, whatever it has.
 
+Lanes (2026-10-09): three scheduled runners share the work side by side (ops/schedules/dispatch.md).
+  python tools/office_next.py --lane N --take      the plan, then TOOK <key> | <line>, or TOOK nothing
+  python tools/office_next.py --lane N --release   at the end of the lane's tick
+--take claims the first runnable line no other lane holds with an O_EXCL file in OPS/state/claims,
+so two lanes can never start the same work. Dev builds up to MAX_DEV work orders at once, each in
+its own worktree on its own branch; merges, and every other department, run one at a time. Work
+other lanes are running counts against the budget. tools/blind_eval.py makes test runs take turns.
+
 Budget (the CEO's rule, 2026-10-08): the 5-hour window stays at or under 70%,
 and the weekly window keeps pace with the week - x% of the way from the last
 reset to the next, at most x% used - so it can be used up by the Friday reset.
@@ -41,6 +49,9 @@ COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security
 WEEK = datetime.timedelta(days=7)
 HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-history.json")
 RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
+CLAIMS = ("state", "claims")
+MAX_DEV = 2           # ponytail: Dev builds at once; each has its own worktree, merges are serialized
+STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
 def latest_usage(path=HISTORY, fallback=None):
@@ -69,8 +80,54 @@ def _mtime(pattern):
     return max((os.path.getmtime(p) for p in glob.glob(pattern)), default=0)
 
 
-def waiting(ops, repo, now):
-    """[(department, why)] for every office task with work waiting, most urgent first."""
+def claims(ops):
+    """{key: {lane, at, line}} for work a lane is doing now. One file per piece of work in
+    OPS/state/claims, made with O_EXCL so two lanes can never take the same thing."""
+    out = {}
+    for p in glob.glob(os.path.join(ops, *CLAIMS, "*.json")):
+        try:
+            if time.time() - os.path.getmtime(p) > STALE:
+                os.remove(p)
+                continue
+            out[os.path.basename(p)[:-5]] = json.load(open(p, encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    return out
+
+
+def release(ops, lane):
+    """Drop every claim this lane holds."""
+    for p in glob.glob(os.path.join(ops, *CLAIMS, "*.json")):
+        try:
+            if json.load(open(p, encoding="utf-8")).get("lane") == lane:
+                os.remove(p)
+        except (OSError, ValueError):
+            pass
+
+
+def take(ops, repo, five, week, resets, now, lane):
+    """The plan, then a claim on its first runnable line no other lane holds. Runs of one lane
+    never overlap, so this lane's leftover claims are from its last run and are dropped first."""
+    release(ops, lane)
+    d = os.path.join(ops, *CLAIMS)
+    os.makedirs(d, exist_ok=True)
+    rows = entries(ops, repo, five, week, resets, now, claims(ops))
+    for line, key, ok in rows:
+        if not ok:
+            continue
+        try:
+            fd = os.open(os.path.join(d, key + ".json"), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:   # another lane won the race: try the next line
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"lane": lane, "at": now.isoformat(timespec="seconds"), "line": line}, f)
+        return [r[0] for r in rows] + [f"TOOK {key} | {line}"]
+    return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
+
+
+def waiting(ops, repo, now, taken=()):
+    """[(department, why, claim key)] for every office task with work waiting, most urgent first.
+    Dev builds skip work orders another lane already holds, so a second lane gets the next one."""
     items = decisions(ops)
     merged, reverted = git_sets(repo)
     dev = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") == "dev"}
@@ -83,7 +140,7 @@ def waiting(ops, repo, now):
             return ""
         m = re.search(r"(?mi)^Verdict:\s*(CLEAR|BLOCK)", open(review(i), encoding="utf-8").read())
         return m.group(1).upper() if m else ""
-    out = [("merge", i) for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"]   # tools/office_merge.py
+    out = [("merge", i, "merge") for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"]   # tools/office_merge.py
     blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
     blocked += [review(i) for i, s in dev.items() if s in ("check passed", "ready to merge") and verdict(i) == "BLOCK"]
     findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
@@ -91,9 +148,10 @@ def waiting(ops, repo, now):
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
     if check or findings:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
-                                                             findings and f"{len(findings)} new findings"]))))
-    if build:
-        out.append(("dev", f"build {build[0]}" + (f" (+{len(build) - 1} queued)" if len(build) > 1 else "")))
+                                                             findings and f"{len(findings)} new findings"])), "product-owner"))
+    free = [i for i in build if f"dev-{i}" not in taken]
+    if free:
+        out.append(("dev", f"build {free[0]}" + (f" (+{len(free) - 1} queued)" if len(free) > 1 else ""), f"dev-{free[0]}"))
     age = lambda t: (now.timestamp() - t) / 86400
     last_run = _mtime(os.path.join(ops, "runs", "*", "DONE"))
     try:
@@ -102,13 +160,13 @@ def waiting(ops, repo, now):
     except Exception:
         last_merge = 0
     if not last_run or age(last_run) >= 7 or last_merge > last_run:
-        out.append(("customer", "a fix merged since the last test" if last_run and last_merge > last_run else "weekly test due"))
+        out.append(("customer", "a fix merged since the last test" if last_run and last_merge > last_run else "weekly test due", "customer"))
     unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge")
                   and not os.path.exists(os.path.join(ops, "inbox", "security", f"review-{i}.md"))]
     if unreviewed or age(_mtime(os.path.join(ops, "state", "security_last_run.txt"))) >= 13:
-        out.append(("security", "review " + ", ".join(unreviewed) if unreviewed else "fortnightly review due"))
+        out.append(("security", "review " + ", ".join(unreviewed) if unreviewed else "fortnightly review due", "security"))
     if age(_mtime(os.path.join(ops, "inbox", "audit", "*-weekly.md"))) >= 7:
-        out.append(("audit", "weekly cost review due"))
+        out.append(("audit", "weekly cost review due", "audit"))
     return out
 
 
@@ -141,17 +199,29 @@ def holds(ops, now):
     return held
 
 
-def plan(ops, repo, five, week, resets, now):
-    lines = []
+def entries(ops, repo, five, week, resets, now, taken):
+    """[(line, claim key, runnable)]. Work other lanes are running counts against the budget,
+    since two lanes starting together both see the same usage figures."""
     held = holds(ops, now)
-    for dept, why in waiting(ops, repo, now):
+    cost = lambda k: COST.get("dev" if k.startswith("dev-") else k, (0, 0))
+    five, week = five + sum(cost(k)[0] for k in taken), week + sum(cost(k)[1] for k in taken)
+    building = sum(k.startswith("dev-") for k in taken)
+    out = []
+    for dept, why, key in waiting(ops, repo, now, taken):
+        lane = f" (lane {taken[key].get('lane')})" if key in taken else ""
         if dept == "merge":
-            lines.append(f"WAIT merge {why}  held (OPS/state/hold)" if "merge" in held
-                         else f"MERGE {why}  gate PASS, READY TO MERGE, Security CLEAR")
+            stop = "held (OPS/state/hold)" if "merge" in held else f"another merge is running{lane}" if lane else None
+            out.append((f"WAIT merge {why}  {stop}" if stop else f"MERGE {why}  gate PASS, READY TO MERGE, Security CLEAR", key, not stop))
             continue
-        stop = "held (OPS/state/hold)" if dept in held else over_budget(dept, five, week, resets, now)
-        lines.append(f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}")
-    return lines or ["IDLE"]
+        stop = ("held (OPS/state/hold)" if dept in held else f"already running{lane}" if lane else
+                f"{MAX_DEV} builds already running" if dept == "dev" and building >= MAX_DEV else
+                over_budget(dept, five, week, resets, now))
+        out.append((f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}", key, not stop))
+    return out
+
+
+def plan(ops, repo, five, week, resets, now, taken=None):
+    return [r[0] for r in entries(ops, repo, five, week, resets, now, claims(ops) if taken is None else taken)] or ["IDLE"]
 
 
 def selftest():
@@ -174,6 +244,19 @@ def selftest():
         w("decisions/20261008b.md", "## D-20261008-08 | Key leak\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
         assert "build D-20261008-08 (+1 queued)" in plan(ops, ops, 11, 38, resets, now)[1], "security first"
         os.remove(os.path.join(ops, "decisions/20261008b.md"))
+        w("decisions/20261008c.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
+                                    "## D-20261008-05 | Five\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        took = [take(ops, ops, 11, 38, resets, now, n)[-1].split(" |")[0] for n in (1, 2, 3, 4)]
+        assert took == ["TOOK product-owner", "TOOK dev-D-20261008-02", "TOOK dev-D-20261008-04", "TOOK nothing"], took
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert "already running (lane 1)" in p[0] and "2 builds already running" in p[1], p
+        release(ops, 3)
+        assert "would pass 70%" in plan(ops, ops, 25, 38, resets, now)[1], "other lanes' work counts against the budget"
+        assert take(ops, ops, 11, 38, resets, now, 1)[-1].startswith("TOOK product-owner"), "a lane's own leftover claim never blocks it"
+        for n in (1, 2):
+            release(ops, n)
+        assert claims(ops) == {}, claims(ops)
+        os.remove(os.path.join(ops, "decisions/20261008c.md"))
         assert plan(ops, ops, 55, 38, resets, now)[1].startswith("WAIT groundedops-office-dev"), "5-hour cap"
         assert "pace" in plan(ops, ops, 11, 92, resets, now)[0], "weekly pace"
         w("state/hold", "product-owner\n")
@@ -215,10 +298,17 @@ def main():
     ap.add_argument("--five", type=float)
     ap.add_argument("--week", type=float)
     ap.add_argument("--resets", help="ISO time the weekly window resets")
+    ap.add_argument("--lane", type=int, help="this runner's lane number, for --take and --release")
+    ap.add_argument("--take", action="store_true", help="claim the first runnable line for --lane; last line TOOK <key> | <line> or TOOK nothing")
+    ap.add_argument("--release", action="store_true", help="drop every claim --lane holds")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if (a.take or a.release) and not a.lane:
+        ap.error("--take and --release need --lane")
+    if a.release:
+        return release(a.ops, a.lane) or print(f"RELEASED lane {a.lane}")
     now = datetime.datetime.now(datetime.timezone.utc)
     if a.five is None or a.week is None:
         a.five, a.week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
@@ -227,7 +317,7 @@ def main():
                          ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}} from get_usage to OPS/state/usage.json and run again)')
     resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
     print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC")
-    print("\n".join(plan(a.ops, a.repo, a.five, a.week, resets, now)))
+    print("\n".join(take(a.ops, a.repo, a.five, a.week, resets, now, a.lane) if a.take else plan(a.ops, a.repo, a.five, a.week, resets, now)))
 
 
 if __name__ == "__main__":

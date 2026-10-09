@@ -50,6 +50,33 @@ load_env(os.path.join(DATA, ".env"))
 if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
     os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(DATA, ".secrets.enc"))
 
+def lab_lock():
+    """One "system" run at a time on this machine, so parallel office lanes never skew each other's
+    timings or load the models twice; building and planning still run in parallel (2026-10-09).
+    The OS releases the lock when the process ends, so a crashed run never leaves it held."""
+    try:
+        import msvcrt
+        grab = lambda f: msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    except ImportError:
+        import fcntl
+        grab = lambda f: fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    waited = 0
+    while True:
+        f = open(os.path.expanduser("~/.groundedops-lab.lock"), "a+")   # a fresh handle each try: a failed
+        f.seek(0)                                                        # msvcrt attempt never succeeds on retry
+        try:
+            grab(f)
+            break
+        except OSError:
+            f.close()
+            if not waited:
+                print("waiting for the lab: another system run is in progress", flush=True)
+            time.sleep(20)
+            waited += 20
+    if waited:
+        print(f"lab free after {waited // 60} min", flush=True)
+    return f   # keep the handle open for the life of the process
+
 phase = sys.argv[2]
 if phase == "reset":
     for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary")]:
@@ -67,6 +94,7 @@ if phase in ("system", "baseline"):
         os.environ[f"PROVIDER_ROLE_{_r}"] = "openai"; os.environ[f"MODEL_ROLE_{_r}"] = "gpt-5-mini"
     if phase == "system":
         os.environ["PERFORMANCE_MODE"] = "1" if sys.argv[3] == "perf" else "0"
+        LAB = lab_lock()
     import torch  # noqa: F401  main thread first
     import main, llm
     main.capability = lambda *_a, **_k: True

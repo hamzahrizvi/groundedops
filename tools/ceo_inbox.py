@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, stage_of  # noqa: E402
@@ -130,7 +131,17 @@ def main():
     a = ap.parse_args()
     if a.selftest or not a.folder:
         return selftest()
-    print("\n".join(apply(a.ops, a.folder)) or "NONE")
+    lock = os.path.join(a.ops, "state", "ceo_inbox.lock")   # parallel lanes: one applies, the others skip
+    try:
+        if os.path.exists(lock) and time.time() - os.path.getmtime(lock) > 600:
+            os.remove(lock)   # left by a run that died
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL))
+    except FileExistsError:
+        return print("BUSY another lane is applying the page's decisions")
+    try:
+        print("\n".join(apply(a.ops, a.folder)) or "NONE")
+    finally:
+        os.remove(lock)
 
 
 if __name__ == "__main__":

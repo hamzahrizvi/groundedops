@@ -18,7 +18,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
-from office_next import holds, latest_usage, next_reset, plan  # noqa: E402
+from office_next import claims, holds, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "merge": "Merge"}
@@ -78,16 +78,21 @@ def brief(ops, repo, now=None, usage=None):
         stalled = (f"Paused: the office's usage figures are {old / 60:.0f} hours old, and it starts nothing on"
                    " old figures. The hourly runner now fetches fresh ones itself.") if old != float("inf") else \
                   "Paused: the office has no usage figures, so it starts nothing."
-    else:
-        moving = [explain(x, titles) for x in plan(ops, repo, five, week, next_reset(now), now)]
+    else:   # work another lane is doing shows under "running", not as a wait
+        moving = [m for m in (explain(x, titles) for x in plan(ops, repo, five, week, next_reset(now), now))
+                  if "already running (lane" not in m["why"]]
         if moving and all(m["state"] == "wait" for m in moving):
             stalled = "Everything with work is waiting: " + "; ".join(f"{m['dept']}: {m['why']}" for m in moving)
     held = sorted(holds(ops, now))
     if held:
         stalled = (stalled + " " if stalled else "") + "On hold by hand: " + ", ".join(held) + "."
     reports = sorted(glob.glob(os.path.join(ops, "reports", "*.md")))
+    running = [{**explain(c.get("line", "IDLE"), titles), "state": "now", "lane": c.get("lane"), "since": c.get("at")}
+               for c in claims(ops).values()]
+    if running and stalled.startswith("Everything with work is waiting"):
+        stalled = ""   # waiting behind work that is running is not a stall
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
-            "minutes_old": None if old == float("inf") else round(old)}, "moving": moving, "stalled": stalled,
+            "minutes_old": None if old == float("inf") else round(old)}, "running": running, "moving": moving, "stalled": stalled,
             "todo": todo, "items": cards,
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
@@ -110,7 +115,12 @@ def selftest():
         assert "[latest decision]" in b["items"]["D-20261008-07"]["text"] and "Still open." in b["items"]["D-20261008-07"]["text"]
         assert "# Later triage" not in b["items"]["D-20261008-07"]["text"], "a block stops at the next heading"
         assert b["moving"] == [] or all(m["dept"] for m in b["moving"]), b["moving"]
-        assert b["report"].startswith("# Report") and not b["stalled"], b["stalled"]
+        assert b["report"].startswith("# Report") and not b["stalled"] and b["running"] == [], b
+        os.makedirs(os.path.join(ops, "state", "claims"))
+        w("state/claims/dev-D-20261008-01.json", json.dumps({"lane": 2, "at": "2026-10-08T06:30:00+00:00",
+                                                              "line": "RUN  groundedops-office-dev  build D-20261008-01"}))
+        r = brief(ops, ops, now, (11, 38, 5))["running"]
+        assert r == [{"dept": "Dev", "state": "now", "why": "build “Two products”", "lane": 2, "since": "2026-10-08T06:30:00+00:00"}], r
         assert brief(ops, ops, now, (11, 38, 300))["stalled"].startswith("Paused: the office's usage figures are 5 hours old")
         e = explain("WAIT groundedops-office-dev  build D-20261008-01; held (OPS/state/hold)", {"D-20261008-01": "Two products"})
         assert e == {"dept": "Dev", "state": "wait", "why": "build \u201cTwo products\u201d; on hold"}, e

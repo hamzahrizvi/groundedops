@@ -15,6 +15,7 @@ fixes. Merges with --no-ff so the merge commit names the branch, py_compiles the
 Never pushes.
 """
 import argparse
+import glob
 import json
 import os
 import py_compile
@@ -22,6 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions  # noqa: E402
@@ -66,12 +68,14 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
         return f"WAIT uncommitted changes in {target} touch {sorted(changed & dirty)}"
     into = git(target, "rev-parse", "--abbrev-ref", "HEAD")[1]
     title = decisions(ops).get(did, {}).get("title", "")
-    rc, _, err = git(target, "merge", "--no-ff", branch, "-m",
-                     f"Merge branch '{branch}' ({did}: {title})\n\nMerged by the office after a gate PASS and a Security CLEAR "
-                     f"(the CEO's standing instruction, 2026-10-08).")
+    rc, out, err = git(target, "merge", "--no-ff", branch, "-m",
+                       f"Merge branch '{branch}' ({did}: {title})\n\nMerged by the office after a gate PASS and a Security CLEAR "
+                       f"(the CEO's standing instruction, 2026-10-08).")
     if rc:
         git(target, "merge", "--abort")
-        return f"FAILED merge conflict into {into}, sent back for a rebase: {err[:200]}"
+        files = sorted(set(re.findall(r"(?:Merge conflict in|CONFLICT \([^)]*\):.*? in) (\S+)", out + "\n" + err)))
+        send_back(did, ops, into, branch, files)
+        return f"FAILED merge conflict into {into} in {files or 'files git did not name'}; sent back to Dev for a rebase"
     bad = []
     for f in sorted(p for p in changed if p.endswith(".py") and os.path.exists(os.path.join(target, p))):
         try:
@@ -84,6 +88,25 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
     return f"MERGED {branch} into {into} ({target})"
 
 
+def send_back(did, ops, into, branch, files):
+    """Another fix merged first and now conflicts (parallel Dev lanes make this common): hand the
+    item back the way the product owner does, renaming the hand-back, gate and Security review to
+    the next free number so Dev rebuilds it and the gate and Security run again on the result."""
+    base = os.path.join(ops, "inbox", "dev", did)
+    review = os.path.join(ops, "inbox", "security", f"review-{did}.md")
+    n = 1 + max([int(m.group(1)) for p in glob.glob(base + ".*") + glob.glob(review + ".*")
+                 for m in [re.search(r"\.(\d+)$", p)] if m] or [0])
+    for src in (base + ".md", base + ".gate", review):
+        if os.path.exists(src):
+            os.rename(src, f"{src}.{n}")
+    title = decisions(ops).get(did, {}).get("title", "")
+    with open(os.path.join(ops, "decisions", time.strftime("%Y%m%d") + ".md"), "a", encoding="utf-8") as f:
+        f.write(f"\n\n## {did} | {title}\n- Verdict: SENT BACK\n\nSent back by the office merge: another fix merged into "
+                f"{into} first and {branch} now conflicts with it in {', '.join(files) or 'files git did not name'}. "
+                f"Rebase {branch} onto {into}, resolve the conflicts keeping both fixes, run the full suite, then CHECK "
+                f"again. Nothing else changes; the gate and Security run again on the rebased branch.\n")
+
+
 def selftest():
     os.environ.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
     with tempfile.TemporaryDirectory() as tmp:
@@ -94,7 +117,8 @@ def selftest():
         run("init", "-q", "-b", "main")
         w(os.path.join(repo, "a.py"), "x = 1\n")
         run("add", "."), run("commit", "-qm", "base")
-        for did, f, body in (("D-20261008-91", "b.py", "y = 2\n"), ("D-20261008-92", "a.py", "x = 3\n"), ("D-20261008-93", "c.py", "def (\n")):
+        for did, f, body in (("D-20261008-91", "b.py", "y = 2\n"), ("D-20261008-92", "a.py", "x = 3\n"), ("D-20261008-93", "c.py", "def (\n"),
+                             ("D-20261008-94", "b.py", "y = 5\n")):   # 94 built in parallel with 91, same file
             run("checkout", "-qb", f"agents/dev-{did}", "main")
             w(os.path.join(repo, f), body)
             run("add", "."), run("commit", "-qm", did)
@@ -105,15 +129,23 @@ def selftest():
         run("add", "."), run("commit", "-qm", "companion")
         run("checkout", "-q", "main")
         w(os.path.join(ops, "decisions", "20261008.md"), "".join(
-            f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93")))
+            f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94")))
         assert merge("D-20261008-91", ops, repo, repo).startswith("WAIT the product owner"), "needs READY TO MERGE"
         w(os.path.join(ops, "decisions", "20261009.md"), "".join(
-            f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93")))
+            f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94")))
+        w(os.path.join(ops, "inbox", "dev", "D-20261008-94.md"), "Status: READY\n")
         w(os.path.join(repo, "a.py"), "x = 1  # someone's work in progress\n")         # dirty, not in D-1
         r = merge("D-20261008-91", ops, repo, repo)
         assert r.count("MERGED") == 2 and os.path.exists(os.path.join(repo, "tools", "t.py")), r   # companion too
         assert merge("D-20261008-91", ops, repo, repo) == "MERGED agents/dev-D-20261008-91 already\nMERGED agents/office-D-20261008-91 already"
         assert "work in progress" in open(os.path.join(repo, "a.py")).read(), "their edit is untouched"
+        r = merge("D-20261008-94", ops, repo, repo)
+        assert r.startswith("FAILED merge conflict") and "b.py" in r, r
+        assert open(os.path.join(repo, "b.py")).read() == "y = 2\n", "the conflicting merge was aborted"
+        dev = os.path.join(ops, "inbox", "dev")
+        assert sorted(os.listdir(dev)) == ["D-20261008-91.gate", "D-20261008-92.gate", "D-20261008-93.gate", "D-20261008-94.gate.1", "D-20261008-94.md.1"], os.listdir(dev)
+        assert os.path.exists(os.path.join(ops, "inbox", "security", "review-D-20261008-94.md.1")), "Security reviews the rebase again"
+        assert "Verdict: SENT BACK" in open(os.path.join(ops, "decisions", time.strftime("%Y%m%d") + ".md")).read()
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
         assert merge("D-20261008-93", ops, repo, repo).startswith("FAILED"), "broken code is reverted"
         assert not os.path.exists(os.path.join(repo, "c.py")), "the revert removed it"

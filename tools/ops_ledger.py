@@ -73,7 +73,8 @@ def stage_of(it, ops, merged, reverted):
     it["gate"], it["first_try"] = gate, attempts == 0
     if it["id"] in reverted:
         return "reverted"
-    if it["id"] in merged:
+    rode = re.search(r"(?m)^Branch:\s*agents/dev-(D-\d{8}-\d+)", _read(dev + ".md")) if os.path.exists(dev + ".md") else None
+    if it["id"] in merged or (rode and rode.group(1) in merged):   # built on another order's branch (D-13 rode on D-08)
         return "merged"
     if latest == "DONE":   # a CEO action ticked off on the office page (tools/ceo_inbox.py)
         return "done"
@@ -181,6 +182,10 @@ def _selftest():
     assert r["boards"]["dev"]["doing"] == ["Fix comparisons"] and r["boards"]["po"]["queue"] == ["Cache repeated questions"]
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
     assert pts["customer"] == 4 and pts["dev"] == 0, pts            # two approved, none merged yet
+    w("decisions/20261013b.md", "## D-20261013-04 | Audit\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+    w("inbox/dev/D-20261013-04.md", "Status: READY\nBranch: agents/dev-D-20261013-01\n")   # rode on 01's branch
+    assert {c["id"]: c["stage"] for c in ledger(ops, merged={"D-20261013-01"}, today=day)["cards"]}["D-20261013-04"] == "merged"
+    os.remove(os.path.join(ops, "decisions/20261013b.md")); os.remove(os.path.join(ops, "inbox/dev/D-20261013-04.md"))
     r = ledger(ops, merged={"D-20261013-01"}, today=day)
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
     assert (pts["customer"], pts["dev"], pts["po"]) == (4 + 5 + 3, 5 + 3, 1), pts
