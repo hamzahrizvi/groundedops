@@ -388,6 +388,10 @@ Only one session changes code at a time (step P1).
 | **Extra - Confluence sync (outside the 7 -> 10 plan)** | | | |
 | 55 | CF0 | Service account + read-only token; say pages or PDF attachments, which spaces map to which product, and what a deleted page does. | You |
 | 56 | CF1 | `confluence_sync.py`: weekly pull of changed manuals into the catalogue through `ingest_file`, plus a "Sync now" button. | Opus |
+| **Extra - feedback and reporting (outside the 7 -> 10 plan)** | | | |
+| 57 | FB1 | Widget asks "Did this solve it?" and takes a note on a thumbs-down; console Feedback page lists every vote with its conversation. | Opus |
+| 58 | FB2 | Analytics per website and product: resolved, refused, handed off, voted down, week on week (builds on 10.1). | Opus |
+| 59 | FB3 | "Report an issue" in the console's Widget preview: staff send a recorded summary; the office Customer agent checks it and files real ones for the PO. | Opus + you |
 
 ### How to run the plan: sessions, not steps
 
@@ -1705,6 +1709,75 @@ Jira is not part of this; issues are not manuals (that is MCP3).
     re-ingests, an unchanged one is skipped, a renamed one does not
     duplicate. Then one live sync against a single test space.
   About 150-200 lines plus the test; one session.
+
+### Extra - feedback and reporting (FB1-FB3, added 2026-10-10)
+
+The idea: know how many customer issues the widget actually resolves on
+each website, hear from customers in their own words, and let support
+staff report a bad answer they see while testing so it reaches the fix
+list. **Much of this exists; build only the gaps.**
+
+Already built: thumbs up/down under generated answers (8.10, stored in
+`widget_feedback.json`, a down vote flags the question in the console's
+gaps page), the weekly report with a "Last 7 days" tile row (10.1,
+`log_report.py`, `/admin/report`), the console review loop with a
+"Flagged by visitors" filter (10.2), and the console's Widget preview
+(asks there are logged with origin `console`). The office Customer agent
+already copies `widget_feedback.json` into its weekly run.
+
+Gaps, with the evidence:
+- "Resolved" is a guess (10.1): last turn answered, no handoff, no
+  repeat. There is no question asking the customer.
+- Votes are rare: 0 in the 7 days to 10-09 (Friday review). The widget
+  has no note box although the API takes a 280-character note (8.10).
+- Votes appear only as a filter on the gaps page; nobody can read all
+  feedback in one place.
+- The report has no split by website or product, and no trend.
+- Staff testing in the Widget preview have no way to say "this answer is
+  wrong" except telling someone.
+
+- [ ] **FB1 Customer feedback the console can read.**
+  - At the end of a conversation (the visitor closes the widget, or after
+    an answer with no follow-up), ask once: "Did this solve your
+    problem? Yes / No". Store it beside the votes, keyed by session, so
+    it is the real "resolved" signal for FB2.
+  - After a thumbs-down, open the optional note box (the API already
+    takes `note`).
+  - Console: a Feedback page listing votes, notes and solved yes/no,
+    newest first, each opening the conversation it came from (the gaps
+    page already opens what was said; reuse that view).
+  - Retention: notes are visitor text, so `widget_api`'s prune_before
+    (D-15, 90 days) must cover them; the counts stay.
+  - Check: extend `tests/test_answer_feedback.py`: a note is stored and
+    shown, a solved answer is recorded once per session.
+- [ ] **FB2 Resolved-issue analytics per website.**
+  - Extend `log_report` and the Overview tiles, do not build a second
+    report: split by website (the widget's embedding origin) and by
+    product; resolved = the visitor said yes (FB1), else the 10.1 guess,
+    shown separately so the two are not mixed; week-on-week trend.
+  - Origin `widget` only; console, eval and test asks stay out (10.1
+    already does this).
+  - Check: one log_report test over a small fixed logs file with two
+    websites.
+- [ ] **FB3 Staff "Report an issue" from the Widget preview.**
+  - A "Report an issue" button under each answer in the console's Widget
+    preview. It records a summary without the staff member typing it out:
+    the question, the answer, the cited sources and pages, request id,
+    product, time, plus a short "what is wrong" note from them.
+  - Stored in `staff_reports.json` (admin-only route, signed-in staff;
+    not visitor text, so outside retention), listed in the console with a
+    status: new / checking / real / not a fault.
+  - The office Customer agent reads new reports on its run (as it already
+    reads `widget_feedback.json`), re-asks the question to reproduce it,
+    and files the real ones as findings in `OPS/inbox/customer` for the
+    PO's triage; the PO's decision puts them on the fix list here. It
+    marks each report real or not a fault, with one line why, so the
+    reporter sees the outcome in the console.
+  - You: confirm the Customer agent is the right owner (it runs weekly;
+    a report would wait up to a week) and whether staff should also be
+    able to report from the live widget.
+  - Check: a route test (report stored with its summary, admin-only, a
+    visitor token is refused).
 
 ### Rejected - do not redo without new evidence
 
