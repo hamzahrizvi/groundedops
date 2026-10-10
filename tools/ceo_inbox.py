@@ -12,6 +12,7 @@ from the decisions file, and a note is quoted so it can never read as a decision
   defer    DEFER (the CEO parks it)
   done     DONE (a CEO action ticked off; ops_ledger shows it as done)
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
+  refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
 """
 import argparse
 import datetime
@@ -25,6 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, stage_of  # noqa: E402
+from office_next import claims  # noqa: E402
 
 CAN = {"approve": {"waiting for CEO", "deferred", "rejected"},
        "defer": {"waiting for CEO", "approved, queued", "sent back, rebuilding", "blocked", "check failed"}}
@@ -65,6 +67,14 @@ def apply(ops, folder, now=None):
             open(path, "w", encoding="utf-8").write(f"# A note from the CEO{about}\n\nSent from the office page, {stamp}."
                                                      " Answer it in the next report; if it asks for a decision, make it." + quote(d.get("note")) + "\n")
             out.append(f"APPLIED {doc_id} note")
+            continue
+        if choice == "refresh":   # no item: the dispatcher re-uploads the status figures; office_next.py puts the test run first
+            if "customer" in claims(ops):
+                out.append(f"APPLIED {doc_id} refresh (a test run is under way; the new score comes from it)")
+            else:
+                os.makedirs(os.path.join(ops, "state"), exist_ok=True)
+                open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
+                out.append(f"APPLIED {doc_id} refresh")
             continue
         if i not in items:
             out.append(f"SKIPPED {doc_id} no such item {i!r}")
@@ -120,6 +130,17 @@ def selftest():
         assert len(notes) == 1 and "> Why is the table fix" in open(notes[0], encoding="utf-8").read()
         assert apply(ops, os.path.join(ops, "nothing")) == [], "an empty pull does nothing"
         assert apply(ops, os.path.join(ops, "pull")) == [], "a row is applied once, even if it still reads new"
+        req = os.path.join(ops, "state", "refresh_request")
+        row("8", id="", choice="refresh")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 8 refresh"] and os.path.exists(req), "a press files a request"
+        os.remove(req)
+        os.makedirs(os.path.join(ops, "state", "claims"))
+        json.dump({"lane": 2, "line": "RUN  groundedops-office-customer  weekly test due"},
+                  open(os.path.join(ops, "state", "claims", "customer.json"), "w"))
+        assert apply(ops, os.path.join(ops, "pull")) == [], "row 8 is already applied"
+        row("9", id="", choice="refresh")
+        got = apply(ops, os.path.join(ops, "pull"))
+        assert got[0].startswith("APPLIED 9 refresh (a test run is under way") and not os.path.exists(req), "folded into the run"
     print("selftest ok")
 
 

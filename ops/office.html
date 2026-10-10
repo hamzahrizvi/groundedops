@@ -196,6 +196,7 @@ button{font:inherit;color:inherit}
 .small{font-size:13px;color:var(--muted);margin:0}
 .link{background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-size:14px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.pvrefresh{margin:0 0 6px}
 .btn.go{background:var(--accent);color:var(--accent-ink)}
 .btn:disabled{opacity:.55;cursor:default;transform:none}
 dialog.pop{border:2px solid var(--ink);border-radius:4px;background:var(--surface);color:var(--ink);padding:0;width:min(580px,calc(100vw - 32px));max-height:min(88vh,780px);box-shadow:6px 6px 0 var(--ink)}
@@ -268,6 +269,8 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         </div>
         <p class="lnote" id="ledgerNote"></p>
         <div role="tabpanel" id="p-status" aria-labelledby="t-status">
+          <div class="actions pvrefresh"><button type="button" class="btn" id="refreshBtn" hidden>Refresh status and score</button><p class="small" id="pvUpdated"></p></div>
+          <p class="small" id="refreshMsg"></p>
           <div class="trend">
             <h3 class="pvh">Is the product getting better?</h3>
             <p class="tverdict" id="trVerdict"></p>
@@ -752,7 +755,7 @@ const SAMPLE_PIVOT = {sample:true, runs:["20261001","20261008"], categories:{sim
     steps:[{from:"20261001",to:"20261008",delta:6,noise:8.9,call:"same",fixes:[{id:"D-20261003-01",title:"Comparisons pick each product's manual",when:2,gate:{verdict:"PASS",before:70,after:74}}]}],
     waiting:[], verdict:"No change we can tell yet: the adjusted score moved +6 points from 1 Oct to 8 Oct, inside the 8.9-point noise. 1 fix merged in that time."}};
 let pv = {dim:"category", metric:"score", open:null};
-const runLabel = r => { const d = new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8)); return d.toLocaleDateString(undefined, {day:"numeric", month:"short"}); };
+const runLabel = r => { const d = new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8)); return d.toLocaleDateString(undefined, {day:"numeric", month:"short"}) + (r.length > 8 ? `, run ${r.charCodeAt(8) - 96}` : ""); };
 const TYPE_NAMES = {lookup:"Look up a fact", yes_no_documented:"Yes/no from the manual", table_condition:"A limit in a table", procedure_or_troubleshoot:"How-to and troubleshooting",
   comparison:"Two products compared", followup:"Follow-up in a chat", multi_document:"Several asks in one message", absent_feature:"A feature it doesn't have",
   phantom_or_offtopic:"Made-up product or off-topic", vague:"Too vague to answer"};
@@ -843,6 +846,7 @@ function renderPivot(){
   const P = live.pivot || SAMPLE_PIVOT, M = METRICS[pv.metric], runs = (P.runs || []).slice(-8), last = runs[runs.length-1], prev = runs[runs.length-2];
   renderTrend(P);
   if(tab === "status"){ const chip = document.getElementById("ledgerChip"); chip.textContent = P.sample ? "Sample" : "Live"; chip.className = "chip " + (P.sample ? "sample" : "live"); }
+  document.getElementById("pvUpdated").textContent = P.sample || !P.updated ? "" : `Figures updated ${new Date(P.updated).toLocaleString()}.`;
   document.getElementById("ledgerNote").hidden = tab === "status";
   // tiles
   const o = (P.overall || {})[last], op = prev && P.overall[prev];
@@ -1102,13 +1106,32 @@ function openItem(id){
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
-const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note"};
+const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh"};
 async function decide(id, choice, note, title){
   if(!live.db) throw {code:"no_db"};
   await live.db.collection("ceo_inbox").add({id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
 }
 const writeError = e => e && e.code === "invalid_argument" ? "This view can't send decisions: it needs edit access to the page." :
   e && e.code === "no_db" ? "The office isn't connected in this view, so nothing was sent." : "Couldn't send it. Try again in a moment.";
+/* the CEO's refresh: status figures at the next hourly check, a fresh score from 40 new blind questions (tools/ceo_inbox.py, office_next.py) */
+let refreshArmed = false;
+function renderRefresh(){
+  const b = $("refreshBtn"), msg = $("refreshMsg"), row = live.inbox.find(r => r.choice === "refresh" && r.status === "new");
+  b.hidden = !live.available;
+  if(b.hidden){ msg.textContent = ""; return; }
+  b.disabled = !!row;
+  b.textContent = refreshArmed && !row ? "Confirm: about $1 and an hour of testing" : "Refresh status and score";
+  b.className = refreshArmed && !row ? "btn go" : "btn";
+  msg.className = row ? "sent" : "small";
+  msg.textContent = row ? `You asked at ${fmtTime(new Date(row.at))}. The figures update at the office's next hourly check; the new score follows when the test run finishes, about an hour later.`
+    : refreshArmed ? "Rebuilds the figures and asks the chatbot 40 new questions for a fresh score. In a busy hour it waits for the usage budget." : "";
+}
+$("refreshBtn").addEventListener("click", async () => {
+  if(!refreshArmed){ refreshArmed = true; return renderRefresh(); }
+  refreshArmed = false; $("refreshBtn").disabled = true;
+  try { await decide("", "refresh", "", "Refresh status and score"); renderRefresh(); }
+  catch(e){ renderRefresh(); $("refreshMsg").className = "oops"; $("refreshMsg").textContent = writeError(e); }
+});
 
 /* ---------- the product owner's chat ---------- */
 const chatEl = $("chat"), msgs = $("msgs"), askBox = $("ask"), fab = $("fab");
@@ -1251,7 +1274,7 @@ setInterval(sampleStep, 9000);
   let firstEvents = true;
   try {
     db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderTray(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderRefresh(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());
