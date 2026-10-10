@@ -186,6 +186,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-23 | The pre-ship check grades the "after" answers without the manual pages the "before" grader had | approved, queued | Dev builds it |
 | D-20261010-26 | Security item D-20261010-26, details in the office | approved, queued | Dev builds it |
 | D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | approved, queued | Dev builds it |
+| D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | approved, queued | Dev builds it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261010-31 | An adjustable spending cap for the test lab, and a running cost report, on the office page | approved, queued | Dev builds it |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
@@ -195,6 +196,11 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/20261010b-procedure-or-troubleshoot | Step-by-step set-up answers leave out the first required step | proposed | the product owner triages it |
 | customer/20261010b-table-condition | Lookups in a code or spec table return the neighbouring row, or the other product's row | proposed | the product owner triages it |
 | customer/20261010b-vague | Vague complaints are answered, or declined, instead of asking one question back | proposed | the product owner triages it |
+| customer/20261010c-comparison | Comparison questions get "not in the documentation" when both figures are documented | proposed | the product owner triages it |
+| customer/20261010c-grader | Grader finding: correct declines and a correct baseline were marked down | proposed | the product owner triages it |
+| customer/20261010c-multi-document | Questions with several asks are declined outright when one ask is not found | proposed | the product owner triages it |
+| customer/20261010c-table-condition | Table answers drop a clause or swap columns | proposed | the product owner triages it |
+| customer/20261010c-vague | Vague messages are guessed at or declined instead of getting a clarifying question | proposed | the product owner triages it |
 | security/20261009 | Security item security/20261009, details in the office | proposed | the product owner triages it |
 | D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
 | D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
@@ -220,9 +226,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | deferred | parked |
 | D-20261010-17 | When the passages miss, read the whole manual once before saying "not in the manual" | deferred | parked |
 | D-20261010-18 | Half answers that say "not stated" for a documented fact: search once more for the named gap | deferred | parked |
-| D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | deferred | parked |
 | D-20261010-32 | The source-document and figure routes let in any caller that sends no proxy header, not only private addresses | deferred | parked |
 | D-20261010-33 | Security item D-20261010-33, details in the office | deferred | parked |
+| D-20261010-34 | Yes/no questions get an answer from the page next to the right one | deferred | parked |
 
 **Finished or turned down in the last 30 days:** D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-08 Security item D-20261008-08, details in the office (merged); D-20261008-09 Security item D-20261008-09, details in the office (done); D-20261008-13 Security item D-20261008-13, details in the office (merged); D-20261008-15 Security item D-20261008-15, details in the office (merged); D-20261008-16 Security item D-20261008-16, details in the office (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261010-01 Buying words turn an honest "not found" into a sales brush-off (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-05 The pre-ship check skips its own flicker re-run when the one wrong case also tips the score (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done); D-20261010-19 Security item D-20261010-19, details in the office (merged); D-20261010-20 Security item D-20261010-20, details in the office (merged); D-20261010-22 Security item D-20261010-22, details in the office (merged); D-20261010-24 Security item D-20261010-24, details in the office (merged); D-20261010-25 Security item D-20261010-25, details in the office (merged); D-20261010-29 Security item D-20261010-29, details in the office (merged).
 <!-- office-plan:end -->
