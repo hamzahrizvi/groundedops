@@ -39,6 +39,7 @@ PROV = os.environ.get("LAB_PROVIDER", "deepseek")
 # DeepSeek grades with thinking off: on, it failed right answers that add true detail (grader_ab.py, 2026-09-28)
 MODELS = {"openai": {"bot": "gpt-5-mini", "baseline": "gpt-5-mini", "grader": "gpt-5"},
           "deepseek": {"bot": "deepseek-v4-flash", "baseline": "deepseek-v4-flash", "grader": "deepseek-v4-flash"}}[PROV]
+REMARK = None   # the backup file while a "remark" phase re-grades this run
 URL = {"openai": "https://api.openai.com/v1/chat/completions", "deepseek": "https://api.deepseek.com/v1/chat/completions"}[PROV]
 # $ per 1M tokens: input, cached input, output. ponytail: DeepSeek at its peak rate; off-peak (most hours) is half
 PRICE = {"gpt-5-mini": (0.25, 0.025, 2.00), "gpt-5": (1.25, 0.125, 10.00), "deepseek-v4-flash": (0.30, 0.006, 1.20)}
@@ -86,7 +87,7 @@ def lab_lock():
         print(f"lab free after {waited // 60} min", flush=True)
     return f   # keep the handle open for the life of the process
 
-phase, REMARK = sys.argv[2], None
+phase = sys.argv[2]
 if phase == "reset":
     for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary")]:
         del state[k]
@@ -267,10 +268,10 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
                                   for t in sorted({c['type'] for c in ok})}}
-    bests = [grades[c["id"]].get("best") for c in ok]
-    summary["best"] = {k: bests.count(k) for k in SYSTEMS + ["tie"]}
     used = [g["usage"] for g in grades.values() if "usage" in g]   # grades from before 2026-10-10 logged none
     summary["grader"] = {"model": used[-1]["model"] if used else "gpt-5", "calls": len(used),
                          "usd": round(sum(x["usd"] for x in used), 4)}
+    bests = [grades[c["id"]].get("best") for c in ok]
+    summary["best"] = {k: bests.count(k) for k in SYSTEMS + ["tie"]}
     state["summary"] = summary; save()
     print(json.dumps(summary, indent=1))
