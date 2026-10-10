@@ -196,7 +196,10 @@ and the hand-back header in `.claude/agents/dev.md`; keep them in step.
 touch the shared working tree, and the hidden questions are not in git):
 
 ```
-OPS/runs/<YYYYMMDD>/       manuals/, cases.json, cases_state.json, run.log, DONE
+OPS/runs/<YYYYMMDD>/       manuals/, cases.json, cases_state.json, run.log, DONE; visitor text
+                           (widget_feedback.json, real_questions.json, real_categorised.json)
+                           is deleted after RETENTION_DAYS (90) by the weekly run's first step
+                           (ops_pivot.py --prune); real_counts.json keeps the counts
 OPS/heldout/<YYYYMMDD>/    siblings_<type>.json   (Dev must never read)
 OPS/heldout/gates/<id>.gate-<ts>/  the gate's hidden pass: gate.log, sib_*/ states (Dev never reads)
 OPS/inbox/<department>/    findings and proposals; inbox/dev/ holds hand-backs and gates

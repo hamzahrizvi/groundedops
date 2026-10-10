@@ -11,8 +11,8 @@ PURGE: every phase below runs in a fresh subagent that starts from a cleared con
 1. STAMP = today as YYYYMMDD; if OPS/runs/STAMP already exists (a second run the same day), add the first letter from b on that makes it new (YYYYMMDDb, YYYYMMDDc, ...). RUN = OPS/runs/STAMP. Create RUN/parts, OPS/inbox/customer and OPS/heldout/STAMP.
    Status customer working "Reading the manuals".
    Export the manuals: `cd "<REPO>/src" && HF_HUB_OFFLINE=1 ../.venv/Scripts/python.exe "<OFFICE>/tools/export_manuals.py" "<RUN>/manuals"`.
-   If REPO/src/widget_feedback.json exists, copy it into RUN (real customer votes).
-   Export the week's website questions: `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_pivot.py" --export-real "<RUN>" --src "<REPO>/src"`.
+   Retention first (D-20261010-22): run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_pivot.py" --prune --ops "<OPS>"`. It deletes widget_feedback.json, real_questions.json and real_categorised.json from runs older than RETENTION_DAYS (90) and keeps their counts.
+   Export the week's website questions and the widget votes (without session ids): `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_pivot.py" --export-real "<RUN>" --src "<REPO>/src"`.
 2. Status customer working "Writing 40 new customer questions".
    Plan the 40: the 10 types (lookup, yes_no_documented, table_condition, procedure_or_troubleshoot, comparison, followup, multi_document, absent_feature, phantom_or_offtopic, vague) 4 each, spread so every manual in RUN/manuals gets at least 3, with 2 or 3 phantom/vague questions under product "none".
    Spawn one customer subagent PER PRODUCT, all in one message so they run in parallel: Agent tool with subagent_type "customer"; if not listed, general-purpose with model "sonnet" told to read OFFICE/.claude/agents/customer.md and follow it exactly. Prompt: "Job WRITE-PART. RUN = <RUN>. OFFICE = <OFFICE>. PRODUCT = <p>. TYPES = <type: count, ...>. ID PREFIX = P<STAMP>-<p>."
