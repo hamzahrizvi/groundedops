@@ -185,7 +185,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | waiting for CEO | your yes |
 | D-20261010-20 | Twelve hidden gate questions are still in the live log; retire them, and keep probe traffic out of the log | ready to merge | merges once Security clears it |
 | D-20261010-21 | The test lab spends the website bot's own AI keys; a busy lab day took the bot off its main provider | waiting for CEO | your yes |
-| D-20261010-22 | Copies of visitor text in the office folders are kept forever, past the 90-day deletion | built, waiting for the check | the pre-ship check |
+| D-20261010-22 | Copies of visitor text in the office folders are kept forever, past the 90-day deletion | ready to merge | merges once Security clears it |
 | D-20261010-23 | The pre-ship check grades the "after" answers without the manual pages the "before" grader had | approved, queued | Dev builds it |
 | D-20261010-24 | Anyone on the internet can make the server call the AI providers with the company keys, with no sign-in and no limit | waiting for CEO | your yes |
 | D-20261010-25 | The public code's plan table lists the security weaknesses that are known and not yet fixed | approved, queued | Dev builds it |
