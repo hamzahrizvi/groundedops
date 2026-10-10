@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import git_sets, ledger  # noqa: E402
 
 START, END = "<!-- office-plan:start -->", "<!-- office-plan:end -->"
-ANCHOR = "**Friday review.**"   # the first time, the block goes above this paragraph
+ANCHOR = re.compile(r"(?m)^## ")   # the first time, the block goes above the first section, after the intro
 REJECTED = "### Rejected - do not redo without new evidence\n"
 NEXT = {"waiting for CEO": "your yes", "approved, queued": "Dev builds it", "sent back, rebuilding": "Dev rebuilds it",
         "built, waiting for the check": "the pre-ship check", "check passed": "Security's review",
@@ -64,8 +64,8 @@ def update(text, cards, rejects, today):
     if START in text:
         text = re.sub(re.escape(START) + ".*?" + re.escape(END), lambda _: new, text, count=1, flags=re.S)
     else:
-        i = text.find(ANCHOR)
-        text = text[:i] + new + "\n\n" + text[i:] if i >= 0 else text + "\n\n" + new + "\n"
+        m = ANCHOR.search(text)
+        text = text[:m.start()] + new + "\n\n" + text[m.start():] if m else text + "\n\n" + new + "\n"
     if REJECTED in text:
         head = text.index(REJECTED) + len(REJECTED)
         nxt = text.find("\n### ", head)
@@ -109,14 +109,14 @@ def selftest():
           "## D-20261010-01 | Sales brush-off\n- From: customer\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n\n"
           "## D-20261010-02 | Bigger reranker\n- From: rnd\n- Verdict: REJECT\n- For the rejected list: A bigger reranker: no gain on 40 blind questions.\n")
         w(os.path.join(ops, "inbox", "audit", "20261010-cache.md"), "# Cache repeated answers\n")
-        w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n"
+        w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n## The plan\r\n\r\n"
                                            "### Rejected - do not redo without new evidence\r\n\r\n- Old idea.\r\n\r\n### Waiting\r\n\r\nSMTP.\r\n")
         for a in (("init", "-q"), ("config", "user.email", "t@t"), ("config", "user.name", "t"), ("add", "PENDING.md"), ("commit", "-qm", "x")):
             git(repo, *a)
         today = datetime.date(2026, 10, 10)
         assert run(ops, repo, today) == "COMMITTED"
         t = open(os.path.join(repo, "PENDING.md"), encoding="utf-8", newline="").read()
-        assert "\r\n" in t and t.index(START) < t.index("**Friday review.**"), t
+        assert "\r\n" in t and t.index("**Friday review.**") < t.index(START) < t.index("## The plan"), t
         assert "| D-20261010-01 | Sales brush-off | waiting for CEO | your yes |" in t, t
         assert "| audit/20261010-cache | Cache repeated answers | proposed |" in t, t
         assert "D-20261010-02 Bigger reranker (rejected)" in t, t
