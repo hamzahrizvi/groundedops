@@ -16,7 +16,8 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
 - Each run's summary, never the answers:
   `REPO/.venv/Scripts/python.exe -c "import json,sys;print(json.dumps(json.load(open(sys.argv[1]))['summary'],indent=1))" OPS/runs/<stamp>/cases_state.json`
   It gives per system: `usd_mean`, `usd_median`, `usd_max`, `median_s`, `p90_s`.
-  `sys_normal` is the bot; `baseline` is a whole-manual gpt-5-mini answer.
+  `sys_normal` is the bot; `baseline` is a whole-manual answer by the lab's model;
+  `grader` is what grading the run cost (model, calls, usd; none logged before 2026-10-10).
 - Real traffic: `cd REPO/src && ../.venv/Scripts/python.exe -m log_report --since 7d --json`.
 - The agents' own work this week: count the runs, findings, decisions and
   hand-backs in OPS by date. Say plainly that the real spend is in the

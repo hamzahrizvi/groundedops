@@ -24,4 +24,4 @@ PURGE: the triage runs in a fresh subagent that starts from a cleared context; t
    Upload the graph the same way: collection "pivot", doc_id "current", file_path "<OPS>/pivot.json".
 6. Finish with the product owner's final message.
 
-CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key.
+CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it).

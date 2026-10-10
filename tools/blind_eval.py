@@ -1,8 +1,10 @@
-"""Blind set runner: this bot vs a whole-manual gpt-5-mini baseline, graded blind by gpt-5.
+"""Blind set runner: this bot vs a whole-manual baseline answer, graded blind by a third model.
+LAB_PROVIDER picks who serves all three (default deepseek: V4 Flash, thinking off; openai:
+gpt-5-mini bot and baseline, gpt-5 grader, the lab's models until the credit ran out on 2026-10-10).
 
 Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
 
-  python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | reset
+  python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | remark | reset
   python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
 
 <run_dir> holds <SET>.json ({"cases": [...]}) and manuals/<product>.txt
@@ -33,10 +35,17 @@ OUT = os.path.join(RUN, f"{SET}_state.json")
 cases = json.load(open(os.path.join(RUN, f"{SET}.json"), encoding="utf-8"))["cases"]
 state = json.load(open(OUT, encoding="utf-8")) if os.path.exists(OUT) else {}
 def save(): json.dump(state, open(OUT, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
-IN, CACHED, OUTP = 0.25, 0.025, 2.00   # gpt-5-mini $ per 1M tokens
-def usd(u):
-    p = u.get("prompt_tokens", 0); c = (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
-    return ((p - c) * IN + c * CACHED + u.get("completion_tokens", 0) * OUTP) / 1e6
+PROV = os.environ.get("LAB_PROVIDER", "deepseek")
+# DeepSeek grades with thinking off: on, it failed right answers that add true detail (grader_ab.py, 2026-09-28)
+MODELS = {"openai": {"bot": "gpt-5-mini", "baseline": "gpt-5-mini", "grader": "gpt-5"},
+          "deepseek": {"bot": "deepseek-v4-flash", "baseline": "deepseek-v4-flash", "grader": "deepseek-v4-flash"}}[PROV]
+URL = {"openai": "https://api.openai.com/v1/chat/completions", "deepseek": "https://api.deepseek.com/v1/chat/completions"}[PROV]
+# $ per 1M tokens: input, cached input, output. ponytail: DeepSeek at its peak rate; off-peak (most hours) is half
+PRICE = {"gpt-5-mini": (0.25, 0.025, 2.00), "gpt-5": (1.25, 0.125, 10.00), "deepseek-v4-flash": (0.30, 0.006, 1.20)}
+def cached(u): return (u.get("prompt_tokens_details") or {}).get("cached_tokens") or u.get("prompt_cache_hit_tokens", 0)
+def usd(u, model):
+    i, c_, o = PRICE[model]; p, c = u.get("prompt_tokens", 0), cached(u)
+    return ((p - c) * i + c * c_ + u.get("completion_tokens", 0) * o) / 1e6
 
 def load_env(path):
     """GO_DATA's .env, same rules as main._load_env_file. main.py reads the .env
@@ -77,11 +86,21 @@ def lab_lock():
         print(f"lab free after {waited // 60} min", flush=True)
     return f   # keep the handle open for the life of the process
 
-phase = sys.argv[2]
+phase, REMARK = sys.argv[2], None
 if phase == "reset":
     for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary")]:
         del state[k]
     save(); print("reset", OUT, "kept:", list(state)); sys.exit(0)
+if phase == "remark":
+    # Grades by another model are kept beside the run and every case is graded again by this one, so a
+    # gate's before and after, and the trend's runs, are marked by the same grader (gpt-5 -> DeepSeek, 2026-10-10).
+    old = {g.get("usage", {}).get("model", "gpt-5") for g in state.get("grades", {}).values()} - {MODELS["grader"]}
+    if old:
+        REMARK = os.path.join(RUN, f"{SET}_state.graded-by-{'+'.join(sorted(old))}.json")
+        if not os.path.exists(REMARK):
+            json.dump(state, open(REMARK, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+        state.pop("grades", None); state.pop("summary", None)
+    phase = "grade"   # with nothing to re-mark this only retries cases a failed call left unparsed
 if phase in ("system", "baseline"):
     sys.path.insert(0, CODE); os.chdir(DATA)
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -91,7 +110,7 @@ if phase in ("system", "baseline"):
         os.environ.setdefault("SOURCE_FILE_DIR", os.path.join(os.path.dirname(DATA), "documents"))
     # Every role pinned, or the DeepSeek backup leaks in (S29 run 1).
     for _r in ("DEFAULT", "ADVANCED", "BACKUP"):
-        os.environ[f"PROVIDER_ROLE_{_r}"] = "openai"; os.environ[f"MODEL_ROLE_{_r}"] = "gpt-5-mini"
+        os.environ[f"PROVIDER_ROLE_{_r}"] = PROV; os.environ[f"MODEL_ROLE_{_r}"] = MODELS["bot"]
     if phase == "system":
         os.environ["PERFORMANCE_MODE"] = "1" if sys.argv[3] == "perf" else "0"
         LAB = lab_lock()
@@ -106,11 +125,12 @@ import requests
 
 def chat(model, messages, effort=None, timeout=300):
     body = {"model": model, "messages": messages}
-    if effort: body["reasoning_effort"] = effort
+    if PROV == "deepseek": body["thinking"] = {"type": "disabled"}
+    elif effort: body["reasoning_effort"] = effort
     for attempt in range(3):
         try:
-            r = requests.post("https://api.openai.com/v1/chat/completions", json=body, timeout=timeout,
-                              headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"})
+            r = requests.post(URL, json=body, timeout=timeout,
+                              headers={"Authorization": f"Bearer {os.environ[PROV.upper() + '_API_KEY']}"})
             r.raise_for_status(); j = r.json()
             return j["choices"][0]["message"]["content"], j.get("usage", {})
         except Exception as e:
@@ -125,7 +145,7 @@ if phase == "system":
     def spy(url, *a, **k):
         r = _post(url, *a, **k)
         try:
-            if "openai" in url: usage.append(r.json().get("usage", {}))
+            if PROV in url: usage.append(r.json().get("usage", {}))
         except Exception: pass
         return r
     llm._post = spy
@@ -138,7 +158,7 @@ if phase == "system":
         usage.clear(); t = time.time()
         d = main._traced_query(main.QueryRequest(q=c["q"], product=c.get("product"), session_id=sid), None, attach=True)
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
-                         "usd": round(sum(map(usd, usage)), 6), "calls": len(usage), "cached": sum((u.get("prompt_tokens_details") or {}).get("cached_tokens", 0) for u in usage), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
+                         "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model")}
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
 
@@ -161,9 +181,9 @@ elif phase == "baseline":
         for key in ("turn1", "q"):
             if not c.get(key): continue
             msgs.append({"role": "user", "content": (sel if key == first else "") + c[key]})
-            t = time.time(); a, u = chat("gpt-5-mini", msgs, effort="minimal")
+            t = time.time(); a, u = chat(MODELS["baseline"], msgs, effort="minimal")
             msgs.append({"role": "assistant", "content": a})
-        return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": round(usd(u), 6)}
+        return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": round(usd(u, MODELS["baseline"]), 6)}
     rows = state.setdefault("baseline", {})
     with ThreadPoolExecutor(6) as ex:
         for cid, out in ex.map(run, [c for c in cases if c["id"] not in rows]):
@@ -219,18 +239,22 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         print(prompt(next(c for c in cases if c["id"] == sys.argv[3]))); sys.exit(0)
     def grade(c):
         o = order[c["id"]]
-        raw, _ = chat("gpt-5", [{"role": "user", "content": prompt(c)}], effort="medium")
+        raw, u = chat(MODELS["grader"], [{"role": "user", "content": prompt(c)}], effort="medium")
+        use = {"model": MODELS["grader"], "prompt_tokens": u.get("prompt_tokens", 0), "cached": cached(u),
+               "completion_tokens": u.get("completion_tokens", 0), "usd": round(usd(u, MODELS["grader"]), 6)}
         try:
             g = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
         except Exception:
-            return c["id"], {"raw": raw}
+            return c["id"], {"raw": raw, "usage": use}
         return c["id"], {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
-                         "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best"))}
+                         "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
     grades = state.setdefault("grades", {})
     with ThreadPoolExecutor(6) as ex:
         for cid, g in ex.map(grade, [c for c in cases if c["id"] not in grades or "raw" in grades[c["id"]]]):
             grades[cid] = g; save(); print("graded", cid, g.get("best"), flush=True)
     ok = [c for c in cases if "raw" not in grades[c["id"]]]
+    if REMARK and not ok:   # the grader is down (no key, no credit): the run keeps its old grades
+        import shutil; shutil.copyfile(REMARK, OUT); sys.exit("re-mark failed: no case graded; old grades kept")
     summary = {"ungraded": [c["id"] for c in cases if c not in ok]}
     for s in SYSTEMS:
         sc = [grades[c["id"]][s]["score"] for c in ok]
@@ -245,5 +269,8 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                                   for t in sorted({c['type'] for c in ok})}}
     bests = [grades[c["id"]].get("best") for c in ok]
     summary["best"] = {k: bests.count(k) for k in SYSTEMS + ["tie"]}
+    used = [g["usage"] for g in grades.values() if "usage" in g]   # grades from before 2026-10-10 logged none
+    summary["grader"] = {"model": used[-1]["model"] if used else "gpt-5", "calls": len(used),
+                         "usd": round(sum(x["usd"] for x in used), 4)}
     state["summary"] = summary; save()
     print(json.dumps(summary, indent=1))

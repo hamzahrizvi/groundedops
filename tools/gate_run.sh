@@ -22,6 +22,8 @@ mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
 export PYTHONIOENCODING=utf-8 HF_HUB_OFFLINE=1 GO_CODE="$DEV/src" GO_DATA="${GO_DATA:-$REPO/src}"
 BE="${BE:-$REPO/tools/blind_eval.py}"
 log() { local f="$1"; shift; "$@" >> "$f" 2>&1 || { echo "failed: $*" > "$OUT/FAILED"; exit 1; }; }
+# a run graded by an older grader is re-marked first, so before and after share one marker
+log "$OUT/gate.log" "$PY" "$BE" "$RUN" remark
 
 cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/after/"
 log "$OUT/gate.log" "$PY" "$BE" "$OUT/after" reset

@@ -28,4 +28,4 @@ PURGE: the department runs in a fresh subagent that starts from a cleared contex
 4. Status <dept> idle with last = the first line of its final message. Event <dept> -> po with what it filed, e.g. "2 proposals filed".
 5. Finish with the department's final message.
 
-CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key.
+CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it).

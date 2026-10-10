@@ -20,4 +20,4 @@ PURGE: Dev works in three phases, PLAN, BUILD and CHECK, each in a fresh subagen
    Otherwise status dev idle with last "Handed back <id> for the check" and event dev -> po "Ready for the check".
 5. Finish with two lines: the work order and the outcome.
 
-CONSTRAINTS: code changes only inside Dev's own worktree under REPO/.claude/worktrees/dev-<id>; never touch the main checkout's or OFFICE's files, push, merge, tag, reindex, rebuild an .exe, or use the DeepSeek key.
+CONSTRAINTS: code changes only inside Dev's own worktree under REPO/.claude/worktrees/dev-<id>; never touch the main checkout's or OFFICE's files, push, merge, tag, reindex, rebuild an .exe, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it).

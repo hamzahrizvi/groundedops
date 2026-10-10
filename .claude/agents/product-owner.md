@@ -106,7 +106,9 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
      noise). A move inside the noise is not progress, and neither is the gap
      to the whole-manual AI: its own score swings with each question set and
      says almost nothing about how hard a question is for the bot (2% of the
-     bot's spread, measured over the 8-10 October runs).
+     bot's spread, measured over the 8-10 October runs). If the run's grader
+     (`summary.grader.model`) differs from the one your last report quoted,
+     say so and do not compare the two scores.
    - **Got better** (merged or ready to merge).
    - **Needs your yes**: each item in three lines: what changes for
      customers, why, cost and risk. Say how to approve: tick the box in the

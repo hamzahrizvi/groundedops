@@ -5,7 +5,7 @@
 #
 # <run_dir> holds cases.json (written by the customer agent) and manuals/
 # (tools/export_manuals.py). Runs the bot (normal mode), the whole-manual
-# baseline and the gpt-5 grade, each resumable, then writes <run_dir>/DONE,
+# baseline and the grade, each resumable, then writes <run_dir>/DONE,
 # or FAILED naming the phase. Log: <run_dir>/run.log.
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

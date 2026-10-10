@@ -211,6 +211,13 @@ When nobody is on shift it plays a sample week, labelled as one.
   uncommitted change in the target checkout touches the same files; it reverts
   a merge whose Python does not compile. No agent merges any other way.
 - Nobody pushes, tags or publishes a release.
-- No reindex, no .exe rebuild, no credentials, no personal DeepSeek key.
-- Blind runs pin every provider role to the company OpenAI model.
+- No reindex, no .exe rebuild, no credentials.
+- Test runs pin the bot's every provider role, the whole-manual baseline and
+  the grader to one provider: DeepSeek V4 Flash, thinking off, since
+  2026-10-10, when the OpenAI credit ran out (`LAB_PROVIDER=openai` in
+  `tools/blind_eval.py` brings back gpt-5-mini and the gpt-5 grader). Every
+  grade logs its tokens and cost; a run's `summary.grader` totals them. Scores
+  under different graders do not compare: `blind_eval.py <run> remark`
+  re-grades an old run with today's grader (the gate does it first), and keeps
+  the old grades beside it as `cases_state.graded-by-<model>.json`.
 - A step that needs a person stops and says so; it never guesses.

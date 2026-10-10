@@ -26,4 +26,4 @@ PURGE: every phase below runs in a fresh subagent that starts from a cleared con
 7. Status customer idle with last = the first line of its summary. Event customer -> po "<n> findings filed".
    Finish with the agent's summary.
 
-CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key. OPS is the only place this run writes.
+CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it). OPS is the only place this run writes.
