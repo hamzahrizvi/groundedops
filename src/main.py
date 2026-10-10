@@ -1314,9 +1314,7 @@ def _inference_answer(query: str, chunks: list[dict],
         # Numbered the same way build_answer_prompt's caller numbers them,
         # so a passage the model is told is [Passage 1] here is the same
         # one it would have been on the ordinary path.
-        context = "\n\n".join(
-            f"[Passage {i} of {len(chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
-            for i, r in enumerate(chunks, 1))
+        context = _numbered_passages(chunks)
         from llm import judging
         with judging():
             out = generate_with_fallback(
@@ -1951,6 +1949,25 @@ def _passage_product(chunk: dict, names: dict) -> str:
     if len(tags) != 1 or catalog.is_shared_product(tags[0]) or tags[0] not in names:
         return ""
     return f", from the {names[tags[0]]} documentation"
+
+
+def _numbered_passages(chunks: list[dict], label=lambda r: "") -> str:
+    """The <context> passages, "[Passage i of N]" each. A chunk marked
+    with_previous (retrieval_db.complete_tables: the rows a passage announces
+    or begins) is printed INSIDE the passage before it, directly under that
+    text: as a separate "Passage 5 of 5" the SMART Coin limits reached the
+    model and were never joined to "...for the following currencies:" in
+    passage 1 (D-20261008-04)."""
+    import tables as _tables
+    groups: list[list] = []
+    for r in chunks:
+        text = (r.get("text") or "")[:CHUNK_CHAR_CAP]
+        if r.get("with_previous") and groups:
+            groups[-1][1] += "\n" + _tables.split_prefix(text)[1]
+        else:
+            groups.append([r, text])
+    return "\n\n".join(f"[Passage {i} of {len(groups)}{label(r)}]\n{t}"
+                       for i, (r, t) in enumerate(groups, 1))
 
 
 def _product_names() -> dict[str, str]:
@@ -3693,10 +3710,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             for c in _bundle)
         ptrace.mark("performance", f"{len(_bundle)} passages from {_perf}")
     _names_now = _product_names()
-    context = "\n\n".join(
-        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}]\n"
-        + r["text"][:CHUNK_CHAR_CAP]
-        for i, r in enumerate(top_chunks, 1))
+    context = _numbered_passages(top_chunks, lambda r: _passage_product(r, _names_now))
 
     # v15: history reached the query REWRITER but never the answering prompt,
     # so the model could not see what it had just said. "is the pinout above

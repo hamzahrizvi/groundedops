@@ -67,6 +67,22 @@ def test_selection_was_not_tightened():
     assert "ABS_FLOOR" not in code and "ABSOLUTE_FLOOR" not in code
 
 
+def test_a_table_completion_is_printed_inside_the_passage_before_it():
+    chunks = [{"text": "Limits for the following currencies:"},
+              {"text": "[Coin]\nEUR | 1 cent | 16.25", "with_previous": True},
+              {"text": "Other"}]
+    s = main._numbered_passages(chunks)
+    assert "[Passage 1 of 2]" in s
+    assert "[Passage 2 of 2]" in s
+    assert "currencies:\nEUR | 1 cent | 16.25" in s
+    assert "[Coin]" not in s
+
+
+def test_numbered_passages_keeps_the_label():
+    assert main._numbered_passages([{"text": "a"}], lambda r: ", from X") \
+        == "[Passage 1 of 1, from X]\na"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

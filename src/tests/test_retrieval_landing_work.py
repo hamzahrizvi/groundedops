@@ -235,3 +235,51 @@ def test_chunks_before_reads_live_ids():
         got = rdb.chunks_before([{"id": "NV.pdf:abc:39"}, {"id": "NV.pdf:abc:38"},
                                  {"id": "no-number"}])
     assert got == ["first", None, None]
+
+
+# ── D-20261008-04 round 2: the completion is placed under its source ──
+
+A = {"id": "NV.pdf:abc:38", "text": DELAY_PROSE, "source": "NV.pdf", "page": 22,
+     "section": "S"}
+B = {"id": "NV.pdf:abc:39", "text": DELAY_ROWS, "source": "NV.pdf", "page": 23,
+     "section": ""}
+X = {"id": "X.pdf:zz:4", "text": "[X]\nOther prose.", "source": "X.pdf", "page": 1,
+     "section": "Other"}
+
+
+def _arrange(all_chunks, top):
+    with patch.object(rdb, "get_collection", lambda: object()), \
+         patch.object(rdb, "_get_bm25_index", lambda collection: (None, all_chunks)):
+        return rdb.complete_tables([dict(c) for c in top])
+
+
+def test_complete_tables_puts_the_completion_directly_after_its_source():
+    out = _arrange([A, B, X], [A, X])
+    assert [c["id"] for c in out] == [A["id"], B["id"], X["id"]]
+    assert out[1]["with_previous"] is True
+
+
+def test_complete_tables_moves_an_announced_table_ranked_lower_up_under_its_announcement():
+    out = _arrange([A, B, X], [A, X, B])
+    assert [c["id"] for c in out] == [A["id"], B["id"], X["id"]]
+    assert out[1]["with_previous"] is True
+
+
+def test_complete_tables_leaves_a_table_ranked_above_its_announcement():
+    out = _arrange([A, B], [B, A])
+    assert [c["id"] for c in out] == [B["id"], A["id"]]
+    assert not any("with_previous" in c for c in out)
+
+
+def test_complete_tables_leaves_a_new_table_with_its_own_header_alone():
+    prev = "[API — Params]\nPose_filter | bool | Enable the filter\nTimeout_ms | int | 500"
+    nxt = "[API]\nParam name | Type | Comment\nretries | int | 3"
+    assert len(_complete(prev, nxt, prev_section="Params")) == 1
+
+
+def test_complete_tables_joins_a_continuation_that_repeats_its_tables_header():
+    prev = ("[Coin — Buttons]\nAction | Power Status | Function\n"
+            "Press twice | Powered ON | Shows protocol")
+    nxt = ("[Coin — Buttons]\nAction | Power Status | Function\n"
+           "Hold 10 s | Powered ON | USB mode")
+    assert len(_complete(prev, nxt, prev_section="Buttons", nxt_section="Buttons")) == 2
