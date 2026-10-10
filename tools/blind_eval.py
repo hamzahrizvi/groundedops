@@ -25,6 +25,8 @@ Env:
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also when run via runpy
+from lab_lock import lab_lock
 
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
@@ -60,36 +62,9 @@ load_env(os.path.join(DATA, ".env"))
 if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
     os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(DATA, ".secrets.enc"))
 
-def lab_lock():
-    """One "system" run at a time on this machine, so parallel office lanes never skew each other's
-    timings or load the models twice; building and planning still run in parallel (2026-10-09).
-    The OS releases the lock when the process ends, so a crashed run never leaves it held."""
-    try:
-        import msvcrt
-        grab = lambda f: msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-    except ImportError:
-        import fcntl
-        grab = lambda f: fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    waited = 0
-    while True:
-        f = open(os.path.expanduser("~/.groundedops-lab.lock"), "a+")   # a fresh handle each try: a failed
-        f.seek(0)                                                        # msvcrt attempt never succeeds on retry
-        try:
-            grab(f)
-            break
-        except OSError:
-            f.close()
-            if not waited:
-                print("waiting for the lab: another system run is in progress", flush=True)
-            time.sleep(20)
-            waited += 20
-    if waited:
-        print(f"lab free after {waited // 60} min", flush=True)
-    return f   # keep the handle open for the life of the process
-
 phase = sys.argv[2]
 if phase == "reset":
-    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary")]:
+    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s")]:
         del state[k]
     save(); print("reset", OUT, "kept:", list(state)); sys.exit(0)
 if phase == "remark":
@@ -114,7 +89,10 @@ if phase in ("system", "baseline"):
         os.environ[f"PROVIDER_ROLE_{_r}"] = PROV; os.environ[f"MODEL_ROLE_{_r}"] = MODELS["bot"]
     if phase == "system":
         os.environ["PERFORMANCE_MODE"] = "1" if sys.argv[3] == "perf" else "0"
-        LAB = lab_lock()
+        LAB, waited = lab_lock()
+        waits = state.setdefault("lab_wait_s", {})   # seconds this run waited for the lab (D-20261010-04)
+        waits[f"sys_{sys.argv[3]}"] = waits.get(f"sys_{sys.argv[3]}", 0) + waited
+        save()
     # The app's own question log and FAQ-gap list stay in this run folder, not in GO_DATA's
     # production files (hidden gate questions were landing in REPO/src/logs.jsonl, D-20261009-01).
     os.environ.setdefault("FAQ_GAP_PATH", os.path.join(RUN, "app_faq_gaps.json"))
@@ -273,5 +251,6 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                          "usd": round(sum(x["usd"] for x in used), 4)}
     bests = [grades[c["id"]].get("best") for c in ok]
     summary["best"] = {k: bests.count(k) for k in SYSTEMS + ["tie"]}
+    summary["lab_wait_s"] = state.get("lab_wait_s", {})   # how long the system phase waited for the lab lock
     state["summary"] = summary; save()
     print(json.dumps(summary, indent=1))

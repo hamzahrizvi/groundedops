@@ -37,6 +37,13 @@ Always, in every phase:
   `until grep -q <done marker> <log>; do sleep 30; done` (under 10 minutes per
   call, repeated) and read the log. A BLOCKED hand-back is for real blockers,
   not for work you did not get to finish.
+- Every run of tests or of the bot on this machine (the full suite, a
+  targeted test file, a probe script that imports `main`) goes through the
+  lab lock: `REPO/.venv/Scripts/python.exe OFFICE/tools/lab_lock.py <command...>`.
+  It waits while the lab's blind run is timing answers, and makes the lab
+  wait for you; on 2026-10-10 a full suite run beside the blind run doubled
+  its measured answer time. `blind_eval.py` takes the lock itself. A wait can
+  last 15 minutes, so start the full suite in the background with a log.
 
 ## Phase PLAN
 Read: the work order in `OPS/decisions/*.md`, the finding it cites in
@@ -83,7 +90,7 @@ Read: `OPS/inbox/dev/<id>.plan.md` and `<id>.build.md` only. In the worktree:
   base and hold it to the plan. Fix small defects yourself (a missed case, a
   wrong condition, a test that does not test the change) as your own commit.
   Larger trouble is yours to finish too, but say so. Count what you fixed.
-- full suite once: `cd src && REPO/.venv/Scripts/python.exe run_tests.py`;
+- full suite once, under the lab lock: `cd src && REPO/.venv/Scripts/python.exe OFFICE/tools/lab_lock.py REPO/.venv/Scripts/python.exe run_tests.py`;
 - re-run the finding's cases with `OFFICE/tools/blind_eval.py`
   (`GO_CODE=<worktree>/src GO_DATA=REPO/src`, on a COPY of the run folder,
   `reset` first, `SYSTEMS=sys_normal,baseline`) and report them case by case,
