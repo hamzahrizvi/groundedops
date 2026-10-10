@@ -176,7 +176,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
 | D-20261009-03 | The website's "where your data goes" copy promises what the CEO will not | approved, queued | Dev builds it |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | approved, queued | Dev builds it |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | sent back, rebuilding | Dev rebuilds it |
 | D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
 | D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | sent back, rebuilding | Dev rebuilds it |
 | D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | sent back, rebuilding | Dev rebuilds it |
