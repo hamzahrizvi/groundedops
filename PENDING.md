@@ -187,8 +187,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-24 | Security item D-20261010-24, details in the office | waiting for CEO | your yes |
 | D-20261010-26 | Security item D-20261010-26, details in the office | waiting for CEO | your yes |
 | D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | waiting for CEO | your yes |
-| D-20261010-29 | Security item D-20261010-29, details in the office | approved, queued | Dev builds it |
+| D-20261010-29 | Security item D-20261010-29, details in the office | ready to merge | merges once Security clears it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | waiting for CEO | your yes |
+| D-20261010-31 | An adjustable spending cap for the test lab, and a running cost report, on the office page | waiting for CEO | your yes |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
 | customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
 | customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
