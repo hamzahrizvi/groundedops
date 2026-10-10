@@ -190,9 +190,14 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-24 | Anyone on the internet can make the server call the AI providers with the company keys, with no sign-in and no limit | waiting for CEO | your yes |
 | D-20261010-25 | The public code's plan table lists the security weaknesses that are known and not yet fixed | ready to merge | merges once Security clears it |
 | D-20261010-26 | The unpushed commits already carry the security titles in the plan table's history | waiting for CEO | your yes |
+| D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | waiting for CEO | your yes |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
 | customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
 | customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
+| customer/20261010b-multi-document | Questions that need two or three facts from different places are declined, or answered with one fact missing | proposed | the product owner triages it |
+| customer/20261010b-procedure-or-troubleshoot | Step-by-step set-up answers leave out the first required step | proposed | the product owner triages it |
+| customer/20261010b-table-condition | Lookups in a code or spec table return the neighbouring row, or the other product's row | proposed | the product owner triages it |
+| customer/20261010b-vague | Vague complaints are answered, or declined, instead of asking one question back | proposed | the product owner triages it |
 | security/20261009-server-log-keeps-visitor-questions | Visitor questions stay in the server log after the 90-day deletion | proposed | the product owner triages it |
 | D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
 | D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
@@ -217,6 +222,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | deferred | parked |
 | D-20261010-17 | When the passages miss, read the whole manual once before saying "not in the manual" | deferred | parked |
 | D-20261010-18 | Half answers that say "not stated" for a documented fact: search once more for the named gap | deferred | parked |
+| D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | deferred | parked |
 
 **Finished or turned down in the last 30 days:** D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-08 Two live AI provider keys are sitting in the public code repository (merged); D-20261008-09 Customer questions go to OpenAI and DeepSeek, against the on-premises promise (done); D-20261008-13 Nothing checks installed packages for known vulnerabilities (merged); D-20261008-15 Question logs are kept forever; delete them after 90 days (merged); D-20261008-16 Adding, deleting and reading manuals needs no sign-in from the office network (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261010-01 Buying words turn an honest "not found" into a sales brush-off (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-05 The pre-ship check skips its own flicker re-run when the one wrong case also tips the score (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done); D-20261010-19 The widget's vote file is not ignored by git in a public repository (merged).
 <!-- office-plan:end -->
