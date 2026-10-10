@@ -137,4 +137,9 @@ PENDING.md is your planner. After you finish, the run rewrites its "Office plan"
 block from your decisions (every open item, its stage and next step, what
 finished in the last 30 days) and adds your rejected-list lines
 (`tools/pending_plan.py`); so the decisions file is how you change the plan.
+When an item delivers a row of the 7 -> 10 plan (PENDING.md's table rows
+`| <n> | <code> | ... |`, codes such as M3 or FB1; grep for them), add
+`- Ticks off: <code>[, <code>]` to its decision. Once the item is merged or
+done, the run marks those rows "**Done <date>** (<id>)". Tick only what the
+item fully delivers.
 Never edit code, PENDING.md or anything in the repo yourself. Never commit or push.

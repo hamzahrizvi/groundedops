@@ -28,6 +28,7 @@ from ops_ledger import SECURITY, git_sets, ledger  # noqa: E402
 START, END = "<!-- office-plan:start -->", "<!-- office-plan:end -->"
 ANCHOR = re.compile(r"(?m)^## ")   # the first time, the block goes above the first section, after the intro
 REJECTED = "### Rejected - do not redo without new evidence\n"
+PLAN = re.compile(r"(?m)^## .*7 -> 10 plan.*$")   # rows "| 12 | M3 | what | who |"
 NEXT = {"waiting for CEO": "your yes", "approved, queued": "Dev builds it", "sent back, rebuilding": "Dev rebuilds it",
         "built, waiting for the check": "the pre-ship check", "check passed": "Security's review",
         "ready to merge": "merges once Security clears it", "check failed": "the product owner sends it back",
@@ -71,7 +72,37 @@ def rejected_lines(ops):
     return [(did, line) for did, line in out.items() if did not in sec]
 
 
-def update(text, cards, rejects, today):
+def ticks_of(ops):
+    """{id: [plan item codes]} from "- Ticks off: M3, FB1" lines in the decisions."""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(ops, "decisions", "*.md"))):
+        for part in re.split(r"(?m)^## ", open(path, encoding="utf-8").read())[1:]:
+            m, t = re.match(r"(D-\d{8}-\d+)", part), re.search(r"(?m)^- Ticks off:\s*(.+?)\s*$", part)
+            if m and t:
+                out.setdefault(m.group(1), []).extend(x.strip() for x in t.group(1).split(",") if x.strip())
+    return out
+
+
+def tick(text, cards, ticks, today):
+    """Marks each 7 -> 10 plan row that a merged or done item ticks off as done, once."""
+    stage, m = {c["id"]: c["stage"] for c in cards}, PLAN.search(text)
+    if not m:
+        return text
+    end = text.find("\n## ", m.end())
+    end = len(text) if end < 0 else end
+    sec = text[m.end():end]
+    for did, codes in ticks.items():
+        if stage.get(did) not in ("merged", "done"):
+            continue
+        for c in map(re.escape, codes):
+            # by code only: the section's other tables reuse row numbers
+            sec = re.sub(rf"(?m)^(\|\s*\d+\s*\|\s*{c}\s*\|\s*)(?!\s*\*\*Done)",
+                         lambda x: f"{x.group(1)}**Done {today:%Y-%m-%d}** ({did}): ", sec)
+    return text[:m.end()] + sec + text[end:]
+
+
+def update(text, cards, rejects, today, ticks=None):
+    text = tick(text, cards, ticks or {}, today)
     new = block(cards, today)
     if START in text:
         text = re.sub(re.escape(START) + ".*?" + re.escape(END), lambda _: new, text, count=1, flags=re.S)
@@ -101,7 +132,7 @@ def run(ops, repo, today=None):
     raw = open(path, encoding="utf-8", newline="").read()
     nl = "\r\n" if "\r\n" in raw else "\n"
     text = raw.replace("\r\n", "\n")
-    new = update(text, ledger(ops, *git_sets(repo), today=today)["cards"], rejected_lines(ops), today)
+    new = update(text, ledger(ops, *git_sets(repo), today=today)["cards"], rejected_lines(ops), today, ticks_of(ops))
     if new == text:
         return "UNCHANGED"
     open(path, "w", encoding="utf-8", newline="").write(new.replace("\n", nl))
@@ -150,6 +181,12 @@ def selftest():
         assert run(ops, repo, today).startswith("WAIT") and open(os.path.join(repo, "PENDING.md"), encoding="utf-8",
                                                                  newline="").read().endswith("a hand edit\r\n"), "others' edits are left alone"
         assert git(repo, "log", "--oneline").stdout.count("\n") == 2
+    plan = "## The 7 -> 10 plan\n\n| 3 | M1 | Fix the test tool. | Sonnet |\n| 4 | M3 | Compare tool. | Opus |\n| 5 | M2 | Label lines. | Opus |\n\n## Next\n"
+    cards = [{"id": "D-1", "stage": "merged"}, {"id": "D-2", "stage": "approved, queued"}]
+    t = tick(plan, cards, {"D-1": ["M1", "M2"], "D-2": ["M3"]}, datetime.date(2026, 10, 11))
+    assert "| 3 | M1 | **Done 2026-10-11** (D-1): Fix the test tool. |" in t and "| 5 | M2 | **Done 2026-10-11** (D-1): Label" in t, t
+    assert "| 4 | M3 | Compare tool. |" in t, "only merged or done items tick a row off"
+    assert tick(t, cards, {"D-1": ["M1"]}, datetime.date(2026, 10, 12)) == t, "a row is ticked once"
     print("selftest ok")
 
 

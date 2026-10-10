@@ -161,6 +161,8 @@ button{font:inherit;color:inherit}
 .tray{list-style:none;margin:0;padding:0;display:grid;gap:10px}
 .tray button{display:grid;gap:2px;width:100%;text-align:left;background:none;border:0;border-left:3px solid var(--accent);padding:2px 0 2px 10px;cursor:pointer}
 .tray button:disabled{cursor:default}
+.tray li.sorted button{border-left-color:var(--ok);opacity:.7}
+.tray .sortedh{font:10.5px/1.4 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:4px}
 .tray button:not(:disabled):hover strong{text-decoration:underline}
 .tray strong{display:block;font-size:15px}
 .tray span{color:var(--muted);font-size:14px}
@@ -949,8 +951,11 @@ function renderDetail(){
 }
 /* the tray is always the real list once the office is connected, even while the floor plays a sample week */
 function renderTray(){
-  const real = live.available, items = real ? needs() : (sample.waiting || []), ul = document.getElementById("tray"), c = document.getElementById("trayCount");
-  ul.replaceChildren(...items.map(it => trayItem(it, real)));
+  const real = live.available, all = real ? needs() : (sample.waiting || []), ul = document.getElementById("tray"), c = document.getElementById("trayCount");
+  // once you have answered an item it is sorted: it moves below, out of the count, until the office drops it
+  const items = all.filter(it => !(real && replied(it.id))), done = real ? all.filter(it => replied(it.id)) : [];
+  ul.replaceChildren(...items.map(it => trayItem(it, real)),
+    ...(done.length ? [el("li", "sortedh", "Sorted: you answered these"), ...done.map(it => trayItem(it, real))] : []));
   c.textContent = items.length; c.classList.toggle("zero", !items.length);
   document.getElementById("trayEmpty").hidden = items.length > 0;
 }
@@ -1015,6 +1020,7 @@ function needs(){
   return out;
 }
 const pendingRow = id => live.inbox.find(r => r.id === id && r.status === "new");
+const replied = id => live.inbox.find(r => r.id === id && r.choice !== "refresh");   // any answer from you, sent or applied
 const itemOf = id => ((live.brief && live.brief.items) || {})[id] || {};
 const ago = m => m < 90 ? Math.round(m) + " minutes" : m < 48*60 ? Math.round(m/60) + " hours" : Math.round(m/1440) + " days";
 
@@ -1049,18 +1055,18 @@ $("popX").addEventListener("click", () => pop.close());
 pop.addEventListener("close", () => { if(popKey) store.set("hq.seenNeeds", popKey); popKey = null; });
 pop.addEventListener("click", e => { if(e.target === pop) pop.close(); });
 const el = (tag, cls, text) => { const e = document.createElement(tag); if(cls) e.className = cls; if(text != null) e.textContent = text; return e; };
-const needsKey = () => needs().map(n => n.id + (pendingRow(n.id) ? "*" : "")).join(",");
+const needsKey = () => needs().filter(n => !replied(n.id)).map(n => n.id).join(",");
 
 function trayItem(it, real){
-  const li = el("li"), b = el("button");
+  const r = real && replied(it.id), li = el("li", r ? "sorted" : null), b = el("button");
   b.type = "button";
-  b.append(el("span", "kind", real ? (KIND[it.kind] || "") : "Sample"), el("strong", null, it.title || it.id),
-           el("span", null, real && pendingRow(it.id) ? "Sent to the office. It applies your decision at its next hourly check." : (it.why || "")));
+  b.append(el("span", "kind", real ? (r ? "Sorted" : KIND[it.kind] || "") : "Sample"), el("strong", null, it.title || it.id),
+           el("span", null, r ? `You chose "${CHOICE[r.choice] || r.choice}". ` + (r.status === "new" ? "The office applies it at its next hourly check." : "The office has applied it.") : (it.why || "")));
   if(real) b.addEventListener("click", () => openItem(it.id)); else b.disabled = true;
   li.append(b); return li;
 }
 function openNeeds(){
-  const items = needs(), ul = el("ul", "tray");
+  const items = needs().filter(n => !replied(n.id)), ul = el("ul", "tray");
   ul.append(...items.map(it => trayItem(it, true)));
   const ask = el("button", "btn go", "Ask the product owner"); ask.type = "button"; ask.addEventListener("click", () => { pop.close(); openChat(); });
   const lead = el("p", "lead", $("moveLead").textContent);
