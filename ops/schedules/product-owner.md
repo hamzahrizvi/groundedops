@@ -22,6 +22,7 @@ PURGE: the triage runs in a fresh subagent that starts from a cleared context; t
 5. Boards and rewards: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_ledger.py" --ops "<OPS>" --repo "<REPO>" > "<OPS>/ledger.json"`.
    Upload it to the office: `get` collection "ledger", doc_id "current"; then `set` it with file_path "<OPS>/ledger.json" (pass if_version = the version you got, or none if it did not exist).
    Upload the graph the same way: collection "pivot", doc_id "current", file_path "<OPS>/pivot.json".
+   The planner: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/pending_plan.py" --ops "<OPS>" --repo "<REPO>"`. It prints COMMITTED, UNCHANGED or WAIT (PENDING.md has someone else's unsaved edits; the next run catches up). On WAIT, add this line at the end of OPS/reports/<today>.md: "The plan list had someone else's unsaved edits, so my update to it waits for the next run."
 6. Finish with the product owner's final message.
 
-CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it).
+CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE (tools/pending_plan.py committing PENDING.md alone is the one exception); never reindex, rebuild an .exe, push, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it).

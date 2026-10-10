@@ -44,7 +44,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import NOTES, decisions, git_sets, stage_of  # noqa: E402
+from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
 
 TASK = "groundedops-office-"
 # ponytail: guessed (5-hour %, weekly %) per run; tune from plan-usage-history.json once each has run a few times
@@ -149,7 +149,8 @@ def waiting(ops, repo, now, taken=()):
     blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
     blocked += [review(i) for i, s in dev.items() if s in ("check passed", "ready to merge") and verdict(i) == "BLOCK"]
     findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
-                if p in blocked or (os.path.basename(os.path.dirname(p)) != "dev" and not NOTES.search(os.path.basename(p)))
+                # every department report wakes the product owner, notes too (the CEO, 2026-10-10); a Security review is read with its branch
+                if p in blocked or (os.path.basename(os.path.dirname(p)) != "dev" and not os.path.basename(p).startswith("review-"))
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
     if check or findings:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
@@ -249,6 +250,7 @@ def selftest():
         for p in ("runs/20261008/DONE", "state/security_last_run.txt", "inbox/audit/20261008-weekly.md",
                   "state/rnd_last_run.txt", "state/marketing_last_run.txt"):
             w(p)
+        os.utime(os.path.join(ops, "inbox/audit/20261008-weekly.md"), (time.time() - 60, time.time() - 60))   # already triaged
         got = plan(ops, ops, 11, 38, resets, now)
         assert got[0].startswith("RUN  groundedops-office-product-owner  check D-20261008-01"), got
         assert got[1].startswith("RUN  groundedops-office-dev  build D-20261008-02"), got
@@ -312,6 +314,16 @@ def selftest():
         os.remove(os.path.join(ops, "state/refresh_request"))
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
         assert any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "no test run yet"
+        os.remove(os.path.join(ops, "inbox/security/review-D-20261008-01.md"))
+        w("decisions/20261011.md", "# Triage\n")
+        os.utime(os.path.join(ops, "decisions/20261011.md"), (time.time() + 20, time.time() + 20))
+        po = lambda: next(x for x in plan(ops, ops, 11, 38, resets, now) if "product-owner" in x)
+        assert "1 new findings" in po(), po()                            # D-02's BLOCKED hand-back
+        os.makedirs(os.path.join(ops, "inbox/marketing"))
+        for f in ("inbox/marketing/20261011-market.md", "inbox/security/review-D-20261008-01.md"):
+            w(f, "Verdict: CLEAR\n")
+            os.utime(os.path.join(ops, f), (time.time() + 30, time.time() + 30))
+        assert "2 new findings" in po(), "a department's note wakes the PO; a Security review does not"
     print("selftest ok")
 
 

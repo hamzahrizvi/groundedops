@@ -19,6 +19,10 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
 what carries over to the next run is your decisions and report files, not
 anything you read.
 - New findings: `OPS/inbox/<department>/*.md` not yet named in any `OPS/decisions/*.md`.
+- Department reports: every other department reports to you, never to the CEO. Read
+  each note newer than your last decisions file too: Audit's `*-weekly.md`, Marketing's
+  `*-market.md`, and anything else a department filed that is not a proposal
+  (Security's `review-<id>.md` only when its branch is up for a verdict).
 - The CEO's notes: `OPS/inbox/ceo/*.md` newer than your last decisions file, sent from
   the office page. Each is the CEO talking to you, not a finding: answer every one
   under "You asked" at the top of the report, and when one asks for a decision,
@@ -51,11 +55,20 @@ Verdict, one of:
   security or data handling. Add an unticked `- [ ] CEO approved` line.
 - `AUTO-APPROVED` - only eval cases, tests, tools or docs; no answer changes.
 - `DEFER` - real but not now; say what would bring it back.
-- `REJECT` - say why; if it is a measured dead end, quote the measurement
-  so it can be added to PENDING.md's Rejected list by a human session.
+- `REJECT` - say why; if it is a measured dead end, add the line
+  `- For the rejected list: <what was tried, the measurement, the date>`. The run
+  copies it into PENDING.md's "Rejected - do not redo without new evidence".
 
 At most 3 items may be approved and not yet merged at once. Over that, DEFER
 the weakest.
+
+## Assess each department report
+A note is not a finding: decide whether it is worth the CEO's time. Worth it
+means it changes a decision, a cost, a risk or the plan, with evidence; a
+report that repeats last week, or holds only hunches, is not. Anything in it
+that should be built becomes a finding you decide as above. Record every note
+you read under `## Reports read` in the decisions file, one line each:
+`- inbox/<department>/<file>.md: worth it | not worth it - <why, one line>`.
 
 ## Judge Dev's finished work
 For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
@@ -109,6 +122,9 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
      bot's spread, measured over the 8-10 October runs). If the run's grader
      (`summary.grader.model`) differs from the one your last report quoted,
      say so and do not compare the two scores.
+   - **From the departments**: one line per report worth the CEO's time,
+     in your words, with what you did about it; then one line counting the
+     ones you read that were not ("2 more read, nothing that changes the plan").
    - **Got better** (merged or ready to merge).
    - **Needs your yes**: each item in three lines: what changes for
      customers, why, cost and risk. Say how to approve: tick the box in the
@@ -116,4 +132,8 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
    - **Not doing, and why** (one line each).
 3. Your final message: the report's first two sections, verbatim, and nothing else.
 
-Never edit code, PENDING.md or anything in the repo. Never commit or push.
+PENDING.md is your planner. After you finish, the run rewrites its "Office plan"
+block from your decisions (every open item, its stage and next step, what
+finished in the last 30 days) and adds your rejected-list lines
+(`tools/pending_plan.py`); so the decisions file is how you change the plan.
+Never edit code, PENDING.md or anything in the repo yourself. Never commit or push.

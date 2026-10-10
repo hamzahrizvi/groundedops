@@ -155,6 +155,23 @@ and quotes its verdict in the report's Score section. The gap to the
 whole-manual AI is not used for it: that AI's mark on a question explains 2%
 of the bot's (measured 2026-10-10).
 
+## Reports and the planner
+
+Every department reports to the product owner, never to the CEO: proposals
+and notes alike land in `OPS/inbox/<department>/`, and any new one wakes the
+product owner (`tools/office_next.py`; Security's branch reviews are read with
+their branch). The product owner decides whether each report is worth the
+CEO's time, lists them under "Reports read" in its decisions, and puts the
+ones that are in the report's **From the departments** section.
+
+PENDING.md is the product owner's planner. After each of its runs,
+`tools/pending_plan.py` rewrites the "Office plan" block near the top from the
+decisions (every open item, its stage and next step, what finished in the last
+30 days) and copies each "- For the rejected list:" line into "Rejected - do
+not redo without new evidence", then commits PENDING.md alone. If PENDING.md
+has changes nobody committed, or other files are staged, it writes nothing
+and the next run catches up, so nobody else's edits are ever swept in.
+
 ## Boards and rewards
 
 `tools/ops_ledger.py` builds three things from the files below and from git,
