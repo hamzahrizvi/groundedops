@@ -6,8 +6,8 @@ plus office-status.md appended.
 |---|---|---|---|
 | audit | sonnet | `0 9 * * 3` (Wed 09:00) | Checking this week's running costs |
 | security | opus | `0 14 * * 3` (Wed 14:00; reviews every 2nd week, plus any branch waiting) | Reviewing changes and waiting branches |
-| rnd | opus | `0 10 1 * *` (1st of the month) | Researching what would lift the whole product |
-| marketing | sonnet | `0 10 15 * *` (15th of the month) | Comparing us with the market leaders |
+| rnd | opus | parked; the dispatcher runs it 30 days after its last run (on since 2026-10-10) | Researching what would lift the whole product |
+| marketing | sonnet | parked; the dispatcher runs it 30 days after its last run (on since 2026-10-10) | Comparing us with the market leaders |
 
 ---
 
@@ -26,6 +26,7 @@ PURGE: the department runs in a fresh subagent that starts from a cleared contex
 3. Spawn the department: Agent tool with subagent_type "<dept>"; if not listed, use general-purpose with model "<model>" and tell it to read OFFICE/.claude/agents/<dept>.md and follow it exactly.
    Prompt: "REPO = <REPO>. OFFICE = <OFFICE>. OPS = <OPS>. Today = <YYYYMMDD>."
 4. Status <dept> idle with last = the first line of its final message. Event <dept> -> po with what it filed, e.g. "2 proposals filed".
+   (rnd, marketing) Write today's date into OPS/state/<dept>_last_run.txt, so the dispatcher waits a month before the next run.
 5. Finish with the department's final message.
 
 CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key outside the lab's own scripts (tools/blind_eval.py and the scripts that run it).

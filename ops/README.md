@@ -15,8 +15,8 @@ proposals through the product owner.
 | Dev | `.claude/agents/dev.md` | Opus 5.5, high | when an approved work order waits | on |
 | Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | weekly | phase 2, on since 2026-10-08 |
 | Security | `.claude/agents/security.md` | Opus 5.5, high | every 2nd week, or when a passed branch waits | phase 2, on since 2026-10-08 |
-| R&D | `.claude/agents/rnd.md` | Opus 5.5, high | 1st of the month | phase 3, built, switched off |
-| Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | 15th of the month | phase 3, built, switched off |
+| R&D | `.claude/agents/rnd.md` | Opus 5.5, high | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
+| Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
 | CEO (you) | - | - | when the report lands | ticks approvals; merging is automatic (below) |
 
 **When things run (since 2026-10-08).** No department has a fixed time any

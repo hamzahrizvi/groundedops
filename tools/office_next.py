@@ -47,7 +47,8 @@ from ops_ledger import NOTES, decisions, git_sets, stage_of  # noqa: E402
 
 TASK = "groundedops-office-"
 # ponytail: guessed (5-hour %, weekly %) per run; tune from plan-usage-history.json once each has run a few times
-COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security": (15, 3), "audit": (3, 1)}
+COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security": (15, 3), "audit": (3, 1),
+        "rnd": (15, 3), "marketing": (8, 2)}
 WEEK = datetime.timedelta(days=7)
 HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-history.json")
 RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
@@ -170,6 +171,9 @@ def waiting(ops, repo, now, taken=()):
         out.append(("security", "review " + ", ".join(unreviewed) if unreviewed else "fortnightly review due", "security"))
     if age(_mtime(os.path.join(ops, "inbox", "audit", "*-weekly.md"))) >= 7:
         out.append(("audit", "weekly cost review due", "audit"))
+    for dept, why in (("rnd", "monthly research due"), ("marketing", "monthly market survey due")):   # on since 2026-10-10
+        if age(max(_mtime(os.path.join(ops, "inbox", dept, "*.md")), _mtime(os.path.join(ops, "state", f"{dept}_last_run.txt")))) >= 30:
+            out.append((dept, why, dept))
     return out
 
 
@@ -238,12 +242,16 @@ def selftest():
                                    "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
                                    "## D-20261008-07 | Manuals\n- Assigned: ceo\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
         w("inbox/dev/D-20261008-01.md", "Status: READY\n")
-        for p in ("runs/20261008/DONE", "state/security_last_run.txt", "inbox/audit/20261008-weekly.md"):
+        for p in ("runs/20261008/DONE", "state/security_last_run.txt", "inbox/audit/20261008-weekly.md",
+                  "state/rnd_last_run.txt", "state/marketing_last_run.txt"):
             w(p)
         got = plan(ops, ops, 11, 38, resets, now)
         assert got[0].startswith("RUN  groundedops-office-product-owner  check D-20261008-01"), got
         assert got[1].startswith("RUN  groundedops-office-dev  build D-20261008-02"), got
         assert len(got) == 2, got                                       # D-07 is the CEO's; tests, reviews not due
+        os.remove(os.path.join(ops, "state/rnd_last_run.txt"))
+        assert any("office-rnd  monthly research due" in x for x in plan(ops, ops, 11, 38, resets, now)), "R&D due monthly"
+        w("state/rnd_last_run.txt")
         w("decisions/20261008b.md", "## D-20261008-08 | Key leak\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
         assert "build D-20261008-08 (+1 queued)" in plan(ops, ops, 11, 38, resets, now)[1], "security first"
         os.remove(os.path.join(ops, "decisions/20261008b.md"))

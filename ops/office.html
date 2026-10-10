@@ -331,7 +331,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
     <h2 id="weekH">The week</h2>
     <div class="days" id="days"></div>
   </section>
-  <p class="foot">Phase 1 runs Customer, the test lab, the product owner and Dev. Audit and Security (phase 2) and R&amp;D and Marketing (phase 3) are hired and scheduled but off duty until you switch their tasks on. Decide from "Waiting for you", or ask the product owner in the chat. Your decisions reach the office at its next hourly check.</p>
+  <p class="foot">Customer, the test lab, the product owner and Dev work every week; Audit and Security joined on 8 October, R&amp;D and Marketing on 10 October (once a month each). Everyone works when the Claude usage budget allows. Decide from "Waiting for you", or ask the product owner in the chat. Your decisions reach the office at its next hourly check.</p>
 
   <dialog class="pop" id="pop" aria-labelledby="popH">
     <div class="pophead"><h2 id="popH"></h2><button class="x" type="button" id="popX">Close</button></div>
@@ -379,9 +379,9 @@ const DEPTS = [
    role:"Cost per answer and latency, and what the agents themselves cost. Every cost cut goes through the same gate."},
   {id:"security", name:"Security", tag:"Security", model:"Opus 5.5 · high", sched:"Every 2nd Wed 14:00 (phase 2)", planned:"Desk ready, opens in phase 2",
    role:"Reviews each change and every branch waiting to merge, audits dependencies and secrets, and checks where customer text is sent."},
-  {id:"rnd", name:"R&D", tag:"R&D", model:"Opus 5.5 · high", sched:"1st of the month (phase 3)", planned:"Desk ready, opens in phase 3",
+  {id:"rnd", name:"R&D", tag:"R&D", model:"Opus 5.5 · high", sched:"Once a month, when the budget allows", planned:"Desk ready, opens in phase 3",
    role:"Researches infrastructure and new features that would move the product forward as a whole."},
-  {id:"marketing", name:"Marketing", tag:"Marketing", model:"Sonnet 5.5 · medium", sched:"15th of the month (phase 3)", planned:"Desk ready, opens in phase 3",
+  {id:"marketing", name:"Marketing", tag:"Marketing", model:"Sonnet 5.5 · medium", sched:"Once a month, when the budget allows", planned:"Desk ready, opens in phase 3",
    role:"Compares the product with market leaders and suggests look-and-feel improvements."}
 ];
 const D = Object.fromEntries(DEPTS.map(d => [d.id, d]));

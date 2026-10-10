@@ -21,7 +21,7 @@ from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
 from office_next import claims, holds, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
-        "audit": "Audit", "merge": "Merge"}
+        "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge"}
 
 
 def blocks(ops):
@@ -107,7 +107,8 @@ def selftest():
                                    "## D-20261008-07 | Manuals\n- Assigned: ceo\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\nPass the list on.\n\n"
                                    "# Later triage\n\n## D-20261008-07 | Manuals\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\nStill open.\n")
         w("reports/20261008.md", "# Report\nAll fine.\n")
-        for p in ("runs/20261008/DONE", "state/security_last_run.txt", "inbox/audit/20261008-weekly.md"):
+        for p in ("runs/20261008/DONE", "state/security_last_run.txt", "inbox/audit/20261008-weekly.md",
+                  "state/rnd_last_run.txt", "state/marketing_last_run.txt"):
             w(p)
         b = brief(ops, ops, now, (11, 38, 5))
         assert [(t["id"], t["kind"]) for t in b["todo"]] == [("D-20261008-01", "approve"), ("D-20261008-07", "action")], b["todo"]
