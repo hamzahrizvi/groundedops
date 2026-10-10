@@ -176,19 +176,20 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
 | D-20261009-03 | The website's "where your data goes" copy promises what the CEO will not | approved, queued | Dev builds it |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | approved, queued | Dev builds it |
 | D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
 | D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | sent back, rebuilding | Dev rebuilds it |
 | D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | sent back, rebuilding | Dev rebuilds it |
 | D-20261010-10 | On the new AI the bot gets two questions wrong that it answered right or declined safely before | approved, queued | Dev builds it |
 | D-20261010-11 | The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" | approved, queued | Dev builds it |
-| D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | waiting for CEO | your yes |
+| D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | approved, queued | Dev builds it |
 | D-20261010-20 | Twelve hidden gate questions are still in the live log; retire them, and keep probe traffic out of the log | ready to merge | merges once Security clears it |
 | D-20261010-21 | The test lab spends the website bot's own AI keys; a busy lab day took the bot off its main provider | waiting for CEO | your yes |
 | D-20261010-22 | Copies of visitor text in the office folders are kept forever, past the 90-day deletion | ready to merge | merges once Security clears it |
 | D-20261010-23 | The pre-ship check grades the "after" answers without the manual pages the "before" grader had | approved, queued | Dev builds it |
 | D-20261010-24 | Anyone on the internet can make the server call the AI providers with the company keys, with no sign-in and no limit | waiting for CEO | your yes |
-| D-20261010-25 | The public code's plan table lists the security weaknesses that are known and not yet fixed | approved, queued | Dev builds it |
+| D-20261010-25 | The public code's plan table lists the security weaknesses that are known and not yet fixed | ready to merge | merges once Security clears it |
+| D-20261010-26 | The unpushed commits already carry the security titles in the plan table's history | waiting for CEO | your yes |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
 | customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
 | customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
