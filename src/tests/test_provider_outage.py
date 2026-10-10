@@ -124,6 +124,52 @@ def test_a_forced_model_that_returns_nothing_is_not_a_documentation_gap():
     gap.assert_not_called()  # nobody failed to answer it; the model never ran
 
 
+def test_deep_health_is_private_but_plain_health_is_public():
+    """D-20261010-24: from outside, ?deep=1 is a 404 and spends no provider
+    call; from the box, the LAN, the docker bridge or with a bearer token
+    it answers in full, PUBLIC_ONLY included. Plain /health stays public."""
+    from unittest.mock import patch
+    import requests
+    import quota
+    from fastapi.testclient import TestClient
+    calls = []
+
+    def fake_get(*a, **k):
+        calls.append(a)
+        raise requests.ConnectionError("down")
+
+    ext = {"cf-connecting-ip": "203.0.113.9"}
+    full = lambda r: (r.status_code in (200, 503)
+                      and "provider_reachable" in r.json() and "roles" in r.json())
+    with patch.object(requests, "get", side_effect=fake_get),          patch.object(main.keystore, "get_key", return_value="k"),          patch.object(main.keystore, "has_key", return_value=True),          patch.object(main.keystore, "get_role",
+                      side_effect=lambda r: None if r == "backup" else "openai"):
+        c = TestClient(main.app)                                  # socket "testclient" (private in the harness)
+        for url in ("/health?deep=1", "/api/health?deep=1", "/health?deep=0"):
+            assert c.get(url, headers=ext).status_code == 404, url
+        assert c.get("/health?deep=1",
+                     headers={**ext, "authorization": "Bearer bad.token"}).status_code == 404
+        pub = TestClient(main.app, client=("198.51.100.4", 50000))  # no proxy, public socket
+        assert pub.get("/health?deep=1").status_code == 404
+        r = c.get("/health", headers=ext)
+        assert r.status_code == 200 and r.json() == {"status": "ok"}
+        assert calls == [], "an outside caller must not reach a provider"
+
+        for host in ("127.0.0.1", "172.17.0.1"):                   # the box; docker's bridge
+            r = TestClient(main.app, client=(host, 50000)).get("/health?deep=1")
+            assert full(r), (host, r.status_code)
+        assert calls, "the local deep probe must still contact the provider"
+
+        tok = quota.issue_token("uptime-monitor")
+        r = c.get("/health?deep=1", headers={**ext, "authorization": "Bearer " + tok})
+        assert full(r), r.status_code
+
+        with patch.object(main, "PUBLIC_ONLY", True):
+            r = TestClient(main.app, client=("127.0.0.1", 50000)).get("/health?deep=1")
+            assert full(r), r.status_code
+            assert c.get("/health?deep=1", headers=ext).status_code == 404
+            assert c.get("/health", headers=ext).status_code == 200
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

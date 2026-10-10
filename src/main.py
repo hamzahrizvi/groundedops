@@ -266,9 +266,32 @@ def _is_private(host: str) -> bool:
     return any(host.startswith(p) for p in PRIVATE_NETWORKS)
 
 
+def _bearer_ok(request) -> bool:
+    """A valid widget/member token in Authorization: Bearer. Never raises."""
+    try:
+        import quota as _q
+        auth = request.headers.get("authorization", "")
+        tok = auth[7:].strip() if auth.lower().startswith("bearer ") else None
+        return bool(_q.verify_token(tok))
+    except Exception:
+        return False
+
+
 @app.middleware("http")
 async def _restrict_private_surface(request, call_next):
     path = request.scope.get("path", "")
+    # D-20261010-24: ?deep=1 calls every configured AI provider with the
+    # live keys and returns the provider setup, so only the box or the LAN
+    # (no proxy header, a private socket address; PUBLIC_ONLY included) or a
+    # valid bearer token gets it. Any "deep" parameter counts, whatever its
+    # value. Plain /health stays public for load balancers.
+    if path.startswith("/health") and "deep" in request.query_params:
+        host = request.client.host if request.client else ""
+        proxied = any(h in request.headers for h in _PROXY_HEADERS)
+        if (not proxied and host and _is_private(host)) or _bearer_ok(request):
+            return await call_next(request)
+        logger.warning("blocked deep health probe from outside")
+        return _deny(request)
     if path.startswith(_PUBLIC_PREFIXES):
         return await call_next(request)
 
@@ -276,14 +299,8 @@ async def _restrict_private_surface(request, call_next):
     if path.startswith(_TOKEN_GATED_PREFIXES):
         if not proxied_early:
             return await call_next(request)          # local/LAN: allowed
-        try:
-            import quota as _q
-            auth = request.headers.get("authorization", "")
-            tok = auth[7:].strip() if auth.lower().startswith("bearer ") else None
-            if _q.verify_token(tok):
-                return await call_next(request)
-        except Exception:
-            pass
+        if _bearer_ok(request):
+            return await call_next(request)
         logger.warning(f"blocked unauthenticated external {path}")
         return _deny(request)
 
@@ -1787,6 +1804,9 @@ def _provider_reachable(provider: str | None,
 @app.get("/health")
 def health(deep: int = 0):
     """Liveness by default; readiness with ?deep=1.
+
+    ?deep=1 is NOT public (D-20261010-24): _restrict_private_surface serves
+    it only to the box/LAN with no proxy header, or to a valid bearer token.
 
     The plain form stays a cheap "the process is up" probe, because that is
     what a load balancer should hammer.
