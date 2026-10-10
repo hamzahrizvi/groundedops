@@ -13,9 +13,10 @@ run with its noise band, the product fixes merged between runs (from REPO's git
 merges and their gate.json) and a plain verdict on whether the product got
 better. Export: writes RUN/real_questions.json, the
 week's website-widget questions and how each ended, for Customer to categorise,
-and RUN/widget_feedback.json (the widget votes, without session ids).
+and RUN/widget_feedback.json (the week's widget votes, without session ids).
 Prune: deletes widget_feedback.json, real_questions.json and real_categorised.json
-from runs older than RETENTION_DAYS (90), keeping their counts in real_counts.json.
+from runs older than RETENTION_DAYS (90, from the env or REPO/src/.env), keeping their counts
+in real_counts.json, and drops older votes by created_at from the newer runs' widget_feedback.json.
 """
 import argparse
 import datetime
@@ -204,7 +205,7 @@ def build(ops, repo=None):
 
 
 def export_real(run, src, days):
-    print(copy_feedback(src, run), "widget votes (session ids dropped)")
+    print(copy_feedback(src, run, days), "widget votes from the last", days, "days (session ids dropped)")
     sys.path.insert(0, src)
     import log_report as L
     since = datetime.datetime.now() - datetime.timedelta(days=days)
@@ -220,29 +221,53 @@ def export_real(run, src, days):
     print(len(out), "website questions")
 
 
-def retention_days():
-    """Same rule as the product (REPO/src/retention.py): RETENTION_DAYS, 0 = off, unset or bad = 90."""
+def _since(data, since):
+    """The product's own rule (src/widget_api.py prune_before): keep votes whose
+    created_at is at or after `since`; a vote without one goes."""
+    key = since.astimezone(datetime.timezone.utc).isoformat()
+    return {k: v for k, v in (data.items() if isinstance(data, dict) else [])
+            if isinstance(v, dict) and (v.get("created_at") or "") >= key}
+
+
+def retention_days(repo=None):
+    """Same rule as the product (REPO/src/retention.py): RETENTION_DAYS, 0 = off, unset or bad = 90.
+    Read like the product reads it: the environment first, else REPO/src/.env (first line wins)."""
+    v = os.getenv("RETENTION_DAYS")
+    p = os.path.join(repo, "src", ".env") if repo else ""
+    if v is None and os.path.isfile(p):
+        for line in open(p, encoding="utf-8-sig"):
+            k, _, x = line.strip().partition("=")
+            if k.strip() == "RETENTION_DAYS":
+                v = x.strip().strip('"').strip("'")
+                break
     try:
-        return max(0, int(os.getenv("RETENTION_DAYS", "90")))
+        return max(0, int(v if v is not None else 90))
     except ValueError:
         return 90
 
 
 def prune_runs(ops, days, now=None):
     """D-20261010-22: delete visitor text (VISITOR_FILES) from OPS/runs folders older
-    than `days`, after saving the website-question counts to real_counts.json.
-    A run's age comes from its folder name (YYYYMMDD[b..]); a name that is not a
-    date is left alone. Returns the deleted paths."""
+    than `days` (by folder name YYYYMMDD[b..]), after saving the website-question counts
+    to real_counts.json. D-20261010-29: in every other folder, votes older than `days`
+    by their own created_at are removed from widget_feedback.json. Returns the deleted or trimmed paths."""
     if days <= 0:
         return []
     cutoff = (now or datetime.datetime.now()) - datetime.timedelta(days=days)
     gone = []
     for d in sorted(glob.glob(os.path.join(ops, "runs", "*"))):
         try:
-            stamp = datetime.datetime.strptime(os.path.basename(d)[:8], "%Y%m%d")
+            old = datetime.datetime.strptime(os.path.basename(d)[:8], "%Y%m%d") < cutoff
         except ValueError:
-            continue
-        if stamp >= cutoff:
+            old = False                                   # undated folder: no whole-file delete, rows still trimmed
+        if not old:
+            p = os.path.join(d, "widget_feedback.json")   # D-20261010-29: each vote by its own created_at
+            if os.path.exists(p):
+                data = _load(p)
+                kept = _since(data, cutoff)
+                if kept != data:
+                    json.dump(kept, open(p, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+                    gone.append(p)
             continue
         counts = os.path.join(d, "real_counts.json")
         rc = real_counts(d)
@@ -256,14 +281,16 @@ def prune_runs(ops, days, now=None):
     return gone
 
 
-def copy_feedback(src, run):
-    """Copy the product's widget votes into RUN without session ids. Returns how many."""
+def copy_feedback(src, run, days):
+    """Copy the widget votes of the last `days` days (by created_at) into RUN without
+    session ids, so each vote is copied once. Returns how many."""
     p = os.path.join(src, "widget_feedback.json")
     if not os.path.exists(p):
         return 0
     data = _load(p)
     out = {k: {f: x for f, x in v.items() if f != "session_id"}
            for k, v in (data.items() if isinstance(data, dict) else []) if isinstance(v, dict)}
+    out = _since(out, datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days))
     json.dump(out, open(os.path.join(run, "widget_feedback.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return len(out)
 
@@ -314,7 +341,7 @@ def _selftest():
         if name != "notadate":                                     # an undated folder is no graded run (build would choke on its name)
             json.dump(one, open(os.path.join(d, "cases.json"), "w"))
             json.dump({"grades": {"C-0": {"sys_normal": {"score": 3, "verdict": "correct"}}}}, open(os.path.join(d, "cases_state.json"), "w"))
-        json.dump({"r1": {"question": "q", "vote": "down", "session_id": "s"}}, open(os.path.join(d, "widget_feedback.json"), "w"))
+        json.dump({"old": {"question": "q", "vote": "down", "created_at": "2026-07-04T00:00:00+00:00"}, "new": {"question": "q", "vote": "up", "created_at": "2026-10-01T00:00:00+00:00"}}, open(os.path.join(d, "widget_feedback.json"), "w"))
         json.dump([{"q": "jam", "outcome": "answered", "when": "x"}], open(os.path.join(d, "real_questions.json"), "w"))
         json.dump([{"q": "jam", "category": "technical", "outcome": "answered"}], open(os.path.join(d, "real_categorised.json"), "w"))
     before = build(ops2)["real"]
@@ -322,16 +349,37 @@ def _selftest():
     assert prune_runs(ops2, 0, now) == []                          # RETENTION_DAYS=0: off
     gone = prune_runs(ops2, 90, now)
     old = os.path.join(ops2, "runs", "20260601")
-    assert sorted(os.path.basename(p) for p in gone) == sorted(VISITOR_FILES) and all(os.path.dirname(p) == old for p in gone), gone
+    fb = lambda name: os.path.join(ops2, "runs", name, "widget_feedback.json")
+    assert sorted(gone) == sorted([os.path.join(old, f) for f in VISITOR_FILES] + [fb("20261001"), fb("notadate")]), gone
+    for name in ("20261001", "notadate"):                       # D-20261010-29: the 100-day-old vote goes, the fresh one stays
+        assert list(_load(fb(name))) == ["new"], name
     for name in ("20261001", "notadate"):                         # recent, and undatable, keep everything
         assert all(os.path.exists(os.path.join(ops2, "runs", name, f)) for f in VISITOR_FILES), name
     assert _load(os.path.join(old, "real_counts.json")) == {"technical": {"answered": 1}}
     assert build(ops2)["real"] == before, (build(ops2)["real"], before)   # the pivot keeps the old run's counts
     assert prune_runs(ops2, 90, now) == []                         # second run: nothing left to delete
+    src = tempfile.mkdtemp()
+    ago = lambda n: (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=n)).isoformat()
+    json.dump({"a": {"question": "q", "vote": "down", "session_id": "s", "created_at": ago(100)},
+               "b": {"question": "q", "vote": "down", "session_id": "s", "created_at": ago(1)}},
+              open(os.path.join(src, "widget_feedback.json"), "w"))
     run = tempfile.mkdtemp()
-    assert copy_feedback(os.path.join(ops2, "runs", "20261001"), run) == 1
-    assert _load(os.path.join(run, "widget_feedback.json")) == {"r1": {"question": "q", "vote": "down"}}
-    assert copy_feedback(run + "/missing", run) == 0
+    assert copy_feedback(src, run, 7) == 1
+    assert list(_load(os.path.join(run, "widget_feedback.json"))) == ["b"]
+    assert "session_id" not in _load(os.path.join(run, "widget_feedback.json"))["b"]
+    assert copy_feedback(run + "/missing", run, 7) == 0
+    saved = os.environ.pop("RETENTION_DAYS", None)
+    try:
+        repo = tempfile.mkdtemp(); os.makedirs(os.path.join(repo, "src"))
+        assert retention_days(repo) == 90                       # no .env
+        open(os.path.join(repo, "src", ".env"), "w").write("# RETENTION_DAYS=5\nRETENTION_DAYS=30\nRETENTION_DAYS=40\n")
+        assert retention_days(repo) == 30                       # the product's .env, first line wins
+        os.environ["RETENTION_DAYS"] = "7"
+        assert retention_days(repo) == 7                        # the environment wins, as in the product
+    finally:
+        os.environ.pop("RETENTION_DAYS", None)
+        if saved is not None:
+            os.environ["RETENTION_DAYS"] = saved
     print("selftest ok")
 
 
@@ -347,8 +395,9 @@ if __name__ == "__main__":
     ap.add_argument("--prune", action="store_true", help="delete visitor text from runs older than RETENTION_DAYS")
     o = ap.parse_args()
     if o.prune:
-        gone = prune_runs(o.ops, retention_days())
-        print(len(gone), "visitor-text files deleted from runs older than", retention_days(), "days")
+        days = retention_days(o.repo)
+        gone = prune_runs(o.ops, days)
+        print(len(gone), "visitor-text files deleted or trimmed (older than", days, "days)")
         sys.exit(0)
     if o.export_real:
         export_real(o.export_real, o.src, o.days)

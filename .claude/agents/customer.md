@@ -99,8 +99,9 @@ is reported as a grader finding, not a bot finding.
 
 For each type write two things:
 1. A finding in `C:/Users/hrizvi/groundedops-ops/inbox/customer/<RUN name>-<type-slug>.md`
-   using `OFFICE/ops/proposal_template.md`. Quote the
-   failing questions and answers. Say how many cases of this type passed too.
+   using `OFFICE/ops/proposal_template.md`. Quote the failing lab questions and answers (cases.json). Real
+   website questions and widget votes (real_questions.json, widget_feedback.json) you paraphrase,
+   never quote: visitor text is deleted after 90 days and your finding is kept. Say how many cases of this type passed too.
 2. FOUR hidden sibling questions in
    `C:/Users/hrizvi/groundedops-ops/heldout/<RUN name>/siblings_<type-slug>.json`,
    same schema and grading fields as above. They test the same weakness on
