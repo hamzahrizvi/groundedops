@@ -102,7 +102,8 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
     cards = []
     for it in items.values():
         st = stage_of(it, ops, merged, reverted)
-        cards.append({"id": it["id"], "title": it["title"], "from": it.get("from", ""), "assigned": it.get("assigned", "dev"),
+        cards.append({"id": it["id"], "title": it["title"], "from": it.get("from", ""), "source": it.get("source", "").replace("\\", "/"),
+                      "assigned": it.get("assigned", "dev"),
                       "stage": st, "lane": "past" if st in PAST else "future" if st in FUTURE else "ongoing",
                       "decided": it["decided"]})
     for path in sorted(glob.glob(os.path.join(ops, "inbox", "*", "*.md"))):

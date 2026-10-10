@@ -6,7 +6,8 @@
 Rewrites one block between the office-plan markers near the top of PENDING.md: every open office
 item with its stage and next step, and what finished or was turned down in the last 30 days. Each
 "- For the rejected list: ..." line in a decision is added once to "Rejected - do not redo without
-new evidence". Then commits PENDING.md alone.
+new evidence". Then commits PENDING.md alone. Items that came from Security show only as "Security item
+<id>, details in the office": the repository is public.
 
 PENDING.md is also edited by hand and by other sessions (its header, CLAUDE.md P1): when it has
 changes nobody committed, or anything else is staged, this writes nothing, prints WAIT and leaves
@@ -33,7 +34,16 @@ NEXT = {"waiting for CEO": "your yes", "approved, queued": "Dev builds it", "sen
         "blocked": "the product owner decides", "proposed": "the product owner triages it", "deferred": "parked"}
 
 
+def masked(c):
+    """Security's items by where they came from, never by name: the repository is public."""
+    if c["from"].lower() != "security" and not c.get("source", "").startswith("inbox/security/"):
+        return c
+    cid = c["id"][:len("security/") + 8] if c["id"].startswith("security/") else c["id"]
+    return {**c, "id": cid, "title": f"Security item {cid}, details in the office"}
+
+
 def block(cards, today):
+    cards = [masked(c) for c in cards]
     open_ = [c for c in cards if c["lane"] != "past"]
     since = (today - datetime.timedelta(days=30)).strftime("%Y%m%d")
     past = [c for c in cards if c["lane"] == "past" and c["decided"] >= since]
@@ -54,7 +64,7 @@ def rejected_lines(ops):
         for part in re.split(r"(?m)^## ", open(path, encoding="utf-8").read())[1:]:
             m = re.match(r"(D-\d{8}-\d+)", part)
             r = re.search(r"(?m)^- For the rejected list:\s*(.+?)\s*$", part)
-            if m and r:
+            if m and r and not re.search(r"(?mi)^- (From:\s*security\b|Source:\s*inbox[/\\]security[/\\])", part):
                 out[m.group(1)] = r.group(1)
     return list(out.items())
 
@@ -101,14 +111,17 @@ def run(ops, repo, today=None):
 def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         ops, repo = os.path.join(tmp, "ops"), os.path.join(tmp, "repo")
-        for d in ("decisions", "inbox/dev", "inbox/audit"):
+        for d in ("decisions", "inbox/dev", "inbox/audit", "inbox/security"):
             os.makedirs(os.path.join(ops, d))
         os.makedirs(repo)
         w = lambda p, s: open(p, "w", encoding="utf-8", newline="").write(s)
         w(os.path.join(ops, "decisions", "20261010.md"),
           "## D-20261010-01 | Sales brush-off\n- From: customer\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n\n"
-          "## D-20261010-02 | Bigger reranker\n- From: rnd\n- Verdict: REJECT\n- For the rejected list: A bigger reranker: no gain on 40 blind questions.\n")
+          "## D-20261010-02 | Bigger reranker\n- From: rnd\n- Verdict: REJECT\n- For the rejected list: A bigger reranker: no gain on 40 blind questions.\n"
+          "\n## D-20261010-03 | Rate limits trust a forged header\n- Source: inbox/security/20261010-forge.md\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
+          "## D-20261010-04 | Uploads stored before sign-in\n- Source: inbox/security/20261010-upload.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Uploads stored before sign-in: accepted risk.\n")
         w(os.path.join(ops, "inbox", "audit", "20261010-cache.md"), "# Cache repeated answers\n")
+        w(os.path.join(ops, "inbox", "security", "20261010-chunked-cap.md"), "# The size cap misses chunked uploads\n")
         w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n## The plan\r\n\r\n"
                                            "### Rejected - do not redo without new evidence\r\n\r\n- Old idea.\r\n\r\n### Waiting\r\n\r\nSMTP.\r\n")
         for a in (("init", "-q"), ("config", "user.email", "t@t"), ("config", "user.name", "t"), ("add", "PENDING.md"), ("commit", "-qm", "x")):
@@ -120,6 +133,11 @@ def selftest():
         assert "| D-20261010-01 | Sales brush-off | waiting for CEO | your yes |" in t, t
         assert "| audit/20261010-cache | Cache repeated answers | proposed |" in t, t
         assert "D-20261010-02 Bigger reranker (rejected)" in t, t
+        assert "| D-20261010-03 | Security item D-20261010-03, details in the office |" in t, t
+        assert "| security/20261010 | Security item security/20261010, details in the office |" in t, t
+        assert "D-20261010-04 Security item D-20261010-04, details in the office (rejected)" in t, t
+        for leak in ("forged", "chunked", "Uploads stored", "sign-in"):
+            assert leak not in t, (leak, t)
         assert "- Old idea.\r\n- A bigger reranker: no gain on 40 blind questions. (D-20261010-02, product owner)\r\n\r\n### Waiting" in t, t
         assert run(ops, repo, today) == "UNCHANGED", "a second run changes nothing"
         assert t.count("D-20261010-02, product owner") == 1
