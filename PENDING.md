@@ -13,60 +13,6 @@ English. A session that finds edits here it did not make keeps them: it
 edits around them, never reverts or rewrites them, and asks before
 committing them.
 
-<!-- office-plan:start -->
-## Office plan (the product owner's)
-
-Rewritten from the product owner's decisions after each of its runs (`tools/pending_plan.py`).
-To change an item, tell the product owner or answer it on the office page; edits here are overwritten.
-
-| Item | What | Stage | Next |
-|---|---|---|---|
-| D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
-| D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
-| D-20261009-03 | The website's "where your data goes" copy promises what the CEO will not | approved, queued | Dev builds it |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
-| D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
-| D-20261010-01 | Buying words turn an honest "not found" into a sales brush-off | built, waiting for the check | the pre-ship check |
-| D-20261010-05 | The pre-ship check skips its own flicker re-run when the one wrong case also tips the score | sent back, rebuilding | Dev rebuilds it |
-| D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | approved, queued | Dev builds it |
-| D-20261010-10 | On the new AI the bot gets two questions wrong that it answered right or declined safely before | approved, queued | Dev builds it |
-| D-20261010-11 | The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" | approved, queued | Dev builds it |
-| customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
-| customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
-| customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
-| rnd/20261010-contextual-chunks | The fact is in the manual but the search never finds it: give every passage a sentence saying what it is about | proposed | the product owner triages it |
-| rnd/20261010-gap-driven-second-search | Half answers that say "not stated" for a documented fact: search once more for exactly what the answer says is missing | proposed | the product owner triages it |
-| rnd/20261010-self-route-whole-manual | When the passages don't hold the answer, read the whole manual once before saying "not in the manual" | proposed | the product owner triages it |
-| security/20261009-server-log-keeps-visitor-questions | Visitor questions stay in the server log after the 90-day deletion | proposed | the product owner triages it |
-| security/20261010-feedback-file-not-gitignored | The widget's vote file is not ignored by git, in a public repository | proposed | the product owner triages it |
-| security/20261010-hidden-questions-in-live-log | Twelve hidden gate questions are still in the live question log that Dev can read | proposed | the product owner triages it |
-| security/20261010-lab-shares-live-provider-keys | The test lab spends the live bot's provider keys, so a busy lab day takes the website bot off OpenAI | proposed | the product owner triages it |
-| security/20261010-office-copies-outlive-retention | Copies of visitor text in the office folders are kept forever, past the new 90-day deletion | proposed | the product owner triages it |
-| D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
-| D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
-| D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
-| D-20261008-05 | How-to answers stop before the fix, the test or the warning | deferred | parked |
-| D-20261008-06 | Vague complaints get a checklist instead of one question | deferred | parked |
-| D-20261008-10 | Any website can embed the widget | deferred | parked |
-| D-20261008-11 | Rate limits trust an address header any caller can forge | deferred | parked |
-| D-20261008-12 | The request size cap misses chunked uploads | deferred | parked |
-| D-20261008-14 | A visitor can label their own questions as test traffic | deferred | parked |
-| D-20261008-17 | The desktop build carries known-vulnerable packages that CI does not see | deferred | parked |
-| D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
-| D-20261009-05 | A table from the next product's section is read as the asked product's | deferred | parked |
-| D-20261009-06 | The server's console log keeps question fragments past 90 days | deferred | parked |
-| D-20261009-07 | Hidden test questions sit in the live question log and the admin FAQ-gap list | deferred | parked |
-| D-20261009-08 | Two products in one question are declined even when both figures are in the manuals | deferred | parked |
-| D-20261009-10 | Vague "it stopped working" messages get a checklist or a decline instead of one question | deferred | parked |
-| D-20261010-02 | An upload with no sign-in is stored on disk before it is refused | deferred | parked |
-| D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | deferred | parked |
-| D-20261010-13 | A refused question shows two bot messages and never says what was checked | deferred | parked |
-| D-20261010-14 | The page the answer came from is hidden behind a click | deferred | parked |
-| D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | deferred | parked |
-
-**Finished or turned down in the last 30 days:** D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-08 Two live AI provider keys are sitting in the public code repository (merged); D-20261008-09 Customer questions go to OpenAI and DeepSeek, against the on-premises promise (done); D-20261008-13 Nothing checks installed packages for known vulnerabilities (merged); D-20261008-15 Question logs are kept forever; delete them after 90 days (merged); D-20261008-16 Adding, deleting and reading manuals needs no sign-in from the office network (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done); D-20261010-07 Office-only fixes skip the bot gate; the gate runs only when product code changed (merged).
-<!-- office-plan:end -->
-
 **Friday review.** Once a week this file gets a pass, not just additions:
 
 1. Tick off anything now done — strike it through, name the commit or PR,
@@ -218,6 +164,61 @@ the LiteLLM gateway; v16.5 pipeline-hardening deferrals still open (see the
 dated section below).
 
 ---
+
+<!-- office-plan:start -->
+## Office plan (the product owner's)
+
+Rewritten from the product owner's decisions after each of its runs (`tools/pending_plan.py`).
+To change an item, tell the product owner or answer it on the office page; edits here are overwritten.
+
+| Item | What | Stage | Next |
+|---|---|---|---|
+| D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
+| D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
+| D-20261009-03 | The website's "where your data goes" copy promises what the CEO will not | approved, queued | Dev builds it |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
+| D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
+| D-20261010-01 | Buying words turn an honest "not found" into a sales brush-off | built, waiting for the check | the pre-ship check |
+| D-20261010-05 | The pre-ship check skips its own flicker re-run when the one wrong case also tips the score | sent back, rebuilding | Dev rebuilds it |
+| D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | approved, queued | Dev builds it |
+| D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | approved, queued | Dev builds it |
+| D-20261010-10 | On the new AI the bot gets two questions wrong that it answered right or declined safely before | approved, queued | Dev builds it |
+| D-20261010-11 | The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" | approved, queued | Dev builds it |
+| customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
+| customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
+| customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
+| rnd/20261010-contextual-chunks | The fact is in the manual but the search never finds it: give every passage a sentence saying what it is about | proposed | the product owner triages it |
+| rnd/20261010-gap-driven-second-search | Half answers that say "not stated" for a documented fact: search once more for exactly what the answer says is missing | proposed | the product owner triages it |
+| rnd/20261010-self-route-whole-manual | When the passages don't hold the answer, read the whole manual once before saying "not in the manual" | proposed | the product owner triages it |
+| security/20261009-server-log-keeps-visitor-questions | Visitor questions stay in the server log after the 90-day deletion | proposed | the product owner triages it |
+| security/20261010-feedback-file-not-gitignored | The widget's vote file is not ignored by git, in a public repository | proposed | the product owner triages it |
+| security/20261010-hidden-questions-in-live-log | Twelve hidden gate questions are still in the live question log that Dev can read | proposed | the product owner triages it |
+| security/20261010-lab-shares-live-provider-keys | The test lab spends the live bot's provider keys, so a busy lab day takes the website bot off OpenAI | proposed | the product owner triages it |
+| security/20261010-office-copies-outlive-retention | Copies of visitor text in the office folders are kept forever, past the new 90-day deletion | proposed | the product owner triages it |
+| D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
+| D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
+| D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
+| D-20261008-05 | How-to answers stop before the fix, the test or the warning | deferred | parked |
+| D-20261008-06 | Vague complaints get a checklist instead of one question | deferred | parked |
+| D-20261008-10 | Any website can embed the widget | deferred | parked |
+| D-20261008-11 | Rate limits trust an address header any caller can forge | deferred | parked |
+| D-20261008-12 | The request size cap misses chunked uploads | deferred | parked |
+| D-20261008-14 | A visitor can label their own questions as test traffic | deferred | parked |
+| D-20261008-17 | The desktop build carries known-vulnerable packages that CI does not see | deferred | parked |
+| D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
+| D-20261009-05 | A table from the next product's section is read as the asked product's | deferred | parked |
+| D-20261009-06 | The server's console log keeps question fragments past 90 days | deferred | parked |
+| D-20261009-07 | Hidden test questions sit in the live question log and the admin FAQ-gap list | deferred | parked |
+| D-20261009-08 | Two products in one question are declined even when both figures are in the manuals | deferred | parked |
+| D-20261009-10 | Vague "it stopped working" messages get a checklist or a decline instead of one question | deferred | parked |
+| D-20261010-02 | An upload with no sign-in is stored on disk before it is refused | deferred | parked |
+| D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | deferred | parked |
+| D-20261010-13 | A refused question shows two bot messages and never says what was checked | deferred | parked |
+| D-20261010-14 | The page the answer came from is hidden behind a click | deferred | parked |
+| D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | deferred | parked |
+
+**Finished or turned down in the last 30 days:** D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-08 Two live AI provider keys are sitting in the public code repository (merged); D-20261008-09 Customer questions go to OpenAI and DeepSeek, against the on-premises promise (done); D-20261008-13 Nothing checks installed packages for known vulnerabilities (merged); D-20261008-15 Question logs are kept forever; delete them after 90 days (merged); D-20261008-16 Adding, deleting and reading manuals needs no sign-in from the office network (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done).
+<!-- office-plan:end -->
 
 ## 2026-09-27 - the 7 -> 10 plan, in plain English (all open)
 
