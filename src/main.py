@@ -1367,18 +1367,9 @@ def _friendly_refusal(scope_key: str | None, product_label: str = "",
     configured support email and phone when offer_support is set, and
     hardcoding them here would give a visitor two versions to reconcile.
     """
-    # A commercial question that searched first (sales.is_price_question
-    # deflects the rest before retrieval) and found nothing: the operator's
-    # sales reply, not a documentation refusal.
-    try:
-        import sales, policy
-        if (query and sales.is_commercial_question(query)
-                and (policy.value("sales_mode") or "answer").strip().lower() != "documents"):
-            _reply = (policy.value("sales_reply") or "").strip()
-            if _reply:
-                return _reply
-    except Exception as exc:
-        logger.debug(f"refusal sales reply skipped: {exc}")
+    # No sales reply here (D-20261010-01, CEO 2026-10-10): a refusal says what
+    # was not found and offers support, whatever buying words the message holds.
+    # Price questions are deflected before the search in _sales_answer.
 
     what = f" about the {product_label}" if product_label else ""
     lines = [f"I don't have that in the product documentation{what}."]
@@ -1615,9 +1606,8 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         # catalogue-navigation vocabulary, so "what is the price for a nv9 st"
         # returned None here and the operator's configured deflect was never
         # consulted at all.
-        # Only a PRICE question deflects before the search; buy/order/stock/
-        # budget wordings search first and _friendly_refusal deflects them
-        # when nothing answers (S30, blind sets 4-5).
+        # Only a PRICE question deflects; buy/order/stock/budget wordings
+        # search the manuals and a refusal stays a refusal (D-20261010-01).
         commercial = sales.is_commercial_question(q) and sales.is_price_question(q)
         if not (sales.is_sales_question(q) or sales.is_comparison(q)
                 or commercial):
@@ -1658,6 +1648,8 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
             reply = (policy.value("sales_reply") or "").strip()
             if not reply:
                 return None
+            logger.info("price deflect before search, matched %s",
+                        [m.group(0) for m in sales._PRICE.finditer(q)])
             return {"answer": reply, "kind": "deflected"}
 
         idx = sales.get_index(docstore.store_dir(), _source_to_product())

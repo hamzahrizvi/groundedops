@@ -102,8 +102,8 @@ _DEFAULTS = {
     "dedupe_shadowed_chunks": True,
 
     # ── Commercial questions ───────────────────────────────────────────
-    # Governs COMMERCIAL questions only (price, fees, buying, stock,
-    # resellers -- sales.is_commercial_question). Cross-product catalogue and
+    # Governs PRICE questions only (sales.is_price_question), deflected
+    # before the search. Cross-product catalogue and
     # spec questions ("which products run on 24V?") are technical and always
     # answered from the catalogue; see main._sales_answer for why.
     #
