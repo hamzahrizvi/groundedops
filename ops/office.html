@@ -200,6 +200,7 @@ button{font:inherit;color:inherit}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .pvrefresh{margin:0 0 6px}
 .btn.go{background:var(--accent);color:var(--accent-ink)}
+.btn.pon{background:var(--ok);color:#fff} .btn.poff{background:var(--crit);color:#fff}
 .btn:disabled{opacity:.55;cursor:default;transform:none}
 dialog.pop{border:2px solid var(--ink);border-radius:4px;background:var(--surface);color:var(--ink);padding:0;width:min(580px,calc(100vw - 32px));max-height:min(88vh,780px);box-shadow:6px 6px 0 var(--ink)}
 dialog.pop[open]{display:flex;flex-direction:column}
@@ -1147,7 +1148,7 @@ function renderPower(){
   const off = row ? row.choice === "off" : !!(live.brief && live.brief.off);
   b.disabled = !!row;
   b.setAttribute("aria-pressed", String(!off));
-  b.className = off ? "btn go" : "btn";
+  b.className = off ? "btn poff" : "btn pon";
   b.textContent = row ? (off ? "Switching off at the next check…" : "Switching on at the next check…") : off ? "⏻ Switch office on" : "⏻ Switch office off";
   $("sign").textContent = off ? "CLOSED" : "OPEN";
 }
