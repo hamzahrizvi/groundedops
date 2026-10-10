@@ -27,8 +27,10 @@ log "$OUT/gate.log" "$PY" "$BE" "$RUN" remark
 
 cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/after/"
 log "$OUT/gate.log" "$PY" "$BE" "$OUT/after" reset
+# the old code's answers ride along as sys_before so before and after are graded in one pass (D-20261010-05)
+log "$OUT/gate.log" "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8")); s["sys_before"]=json.load(open(sys.argv[1],encoding="utf-8"))["sys_normal"]; json.dump(s,open(sys.argv[2],"w",encoding="utf-8"),indent=1,ensure_ascii=False)' "$RUN/cases_state.json" "$OUT/after/cases_state.json"
 log "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal
-log "$OUT/gate.log" "$PY" "$BE" "$OUT/after" grade
+log "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade
 
 SIBS=()
 if [ $# -gt 0 ]; then
@@ -47,6 +49,6 @@ if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$
 fi
 
 "$PY" "$REPO/tools/retrofit_gate.py" --before "$RUN/cases_state.json" \
-  --after "$OUT/after/cases_state.json" --siblings "${SIBS[@]}" > "$OUT/gate.json"
+  --after "$OUT/after/cases_state.json" --regraded sys_before --siblings "${SIBS[@]}" > "$OUT/gate.json"
 cat "$OUT/gate.json"
 "$PY" "$REPO/tools/gate_rerun.py" "$DEV" "$RUN" "$OUT"   # 1-2 case "became wrong": re-ask 6x branch vs base

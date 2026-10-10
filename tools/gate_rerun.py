@@ -5,11 +5,14 @@
 
 tools/gate_run.sh calls it after tools/retrofit_gate.py has written <out_dir>/gate.json.
 One blind pass is noisy: C20261008-22 scored 0 in 2 passes of 6 on unchanged code
-(2026-10-08). So when the ONLY reason for FAIL is "became wrong" on 1-2 cases, each of
+(2026-10-08). So when the only reasons for FAIL are "became wrong" on 1-2 cases, alone or
+with a score drop that is within --noise once those cases are held at their before scores
+(D-20261010-05: one 3 -> 0 flip is 2.5 pts of 40 cases), each of
 those cases is asked 6 times on the branch and 6 times on its base code, interleaved.
 A case stays wrong only if the branch answers it wrong (score 0) at least 2 passes more
 often than the base, or a pass has no grade (fail closed). gate.json gains "rerun" (the
-per-pass grades) and a recomputed verdict. Siblings, a score drop or 3+ cases: untouched.
+per-pass grades) and a recomputed verdict; the drop is recomputed with the cleared cases
+held before ruling. Siblings, a drop beyond noise or 3+ cases: untouched.
 Only the open-set ids in gate.json's "became_wrong" are re-run; siblings are never read.
 
 Env: GO_DATA (as gate_run.sh exports it); GATE_BASE = base commit (default: merge-base
@@ -26,10 +29,21 @@ import tarfile
 ROUNDS, MARGIN, MAX_CASES = 6, 2, 2
 
 
+def held_drop(gate, cids):
+    """The score drop with these became-wrong cases held at their before scores."""
+    return round(gate["drop"] - 100 * sum(gate["flip_before"][c] for c in cids) / (3 * gate["cases"]), 1)
+
+
 def eligible(gate):
-    r = gate.get("reasons", [])
-    return (gate.get("verdict") == "FAIL" and len(r) == 1 and r[0].startswith("became wrong")
-            and 1 <= len(gate.get("became_wrong", [])) <= MAX_CASES)
+    r, bw = gate.get("reasons", []), gate.get("became_wrong", [])
+    if not (gate.get("verdict") == "FAIL" and 1 <= len(bw) <= MAX_CASES
+            and all(x.startswith(("became wrong", "score dropped")) for x in r)
+            and any(x.startswith("became wrong") for x in r)):
+        return False
+    if any(x.startswith("score dropped") for x in r):
+        return ("drop" in gate and all(c in gate.get("flip_before", {}) for c in bw)
+                and held_drop(gate, bw) <= gate.get("noise", 3.0))
+    return True
 
 
 def grade_of(state, cid):
@@ -53,7 +67,13 @@ def rerate(gate, head_states, base_states):
     rates = ", ".join(f"{c} wrong {rerun[c]['head_wrong']}/{len(rerun[c]['head'])} on branch vs "
                       f"{rerun[c]['base_wrong']}/{len(rerun[c]['base'])} on base" for c in kept)
     reasons = [f"became wrong: {kept} (re-run: {rates})"] if kept else []
-    return {**gate, "verdict": "FAIL" if reasons else "PASS", "reasons": reasons, "rerun": rerun}
+    extra = {}
+    if "drop" in gate:
+        cleared, noise = [c for c in gate["became_wrong"] if c not in kept], gate.get("noise", 3.0)
+        d = extra["drop_held"] = held_drop(gate, cleared)
+        if d > noise:
+            reasons.append(f"score dropped {d} pts (> {noise}) with the cleared cases at their before scores")
+    return {**gate, **extra, "verdict": "FAIL" if reasons else "PASS", "reasons": reasons, "rerun": rerun}
 
 
 def run(dev, run_dir, out):
@@ -130,8 +150,25 @@ def _selftest():
     assert eligible(one) and eligible({**one, "became_wrong": ["a", "b"]})
     assert not eligible({**one, "became_wrong": ["a", "b", "c"]})       # 3+ cases fail outright
     assert not eligible({**one, "reasons": ["hidden siblings below 2: ['s']", "became wrong: ['c']"]})
-    assert not eligible({**one, "reasons": ["became wrong: ['c']", "score dropped 4 pts (> 3)"]})
+    assert not eligible({**one, "reasons": ["became wrong: ['c']", "score dropped 4 pts (> 3)"]})  # old gate.json without drop/flip_before: fail closed
     assert not eligible({**one, "verdict": "PASS", "reasons": []})
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from retrofit_gate import gate as rgate
+    def state(d):
+        return {"grades": {k: {"sys_normal": {"score": v}} for k, v in d.items()}}
+    ids = [f"c{i:02d}" for i in range(40)]
+    sb = {i: 3 if n < 27 else 1 for n, i in enumerate(ids)}
+    sa = {**sb, "c00": 0, "c01": 2, "c02": 2}
+    g = rgate(state(sb), state(sa))                                     # today's shape: 78.3 -> 74.2
+    assert g["drop"] == 4.1 and len(g["reasons"]) == 2 and g["became_wrong"] == ["c00"], g
+    assert held_drop(g, ["c00"]) == 1.6 and eligible(g), g
+    cs = lambda *sc: [{"grades": {"c00": {"sys_normal": {"score": v}}}} for v in sc]
+    r = rerate(g, cs(0, 2, 3, 2, 2, 2), cs(2, 0, 3, 2, 2, 2))
+    assert r["verdict"] == "PASS" and r["reasons"] == [] and r["drop_held"] == 1.6, r
+    r = rerate(g, cs(0, 0, 3, 2, 2, 2), cs(2, 2, 3, 2, 2, 2))
+    assert r["verdict"] == "FAIL" and r["reasons"][0].startswith("became wrong"), r
+    assert r["reasons"][1].startswith("score dropped 4.1"), r
+    assert not eligible({**g, "drop": 6.0})                              # held 3.5 > 3
     print("selftest ok")
 
 
