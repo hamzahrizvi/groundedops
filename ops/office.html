@@ -1142,6 +1142,8 @@ $("refreshBtn").addEventListener("click", async () => {
 });
 
 /* the CEO's power button: off = every agent sleeps after the work under way (tools/ceo_inbox.py, office_next.py) */
+let powerArmed = false;
+const POWER_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="vertical-align:-3px;margin-right:6px"><path d="M12 3v9" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/><path d="M7.1 6.3a8 8 0 1 0 9.8 0" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>';
 function renderPower(){
   const b = $("powerBtn"), row = live.inbox.find(r => (r.choice === "off" || r.choice === "on") && r.status === "new");
   b.hidden = !live.available;
@@ -1149,15 +1151,18 @@ function renderPower(){
   b.disabled = !!row;
   b.setAttribute("aria-pressed", String(!off));
   b.className = off ? "btn poff" : "btn pon";
-  b.textContent = row ? (off ? "Switching off at the next check…" : "Switching on at the next check…") : off ? "⏻ Switch office on" : "⏻ Switch office off";
+  b.title = off ? "The office is off. Click to switch it on." : "The office is on. Click to switch it off.";
+  b.innerHTML = POWER_SVG;
+  b.append(row ? (off ? "Switching off at the next check" : "Switching on at the next check")
+    : powerArmed ? "Click again: all agents sleep" : off ? "Office off" : "Office on");
   $("sign").textContent = off ? "CLOSED" : "OPEN";
 }
 $("powerBtn").addEventListener("click", async () => {
   const off = !!(live.brief && live.brief.off);
-  if(!off && !confirm("Switch the office off? Every agent goes to sleep: work already started finishes, nothing new starts until you switch it back on.")) return;
-  $("powerBtn").disabled = true;
+  if(!off && !powerArmed){ powerArmed = true; renderPower(); setTimeout(() => { powerArmed = false; renderPower(); }, 6000); return; }
+  powerArmed = false; $("powerBtn").disabled = true;
   try { await decide("", off ? "on" : "off", "", off ? "Switch office on" : "Switch office off"); }
-  catch(e){ alert(writeError(e)); }
+  catch(e){ $("banner").textContent = writeError(e); }
   renderPower();
 });
 
