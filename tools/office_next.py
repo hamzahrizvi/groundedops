@@ -16,6 +16,7 @@ the first RUN line itself by following that task's prompt: scheduled runs
 cannot start other scheduled tasks.
 
 A department named on a line of OPS/state/hold is held: WAIT, whatever it has.
+The CEO's refresh button (OPS/state/refresh_request, newer than the last run's DONE) puts Customer's run first.
 
 Lanes (2026-10-09): three scheduled runners share the work side by side (ops/schedules/dispatch.md).
   python tools/office_next.py --lane N --take      the plan, then TOOK <key> | <line>, or TOOK nothing
@@ -163,7 +164,10 @@ def waiting(ops, repo, now, taken=()):
                                         capture_output=True, text=True, timeout=30).stdout.strip() or 0)
     except Exception:
         last_merge = 0
-    if not last_run or age(last_run) >= 7 or last_merge > last_run:
+    asked = _mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
+    if asked > last_run:   # first in the queue until a run finishes after the press
+        out.insert(0, ("customer", "the CEO asked for a fresh score", "customer"))
+    elif not last_run or age(last_run) >= 7 or last_merge > last_run:
         out.append(("customer", "a fix merged since the last test" if last_run and last_merge > last_run else "weekly test due", "customer"))
     unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge")
                   and not os.path.exists(os.path.join(ops, "inbox", "security", f"review-{i}.md"))]
@@ -297,6 +301,15 @@ def selftest():
         w("inbox/security/review-D-20261008-01.md", "Verdict: BLOCK\n")
         p = plan(ops, ops, 11, 38, resets, now)
         assert not any(x.startswith("MERGE") for x in p) and "new findings" in p[0], p   # a BLOCK wakes the product owner
+        w("state/refresh_request", "2026-10-08 07:00 x\n")
+        os.utime(os.path.join(ops, "state/refresh_request"), (time.time() + 5, time.time() + 5))
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert p[0].startswith("RUN  groundedops-office-customer  the CEO asked for a fresh score"), p
+        assert sum("customer" in x for x in p) == 1, p
+        assert "would pass 70%" in plan(ops, ops, 60, 38, resets, now)[0], "a press still waits for the budget"
+        os.utime(os.path.join(ops, "runs/20261008/DONE"), (time.time() + 10, time.time() + 10))
+        assert not any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "a run finished after the press answers it"
+        os.remove(os.path.join(ops, "state/refresh_request"))
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
         assert any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "no test run yet"
     print("selftest ok")
