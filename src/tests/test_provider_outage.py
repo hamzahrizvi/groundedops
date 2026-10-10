@@ -141,7 +141,10 @@ def test_deep_health_is_private_but_plain_health_is_public():
     ext = {"cf-connecting-ip": "203.0.113.9"}
     full = lambda r: (r.status_code in (200, 503)
                       and "provider_reachable" in r.json() and "roles" in r.json())
-    with patch.object(requests, "get", side_effect=fake_get),          patch.object(main.keystore, "get_key", return_value="k"),          patch.object(main.keystore, "has_key", return_value=True),          patch.object(main.keystore, "get_role",
+    with patch.object(requests, "get", side_effect=fake_get), \
+         patch.object(main.keystore, "get_key", return_value="k"), \
+         patch.object(main.keystore, "has_key", return_value=True), \
+         patch.object(main.keystore, "get_role",
                       side_effect=lambda r: None if r == "backup" else "openai"):
         c = TestClient(main.app)                                  # socket "testclient" (private in the harness)
         for url in ("/health?deep=1", "/api/health?deep=1", "/health?deep=0"):
