@@ -245,6 +245,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
       <span class="clock" id="clock">--:--</span>
       <span class="chip" id="modeChip">Sample week</span>
       <button class="btn" id="modeBtn" type="button" hidden>Show live office</button>
+      <button class="btn" id="powerBtn" type="button" hidden aria-pressed="true">Power</button>
     </div>
   </header>
   <p class="banner" id="banner">Connecting to the office…</p>
@@ -252,7 +253,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
   <div class="grid">
     <div class="main">
       <section class="building" aria-label="Office floor">
-        <div class="roofline"><span>GROUNDEDOPS · FLOOR 1</span><span class="hint">Click anyone to see what they are doing</span><span class="sign">OPEN</span></div>
+        <div class="roofline"><span>GROUNDEDOPS · FLOOR 1</span><span class="hint">Click anyone to see what they are doing</span><span class="sign" id="sign">OPEN</span></div>
         <div class="scroller" id="scroller">
           <div class="floorwrap" id="floorwrap">
             <canvas id="floor" width="416" height="272" aria-label="Animated office floor plan"></canvas>
@@ -1112,7 +1113,7 @@ function openItem(id){
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
-const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh"};
+const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on"};
 async function decide(id, choice, note, title){
   if(!live.db) throw {code:"no_db"};
   await live.db.collection("ceo_inbox").add({id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
@@ -1137,6 +1138,26 @@ $("refreshBtn").addEventListener("click", async () => {
   refreshArmed = false; $("refreshBtn").disabled = true;
   try { await decide("", "refresh", "", "Refresh status and score"); renderRefresh(); }
   catch(e){ renderRefresh(); $("refreshMsg").className = "oops"; $("refreshMsg").textContent = writeError(e); }
+});
+
+/* the CEO's power button: off = every agent sleeps after the work under way (tools/ceo_inbox.py, office_next.py) */
+function renderPower(){
+  const b = $("powerBtn"), row = live.inbox.find(r => (r.choice === "off" || r.choice === "on") && r.status === "new");
+  b.hidden = !live.available;
+  const off = row ? row.choice === "off" : !!(live.brief && live.brief.off);
+  b.disabled = !!row;
+  b.setAttribute("aria-pressed", String(!off));
+  b.className = off ? "btn go" : "btn";
+  b.textContent = row ? (off ? "Switching off at the next check…" : "Switching on at the next check…") : off ? "⏻ Switch office on" : "⏻ Switch office off";
+  $("sign").textContent = off ? "CLOSED" : "OPEN";
+}
+$("powerBtn").addEventListener("click", async () => {
+  const off = !!(live.brief && live.brief.off);
+  if(!off && !confirm("Switch the office off? Every agent goes to sleep: work already started finishes, nothing new starts until you switch it back on.")) return;
+  $("powerBtn").disabled = true;
+  try { await decide("", off ? "on" : "off", "", off ? "Switch office on" : "Switch office off"); }
+  catch(e){ alert(writeError(e)); }
+  renderPower();
 });
 
 /* ---------- the product owner's chat ---------- */
@@ -1279,8 +1300,8 @@ setInterval(sampleStep, 9000);
   live.available = true; live.db = db;
   let firstEvents = true;
   try {
-    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderTray(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderRefresh(); }, () => {});
+    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderRefresh(); renderPower(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());

@@ -18,7 +18,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
-from office_next import claims, holds, latest_usage, next_reset, plan  # noqa: E402
+from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge"}
@@ -84,6 +84,9 @@ def brief(ops, repo, now=None, usage=None):
         if moving and all(m["state"] == "wait" for m in moving):
             stalled = "Everything with work is waiting: " + "; ".join(f"{m['dept']}: {m['why']}" for m in moving)
     held = sorted(holds(ops, now))
+    if is_off(ops):
+        moving, held = [], []
+        stalled = "Paused: you switched the office off. Work already started finishes; nothing new starts until you switch it on."
     if held:
         stalled = (stalled + " " if stalled else "") + "On hold by hand: " + ", ".join(held) + "."
     reports = sorted(glob.glob(os.path.join(ops, "reports", "*.md")))
@@ -92,7 +95,7 @@ def brief(ops, repo, now=None, usage=None):
     if running and stalled.startswith("Everything with work is waiting"):
         stalled = ""   # waiting behind work that is running is not a stall
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
-            "minutes_old": None if old == float("inf") else round(old)}, "running": running, "moving": moving, "stalled": stalled,
+            "minutes_old": None if old == float("inf") else round(old)}, "running": running, "moving": moving, "stalled": stalled, "off": is_off(ops),
             "todo": todo, "items": cards,
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 

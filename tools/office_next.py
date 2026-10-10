@@ -16,6 +16,7 @@ the first RUN line itself by following that task's prompt: scheduled runs
 cannot start other scheduled tasks.
 
 A department named on a line of OPS/state/hold is held: WAIT, whatever it has.
+OPS/state/office_off (the CEO's power button, via tools/ceo_inbox.py) holds every department and merges.
 The CEO's refresh button (OPS/state/refresh_request, newer than the last run's DONE) puts Customer's run first.
 
 Lanes (2026-10-09): three scheduled runners share the work side by side (ops/schedules/dispatch.md).
@@ -211,10 +212,16 @@ def holds(ops, now):
     return held
 
 
+def is_off(ops):
+    return os.path.exists(os.path.join(ops, "state", "office_off"))
+
+
 def entries(ops, repo, five, week, resets, now, taken):
     """[(line, claim key, runnable)]. Work other lanes are running counts against the budget,
     since two lanes starting together both see the same usage figures."""
     held = holds(ops, now)
+    if is_off(ops):
+        held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken)}
     cost = lambda k: COST.get("dev" if k.startswith("dev-") else k, (0, 0))
     five, week = five + sum(cost(k)[0] for k in taken), week + sum(cost(k)[1] for k in taken)
     building = sum(k.startswith("dev-") for k in taken)
@@ -312,6 +319,9 @@ def selftest():
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (time.time() + 10, time.time() + 10))
         assert not any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "a run finished after the press answers it"
         os.remove(os.path.join(ops, "state/refresh_request"))
+        w("state/office_off", "x\n")
+        assert all(l.startswith("WAIT") or l == "IDLE" for l in plan(ops, ops, 11, 38, resets, now)), "switched off"
+        os.remove(os.path.join(ops, "state/office_off"))
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
         assert any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "no test run yet"
         os.remove(os.path.join(ops, "inbox/security/review-D-20261008-01.md"))

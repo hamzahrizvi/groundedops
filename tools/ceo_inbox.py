@@ -12,6 +12,7 @@ from the decisions file, and a note is quoted so it can never read as a decision
   defer    DEFER (the CEO parks it)
   done     DONE (a CEO action ticked off; ops_ledger shows it as done)
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
+  off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
 """
 import argparse
@@ -67,6 +68,15 @@ def apply(ops, folder, now=None):
             open(path, "w", encoding="utf-8").write(f"# A note from the CEO{about}\n\nSent from the office page, {stamp}."
                                                      " Answer it in the next report; if it asks for a decision, make it." + quote(d.get("note")) + "\n")
             out.append(f"APPLIED {doc_id} note")
+            continue
+        if choice in ("off", "on"):   # the power button
+            path = os.path.join(ops, "state", "office_off")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if choice == "off":
+                open(path, "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
+            elif os.path.exists(path):
+                os.remove(path)
+            out.append(f"APPLIED {doc_id} {choice}")
             continue
         if choice == "refresh":   # no item: the dispatcher re-uploads the status figures; office_next.py puts the test run first
             if "customer" in claims(ops):
@@ -141,6 +151,11 @@ def selftest():
         row("9", id="", choice="refresh")
         got = apply(ops, os.path.join(ops, "pull"))
         assert got[0].startswith("APPLIED 9 refresh (a test run is under way") and not os.path.exists(req), "folded into the run"
+        off = os.path.join(ops, "state", "office_off")
+        row("10", id="", choice="off")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 10 off"] and os.path.exists(off), "switched off"
+        row("11", id="", choice="on")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 11 on"] and not os.path.exists(off), "switched on"
     print("selftest ok")
 
 
