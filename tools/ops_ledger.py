@@ -209,6 +209,15 @@ def _selftest():
     r = ledger(ops, merged={"D-20261013-01"}, reverted={"D-20261013-01"}, today=day)
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
     assert pts["po"] == -3 and pts["dev"] == -3, pts                 # a revert costs, and earns no merge points
+    # an office-only PASS (D-20261010-07) counts as a merge, not as a bot fix
+    w("decisions/20261013c.md", "## D-20261013-05 | Office tool\n- From: audit\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+    w("inbox/dev/D-20261013-05.md", "Status: READY\nBranch: agents/dev-D-20261013-05\n")
+    os.makedirs(os.path.join(ops, "inbox/dev/D-20261013-05.gate"))
+    w("inbox/dev/D-20261013-05.gate/gate.json", json.dumps({"verdict": "PASS", "reasons": ["no product code changed"],
+      "fixed": [], "became_wrong": [], "cases": 0, "siblings": 0, "office_only": True}))
+    row = {t["dept"]: t for t in ledger(ops, merged={"D-20261013-01", "D-20261013-05"}, today=day)["rewards"]["table"]}
+    assert (row["audit"]["merged"], row["audit"]["fixed"], row["audit"]["points"]) == (1, 0, 2 + 5), row["audit"]
+    assert (row["dev"]["merged"], row["dev"]["fixed"]) == (2, 3), row["dev"]
     print("selftest ok")
 
 

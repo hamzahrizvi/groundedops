@@ -76,6 +76,19 @@ def rerate(gate, head_states, base_states):
     return {**gate, **extra, "verdict": "FAIL" if reasons else "PASS", "reasons": reasons, "rerun": rerun}
 
 
+def base_code(dev, data, dest):
+    """Extract src/ at the branch's base commit into <dest>/src; returns the commit. The base is GATE_BASE,
+    or the merge-base of the branch and GO_DATA's checkout. gate_run.sh calls it as --base-code <dev> <dest>."""
+    git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout.strip()
+    base = os.environ.get("GATE_BASE") or git("-C", dev, "merge-base", "HEAD", git("-C", data, "rev-parse", "HEAD"))
+    p = subprocess.Popen(["git", "-C", dev, "archive", base, "src"], stdout=subprocess.PIPE)
+    with tarfile.open(fileobj=p.stdout, mode="r|") as t:
+        t.extractall(dest, filter="data")
+    if p.wait():
+        raise RuntimeError(f"git -C {dev} archive {base} src")
+    return base
+
+
 def run(dev, run_dir, out):
     gp = os.path.join(out, "gate.json")
     try:
@@ -90,16 +103,10 @@ def run(dev, run_dir, out):
     shutil.rmtree(rr, ignore_errors=True)
     os.makedirs(rr)
     log = open(os.path.join(rr, "rerun.log"), "a", encoding="utf-8")
-    git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout.strip()
     try:
-        base = os.environ.get("GATE_BASE") or git("-C", dev, "merge-base", "HEAD", git("-C", data, "rev-parse", "HEAD"))
-        log.write(f"base {base}\n"); log.flush()
         code = os.path.join(rr, "base_code")
-        p = subprocess.Popen(["git", "-C", dev, "archive", base, "src"], stdout=subprocess.PIPE)
-        with tarfile.open(fileobj=p.stdout, mode="r|") as t:
-            t.extractall(code, filter="data")
-        if p.wait():
-            raise RuntimeError(f"git -C {dev} archive {base} src")
+        base = base_code(dev, data, code)
+        log.write(f"base {base}\n"); log.flush()
         ids = set(gate["became_wrong"])
         cases = json.load(open(os.path.join(run_dir, "cases.json"), encoding="utf-8"))["cases"]
         sides = {"head": os.path.join(dev, "src"), "base": os.path.join(code, "src")}
@@ -175,6 +182,11 @@ def _selftest():
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         _selftest(); sys.exit(0)
+    if sys.argv[1:2] == ["--base-code"]:   # gate_run.sh: the before re-asked on the base code (D-20261010-09)
+        here = os.path.dirname(os.path.abspath(__file__))
+        print(base_code(os.path.abspath(sys.argv[2]), os.environ.get("GO_DATA") or os.path.join(here, "..", "src"),
+                        os.path.abspath(sys.argv[3])))
+        sys.exit(0)
     if len(sys.argv) != 4:
         sys.exit(__doc__)
     run(*(os.path.abspath(a) for a in sys.argv[1:]))

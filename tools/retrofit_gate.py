@@ -128,8 +128,12 @@ if __name__ == "__main__":
     ap.add_argument("--noise", type=float, default=3.0)
     ap.add_argument("--regraded", default=None,
                     help="system key in --after holding the before answers re-graded in the same pass, e.g. sys_before")
+    ap.add_argument("--models")   # blind_eval.py <run> models output (D-20261010-09)
     o = ap.parse_args()
     load = lambda p: json.load(open(p, encoding="utf-8"))
     res = gate(load(o.before), load(o.after), [load(p) for p in o.siblings], o.system, o.noise, o.regraded)
+    if o.models:   # which before answers the gate marked, and both bot models
+        res["models"] = load(o.models)
+        res["before"] = "stored" if res["models"]["same"] else "re-asked"
     print(json.dumps(res, indent=1))
     sys.exit(0 if res["verdict"] == "PASS" else 1)
