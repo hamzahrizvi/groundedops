@@ -12,6 +12,7 @@
 # only. Everything the hidden pass writes (its log, sib_*/ states) goes to
 # $GATE_HELD, default <heldout>/gates/<out_dir name>-<timestamp>, beside the
 # sibling files. Before scoring, the open-side files are checked for sibling text.
+# A sibling whose text is already in the live question log or FAQ-gap list fails the gate before the bot is asked.
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
@@ -20,6 +21,10 @@ RUN="$(cd "$2" && pwd)" || exit 1
 OUT="$3"; shift 3
 mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
 export PYTHONIOENCODING=utf-8 HF_HUB_OFFLINE=1 GO_CODE="$DEV/src" GO_DATA="${GO_DATA:-$REPO/src}"
+# D-20261010-20: this gate's hidden siblings must not be readable in the live log Dev works beside
+if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$GO_DATA"/logs*.jsonl "$GO_DATA/faq_gaps.json" --cases "$@")"; then
+  echo "hidden questions in the live log: $hits" > "$OUT/FAILED"; exit 1
+fi
 BE="${BE:-$REPO/tools/blind_eval.py}"
 log() { local f="$1"; shift; "$@" >> "$f" 2>&1 || { echo "failed: $*" > "$OUT/FAILED"; exit 1; }; }
 # a run graded by an older grader is re-marked first, so before and after share one marker
