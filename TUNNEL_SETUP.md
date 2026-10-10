@@ -54,7 +54,10 @@ Check `logs\service.log` says `starting NAMED tunnel`, not `QUICK`, and
   `.\backup_daily.ps1 -Install -Dest <second disk>`; `BACKUP_PASSPHRASE`
   stored in the password manager before `BACKUP_ALLOW_PLAINTEXT` is removed.
 - External uptime pinger (>= 5 min): alert on plain `/health` failing
-  ("is it up") separately from `/health?deep=1` `provider_reachable`
-  ("is the provider up"). Never restart on the deep one.
+  ("is it up"). `/health?deep=1` (`provider_reachable`, "is the provider
+  up") answers only on the box or the LAN, or through the tunnel with
+  `Authorization: Bearer <member token>` (mint one with
+  `quota.issue_token("uptime", ttl_seconds=...)`); without it, it is a 404.
+  Never restart on the deep one.
 - Docker path instead: STAGING.md step 0 first (the override file turns on
   `--reload` and `WIDGET_ALLOWED_ORIGINS=*`).
