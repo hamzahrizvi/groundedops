@@ -141,6 +141,16 @@ button{font:inherit;color:inherit}
 .vpill{font:10px/1 var(--display);letter-spacing:.04em;padding:3px 5px;border-radius:2px;border:1px solid var(--line);white-space:nowrap}
 .vpill.ok{border-color:var(--ok);color:var(--ok)} .vpill.warn{border-color:var(--accent);color:var(--ink)} .vpill.bad{border-color:var(--crit);color:var(--crit)}
 .pvh{font-size:13px;letter-spacing:.06em;margin:16px 0 6px}
+.trend{margin-bottom:16px}
+.trend .pvh{margin-top:0}
+.tverdict{margin:0 0 8px;font-size:15px}
+.tverdict .vpill{margin-right:8px;vertical-align:2px}
+#trChart{display:block;width:100%;height:230px;touch-action:pan-y;overflow:visible}
+#trChart text{font:12px var(--body);fill:var(--muted)}
+#trChart .badge text{font:11px var(--display);fill:var(--accent-ink)}
+.tsteps{list-style:none;margin:8px 0 0;padding:0;font-size:14px;display:grid;gap:6px}
+.tsteps li{display:flex;gap:8px;align-items:baseline}
+.tbadge{flex:none;display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font:11px/1 var(--display)}
 .pvtip{position:fixed;z-index:5;pointer-events:none;background:var(--ink);color:var(--bg);font-size:13px;line-height:1.35;padding:6px 8px;border-radius:3px;max-width:260px}
 
 .rail{display:grid;gap:14px;min-width:0}
@@ -258,6 +268,13 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         </div>
         <p class="lnote" id="ledgerNote"></p>
         <div role="tabpanel" id="p-status" aria-labelledby="t-status">
+          <div class="trend">
+            <h3 class="pvh">Is the product getting better?</h3>
+            <p class="tverdict" id="trVerdict"></p>
+            <svg id="trChart" role="img" aria-labelledby="trVerdict"></svg>
+            <p class="lnote" id="trNote">Adjusted for difficulty: every question type counts the same in every run, so a set heavy on hard questions does not look like a worse bot. The shaded band is where the true score probably sits, given how few questions one run asks (90%). A move inside the noise, which is never under 3 points, is the bot and the marker flickering, not a change. Numbered marks are fixes merged into the product.</p>
+            <ul class="tsteps" id="trSteps"></ul>
+          </div>
           <div class="tiles" id="pvTiles"></div>
           <div class="pvbar">
             <div class="seg" role="group" aria-label="Group by">
@@ -730,7 +747,10 @@ const SAMPLE_PIVOT = {sample:true, runs:["20261001","20261008"], categories:{sim
     simple:{"20261001":{n:8,bot_pct:92,base_pct:92,right:7,wrong:0,declined:0},"20261008":{n:8,bot_pct:96,base_pct:92,right:7,wrong:0,declined:0}},
     conversational:{"20261001":{n:9,bot_pct:63,base_pct:85,right:2,wrong:0,declined:3},"20261008":{n:9,bot_pct:70,base_pct:85,right:4,wrong:0,declined:2}},
     commercial:{"20261008":{n:1,bot_pct:67,base_pct:67,right:0,wrong:0,declined:0}}}, type:{}, product:{}},
-  real:{"20261008":{simple:{answered:4,refused:1},technical:{answered:1},conversational:{clarify:1}}}, latest:{run:"20261008", cases:[]}};
+  real:{"20261008":{simple:{answered:4,refused:1},technical:{answered:1},conversational:{clarify:1}}}, latest:{run:"20261008", cases:[]},
+  trend:{points:[{run:"20261001",n:40,adj:70,lo:63.7,hi:76.3,raw:70,wrong:2,when:1},{run:"20261008",n:40,adj:76,lo:69.7,hi:82.3,raw:76,wrong:1,when:3}],
+    steps:[{from:"20261001",to:"20261008",delta:6,noise:8.9,call:"same",fixes:[{id:"D-20261003-01",title:"Comparisons pick each product's manual",when:2,gate:{verdict:"PASS",before:70,after:74}}]}],
+    waiting:[], verdict:"No change we can tell yet: the adjusted score moved +6 points from 1 Oct to 8 Oct, inside the 8.9-point noise. 1 fix merged in that time."}};
 let pv = {dim:"category", metric:"score", open:null};
 const runLabel = r => { const d = new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8)); return d.toLocaleDateString(undefined, {day:"numeric", month:"short"}); };
 const TYPE_NAMES = {lookup:"Look up a fact", yes_no_documented:"Yes/no from the manual", table_condition:"A limit in a table", procedure_or_troubleshoot:"How-to and troubleshooting",
@@ -748,8 +768,80 @@ const METRICS = {
 };
 const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
 const pvTip = document.getElementById("pvTip");
+/* the adjusted trend (ops_pivot.py "trend"): one line, its noise band, and the fixes merged between runs */
+const SVGNS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs, parent) => { const e = document.createElementNS(SVGNS, tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(parent) parent.append(e); return e; };
+function renderTrend(P){
+  const T = P.trend || {points:[], steps:[], waiting:[], verdict:"The graph appears after the next product owner run."}, pts = T.points || [];
+  const call = /^Better/.test(T.verdict) ? ["Better","ok"] : /^Worse/.test(T.verdict) ? ["Worse","bad"] : ["No change yet",""];
+  const vp = document.createElement("span"); vp.className = "vpill " + call[1]; vp.textContent = call[0];
+  document.getElementById("trVerdict").replaceChildren(vp, document.createTextNode(T.verdict.replace(/^[^:]*:\s*(.)/, (_, c) => c.toUpperCase())));
+  const svg = document.getElementById("trChart"), list = document.getElementById("trSteps");
+  svg.replaceChildren(); svg.style.display = pts.length < 2 ? "none" : "";
+  if(pts.length < 2){ list.replaceChildren(); return; }
+  const W = svg.clientWidth || 640, H = 230, L = 52, R = 46, Tp = 28, B = 30;
+  let lo = Math.floor(Math.min(...pts.map(p => p.lo)) / 10) * 10, hi = Math.ceil(Math.max(...pts.map(p => p.hi)) / 10) * 10;
+  if(hi - lo < 20){ lo = Math.max(0, hi - 20); hi = lo + 20; }
+  const x = i => L + (W - L - R) * i / (pts.length - 1), y = v => Tp + (H - Tp - B) * (hi - v) / (hi - lo);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  for(let v = lo; v <= hi; v += 10){
+    svgEl("line", {x1:L, x2:W - R, y1:y(v), y2:y(v), stroke:"var(--line)", "stroke-width":1}, svg);
+    svgEl("text", {x:L - 6, y:y(v) + 4, "text-anchor":"end"}, svg).textContent = v + "%";
+  }
+  // fixes, numbered, placed between the two runs they fall between, by time
+  const steps = T.steps || [];
+  let k = 0;
+  for(const st of steps){
+    const i = pts.findIndex(p => p.run === st.from), a = pts[i], b = pts[i + 1];
+    if(!b) continue;
+    const at = {};
+    for(const f of st.fixes){
+      const fx = Math.round(x(i) + (x(i + 1) - x(i)) * Math.min(.85, Math.max(.15, (f.when - a.when) / Math.max(1, b.when - a.when))));
+      (at[fx] = at[fx] || []).push(f); f._n = ++k;
+    }
+    for(const [fx, fs] of Object.entries(at)){
+      svgEl("line", {x1:fx, x2:fx, y1:Tp - 4, y2:H - B, stroke:"var(--accent)", "stroke-width":2}, svg);
+      const g = svgEl("g", {class:"badge"}, svg), label = fs.map(f => f._n).join(","), w = 12 + label.length * 8;
+      svgEl("rect", {x:fx - w / 2, y:2, width:w, height:20, rx:10, fill:"var(--accent)"}, g);
+      svgEl("text", {x:fx, y:16, "text-anchor":"middle"}, g).textContent = label;
+      svgEl("title", {}, g).textContent = fs.map(f => `${f._n}. ${f.title}`).join("\n");
+    }
+  }
+  const band = pts.map((p, i) => `${x(i)},${y(p.hi)}`).concat(pts.map((p, i) => `${x(i)},${y(p.lo)}`).reverse()).join(" ");
+  svgEl("polygon", {points:band, fill:"var(--seq)", "fill-opacity":.12}, svg);
+  svgEl("polyline", {points:pts.map((p, i) => `${x(i)},${y(p.adj)}`).join(" "), fill:"none", stroke:"var(--seq)", "stroke-width":2, "stroke-linejoin":"round", "stroke-linecap":"round"}, svg);
+  const hair = svgEl("line", {y1:Tp, y2:H - B, stroke:"var(--muted)", "stroke-width":1, visibility:"hidden"}, svg);
+  pts.forEach((p, i) => {
+    svgEl("circle", {cx:x(i), cy:y(p.adj), r:4.5, fill:"var(--seq)", stroke:"var(--surface)", "stroke-width":2}, svg);
+    svgEl("text", {x:x(i), y:H - 8, "text-anchor":"middle"}, svg).textContent = runLabel(p.run);
+  });
+  const lp = pts[pts.length - 1];
+  svgEl("text", {x:x(pts.length - 1) + 9, y:y(lp.adj) + 4, style:"fill:var(--ink)"}, svg).textContent = Math.round(lp.adj) + "%";
+  svg.onpointermove = e => {
+    const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
+    let i = 0; pts.forEach((_, j) => { if(Math.abs(x(j) - px) < Math.abs(x(i) - px)) i = j; });
+    const p = pts[i]; hair.setAttribute("x1", x(i)); hair.setAttribute("x2", x(i)); hair.setAttribute("visibility", "visible");
+    pvTip.hidden = false; pvTip.textContent = `${runLabel(p.run)}: adjusted score ${p.adj}% (probably ${p.lo}-${p.hi}%). Raw score ${p.raw}%, ${p.n} questions, ${p.wrong} wrong.`;
+    pvTip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; pvTip.style.top = (e.clientY + 14) + "px";
+  };
+  svg.onpointerleave = () => { pvTip.hidden = true; hair.setAttribute("visibility", "hidden"); };
+  // the same facts as text: one line per fix, plus what is merged but not tested yet
+  const CALL = {better:"better, beyond the noise", worse:"worse, beyond the noise", same:"no change beyond the noise"};
+  const lis = steps.flatMap(st => st.fixes.filter(f => f._n).map((f, j) => {
+    const li = document.createElement("li"), b = document.createElement("span"), t = document.createElement("span");
+    b.className = "tbadge"; b.textContent = f._n;
+    const gate = f.gate && f.gate.before != null ? ` Its own check on the same questions: ${f.gate.before}% to ${f.gate.after}%.` : "";
+    t.textContent = `Fixed: ${f.title}. ` + (j === 0 ? `Next run, ${runLabel(st.to)}: ${st.delta > 0 ? "+" : ""}${st.delta} points on ${runLabel(st.from)}, noise ${st.noise}: ${CALL[st.call]}${st.fixes.length > 1 ? ", for these " + st.fixes.length + " fixes together" : ""}.` : "Measured together with the one above.") + gate;
+    li.append(b, t); return li;
+  }));
+  for(const f of T.waiting || []){ const li = document.createElement("li"), t = document.createElement("span"); t.textContent = `Merged since the last test run, not measured yet: ${f.title}.`; li.append(t); lis.push(li); }
+  list.replaceChildren(...lis);
+}
+addEventListener("resize", () => { if(tab === "status") renderTrend(live.pivot || SAMPLE_PIVOT); });
+
 function renderPivot(){
   const P = live.pivot || SAMPLE_PIVOT, M = METRICS[pv.metric], runs = (P.runs || []).slice(-8), last = runs[runs.length-1], prev = runs[runs.length-2];
+  renderTrend(P);
   if(tab === "status"){ const chip = document.getElementById("ledgerChip"); chip.textContent = P.sample ? "Sample" : "Live"; chip.className = "chip " + (P.sample ? "sample" : "live"); }
   document.getElementById("ledgerNote").hidden = tab === "status";
   // tiles

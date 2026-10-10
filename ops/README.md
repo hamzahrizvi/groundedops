@@ -144,6 +144,17 @@ wrong answers, wrong "not in the manual" replies, question counts), plus the
 week's real website questions by category and how each ended. The office's
 **Product status** tab pivots it live; click a row for the questions behind it.
 
+Above the pivot, **Is the product getting better?** is one line: the bot's
+score per test run adjusted for difficulty (each question type weighs the same
+in every run, since type explains about half the spread in the bot's marks),
+a band for how few questions one run asks (90%), and a numbered mark for each
+Dev fix merged into REPO between runs. A move counts only when it beats that
+noise, and never under the gate's 3 points; with 40 questions a run that is
+about 9 points between two runs. The product owner refreshes it on every run
+and quotes its verdict in the report's Score section. The gap to the
+whole-manual AI is not used for it: that AI's mark on a question explains 2%
+of the bot's (measured 2026-10-10).
+
 ## Boards and rewards
 
 `tools/ops_ledger.py` builds three things from the files below and from git,

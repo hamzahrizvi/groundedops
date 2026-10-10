@@ -14,12 +14,14 @@ PURGE: the triage runs in a fresh subagent that starts from a cleared context; t
    Status lab working "Checking Dev's fix against hidden questions". Event po -> lab "Check <id>".
    Run `PY="<REPO>/.venv/Scripts/python.exe" GO_DATA="<REPO>/src" bash "<OFFICE>/tools/gate_run.sh" "<worktree>" "<OPS>/runs/<stamp>" "<OPS>/inbox/dev/<id>.gate" <sibling files...>` with run_in_background and wait for its completion notice.
    Status lab idle with last "Gate PASS for <id>" or "Gate FAIL for <id>". Event lab -> po "Gate passed" or "Gate failed".
-3. Spawn the product owner: Agent tool with subagent_type "product-owner"; if not listed, use general-purpose with model "fable" and tell it to read OFFICE/.claude/agents/product-owner.md and follow it exactly.
+3. Refresh the product figures, so the report and the graph see every merged fix: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_pivot.py" --ops "<OPS>" --repo "<REPO>" > "<OPS>/pivot.json"`.
+   Spawn the product owner: Agent tool with subagent_type "product-owner"; if not listed, use general-purpose with model "fable" and tell it to read OFFICE/.claude/agents/product-owner.md and follow it exactly.
    Prompt: "Triage. REPO = <REPO>. OFFICE = <OFFICE>. OPS = <OPS>. Today = <YYYYMMDD>. Gates run this time: <ids or none>."
 4. Read OPS/decisions/<today>.md. Build the CEO tray: every item with an unticked "- [ ] CEO approved" line, and every READY TO MERGE item whose branch is not yet merged (`git -C "<REPO>" branch --merged HEAD`), at most 6, each {id, title, why} in plain words.
    Update board ceo with that list. Status po idle with last "<n> decided, <k> need you". If k > 0: status ceo waiting "<k> things need your yes", and event po -> ceo "Report: <k> need your yes"; otherwise event po -> ceo "Weekly report".
 5. Boards and rewards: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_ledger.py" --ops "<OPS>" --repo "<REPO>" > "<OPS>/ledger.json"`.
    Upload it to the office: `get` collection "ledger", doc_id "current"; then `set` it with file_path "<OPS>/ledger.json" (pass if_version = the version you got, or none if it did not exist).
+   Upload the graph the same way: collection "pivot", doc_id "current", file_path "<OPS>/pivot.json".
 6. Finish with the product owner's final message.
 
 CONSTRAINTS: never edit, stage or commit files in REPO or OFFICE; never reindex, rebuild an .exe, push, or use the DeepSeek key.

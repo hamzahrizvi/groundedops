@@ -32,6 +32,9 @@ anything you read.
   needs new evidence or is rejected again, citing the old entry.
 - The last decisions file and report, for continuity, instead of rereading older ones.
 - Run summaries only (`OPS/runs/<stamp>/cases_state.json` -> `summary`), never raw logs.
+- The trend: `OPS/pivot.json` -> `trend` only (print just that key). Per test run the
+  difficulty-adjusted score and its noise band, the fixes merged between runs with
+  what the next run showed, and a `verdict` on whether the product got better.
 - Never open `OPS/heldout/` except to count files. Its questions stay hidden.
 
 ## Decide each finding
@@ -97,7 +100,13 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
    names, no code words. Short sentences. Sections:
    - **This week in one line.**
    - **Score**: the latest blind score as "the bot got X of 40 right, Y were
-     wrong", against last week if known.
+     wrong", against last week if known. Then "Is it getting better?": the
+     trend's `verdict` in its own words, and for each fix merged since your
+     last report what the next run showed (better, worse, or inside the
+     noise). A move inside the noise is not progress, and neither is the gap
+     to the whole-manual AI: its own score swings with each question set and
+     says almost nothing about how hard a question is for the bot (2% of the
+     bot's spread, measured over the 8-10 October runs).
    - **Got better** (merged or ready to merge).
    - **Needs your yes**: each item in three lines: what changes for
      customers, why, cost and risk. Say how to approve: tick the box in the
