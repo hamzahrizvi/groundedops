@@ -178,23 +178,22 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261009-03 | The website's "where your data goes" copy promises what the CEO will not | approved, queued | Dev builds it |
 | D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
 | D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
-| D-20261010-01 | Buying words turn an honest "not found" into a sales brush-off | built, waiting for the check | the pre-ship check |
-| D-20261010-05 | The pre-ship check skips its own flicker re-run when the one wrong case also tips the score | sent back, rebuilding | Dev rebuilds it |
-| D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | approved, queued | Dev builds it |
-| D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | approved, queued | Dev builds it |
+| D-20261010-01 | Buying words turn an honest "not found" into a sales brush-off | ready to merge | merges once Security clears it |
+| D-20261010-05 | The pre-ship check skips its own flicker re-run when the one wrong case also tips the score | ready to merge | merges once Security clears it |
+| D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | sent back, rebuilding | Dev rebuilds it |
+| D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | sent back, rebuilding | Dev rebuilds it |
 | D-20261010-10 | On the new AI the bot gets two questions wrong that it answered right or declined safely before | approved, queued | Dev builds it |
 | D-20261010-11 | The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" | approved, queued | Dev builds it |
+| D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | waiting for CEO | your yes |
+| D-20261010-19 | The widget's vote file is not ignored by git in a public repository | ready to merge | merges once Security clears it |
+| D-20261010-20 | Twelve hidden gate questions are still in the live log; retire them, and keep probe traffic out of the log | approved, queued | Dev builds it |
+| D-20261010-21 | The test lab spends the website bot's own AI keys; a busy lab day took the bot off its main provider | waiting for CEO | your yes |
+| D-20261010-22 | Copies of visitor text in the office folders are kept forever, past the 90-day deletion | approved, queued | Dev builds it |
+| D-20261010-23 | The pre-ship check grades the "after" answers without the manual pages the "before" grader had | approved, queued | Dev builds it |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
 | customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
 | customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
-| rnd/20261010-contextual-chunks | The fact is in the manual but the search never finds it: give every passage a sentence saying what it is about | proposed | the product owner triages it |
-| rnd/20261010-gap-driven-second-search | Half answers that say "not stated" for a documented fact: search once more for exactly what the answer says is missing | proposed | the product owner triages it |
-| rnd/20261010-self-route-whole-manual | When the passages don't hold the answer, read the whole manual once before saying "not in the manual" | proposed | the product owner triages it |
 | security/20261009-server-log-keeps-visitor-questions | Visitor questions stay in the server log after the 90-day deletion | proposed | the product owner triages it |
-| security/20261010-feedback-file-not-gitignored | The widget's vote file is not ignored by git, in a public repository | proposed | the product owner triages it |
-| security/20261010-hidden-questions-in-live-log | Twelve hidden gate questions are still in the live question log that Dev can read | proposed | the product owner triages it |
-| security/20261010-lab-shares-live-provider-keys | The test lab spends the live bot's provider keys, so a busy lab day takes the website bot off OpenAI | proposed | the product owner triages it |
-| security/20261010-office-copies-outlive-retention | Copies of visitor text in the office folders are kept forever, past the new 90-day deletion | proposed | the product owner triages it |
 | D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
 | D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
 | D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
@@ -216,6 +215,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-13 | A refused question shows two bot messages and never says what was checked | deferred | parked |
 | D-20261010-14 | The page the answer came from is hidden behind a click | deferred | parked |
 | D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | deferred | parked |
+| D-20261010-17 | When the passages miss, read the whole manual once before saying "not in the manual" | deferred | parked |
+| D-20261010-18 | Half answers that say "not stated" for a documented fact: search once more for the named gap | deferred | parked |
 
 **Finished or turned down in the last 30 days:** D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-08 Two live AI provider keys are sitting in the public code repository (merged); D-20261008-09 Customer questions go to OpenAI and DeepSeek, against the on-premises promise (done); D-20261008-13 Nothing checks installed packages for known vulnerabilities (merged); D-20261008-15 Question logs are kept forever; delete them after 90 days (merged); D-20261008-16 Adding, deleting and reading manuals needs no sign-in from the office network (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done).
 <!-- office-plan:end -->
