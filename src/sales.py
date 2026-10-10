@@ -205,12 +205,13 @@ def is_commercial_question(q: str) -> bool:
 # manuals first: blind sets 4, 5 and NV4000 (2026-10-07) got the sales reply
 # for "what do i need to buy", "budgeting power supplies", "quoting a job",
 # "order one off RS" and "do we have to pay" (the manual says free), all of
-# which the manuals answer. main._friendly_refusal gives the sales reply when
-# that search finds nothing.
+# which the manuals answer. When that search finds nothing the refusal says so;
+# it no longer turns into the sales reply (D-20261010-01).
+# A rate ("11.2 A per device", "cycles per year") is not a price: only a money
+# word or "how much" makes one.
 _PRICE = re.compile(
     r"\b(?:pric|cost|discount|cheap|expensive|invoic|tariff|rebate|surcharg)\w*"
-    r"|\bquot(?:e|es|ations?)\b|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will|for)\b"
-    r"|\bper\s+(?:unit|device|licence|license|seat|month|year)\b", re.I)
+    r"|\bquot(?:e|es|ations?)\b|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will|for|per)\b", re.I)
 
 
 def is_price_question(q: str) -> bool:
