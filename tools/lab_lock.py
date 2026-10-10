@@ -10,10 +10,15 @@ system phase; Dev runs its test suites and probes through it, so each waits for 
 
 The command gets GO_LAB_LOCK_HELD=1, so a blind_eval.py started under it does not wait for
 its own parent. GO_LAB_LOCK overrides the lock file (the self-test uses it).
+
+Unless already set, the command also gets LOG_FILE and FAQ_GAP_PATH in LAB_DIR
+(<temp>/groundedops-lab), so a probe or test that imports main from REPO/src never writes the
+live src/logs.jsonl or src/faq_gaps.json (D-20261010-20). Read a probe's app log there.
 """
 import os, subprocess, sys, tempfile, time
 
 HELD = "GO_LAB_LOCK_HELD"
+LAB_DIR = os.path.join(tempfile.gettempdir(), "groundedops-lab")
 
 
 def lab_lock(poll=20):
@@ -49,7 +54,11 @@ def lab_lock(poll=20):
 
 def run(cmd):
     handle, _ = lab_lock()   # held until this process exits
-    return subprocess.call(cmd, env={**os.environ, HELD: "1"})
+    os.makedirs(LAB_DIR, exist_ok=True)
+    env = {**os.environ, HELD: "1"}
+    env.setdefault("LOG_FILE", os.path.join(LAB_DIR, "logs.jsonl"))
+    env.setdefault("FAQ_GAP_PATH", os.path.join(LAB_DIR, "faq_gaps.json"))
+    return subprocess.call(cmd, env=env)
 
 
 def selftest():
@@ -68,6 +77,14 @@ def selftest():
     nested = subprocess.run([sys.executable, me, sys.executable, "-c", "print('nested'); raise SystemExit(3)"],
                             env={**env, HELD: "1"}, capture_output=True, text=True)
     assert nested.returncode == 3 and "nested" in nested.stdout and "waiting" not in nested.stdout, nested
+    show = [sys.executable, me, sys.executable, "-c",
+            "import os; print(os.environ['LOG_FILE']); print(os.environ['FAQ_GAP_PATH'])"]
+    clean = {k: v for k, v in env.items() if k not in ("LOG_FILE", "FAQ_GAP_PATH")}
+    out = subprocess.run(show, env={**clean, HELD: "1"}, capture_output=True, text=True).stdout.split()
+    assert out == [os.path.join(LAB_DIR, "logs.jsonl"), os.path.join(LAB_DIR, "faq_gaps.json")], out
+    out = subprocess.run(show, env={**clean, HELD: "1", "LOG_FILE": "mine.jsonl"},
+                         capture_output=True, text=True).stdout.split()
+    assert out[0] == "mine.jsonl", out          # a caller's own choice is kept
     # a Dev check started during the run waits for the run to finish
     check = subprocess.run([sys.executable, me, sys.executable, "-c",
                             f"import os; print('holder done' if os.path.exists({done!r}) else 'holder running')"],
