@@ -23,7 +23,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import git_sets, ledger  # noqa: E402
+from ops_ledger import SECURITY, git_sets, ledger  # noqa: E402
 
 START, END = "<!-- office-plan:start -->", "<!-- office-plan:end -->"
 ANCHOR = re.compile(r"(?m)^## ")   # the first time, the block goes above the first section, after the intro
@@ -36,7 +36,7 @@ NEXT = {"waiting for CEO": "your yes", "approved, queued": "Dev builds it", "sen
 
 def masked(c):
     """Security's items by where they came from, never by name: the repository is public."""
-    if c["from"].lower() != "security" and not c.get("source", "").startswith("inbox/security/"):
+    if not c.get("security"):
         return c
     cid = c["id"][:len("security/") + 8] if c["id"].startswith("security/") else c["id"]
     return {**c, "id": cid, "title": f"Security item {cid}, details in the office"}
@@ -59,14 +59,16 @@ def block(cards, today):
 
 def rejected_lines(ops):
     """[(id, line)] from every decision that carries "- For the rejected list: ...", latest wording per id."""
-    out = {}
+    out, sec = {}, set()
     for path in sorted(glob.glob(os.path.join(ops, "decisions", "*.md"))):
         for part in re.split(r"(?m)^## ", open(path, encoding="utf-8").read())[1:]:
             m = re.match(r"(D-\d{8}-\d+)", part)
             r = re.search(r"(?m)^- For the rejected list:\s*(.+?)\s*$", part)
-            if m and r and not re.search(r"(?mi)^- (From:\s*security\b|Source:\s*inbox[/\\]security[/\\])", part):
+            if m and SECURITY.search(part):   # any entry: a re-triage can cite Security later
+                sec.add(m.group(1))
+            if m and r:
                 out[m.group(1)] = r.group(1)
-    return list(out.items())
+    return [(did, line) for did, line in out.items() if did not in sec]
 
 
 def update(text, cards, rejects, today):
@@ -119,7 +121,9 @@ def selftest():
           "## D-20261010-01 | Sales brush-off\n- From: customer\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n\n"
           "## D-20261010-02 | Bigger reranker\n- From: rnd\n- Verdict: REJECT\n- For the rejected list: A bigger reranker: no gain on 40 blind questions.\n"
           "\n## D-20261010-03 | Rate limits trust a forged header\n- Source: inbox/security/20261010-forge.md\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
-          "## D-20261010-04 | Uploads stored before sign-in\n- Source: inbox/security/20261010-upload.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Uploads stored before sign-in: accepted risk.\n")
+          "## D-20261010-04 | Uploads stored before sign-in\n- Source: inbox/security/20261010-upload.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Uploads stored before sign-in: accepted risk.\n"
+          "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/dev/D-20261010-01.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Test lines in the live log: later.\n"
+          "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/security/20261010-log.md\n- From: audit\n- Verdict: REJECT\n")
         w(os.path.join(ops, "inbox", "audit", "20261010-cache.md"), "# Cache repeated answers\n")
         w(os.path.join(ops, "inbox", "security", "20261010-chunked-cap.md"), "# The size cap misses chunked uploads\n")
         w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n## The plan\r\n\r\n"
@@ -136,7 +140,8 @@ def selftest():
         assert "| D-20261010-03 | Security item D-20261010-03, details in the office |" in t, t
         assert "| security/20261010 | Security item security/20261010, details in the office |" in t, t
         assert "D-20261010-04 Security item D-20261010-04, details in the office (rejected)" in t, t
-        for leak in ("forged", "chunked", "Uploads stored", "sign-in"):
+        assert "D-20261010-05 Security item D-20261010-05, details in the office (rejected)" in t, t
+        for leak in ("forged", "chunked", "Uploads stored", "sign-in", "live log"):
             assert leak not in t, (leak, t)
         assert "- Old idea.\r\n- A bigger reranker: no gain on 40 blind questions. (D-20261010-02, product owner)\r\n\r\n### Waiting" in t, t
         assert run(ops, repo, today) == "UNCHANGED", "a second run changes nothing"
