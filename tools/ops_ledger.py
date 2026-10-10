@@ -25,6 +25,7 @@ from collections import defaultdict
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
 CAPACITY = {"dev": 3, "po": 8}          # ponytail: everyone else 2; tune when a board shows real overload
 NOTES = re.compile(r"(-weekly|-market)\.md$|^review-")
+SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Source:\s*inbox[/\\]security[/\\])")   # any entry of a decision
 PAST, FUTURE = {"merged", "rejected", "reverted", "done"}, {"proposed", "waiting for CEO", "deferred"}
 
 
@@ -47,6 +48,8 @@ def decisions(ops):
                     it["history"].append(v.strip().upper())
                 else:
                     it.setdefault(k.lower(), v.strip())
+            if SECURITY.search(body):
+                it["security"] = True
             if re.search(r"(?mi)^- \[x\] CEO approved", body):
                 it["ceo_approved"] = True
     return items
@@ -102,7 +105,8 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
     cards = []
     for it in items.values():
         st = stage_of(it, ops, merged, reverted)
-        cards.append({"id": it["id"], "title": it["title"], "from": it.get("from", ""), "assigned": it.get("assigned", "dev"),
+        cards.append({"id": it["id"], "title": it["title"], "from": it.get("from", ""), "security": it.get("security", False),
+                      "assigned": it.get("assigned", "dev"),
                       "stage": st, "lane": "past" if st in PAST else "future" if st in FUTURE else "ongoing",
                       "decided": it["decided"]})
     for path in sorted(glob.glob(os.path.join(ops, "inbox", "*", "*.md"))):
@@ -110,7 +114,7 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
         if dept in ("dev", "ceo") or NOTES.search(name) or f"inbox/{dept}/{name}" in cited:   # ceo: notes, answered in the report
             continue
         m = re.search(r"(?m)^#\s+(.+)$", _read(path))
-        cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept,
+        cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept, "security": dept == "security",
                       "assigned": "po", "stage": "proposed", "lane": "future", "decided": name[:8]})
 
     boards = {}
