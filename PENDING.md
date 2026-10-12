@@ -178,7 +178,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261009-03 | Security item D-20261009-03, details in the office | approved, queued | Dev builds it |
 | D-20261009-08 | Two products in one question are declined even when both figures are in the manuals | blocked | the product owner decides |
 | D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | check failed | the product owner sends it back |
-| D-20261009-10 | Vague "it stopped working" messages get a checklist or a decline instead of one question | waiting for CEO | your yes |
+| D-20261009-10 | Vague "it stopped working" messages get a checklist or a decline instead of one question | approved, queued | Dev builds it |
 | D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
 | D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | ready to merge | merges once Security clears it |
 | D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | rides on D-20261010-07 | - |
@@ -186,7 +186,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-11 | The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" | rides on D-20261010-07 | - |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
 | D-20261010-23 | The pre-ship check grades the "after" answers without the manual pages the "before" grader had | rides on D-20261010-07 | - |
-| D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | sent back, rebuilding | Dev rebuilds it |
 | D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | approved, queued | Dev builds it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261010-31 | An adjustable spending cap for the test lab, and a running cost report, on the office page | approved, queued | Dev builds it |
@@ -230,9 +229,11 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | deferred | parked |
 | D-20261010-17 | When the passages miss, read the whole manual once before saying "not in the manual" | deferred | parked |
 | D-20261010-18 | Half answers that say "not stated" for a documented fact: search once more for the named gap | deferred | parked |
+| D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | deferred | parked |
 | D-20261010-33 | Security item D-20261010-33, details in the office | deferred | parked |
 | D-20261010-34 | Yes/no questions get an answer from the page next to the right one | deferred | parked |
 | D-20261012-04 | Off-topic buying advice (a card reader for a cafe) gets an answer instead of a refusal | deferred | parked |
+| D-20261012-06 | A two-product question loses one product's best passage under the other's relevance floor | deferred | parked |
 
 **Finished or turned down in the last 30 days:** D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-08 Security item D-20261008-08, details in the office (merged); D-20261008-09 Security item D-20261008-09, details in the office (done); D-20261008-13 Security item D-20261008-13, details in the office (merged); D-20261008-15 Security item D-20261008-15, details in the office (merged); D-20261008-16 Security item D-20261008-16, details in the office (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261010-01 Buying words turn an honest "not found" into a sales brush-off (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-05 The pre-ship check skips its own flicker re-run when the one wrong case also tips the score (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done); D-20261010-19 Security item D-20261010-19, details in the office (merged); D-20261010-20 Security item D-20261010-20, details in the office (merged); D-20261010-22 Security item D-20261010-22, details in the office (merged); D-20261010-24 Security item D-20261010-24, details in the office (merged); D-20261010-25 Security item D-20261010-25, details in the office (merged); D-20261010-26 Security item D-20261010-26, details in the office (merged); D-20261010-29 Security item D-20261010-29, details in the office (merged).
 <!-- office-plan:end -->
@@ -1864,6 +1865,7 @@ Gaps, with the evidence:
 - A canned reply for "what do you recommend?": almost no one asks it; the
   comparison work covers it.
 - a model-written sentence per passage inside the breadcrumb (D-20261010-16): 122 blind questions, live index 255 -> enriched 262 marks, inside the noise of 29 moving on identical code; safe declines 34 -> 33; one retrieval case worse; a right table answer became a decline when the sentence echoed the question's word; rebuild 98 min CPU; 2026-10-12. (D-20261010-16, product owner)
+- narrowing the spec-table shortcut on its own (sales.compare answers only a row whose whole label was asked, never a value question; a2481c6): two gate rounds on runs/20261010b, open set +0.8 both times, nothing became wrong, 2 cases fixed, but one hidden comparison sibling stays under 2 because the ordinary two-product path declines where the table used to be wrong; 2026-10-12. The narrowing itself is carried by D-20261012-05; what is dead is shipping it without a better two-product path. (D-20261010-27, product owner) (D-20261010-27, product owner)
 
 ### Waiting on things outside the code
 
