@@ -28,6 +28,7 @@ runs, then lock it separately with `--baseline eval_baseline_retrieval.json
 | `lab_lock.py` | One measuring job at a time: `blind_eval.py` takes it for its system phase, Dev runs its test suites and probes as `lab_lock.py <command...>`, so neither skews the other's timings. The run summary's `lab_wait_s` says how long the system phase waited. `--selftest`. |
 | `retrofit_gate.py` | Pass/fail for a fix: hidden sibling questions >= 2/3, nothing right became wrong, no drop beyond noise; with `--regraded` the before answers are re-graded in the same pass (`before_pct_stored` shows drift). `--selftest`. |
 | `gate_rerun.py` | Run by `gate_run.sh`: a FAIL whose only reasons are 1-2 cases "became wrong", alone or with a drop within noise once they are held, is re-asked 6x on branch and base; kept only if the branch is wrong 2+ passes more often. `--selftest`. |
+| `scrub_pending_history.py` | Run right before the first push: rewrites the unpushed commits so PENDING.md never names a Security item (`pending_plan.masked`), checks no leak is left, tips differ only in PENDING.md and branches merge as before. Dry run by default; `--apply` moves every affected branch in one compare-and-swap, backs the old tips up under `refs/pre-scrub/`, refreshes clean worktrees. `--selftest`. |
 | `weekly_blind.sh`, `gate_run.sh` | The agent office's shell jobs (`ops/README.md`): the weekly blind run, and the gate on a Dev branch. |
 
 ## The throwaway console
