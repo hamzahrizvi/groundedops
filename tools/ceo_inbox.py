@@ -14,6 +14,8 @@ from the decisions file, and a note is quoted so it can never read as a decision
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
   off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
+  cap      OPS/lab_cap.json {usd, per}: the test lab's spending cap, from note "<usd> [day|week|month]" (0-1000,
+           default month); tools/blind_eval.py stops at it (tools/ops_costs.py cap_status)
 """
 import argparse
 import datetime
@@ -29,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, stage_of  # noqa: E402
 from office_next import claims  # noqa: E402
 
+CAP_NOTE = re.compile(r"^\s*(\d{1,4}(?:\.\d{1,2})?)\s*(day|week|month)?\s*$")
 CAN = {"approve": {"waiting for CEO", "deferred", "rejected"},
        "defer": {"waiting for CEO", "approved, queued", "sent back, rebuilding", "blocked", "check failed"}}
 
@@ -85,6 +88,17 @@ def apply(ops, folder, now=None):
                 os.makedirs(os.path.join(ops, "state"), exist_ok=True)
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
                 out.append(f"APPLIED {doc_id} refresh")
+            continue
+        if choice == "cap":   # the CEO's lab spending cap, from the Costs tab
+            m = CAP_NOTE.match(str(d.get("note") or ""))
+            if not m or float(m[1]) > 1000:
+                out.append(f"SKIPPED {doc_id} cap: not a number of dollars from 0 to 1000")
+                continue
+            usd, per = float(m[1]), m[2] or "month"
+            # a plain write: os.replace can fail on Windows while a reader has the file open (D-20261010-08)
+            open(os.path.join(ops, "lab_cap.json"), "w", encoding="utf-8").write(
+                json.dumps({"usd": usd, "per": per, "set_at": stamp, "row": doc_id}))
+            out.append(f"APPLIED {doc_id} cap ${usd:g} per {per}")
             continue
         if i not in items:
             out.append(f"SKIPPED {doc_id} no such item {i!r}")
@@ -156,6 +170,16 @@ def selftest():
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 10 off"] and os.path.exists(off), "switched off"
         row("11", id="", choice="on")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 11 on"] and not os.path.exists(off), "switched on"
+        cap = os.path.join(ops, "lab_cap.json")
+        row("12", id="", choice="cap", note="25 week")
+        row("13", id="", choice="cap", note="lots")
+        row("14", id="", choice="cap", note="5000")
+        row("15", id="", choice="cap", note=" 7.5 ")
+        got = apply(ops, os.path.join(ops, "pull"))
+        assert got == ["APPLIED 12 cap $25 per week", "SKIPPED 13 cap: not a number of dollars from 0 to 1000",
+                       "SKIPPED 14 cap: not a number of dollars from 0 to 1000", "APPLIED 15 cap $7.5 per month"], got
+        c = json.load(open(cap, encoding="utf-8"))
+        assert (c["usd"], c["per"], c["row"]) == (7.5, "month", "15"), c   # the newest row wins
     print("selftest ok")
 
 

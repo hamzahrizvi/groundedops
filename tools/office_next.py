@@ -18,6 +18,8 @@ cannot start other scheduled tasks.
 A department named on a line of OPS/state/hold is held: WAIT, whatever it has.
 OPS/state/office_off (the CEO's power button, via tools/ceo_inbox.py) holds every department and merges.
 The CEO's refresh button (OPS/state/refresh_request, newer than the last run's DONE) puts Customer's run first.
+At the CEO's lab cap (OPS/lab_cap.json, tools/ops_costs.py cap_status) Customer's run and gate checks WAIT: both
+spend lab money, and tools/blind_eval.py would stop them anyway. New findings still wake the product owner.
 
 Lanes (2026-10-09): three scheduled runners share the work side by side (ops/schedules/dispatch.md).
   python tools/office_next.py --lane N --take      the plan, then TOOK <key> | <line>, or TOOK nothing
@@ -46,6 +48,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
+from ops_costs import cap_status  # noqa: E402
 
 TASK = "groundedops-office-"
 IN_FLIGHT = {"approved, queued", "sent back, rebuilding", "built, waiting for the check", "check passed", "check failed", "ready to merge", "blocked"}
@@ -154,6 +157,12 @@ def waiting(ops, repo, now, taken=()):
                 # every department report wakes the product owner, notes too (the CEO, 2026-10-10); a Security review is read with its branch
                 if p in blocked or (os.path.basename(os.path.dirname(p)) != "dev" and not os.path.basename(p).startswith("review-"))
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
+    lab = cap_status(ops)
+    capped = lab["stopped"] and (f"lab stopped at the cap (${lab['spent']:.2f} of ${lab['usd']:.2f} this {lab['per']})"
+                                 "; raise it on the Costs tab")
+    if capped and check:   # a gate check spends lab money: it waits with the lab
+        out.append(("product-owner", f"check {', '.join(check)} waits: {capped}", None))
+        check = []
     if check or findings:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
                                                              findings and f"{len(findings)} new findings"])), "product-owner"))
@@ -188,6 +197,8 @@ def waiting(ops, repo, now, taken=()):
     for dept, why in (("rnd", "monthly research due"), ("marketing", "monthly market survey due")):   # on since 2026-10-10
         if age(max(_mtime(os.path.join(ops, "inbox", dept, "*.md")), _mtime(os.path.join(ops, "state", f"{dept}_last_run.txt")))) >= 30:
             out.append((dept, why, dept))
+    if capped:   # a blind run spends lab money too
+        out = [("customer", capped, None) if x[0] == "customer" else x for x in out]
     return out
 
 
@@ -359,6 +370,15 @@ def selftest():
             w(f, "Verdict: CLEAR\n")
             os.utime(os.path.join(ops, f), (time.time() + 30, time.time() + 30))
         assert "2 new findings" in po(), "a department's note wakes the PO; a Security review does not"
+        json.dump({"usd": 0, "per": "month"}, open(os.path.join(ops, "lab_cap.json"), "w"))   # a cap of $0: stopped
+        p = plan(ops, ops, 11, 38, resets, now)
+        cust = next(x for x in p if "customer" in x)
+        assert cust.startswith("WAIT groundedops-office-customer  lab stopped at the cap ($0.00 of $0.00 this month)"), p
+        w("inbox/dev/D-20261008-04.md", "Status: READY\n")
+        w("decisions/20261008e.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert any(x.startswith("WAIT groundedops-office-product-owner  check D-20261008-04 waits: lab stopped") for x in p), p
+        assert any(x.startswith("RUN  groundedops-office-product-owner  2 new findings") for x in p), "findings still wake the PO"
     print("selftest ok")
 
 

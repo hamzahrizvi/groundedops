@@ -18,6 +18,9 @@ Env:
   GO_CODE  src/ whose code is imported (default: this repo's src) -- point at a
            Dev worktree's src to test a branch
   GO_DATA  src/ used as cwd: chroma_db, .env and the JSON stores (default GO_CODE)
+  LAB_OPS  the office folder whose lab_cap.json caps the lab's spend (default C:/Users/hrizvi/groundedops-ops).
+           At the cap (tools/ops_costs.py cap_status) a paid phase stops with exit code 3 and
+           "lab stopped at the cap": answers so far are saved, a re-mark keeps its old grades.
   reset    drops every sys_* answer, the grades and the summary but keeps the
            baseline answers, so a copied run dir re-measures new code cheaply.
   grade    shows the grader the full text of each case's cited pages (manuals/,
@@ -63,6 +66,19 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
     os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(DATA, ".secrets.enc"))
 
 phase = sys.argv[2]
+CAP, spent = None, 0.0   # the CEO's lab cap (D-20261010-31) and what this process has spent against it
+def cap_read():
+    global CAP
+    from ops_costs import cap_status
+    CAP = cap_status(os.environ.get("LAB_OPS", "C:/Users/hrizvi/groundedops-ops"))
+def capped(): return bool(CAP) and (CAP["stopped"] or (CAP["usd"] is not None and CAP["spent"] + spent >= CAP["usd"]))
+def stop():
+    print(f"lab stopped at the cap: ${(CAP['spent'] or 0) + spent:.2f} of ${CAP['usd']:.2f} this {CAP['per']}"
+          + (f" ({CAP['error']})" if CAP.get("error") else ""), flush=True)
+    sys.exit(3)
+if phase in ("system", "baseline", "grade", "remark"):
+    cap_read()
+    if capped(): stop()   # before a re-mark touches the run's state
 if phase == "models":   # D-20261010-09: the bot model on this run's stored answers vs the lab's today
     run = sorted({r.get("model") for r in state.get("sys_normal", {}).values()} - {None, "none", "structured", "faq-curated", "stub"})
     print(json.dumps({"run": run, "lab": MODELS["bot"], "same": run == [MODELS["bot"]]})); sys.exit(0)
@@ -93,6 +109,8 @@ if phase in ("system", "baseline"):
     if phase == "system":
         os.environ["PERFORMANCE_MODE"] = "1" if sys.argv[3] == "perf" else "0"
         LAB, waited = lab_lock()
+        cap_read()   # the wait can be long; other jobs spent meanwhile
+        if capped(): stop()
         waits = state.setdefault("lab_wait_s", {})   # seconds this run waited for the lab (D-20261010-04)
         waits[f"sys_{sys.argv[3]}"] = waits.get(f"sys_{sys.argv[3]}", 0) + waited
         save()
@@ -134,6 +152,7 @@ if phase == "system":
     rows = state.setdefault(f"sys_{mode}", {})
     for c in cases:
         if c["id"] in rows: continue
+        if capped(): stop()
         sid = f"{SET}-{uuid.uuid4()}"
         if c.get("turn1"):
             main._traced_query(main.QueryRequest(q=c["turn1"], product=c.get("product"), session_id=sid), None, attach=True)
@@ -142,7 +161,9 @@ if phase == "system":
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
-                         "pipeline": d.get("pipeline")}   # where the answer went (pipeline_trace), for the office review
+                         "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
+                         "at": time.strftime("%Y-%m-%d")}   # the day it was spent (tools/ops_costs.py)
+        spent += rows[c["id"]]["usd"]
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
 
 elif phase == "baseline":
@@ -158,6 +179,7 @@ elif phase == "baseline":
            "question using only the product documentation below. If the documentation does not cover it, say so "
            "plainly rather than guessing. Be concise and practical.\n\n<documentation>\n{doc}\n</documentation>")
     def run(c):
+        if capped(): return c["id"], None
         sel = f"(The customer is chatting about: {names.get(c['product'], c['product'])})\n" if c.get("product") else ""
         msgs = [{"role": "system", "content": SYS.format(doc=manual(c.get("product"), c.get("compare_with") or ()))}]
         first = "turn1" if c.get("turn1") else "q"
@@ -166,11 +188,15 @@ elif phase == "baseline":
             msgs.append({"role": "user", "content": (sel if key == first else "") + c[key]})
             t = time.time(); a, u = chat(MODELS["baseline"], msgs, effort="minimal")
             msgs.append({"role": "assistant", "content": a})
-        return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": round(usd(u, MODELS["baseline"]), 6)}
+        return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": round(usd(u, MODELS["baseline"]), 6),
+                         "model": MODELS["baseline"], "at": time.strftime("%Y-%m-%d")}
     rows = state.setdefault("baseline", {})
+    # ponytail: up to 6 calls in flight can pass the cap; the provider's own limit is the hard stop
     with ThreadPoolExecutor(6) as ex:
         for cid, out in ex.map(run, [c for c in cases if c["id"] not in rows]):
-            rows[cid] = out; save(); print("baseline", cid, out["wall"], flush=True)
+            if out is None: continue
+            rows[cid] = out; spent += out["usd"]; save(); print("baseline", cid, out["wall"], flush=True)
+    if any(c["id"] not in rows for c in cases): stop()   # the rest waits for the cap to rise; a rerun resumes
 
 elif phase in ("grade", "prompt"):
     L = "ABCDEFG"[:len(SYSTEMS)]
@@ -221,20 +247,27 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         sys.stdout.reconfigure(encoding="utf-8")  # manuals carry symbols cp1252 cannot print
         print(prompt(next(c for c in cases if c["id"] == sys.argv[3]))); sys.exit(0)
     def grade(c):
+        if capped(): return c["id"], None
         o = order[c["id"]]
         raw, u = chat(MODELS["grader"], [{"role": "user", "content": prompt(c)}], effort="medium")
         use = {"model": MODELS["grader"], "prompt_tokens": u.get("prompt_tokens", 0), "cached": cached(u),
-               "completion_tokens": u.get("completion_tokens", 0), "usd": round(usd(u, MODELS["grader"]), 6)}
+               "completion_tokens": u.get("completion_tokens", 0), "usd": round(usd(u, MODELS["grader"]), 6),
+               "at": time.strftime("%Y-%m-%d")}
         try:
             g = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
         except Exception:
             return c["id"], {"raw": raw, "usage": use}
         return c["id"], {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
-    grades = state.setdefault("grades", {})
-    with ThreadPoolExecutor(6) as ex:
+    grades, held = state.setdefault("grades", {}), False
+    with ThreadPoolExecutor(6) as ex:   # ponytail: as in baseline, calls in flight can pass the cap
         for cid, g in ex.map(grade, [c for c in cases if c["id"] not in grades or "raw" in grades[c["id"]]]):
-            grades[cid] = g; save(); print("graded", cid, g.get("best"), flush=True)
+            if g is None: held = True; continue
+            grades[cid] = g; spent += g["usage"]["usd"]; save(); print("graded", cid, g.get("best"), flush=True)
+    if held:
+        if REMARK:   # no half re-marked run: it keeps its old grades until the cap rises
+            import shutil; shutil.copyfile(REMARK, OUT)
+        stop()
     ok = [c for c in cases if "raw" not in grades[c["id"]]]
     if REMARK and not ok:   # the grader is down (no key, no credit): the run keeps its old grades
         import shutil; shutil.copyfile(REMARK, OUT); sys.exit("re-mark failed: no case graded; old grades kept")

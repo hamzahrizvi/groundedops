@@ -17,6 +17,6 @@ for p in "system normal" "baseline" "grade"; do
   echo "== $p $(date +%T)" >> "$RUN/run.log"
   # shellcheck disable=SC2086
   "$PY" -X faulthandler "$REPO/tools/blind_eval.py" "$RUN" $p >> "$RUN/run.log" 2>&1 \
-    || { echo "$p" > "$RUN/FAILED"; exit 1; }
+    || { [ $? -eq 3 ] && p="$p: lab stopped at the cap"; echo "$p" > "$RUN/FAILED"; exit 1; }   # exit 3: OPS/lab_cap.json
 done
 touch "$RUN/DONE"
