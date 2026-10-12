@@ -102,7 +102,7 @@ def _selftest():
     assert r["before_regraded"] is True, r
     r = gate(s0, aft)
     assert r["became_wrong"] == ["a"] and r["before_regraded"] is False, r
-    r = gate(st({"a": 3, "b": 1}), {"grades": {"a": {"sys_normal": {"score": 1, "verdict": "wrong"}},
+    r = gate(st({"a": 3, "b": 3}), {"grades": {"a": {"sys_normal": {"score": 1, "verdict": "wrong"}},
                                                "b": {"sys_normal": {"score": 1, "verdict": "safe_decline"}}}})
     assert r["became_wrong"] == ["a"] and r["flip_after"] == {"a": 1}, r   # D-20261010-11: "wrong" with 1 mark
     import tempfile
