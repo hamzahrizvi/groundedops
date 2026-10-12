@@ -294,7 +294,9 @@ SYMPTOM_MAX_WORDS = 4      # content words a vague complaint may carry
 MAX_CHECKLIST = 4          # headings offered back
 
 FAULT_HEADING = re.compile(
-    r"troubleshoot|\bfault|flash code|error|\bled\b|indicator|"
+    # Not "LED" or "indicator" alone: those are mostly settings and API
+    # commands ("Set Indicator LED Status"), and the fast model picked them.
+    r"troubleshoot|\bfault|flash code|error|"
     r"first level support|status bar|reject|diagnos|problem|issue", re.I)
 _COMMAND_HEADING = re.compile(r"\b0x[0-9a-f]+\b", re.I)   # command reference
 
@@ -353,7 +355,10 @@ def fault_sections(product: str, results: list[dict], limit: int = 20,
         if h not in out:
             if len(out) >= limit:
                 return
-            out[h] = {"heading": h, "page": c.get("page"),
+            # The model sees the whole path: "Set Indicator LED Status >
+            # Responses" is a command, which its last parts do not say.
+            path = " > ".join(p.strip() for p in sec.split("›") if p.strip())
+            out[h] = {"heading": h, "path": path, "page": c.get("page"),
                       "source": c.get("source"), "chunks": []}
         out[h]["chunks"].append(c)
 
@@ -375,7 +380,8 @@ def checklist_for(query: str, product_name: str,
     import llm
     if not sections:
         return None
-    listing = "\n".join(f"{i}. {s['heading']}" for i, s in enumerate(sections, 1))
+    listing = "\n".join(f"{i}. {s.get('path') or s['heading']}"
+                        for i, s in enumerate(sections, 1))
     msg = " ".join((query or "").split())[:300].replace('"', "'")
     prompt = (
         f"A customer wrote to the support assistant for the "
@@ -388,7 +394,9 @@ def checklist_for(query: str, product_name: str,
         "right answer depends on a detail the customer has not given?\n"
         f"If so, reply CHECK and the numbers of up to {MAX_CHECKLIST} headings "
         "the customer should look at to find which fault it is, most useful "
-        "first, for example: CHECK 3,1\n"
+        "first, for example: CHECK 3,1. The customer is standing at the "
+        "device: choose troubleshooting, fault, error and flash-code "
+        "sections, never a command, API or settings heading.\n"
         "Otherwise (the message asks something the manual answers as it "
         "stands, names a symptom or code, or asks how to do something) reply "
         "ANSWER.\nWhen in doubt, reply ANSWER. Reply with nothing else.")
@@ -408,6 +416,10 @@ def checklist_for(query: str, product_name: str,
         i = int(n) - 1
         if 0 <= i < len(sections) and sections[i] not in chosen:
             chosen.append(sections[i])
+    # A heading whose own sub-section is also chosen is the vaguer of the
+    # two: "Support and Troubleshooting" beside its "Hub Issues".
+    chosen = [s for s in chosen if not any(
+        o is not s and o["heading"].startswith(s["heading"] + ": ") for o in chosen)]
     if not chosen:
         return None
     return chosen[:MAX_CHECKLIST], out.get("model") or out.get("provider") or "fast"

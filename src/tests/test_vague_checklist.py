@@ -63,6 +63,13 @@ def test_a_pick_returns_the_chosen_headings_in_order():
     assert "1. Bezel/Status LED Flash Codes" in seen[0] and "NV4000" in seen[0]
     assert _pick("**CHECK: 1**")[0][0] == [SECTIONS[0]]
     assert _pick("CHECK 3, 3, 1")[0][0] == [SECTIONS[2], SECTIONS[0]]
+    # The model is shown the whole heading path, the customer the short one.
+    path = [dict(SECTIONS[0], path="Fault Finding > Bezel/Status LED Flash Codes")]
+    assert "1. Fault Finding > Bezel/Status LED Flash Codes" in _pick("ANSWER", path)[1][0]
+    # A heading whose sub-section is also chosen is dropped for it.
+    nested = [{"heading": "Flash Codes", "page": 60, "chunks": []},
+              {"heading": "Flash Codes: Interface Flash Codes", "page": 60, "chunks": []}]
+    assert _pick("CHECK 1,2", nested)[0][0] == [nested[1]]
 
 
 def test_anything_else_answers_as_before():
@@ -99,6 +106,7 @@ def test_fault_sections_dedupes_and_skips_command_headings():
         ("Fault Finding: Bezel/Status LED Flash Codes", 51),
         ("Module Flash Codes", 52)]
     assert len(out[1]["chunks"]) == 2
+    assert out[1]["path"] == "Fault Finding > Bezel/Status LED Flash Codes"
 
 
 def test_an_unknown_model_name_is_found():
