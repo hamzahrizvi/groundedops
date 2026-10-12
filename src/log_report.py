@@ -33,7 +33,7 @@ TEST_ORIGINS = {"eval", "live", "preflight"}
 # offer_support already uses).
 _REFUSED_OUTCOMES = {"none.reject", "suppress", "refusal"}
 _CLARIFY_OUTCOMES = {"none.follow", "none.vague", "clarify", "faq.ask",
-                     "span.ask"}
+                     "span.ask", "symptom.ask"}
 _ANSWER_OUTCOMES = {"respond", "faq.answer", "faq.picked", "extract",
                     "verbatim", "steps", "more", "sales", "capability",
                     "inference"}

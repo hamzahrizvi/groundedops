@@ -60,6 +60,7 @@ LABELS: dict[str, str] = {
     "none.vague":  "Could not tell which device was meant",
     "none.reject": "Found nothing relevant and said so",
     "span.ask":    "Evidence spanned several products, so asked which",
+    "symptom.ask": "Not sure what was wrong, offered the manual's checklist",
     # writing
     "route":       "Picked the model for this kind of question",
     "extract":     "Copied a checklist straight out of the manual",
@@ -198,6 +199,7 @@ def get_meta(key: str):
 OUTCOMES = frozenset({
     "steps", "faq.picked", "faq.answer", "faq.ask", "more", "sales",
     "extract", "none.follow", "none.vague", "none.reject", "span.ask",
+    "symptom.ask",
     "verbatim", "suppress", "capability", "inference", "clarify",
     "refusal", "respond",
 })
