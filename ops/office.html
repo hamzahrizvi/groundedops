@@ -965,7 +965,7 @@ function renderPivot(){
   document.getElementById("pvTiles").replaceChildren(...tiles.map(([k, v, d]) => { const t = document.createElement("div"); t.className = "tile";
     t.innerHTML = '<div class="k"></div><div class="v"></div><div class="d"></div>'; t.children[0].textContent = k; t.children[1].textContent = v; t.children[2].textContent = d; return t; }));
   document.getElementById("pvLegend").textContent = (P.sample ? "Sample figures, made up to show the layout; the real ones appear after Customer's first categorised run. " : "") + M.legend + " Worst first. Click a number to review those questions and comment on them.";
-  for(const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.dim === pv.dim));
+  for(const b of document.querySelectorAll(".seg button[data-dim]")) b.setAttribute("aria-pressed", String(b.dataset.dim === pv.dim));
   // pivot rows
   const groups = Object.entries((P.blind || {})[pv.dim] || {});
   const mx = Math.max(1, ...groups.flatMap(([, byRun]) => runs.map(r => byRun[r] ? M.val(byRun[r]) : 0)).filter(v => v != null));
@@ -1011,7 +1011,7 @@ function renderPivot(){
   }
   document.getElementById("pvCats").textContent = "Categories are Customer's own: " + Object.entries(P.categories || {}).map(([k, v]) => `${k} (${v.toLowerCase()})`).join("; ") + ". Customer adds one when a question fits none.";
 }
-for(const b of document.querySelectorAll(".seg button")) b.addEventListener("click", () => { pv.dim = b.dataset.dim; pv.open = null; renderPivot(); });
+for(const b of document.querySelectorAll(".seg button[data-dim]")) b.addEventListener("click", () => { pv.dim = b.dataset.dim; pv.open = null; renderPivot(); });
 document.getElementById("pvMetric").addEventListener("change", e => { pv.metric = e.target.value; renderPivot(); });
 
 function select(id){ selected = id; renderDetail(); renderRoster(true); }
