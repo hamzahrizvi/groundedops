@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
 
 TASK = "groundedops-office-"
+IN_FLIGHT = {"approved, queued", "sent back, rebuilding", "built, waiting for the check", "check passed", "check failed", "ready to merge", "blocked"}
 # ponytail: guessed (5-hour %, weekly %) per run; tune from plan-usage-history.json once each has run a few times
 COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security": (15, 3), "audit": (3, 1),
         "rnd": (15, 3), "marketing": (8, 2)}
@@ -169,8 +170,15 @@ def waiting(ops, repo, now, taken=()):
     asked = _mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
     if asked > last_run:   # first in the queue until a run finishes after the press
         out.insert(0, ("customer", "the CEO asked for a fresh score", "customer"))
-    elif not last_run or age(last_run) >= 7 or last_merge > last_run:
-        out.append(("customer", "a fix merged since the last test" if last_run and last_merge > last_run else "weekly test due", "customer"))
+    elif not last_run or age(last_run) >= 14:
+        out.append(("customer", "no test run in 14 days" if last_run else "no test run yet", "customer"))
+    elif last_merge > last_run or age(last_run) >= 7:
+        # the CEO, 2026-10-12: each fix is proven on its own failure type's hidden siblings by the retrofit gate;
+        # a new 40-question bank only once Customer's fixes in flight are all through, to find the next issues
+        busy = sorted(i for i, s in dev.items() if items[i].get("from") == "customer" and s in IN_FLIGHT)
+        out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
+                    "the gate tests each fix on its own questions" if busy else
+                    "the customer fixes are all through: a new blind bank to find more issues", "customer" if not busy else None))
     unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge")
                   and not os.path.exists(os.path.join(ops, "inbox", "security", f"review-{i}.md"))]
     if unreviewed or age(_mtime(os.path.join(ops, "state", "security_last_run.txt"))) >= 13:
@@ -227,6 +235,9 @@ def entries(ops, repo, five, week, resets, now, taken):
     building = sum(k.startswith("dev-") for k in taken)
     out = []
     for dept, why, key in waiting(ops, repo, now, taken):
+        if key is None:   # waits on other work, not on the budget
+            out.append((f"WAIT {TASK}{dept}  {why}", None, False))
+            continue
         lane = f" (lane {taken[key].get('lane')})" if key in taken else ""
         if dept == "merge":
             stop = "held (OPS/state/hold)" if "merge" in held else f"another merge is running{lane}" if lane else None
@@ -324,6 +335,20 @@ def selftest():
         os.remove(os.path.join(ops, "state/office_off"))
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
         assert any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "no test run yet"
+        w("runs/20261008/DONE")
+        old = now.timestamp() - 8 * 86400
+        os.utime(os.path.join(ops, "runs/20261008/DONE"), (old, old))
+        w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        cust = lambda: next(x for x in plan(ops, ops, 11, 38, resets, now) if "customer" in x)
+        assert cust().startswith("WAIT") and "D-20261008-09" in cust(), "no new bank while a customer fix is in flight"
+        os.remove(os.path.join(ops, "decisions/20261008d.md"))
+        assert cust().startswith("RUN") and "all through" in cust(), "a new bank once they are through"
+        old = now.timestamp() - 15 * 86400
+        os.utime(os.path.join(ops, "runs/20261008/DONE"), (old, old))
+        w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        assert cust().startswith("RUN") and "14 days" in cust(), "never more than 14 days without a bank"
+        os.remove(os.path.join(ops, "decisions/20261008d.md"))
+        os.remove(os.path.join(ops, "runs/20261008/DONE"))
         os.remove(os.path.join(ops, "inbox/security/review-D-20261008-01.md"))
         w("decisions/20261011.md", "# Triage\n")
         os.utime(os.path.join(ops, "decisions/20261011.md"), (time.time() + 20, time.time() + 20))

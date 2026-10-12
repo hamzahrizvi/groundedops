@@ -18,6 +18,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
+from ops_pivot import agg, run_facts  # noqa: E402
 from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
@@ -55,6 +56,23 @@ def explain(line, titles):
     return {"dept": dept, "state": "run" if words[0] == "RUN" else "wait", "why": why.strip()}
 
 
+GOOD_GAP, GOOD_WRONG = 10, 1   # the CEO, 2026-10-12: when two blind runs in a row are this close, test on an unseen product
+
+
+def ready_for_new_product(ops):
+    """Why to feed a new product (overfitting check), or "". Good = the last two blind runs each within
+    GOOD_GAP points of the whole-manual baseline and at most GOOD_WRONG wrong answers."""
+    runs = sorted(d for d in glob.glob(os.path.join(ops, "runs", "*"))
+                  if os.path.exists(os.path.join(d, "DONE")) and os.path.exists(os.path.join(d, "cases_state.json")))
+    last = [agg(f) for f in (run_facts(d) for d in runs[-4:]) if f][-2:]
+    if len(last) < 2 or not all(a["base_pct"] is not None and a["base_pct"] - a["bot_pct"] <= GOOD_GAP
+                                and a["wrong"] <= GOOD_WRONG for a in last):
+        return ""
+    return (f"The last two blind runs scored {last[0]['bot_pct']} and {last[1]['bot_pct']}, within {GOOD_GAP} points of an AI"
+            " given the whole manual. To check the fixes did not just fit these manuals, add a product the office has"
+            " never tested and ask the product owner to point Customer's next run at it.")
+
+
 def brief(ops, repo, now=None, usage=None):
     now = now or datetime.datetime.now(datetime.timezone.utc)
     items, texts = decisions(ops), blocks(ops)
@@ -71,6 +89,9 @@ def brief(ops, repo, now=None, usage=None):
         elif it.get("assigned") == "ceo" and st == "approved, queued":
             todo.append({"id": i, "title": it["title"], "kind": "action",
                          "why": "Only you can do this. Mark it done once you have."})
+    good = ready_for_new_product(ops)
+    if good:
+        todo.append({"id": "new-product", "title": "Give the office a new product's manual", "kind": "info", "why": good})
     titles = {i: c["title"] for i, c in cards.items()}
     stalled = ""
     if old > 60:
@@ -128,6 +149,17 @@ def selftest():
         assert brief(ops, ops, now, (11, 38, 300))["stalled"].startswith("Paused: the office's usage figures are 5 hours old")
         e = explain("WAIT groundedops-office-dev  build D-20261008-01; held (OPS/state/hold)", {"D-20261008-01": "Two products"})
         assert e == {"dept": "Dev", "state": "wait", "why": "build \u201cTwo products\u201d; on hold"}, e
+        def run(name, bot, base):   # 3 cases, one score each
+            d = os.path.join(ops, "runs", name); os.makedirs(d, exist_ok=True)
+            json.dump({"cases": [{"id": f"c{k}", "q": "q", "type": "lookup"} for k in range(3)]}, open(os.path.join(d, "cases.json"), "w"))
+            json.dump({"grades": {f"c{k}": {"sys_normal": {"score": bot[k]}, "baseline": {"score": base[k]}} for k in range(3)}},
+                      open(os.path.join(d, "cases_state.json"), "w"))
+            open(os.path.join(d, "DONE"), "w").close()
+        run("r1", [3, 3, 2], [3, 3, 2]); run("r2", [3, 2, 3], [3, 2, 3])
+        got = ready_for_new_product(ops)
+        assert got.startswith("The last two blind runs scored 88.9 and 88.9"), got
+        run("r3", [3, 0, 2], [3, 3, 3])
+        assert ready_for_new_product(ops) == "", "a bad run: keep fixing"
     print("selftest ok")
 
 
