@@ -190,7 +190,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261010-31 | An adjustable spending cap for the test lab, and a running cost report, on the office page | approved, queued | Dev builds it |
 | D-20261012-01 | A monthly score out of 10 against the leading support chatbots | approved, queued | Dev builds it |
-| D-20261012-03 | Security item D-20261012-03, details in the office | approved, queued | Dev builds it |
+| D-20261012-03 | Security item D-20261012-03, details in the office | ready to merge | merges once Security clears it |
 | D-20261012-05 | Several-asks and two-product messages are answered from the whole manual, not the ranked passages | approved, queued | Dev builds it |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
 | customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
