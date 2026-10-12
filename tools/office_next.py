@@ -155,7 +155,8 @@ def waiting(ops, repo, now, taken=()):
     blocked += [review(i) for i, s in dev.items() if s in ("check passed", "ready to merge") and verdict(i) == "BLOCK"]
     findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
                 # every department report wakes the product owner, notes too (the CEO, 2026-10-10); a Security review is read with its branch
-                if p in blocked or (os.path.basename(os.path.dirname(p)) != "dev" and not os.path.basename(p).startswith("review-"))
+                # a BLOCKED hand-back or BLOCK review counts until a triage newer than it (decisions/*.md) has seen it
+                if (p in blocked or (os.path.basename(os.path.dirname(p)) != "dev" and not os.path.basename(p).startswith("review-")))
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
     lab = cap_status(ops)
     capped = lab["stopped"] and (f"lab stopped at the cap (${lab['spent']:.2f} of ${lab['usd']:.2f} this {lab['per']})"
@@ -364,12 +365,12 @@ def selftest():
         w("decisions/20261011.md", "# Triage\n")
         os.utime(os.path.join(ops, "decisions/20261011.md"), (time.time() + 20, time.time() + 20))
         po = lambda: next(x for x in plan(ops, ops, 11, 38, resets, now) if "product-owner" in x)
-        assert "1 new findings" in po(), po()                            # D-02's BLOCKED hand-back
+        assert not any("new findings" in x for x in plan(ops, ops, 11, 38, resets, now)), "a BLOCKED hand-back older than the last triage was already decided"
         os.makedirs(os.path.join(ops, "inbox/marketing"))
         for f in ("inbox/marketing/20261011-market.md", "inbox/security/review-D-20261008-01.md"):
             w(f, "Verdict: CLEAR\n")
             os.utime(os.path.join(ops, f), (time.time() + 30, time.time() + 30))
-        assert "2 new findings" in po(), "a department's note wakes the PO; a Security review does not"
+        assert "1 new findings" in po(), "a department's note wakes the PO; a Security review does not"
         json.dump({"usd": 0, "per": "month"}, open(os.path.join(ops, "lab_cap.json"), "w"))   # a cap of $0: stopped
         p = plan(ops, ops, 11, 38, resets, now)
         cust = next(x for x in p if "customer" in x)
@@ -378,7 +379,7 @@ def selftest():
         w("decisions/20261008e.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
         p = plan(ops, ops, 11, 38, resets, now)
         assert any(x.startswith("WAIT groundedops-office-product-owner  check D-20261008-04 waits: lab stopped") for x in p), p
-        assert any(x.startswith("RUN  groundedops-office-product-owner  2 new findings") for x in p), "findings still wake the PO"
+        assert any(x.startswith("RUN  groundedops-office-product-owner  1 new findings") for x in p), "findings still wake the PO"
     print("selftest ok")
 
 
