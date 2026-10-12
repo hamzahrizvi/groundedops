@@ -8,7 +8,7 @@
 Reads blind_eval.py state files (0-3 grades per case). PASS needs all three:
   1. siblings: every hidden sibling question (same failure type, never shown
      to Dev) scores >= 2 on the new code;
-  2. no case that scored >= 2 before scores 0 (stated something wrong) after;
+  2. no case that scored >= 2 before is wrong after (0 marks, or the verdict "wrong" at any mark);
   3. the overall score does not drop by more than --noise percentage points.
 Rule 3 and rule 2 use the before answers re-graded in the same pass when --regraded is
 given (gate.json keeps before_pct_stored so grader drift shows); tools/gate_rerun.py re-asks
@@ -33,12 +33,18 @@ def pct(sc):
     return round(100 * sum(sc.values()) / (3 * len(sc)), 1) if sc else 0.0
 
 
+def wrong(g):
+    """The marker called this answer wrong: 0 marks, or verdict "wrong" at any mark (D-20261010-11)."""
+    return g.get("score") == 0 or g.get("verdict") == "wrong"
+
+
 def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=None):
     stored = scores(before, system)
     b = (scores(after, regraded) if regraded else {}) or stored
     a = scores(after, system)
     common = sorted(set(b) & set(a))
-    became_wrong = [cid for cid in common if b[cid] >= 2 and a[cid] == 0]
+    ga = {cid: g[system] for cid, g in after.get("grades", {}).items() if system in g}
+    became_wrong = [cid for cid in common if b[cid] >= 2 and wrong(ga[cid])]
     fixed = [cid for cid in common if b[cid] <= 1 and a[cid] >= 2]
     drop = round(pct({c: b[c] for c in common}) - pct({c: a[c] for c in common}), 1)
     sib_fail = [cid for s in siblings for cid, v in scores(s, system).items() if v < 2]
@@ -52,6 +58,7 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
             "before_pct_stored": pct({c: stored[c] for c in common if c in stored}),
             "before_regraded": b is not stored, "drop": drop, "noise": noise,
             "flip_before": {c: b[c] for c in became_wrong},
+            "flip_after": {c: a[c] for c in became_wrong},
             "fixed": fixed, "became_wrong": became_wrong, "cases": len(common),
             "siblings": sum(len(scores(s, system)) for s in siblings)}
 
@@ -95,6 +102,9 @@ def _selftest():
     assert r["before_regraded"] is True, r
     r = gate(s0, aft)
     assert r["became_wrong"] == ["a"] and r["before_regraded"] is False, r
+    r = gate(st({"a": 3, "b": 1}), {"grades": {"a": {"sys_normal": {"score": 1, "verdict": "wrong"}},
+                                               "b": {"sys_normal": {"score": 1, "verdict": "safe_decline"}}}})
+    assert r["became_wrong"] == ["a"] and r["flip_after"] == {"a": 1}, r   # D-20261010-11: "wrong" with 1 mark
     import tempfile
     sibs = [{"id": "h1", "q": 'What does the "amber" light on the reader mean?'},
             {"id": "h2", "turn1": "Which models accept polymer notes?", "q": "and that one?"}]

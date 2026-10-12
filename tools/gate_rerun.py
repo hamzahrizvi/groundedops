@@ -9,7 +9,7 @@ One blind pass is noisy: C20261008-22 scored 0 in 2 passes of 6 on unchanged cod
 with a score drop that is within --noise once those cases are held at their before scores
 (D-20261010-05: one 3 -> 0 flip is 2.5 pts of 40 cases), each of
 those cases is asked 6 times on the branch and 6 times on its base code, interleaved.
-A case stays wrong only if the branch answers it wrong (score 0) at least 2 passes more
+A case stays wrong only if the branch answers it wrong (0 marks or verdict "wrong") at least 2 passes more
 often than the base, or a pass has no grade (fail closed). gate.json gains "rerun" (the
 per-pass grades) and a recomputed verdict; the drop is recomputed with the cleared cases
 held before ruling. Siblings, a drop beyond noise or 3+ cases: untouched.
@@ -26,12 +26,14 @@ import subprocess
 import sys
 import tarfile
 
+from retrofit_gate import wrong   # one rule for "wrong" (D-20261010-11)
+
 ROUNDS, MARGIN, MAX_CASES = 6, 2, 2
 
 
 def held_drop(gate, cids):
     """The score drop with these became-wrong cases held at their before scores."""
-    return round(gate["drop"] - 100 * sum(gate["flip_before"][c] for c in cids) / (3 * gate["cases"]), 1)
+    return round(gate["drop"] - 100 * sum(gate["flip_before"][c] - gate.get("flip_after", {}).get(c, 0) for c in cids) / (3 * gate["cases"]), 1)
 
 
 def eligible(gate):
@@ -57,8 +59,8 @@ def rerate(gate, head_states, base_states):
     for cid in gate["became_wrong"]:
         h = [grade_of(s, cid) for s in head_states]
         b = [grade_of(s, cid) for s in base_states]
-        hw = sum(1 for g in h if g and g["score"] == 0)
-        bw = sum(1 for g in b if g and g["score"] == 0)
+        hw = sum(1 for g in h if g and wrong(g))
+        bw = sum(1 for g in b if g and wrong(g))
         keep = not h or not b or None in h + b or hw - bw >= MARGIN
         rerun[cid] = {"head": [show(g) for g in h], "base": [show(g) for g in b],
                       "head_wrong": hw, "base_wrong": bw, "kept": keep}
@@ -176,6 +178,10 @@ def _selftest():
     assert r["verdict"] == "FAIL" and r["reasons"][0].startswith("became wrong"), r
     assert r["reasons"][1].startswith("score dropped 4.1"), r
     assert not eligible({**g, "drop": 6.0})                              # held 3.5 > 3
+    w1 = lambda *sc: [{"grades": {"c": {"sys_normal": {"score": v, "verdict": "wrong" if v == 1 else "correct"}}}} for v in sc]
+    r = rerate(one, w1(1, 1, 3, 3, 3, 3), w1(3, 3, 3, 3, 3, 3))
+    assert r["verdict"] == "FAIL" and r["rerun"]["c"]["head_wrong"] == 2, r   # a 1-mark "wrong" counts (D-20261010-11)
+    assert held_drop({"drop": 2.5, "cases": 40, "flip_before": {"c": 3}, "flip_after": {"c": 1}}, ["c"]) == 0.8
     print("selftest ok")
 
 
