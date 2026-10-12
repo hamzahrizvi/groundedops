@@ -30,6 +30,7 @@ import sys
 from collections import Counter, defaultdict
 
 DIMS = ("category", "type", "product")
+RIGHT = ("correct", "correct_refusal", "clarified")   # the page's Right tab; its Wrong tab is verdict "wrong"
 REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens its questions
 KEEP_RUNS = 12       # ponytail: the page shows the last 12 runs; ops/runs keeps every run
 NOISE_PTS = 3.0      # the retrofit gate's noise rule: moves under 3 points are the bot's and the marker's own flicker
@@ -110,7 +111,7 @@ def agg(facts):
     base = [f["base"] for f in facts if f["base"] is not None]
     return {"n": n, "bot_pct": round(100 * sum(f["bot"] for f in facts) / (3 * n), 1),
             "base_pct": round(100 * sum(base) / (3 * len(base)), 1) if base else None,
-            "right": sum(f["bot"] == 3 for f in facts), "wrong": sum(f["bot"] == 0 for f in facts),
+            "right": sum(f.get("verdict") in RIGHT for f in facts), "wrong": sum(f.get("verdict") == "wrong" for f in facts),
             "declined": sum(f["verdict"] == "safe_decline" for f in facts)}
 
 
@@ -188,7 +189,7 @@ def trend(by_run, ends, fixes):
         points.append({"run": r, "when": ends[r], "n": len(facts), "adj": round(a["adj"], 1), "se": round(a["se"], 2),
                        "lo": round(max(0, a["adj"] - 1.645 * a["se"]), 1), "hi": round(min(100, a["adj"] + 1.645 * a["se"]), 1),
                        "raw": round(100 * sum(f["bot"] for f in facts) / (3 * len(facts)), 1),
-                       "wrong": sum(f["bot"] == 0 for f in facts)})
+                       "wrong": sum(f.get("verdict") == "wrong" for f in facts)})
     steps = []
     for a, b in zip(names, names[1:]):
         # ponytail: a run is placed at its DONE time; a merge landing mid-run counts for the next run

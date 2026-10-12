@@ -959,11 +959,11 @@ function renderPivot(){
   const realLast = P.real && Object.keys(P.real).sort().pop(), realN = realLast ? Object.values(P.real[realLast]).reduce((t, c) => t + Object.values(c).reduce((a, b) => a + b, 0), 0) : 0;
   const delta = (a, b, unit) => b == null ? "" : a === b ? "same as last run" : `${a > b ? "up" : "down"} ${Math.abs(Math.round((a-b)*10)/10)}${unit} on ${runLabel(prev)}`;
   const tiles = !o ? [] : [
-    // the 4th field picks the questions behind the figure, the same rules as ops_pivot.agg()
+    // the 4th field picks the questions behind the figure: the review's tabs, and ops_pivot.agg()'s counts
     ["Bot score", o.bot_pct + "%", op ? delta(o.bot_pct, op.bot_pct, " pts") : `${o.n} questions, ${runLabel(last)}`, () => true],
     ["AI given the whole manual", o.base_pct + "%", "same questions, for comparison", () => true],
-    ["Fully right", `${o.right} of ${o.n}`, op ? delta(o.right, op.right, "") : "", c => c.bot === 3],
-    ["Wrong answers", String(o.wrong), op ? delta(o.wrong, op.wrong, "") : "stated something false", c => c.bot === 0],
+    ["Right", `${o.right} of ${o.n}`, op ? delta(o.right, op.right, "") : "", c => (VERDICT[c.verdict] || [])[1] === "ok"],
+    ["Wrong answers", String(o.wrong), op ? delta(o.wrong, op.wrong, "") : "stated something false", c => c.verdict === "wrong"],
     ["Said \"not found\" wrongly", String(o.declined), op ? delta(o.declined, op.declined, "") : "the manual had it", c => c.verdict === "safe_decline"],
     ["Website questions", String(realN), realLast ? `week to ${runLabel(realLast)}` : "none logged yet"]];
   document.getElementById("pvTiles").replaceChildren(...tiles.map(([k, v, d, pick]) => { const t = document.createElement("div"); t.className = "tile";
