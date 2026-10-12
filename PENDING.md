@@ -176,15 +176,16 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
 | D-20261009-03 | Security item D-20261009-03, details in the office | approved, queued | Dev builds it |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | check failed | the product owner sends it back |
 | D-20261009-11 | Measure the whole-manual mode on the same 40 questions before the cost decision | approved, queued | Dev builds it |
 | D-20261010-07 | Office-only fixes skip the bot gate; the gate runs only when product code changed | sent back, rebuilding | Dev rebuilds it |
-| D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | sent back, rebuilding | Dev rebuilds it |
+| D-20261010-09 | The pre-ship check compares answers from the old AI with answers from the new one | built, waiting for the check | the pre-ship check |
 | D-20261010-10 | On the new AI the bot gets two questions wrong that it answered right or declined safely before | approved, queued | Dev builds it |
 | D-20261010-11 | The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" | approved, queued | Dev builds it |
 | D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | approved, queued | Dev builds it |
-| D-20261010-21 | Security item D-20261010-21, details in the office | waiting for CEO | your yes |
+| D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
 | D-20261010-23 | The pre-ship check grades the "after" answers without the manual pages the "before" grader had | approved, queued | Dev builds it |
-| D-20261010-26 | Security item D-20261010-26, details in the office | approved, queued | Dev builds it |
+| D-20261010-26 | Security item D-20261010-26, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | approved, queued | Dev builds it |
 | D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | approved, queued | Dev builds it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
@@ -217,7 +218,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261009-06 | Security item D-20261009-06, details in the office | deferred | parked |
 | D-20261009-07 | Security item D-20261009-07, details in the office | deferred | parked |
 | D-20261009-08 | Two products in one question are declined even when both figures are in the manuals | deferred | parked |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | deferred | parked |
 | D-20261009-10 | Vague "it stopped working" messages get a checklist or a decline instead of one question | deferred | parked |
 | D-20261010-02 | Security item D-20261010-02, details in the office | deferred | parked |
 | D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | deferred | parked |
