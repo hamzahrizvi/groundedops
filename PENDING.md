@@ -189,9 +189,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | approved, queued | Dev builds it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261010-31 | An adjustable spending cap for the test lab, and a running cost report, on the office page | approved, queued | Dev builds it |
-| D-20261010-32 | Security item D-20261010-32, details in the office | waiting for CEO | your yes |
 | D-20261012-01 | A monthly score out of 10 against the leading support chatbots | approved, queued | Dev builds it |
-| D-20261012-02 | Security item D-20261012-02, details in the office | waiting for CEO | your yes |
 | D-20261012-03 | Security item D-20261012-03, details in the office | approved, queued | Dev builds it |
 | D-20261012-05 | Several-asks and two-product messages are answered from the whole manual, not the ranked passages | approved, queued | Dev builds it |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
@@ -230,8 +228,10 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-17 | When the passages miss, read the whole manual once before saying "not in the manual" | deferred | parked |
 | D-20261010-18 | Half answers that say "not stated" for a documented fact: search once more for the named gap | deferred | parked |
 | D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | deferred | parked |
+| D-20261010-32 | Security item D-20261010-32, details in the office | deferred | parked |
 | D-20261010-33 | Security item D-20261010-33, details in the office | deferred | parked |
 | D-20261010-34 | Yes/no questions get an answer from the page next to the right one | deferred | parked |
+| D-20261012-02 | Security item D-20261012-02, details in the office | deferred | parked |
 | D-20261012-04 | Off-topic buying advice (a card reader for a cafe) gets an answer instead of a refusal | deferred | parked |
 | D-20261012-06 | A two-product question loses one product's best passage under the other's relevance floor | deferred | parked |
 
