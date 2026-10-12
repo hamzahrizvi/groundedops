@@ -930,6 +930,14 @@ addEventListener("load",fit);
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(fit,150);});
 fit(); select("entry");
 if(recorded) showRecorded(recorded);
+/* Published on claude.ai, the page may not connect to this computer (the host's allow-list, and the
+   browser's block on public sites calling localhost), so the live tracer can only fail there. */
+else if(location.protocol!=="file:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)){
+  document.body.classList.add("embedded");
+  $("status").innerHTML="Live tracing runs only from your own computer: open <b>tools/pipeline_map.html</b> from the repo"
+    +" (with the backend running), or use the admin console's Pipeline check at <b>localhost:8000/admin</b>."
+    +" On the office page, <b>Open pipeline</b> on a test question shows the path it took.";
+}
 </script>
 </body>
 </html>
