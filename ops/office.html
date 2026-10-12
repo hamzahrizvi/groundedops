@@ -125,11 +125,11 @@ button{font:inherit;color:inherit}
 .tile .v{font:34px/1.05 var(--data);font-variant-numeric:tabular-nums;margin-top:4px}
 .tile .d{font-size:13px;color:var(--muted)}
 .pvbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:6px}
-.pvbar .lbl,.seg .lbl{font:11px/1 var(--display);letter-spacing:.05em;color:var(--muted)}
+.pvbar .lbl,.seg .lbl,.labcap .lbl{font:11px/1 var(--display);letter-spacing:.05em;color:var(--muted)}
 .seg{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .seg button{border:1px solid var(--line);background:var(--bg);padding:6px 9px;border-radius:3px;cursor:pointer;font-size:13.5px}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-#pvMetric{font:inherit;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface);color:var(--ink);max-width:100%}
+#pvMetric,#labUsd,#labPer{font:inherit;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:3px;background:var(--surface);color:var(--ink);max-width:100%}
 .pivot{width:100%;border-collapse:separate;border-spacing:2px;font-size:14px;font-variant-numeric:tabular-nums}
 .pivot th{font:11px/1.4 var(--display);letter-spacing:.04em;color:var(--muted);text-align:right;padding:6px 8px;white-space:nowrap}
 .pivot th:first-child{text-align:left}
@@ -176,6 +176,8 @@ button{font:inherit;color:inherit}
 .ctable{border-collapse:collapse;font-variant-numeric:tabular-nums;margin-top:6px}
 .ctable th,.ctable td{padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 .ctable th:first-child,.ctable td:first-child{text-align:left}
+.labcap{border-bottom:1px solid var(--line);padding-bottom:14px}
+.labcap form{margin:8px 0 6px} .labcap .ctable th:nth-child(2),.labcap .ctable td:nth-child(2){text-align:left} #labUsd{width:7em} .labcap .oops{margin:4px 0 8px}
 :root{--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;--s8:#e34948}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767}}
 :root[data-theme="dark"]{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767}
@@ -342,6 +344,18 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <div role="tabpanel" id="p-depts" aria-labelledby="t-depts" class="dboards" hidden></div>
         <div role="tabpanel" id="p-rewards" aria-labelledby="t-rewards" hidden></div>
         <div role="tabpanel" id="p-costs" aria-labelledby="t-costs" hidden>
+          <section class="cchart labcap" id="labCap" aria-labelledby="labH" hidden>
+            <h3 class="pvh" id="labH">Test lab: spending cap</h3>
+            <p class="oops" id="labStop" hidden></p>
+            <p class="small" id="labLine"></p>
+            <form class="actions" id="labForm">
+              <label class="lbl" for="labUsd">Cap in $</label><input id="labUsd" type="number" min="0" max="1000" step="0.01" inputmode="decimal" required>
+              <label class="lbl" for="labPer">per</label><select id="labPer"><option value="month">month</option><option value="week">week</option><option value="day">day</option></select>
+              <button class="btn" id="labSet" type="submit">Set the cap</button>
+            </form>
+            <p class="small" id="labMsg"></p>
+            <div id="labRuns"></div>
+          </section>
           <div class="pvbar">
             <div class="seg" role="group" aria-label="Period"><span class="lbl">Per</span>
               <button type="button" data-unit="day" aria-pressed="true">Day</button><button type="button" data-unit="week" aria-pressed="false">Week</button><button type="button" data-unit="month" aria-pressed="false">Month</button></div>
@@ -1232,7 +1246,7 @@ function openItem(id){
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
-const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on"};
+const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on", cap:"Lab cap"};
 async function decide(id, choice, note, title){
   if(!live.db) throw {code:"no_db"};
   await live.db.collection("ceo_inbox").add({id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
@@ -1316,9 +1330,42 @@ function renderCosts(){
   if(!c){ out.replaceChildren(el("p", "empty", live.available ? "The first cost figures arrive with the office's next hourly check." : "Costs show in the live office.")); $("costNote").textContent = ""; return; }
   out.replaceChildren(
     costChart("Claude (agents and sessions)", c.claude[cost.unit], "Tokens at API list prices. The office runs on a Claude plan, so this is what the same work would cost on the API, not a bill."),
-    costChart("AI provider API (test lab)", c.api[cost.unit], "The lab's chatbot, whole-manual baseline and grader calls. The live chatbot does not log tokens yet; its spend is in the provider's console."));
+    costChart("AI provider API (test lab)", c.api[cost.unit], "The lab's chatbot, whole-manual baseline and grader calls, in test runs and gate checks. The live chatbot does not log tokens yet; its spend is in the provider's console."));
   $("costNote").textContent = `Updated ${fmtWhen(new Date(c.updated))}.`;
+  renderLab();
 }
+/* the CEO's lab spending cap: OPS/lab_cap.json via a "cap" row (tools/ceo_inbox.py); tools/blind_eval.py stops at it */
+function renderLab(){
+  const lab = live.costs && live.costs.lab, box = $("labCap");
+  box.hidden = !lab;
+  if(!lab) return;
+  const cap = lab.cap || {}, row = live.inbox.find(r => r.choice === "cap" && r.status === "new");
+  $("labStop").hidden = !cap.stopped;
+  $("labStop").textContent = cap.error ? "Lab stopped: " + cap.error + "."
+    : `Lab stopped at the cap: ${usd(cap.spent)} of ${usd(cap.usd)} this ${cap.per}. Test runs and gate checks wait until you raise it.`;
+  $("labLine").textContent = cap.usd == null ? "No cap set. The lab spends until the provider's own limit stops it."
+    : `Cap ${usd(cap.usd)} per ${cap.per}: ${usd(cap.spent)} spent since ${pLabel("day", cap.since)}. At the cap the lab stops before its next call.`;
+  $("labSet").disabled = !!row;
+  $("labMsg").className = row ? "sent" : "small";
+  $("labMsg").textContent = row ? `You set the cap to $${String(row.note).replace(" ", " per ")} at ${fmtTime(new Date(row.at))}. The office applies it at its next hourly check.` : "";
+  const was = $("labRuns").querySelector("details"), det = el("details"), tb = el("table", "ctable"), hr = el("tr");
+  det.open = !!(was && was.open);
+  det.append(el("summary", null, `Each test run and gate check (${lab.rows.length})`));
+  hr.append(...["When", "What", "Bot", "Whole-manual AI", "Marking", "Total"].map(h => el("th", null, h))); tb.append(hr);
+  for(const r of lab.rows){ const tr = el("tr");
+    tr.append(el("td", null, pLabel("day", r.date)), el("td", null, (r.kind === "gate" ? "Gate check " : "Test run ") + r.name),
+      ...[r.bot, r.baseline, r.grader, r.total].map(v => el("td", null, usd(v)))); tb.append(tr); }
+  const scroll = el("div", "rscroll"); scroll.append(tb); det.append(scroll);
+  $("labRuns").replaceChildren(el("p", "small", lab.first ? `Since the start (${pLabel("day", lab.first)}): ${usd(lab.since_start)}.` : "Nothing spent yet."), det);
+}
+$("labForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const v = Number($("labUsd").value), msg = $("labMsg");
+  if(!($("labUsd").value !== "" && v >= 0 && v <= 1000)){ msg.className = "oops"; msg.textContent = "Enter a number of dollars from 0 to 1000."; return; }
+  $("labSet").disabled = true;
+  try { await decide("", "cap", `${Math.round(v * 100) / 100} ${$("labPer").value}`, "Set the lab cap"); renderLab(); }
+  catch(err){ $("labSet").disabled = false; msg.className = "oops"; msg.textContent = writeError(err); }
+});
 for(const b of document.querySelectorAll("#p-costs [data-unit]")) b.addEventListener("click", () => { cost.unit = b.dataset.unit; renderCosts(); });
 for(const b of document.querySelectorAll("#p-costs [data-split]")) b.addEventListener("click", () => { cost.split = b.dataset.split; renderCosts(); });
 
@@ -1488,7 +1535,7 @@ setInterval(sampleStep, 9000);
   let firstEvents = true;
   try {
     db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderRefresh(); renderPower(); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderRefresh(); renderPower(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());
