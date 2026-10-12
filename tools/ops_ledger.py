@@ -25,7 +25,7 @@ from collections import defaultdict
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
 CAPACITY = {"dev": 3, "po": 8}          # ponytail: everyone else 2; tune when a board shows real overload
 NOTES = re.compile(r"(-weekly|-market)\.md$|^review-")
-SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Source:\s*inbox[/\\]security[/\\])")   # any entry of a decision
+SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Assigned:\s*security\b|Source:\s*inbox[/\\]security[/\\])")   # any entry of a decision
 PAST, FUTURE = {"merged", "rejected", "reverted", "done"}, {"proposed", "waiting for CEO", "deferred"}
 
 
@@ -193,6 +193,9 @@ def _selftest():
     assert r["boards"]["dev"]["doing"] == ["Fix comparisons"] and r["boards"]["po"]["queue"] == ["Cache repeated questions"]
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
     assert pts["customer"] == 4 and pts["dev"] == 0, pts            # two approved, none merged yet
+    w("decisions/20261013d.md", "## D-20261013-05 | Header-less callers get in\n- Source: inbox/dev/D-20261013-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
+    assert {c["id"]: c["security"] for c in ledger(ops, today=day)["cards"]}["D-20261013-05"], "assigned to Security = Security's, whoever raised it"
+    os.remove(os.path.join(ops, "decisions/20261013d.md"))
     w("decisions/20261013b.md", "## D-20261013-04 | Audit\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
     w("inbox/dev/D-20261013-04.md", "Status: READY\nBranch: agents/dev-D-20261013-01\n")   # rode on 01's branch
     assert {c["id"]: c["stage"] for c in ledger(ops, merged={"D-20261013-01"}, today=day)["cards"]}["D-20261013-04"] == "merged"
