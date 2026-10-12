@@ -141,6 +141,12 @@ button{font:inherit;color:inherit}
 .rq .qq{font-weight:700}
 .rq .ans{white-space:pre-wrap;background:var(--bg);padding:8px 10px;border-radius:3px;font-size:14px;margin:0}
 .rq .why{font-size:13.5px;color:var(--muted);margin:0}
+.rqpane{display:grid;gap:10px}
+.trace summary{cursor:pointer;font-size:13.5px}
+.trace ol{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:3px;font-size:13px}
+.trace li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.trace .ms{min-width:58px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.trace .nt{color:var(--muted)}
 .pivot td.g .m{display:block;font-size:12.5px;color:var(--muted)}
 .pivot tr.drill td{background:var(--bg);text-align:left;white-space:normal}
 .drill ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
@@ -809,12 +815,20 @@ function openReview(g, run){
   const P = live.pivot || SAMPLE_PIVOT, cases = (((P.cases || {})[run]) || []).filter(c => c[pv.dim] === g);
   const nodes = [el("p", "small", `${cases.length} questions in ${runLabel(run)}, weakest first. Comments go to the product owner's next triage as your note.`)];
   if(!cases.length) nodes.push(el("p", "empty", "The questions behind these figures appear once the live figures are in."));
+  /* tabs by how the grader judged it: Wrong / Partly right (incl. "said not found") / Right */
+  const TABS = [["bad", "Wrong"], ["warn", "Partly right"], ["ok", "Right"]], panes = {}, seg = el("div", "seg"), btns = [];
+  seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Show questions");
+  for(const [k] of TABS) panes[k] = el("div", "rqpane");
+  const show = k => { for(const b of btns) b.setAttribute("aria-pressed", String(b.dataset.k === k)); for(const [t] of TABS) panes[t].hidden = t !== k; };
+  if(cases.length) nodes.push(seg, ...TABS.map(([k]) => panes[k]));
   for(const c of cases.sort((x, y) => x.bot - y.bot)){
     const box = el("div", "rq"), head = el("div", "qh"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
     head.append(el("span", "vpill " + cls, lab), el("span", "small", `${c.product} · ${groupName("type", c.type)} · bot ${c.bot}/3` + (c.base != null ? `, whole-manual AI ${c.base}/3` : "")));
     box.append(head, el("p", "qq", c.q));
     if(c.answer){ const d = el("details"); d.append(el("summary", null, "The bot's answer"), el("p", "ans", c.answer)); box.append(d); }
     if(c.why) box.append(el("p", "why", "Grader: " + c.why));
+    box.append(traceBox(c.trace));
+    (panes[cls] || panes.warn).append(box);
     const sent = live.inbox.find(r => r.id === c.id && r.choice === "note");
     if(sent) box.append(el("p", "sent", `You commented: "${sent.note}"` + (sent.status === "new" ? " (reaches the product owner at the next hourly check)" : "")));
     else if(live.available){
@@ -830,9 +844,33 @@ function openReview(g, run){
       });
       acts.append(go); f.append(ta, acts, msg); box.append(f);
     }
-    nodes.push(box);
   }
+  for(const [k, name] of TABS){
+    const b = el("button", null, `${name} (${panes[k].children.length})`); b.type = "button"; b.dataset.k = k;
+    b.addEventListener("click", () => show(k)); btns.push(b); seg.append(b);
+    if(!panes[k].children.length) panes[k].append(el("p", "empty", `No ${name.toLowerCase()} answers here.`));
+  }
+  show((TABS.find(([k]) => panes[k].querySelector(".rq")) || TABS[0])[0]);
   openPop(`${groupName(pv.dim, g)}: ${runLabel(run)}`, nodes);
+}
+/* where the bot's answer went (src/pipeline_trace.py, kept by blind_eval.py): the full stage list, or just how it ended for older runs */
+function traceBox(t){
+  const d = el("details", "trace");
+  if(!t){ d.append(el("summary", null, "Where it went: not recorded for this run")); return d; }
+  d.append(el("summary", null, `Where it went: ended at "${t.exit || "unknown"}"` + (t.ms != null ? `, ${(t.ms / 1000).toFixed(1)} s` : "")));
+  if(t.because) d.append(el("p", "why", "Because: " + t.because));
+  if(t.stages){
+    const ol = el("ol");
+    for(const [ms, label, note] of t.stages){ const li = el("li"); li.append(el("span", "ms", `${ms} ms`), el("span", null, label)); if(note) li.append(el("span", "nt", "— " + note)); ol.append(li); }
+    d.append(ol);
+  } else {
+    d.append(el("p", "why", "This run kept only how the answer ended; runs from 12 Oct keep every step."));
+    if(t.sources && t.sources.length) d.append(el("p", "why", "Manuals it used: " + t.sources.join(", ")));
+    if(t.via || t.verifier) d.append(el("p", "why", "Checked by: " + [t.via, t.verifier].filter(Boolean).join(", ")));
+    const tm = Object.entries(t.times || {}).sort((a, b) => b[1] - a[1]);
+    if(tm.length) d.append(el("p", "why", "Time spent: " + tm.map(([k, v]) => `${k.replace(/_/g, " ")} ${v.toFixed(1)} s`).join(", ")));
+  }
+  return d;
 }
 const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
 const pvTip = document.getElementById("pvTip");

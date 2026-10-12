@@ -54,9 +54,44 @@ def run_facts(run_dir):
     return out
 
 
+def _labels():
+    """pipeline_trace.LABELS (src/ beside tools/): stdlib-only, so importing it costs nothing."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+        import pipeline_trace
+        return pipeline_trace.LABELS
+    except Exception:
+        return {}
+
+
+def trace(row, log, labels):
+    """Where the bot's answer went, compact for the page: the full stage list when the run kept it
+    (blind_eval.py from 2026-10-12), else how it ended from the run's app_logs.jsonl line."""
+    p = (row or {}).get("pipeline")
+    if p and p.get("stages"):
+        ex = p.get("exit") or {}
+        return {"exit": ex.get("label"), "because": (ex.get("note") or "")[:200], "ms": p.get("ms"),
+                "stages": [[s.get("at_ms"), s.get("label"), (s.get("note") or "")[:160]] for s in p["stages"]]}
+    if log:
+        t = log.get("timing") or {}
+        return {"exit": labels.get(log.get("outcome"), log.get("outcome")), "ms": round((t.get("total_time") or 0) * 1000),
+                "via": log.get("verified_by"), "verifier": log.get("verifier"), "sources": log.get("sources") or [],
+                "times": {k[:-5]: v for k, v in t.items() if k.endswith("_time") and k != "total_time" and v}}
+    return None
+
+
 def review(run_dir):
     """The run's questions with the bot's answer and the grader's reason, for the CEO's review pop-up."""
     st = _load(os.path.join(run_dir, "cases_state.json"))
+    logs, labels = {}, _labels()
+    lp = os.path.join(run_dir, "app_logs.jsonl")
+    if os.path.exists(lp):   # the bot's own log of this run; last line per question wins (a turn1 case logs twice)
+        for line in open(lp, encoding="utf-8"):
+            try:
+                e = json.loads(line)
+                logs[e.get("query")] = e
+            except ValueError:
+                pass
     out = []
     for f in run_facts(run_dir):
         g = st.get("grades", {}).get(f["id"], {})
@@ -65,7 +100,8 @@ def review(run_dir):
         if bot:   # the grader compares two unnamed answers; name them
             other = "B" if bot == "A" else "A"   # whole words only: "1.50A" stays
             why = re.sub(rf"\b{other}\b", "the whole-manual AI", re.sub(rf"\b{bot}\b", "the bot", why))
-        out.append(dict(f, answer=str((st.get("sys_normal") or {}).get(f["id"], {}).get("answer", ""))[:600], why=why[:400]))
+        row = (st.get("sys_normal") or {}).get(f["id"], {})
+        out.append(dict(f, answer=str(row.get("answer", ""))[:600], why=why[:400], trace=trace(row, logs.get(f["q"]), labels)))
     return out
 
 
@@ -397,6 +433,14 @@ def _selftest():
         os.environ.pop("RETENTION_DAYS", None)
         if saved is not None:
             os.environ["RETENTION_DAYS"] = saved
+    # trace: the kept stage list wins; else the app log's ending; else nothing
+    full = {"pipeline": {"ms": 9, "exit": {"label": "Stopped", "note": "score 0.2"},
+                         "stages": [{"at_ms": 1, "label": "Took the question", "note": None}]}}
+    t = trace(full, {"outcome": "respond"}, {})
+    assert t["exit"] == "Stopped" and t["stages"] == [[1, "Took the question", ""]], t
+    t = trace({}, {"outcome": "respond", "timing": {"total_time": 1.5, "llm_time": 0.5, "rerank_time": 0}}, {"respond": "Answered"})
+    assert t["exit"] == "Answered" and t["ms"] == 1500 and t["times"] == {"llm": 0.5}, t
+    assert trace({}, None, {}) is None
     print("selftest ok")
 
 

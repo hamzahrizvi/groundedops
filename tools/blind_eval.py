@@ -138,7 +138,8 @@ if phase == "system":
         d = main._traced_query(main.QueryRequest(q=c["q"], product=c.get("product"), session_id=sid), None, attach=True)
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
-                         "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model")}
+                         "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
+                         "pipeline": d.get("pipeline")}   # where the answer went (pipeline_trace), for the office review
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
 
 elif phase == "baseline":
