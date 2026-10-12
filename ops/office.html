@@ -335,7 +335,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
   </div>
 
   <section class="rhythm" aria-labelledby="weekH">
-    <h2 id="weekH">The week</h2>
+    <h2 id="weekH">How work moves</h2>
     <div class="days" id="days"></div>
   </section>
   <p class="foot">Customer, the test lab, the product owner and Dev work every week; Audit and Security joined on 8 October, R&amp;D and Marketing on 10 October (once a month each). Everyone works when the Claude usage budget allows. Decide from "Waiting for you", or ask the product owner in the chat. Your decisions reach the office at its next hourly check.</p>
@@ -974,11 +974,11 @@ function renderFeed(){
 }
 function renderWeek(){
   const plan = [
-    ["Mon", [["01:00","Customer writes 40 new questions"],["after","Lab bot asks and grades them"],["after","Customer files findings"],["20:00","Dev, if work is approved"]]],
-    ["Tue", [["08:00","Product owner decides, then meets you with the report"],["day","You approve or decline"],["20:00","Dev builds approved work"]]],
-    ["Wed", [["20:00","Dev builds approved work"]]],
-    ["Thu", [["20:00","Dev builds approved work"]]],
-    ["Fri", [["08:00","Lab bot runs the gate; product owner judges it"],["day","You merge what passed"],["20:00","Dev"]]]
+    ["Find", [["bank","Customer writes 40 new blind questions, only once the fixes in flight are through (at most 14 days apart, or when you press Refresh)"],["after","Lab bot asks and grades them"],["after","Customer files one finding per failure type"]]],
+    ["Decide", [["hourly","Product owner triages new findings"],["you","Approve or decline what needs your yes"]]],
+    ["Build", [["hourly","Dev builds approved work, up to 2 at a time"],["check","Security reviews each branch"]]],
+    ["Prove", [["gate","Lab bot re-asks only the hidden questions of that fix's failure type, not a new 40"],["pass","The office merges it"]]],
+    ["Next", [["good","Two runs within 10 points of the whole-manual AI: you add a product it has never seen, to catch overfitting"]]]
   ];
   const today = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()];
   document.getElementById("days").replaceChildren(...plan.map(([day, slots]) => {
