@@ -151,6 +151,19 @@ button{font:inherit;color:inherit}
 .tsteps{list-style:none;margin:8px 0 0;padding:0;font-size:14px;display:grid;gap:6px}
 .tsteps li{display:flex;gap:8px;align-items:baseline}
 .tbadge{flex:none;display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;background:var(--accent);color:var(--accent-ink);font:11px/1 var(--display)}
+.cchart{margin:0 0 18px}
+.cchart svg{display:block;width:100%;height:220px;overflow:visible}
+.cchart svg text{font:12px var(--body);fill:var(--muted)}
+.cchart svg text.tot{fill:var(--ink)}
+.clegend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:4px 0 6px;font-size:13.5px;list-style:none;padding:0}
+.clegend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.cchart details{font-size:13.5px}
+.ctable{border-collapse:collapse;font-variant-numeric:tabular-nums;margin-top:6px}
+.ctable th,.ctable td{padding:4px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.ctable th:first-child,.ctable td:first-child{text-align:left}
+:root{--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;--s8:#e34948}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767}}
+:root[data-theme="dark"]{--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767}
 .pvtip{position:fixed;z-index:5;pointer-events:none;background:var(--ink);color:var(--bg);font-size:13px;line-height:1.35;padding:6px 8px;border-radius:3px;max-width:260px}
 
 .rail{display:grid;gap:14px;min-width:0}
@@ -269,6 +282,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
           <button type="button" role="tab" id="t-plan" aria-selected="false" aria-controls="p-plan">Plan board</button>
           <button type="button" role="tab" id="t-depts" aria-selected="false" aria-controls="p-depts">Department boards</button>
           <button type="button" role="tab" id="t-rewards" aria-selected="false" aria-controls="p-rewards">Improvement of the month</button>
+          <button type="button" role="tab" id="t-costs" aria-selected="false" aria-controls="p-costs">Costs</button>
           <span class="chip" id="ledgerChip">Sample</span>
         </div>
         <p class="lnote" id="ledgerNote"></p>
@@ -309,6 +323,16 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <div role="tabpanel" id="p-plan" aria-labelledby="t-plan" class="lanes" hidden></div>
         <div role="tabpanel" id="p-depts" aria-labelledby="t-depts" class="dboards" hidden></div>
         <div role="tabpanel" id="p-rewards" aria-labelledby="t-rewards" hidden></div>
+        <div role="tabpanel" id="p-costs" aria-labelledby="t-costs" hidden>
+          <div class="pvbar">
+            <div class="seg" role="group" aria-label="Period"><span class="lbl">Per</span>
+              <button type="button" data-unit="day" aria-pressed="true">Day</button><button type="button" data-unit="week" aria-pressed="false">Week</button><button type="button" data-unit="month" aria-pressed="false">Month</button></div>
+            <div class="seg" role="group" aria-label="Split by"><span class="lbl">Split by</span>
+              <button type="button" data-split="model" aria-pressed="true">Model</button><button type="button" data-split="group" aria-pressed="false">Department or use</button></div>
+          </div>
+          <div id="costCharts"></div>
+          <p class="lnote" id="costNote"></p>
+        </div>
       </section>
     </div>
 
@@ -690,11 +714,11 @@ const SAMPLE_LEDGER = {sample:true, cards:[
 let tab = "status";
 function showTab(name, scroll){
   tab = name;
-  for(const n of ["status","plan","depts","rewards"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
-  renderBoards();
+  for(const n of ["status","plan","depts","rewards","costs"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
+  renderBoards(); if(name === "costs") renderCosts();
   if(scroll) document.getElementById("boards").scrollIntoView({behavior: reduce ? "auto" : "smooth", block:"start"});
 }
-for(const n of ["status","plan","depts","rewards"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
+for(const n of ["status","plan","depts","rewards","costs"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
 const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
 const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
 function renderBoards(){
@@ -851,7 +875,7 @@ function renderPivot(){
   renderTrend(P);
   if(tab === "status"){ const chip = document.getElementById("ledgerChip"); chip.textContent = P.sample ? "Sample" : "Live"; chip.className = "chip " + (P.sample ? "sample" : "live"); }
   document.getElementById("pvUpdated").textContent = P.sample || !P.updated ? "" : `Figures updated ${new Date(P.updated).toLocaleString()}.`;
-  document.getElementById("ledgerNote").hidden = tab === "status";
+  document.getElementById("ledgerNote").hidden = tab === "status" || tab === "costs";
   // tiles
   const o = (P.overall || {})[last], op = prev && P.overall[prev];
   const realLast = P.real && Object.keys(P.real).sort().pop(), realN = realLast ? Object.values(P.real[realLast]).reduce((t, c) => t + Object.values(c).reduce((a, b) => a + b, 0), 0) : 0;
@@ -1141,6 +1165,69 @@ $("refreshBtn").addEventListener("click", async () => {
   catch(e){ renderRefresh(); $("refreshMsg").className = "oops"; $("refreshMsg").textContent = writeError(e); }
 });
 
+/* costs: stacked bars per day / week / month, split by model or by department (tools/ops_costs.py) */
+const cost = {unit: "day", split: "model"};
+const costTip = document.createElement("div"); costTip.className = "pvtip"; costTip.hidden = true; document.body.append(costTip);
+const usd = v => v >= 100 ? "$" + Math.round(v) : v >= 1 ? "$" + v.toFixed(2) : v > 0 ? "$" + v.toFixed(3) : "$0";
+const pLabel = (u, k) => u === "day" ? new Date(k + "T12:00").toLocaleDateString(undefined, {day:"numeric", month:"short"})
+  : u === "month" ? new Date(k + "-15T12:00").toLocaleDateString(undefined, {month:"short", year:"2-digit"}) : "Wk " + k.split("-W")[1];
+function costChart(title, rows, note){
+  const box = el("section", "cchart"), keyOf = r => r[cost.split] || {};
+  // fixed colour per series: biggest first over the shown range; past 7 the rest fold into Other
+  const tot = {}; for(const r of rows) for(const [k, v] of Object.entries(keyOf(r))) tot[k] = (tot[k] || 0) + v;
+  let series = Object.keys(tot).sort((a, b) => tot[b] - tot[a]);
+  const fold = series.length > 8 ? series.slice(7) : [];
+  if(fold.length) series = [...series.slice(0, 7), "Other"];
+  const val = (r, k) => k === "Other" ? fold.reduce((t, f) => t + (keyOf(r)[f] || 0), 0) : keyOf(r)[k] || 0;
+  const sum = r => series.reduce((t, k) => t + val(r, k), 0), all = rows.reduce((t, r) => t + sum(r), 0);
+  box.append(el("h3", "pvh", `${title}: ${usd(all)} over these ${rows.length} ${cost.unit}s`), el("p", "small", note));
+  if(!all){ box.append(el("p", "empty", "Nothing spent in this range.")); return box; }
+  const lg = el("ul", "clegend");
+  series.forEach((k, i) => { const li = el("li"); const sw = el("i"); sw.style.background = `var(--s${i + 1})`; li.append(sw, k); lg.append(li); });
+  if(series.length > 1) box.append(lg);
+  const W = 640, H = 220, L = 46, B = 22, T = 16, max = Math.max(...rows.map(sum)) || 1;
+  const NS = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(NS, t); for(const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = mk("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `${title}, stacked bars per ${cost.unit}`});
+  const y = v => H - B - (H - B - T) * v / max;
+  for(const f of [0, .5, 1]){ svg.append(mk("line", {x1: L, x2: W, y1: y(max * f), y2: y(max * f), stroke: "var(--line)", "stroke-width": 1}));
+    const t = mk("text", {x: L - 6, y: y(max * f) + 4, "text-anchor": "end"}); t.textContent = usd(max * f); svg.append(t); }
+  const step = (W - L) / rows.length, bw = Math.min(36, step * .62), every = Math.ceil(rows.length / 8);
+  rows.forEach((r, i) => {
+    const x = L + i * step + (step - bw) / 2; let base = 0;
+    series.forEach((k, j) => {
+      const v = val(r, k); if(!v) return;
+      const top = base + v, y0 = y(base), y1 = y(top), h = Math.max(1, y0 - y1 - (base ? 2 : 0));   // 2px surface gap between segments
+      const seg = mk("rect", {x, y: y1, width: bw, height: h, rx: top === sum(r) ? 4 : 0, fill: `var(--s${j + 1})`});
+      seg.addEventListener("pointermove", e => { costTip.hidden = false; costTip.textContent = `${pLabel(cost.unit, r.period)} · ${k}: ${usd(v)} (of ${usd(sum(r))})`;
+        costTip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; costTip.style.top = (e.clientY + 14) + "px"; });
+      seg.addEventListener("pointerleave", () => { costTip.hidden = true; });
+      svg.append(seg); base = top;
+    });
+    if(sum(r) >= max * .12){ const t = mk("text", {x: x + bw / 2, y: y(sum(r)) - 4, "text-anchor": "middle", class: "tot"}); t.textContent = usd(sum(r)); svg.append(t); }
+    if(i % every === 0 || i === rows.length - 1){ const t = mk("text", {x: x + bw / 2, y: H - 6, "text-anchor": "middle"}); t.textContent = pLabel(cost.unit, r.period); svg.append(t); }
+  });
+  box.append(svg);
+  const det = el("details"), tb = el("table", "ctable"), hr = el("tr");
+  det.append(el("summary", null, "Show as a table"));
+  hr.append(el("th", null, cost.unit), ...series.map(k => el("th", null, k)), el("th", null, "Total")); tb.append(hr);
+  for(const r of rows){ const tr = el("tr"); tr.append(el("td", null, pLabel(cost.unit, r.period)), ...series.map(k => el("td", null, usd(val(r, k)))), el("td", null, usd(sum(r)))); tb.append(tr); }
+  det.append(tb); box.append(det);
+  return box;
+}
+function renderCosts(){
+  for(const b of document.querySelectorAll("#p-costs [data-unit]")) b.setAttribute("aria-pressed", String(b.dataset.unit === cost.unit));
+  for(const b of document.querySelectorAll("#p-costs [data-split]")) b.setAttribute("aria-pressed", String(b.dataset.split === cost.split));
+  const c = live.costs, out = $("costCharts"), chip = $("ledgerChip");
+  if(tab === "costs"){ chip.textContent = c ? "Live" : "Sample"; chip.className = "chip " + (c ? "live" : "sample"); }
+  if(!c){ out.replaceChildren(el("p", "empty", live.available ? "The first cost figures arrive with the office's next hourly check." : "Costs show in the live office.")); $("costNote").textContent = ""; return; }
+  out.replaceChildren(
+    costChart("Claude (agents and sessions)", c.claude[cost.unit], "Tokens at API list prices. The office runs on a Claude plan, so this is what the same work would cost on the API, not a bill."),
+    costChart("AI provider API (test lab)", c.api[cost.unit], "The lab's chatbot, whole-manual baseline and grader calls. The live chatbot does not log tokens yet; its spend is in the provider's console."));
+  $("costNote").textContent = `Updated ${fmtWhen(new Date(c.updated))}.`;
+}
+for(const b of document.querySelectorAll("#p-costs [data-unit]")) b.addEventListener("click", () => { cost.unit = b.dataset.unit; renderCosts(); });
+for(const b of document.querySelectorAll("#p-costs [data-split]")) b.addEventListener("click", () => { cost.split = b.dataset.split; renderCosts(); });
+
 /* the CEO's power button: off = every agent sleeps after the work under way (tools/ceo_inbox.py, office_next.py) */
 let powerArmed = false;
 const POWER_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="vertical-align:-3px;margin-right:6px"><path d="M12 3v9" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/><path d="M7.1 6.3a8 8 0 1 0 9.8 0" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" fill="none"/></svg>';
@@ -1316,6 +1403,7 @@ setInterval(sampleStep, 9000);
     }, () => {});
     db.doc("board/ceo").onSnapshot(d => { live.waiting = (d.exists && d.data().waiting) || []; renderTray(); }, () => {});
     db.doc("ledger/current").onSnapshot(d => { live.ledger = d.exists ? d.data() : null; renderBoards(); }, () => {});
+    db.doc("costs/current").onSnapshot(d => { live.costs = d.exists ? d.data() : null; renderCosts(); }, () => {});
     db.doc("pivot/current").onSnapshot(d => { live.pivot = d.exists ? d.data() : null; renderPivot(); }, () => {});
   } catch(e) { live.available = false; }
   decideMode();
