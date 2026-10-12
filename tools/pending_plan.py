@@ -6,7 +6,7 @@
 Rewrites one block between the office-plan markers near the top of PENDING.md: every open office
 item with its stage and next step, and what finished or was turned down in the last 30 days. Each
 "- For the rejected list: ..." line in a decision is added once to "Rejected - do not redo without
-new evidence". Then commits PENDING.md alone. Items that came from Security show only as "Security item
+new evidence". Then commits PENDING.md alone. Items that came from Security or are assigned to it show only as "Security item
 <id>, details in the office": the repository is public.
 
 PENDING.md is also edited by hand and by other sessions (its header, CLAUDE.md P1): when it has
@@ -154,7 +154,8 @@ def selftest():
           "\n## D-20261010-03 | Rate limits trust a forged header\n- Source: inbox/security/20261010-forge.md\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
           "## D-20261010-04 | Uploads stored before sign-in\n- Source: inbox/security/20261010-upload.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Uploads stored before sign-in: accepted risk.\n"
           "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/dev/D-20261010-01.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Test lines in the live log: later.\n"
-          "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/security/20261010-log.md\n- From: audit\n- Verdict: REJECT\n")
+          "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/security/20261010-log.md\n- From: audit\n- Verdict: REJECT\n"
+          "\n## D-20261010-06 | Header-less callers skip the gate\n- Source: inbox/dev/D-20261010-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
         w(os.path.join(ops, "inbox", "audit", "20261010-cache.md"), "# Cache repeated answers\n")
         w(os.path.join(ops, "inbox", "security", "20261010-chunked-cap.md"), "# The size cap misses chunked uploads\n")
         w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n## The plan\r\n\r\n"
@@ -172,7 +173,8 @@ def selftest():
         assert "| security/20261010 | Security item security/20261010, details in the office |" in t, t
         assert "D-20261010-04 Security item D-20261010-04, details in the office (rejected)" in t, t
         assert "D-20261010-05 Security item D-20261010-05, details in the office (rejected)" in t, t
-        for leak in ("forged", "chunked", "Uploads stored", "sign-in", "live log"):
+        assert "| D-20261010-06 | Security item D-20261010-06, details in the office |" in t, t
+        for leak in ("Header-less", "forged", "chunked", "Uploads stored", "sign-in", "live log"):
             assert leak not in t, (leak, t)
         assert "- Old idea.\r\n- A bigger reranker: no gain on 40 blind questions. (D-20261010-02, product owner)\r\n\r\n### Waiting" in t, t
         assert run(ops, repo, today) == "UNCHANGED", "a second run changes nothing"
