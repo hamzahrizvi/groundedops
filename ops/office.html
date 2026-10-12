@@ -232,6 +232,9 @@ button{font:inherit;color:inherit}
 .btn:disabled{opacity:.55;cursor:default;transform:none}
 dialog.pop{border:2px solid var(--ink);border-radius:4px;background:var(--surface);color:var(--ink);padding:0;width:min(580px,calc(100vw - 32px));max-height:min(88vh,780px);box-shadow:6px 6px 0 var(--ink)}
 dialog.pop[open]{display:flex;flex-direction:column}
+dialog.pop.pipe{width:calc(100vw - 32px);max-width:none;height:calc(100vh - 32px);max-height:none}
+.pipe iframe{flex:1;border:0;width:100%;min-height:0;background:var(--bg)}
+.trace .btn{justify-self:start;margin-top:8px}
 dialog.pop::backdrop{background:rgba(10,15,20,.55)}
 .pophead{display:flex;justify-content:space-between;gap:12px;align-items:start;padding:14px 16px 10px;border-bottom:1px solid var(--line)}
 .pophead h2{font-size:17px;letter-spacing:.03em}
@@ -379,6 +382,10 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
   </section>
   <p class="foot">Customer, the test lab, the product owner and Dev work every week; Audit and Security joined on 8 October, R&amp;D and Marketing on 10 October (once a month each). Everyone works when the Claude usage budget allows. Decide from "Waiting for you", or ask the product owner in the chat. Your decisions reach the office at its next hourly check.</p>
 
+  <dialog class="pop pipe" id="pipe" aria-labelledby="pipeH">
+    <div class="pophead"><h2 id="pipeH">Pipeline</h2><button class="x" type="button" id="pipeX">Close</button></div>
+    <iframe id="pipeFrame" title="Where this question went through the pipeline"></iframe>
+  </dialog>
   <dialog class="pop" id="pop" aria-labelledby="popH">
     <div class="pophead"><h2 id="popH"></h2><button class="x" type="button" id="popX">Close</button></div>
     <div class="popbody" id="popBody"></div>
@@ -830,7 +837,7 @@ function openReview(g, run, pick, title){
     box.append(head, el("p", "qq", c.q));
     if(c.answer){ const d = el("details"); d.append(el("summary", null, "The bot's answer"), el("p", "ans", c.answer)); box.append(d); }
     if(c.why) box.append(el("p", "why", "Grader: " + c.why));
-    box.append(traceBox(c.trace));
+    box.append(traceBox(c.trace, c, lab));
     (panes[cls] || panes.warn).append(box);
     const sent = live.inbox.find(r => r.id === c.id && r.choice === "note");
     if(sent) box.append(el("p", "sent", `You commented: "${sent.note}"` + (sent.status === "new" ? " (reaches the product owner at the next hourly check)" : "")));
@@ -857,10 +864,13 @@ function openReview(g, run, pick, title){
   openPop(`${title || groupName(pv.dim, g)}: ${runLabel(run)}`, nodes);
 }
 /* where the bot's answer went (src/pipeline_trace.py, kept by blind_eval.py): the full stage list, or just how it ended for older runs */
-function traceBox(t){
+function traceBox(t, c, lab){
   const d = el("details", "trace");
   if(!t){ d.append(el("summary", null, "Where it went: not recorded for this run")); return d; }
   d.append(el("summary", null, `Where it went: ended at "${t.exit || "unknown"}"` + (t.ms != null ? `, ${(t.ms / 1000).toFixed(1)} s` : "")));
+  const go = el("button", "btn", "Open pipeline"); go.type = "button";
+  go.addEventListener("click", () => openPipeline(Object.assign({q: c.q, verdict: lab}, t)));
+  d.append(go);
   if(t.because) d.append(el("p", "why", "Because: " + t.because));
   if(t.stages){
     const ol = el("ol");
@@ -874,6 +884,14 @@ function traceBox(t){
     if(tm.length) d.append(el("p", "why", "Time spent: " + tm.map(([k, v]) => `${k.replace(/_/g, " ")} ${v.toFixed(1)} s`).join(", ")));
   }
   return d;
+}
+/* the pipeline map (tools/pipeline_map.html, published beside this page) with this question's path lit;
+   loaded only when asked for, emptied on close */
+function openPipeline(t){
+  const f = $("pipeFrame");
+  f.src = "pipeline_map.html#trace=" + encodeURIComponent(JSON.stringify(t));
+  $("pipeH").textContent = "Pipeline: " + (t.q || "").slice(0, 90);
+  $("pipe").showModal();
 }
 const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
 const pvTip = document.getElementById("pvTip");
@@ -1152,6 +1170,8 @@ function openPop(title, nodes, key){
   if(!pop.open) pop.showModal();
 }
 $("popX").addEventListener("click", () => pop.close());
+$("pipeX").addEventListener("click", () => $("pipe").close());
+$("pipe").addEventListener("close", () => { if(!$("pipe").open) $("pipeFrame").removeAttribute("src"); });
 pop.addEventListener("close", () => { if(popKey) store.set("hq.seenNeeds", popKey); popKey = null; });
 pop.addEventListener("click", e => { if(e.target === pop) pop.close(); });
 const el = (tag, cls, text) => { const e = document.createElement(tag); if(cls) e.className = cls; if(text != null) e.textContent = text; return e; };

@@ -160,6 +160,9 @@ code{background:var(--code);padding:1px 5px;border-radius:5px;font-size:12.5px}
 .zoom{margin-left:auto;display:flex;gap:6px;align-items:center}
 .zoom button{width:28px;height:26px;border-radius:7px;border:1px solid var(--line);
   background:var(--bg);cursor:pointer;color:var(--muted);font-weight:700}
+/* a recorded question: no live tracer (it needs a backend this page cannot reach); keep the status line */
+body.embedded .tracebar>:not(#status){display:none}
+body.embedded .shell{height:calc(100vh - 96px)}
 @media print{
   body{overflow:visible}header,.tracebar,.legend,aside{display:none}
   .shell{display:block;height:auto}#viewport{overflow:visible}
@@ -899,9 +902,34 @@ const nSteps=PHASES.reduce((a,p)=>a+p.steps.length,0);
 const nExits=Object.values(byId).filter(o=>o.exit).length;
 $("stat-steps").textContent=`${nSteps} steps · ${PHASES.length} phases · ${nExits} ways out`;
 
+/* ═══════════════ one recorded question (the office page's "Open pipeline") ═══
+   #trace=<URI-encoded JSON> {q, verdict, exit, exit_id, because, ms, stages:[[ms,label,note,id]]}:
+   the steps a graded test question actually ran (tools/ops_pivot.py trace()), lit
+   without asking any backend. Older runs carry only exit_id: the ending is lit, the
+   steps before it were not recorded. */
+function showRecorded(t){
+  document.body.classList.add("embedded");
+  const st=(t.stages||[]).filter(s=>s[3]).map(s=>({id:s[3]}));
+  const on=st.length?pathFromServer({stages:st}):new Set(SERVER_TO_MAP[t.exit_id]||[]);
+  paint(on);
+  $("status").innerHTML=`ended at <b>${esc(t.exit||"unknown")}</b>${t.because?" — "+esc(t.because):""}`;
+  panel.innerHTML=`<h2>Where this question went</h2><div class="where">${esc(t.q||"")}</div>
+    ${t.verdict?`<p class="lead">Graded: ${esc(t.verdict)}</p>`:""}
+    <div class="why"><b>Ended at</b>${esc(t.exit||"unknown")}${t.because?"<br>"+esc(t.because):""}</div>
+    ${st.length?`<div class="kv">${t.stages.map(([ms,l,n])=>
+        `<span>${ms} ms</span><span>${esc(l)}${n?" — "+esc(n):""}</span>`).join("")}</div>`
+      :`<p>This run kept only how the answer ended, so the steps before it are not lit. Runs from 12 Oct keep every step.</p>`}
+    <p style="font-size:12.5px;color:var(--muted)">Lit = the steps it took. Click any step for what it does.</p>`;
+  const end=(SERVER_TO_MAP[t.exit_id]||[])[0];   // scroll to where it ended
+  if(byId[end]) setTimeout(()=>byId[end].el.scrollIntoView({block:"center"}),300);
+}
+let recorded=null;
+try{ if(location.hash.startsWith("#trace=")) recorded=JSON.parse(decodeURIComponent(location.hash.slice(7))); }catch(e){ recorded=null; }
+
 addEventListener("load",fit);
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(fit,150);});
 fit(); select("entry");
+if(recorded) showRecorded(recorded);
 </script>
 </body>
 </html>

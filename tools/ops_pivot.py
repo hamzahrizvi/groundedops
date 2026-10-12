@@ -71,11 +71,13 @@ def trace(row, log, labels):
     p = (row or {}).get("pipeline")
     if p and p.get("stages"):
         ex = p.get("exit") or {}
-        return {"exit": ex.get("label"), "because": (ex.get("note") or "")[:200], "ms": p.get("ms"),
-                "stages": [[s.get("at_ms"), s.get("label"), (s.get("note") or "")[:160]] for s in p["stages"]]}
+        # ids are tools/pipeline_map.html's (its SERVER_TO_MAP), so the page's "Open pipeline" can light the path
+        return {"exit": ex.get("label"), "exit_id": ex.get("id"), "because": (ex.get("note") or "")[:200], "ms": p.get("ms"),
+                "stages": [[s.get("at_ms"), s.get("label"), (s.get("note") or "")[:160], s.get("id")] for s in p["stages"]]}
     if log:
         t = log.get("timing") or {}
-        return {"exit": labels.get(log.get("outcome"), log.get("outcome")), "ms": round((t.get("total_time") or 0) * 1000),
+        return {"exit": labels.get(log.get("outcome"), log.get("outcome")), "exit_id": log.get("outcome"),
+                "ms": round((t.get("total_time") or 0) * 1000),
                 "via": log.get("verified_by"), "verifier": log.get("verifier"), "sources": log.get("sources") or [],
                 "times": {k[:-5]: v for k, v in t.items() if k.endswith("_time") and k != "total_time" and v}}
     return None
@@ -438,7 +440,7 @@ def _selftest():
     full = {"pipeline": {"ms": 9, "exit": {"label": "Stopped", "note": "score 0.2"},
                          "stages": [{"at_ms": 1, "label": "Took the question", "note": None}]}}
     t = trace(full, {"outcome": "respond"}, {})
-    assert t["exit"] == "Stopped" and t["stages"] == [[1, "Took the question", ""]], t
+    assert t["exit"] == "Stopped" and t["stages"] == [[1, "Took the question", "", None]], t
     t = trace({}, {"outcome": "respond", "timing": {"total_time": 1.5, "llm_time": 0.5, "rerank_time": 0}}, {"respond": "Answered"})
     assert t["exit"] == "Answered" and t["ms"] == 1500 and t["times"] == {"llm": 0.5}, t
     assert trace({}, None, {}) is None
