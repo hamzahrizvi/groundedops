@@ -24,13 +24,16 @@ DEV="$(cd "$1" && pwd)" || exit 1
 RUN="$(cd "$2" && pwd)" || exit 1
 OUT="$3"; shift 3
 mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
+rm -f "$OUT/FAILED"   # an earlier attempt's (a cap stop is retried once the cap rises)
 export PYTHONIOENCODING=utf-8 HF_HUB_OFFLINE=1 GO_CODE="$DEV/src" GO_DATA="${GO_DATA:-$REPO/src}"
 # D-20261010-20: this gate's hidden siblings must not be readable in the live log Dev works beside
 if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$GO_DATA"/logs*.jsonl "$GO_DATA/faq_gaps.json" --cases "$@")"; then
   echo "hidden questions in the live log: $hits" > "$OUT/FAILED"; exit 1
 fi
 BE="${BE:-$REPO/tools/blind_eval.py}"
-log() { local f="$1"; shift; "$@" >> "$f" 2>&1 || { echo "failed: $*" > "$OUT/FAILED"; exit 1; }; }
+# exit 3 from blind_eval.py: the CEO's lab cap is reached (D-20261010-31); the gate fails closed and says so
+log() { local f="$1"; shift; "$@" >> "$f" 2>&1 && return
+  if [ $? -eq 3 ]; then echo "lab stopped at the cap" > "$OUT/FAILED"; else echo "failed: $*" > "$OUT/FAILED"; fi; exit 1; }
 # D-20261010-07: the branch's own commits (in neither the office nor the product checkout) touch nothing
 # under src/, so the bot cannot answer differently: PASS without asking it. Any git error runs the full gate.
 not=(); for c in "$REPO" "$GO_DATA"; do h="$(git -C "$c" rev-parse HEAD 2>/dev/null)" && git -C "$DEV" cat-file -e "$h^{commit}" 2>/dev/null && not+=("$h"); done

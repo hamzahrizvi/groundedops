@@ -5,7 +5,8 @@
 1. a branch whose own commits touch nothing under src/: office_only PASS, blind_eval never called (D-20261010-07);
 2. a branch touching src/, run answered on today's bot model: full gate, the stored before is used;
 3. the same branch, run answered on another bot model: the before is re-asked on the base code (D-20261010-09);
-4. the after pass is marked with the run's manuals/ (D-20261010-23).
+4. the after pass is marked with the run's manuals/ (D-20261010-23);
+5. blind_eval.py stopped at the lab cap (exit 3): FAILED says so and no gate.json is written (D-20261010-31).
 """
 import json
 import os
@@ -20,6 +21,8 @@ run, phase = sys.argv[1], sys.argv[2]
 tag = " manuals" if phase == "grade" and os.path.isdir(os.path.join(run, "manuals")) else ""
 open(os.environ["FAKE_LOG"], "a").write(phase + " " + os.path.basename(run) + tag + "\\n")
 p = os.path.join(run, "cases_state.json")
+if os.environ.get("FAKE_CAP") and phase != "models":
+    sys.exit(3)
 if phase == "models":
     same = os.environ["FAKE_SAME"] == "1"
     print(json.dumps({"run": ["deepseek-v4-flash" if same else "gpt-5-mini"], "lab": "deepseek-v4-flash", "same": same}))
@@ -55,12 +58,14 @@ def main():
     put(os.path.join(run, "manuals", "m.txt"), "[m.pdf p1] text\n")
     put(os.path.join(tmp, "fake_be.py"), FAKE)
 
-    def gate(name, same):
+    def gate(name, same, cap=""):
         out, calls = os.path.join(tmp, name), os.path.join(tmp, name + ".calls")
         e = {**env, "PY": fwd(sys.executable), "BE": fwd(os.path.join(tmp, "fake_be.py")),
-             "GO_DATA": fwd(os.path.join(base, "src")), "FAKE_LOG": calls, "FAKE_SAME": same}
+             "GO_DATA": fwd(os.path.join(base, "src")), "FAKE_LOG": calls, "FAKE_SAME": same, "FAKE_CAP": cap}
         r = subprocess.run([os.environ.get("GATE_BASH") or shutil.which("bash"), fwd(os.path.join(HERE, "gate_run.sh")),
                             fwd(dev), fwd(run), fwd(out)], env=e, capture_output=True, text=True)
+        if cap:
+            return open(os.path.join(out, "FAILED")).read().strip(), os.path.exists(os.path.join(out, "gate.json"))
         assert not os.path.exists(os.path.join(out, "FAILED")), (r.stdout, r.stderr)
         seen = open(calls).read().splitlines() if os.path.exists(calls) else []
         return json.load(open(os.path.join(out, "gate.json"))), seen, out
@@ -82,6 +87,7 @@ def main():
     after = json.load(open(os.path.join(out, "after", "cases_state.json")))
     assert (after["sys_before"]["c1"]["answer"], after["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n")  # before on base code, after on the branch, one marking pass
     assert not os.path.exists(os.path.join(out, "base_code"))
+    assert gate("g4", "1", cap="1") == ("lab stopped at the cap", False)   # fails closed: no PASS without a measurement
     git(base, "worktree", "remove", "--force", dev)
     shutil.rmtree(tmp, ignore_errors=True)
     print("selftest ok")
