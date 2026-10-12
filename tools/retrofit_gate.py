@@ -1,7 +1,7 @@
 """Retrofit gate: does a fix generalise, or does it only fix the question that prompted it?
 
   python tools/retrofit_gate.py --before A_state.json --after B_state.json \
-      [--siblings S_state.json ...] [--system sys_normal] [--noise 3] [--regraded sys_before]
+      [--siblings S_state.json ...] [--system sys_normal] [--noise 3] [--regraded sys_before] [--models M.json] [--manuals DIR]
   python tools/retrofit_gate.py --leakcheck DIR_OR_FILE... --cases SIBLINGS.json...
   python tools/retrofit_gate.py --selftest
 
@@ -139,11 +139,14 @@ if __name__ == "__main__":
     ap.add_argument("--regraded", default=None,
                     help="system key in --after holding the before answers re-graded in the same pass, e.g. sys_before")
     ap.add_argument("--models")   # blind_eval.py <run> models output (D-20261010-09)
+    ap.add_argument("--manuals")   # the manuals/ the one marking pass read (D-20261010-23)
     o = ap.parse_args()
     load = lambda p: json.load(open(p, encoding="utf-8"))
     res = gate(load(o.before), load(o.after), [load(p) for p in o.siblings], o.system, o.noise, o.regraded)
     if o.models:   # which before answers the gate marked, and both bot models
         res["models"] = load(o.models)
         res["before"] = "stored" if res["models"]["same"] else "re-asked"
+    if o.manuals is not None:   # before and after are marked in one pass, so with the same pages
+        res["manuals"] = sorted(os.listdir(o.manuals)) if os.path.isdir(o.manuals) else []
     print(json.dumps(res, indent=1))
     sys.exit(0 if res["verdict"] == "PASS" else 1)

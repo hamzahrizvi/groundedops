@@ -4,7 +4,8 @@
 
 1. a branch whose own commits touch nothing under src/: office_only PASS, blind_eval never called (D-20261010-07);
 2. a branch touching src/, run answered on today's bot model: full gate, the stored before is used;
-3. the same branch, run answered on another bot model: the before is re-asked on the base code (D-20261010-09).
+3. the same branch, run answered on another bot model: the before is re-asked on the base code (D-20261010-09);
+4. the after pass is marked with the run's manuals/ (D-20261010-23).
 """
 import json
 import os
@@ -16,7 +17,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAKE = '''import json, os, sys
 run, phase = sys.argv[1], sys.argv[2]
-open(os.environ["FAKE_LOG"], "a").write(phase + " " + os.path.basename(run) + "\\n")
+tag = " manuals" if phase == "grade" and os.path.isdir(os.path.join(run, "manuals")) else ""
+open(os.environ["FAKE_LOG"], "a").write(phase + " " + os.path.basename(run) + tag + "\\n")
 p = os.path.join(run, "cases_state.json")
 if phase == "models":
     same = os.environ["FAKE_SAME"] == "1"
@@ -50,6 +52,7 @@ def main():
     put(os.path.join(run, "cases.json"), json.dumps({"cases": [{"id": "c1"}]}))
     put(os.path.join(run, "cases_state.json"), json.dumps({"sys_normal": {"c1": {"answer": "stored"}},
                                                            "grades": {"c1": {"sys_normal": {"score": 3}}}}))
+    put(os.path.join(run, "manuals", "m.txt"), "[m.pdf p1] text\n")
     put(os.path.join(tmp, "fake_be.py"), FAKE)
 
     def gate(name, same):
@@ -69,12 +72,13 @@ def main():
     put(os.path.join(dev, "src", "a.py"), "x = 2\n"); git(dev, "commit", "-qam", "product change")
     g, seen, out = gate("g2", "1")
     assert "office_only" not in g and g["verdict"] == "PASS" and g["before"] == "stored", g
-    assert seen == ["remark run", "models run", "reset after", "system after", "grade after"], seen
+    assert seen == ["remark run", "models run", "reset after", "system after", "grade after manuals"], seen
+    assert g["manuals"] == ["m.txt"], g
     assert json.load(open(os.path.join(out, "after", "cases_state.json")))["sys_before"]["c1"]["answer"] == "stored"
     g, seen, out = gate("g3", "0")
     assert g["before"] == "re-asked" and g["models"]["run"] == ["gpt-5-mini"], g
     assert seen == ["remark run", "models run", "reset before", "system before",
-                    "reset after", "system after", "grade after"], seen
+                    "reset after", "system after", "grade after manuals"], seen
     after = json.load(open(os.path.join(out, "after", "cases_state.json")))
     assert (after["sys_before"]["c1"]["answer"], after["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n")  # before on base code, after on the branch, one marking pass
     assert not os.path.exists(os.path.join(out, "base_code"))

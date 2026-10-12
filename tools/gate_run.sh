@@ -16,6 +16,7 @@
 # A branch whose own commits touch nothing under src/ gets an office_only PASS and the bot is
 # not asked (D-20261010-07). When the run's stored answers came from another bot model than the
 # lab's today, the before is re-asked on the branch's base code into <out_dir>/before (D-20261010-09).
+# The after pass gets the run's manuals/, the cited pages the run's grader had (D-20261010-23).
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
@@ -52,6 +53,7 @@ if ! grep -q '"same": true' "$OUT/models.json"; then
 fi
 
 cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/after/"
+if [ -d "$RUN/manuals" ]; then mkdir -p "$OUT/after/manuals" && cp "$RUN/manuals/"* "$OUT/after/manuals/"; fi   # D-20261010-23
 log "$OUT/gate.log" "$PY" "$BE" "$OUT/after" reset
 # the before answers (stored, or re-asked above) ride along as sys_before, graded with after in one pass (D-20261010-05)
 log "$OUT/gate.log" "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8")); s["sys_before"]=json.load(open(sys.argv[1],encoding="utf-8"))["sys_normal"]; json.dump(s,open(sys.argv[2],"w",encoding="utf-8"),indent=1,ensure_ascii=False)' "$BEFORE" "$OUT/after/cases_state.json"
@@ -75,6 +77,6 @@ if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$
 fi
 
 "$PY" "$REPO/tools/retrofit_gate.py" --before "$RUN/cases_state.json" \
-  --after "$OUT/after/cases_state.json" --regraded sys_before --models "$OUT/models.json" --siblings "${SIBS[@]}" > "$OUT/gate.json"
+  --after "$OUT/after/cases_state.json" --regraded sys_before --models "$OUT/models.json" --manuals "$OUT/after/manuals" --siblings "${SIBS[@]}" > "$OUT/gate.json"
 cat "$OUT/gate.json"
 "$PY" "$REPO/tools/gate_rerun.py" "$DEV" "$RUN" "$OUT"   # 1-2 case "became wrong": re-ask 6x branch vs base
