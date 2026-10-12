@@ -30,6 +30,7 @@ import sys
 from collections import Counter, defaultdict
 
 DIMS = ("category", "type", "product")
+REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens its questions
 KEEP_RUNS = 12       # ponytail: the page shows the last 12 runs; ops/runs keeps every run
 NOISE_PTS = 3.0      # the retrofit gate's noise rule: moves under 3 points are the bot's and the marker's own flicker
 VISITOR_FILES = ("widget_feedback.json", "real_questions.json", "real_categorised.json")  # D-20261010-22: visitor text in a run
@@ -50,6 +51,21 @@ def run_facts(run_dir):
         out.append({"id": c["id"], "q": c["q"], "product": c.get("product") or "none", "type": c["type"],
                     "category": c.get("category") or "uncategorised", "bot": g["sys_normal"]["score"],
                     "base": (g.get("baseline") or {}).get("score"), "verdict": g["sys_normal"].get("verdict", "")})
+    return out
+
+
+def review(run_dir):
+    """The run's questions with the bot's answer and the grader's reason, for the CEO's review pop-up."""
+    st = _load(os.path.join(run_dir, "cases_state.json"))
+    out = []
+    for f in run_facts(run_dir):
+        g = st.get("grades", {}).get(f["id"], {})
+        bot = next((k for k, v in (g.get("labels") or {}).items() if v == "sys_normal"), None)
+        why = str(g.get("why") or "")
+        if bot:   # the grader compares two unnamed answers; name them
+            other = "B" if bot == "A" else "A"   # whole words only: "1.50A" stays
+            why = re.sub(rf"\b{other}\b", "the whole-manual AI", re.sub(rf"\b{bot}\b", "the bot", why))
+        out.append(dict(f, answer=str((st.get("sys_normal") or {}).get(f["id"], {}).get("answer", ""))[:600], why=why[:400]))
     return out
 
 
@@ -200,6 +216,7 @@ def build(ops, repo=None):
             "runs": names, "categories": _load(cats) if os.path.exists(cats) else {},
             "overall": overall, "blind": {k: dict(v) for k, v in blind.items()}, "real": real,
             "trend": trend(by_run, ends, merged_fixes(repo, ops) if repo else []),
+            "cases": {n: review(d) for d, n in list(zip(runs, names))[-REVIEW_RUNS:]},
             "latest": {"run": names[-1] if names else None,
                        "cases": [dict(f, q=f["q"][:160]) for f in latest]}}
 
@@ -402,4 +419,4 @@ if __name__ == "__main__":
     if o.export_real:
         export_real(o.export_real, o.src, o.days)
     else:
-        json.dump(build(o.ops, o.repo), sys.stdout, indent=1, ensure_ascii=False)
+        json.dump(build(o.ops, o.repo), sys.stdout, indent=1)   # ASCII escapes: the dispatcher redirects stdout on a cp1252 console

@@ -134,6 +134,13 @@ button{font:inherit;color:inherit}
 .pivot td{padding:7px 9px;text-align:right;border-radius:3px;white-space:nowrap}
 .pivot td.g{text-align:left;white-space:normal;min-width:150px;cursor:pointer}
 .pivot td.g:hover{text-decoration:underline}
+.pivot td.cell{cursor:pointer}
+.pivot td.cell:hover{outline:2px solid var(--accent);outline-offset:-2px}
+.rq{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:6px}
+.rq .qh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.rq .qq{font-weight:700}
+.rq .ans{white-space:pre-wrap;background:var(--bg);padding:8px 10px;border-radius:3px;font-size:14px;margin:0}
+.rq .why{font-size:13.5px;color:var(--muted);margin:0}
 .pivot td.g .m{display:block;font-size:12.5px;color:var(--muted)}
 .pivot tr.drill td{background:var(--bg);text-align:left;white-space:normal}
 .drill ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
@@ -797,6 +804,36 @@ const METRICS = {
   declined: {val:a => a.declined, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx : 0), legend:"Said \"not in the manual\" when the manual had the answer. Darker = more."},
   n: {val:a => a.n, fmt:v => v, worstFirst:"desc", shade:(v, mx) => mix("--seq", mx ? v/mx*.6 : 0), legend:"How many of the week's test questions fell in each group."}
 };
+/* the CEO reviews one group's questions in one run: the bot's answer, the grade, a comment for the product owner */
+function openReview(g, run){
+  const P = live.pivot || SAMPLE_PIVOT, cases = (((P.cases || {})[run]) || []).filter(c => c[pv.dim] === g);
+  const nodes = [el("p", "small", `${cases.length} questions in ${runLabel(run)}, weakest first. Comments go to the product owner's next triage as your note.`)];
+  if(!cases.length) nodes.push(el("p", "empty", "The questions behind these figures appear once the live figures are in."));
+  for(const c of cases.sort((x, y) => x.bot - y.bot)){
+    const box = el("div", "rq"), head = el("div", "qh"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
+    head.append(el("span", "vpill " + cls, lab), el("span", "small", `${c.product} · ${groupName("type", c.type)} · bot ${c.bot}/3` + (c.base != null ? `, whole-manual AI ${c.base}/3` : "")));
+    box.append(head, el("p", "qq", c.q));
+    if(c.answer){ const d = el("details"); d.append(el("summary", null, "The bot's answer"), el("p", "ans", c.answer)); box.append(d); }
+    if(c.why) box.append(el("p", "why", "Grader: " + c.why));
+    const sent = live.inbox.find(r => r.id === c.id && r.choice === "note");
+    if(sent) box.append(el("p", "sent", `You commented: "${sent.note}"` + (sent.status === "new" ? " (reaches the product owner at the next hourly check)" : "")));
+    else if(live.available){
+      const f = el("div", "field"), ta = el("textarea"), acts = el("div", "actions"), go = el("button", "btn", "Send comment"), msg = el("p", "small", "");
+      ta.rows = 2; ta.placeholder = "e.g. this answer is fine / the grader is wrong / ask it this way instead"; ta.setAttribute("aria-label", "Your comment on this question");
+      go.type = "button";
+      go.addEventListener("click", async () => {
+        const t = ta.value.trim(); if(!t) return;
+        go.disabled = true; msg.textContent = "Sending…";
+        try { await decide(c.id, "note", `On blind question ${c.id} (${runLabel(run)}, ${c.product}): "${c.q}". Bot scored ${c.bot}/3 (${lab}). My comment: ${t}`, c.q.slice(0, 80));
+          msg.className = "sent"; msg.textContent = "Sent. It reaches the product owner at the next hourly check."; ta.disabled = true; }
+        catch(e){ go.disabled = false; msg.className = "oops"; msg.textContent = writeError(e); }
+      });
+      acts.append(go); f.append(ta, acts, msg); box.append(f);
+    }
+    nodes.push(box);
+  }
+  openPop(`${groupName(pv.dim, g)}: ${runLabel(run)}`, nodes);
+}
 const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
 const pvTip = document.getElementById("pvTip");
 /* the adjusted trend (ops_pivot.py "trend"): one line, its noise band, and the fixes merged between runs */
@@ -889,7 +926,7 @@ function renderPivot(){
     ["Website questions", String(realN), realLast ? `week to ${runLabel(realLast)}` : "none logged yet"]];
   document.getElementById("pvTiles").replaceChildren(...tiles.map(([k, v, d]) => { const t = document.createElement("div"); t.className = "tile";
     t.innerHTML = '<div class="k"></div><div class="v"></div><div class="d"></div>'; t.children[0].textContent = k; t.children[1].textContent = v; t.children[2].textContent = d; return t; }));
-  document.getElementById("pvLegend").textContent = (P.sample ? "Sample figures, made up to show the layout; the real ones appear after Customer's first categorised run. " : "") + M.legend + " Worst first. Click a row to see its questions.";
+  document.getElementById("pvLegend").textContent = (P.sample ? "Sample figures, made up to show the layout; the real ones appear after Customer's first categorised run. " : "") + M.legend + " Worst first. Click a number to review those questions and comment on them.";
   for(const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.dim === pv.dim));
   // pivot rows
   const groups = Object.entries((P.blind || {})[pv.dim] || {});
@@ -905,29 +942,21 @@ function renderPivot(){
     const tr = document.createElement("tr"), tg = document.createElement("td"); tg.className = "g"; tg.tabIndex = 0;
     tg.textContent = groupName(pv.dim, g);
     if(pv.dim === "category" && P.categories && P.categories[g]){ const m = document.createElement("span"); m.className = "m"; m.textContent = P.categories[g]; tg.append(m); }
-    const toggle = () => { pv.open = pv.open === g ? null : g; renderPivot(); };
+    const toggle = () => openReview(g, last);
     tg.addEventListener("click", toggle); tg.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); } });
     tr.append(tg);
     for(const r of runs){
       const td = document.createElement("td"), a = byRun[r], v = a ? M.val(a) : null;
       td.textContent = v == null ? "–" : M.fmt(v);
-      if(v != null){ td.style.background = M.shade(v, mx);
+      if(v != null){ td.style.background = M.shade(v, mx); td.className = "cell"; td.tabIndex = 0;
+        td.addEventListener("click", () => { pvTip.hidden = true; openReview(g, r); });
+        td.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openReview(g, r); } });
         td.addEventListener("mouseenter", e => { pvTip.hidden = false; pvTip.textContent = `${groupName(pv.dim, g)}, ${runLabel(r)}: score ${a.bot_pct}%` + (a.base_pct != null ? ` (whole-manual AI ${a.base_pct}%)` : "") + `, ${a.n} questions, ${a.right} right, ${a.wrong} wrong, ${a.declined} said not found`; });
         td.addEventListener("mousemove", e => { pvTip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; pvTip.style.top = (e.clientY + 14) + "px"; });
         td.addEventListener("mouseleave", () => { pvTip.hidden = true; }); }
       tr.append(td);
     }
     const tn = document.createElement("td"); tn.textContent = byRun[last] ? byRun[last].n : 0; tr.append(tn); tbl.append(tr);
-    if(pv.open === g){
-      const dr = document.createElement("tr"), dd = document.createElement("td"); dr.className = "drill"; dd.colSpan = runs.length + 2;
-      const cases = ((P.latest || {}).cases || []).filter(c => c[pv.dim] === g);
-      if(!cases.length){ dd.textContent = "The questions behind these figures appear once the live figures are in."; }
-      else { const ul = document.createElement("ul");
-        for(const c of cases.sort((x, y) => x.bot - y.bot)){ const li = document.createElement("li"), p = document.createElement("span"), q = document.createElement("span"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
-          p.className = "vpill " + cls; p.textContent = lab; q.textContent = `${c.q}  (${c.product}, ${c.bot}/3)`; li.append(p, q); ul.append(li); }
-        const cap = document.createElement("div"); cap.className = "lbl"; cap.textContent = `${runLabel(P.latest.run)}: the test questions in this group, weakest first`; dd.append(cap, ul); }
-      dr.append(dd); tbl.append(dr);
-    }
   }
   // real website questions
   const rt = document.getElementById("pvReal"); rt.replaceChildren();
