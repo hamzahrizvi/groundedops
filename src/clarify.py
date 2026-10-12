@@ -59,10 +59,13 @@ just still again also very really thing things one ok hi hello thanks thank
 """.split())
 
 # A reference to a device the visitor has not named.
+_DEVICE_NOUNS = ("machine", "device", "unit", "validator", "hopper", "reader",
+                 "scanner", "camera", "screen", "product", "kit", "system",
+                 "thing", "box")
 _DEVICE_REF = re.compile(
     r"\bit\b|\bthis\b|\bthat\b"
-    r"|\b(?:my|the|our|this|that)\s+(?:machine|device|unit|validator|hopper|"
-    r"reader|scanner|camera|screen|product|kit|system|thing|box)\b", re.I)
+    r"|\b(?:my|the|our|this|that)\s+(?:" + "|".join(_DEVICE_NOUNS) + r")\b",
+    re.I)
 
 NEAR_TOP_MARGIN = 0.10
 MAX_PRODUCT_BUTTONS = 5
@@ -275,3 +278,187 @@ def candidate_products(query: str, vocab: dict | None = None) -> list[str]:
     for s in vocab.values():
         everything |= s
     return sorted(everything)
+
+
+# ── A vague fault report about a known product (D-20261009-10) ──────────
+# Every clarify branch above asks WHICH PRODUCT and is skipped once one is
+# picked (every widget chat). "nv4000 is showing an error" was answered
+# from whatever the top passages held: a misread flash-code table, a
+# reject table, a decline. Now a short first message is shown to the
+# model with the manual's own fault headings; when it reports a fault
+# without saying what the device shows, the reply lists the headings it
+# picked, with pages, and asks which matches. The model only chooses
+# among headings: the reply is composed here, nothing it writes is shown.
+
+SYMPTOM_MAX_WORDS = 4      # content words a vague complaint may carry
+MAX_CHECKLIST = 4          # headings offered back
+
+FAULT_HEADING = re.compile(
+    r"troubleshoot|\bfault|flash code|error|\bled\b|indicator|"
+    r"first level support|status bar|reject|diagnos|problem|issue", re.I)
+_COMMAND_HEADING = re.compile(r"\b0x[0-9a-f]+\b", re.I)   # command reference
+
+
+def vague_shape(query: str, product_words: set[str]) -> bool:
+    """True when a scoped first message is short enough to be a vague
+    complaint ("the light is flashing", "it's not working"): with the
+    product's own words, stop words and bare device nouns removed, no digit
+    (a code, count or value is a specific question) and at most
+    SYMPTOM_MAX_WORDS content words. Only bounds when checklist_for is
+    asked; the model decides."""
+    rest = [w for w in re.findall(r"[a-z0-9]+", (query or "").lower())
+            if w not in product_words and w not in _STOP
+            and w not in _DEVICE_NOUNS]
+    if any(ch.isdigit() for w in rest for ch in w):
+        return False
+    return len([w for w in rest if len(w) > 2]) <= SYMPTOM_MAX_WORDS
+
+
+def _heading(section: str) -> str:
+    """"A › B › C" -> "B: C", a repeated part dropped, leading symbols
+    (an emoji in a heading) stripped."""
+    parts: list[str] = []
+    for part in (section or "").split("›"):
+        part = re.sub(r"^\W+", "", part.strip()).strip()
+        if part and part not in parts:
+            parts.append(part)
+    return ": ".join(parts[-2:])
+
+
+def _has_product(chunk: dict, product: str) -> bool:
+    return product in [k.strip() for k in (chunk.get("product") or "").split(",")]
+
+
+def fault_sections(product: str, results: list[dict], limit: int = 20,
+                   chunks: list[dict] | None = None) -> list[dict]:
+    """The headings a checklist may offer: this turn's retrieved sections
+    first (rank order), then every heading of the product's manuals that
+    names a fault, error, LED or troubleshooting topic. One entry per
+    heading text, with the first page seen and its chunks."""
+    if chunks is None:
+        import db
+        import retrieval_db
+        _, chunks = retrieval_db._get_bm25_index(db.get_collection())
+    out: dict[str, dict] = {}
+
+    def add(c: dict, fault_only: bool) -> None:
+        sec = c.get("section") or ""
+        if not sec or _COMMAND_HEADING.search(sec):
+            return
+        if fault_only and not FAULT_HEADING.search(sec):
+            return
+        h = _heading(sec)
+        if not h:
+            return
+        if h not in out:
+            if len(out) >= limit:
+                return
+            out[h] = {"heading": h, "page": c.get("page"),
+                      "source": c.get("source"), "chunks": []}
+        out[h]["chunks"].append(c)
+
+    for c in results or []:
+        add(c, False)
+    for c in chunks or []:
+        if _has_product(c, product):
+            add(c, True)
+    return list(out.values())
+
+
+def checklist_for(query: str, product_name: str,
+                  sections: list[dict]) -> tuple[list[dict], str] | None:
+    """(the headings to offer, model) when the message reports a problem
+    without saying what the device is doing or showing, else None (answer
+    as before): the model said ANSWER, no model answered, the reply did
+    not parse, or it named no valid heading. Not under llm.judging(): a
+    pick of numbers, in front of every short first question."""
+    import llm
+    if not sections:
+        return None
+    listing = "\n".join(f"{i}. {s['heading']}" for i, s in enumerate(sections, 1))
+    msg = " ".join((query or "").split())[:300].replace('"', "'")
+    prompt = (
+        f"A customer wrote to the support assistant for the "
+        f"{product_name or 'product'}.\n"
+        f'Customer message: "{msg}"\n\n'
+        "Headings from the product's manual:\n" + listing + "\n\n"
+        "Does the message report a problem, fault or error WITHOUT saying "
+        "what the device is doing or showing (no light, colour, flash count, "
+        "code, message, sound, part, screen content or step named), so the "
+        "right answer depends on a detail the customer has not given?\n"
+        f"If so, reply CHECK and the numbers of up to {MAX_CHECKLIST} headings "
+        "the customer should look at to find which fault it is, most useful "
+        "first, for example: CHECK 3,1\n"
+        "Otherwise (the message asks something the manual answers as it "
+        "stands, names a symptom or code, or asks how to do something) reply "
+        "ANSWER.\nWhen in doubt, reply ANSWER. Reply with nothing else.")
+    try:
+        out = llm.generate_with_fallback("fast", prompt)
+    except Exception:
+        return None
+    if not out or out.get("provider") in (None, "none"):
+        return None
+    reply = (out.get("text") or "").strip()
+    logging.getLogger(__name__).info("checklist_for %r -> %r", msg[:60], reply[:60])
+    m = re.match(r"[\W_]*CHECK\W*([\d,\s]+)", reply, re.I)
+    if not m:
+        return None
+    chosen: list[dict] = []
+    for n in re.findall(r"\d+", m.group(1)):
+        i = int(n) - 1
+        if 0 <= i < len(sections) and sections[i] not in chosen:
+            chosen.append(sections[i])
+    if not chosen:
+        return None
+    return chosen[:MAX_CHECKLIST], out.get("model") or out.get("provider") or "fast"
+
+
+CHECKLIST_MARKER = "not sure what is wrong from that message"
+
+
+def checklist_reply(product_name: str, chosen: list[dict]) -> str:
+    """The reply, composed from the chosen headings and pages only."""
+    lines = [f"- {s['heading']}" + (f" (page {s['page']})" if s.get("page") else "")
+             for s in chosen]
+    manual = f"the {product_name} manual" if product_name else "the manual"
+    return (f"I'm {CHECKLIST_MARKER} alone. These parts of {manual} cover "
+            "it:\n" + "\n".join(lines) + "\nWhich of these matches what you "
+            "see? Pick one below, or contact support if none does.")
+
+
+# ── A model name no catalogue product has (D-20261009-10) ──────────────
+_MODEL_TOKEN = re.compile(r"\b([a-z]{2,4})-?(\d{2,5})([a-z+]*)", re.I)
+
+
+def model_prefixes(names) -> set[str]:
+    """The letter prefixes the catalogue's own names put before digits
+    ("NV9 Spectral", "BV30" -> {"nv", "bv"})."""
+    return {m.group(1).lower() for n in names or []
+            for m in re.finditer(r"\b([a-z]{2,4})-?\d", n or "", re.I)}
+
+
+def unknown_model_name(query: str, known_words: set[str], vocab: dict,
+                       prefixes: set[str]) -> str | None:
+    """A model name in the question shaped like ours (a known prefix
+    before digits) that no product is called and no manual prints, upper-
+    cased; else None. "nv300" -> "NV300"; "nv200", "nv9s", "win10" -> None."""
+    for m in _MODEL_TOKEN.finditer(query or ""):
+        if m.group(1).lower() not in prefixes:
+            continue
+        tok = m.group(0).lower()
+        flat = tok.replace("-", "")
+        if tok in known_words or flat in known_words:
+            continue
+        if _lookup(vocab, flat) or _lookup(vocab, tok):
+            continue
+        return m.group(0).upper()
+    return None
+
+
+def unknown_product_reply(name: str, product_names: list[str]) -> str:
+    names = [n for n in product_names if n]
+    listed = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 \
+        else "".join(names)
+    return (f"I don't have a product called {name}. "
+            + (f"The products I cover are {listed}. " if listed else "")
+            + "Which one did you mean?")

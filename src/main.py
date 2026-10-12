@@ -1695,6 +1695,7 @@ _CLARIFY_MARKERS = (
     "could you tell me more concretely",
     "could you say which one you're asking about",
     "could you clarify which part you mean",
+    "not sure what is wrong from that message",     # clarify.checklist_reply
 )
 
 
@@ -1742,6 +1743,75 @@ def _curated_faq_reply(entry: dict, asked: str, payload, x_user_id,
     }
     reply.update(extra)
     return reply
+
+
+def _vague_fault_checklist(q: str, payload, results: list[dict],
+                           session_id, request_id: str, started: float,
+                           resolved_query: str, top_score: float) -> dict | None:
+    """D-20261009-10: the reply to a vague fault report about a known
+    product ("nv4000 is showing an error"), or None to answer as before.
+
+    The manual's own fault headings, chosen by the model and listed with
+    their pages, ending "which of these matches what you see?"; each is a
+    chip, plus "Contact support" (the widget opens its support form on it).
+    The caller checks the turn is a scoped first message."""
+    import clarify as _clarify
+    try:
+        if not _clarify.vague_shape(q, _product_words()):
+            return None
+        name = _product_names().get(payload.product, "")
+        picked = _clarify.checklist_for(
+            q, name, _clarify.fault_sections(payload.product, results))
+    except Exception as _exc:
+        logger.warning(f"vague-symptom checklist skipped: {_exc}")
+        return None
+    if not picked:
+        return None
+    chosen, model = picked
+    answer = _clarify.checklist_reply(name, chosen)
+    total_time = time.time() - started
+    sources = _build_sources([c for s in chosen for c in s["chunks"]])
+    ptrace.mark("symptom.ask", "; ".join(s["heading"] for s in chosen)[:80])
+    log_interaction(q, answer, "clarify", model, [s["source"] for s in sources],
+                    grounding_score=None, flagged=False, request_id=request_id,
+                    timing={"total_time": total_time})
+    # Remembered so the visitor's pick condenses with the complaint; the
+    # marker in _CLARIFY_MARKERS stops the next turn asking back again.
+    add_to_memory(session_id, q, answer)
+    return {
+        "answer": answer,
+        "response_time_ms": round(total_time * 1000),
+        "model": model,
+        "role": "clarify",
+        "reason": "vague_symptom",
+        # The reply already routes to support; the widget's offer would add
+        # "that is not in my knowledge base", which is untrue here.
+        "offer_support": False,
+        "needs_clarification": True,
+        "clarification_options": [s["heading"] for s in chosen] + ["Contact support"],
+        "product_options": [],
+        "resolved_query": resolved_query if resolved_query != q else None,
+        "sources": sources,
+        "retrieval_score": round(top_score, 4),
+        "response_time": round(total_time, 3),
+    }
+
+
+def _unknown_product_text(q: str) -> str | None:
+    """"I don't have a product called NV300..." when the question names a
+    model shaped like ours that no product is and no manual prints."""
+    try:
+        import clarify as _clarify
+        names = _product_names()
+        shown = [n for k, n in names.items() if not k.endswith("_general")]
+        prefixes = _clarify.model_prefixes(
+            shown + [a for v in _product_aliases().values() for a in v])
+        found = _clarify.unknown_model_name(
+            q, _product_words(), _clarify.product_vocabulary(), prefixes)
+        return _clarify.unknown_product_reply(found, shown) if found else None
+    except Exception as _exc:
+        logger.warning(f"unknown-product check skipped: {_exc}")
+        return None
 
 
 def _asked_to_clarify_last_turn(history: list[dict] | None) -> bool:
@@ -3205,6 +3275,24 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _unscoped_verdict == "other":
             confidence = "none"
 
+    # ── Vague fault report about a known product: offer the checklist ──
+    # D-20261009-10. Every clarify branch below asks WHICH PRODUCT and is
+    # skipped once one is picked (every widget chat), so "it isn't working"
+    # was answered from whatever the top passages held, or refused. Tried
+    # here for a scoped first message (a refusal would follow on "none"),
+    # and again below once the wording has named the product.
+    # Follow-ups, comparisons and a rethink are always answered.
+    _symptom_open = (not history and not _comparing
+                     and not (payload.force_provider and payload.force_model
+                              and not payload.forced_by_effort))
+    if _symptom_open and payload.product:
+        _symptom_open = False
+        _checklist = _vague_fault_checklist(q, payload, results, session_id,
+                                            request_id, start_total,
+                                            resolved_query, top_score)
+        if _checklist:
+            return _checklist
+
     # ── No relevant content at all ───────────
     if confidence == "none":
         total_time = time.time() - start_total
@@ -3271,8 +3359,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 _vague_products, _cat_mod.catalog(), _product_names())
             # The products are on the buttons. Filenames used to be listed
             # here instead, which a visitor cannot click and should not see.
-            answer = ("Which product is this about? The answer is different "
-                      "for each of them.")
+            # A model name none of the products has ("the NV300") is said
+            # to be unknown rather than treated as one of the menu's.
+            answer = (_unknown_product_text(q)
+                      or "Which product is this about? The answer is "
+                         "different for each of them.")
             role_out = "clarify"
             reason = "ambiguous_in_domain_query"
             ptrace.mark("none.vague", f"best {top_score:.3f}, no product named")
@@ -3424,6 +3515,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if _ask_product:
         confidence = "ambiguous"
 
+    # The product came from the wording ("my nv4000 is showing an error").
+    if _symptom_open and payload.product:
+        _checklist = _vague_fault_checklist(q, payload, results, session_id,
+                                            request_id, start_total,
+                                            resolved_query, top_score)
+        if _checklist:
+            return _checklist
+
     if confidence == "ambiguous":
         candidate_sources = sorted({r.get("source") for r in results[:4] if r.get("source")})
         total_time = time.time() - start_total
@@ -3432,7 +3531,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # The names are on the buttons, so the prose should not repeat
             # them -- and must never show raw catalogue keys, which is what a
             # broken name lookup used to produce ("nv9_spectral, nv9usb").
-            clarifying = (
+            # A model name none of them has is said to be unknown.
+            clarifying = _unknown_product_text(q) or (
                 "That could apply to more than one product, and the answer "
                 "differs between them — which did you mean?"
             )
