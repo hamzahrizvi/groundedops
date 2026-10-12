@@ -4,7 +4,7 @@ gpt-5-mini bot and baseline, gpt-5 grader, the lab's models until the credit ran
 
 Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
 
-  python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | remark | reset
+  python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | remark | reset | models
   python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
 
 <run_dir> holds <SET>.json ({"cases": [...]}) and manuals/<product>.txt
@@ -63,6 +63,9 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
     os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(DATA, ".secrets.enc"))
 
 phase = sys.argv[2]
+if phase == "models":   # D-20261010-09: the bot model on this run's stored answers vs the lab's today
+    run = sorted({r.get("model") for r in state.get("sys_normal", {}).values()} - {None, "none", "structured", "faq-curated", "stub"})
+    print(json.dumps({"run": run, "lab": MODELS["bot"], "same": run == [MODELS["bot"]]})); sys.exit(0)
 if phase == "reset":
     for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s")]:
         del state[k]
