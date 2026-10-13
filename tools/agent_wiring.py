@@ -13,6 +13,9 @@ the model and the effort that actually ran, so this compares those with the
 A department spawned as "general-purpose" is always a mismatch: its office
 agent type was not loaded, so the file's effort and tool list were ignored and
 the subagent inherited the orchestrator's effort instead.
+
+Since 2026-10-13 a light model picks each job's model and effort (tools/model_pick.py), so a run is
+OK anywhere from the agent's lowest floor (any job) up to its file's model and effort.
 """
 import argparse
 import glob
@@ -22,6 +25,9 @@ import re
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from model_pick import EFFORTS, FLOOR, MODELS  # noqa: E402
 
 TASK = re.compile(r'<scheduled-task name=\\?"groundedops-office-([a-z-]+)')
 PROJECTS = os.path.join(os.path.expanduser("~"), ".claude", "projects")
@@ -48,6 +54,15 @@ def ran(path):
     return sorted(models), sorted(efforts)
 
 
+def in_range(kind, model, effort, models, efforts):
+    """Every model and effort that ran sits between the agent's lowest floor and its file's ceiling."""
+    floors = [v for k, v in FLOOR.items() if k.split(":")[0] == kind] or [(model, effort)]
+    lo_m, lo_e = min(MODELS.index(f[0]) for f in floors), min(EFFORTS.index(f[1]) for f in floors)
+    name = lambda m: next((i for i, n in enumerate(MODELS) if n in m), None)
+    return (all(name(m) is not None and lo_m <= name(m) <= MODELS.index(model) for m in models)
+            and all(e in EFFORTS and lo_e <= EFFORTS.index(e) <= EFFORTS.index(effort) for e in efforts))
+
+
 def check(session, office):
     """One row per department subagent of one run: (task, agent type, wanted, got, ok)."""
     with open(session, encoding="utf-8") as f:
@@ -62,8 +77,7 @@ def check(session, office):
             continue                                    # the department's own helpers, not the department
         model, effort = wanted(office, kind if kind != "general-purpose" else (task or ""))
         models, efforts = ran(meta_path[:-len(".meta.json")] + ".jsonl")
-        ok = (kind != "general-purpose" and model is not None
-              and all(model in x for x in models) and efforts == [effort])
+        ok = kind != "general-purpose" and model is not None and in_range(kind, model, effort, models, efforts)
         rows.append((task or "?", kind, f"{model}/{effort}", f"{','.join(models)}/{','.join(efforts)}", ok))
     return rows
 
@@ -88,11 +102,13 @@ def selftest():
         os.makedirs(sub)
         line = lambda model, effort: json.dumps({"type": "assistant", "effort": effort, "message": {"model": model}},
                                                 separators=(",", ":")) + "\n"     # transcripts are compact
-        for name, kind, effort in (("a", "product-owner", "high"), ("b", "general-purpose", "high"),
-                                   ("c", "product-owner", "medium"), ("d", "Explore", "low")):
+        for name, kind, model, effort in (("a", "product-owner", "fable-5-1", "high"), ("b", "general-purpose", "fable-5-1", "high"),
+                                          ("c", "product-owner", "haiku-5-5", "low"), ("d", "Explore", "fable-5-1", "low"),
+                                          ("e", "product-owner", "sonnet-5-5", "medium"), ("f", "product-owner", "fable-5-1", "xhigh")):
             json.dump({"agentType": kind, "spawnDepth": 1}, open(os.path.join(sub, name + ".meta.json"), "w"))
-            open(os.path.join(sub, name + ".jsonl"), "w").write(line("claude-fable-5-1", effort))
-        assert [r[4] for r in check(run, tmp)] == [True, False, False], check(run, tmp)
+            open(os.path.join(sub, name + ".jsonl"), "w").write(line("claude-" + model, effort))
+        # haiku/low is the diary's floor; above the file's high is not
+        assert [r[4] for r in check(run, tmp)] == [True, False, True, True, False], check(run, tmp)
     print("selftest ok")
 
 
