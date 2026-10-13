@@ -186,7 +186,9 @@ def waiting(ops, repo, now, taken=()):
         # the CEO, 2026-10-12: each fix is proven on its own failure type's hidden siblings by the retrofit gate;
         # a new 40-question bank only once Customer's fixes in flight are all through, to find the next issues
         busy = sorted(i for i, s in dev.items() if items[i].get("from") == "customer" and s in IN_FLIGHT)
-        out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
+        if busy and last_merge > last_run:   # the CEO, 2026-10-13: the score shows each fix, so re-ask the last bank
+            out.append(("customer", "re-ask the last 40 questions: a fix merged since the last test run", "customer"))
+        else: out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
                     "the gate tests each fix on its own questions" if busy else
                     "the customer fixes are all through: a new blind bank to find more issues", "customer" if not busy else None))
     unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge")
@@ -353,6 +355,11 @@ def selftest():
         w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
         cust = lambda: next(x for x in plan(ops, ops, 11, 38, resets, now) if "customer" in x)
         assert cust().startswith("WAIT") and "D-20261008-09" in cust(), "no new bank while a customer fix is in flight"
+        git = os.path.join(ops, "git")
+        subprocess.run(f'git init -q "{git}" && git -C "{git}" -c user.name=t -c user.email=t commit -q --allow-empty '
+                       "-m \"Merge branch 'agents/dev-D-20261008-02'\"", shell=True, check=True)
+        p = plan(ops, git, 11, 38, resets, now)
+        assert any(x.startswith("RUN  groundedops-office-customer  re-ask the last 40") for x in p), p
         os.remove(os.path.join(ops, "decisions/20261008d.md"))
         assert cust().startswith("RUN") and "all through" in cust(), "a new bank once they are through"
         old = now.timestamp() - 15 * 86400
