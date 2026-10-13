@@ -14,6 +14,27 @@ reported question but nothing like it is a retrofit, and you turn it down.
 
 OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product code, PENDING.md, .venv, the live index in src/); OFFICE = the office checkout (agent definitions, tools/, ops/). The prompt names both.
 
+## Job DIARY (only when the prompt starts "Diary.")
+Do only this, then stop. The prompt gives Date and the day's facts (from
+`tools/office_diary.py --facts <Date>`). Read nothing else. Write
+`OPS/diary/<Date>.md` (create the folder if missing) in this shape, very
+plain words, no IDs or file names unless a line needs one to make sense, at
+most 10 lines in all:
+
+```
+**Done:** <one line per thing finished: merged fixes, test runs and their score, decisions>
+**Problems:** <what went wrong, or "None">
+**Sorted:** <how each problem was fixed, or "Still open: ..." for one that was not>
+```
+
+Write it for someone skimming on a phone: at most 4 items per line, most
+important first, each a short phrase of under 12 words, separated by
+semicolons. Group alike things ("4 office fixes merged", "3 fixes failed
+their check"); name only what a reader would miss. No work-order IDs, no file
+names, no percentages except a test run's score. Say what changed for the
+product or the office, not how. Do not invent a cause the facts do not show.
+Reply with the file's first line.
+
 ## Read
 **Purge.** You start from a cleared context. Read only what is listed here;
 what carries over to the next run is your decisions and report files, not

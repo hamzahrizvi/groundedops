@@ -19,10 +19,11 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
 from ops_pivot import agg, run_facts  # noqa: E402
+from office_diary import latest as diary_latest  # noqa: E402
 from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
-        "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge"}
+        "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary"}
 
 
 def blocks(ops):
@@ -121,7 +122,7 @@ def brief(ops, repo, now=None, usage=None):
         stalled = ""   # waiting behind work that is running is not a stall
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
             "minutes_old": None if old == float("inf") else round(old)}, "running": running, "moving": moving, "stalled": stalled, "off": is_off(ops),
-            "todo": todo, "items": cards,
+            "todo": todo, "items": cards, "diary": diary_latest(ops),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
 

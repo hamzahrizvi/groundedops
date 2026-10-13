@@ -49,12 +49,13 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
+from office_diary import due as diary_due  # noqa: E402
 
 TASK = "groundedops-office-"
 IN_FLIGHT = {"approved, queued", "sent back, rebuilding", "built, waiting for the check", "check passed", "check failed", "ready to merge", "blocked"}
 # ponytail: guessed (5-hour %, weekly %) per run; tune from plan-usage-history.json once each has run a few times
 COST = {"product-owner": (10, 2), "dev": (20, 4), "customer": (15, 3), "security": (15, 3), "audit": (3, 1),
-        "rnd": (15, 3), "marketing": (8, 2)}
+        "rnd": (15, 3), "marketing": (8, 2), "diary": (2, 0)}
 WEEK = datetime.timedelta(days=7)
 HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-history.json")
 RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
@@ -204,6 +205,9 @@ def waiting(ops, repo, now, taken=()):
     for dept, why in (("rnd", "monthly research due"), ("marketing", "monthly market survey due")):   # on since 2026-10-10
         if age(max(_mtime(os.path.join(ops, "inbox", dept, "*.md")), _mtime(os.path.join(ops, "state", f"{dept}_last_run.txt")))) >= 30:
             out.append((dept, why, dept))
+    days = diary_due(ops, repo, now.astimezone().replace(tzinfo=None))   # the product owner's diary (tools/office_diary.py), on a light model
+    if days:
+        out.append(("diary", f"diary for {', '.join(str(d) for d in days[:3])}" + (" and more" if len(days) > 3 else ""), "diary"))
     if capped:   # a blind run spends lab money too
         out = [("customer", capped, None) if x[0] == "customer" else x for x in out]
     return out
@@ -283,9 +287,11 @@ def plan(ops, repo, five, week, resets, now, taken=None):
 
 
 def selftest():
+    import office_diary
     now = datetime.datetime(2026, 10, 8, 7, 0, tzinfo=datetime.timezone.utc)
     resets = datetime.datetime(2026, 10, 9, 19, 0, tzinfo=datetime.timezone.utc)   # pace ~79%, so up to ~94% with AHEAD
     with tempfile.TemporaryDirectory() as ops:
+        office_diary.OFFICE = ops   # no real commits in the test's diary
         for d in ("decisions", "inbox/dev", "inbox/audit", "runs/20261008", "state"):
             os.makedirs(os.path.join(ops, d))
         w = lambda p, s="": open(os.path.join(ops, p), "w", encoding="utf-8").write(s)

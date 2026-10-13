@@ -229,6 +229,7 @@ button{font:inherit;color:inherit}
 .pvage{margin:0 0 8px;font-size:13px;color:var(--muted)} .pvage.stale{color:var(--ink);border-left:4px solid var(--accent);padding-left:8px}
 .qhist{margin:6px 0 0;font-size:13px;color:var(--muted)} .qhist .vpill{margin-right:4px}
 .small{font-size:13px;color:var(--muted);margin:0}
+.dday{border-top:1px solid var(--line);padding:4px 0 8px} .dday .pvh{margin:8px 0 4px} .dline{margin:0 0 4px;font-size:14.5px;line-height:1.45}
 .link{background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-size:14px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .pvrefresh{margin:0 0 6px}
@@ -306,6 +307,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
           <button type="button" role="tab" id="t-depts" aria-selected="false" aria-controls="p-depts">Department boards</button>
           <button type="button" role="tab" id="t-rewards" aria-selected="false" aria-controls="p-rewards">Improvement of the month</button>
           <button type="button" role="tab" id="t-costs" aria-selected="false" aria-controls="p-costs">Costs</button>
+          <button type="button" role="tab" id="t-diary" aria-selected="false" aria-controls="p-diary">Diary</button>
           <span class="chip" id="ledgerChip">Sample</span>
         </div>
         <p class="lnote" id="ledgerNote"></p>
@@ -347,6 +349,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <div role="tabpanel" id="p-plan" aria-labelledby="t-plan" class="lanes" hidden></div>
         <div role="tabpanel" id="p-depts" aria-labelledby="t-depts" class="dboards" hidden></div>
         <div role="tabpanel" id="p-rewards" aria-labelledby="t-rewards" hidden></div>
+        <div role="tabpanel" id="p-diary" aria-labelledby="t-diary" hidden></div>
         <div role="tabpanel" id="p-costs" aria-labelledby="t-costs" hidden>
           <section class="cchart labcap" id="labCap" aria-labelledby="labH" hidden>
             <h3 class="pvh" id="labH">Test lab: spending cap</h3>
@@ -754,13 +757,24 @@ const SAMPLE_LEDGER = {sample:true, cards:[
 let tab = "status";
 function showTab(name, scroll){
   tab = name;
-  for(const n of ["status","plan","depts","rewards","costs"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
-  renderBoards(); if(name === "costs") renderCosts();
+  for(const n of ["status","plan","depts","rewards","costs","diary"]){ document.getElementById("t-" + n).setAttribute("aria-selected", String(n === name)); document.getElementById("p-" + n).hidden = n !== name; }
+  renderBoards(); if(name === "costs") renderCosts(); if(name === "diary") renderDiary();
   if(scroll) document.getElementById("boards").scrollIntoView({behavior: reduce ? "auto" : "smooth", block:"start"});
 }
-for(const n of ["status","plan","depts","rewards","costs"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
+for(const n of ["status","plan","depts","rewards","costs","diary"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
 const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
 const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
+/* the product owner's diary (tools/office_diary.py): a few plain lines per day, newest first, from the brief */
+function renderDiary(){
+  const days = (live.brief && live.brief.diary) || [], box = document.getElementById("p-diary");
+  if(!days.length){ box.replaceChildren(el("p", "empty", live.available ? "No diary yet. The product owner writes each day's entry that night, at the office's hourly check." : "The diary appears with the live office.")); return; }
+  box.replaceChildren(el("p", "lnote", "What the office did each day, what went wrong and how it was sorted, in the product owner's words."),
+    ...days.map(d => { const sec = el("section", "dday"), when = new Date(d.date + "T12:00");
+      sec.append(el("h3", "pvh", when.toLocaleDateString(undefined, {weekday:"short", day:"numeric", month:"short"})));
+      for(const line of d.text.split("\n").filter(l => l.trim())){ const m = line.match(/^\*\*(.+?)\*\*\s*(.*)$/), p = el("p", "dline");
+        if(m) p.append(el("b", null, m[1] + " "), document.createTextNode(m[2])); else p.textContent = line; sec.append(p); }
+      return sec; }));
+}
 function renderBoards(){
   const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
   const chip = document.getElementById("ledgerChip"); chip.textContent = isSample ? "Sample" : "Live"; chip.className = "chip " + (isSample ? "sample" : "live");
@@ -1565,7 +1579,7 @@ setInterval(sampleStep, 9000);
   live.available = true; live.db = db;
   let firstEvents = true;
   try {
-    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
+    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
     db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderRefresh(); renderPower(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {

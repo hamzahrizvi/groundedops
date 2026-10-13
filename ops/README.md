@@ -60,8 +60,20 @@ task completion notices to a session did not arrive.
 
 Scheduled tasks are named `groundedops-office-<department>`. Their prompts
 live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
-`dev-approved.md`, and `department.md` for the other four), each with
-`office-status.md` appended. Edit them there and copy the change into the task.
+`dev-approved.md`, `diary.md`, and `department.md` for the other four), each with
+`model-pick.md` and `office-status.md` appended. Edit them there and copy the change into the task.
+
+**Model per job.** Before each department spawn, the `model-picker` agent (Haiku)
+reads the job line and picks a model and effort; `tools/model_pick.py` keeps the
+pick between the job's floor (its `FLOOR` table) and the agent file's own model and
+effort, which stay the ceiling, and logs it to `OPS/state/model_picks.log`.
+`tools/agent_wiring.py` accepts any run inside that range.
+
+**Diary.** Once a day is over (or after 22:00), the dispatcher runs
+`groundedops-office-diary`: `tools/office_diary.py --facts <date>` gathers the day's
+merges, test runs, gates, hand-backs and decisions, and the product owner (job
+DIARY, usually on Haiku) writes `OPS/diary/<date>.md` in three plain lines: Done,
+Problems, Sorted. The office page shows the latest 14 on its Diary tab.
 
 **Where it runs.** The office stays on its own branch,
 `experimental/agent-org-phase1`, and is never merged into `main`. The tasks
