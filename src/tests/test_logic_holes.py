@@ -156,6 +156,24 @@ def test_a_product_form_matches_whole_words_only():
         main._product_names, main._product_aliases = real_names, real_aliases
 
 
+def test_a_sibling_is_named_by_its_difference_once_the_family_is_typed():
+    """"the mycheckr ... vs the mini" names both; "mini" alone names nothing."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    main._product_names = lambda: {"mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr mini",
+                                   "nv9usb": "NV9USB+"}
+    main._product_aliases = lambda: {"mycheckr": [], "mycheckr_mini": ["MyCheckr Mini"],
+                                     "nv9usb": []}
+    keys = ["mycheckr", "mycheckr_mini", "nv9usb"]
+    try:
+        assert main._products_named_in(
+            "how do you fix the mycheckr to a wall vs the mini?", keys) == ["mycheckr", "mycheckr_mini"]
+        assert main._products_named_in("does the mycheckr mini need wifi", keys) == ["mycheckr_mini"]
+        assert main._products_named_in("is the mycheckr minimal", keys) == ["mycheckr"]
+        assert main._products_named_in("nv9usb with a mini usb cable", keys) == ["nv9usb"]
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

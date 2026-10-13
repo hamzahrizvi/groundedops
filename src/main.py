@@ -2221,6 +2221,27 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
                 hits.append((len(form), key, form))
                 break
 
+    # A SIBLING NAMED BY ITS DIFFERENCE. "How do you fix the mycheckr to a
+    # wall vs the mini?" names two products, but "mini" alone is no form of
+    # "MyCheckr mini", so only the MyCheckr was searched and the Mini's
+    # adhesive pad was never found (office, 10-10 and 10-13: 1/3). Once the
+    # family name is typed, the rest of a sibling's name standing as its own
+    # word names the sibling. Recorded as that word, so the containment
+    # rule below keeps both. Only with the family typed: "mini" alone is a
+    # mini USB cable as often as a product.
+    hit_forms = [form for _len, _key, form in hits]
+    hit_keys = {key for _len, key, _form in hits}
+    for key in candidates:
+        if key in hit_keys:
+            continue
+        for form in _product_alias_tokens(key, names.get(key, ""),
+                                          aliases.get(key, ())):
+            rest = next((form[len(p):] for p in hit_forms
+                         if form != p and form.startswith(p)), "")
+            if len(rest) >= 3 and not rest.isdigit() and rest in runs:
+                hits.append((len(rest), key, rest))
+                break
+
     if not hits:
         return []
     # Drop a hit only when its matched form is CONTAINED IN another hit's
@@ -3665,17 +3686,24 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if len(_both_named) >= 2:
         def _tags(c):
             return {k.strip() for k in (c.get("product") or "").split(",")}
+        # Each product's floor is relative to ITS OWN best passage. Against
+        # the global best it cut a whole half: "fix the mycheckr to a wall vs
+        # the mini" -- the Mini's mounting page scored 0.12, the MyCheckr's
+        # 0.0067, so the MyCheckr got nothing and the prompt one passage.
         _per = max(2, CONTEXT_K // len(_both_named))
         _picked: list[int] = []
         for _k in _both_named:
-            _mine = [i for i, r in enumerate(_retrieved)
-                     if _k in _tags(r) and r.get("rerank_score", 0.0) >= _floor
-                     and i not in _picked][:_per]
-            _picked += _mine
+            _own = [i for i, r in enumerate(_retrieved)
+                    if _k in _tags(r) and i not in _picked]
+            _kfloor = (_retrieved[_own[0]].get("rerank_score", 0.0)
+                       * CONTEXT_FLOOR_RATIO) if _own else 0.0
+            _picked += [i for i in _own
+                        if _retrieved[i].get("rerank_score", 0.0) >= _kfloor][:_per]
         for i, r in enumerate(_retrieved[:CONTEXT_K]):
             if len(_picked) >= CONTEXT_K:
                 break
-            if i not in _picked and r.get("rerank_score", 0.0) >= _floor:
+            if i not in _picked and (r.get("rerank_score", 0.0) >= _floor
+                                     or len(_picked) < CONTEXT_MIN):
                 _picked.append(i)
         if _picked:
             top_chunks = [_strip_breadcrumb(_retrieved[i]) for i in sorted(_picked)]
