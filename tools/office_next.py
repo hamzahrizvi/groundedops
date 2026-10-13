@@ -208,6 +208,8 @@ def waiting(ops, repo, now, taken=()):
     days = diary_due(ops, repo, now.astimezone().replace(tzinfo=None))   # the product owner's diary (tools/office_diary.py), on a light model
     if days:
         out.append(("diary", f"diary for {', '.join(str(d) for d in days[:3])}" + (" and more" if len(days) > 3 else ""), "diary"))
+    for dept in sorted(run_now(ops) - {d for d, _, _ in out} - {"dev"}):   # "Do it now" with nothing due (Dev needs a work order)
+        out.append((dept, "you asked for it now", dept))
     if capped:   # a blind run spends lab money too
         out = [("customer", capped, None) if x[0] == "customer" else x for x in out]
     return out
@@ -366,6 +368,9 @@ def selftest():
         assert "5-hour window at 92%" in plan(ops, ops, 92, 38, resets, now)[0], "but not the 5-hour limit itself"
         assert take(ops, ops, 60, 38, resets, now, 7)[-1].startswith("TOOK customer") and not run_now(ops), "used up"
         release(ops, 7)
+        w("state/run_now/audit")
+        assert any(x.startswith("RUN  groundedops-office-audit  you asked for it now") for x in plan(ops, ops, 11, 38, resets, now)), "Do it now, nothing due"
+        os.remove(os.path.join(ops, "state", "run_now", "audit"))
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (time.time() + 10, time.time() + 10))
         assert not any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "a run finished after the press answers it"
         os.remove(os.path.join(ops, "state/refresh_request"))

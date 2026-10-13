@@ -206,6 +206,7 @@ button{font:inherit;color:inherit}
 .detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:10px 0 0;font-size:14px}
 .detail dt{color:var(--muted);font:12px/1.6 var(--display);letter-spacing:.04em}
 .detail dd{margin:0}
+.detail .donow{margin-top:12px}
 .detail p{margin:0;font-size:14.5px}
 
 .rhythm{margin-top:20px}
@@ -1110,6 +1111,13 @@ function renderDetail(){
   if(mode === "live" && w.updated) rows.push(["Updated", new Date(w.updated).toLocaleString()]);
   const dl = el.querySelector("dl");
   for(const [k, v] of rows){ const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; if(k === "Doing now") dd.id = "doingNow"; dl.append(dt, dd); }
+  // "Do it now": this department's scheduled task at the next hourly check, due or not (tools/ceo_inbox.py run_now)
+  const key = {customer:"customer", po:"product-owner", security:"security", audit:"audit", rnd:"rnd", marketing:"marketing"}[d.id];
+  if(key && live.available && hired(d.id) && !(live.brief && live.brief.off)){
+    const b = runNowBtn({key, dept: d.name, why: "do it now"}, "Do it now"); b.classList.add("donow");
+    b.title = "Starts this department's run at the next hourly check, even if nothing is due, past the budget pace. The 5-hour limit and the lab spending cap still apply.";
+    el.append(b);
+  }
 }
 /* the tray is always the real list once the office is connected, even while the floor plays a sample week */
 function renderTray(){
@@ -1209,14 +1217,14 @@ function renderMove(){
 }
 
 /* "Run now": the CEO lifts a budget, hold or fixes-in-flight wait for one start (tools/ceo_inbox.py run_now) */
-function runNowBtn(m){
-  const sent = live.inbox.find(r => r.choice === "run_now" && r.id === m.key && r.status === "new"), go = el("button", "btn", sent ? "Sent: starts at the next check" : "Run now");
+function runNowBtn(m, label = "Run now"){
+  const sent = live.inbox.find(r => r.choice === "run_now" && r.id === m.key && r.status === "new"), go = el("button", "btn", sent ? "Sent: starts at the next check" : label);
   go.type = "button"; go.disabled = !!sent;
   go.title = "Start this at the next hourly check, past the budget pace or a hold. The lab spending cap and the 5-hour limit still apply.";
   go.addEventListener("click", async () => {
     go.disabled = true; go.textContent = "Sending…";
     try { await decide(m.key, "run_now", `Run now: ${m.dept} (${m.why})`, m.dept); go.textContent = "Sent: starts at the next check"; }
-    catch(e){ go.disabled = false; go.textContent = "Run now"; go.title = writeError(e); }
+    catch(e){ go.disabled = false; go.textContent = label; go.title = writeError(e); }
   });
   return go;
 }
@@ -1580,7 +1588,7 @@ setInterval(sampleStep, 9000);
   let firstEvents = true;
   try {
     db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderRefresh(); renderPower(); renderLab(); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); renderRefresh(); renderPower(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());

@@ -21,7 +21,7 @@ PURGE: the department runs in a fresh subagent that starts from a cleared contex
 
 0. Move the session to OFFICE with the change_directory tool. If OFFICE/.claude/agents/<dept>.md is missing, stop with one line.
    Use the OFFICE STATUS section at the end for every "status" and "event" below.
-1. (security only) If OPS/state/security_last_run.txt holds a date less than 13 days ago, and every OPS/inbox/dev/<id>.gate/gate.json with verdict PASS already has an OPS/inbox/security/review-<id>.md, stop with one line. Otherwise write today's date into that file when you finish.
+1. (security only) Unless the dispatcher's why is "you asked for it now" (the CEO's Do it now button): if OPS/state/security_last_run.txt holds a date less than 13 days ago, and every OPS/inbox/dev/<id>.gate/gate.json with verdict PASS already has an OPS/inbox/security/review-<id>.md, stop with one line. Otherwise write today's date into that file when you finish.
 2. Create OPS/inbox/<dept> and OPS/state if missing. Status <dept> working "<task>".
 3. MODEL PICK (agent <dept>, job <the task line>, inputs OPS/inbox/<dept>/ and what its file says it reads), then spawn the department with it: Agent tool with subagent_type "<dept>"; if not listed, use general-purpose with model "<model>" and tell it to read OFFICE/.claude/agents/<dept>.md and follow it exactly.
    Prompt: "REPO = <REPO>. OFFICE = <OFFICE>. OPS = <OPS>. Today = <YYYYMMDD>."
