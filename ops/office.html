@@ -51,6 +51,8 @@ button{font:inherit;color:inherit}
 .roofline{display:flex;justify-content:space-between;align-items:center;color:var(--facade-ink);font:13px/1 var(--display);letter-spacing:.12em;margin:0 2px 10px;gap:8px;flex-wrap:wrap}
 .roofline .sign{background:var(--accent);color:var(--accent-ink);padding:5px 9px;border-radius:2px}
 .roofline .hint{font:16px/1 var(--data);letter-spacing:0;opacity:.75}
+.scenebtn{font:12px/1 var(--display);letter-spacing:.06em;background:transparent;color:var(--facade-ink);border:1px solid currentColor;border-radius:2px;padding:5px 8px;cursor:pointer}
+.scenebtn[aria-pressed="true"]{background:#3CC6C6;color:#0A2A2A;border-color:#3CC6C6}
 .scroller{overflow-x:auto;overflow-y:hidden;border-radius:3px;-webkit-overflow-scrolling:touch}
 .floorwrap{position:relative;margin:0 auto;line-height:0}
 .floorwrap canvas{width:100%;height:auto;aspect-ratio:416/272;image-rendering:pixelated;image-rendering:crisp-edges;display:block;cursor:pointer}
@@ -296,7 +298,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
   <div class="grid">
     <div class="main">
       <section class="building" aria-label="Office floor">
-        <div class="roofline"><span>GROUNDEDOPS · FLOOR 1</span><span class="hint">Click anyone to see what they are doing</span><span class="sign" id="sign">OPEN</span></div>
+        <div class="roofline"><span>GROUNDEDOPS · FLOOR 1</span><span class="hint">Click anyone to see what they are doing</span><button class="scenebtn" id="sceneBtn" type="button" aria-pressed="false">Scenery: classic</button><span class="sign" id="sign">OPEN</span></div>
         <div class="scroller" id="scroller">
           <div class="floorwrap" id="floorwrap">
             <canvas id="floor" width="416" height="272" aria-label="Animated office floor plan"></canvas>
@@ -1659,45 +1661,66 @@ const px = (x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), M
 const hash = n => { const s = Math.sin(n*127.1 + 311.7)*43758.5453; return s - Math.floor(s); };
 function light(){ const h = new Date().getHours() + new Date().getMinutes()/60; return h >= 7.5 && h < 17.5 ? "day" : (h >= 6.5 && h < 7.5) || (h >= 17.5 && h < 19.5) ? "dusk" : "night"; }
 
-/* floor + walls, drawn once */
-const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
-(function paintBg(){
+/* floor + walls, drawn once per scenery: "classic" or "space" (a space-age retro-future office above the clouds) */
+const ZC = {open:["#8FA3AE","#899DA8","#83969F"], ceo:["#B5835A","#9C6C47"], meet:["#5C6B88","#586683"], server:["#7E878F","#6C757D"],
+  kitchen:["#E9E5DA","#D3CEC2"], lounge:["#A8734B","#92603C"], pave:["#BEB9AE","#A9A498"], grass:["#6FA35A","#6A9C55","#58884A"],
+  rugs:["#B4553F","#C66A50","#8E3B3B","#A44A47","#7E93A0","#8599A6","#6E5A44"], face:["#3E4852","#55606B","#D8E1DB","#AFC0B6"],
+  outer:["#4A5561","#5F6B78"], glass:["rgba(190,226,240,.55)","#7FA6B6"], low:["#7C5A3F","#A07A58"], door:["#8C7A62","#6E5E4A"]};
+const ZS = {open:["#BFE8E0","#B4E0D8","#9FD3C9"], ceo:["#C9B6E4","#B49FD6"], meet:["#2E8C99","#2A808C"], server:["#C4CCD4","#AAB4BE"],
+  kitchen:["#F7C8D6","#FFFFFF"], lounge:["#F08A3C","#D9742C"], pave:["#D7DEE6","#B9C3CE"], sky:true,
+  rugs:["#F2C14E","#FFD970","#E24E7A","#F2709A","#5BC0DE","#7FD3EA","#3E4A63"], face:["#F4F7FB","#3CC6C6","#FFFFFF","#FF8A3D"],
+  outer:["#A9B6C6","#E3EAF2"], glass:["rgba(170,235,255,.5)","#FF8A3D"], low:["#FF8A3D","#FFC07A"], door:["#3CC6C6","#2A9FA0"]};
+function paintBg(Z){
+  const bg = document.createElement("canvas"); bg.width = W; bg.height = H;
   const g = bg.getContext("2d"), P = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
   for(let y = 0; y < MH; y++) for(let x = 0; x < MW; x++){
     const X = x*T, Y = y*T, z = zone(x, y), k = (x + y) % 2;
-    if(z === "open"){ P(X, Y, T, T, k ? "#8FA3AE" : "#899DA8"); P(X, Y, T, 1, "#83969F"); }
-    else if(z === "ceo"){ P(X, Y, T, T, "#B5835A"); P(X, Y + (x % 2 ? 3 : 7), T, 1, "#9C6C47"); }
-    else if(z === "meet"){ P(X, Y, T, T, k ? "#5C6B88" : "#586683"); }
-    else if(z === "server"){ P(X, Y, T, T, "#7E878F"); P(X, Y, T, 1, "#6C757D"); P(X, Y, 1, T, "#6C757D"); }
-    else if(z === "kitchen"){ P(X, Y, T, T, k ? "#E9E5DA" : "#D3CEC2"); }
-    else if(z === "lounge"){ P(X, Y, T, T, "#A8734B"); P(X, Y + ((x*3) % 8), T, 1, "#92603C"); }
-    else if(z === "pave"){ P(X, Y, T, T, "#BEB9AE"); P(X, Y, T, 1, "#A9A498"); P(X + (y % 2 ? 4 : 0), Y, 1, T, "#A9A498"); }
-    else { P(X, Y, T, T, k ? "#6FA35A" : "#6A9C55"); if(hash(x*7+y*13) > .7) P(X + 2, Y + 3, 1, 2, "#58884A"); }
+    if(z === "open"){ P(X, Y, T, T, k ? Z.open[0] : Z.open[1]); P(X, Y, T, 1, Z.open[2]); }
+    else if(z === "ceo"){ P(X, Y, T, T, Z.ceo[0]); P(X, Y + (x % 2 ? 3 : 7), T, 1, Z.ceo[1]); }
+    else if(z === "meet"){ P(X, Y, T, T, k ? Z.meet[0] : Z.meet[1]); }
+    else if(z === "server"){ P(X, Y, T, T, Z.server[0]); P(X, Y, T, 1, Z.server[1]); P(X, Y, 1, T, Z.server[1]); }
+    else if(z === "kitchen"){ P(X, Y, T, T, k ? Z.kitchen[0] : Z.kitchen[1]); }
+    else if(z === "lounge"){ P(X, Y, T, T, Z.lounge[0]); P(X, Y + ((x*3) % 8), T, 1, Z.lounge[1]); }
+    else if(z === "pave"){ P(X, Y, T, T, Z.pave[0]); P(X, Y, T, 1, Z.pave[1]); P(X + (y % 2 ? 4 : 0), Y, 1, T, Z.pave[1]); }
+    else if(Z.sky){   // the building floats: open sky and clouds below the deck
+      const f = (Y - 27*T) / (6*T); P(X, Y, T, T, `rgb(${Math.round(255 - 60*f)},${Math.round(196 + 20*f)},${Math.round(214 + 30*f)})`);
+      if(hash(x*7 + y*13) > .78) P(X + 1, Y + 3, 6, 2, "rgba(255,255,255,.75)");
+    }
+    else { P(X, Y, T, T, k ? Z.grass[0] : Z.grass[1]); if(hash(x*7+y*13) > .7) P(X + 2, Y + 3, 1, 2, Z.grass[2]); }
   }
-  // rugs
-  P(38*T+2, 15*T+2, 4*T-4, 3*T, "#B4553F"); P(38*T+4, 15*T+4, 4*T-8, 3*T-4, "#C66A50");
-  P(4*T, 6*T+4, 4*T, 3*T-4, "#8E3B3B"); P(4*T+2, 6*T+6, 4*T-4, 3*T-8, "#A44A47");
-  P(20*T, 14*T, 10*T, 8*T, "#7E93A0"); P(20*T+2, 14*T+2, 10*T-4, 8*T-4, "#8599A6");
-  P(20*T, 25*T, 2*T, T, "#6E5A44");                       // door mat
-  // walls
+  if(Z.sky){   // starbursts set into the open-plan floor, and the deck's stilts down into the clouds
+    for(const [cx, cy] of [[9,12],[31,12],[19,24],[33,24]]){ for(let i = 0; i < 8; i++){ const a = i*Math.PI/4; for(let r = 2; r < 9; r++) P(cx*T + Math.round(Math.cos(a)*r), cy*T + Math.round(Math.sin(a)*r), 1, 1, i % 2 ? "#FFFFFF" : "#FF8A3D"); } }
+    for(const sx of [14, 24, 37]) P(sx*T, 33*T - 6, 3, 6, "#A9B6C6");
+  }
+  const R = Z.rugs;
+  P(38*T+2, 15*T+2, 4*T-4, 3*T, R[0]); P(38*T+4, 15*T+4, 4*T-8, 3*T-4, R[1]);
+  P(4*T, 6*T+4, 4*T, 3*T-4, R[2]); P(4*T+2, 6*T+6, 4*T-4, 3*T-8, R[3]);
+  P(20*T, 14*T, 10*T, 8*T, R[4]); P(20*T+2, 14*T+2, 10*T-4, 8*T-4, R[5]);
+  P(20*T, 25*T, 2*T, T, R[6]);                       // door mat
   for(let y = 0; y < MH; y++) for(let x = 0; x < MW; x++){
-    const k = WALL[y][x], X = x*T, Y = y*T; if(!k) continue;
-    if(k === "face"){ P(X, Y, T, T, y === 0 ? "#3E4852" : "#D8E1DB"); if(y === 1) P(X, Y+6, T, 2, "#AFC0B6"); if(y === 0) P(X, Y+6, T, 2, "#55606B"); }
-    else if(k === "outer" || k === "solid"){ P(X, Y, T, T, "#4A5561"); P(X, Y, T, 2, "#5F6B78"); }
-    else if(k === "glass"){ P(X, Y, T, T, "rgba(190,226,240,.55)"); const v = WALL[y-1] && WALL[y-1][x] === "glass" || WALL[y+1] && WALL[y+1][x] === "glass";
-      if(v && !(WALL[y][x-1] === "glass" || WALL[y][x+1] === "glass")){ P(X+3, Y, 2, T, "#7FA6B6"); } else { P(X, Y+3, T, 2, "#7FA6B6"); } }
-    else if(k === "low"){ P(X, Y, T, T, "#7C5A3F"); P(X, Y, T, 2, "#A07A58"); }
+    const kd = WALL[y][x], X = x*T, Y = y*T; if(!kd) continue;
+    if(kd === "face"){ P(X, Y, T, T, y === 0 ? Z.face[0] : Z.face[2]); if(y === 1) P(X, Y+6, T, 2, Z.face[3]); if(y === 0) P(X, Y+6, T, 2, Z.face[1]); }
+    else if(kd === "outer" || kd === "solid"){ P(X, Y, T, T, Z.outer[0]); P(X, Y, T, 2, Z.outer[1]); }
+    else if(kd === "glass"){ P(X, Y, T, T, Z.glass[0]); const v = WALL[y-1] && WALL[y-1][x] === "glass" || WALL[y+1] && WALL[y+1][x] === "glass";
+      if(v && !(WALL[y][x-1] === "glass" || WALL[y][x+1] === "glass")){ P(X+3, Y, 2, T, Z.glass[1]); } else { P(X, Y+3, T, 2, Z.glass[1]); } }
+    else if(kd === "low"){ P(X, Y, T, T, Z.low[0]); P(X, Y, T, 2, Z.low[1]); }
   }
-  P(20*T, 26*T, 2*T, T, "#8C7A62"); P(20*T, 26*T+3, 2*T, 1, "#6E5E4A");   // terrace door
-})();
+  P(20*T, 26*T, 2*T, T, Z.door[0]); P(20*T, 26*T+3, 2*T, 1, Z.door[1]);   // terrace door
+  return bg;
+}
+const BG = {classic: paintBg(ZC), space: paintBg(ZS)};
+let scene = store.get("hq.scene") === "space" ? "space" : "classic";
 
 function drawWindows(t){
-  const L = light(), sky = L === "day" ? ["#6FB9E6","#BFE3F6"] : L === "dusk" ? ["#3A3A70","#EE9466"] : ["#0A132C","#1B2850"];
+  const L = light(), sp = scene === "space";
+  const sky = sp ? (L === "night" ? ["#1A1446","#4B2E83"] : ["#FF9EC4","#8FE3F2"]) : L === "day" ? ["#6FB9E6","#BFE3F6"] : L === "dusk" ? ["#3A3A70","#EE9466"] : ["#0A132C","#1B2850"];
   const spans = [[4,9],[13,14],[38,47]];
   for(const [x0, x1] of spans) for(let x = x0; x <= x1; x += 2){
     const X = x*T + 2, Y = 3, w = 2*T - 4, h = 9;
     const g = c.createLinearGradient(0, Y, 0, Y+h); g.addColorStop(0, sky[0]); g.addColorStop(1, sky[1]); c.fillStyle = g; c.fillRect(X, Y, w, h);
-    if(L === "day"){ const cx = X + ((t*2 + x*9) % (w+8)) - 4; px(cx, Y+3, 5, 1, "#FFFFFF"); }
+    if(sp){ if(x === 40){ px(X+6, Y+3, 4, 4, "#F2C14E"); px(X+4, Y+5, 8, 1, "#FF8A3D"); }
+      const cx = X + ((t*6 + x*13) % (w+10)) - 6; px(cx, Y+5, 4, 2, "#FFFFFF"); px(cx+1, Y+4, 2, 1, "#9FE7F5"); }
+    else if(L === "day"){ const cx = X + ((t*2 + x*9) % (w+8)) - 4; px(cx, Y+3, 5, 1, "#FFFFFF"); }
     else if(L === "night" && hash(x) > .4) px(X + 3 + Math.floor(hash(x+1)*8), Y + 2, 1, 1, "#FFF3CF");
     px(X + w/2, Y, 1, h, "#55606B"); px(X-1, Y-1, w+2, 1, "#55606B"); px(X-1, Y+h, w+2, 1, "#55606B");
   }
@@ -1807,6 +1830,32 @@ const DRAW = {
   bikes(o){ const X = o.x*T, Y = o.y*T; for(let i = 0; i < 3; i++){ px(X+i*8+1, Y+1, 6, 6, "#2F6FD0"); px(X+i*8+2, Y+2, 4, 4, "#BEB9AE"); px(X+i*8, Y+4, 8, 1, "#3A424C"); } },
   lamp(o, t){ const X = o.x*T, Y = o.y*T; px(X+3, Y-10, 2, 17, "#3A424C"); px(X+1, Y-12, 6, 3, "#59636E"); if(light() !== "day") px(X+2, Y-9, 4, 1, "#FFE6A3"); }
 };
+
+/* space-age scenery: these replace the classic drawings of the same kind */
+const SPACE = {
+  tree(o, t){ const X = o.x*T, Y = o.y*T, d = Math.round(Math.sin(t*0.6 + o.x)*2);   // a drifting cloud
+    c.globalAlpha = .9; px(X-2+d, Y+2, 20, 6, "#FFFFFF"); px(X+2+d, Y-1, 10, 4, "#FFFFFF"); px(X+9+d, Y, 7, 3, "#F4FBFF"); c.globalAlpha = 1; },
+  plant(o, t){ const X = o.x*T, Y = o.y*T, sp = Math.floor(t*3 + o.x) % 4;   // atomic plant: a ball on a stalk with orbiting dots
+    px(X+2, Y+4, 5, 4, "#FF8A3D"); px(X+4, Y-2, 1, 6, "#3A424C"); px(X+2, Y-6, 5, 5, "#3CC6C6");
+    for(let i = 0; i < 4; i++){ const a = (i + sp/4)*Math.PI/2; px(X+4 + Math.round(Math.cos(a)*5), Y-4 + Math.round(Math.sin(a)*3), 1, 1, "#F2C14E"); } },
+  bikes(o, t){ const X = o.x*T, Y = o.y*T;   // hover-car pad
+    px(X, Y+1, 3*T, 6, "#3A424C"); for(let i = 0; i < 3; i++) px(X+3+i*8, Y+3, 4, 1, Math.floor(t*2 + i) % 3 ? "#3CC6C6" : "#F2C14E"); },
+  lamp(o, t){ const X = o.x*T, Y = o.y*T;   // Googie pylon with a ring and a blinking tip
+    px(X+3, Y-14, 2, 21, "#A9B6C6"); px(X-1, Y-10, 10, 2, "#FF8A3D"); px(X+3, Y-17, 2, 3, Math.floor(t*2) % 2 ? "#E24E7A" : "#7A2A45"); },
+  shelter(o, t){ const X = o.x*T, Y = o.y*T, w = o.w*T;   // bubble dome
+    c.globalAlpha = .35; px(X, Y-8, w, 3*T+4, "#BFF2FF"); c.globalAlpha = 1;
+    px(X, Y-8, w, 1, "#3CC6C6"); px(X+4, Y-10, w-8, 2, "#3CC6C6"); px(X, Y+3*T-4, w, 2, "#A9B6C6"); px(X+w/2-1, Y-14, 2, 4, "#FF8A3D"); }
+};
+const CARS = [{y:28.6, v:9, col:"#E24E7A", off:0}, {y:31.2, v:-6, col:"#3CC6C6", off:150}, {y:0.25, v:4, col:"#F2C14E", off:60}];
+function drawCars(t){   // flying bubble cars over the deck and past the roof
+  for(const k of CARS){ const span = W + 40, x = ((t*k.v + k.off) % span + span) % span - 20, Y = Math.round(k.y*T + Math.sin(t*2 + k.off)*1.5);
+    px(x, Y+3, 14, 3, k.col); px(x+3, Y, 8, 3, "rgba(200,245,255,.85)"); px(x+5, Y+1, 2, 2, "#3A424C");
+    px(k.v > 0 ? x-3 : x+14, Y+4, 3, 1, Math.floor(t*8) % 2 ? "#F2C14E" : "#FFFFFF"); }
+}
+const sceneBtn = document.getElementById("sceneBtn");
+function renderScene(){ sceneBtn.textContent = scene === "space" ? "Scenery: space age" : "Scenery: classic"; sceneBtn.setAttribute("aria-pressed", String(scene === "space")); }
+sceneBtn.addEventListener("click", () => { scene = scene === "space" ? "classic" : "space"; store.set("hq.scene", scene); renderScene(); });
+renderScene();
 
 /* pool table physics */
 const POOL = {w:5*T-6, h:3*T-6, balls:[], next:0};
@@ -1925,11 +1974,13 @@ function drawLights(t){
 }
 
 function draw(t){
-  c.drawImage(bg, 0, 0);
+  c.drawImage(BG[scene], 0, 0);
   drawWindows(t);
   const list = OBJ.map(o => ({s:o.sort, o})).concat(AGENTS.filter(a => hired(a.id)).map(a => ({s:a.y + 0.5 + (a.sitting ? 0 : 0.02), a})));
   list.sort((p, q) => p.s - q.s);
-  for(const it of list){ if(it.o) DRAW[it.o.kind](it.o, t); else if(it.a.robot) drawRobot(it.a, t); else drawPerson(it.a, t); }
+  const kit = scene === "space" ? SPACE : {};
+  for(const it of list){ if(it.o) (kit[it.o.kind] || DRAW[it.o.kind])(it.o, t); else if(it.a.robot) drawRobot(it.a, t); else drawPerson(it.a, t); }
+  if(scene === "space") drawCars(t);
   drawParts();
   drawLights(t);
 }
