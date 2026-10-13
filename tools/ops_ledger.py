@@ -65,6 +65,10 @@ def git_sets(repo):
             return ""
     merged = {b.strip().lstrip("*+ ").replace("agents/dev-", "") for into in ("HEAD", "experimental/agent-org-phase1")
               for b in run("branch", "--merged", into, "--list", "agents/dev-*").splitlines() if b.strip()}  # product or office fix
+    # a branch Dev created but never committed to sits on main's history, so --merged lists it; it is not merged
+    # (D-20261012-05 showed as merged for a day and was never rescheduled, 2026-10-13)
+    empty = lambda log: len(log) == 1 and log[0].startswith("branch: Created")
+    merged = {i for i in merged if not empty(run("reflog", "show", "--format=%gs", f"agents/dev-{i}").split("\n")[:-1])}
     reverts = run("log", "--oneline", "-i", "--grep=revert")
     reverted = set(re.findall(r"D-\d{8}-\d+", reverts))
     return merged, reverted
