@@ -50,10 +50,14 @@ def explain(line, titles):
         return {"dept": "Office", "state": "idle", "why": "Nothing is waiting for any department."}
     if words[0] == "MERGE":
         return {"dept": "Merge", "state": "run", "why": re.sub(r"D-\d{8}-\d+", name, "Merging " + words[1] + ": passed every check")}
-    dept = DEPT.get(words[1].replace("groundedops-office-", ""), words[1])
+    key = words[1].replace("groundedops-office-", "")
+    dept = DEPT.get(key, words[1])
     why = re.sub(r"D-\d{8}-\d+", name, line.split(None, 2)[2] if len(words) > 2 else "")
     why = why.replace("held (OPS/state/hold)", "on hold").replace("new findings", "new reports to read")
-    return {"dept": dept, "state": "run" if words[0] == "RUN" else "wait", "why": why.strip()}
+    # "Run now" can lift a wait on the budget, a hold, or (Customer) on fixes in flight; never the lab cap or the office switch
+    can = words[0] == "WAIT" and "lab stopped" not in line and any(
+        k in line for k in ("would pass 70%", "ahead of the week's pace", "held (OPS/state/hold)", "customer fixes in flight"))
+    return {"dept": dept, "key": key, "can_run": can, "state": "run" if words[0] == "RUN" else "wait", "why": why.strip()}
 
 
 GOOD_GAP, GOOD_WRONG = 10, 1   # the CEO, 2026-10-12: when two blind runs in a row are this close, test on an unseen product
@@ -145,10 +149,10 @@ def selftest():
         w("state/claims/dev-D-20261008-01.json", json.dumps({"lane": 2, "at": "2026-10-08T06:30:00+00:00",
                                                               "line": "RUN  groundedops-office-dev  build D-20261008-01"}))
         r = brief(ops, ops, now, (11, 38, 5))["running"]
-        assert r == [{"dept": "Dev", "state": "now", "why": "build “Two products”", "lane": 2, "since": "2026-10-08T06:30:00+00:00"}], r
+        assert r == [{"dept": "Dev", "key": "dev", "can_run": False, "state": "now", "why": "build “Two products”", "lane": 2, "since": "2026-10-08T06:30:00+00:00"}], r
         assert brief(ops, ops, now, (11, 38, 300))["stalled"].startswith("Paused: the office's usage figures are 5 hours old")
         e = explain("WAIT groundedops-office-dev  build D-20261008-01; held (OPS/state/hold)", {"D-20261008-01": "Two products"})
-        assert e == {"dept": "Dev", "state": "wait", "why": "build \u201cTwo products\u201d; on hold"}, e
+        assert e == {"dept": "Dev", "key": "dev", "can_run": True, "state": "wait", "why": "build \u201cTwo products\u201d; on hold"}, e
         def run(name, bot, base):   # 3 cases, one score each
             d = os.path.join(ops, "runs", name); os.makedirs(d, exist_ok=True)
             json.dump({"cases": [{"id": f"c{k}", "q": "q", "type": "lookup"} for k in range(3)]}, open(os.path.join(d, "cases.json"), "w"))

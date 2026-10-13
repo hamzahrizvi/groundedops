@@ -131,6 +131,10 @@ def take(ops, repo, five, week, resets, now, lane):
             continue
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"lane": lane, "at": now.isoformat(timespec="seconds"), "line": line}, f)
+        try:   # a "Run now" press is used up by the start it allowed
+            os.remove(os.path.join(ops, "state", "run_now", "dev" if key.startswith("dev-") else key))
+        except OSError:
+            pass
         return [r[0] for r in rows] + [f"TOOK {key} | {line}"]
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
 
@@ -234,6 +238,14 @@ def holds(ops, now):
     return held
 
 
+def run_now(ops):
+    """Departments the CEO pressed "Run now" for (OPS/state/run_now/<dept>, via tools/ceo_inbox.py): their next
+    start skips the budget pace and a hold. A press lapses after a day, and taking the work uses it up."""
+    d = os.path.join(ops, "state", "run_now")
+    return {n for n in (os.listdir(d) if os.path.isdir(d) else [])
+            if time.time() - os.path.getmtime(os.path.join(d, n)) < 86400}
+
+
 def is_off(ops):
     return os.path.exists(os.path.join(ops, "state", "office_off"))
 
@@ -241,7 +253,7 @@ def is_off(ops):
 def entries(ops, repo, five, week, resets, now, taken):
     """[(line, claim key, runnable)]. Work other lanes are running counts against the budget,
     since two lanes starting together both see the same usage figures."""
-    held = holds(ops, now)
+    held, forced = holds(ops, now), run_now(ops)
     if is_off(ops):
         held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken)}
     cost = lambda k: COST.get("dev" if k.startswith("dev-") else k, (0, 0))
@@ -257,9 +269,11 @@ def entries(ops, repo, five, week, resets, now, taken):
             stop = "held (OPS/state/hold)" if "merge" in held else f"another merge is running{lane}" if lane else None
             out.append((f"WAIT merge {why}  {stop}" if stop else f"MERGE {why}  gate PASS, READY TO MERGE, Security CLEAR", key, not stop))
             continue
-        stop = ("held (OPS/state/hold)" if dept in held else f"already running{lane}" if lane else
+        pressed = dept in forced and not is_off(ops)   # "Run now": skips a hold and the budget, not the 5-hour limit itself
+        stop = ("held (OPS/state/hold)" if dept in held and not pressed else f"already running{lane}" if lane else
                 f"{MAX_DEV} builds already running" if dept == "dev" and building >= MAX_DEV else
-                over_budget(dept, five, week, resets, now))
+                f"5-hour window at {five}%" if pressed and five >= 90 else
+                None if pressed else over_budget(dept, five, week, resets, now))
         out.append((f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}", key, not stop))
     return out
 
@@ -341,6 +355,11 @@ def selftest():
         assert p[0].startswith("RUN  groundedops-office-customer  the CEO asked for a fresh score"), p
         assert sum("customer" in x for x in p) == 1, p
         assert "would pass 70%" in plan(ops, ops, 60, 38, resets, now)[0], "a press still waits for the budget"
+        os.makedirs(os.path.join(ops, "state", "run_now")); w("state/run_now/customer")
+        assert plan(ops, ops, 60, 38, resets, now)[0].startswith("RUN  groundedops-office-customer"), "Run now skips the budget"
+        assert "5-hour window at 92%" in plan(ops, ops, 92, 38, resets, now)[0], "but not the 5-hour limit itself"
+        assert take(ops, ops, 60, 38, resets, now, 7)[-1].startswith("TOOK customer") and not run_now(ops), "used up"
+        release(ops, 7)
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (time.time() + 10, time.time() + 10))
         assert not any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "a run finished after the press answers it"
         os.remove(os.path.join(ops, "state/refresh_request"))

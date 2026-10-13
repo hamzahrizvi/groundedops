@@ -14,6 +14,8 @@ from the decisions file, and a note is quoted so it can never read as a decision
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
   off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
+  run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
+           (office_next.py); for customer it also files a refresh request, so a held-back test run goes first
   cap      OPS/lab_cap.json {usd, per}: the test lab's spending cap, from note "<usd> [day|week|month]" (0-1000,
            default month); tools/blind_eval.py stops at it (tools/ops_costs.py cap_status)
 """
@@ -29,7 +31,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, stage_of  # noqa: E402
-from office_next import claims  # noqa: E402
+from office_next import COST, claims  # noqa: E402
 
 CAP_NOTE = re.compile(r"^\s*(\d{1,4}(?:\.\d{1,2})?)\s*(day|week|month)?\s*$")
 CAN = {"approve": {"waiting for CEO", "deferred", "rejected"},
@@ -88,6 +90,16 @@ def apply(ops, folder, now=None):
                 os.makedirs(os.path.join(ops, "state"), exist_ok=True)
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
                 out.append(f"APPLIED {doc_id} refresh")
+            continue
+        if choice == "run_now":   # "Run now" on a waiting department in the office page's Moving panel
+            if i not in COST:
+                out.append(f"SKIPPED {doc_id} run_now: no such department {i!r}")
+                continue
+            os.makedirs(os.path.join(ops, "state", "run_now"), exist_ok=True)
+            open(os.path.join(ops, "state", "run_now", i), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
+            if i == "customer" and "customer" not in claims(ops):
+                open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
+            out.append(f"APPLIED {doc_id} run_now {i}")
             continue
         if choice == "cap":   # the CEO's lab spending cap, from the Costs tab
             m = CAP_NOTE.match(str(d.get("note") or ""))
@@ -180,6 +192,10 @@ def selftest():
                        "SKIPPED 14 cap: not a number of dollars from 0 to 1000", "APPLIED 15 cap $7.5 per month"], got
         c = json.load(open(cap, encoding="utf-8"))
         assert (c["usd"], c["per"], c["row"]) == (7.5, "month", "15"), c   # the newest row wins
+        row("16", id="security", choice="run_now")
+        row("17", id="../x", choice="run_now")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 16 run_now security", "SKIPPED 17 run_now: no such department '../x'"]
+        assert os.path.exists(os.path.join(ops, "state", "run_now", "security"))
     print("selftest ok")
 
 

@@ -225,6 +225,9 @@ button{font:inherit;color:inherit}
 .mlist{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:8px}
 .mlist li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:baseline;font-size:14px;line-height:1.35}
 .mlist b{font:12px/1.3 var(--display);letter-spacing:.04em;display:block}
+.mlist .btn{font-size:11px;padding:3px 8px;box-shadow:2px 2px 0 var(--ink);margin-top:6px}
+.pvage{margin:0 0 8px;font-size:13px;color:var(--muted)} .pvage.stale{color:var(--ink);border-left:4px solid var(--accent);padding-left:8px}
+.qhist{margin:6px 0 0;font-size:13px;color:var(--muted)} .qhist .vpill{margin-right:4px}
 .small{font-size:13px;color:var(--muted);margin:0}
 .link{background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-size:14px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -316,6 +319,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
             <p class="lnote" id="trNote">Adjusted for difficulty: every question type counts the same in every run, so a set heavy on hard questions does not look like a worse bot. The shaded band is where the true score probably sits, given how few questions one run asks (90%). A move inside the noise, which is never under 3 points, is the bot and the marker flickering, not a change. Numbered marks are fixes merged into the product.</p>
             <ul class="tsteps" id="trSteps"></ul>
           </div>
+          <p class="pvage" id="pvAge"></p>
           <div class="tiles" id="pvTiles"></div>
           <div class="pvbar">
             <div class="seg" role="group" aria-label="Group by">
@@ -849,6 +853,11 @@ function openReview(g, run, pick, title){
     const box = el("div", "rq"), head = el("div", "qh"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
     head.append(el("span", "vpill " + cls, lab), el("span", "small", `${c.product} · ${groupName("type", c.type)} · bot ${c.bot}/3` + (c.base != null ? `, whole-manual AI ${c.base}/3` : "")));
     box.append(head, el("p", "qq", c.q));
+    // the same question in other runs (a re-ask keeps its id): flicker or a real fix
+    const hist = Object.entries(P.cases || {}).sort().map(([r, cs]) => [r, cs.find(x => x.id === c.id || x.q === c.q)]).filter(([, x]) => x);
+    if(hist.length > 1){ const h = el("p", "qhist", "Every run that asked it: ");
+      for(const [r, x] of hist){ const [l, k] = VERDICT[x.verdict] || [x.verdict, ""], pill = el("span", "vpill " + k, `${runLabel(r)}: ${x.bot}/3`); pill.title = l; h.append(pill); }
+      box.append(h); }
     if(c.answer){ const d = el("details"); d.append(el("summary", null, "The bot's answer"), el("p", "ans", c.answer)); box.append(d); }
     if(c.why) box.append(el("p", "why", "Grader: " + c.why));
     box.append(traceBox(c.trace, c, lab));
@@ -998,6 +1007,13 @@ function renderPivot(){
     ["Wrong answers", String(o.wrong), op ? delta(o.wrong, op.wrong, "") : "stated something false", c => c.verdict === "wrong"],
     ["Said \"not found\" wrongly", String(o.declined), op ? delta(o.declined, op.declined, "") : "the manual had it", c => c.verdict === "safe_decline"],
     ["Website questions", String(realN), realLast ? `week to ${runLabel(realLast)}` : "none logged yet"]];
+  // how old the score is, and whether fixes merged since have not been measured yet
+  const age = document.getElementById("pvAge"), lastPt = ((P.trend || {}).points || []).slice(-1)[0], fresh = ((P.trend || {}).waiting || []).length;
+  const days = lastPt && lastPt.when ? (Date.now() / 1000 - lastPt.when) / 86400 : null;
+  age.hidden = P.sample || !last;
+  age.className = "pvage" + (fresh || days > 3 ? " stale" : "");
+  age.textContent = !last ? "" : `Measured ${runLabel(last)}` + (days != null ? `, ${days < 1 ? "today" : Math.round(days) + (Math.round(days) === 1 ? " day" : " days") + " ago"}` : "") +
+    (fresh ? `. ${fresh} fix${fresh > 1 ? "es" : ""} merged since, not in these figures yet: the next test run measures ${fresh > 1 ? "them" : "it"}.` : ".");
   document.getElementById("pvTiles").replaceChildren(...tiles.map(([k, v, d, pick]) => { const t = document.createElement("div"); t.className = "tile";
     t.innerHTML = '<div class="k"></div><div class="v"></div><div class="d"></div>'; t.children[0].textContent = k; t.children[1].textContent = v; t.children[2].textContent = d;
     if(pick){ const go = () => openReview(null, last, pick, k); t.classList.add("cell"); t.tabIndex = 0; t.setAttribute("role", "button");
@@ -1172,8 +1188,23 @@ function renderMove(){
   const LBL = {now: ["working", "Now"], run: ["working", "Next"], wait: ["waiting", "Waits"]};
   list.replaceChildren(...(age > 90 ? [] : [...(b.running || []), ...(b.moving || [])]).map(m => { const li = document.createElement("li"), s = document.createElement("span"), d = document.createElement("div"), n = document.createElement("b");
     const [cls, lbl] = LBL[m.state] || ["idle", "Idle"]; s.className = "state " + cls; s.textContent = lbl;
-    n.textContent = m.dept; d.append(n, document.createTextNode(m.why + (m.since ? ` (since ${fmtTime(new Date(m.since))})` : ""))); li.append(s, d); return li; }));
+    n.textContent = m.dept; d.append(n, document.createTextNode(m.why + (m.since ? ` (since ${fmtTime(new Date(m.since))})` : "")));
+    if(m.can_run && live.available && !b.off) d.append(runNowBtn(m));
+    li.append(s, d); return li; }));
   $("moveWhen").textContent = `Checked at ${fmtTime(at)}.` + (b.usage ? ` Claude usage: ${b.usage.five}% of the 5-hour limit, ${b.usage.week}% of the week.` : "");
+}
+
+/* "Run now": the CEO lifts a budget, hold or fixes-in-flight wait for one start (tools/ceo_inbox.py run_now) */
+function runNowBtn(m){
+  const sent = live.inbox.find(r => r.choice === "run_now" && r.id === m.key && r.status === "new"), go = el("button", "btn", sent ? "Sent: starts at the next check" : "Run now");
+  go.type = "button"; go.disabled = !!sent;
+  go.title = "Start this at the next hourly check, past the budget pace or a hold. The lab spending cap and the 5-hour limit still apply.";
+  go.addEventListener("click", async () => {
+    go.disabled = true; go.textContent = "Sending…";
+    try { await decide(m.key, "run_now", `Run now: ${m.dept} (${m.why})`, m.dept); go.textContent = "Sent: starts at the next check"; }
+    catch(e){ go.disabled = false; go.textContent = "Run now"; go.title = writeError(e); }
+  });
+  return go;
 }
 
 /* ---------- pop-ups ---------- */
@@ -1535,7 +1566,7 @@ setInterval(sampleStep, 9000);
   let firstEvents = true;
   try {
     db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderRefresh(); renderPower(); renderLab(); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderRefresh(); renderPower(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());
