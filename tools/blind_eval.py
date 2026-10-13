@@ -222,7 +222,7 @@ Verdict per answer, one of: correct, partial, safe_decline, wrong, correct_refus
 {answers}
 
 Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
-    MAN, CAP = os.path.join(RUN, "manuals"), 30000
+    MAN, PAGE_CHARS = os.path.join(RUN, "manuals"), 30000
     pages = {}   # "<file>.pdf pN" -> every chunk of that page
     if os.path.isdir(MAN):
         for f in sorted(os.listdir(MAN)):
@@ -231,7 +231,7 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                 pages.setdefault(chunk.split("]", 1)[0], []).append("[" + chunk)
     def cited(c):
         text = "\n\n".join(ch for p in c.get("pages") or [] for ch in pages.get(p, []))
-        return "\n" + text[:CAP] if text else "n/a"
+        return "\n" + text[:PAGE_CHARS] if text else "n/a"
     rng = random.Random(4)
     order = {c["id"]: rng.sample(SYSTEMS, len(SYSTEMS)) for c in cases}
     def prompt(c):

@@ -32,6 +32,8 @@ from collections import Counter, defaultdict
 DIMS = ("category", "type", "product")
 RIGHT = ("correct", "correct_refusal", "clarified")   # the page's Right tab; its Wrong tab is verdict "wrong"
 REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens its questions
+FULL_RUNS = 2        # ponytail: only the newest runs keep answers and traces, so the page's doc stays under 256 KB
+SLIM = ("id", "q", "product", "type", "category", "bot", "base", "verdict")
 KEEP_RUNS = 12       # ponytail: the page shows the last 12 runs; ops/runs keeps every run
 NOISE_PTS = 3.0      # the retrofit gate's noise rule: moves under 3 points are the bot's and the marker's own flicker
 VISITOR_FILES = ("widget_feedback.json", "real_questions.json", "real_categorised.json")  # D-20261010-22: visitor text in a run
@@ -251,11 +253,13 @@ def build(ops, repo=None):
             real[name] = rc
         latest = facts
     cats = os.path.join(ops, "categories.json")
+    recent = list(zip(runs, names))[-REVIEW_RUNS:]
     return {"updated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "runs": names, "categories": _load(cats) if os.path.exists(cats) else {},
             "overall": overall, "blind": {k: dict(v) for k, v in blind.items()}, "real": real,
             "trend": trend(by_run, ends, merged_fixes(repo, ops) if repo else []),
-            "cases": {n: review(d) for d, n in list(zip(runs, names))[-REVIEW_RUNS:]},
+            "cases": {n: review(d) if k >= len(recent) - FULL_RUNS else [{f: c.get(f) for f in SLIM} for c in review(d)]
+                      for k, (d, n) in enumerate(recent)},
             "latest": {"run": names[-1] if names else None,
                        "cases": [dict(f, q=f["q"][:160]) for f in latest]}}
 
