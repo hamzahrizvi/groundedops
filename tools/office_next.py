@@ -206,7 +206,9 @@ def waiting(ops, repo, now, taken=()):
         if age(max(_mtime(os.path.join(ops, "inbox", dept, "*.md")), _mtime(os.path.join(ops, "state", f"{dept}_last_run.txt")))) >= 30:
             out.append((dept, why, dept))
     days = diary_due(ops, repo, now.astimezone().replace(tzinfo=None))   # the product owner's diary (tools/office_diary.py), on a light model
-    if days:
+    if "diary" in run_now(ops):   # Do it now: today's entry too, before the day ends (office_diary.py --today)
+        out.append(("diary", "you asked for it now", "diary"))
+    elif days:
         out.append(("diary", f"diary for {', '.join(str(d) for d in days[:3])}" + (" and more" if len(days) > 3 else ""), "diary"))
     for dept in sorted(run_now(ops) - {d for d, _, _ in out} - {"dev"}):   # "Do it now" with nothing due (Dev needs a work order)
         out.append((dept, "you asked for it now", dept))

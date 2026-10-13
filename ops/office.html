@@ -767,9 +767,14 @@ const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
 const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
 /* the product owner's diary (tools/office_diary.py): a few plain lines per day, newest first, from the brief */
 function renderDiary(){
-  const days = (live.brief && live.brief.diary) || [], box = document.getElementById("p-diary");
-  if(!days.length){ box.replaceChildren(el("p", "empty", live.available ? "No diary yet. The product owner writes each day's entry that night, at the office's hourly check." : "The diary appears with the live office.")); return; }
-  box.replaceChildren(el("p", "lnote", "What the office did each day, what went wrong and how it was sorted, in the product owner's words."),
+  const days = (live.brief && live.brief.diary) || [], box = document.getElementById("p-diary"), head = el("div", "actions pvrefresh");
+  if(live.available && !(live.brief && live.brief.off)){   // Do it now: today's entry so far, rewritten once the day ends
+    const b = runNowBtn({key: "diary", dept: "Diary", why: "do it now"}, "Write today's entry now");
+    b.title = "The product owner writes today's entry so far at the next hourly check. It is written again with the full day after 22:00.";
+    head.append(b);
+  }
+  if(!days.length){ box.replaceChildren(head, el("p", "empty",live.available ? "No diary yet. The product owner writes each day's entry that night, at the office's hourly check." : "The diary appears with the live office.")); return; }
+  box.replaceChildren(head, el("p", "lnote", "What the office did each day, what went wrong and how it was sorted, in the product owner's words."),
     ...days.map(d => { const sec = el("section", "dday"), when = new Date(d.date + "T12:00");
       sec.append(el("h3", "pvh", when.toLocaleDateString(undefined, {weekday:"short", day:"numeric", month:"short"})));
       for(const line of d.text.split("\n").filter(l => l.trim())){ const m = line.match(/^\*\*(.+?)\*\*\s*(.*)$/), p = el("p", "dline");
@@ -1588,7 +1593,7 @@ setInterval(sampleStep, 9000);
   let firstEvents = true;
   try {
     db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); renderRefresh(); renderPower(); renderLab(); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());

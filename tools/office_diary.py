@@ -100,11 +100,21 @@ def facts(ops, repo, day, office=None):
     return out
 
 
-def due(ops, repo, now=None, office=None):
+def due(ops, repo, now=None, office=None, today=False):
+    """Days to write: over (or past DAY_ENDS) with no final entry. An entry written before its day's
+    DAY_ENDS (the CEO's "Do it now", today=True) is provisional and is written again once the day ends."""
     now = now or datetime.datetime.now()
     days = [now.date() - datetime.timedelta(days=k) for k in range(LOOKBACK, -1, -1)]
-    return [d for d in days if (d < now.date() or now.hour >= DAY_ENDS)
-            and not os.path.exists(os.path.join(ops, "diary", f"{d}.md")) and facts(ops, repo, d, office)]
+
+    def final(d):
+        p = os.path.join(ops, "diary", f"{d}.md")
+        return os.path.exists(p) and datetime.datetime.fromtimestamp(os.path.getmtime(p)) >= \
+            datetime.datetime.combine(d, datetime.time(DAY_ENDS))
+
+    def ended(d):
+        return d < now.date() or now.hour >= DAY_ENDS
+    return [d for d in days if (ended(d) and not final(d) or today and d == now.date())
+            and facts(ops, repo, d, office)]
 
 
 def latest(ops, n=14):
@@ -131,7 +141,12 @@ def selftest():
         assert "Test run 20261013b failed at: grade" in f and "Product owner decisions: 2 defer" in f, f
         assert due(ops, ops, datetime.datetime(2026, 10, 13, 15), office=ops) == [], "not over yet"
         assert due(ops, ops, datetime.datetime(2026, 10, 13, 22, 5), office=ops) == [day], "due tonight"
+        assert due(ops, ops, datetime.datetime(2026, 10, 13, 15), office=ops, today=True) == [day], "Do it now"
         w("diary/2026-10-13.md", "Done: a test run.\n")
+        os.utime(os.path.join(ops, "diary/2026-10-13.md"), (stamp, stamp))   # written at noon: provisional
+        assert due(ops, ops, datetime.datetime(2026, 10, 14, 9), office=ops) == [day], "rewritten once the day ends"
+        late = datetime.datetime(2026, 10, 13, 22, 30).timestamp()
+        os.utime(os.path.join(ops, "diary/2026-10-13.md"), (late, late))
         assert due(ops, ops, datetime.datetime(2026, 10, 14, 9), office=ops) == [], "written once"
         assert latest(ops)[0]["date"] == "2026-10-13"
     print("selftest ok")
@@ -143,13 +158,14 @@ def main():
     ap.add_argument("--repo", default=os.path.normpath(os.path.join(OFFICE, "..", "..", "..")))
     ap.add_argument("--facts")
     ap.add_argument("--due", action="store_true")
+    ap.add_argument("--today", action="store_true", help="with --due: today too, before the day ends (Do it now)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.facts:
         sys.stdout.reconfigure(encoding="utf-8")
         print("\n".join(facts(a.ops, a.repo, datetime.date.fromisoformat(a.facts))) or "Nothing recorded.")
     elif a.due:
-        print("\n".join(str(d) for d in due(a.ops, a.repo)) or "NONE")
+        print("\n".join(str(d) for d in due(a.ops, a.repo, today=a.today)) or "NONE")
     else:
         selftest()
 
