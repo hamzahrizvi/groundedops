@@ -10,6 +10,7 @@ OPS    = C:\Users\hrizvi\groundedops-ops
    run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/office_diary.py" --facts <date>` and keep its output;
    MODEL PICK (agent product-owner, job diary, inputs: the facts, already in the prompt), then spawn the product owner with it: Agent tool with subagent_type "product-owner"; if not listed, general-purpose told to read OFFICE/.claude/agents/product-owner.md and follow it exactly.
    Prompt: "Diary. Date = <date>. OPS = <OPS>. Facts:\n<the facts output>"
-3. Finish with one line per date: "<date>: <its reply>".
+3. Upload the diary to the office page: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/office_diary.py" --json > "<OPS>/diary.json"`. Load ArtifactData once with ToolSearch "select:ArtifactData"; `get` collection "diary", doc_id "current" on https://claude.ai/artifact/XeDaMgpcp1foLDuX9N8KMD, then `set` it with file_path "<OPS>/diary.json" and if_version = the version you got (none if it did not exist). If refused because it changed first, get and set once more.
+4. Finish with one line per date: "<date>: <its reply>".
 
-CONSTRAINTS: write only OPS/diary/; never edit, stage or commit files in REPO or OFFICE.
+CONSTRAINTS: write only OPS/diary/ and OPS/diary.json; never edit, stage or commit files in REPO or OFFICE.

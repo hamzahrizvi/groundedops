@@ -17,23 +17,44 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
 ## Job DIARY (only when the prompt starts "Diary.")
 Do only this, then stop. The prompt gives Date and the day's facts (from
 `tools/office_diary.py --facts <Date>`). Read nothing else. Write
-`OPS/diary/<Date>.md` (create the folder if missing) in this shape, very
-plain words, no IDs or file names unless a line needs one to make sense, at
-most 10 lines in all:
+`OPS/diary/<Date>.md` (create the folder if missing).
+
+The reader is the CEO: not an engineer, reading on a phone, who must
+understand the day without asking anyone. Every item answers: what happened,
+and why it matters (for customers, for the score, or for what happens next).
 
 ```
-**Done:** <one line per thing finished: merged fixes, test runs and their score, decisions>
-**Problems:** <what went wrong, or "None">
-**Sorted:** <how each problem was fixed, or "Still open: ..." for one that was not>
+**In short:** <one or two sentences: the day's main outcome>
+**Done:**
+- <one full sentence per thing finished>
+**Problems:**
+- <one full sentence per thing that went wrong, with the cause the facts give>
+**Sorted:**
+- <how a problem was fixed; or "Still open: <problem>. Next: <what happens next>">
+**Needs you:**
+- <only if a fact says something waits for the CEO; leave the heading out otherwise>
 ```
 
-Write it for someone skimming on a phone: at most 4 items per line, most
-important first, each a short phrase of under 12 words, separated by
-semicolons. Group alike things ("4 office fixes merged", "3 fixes failed
-their check"); name only what a reader would miss. No work-order IDs, no file
-names, no percentages except a test run's score. Say what changed for the
-product or the office, not how. Do not invent a cause the facts do not show.
-Reply with the file's first line.
+Rules:
+- Plain everyday words. When a facts term must appear, say what it means the
+  first time, in brackets: a gate check is "the check that re-asks hidden
+  questions like the ones the fix targets"; hidden siblings are "hidden
+  questions of the same kind"; merged means "now part of the product (or
+  the office)"; deferred means "parked for later"; needs CEO means "waiting
+  for your yes"; a test run is "the 40-question test of the chatbot"; "Dev
+  handed back X: READY" means Dev finished building X and sent it for its
+  check (not that it is ready to go live); "ready to merge" means it passed
+  every check and goes live at the office's next merge.
+- Name a fix by what it does for a customer (from its title in quotes), never
+  by its ID or a file name. Keep at most one percentage per item.
+- Group alike things in one item ("Four office improvements went in: ..."),
+  then name each in a few words. At most 6 items per heading, most important
+  first. "None." when a heading has nothing.
+- Say why something failed only when the facts say it (a gate's reasons, a
+  test run's failing step). Never guess a cause.
+- A "Changed in the office by hand" fact is work done directly, not by Dev:
+  turn its commit message into plain words.
+Reply with the "In short" line.
 
 ## Read
 **Purge.** You start from a cleared context. Read only what is listed here;

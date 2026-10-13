@@ -19,6 +19,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ops_ledger import decisions  # noqa: E402
+
 DAY_ENDS = 22     # ponytail: tonight's entry is written after 22:00; later work that night is not in it
 LOOKBACK = 7
 OFFICE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,13 +47,20 @@ def _log(repo, day, *flags):
 def facts(ops, repo, day, office=None):
     """Plain fact lines for one day, from the files the office already keeps."""
     office = office or OFFICE
+    try:
+        titles = {i: it["title"] for i, it in decisions(ops).items()}
+    except Exception:
+        titles = {}
+    called = lambda i: f"\u201c{titles[i]}\u201d ({i})" if i in titles else i
     d, stamp = day, day.strftime("%Y%m%d")
     out = []
     for where, path in (("product", repo), ("office", office)):
         for m in filter(None, map(MERGE.match, _log(path, d, "--merges"))):
             out.append(f"Merged into the {where}: {m[2]} ({m[1]})")
-        for subject in _log(path, d, "--first-parent", "--no-merges"):   # made straight on the branch, not by Dev
-            out.append(f"Changed in the {where} by hand: {subject}")
+        hand = _log(path, d, "--first-parent", "--no-merges")   # made straight on the branch, not by Dev
+        for subject in dict.fromkeys(hand):
+            n = hand.count(subject)
+            out.append(f"Changed in the {where} by hand: {subject}" + (f" ({n} times)" if n > 1 else ""))
     for run in sorted(glob.glob(os.path.join(ops, "runs", stamp + "*"))):
         name = os.path.basename(run)
         if os.path.exists(os.path.join(run, "FAILED")):
@@ -68,12 +78,17 @@ def facts(ops, repo, day, office=None):
                 j = json.load(open(g, encoding="utf-8"))
             except ValueError:
                 continue
-            out.append(f"Gate check {os.path.basename(os.path.dirname(g))[:-5]}: {j.get('verdict')}"
-                       + (f" ({j.get('before_pct')}% to {j.get('after_pct')}%)" if j.get("before_pct") is not None else ""))
+            i = os.path.basename(os.path.dirname(g))[:-5]
+            out.append(f"Gate check of {called(i)}: {j.get('verdict')}"
+                       + (f", score on the last test questions {j.get('before_pct')}% before the fix and {j.get('after_pct')}% after"
+                          if j.get("before_pct") is not None else "")
+                       + (f"; it fixed {len(j['fixed'])} question(s)" if j.get("fixed") else "")
+                       + (f"; {len(j['became_wrong'])} question(s) became wrong" if j.get("became_wrong") else "")
+                       + (f"; reasons: {'; '.join(j['reasons'])}" if j.get("reasons") else ""))
     for h in sorted(glob.glob(os.path.join(ops, "inbox", "dev", "D-*.md"))):
         if _on(h, d) and "." not in os.path.basename(h)[:-3]:
             st = re.search(r"(?mi)^\W*Status:\s*(.+)$", open(h, encoding="utf-8").read())
-            out.append(f"Dev handed back {os.path.basename(h)[:-3]}: {st[1].strip() if st else 'no status line'}")
+            out.append(f"Dev handed back {called(os.path.basename(h)[:-3])}: {st[1].strip() if st else 'no status line'}")
     for dept in sorted(os.listdir(os.path.join(ops, "inbox")) if os.path.isdir(os.path.join(ops, "inbox")) else []):
         if dept == "dev":
             continue
@@ -117,7 +132,7 @@ def due(ops, repo, now=None, office=None, today=False):
             and facts(ops, repo, d, office)]
 
 
-def latest(ops, n=14):
+def latest(ops, n=90):   # ponytail: 90 days keeps the page's diary doc well under its 256 KB
     """The newest n entries, newest first, for the office page."""
     return [{"date": os.path.basename(p)[:-3], "text": open(p, encoding="utf-8").read()[:2000]}
             for p in sorted(glob.glob(os.path.join(ops, "diary", "*.md")), reverse=True)[:n]]
@@ -158,12 +173,17 @@ def main():
     ap.add_argument("--repo", default=os.path.normpath(os.path.join(OFFICE, "..", "..", "..")))
     ap.add_argument("--facts")
     ap.add_argument("--due", action="store_true")
+    ap.add_argument("--json", action="store_true", help="the latest entries, for the office page's diary doc")
     ap.add_argument("--today", action="store_true", help="with --due: today too, before the day ends (Do it now)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.facts:
         sys.stdout.reconfigure(encoding="utf-8")
         print("\n".join(facts(a.ops, a.repo, datetime.date.fromisoformat(a.facts))) or "Nothing recorded.")
+    elif a.json:
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(json.dumps({"updated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                          "entries": latest(a.ops)}))
     elif a.due:
         print("\n".join(str(d) for d in due(a.ops, a.repo, today=a.today)) or "NONE")
     else:

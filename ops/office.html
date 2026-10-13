@@ -230,7 +230,9 @@ button{font:inherit;color:inherit}
 .pvage{margin:0 0 8px;font-size:13px;color:var(--muted)} .pvage.stale{color:var(--ink);border-left:4px solid var(--accent);padding-left:8px}
 .qhist{margin:6px 0 0;font-size:13px;color:var(--muted)} .qhist .vpill{margin-right:4px}
 .small{font-size:13px;color:var(--muted);margin:0}
-.dday{border-top:1px solid var(--line);padding:4px 0 8px} .dday .pvh{margin:8px 0 4px} .dline{margin:0 0 4px;font-size:14.5px;line-height:1.45}
+.dday{border-top:1px solid var(--line);padding:4px 0 10px;max-width:75ch} .dday .pvh{margin:10px 0 6px} .dline{margin:0 0 6px;font-size:15px;line-height:1.5}
+.dhead{margin:10px 0 2px;font-size:14px} .dlist{margin:0 0 4px;padding-left:20px;font-size:15px;line-height:1.5} .dlist li{margin-bottom:4px}
+.dpick{gap:10px 14px} .dpick input[type=date]{font:inherit;font-size:14px;padding:4px 6px;border:1px solid var(--line);border-radius:3px;background:var(--surface);color:var(--ink)}
 .link{background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-size:14px}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .pvrefresh{margin:0 0 6px}
@@ -774,21 +776,43 @@ function showTab(name, scroll){
 for(const n of ["status","plan","depts","rewards","costs","diary"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
 const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
 const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
-/* the product owner's diary (tools/office_diary.py): a few plain lines per day, newest first, from the brief */
+/* the product owner's diary (tools/office_diary.py --json, uploaded by the diary run to diary/current):
+   one entry per day, picked by a date range; "**Heading:**" lines and "- " items render as sections and lists */
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const diaryRange = {from: iso(new Date(Date.now() - 6 * 864e5)), to: iso(new Date())};
 function renderDiary(){
-  const days = (live.brief && live.brief.diary) || [], box = document.getElementById("p-diary"), head = el("div", "actions pvrefresh");
+  const all = (live.diary && live.diary.entries) || (live.brief && live.brief.diary) || [], box = document.getElementById("p-diary");
+  const head = el("div", "actions pvrefresh dpick");
+  const date = (label, k) => { const l = el("label", "lbl", label + " "), i = el("input"); i.type = "date"; i.value = diaryRange[k];
+    if(all.length){ i.min = all[all.length - 1].date; i.max = iso(new Date()); }
+    i.addEventListener("change", () => { if(i.value){ diaryRange[k] = i.value; renderDiary(); } }); l.append(i); return l; };
+  const quick = (label, from, to) => { const b = el("button", null, label); b.type = "button";
+    b.setAttribute("aria-pressed", String(diaryRange.from === from && diaryRange.to === to));
+    b.addEventListener("click", () => { diaryRange.from = from; diaryRange.to = to; renderDiary(); }); return b; };
+  const today = iso(new Date()), now = new Date(), seg = el("div", "seg");
+  seg.append(quick("Today", today, today), quick("Last 7 days", iso(new Date(Date.now() - 6 * 864e5)), today),
+    quick("This month", iso(new Date(now.getFullYear(), now.getMonth(), 1)), today), quick("Everything", all.length ? all[all.length - 1].date : today, today));
+  head.append(seg, date("From", "from"), date("To", "to"));
   if(live.available && !(live.brief && live.brief.off)){   // Do it now: today's entry so far, rewritten once the day ends
     const b = runNowBtn({key: "diary", dept: "Diary", why: "do it now"}, "Write today's entry now");
     b.title = "The product owner writes today's entry so far at the next hourly check. It is written again with the full day after 22:00.";
     head.append(b);
   }
-  if(!days.length){ box.replaceChildren(head, el("p", "empty",live.available ? "No diary yet. The product owner writes each day's entry that night, at the office's hourly check." : "The diary appears with the live office.")); return; }
-  box.replaceChildren(head, el("p", "lnote", "What the office did each day, what went wrong and how it was sorted, in the product owner's words."),
-    ...days.map(d => { const sec = el("section", "dday"), when = new Date(d.date + "T12:00");
-      sec.append(el("h3", "pvh", when.toLocaleDateString(undefined, {weekday:"short", day:"numeric", month:"short"})));
-      for(const line of d.text.split("\n").filter(l => l.trim())){ const m = line.match(/^\*\*(.+?)\*\*\s*(.*)$/), p = el("p", "dline");
-        if(m) p.append(el("b", null, m[1] + " "), document.createTextNode(m[2])); else p.textContent = line; sec.append(p); }
-      return sec; }));
+  const [lo, hi] = [diaryRange.from, diaryRange.to].sort(), days = all.filter(d => d.date >= lo && d.date <= hi);
+  const note = el("p", "lnote", "What the office did each day, what went wrong and how it was sorted, in the product owner's words. Today's entry is a draft until the day ends.");
+  if(!days.length){ box.replaceChildren(head, note, el("p", "empty", !all.length ? (live.available ? "No diary yet. The product owner writes each day's entry that night, at the office's hourly check." : "The diary appears with the live office.") : "No notes for these days. Pick other dates above.")); return; }
+  box.replaceChildren(head, note, ...days.map(d => {
+    const sec = el("section", "dday"), when = new Date(d.date + "T12:00");
+    sec.append(el("h3", "pvh", when.toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"})));
+    let ul = null;
+    for(const line of d.text.split("\n").map(l => l.trim()).filter(Boolean)){
+      if(line.startsWith("- ")){ if(!ul){ ul = el("ul", "dlist"); sec.append(ul); } ul.append(el("li", null, line.slice(2))); continue; }
+      ul = null;
+      const m = line.match(/^\*\*(.+?)\*\*\s*(.*)$/), p = el("p", m && !m[2] ? "dhead" : "dline");
+      if(m) p.append(el("b", null, m[1] + (m[2] ? " " : "")), document.createTextNode(m[2])); else if(!line.startsWith("# ")) p.textContent = line;
+      if(p.textContent) sec.append(p);
+    }
+    return sec; }));
 }
 function renderBoards(){
   const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
@@ -1622,6 +1646,7 @@ setInterval(sampleStep, 9000);
     db.doc("board/ceo").onSnapshot(d => { live.waiting = (d.exists && d.data().waiting) || []; renderTray(); }, () => {});
     db.doc("ledger/current").onSnapshot(d => { live.ledger = d.exists ? d.data() : null; renderBoards(); }, () => {});
     db.doc("costs/current").onSnapshot(d => { live.costs = d.exists ? d.data() : null; renderCosts(); }, () => {});
+    db.doc("diary/current").onSnapshot(d => { live.diary = d.exists ? d.data() : null; if(tab === "diary") renderDiary(); }, () => {});
     db.doc("pivot/current").onSnapshot(d => { live.pivot = d.exists ? d.data() : null; renderPivot(); }, () => {});
   } catch(e) { live.available = false; }
   decideMode();
