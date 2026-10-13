@@ -257,7 +257,9 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
 .field textarea,.compose textarea{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:8px 10px;resize:vertical;min-height:64px;width:100%}
 .sent{border-left:3px solid var(--ok);padding:4px 10px;font-size:14px;margin:0}
 .oops{border-left:3px solid var(--crit);padding:4px 10px;font-size:14px;margin:0}
-.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:19}
+.fabs{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:19;display:flex;gap:12px}
+.fab{width:52px;height:52px;padding:0;border-radius:50%;display:grid;place-items:center}
+.fab svg{width:26px;height:26px}
 .chat{position:fixed;z-index:20;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(430px,calc(100vw - 32px));height:min(660px,calc(100vh - 32px - env(safe-area-inset-bottom,0px)));display:flex;flex-direction:column;background:var(--surface);border:2px solid var(--ink);border-radius:4px;box-shadow:6px 6px 0 var(--ink)}
 .chathead{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--line)}
 .chathead h2{font-size:15px;letter-spacing:.05em;margin-right:auto}
@@ -413,7 +415,14 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
     <div class="popbody" id="popBody"></div>
   </dialog>
 
-  <button class="btn go fab" id="fab" type="button">Ask the product owner</button>
+  <div class="fabs" id="fabs">
+    <button class="btn fab" id="fabPipe" type="button" aria-label="Ask the pipeline" title="Ask the pipeline: trace a question through every step">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="5" cy="19" r="2.2"/><path d="M7.2 5H12a3 3 0 0 1 3 3v1.5M7.2 19H12a3 3 0 0 0 3-3v-1.5M15 12h1.8"/></svg>
+    </button>
+    <button class="btn go fab" id="fab" type="button" aria-label="Ask the product owner" title="Ask the product owner">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>
+    </button>
+  </div>
   <section class="chat" id="chat" aria-labelledby="chatH" hidden>
     <div class="chathead">
       <h2 id="chatH">Product owner</h2>
@@ -928,12 +937,12 @@ function traceBox(t, c, lab){
   }
   return d;
 }
-/* the pipeline map (tools/pipeline_map.html, published beside this page) with this question's path lit;
-   loaded only when asked for, emptied on close */
+/* the pipeline map (tools/pipeline_map.html, published beside this page) with this question's path lit,
+   or, from the pipeline icon, empty and ready to ask; loaded only when asked for, emptied on close */
 function openPipeline(t){
   const f = $("pipeFrame");
-  f.src = "pipeline_map.html#trace=" + encodeURIComponent(JSON.stringify(t));
-  $("pipeH").textContent = "Pipeline: " + (t.q || "").slice(0, 90);
+  f.src = "pipeline_map.html" + (t ? "#trace=" + encodeURIComponent(JSON.stringify(t)) : "");
+  $("pipeH").textContent = t ? "Pipeline: " + (t.q || "").slice(0, 90) : "Ask the pipeline";
   $("pipe").showModal();
 }
 const VERDICT = {correct:["Right","ok"], correct_refusal:["Rightly declined","ok"], clarified:["Asked which product","ok"], partial:["Partly right","warn"], safe_decline:["Said not found","warn"], wrong:["Wrong","bad"]};
@@ -1453,7 +1462,7 @@ $("powerBtn").addEventListener("click", async () => {
 });
 
 /* ---------- the product owner's chat ---------- */
-const chatEl = $("chat"), msgs = $("msgs"), askBox = $("ask"), fab = $("fab");
+const chatEl = $("chat"), msgs = $("msgs"), askBox = $("ask"), fab = $("fabs");
 const chat = {turns: [], ctl: null, sample: undefined};
 try { chat.turns = JSON.parse(store.get("hq.chat") || "[]").filter(t => t && (t.role === "user" || t.role === "assistant") && t.content); } catch(e) { chat.turns = []; }
 $("speak").checked = store.get("hq.speak") === "1";
@@ -1475,7 +1484,8 @@ function openChat(q, send){
   askBox.focus();
 }
 function closeChat(){ if(chat.ctl) chat.ctl.abort(); chatEl.hidden = true; fab.hidden = false; try { speechSynthesis.cancel(); } catch(e) {} }
-fab.addEventListener("click", () => openChat());
+$("fab").addEventListener("click", () => openChat());
+$("fabPipe").addEventListener("click", () => openPipeline(null));
 $("chatX").addEventListener("click", closeChat);
 chatEl.addEventListener("keydown", e => { if(e.key === "Escape") closeChat(); });
 $("whyBtn").addEventListener("click", () => openChat("Why isn't the office moving right now, and what can I do about it?", true));
@@ -1553,7 +1563,7 @@ $("compose").addEventListener("submit", async e => {
     else { if(err && err.text && code !== "refused"){ out.textContent = err.text; out.className = "msg po"; } else out.remove(); bubble("sys", SAMPLE_ERR[code] || "Something went wrong reaching Claude. Try again."); }
   } finally { chat.ctl = null; $("send").disabled = false; $("stop").hidden = true; }
 });
-getSample().then(s => { if(!s) fab.hidden = true; });
+getSample().then(s => { if(!s) $("fab").hidden = true; });
 
 /* ================= sample week (labelled as such on the page) ================= */
 const SAMPLE = [
