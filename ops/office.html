@@ -1126,12 +1126,21 @@ function renderDetail(){
   const dl = el.querySelector("dl");
   for(const [k, v] of rows){ const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; if(k === "Doing now") dd.id = "doingNow"; dl.append(dt, dd); }
   // "Do it now": this department's scheduled task at the next hourly check, due or not (tools/ceo_inbox.py run_now)
-  const key = {customer:"customer", po:"product-owner", security:"security", audit:"audit", rnd:"rnd", marketing:"marketing"}[d.id];
+  const key = {customer:"customer", po:"product-owner", dev:"dev", security:"security", audit:"audit", rnd:"rnd", marketing:"marketing"}[d.id];
   if(key && live.available && hired(d.id) && !(live.brief && live.brief.off)){
     const b = runNowBtn({key, dept: d.name, why: "do it now"}, "Do it now"); b.classList.add("donow");
     b.title = "Starts this department's run at the next hourly check, even if nothing is due, past the budget pace. The 5-hour limit and the lab spending cap still apply.";
+    if(key === "dev") devNow(b);
     el.append(b);
   }
+}
+/* Dev only builds approved work orders: the button says why it cannot start when there is none */
+function devNow(b){
+  const mine = l => (l || []).filter(m => m.key === "dev"), run = mine(live.brief && live.brief.running), next = mine(live.brief && live.brief.moving);
+  const why = run.length && !next.length ? "Building now" : !next.length ? "Nothing approved to build" : next.every(m => m.state === "run") ? "Starts at the next check" : "";
+  if(why && !b.disabled){ b.disabled = true; b.textContent = why; }
+  b.title = why === "Nothing approved to build" ? "Dev builds only work orders you or the product owner approved. Approve one from \"Waiting for you\" first."
+    : "Starts the next approved build at the next hourly check, past the budget pace. At most 2 builds run at once, and the 5-hour limit still applies.";
 }
 /* the tray is always the real list once the office is connected, even while the floor plays a sample week */
 function renderTray(){
@@ -1602,7 +1611,7 @@ setInterval(sampleStep, 9000);
   live.available = true; live.db = db;
   let firstEvents = true;
   try {
-    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
+    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
     db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
