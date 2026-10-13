@@ -18,7 +18,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
-from ops_pivot import agg, run_facts  # noqa: E402
+from ops_pivot import agg, run_facts, test_runs  # noqa: E402
 from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
@@ -66,8 +66,7 @@ GOOD_GAP, GOOD_WRONG = 10, 1   # the CEO, 2026-10-12: when two blind runs in a r
 def ready_for_new_product(ops):
     """Why to feed a new product (overfitting check), or "". Good = the last two blind runs each within
     GOOD_GAP points of the whole-manual baseline and at most GOOD_WRONG wrong answers."""
-    runs = sorted(d for d in glob.glob(os.path.join(ops, "runs", "*"))
-                  if os.path.exists(os.path.join(d, "DONE")) and os.path.exists(os.path.join(d, "cases_state.json")))
+    runs = test_runs(ops)
     last = [agg(f) for f in (run_facts(d) for d in runs[-4:]) if f][-2:]
     if len(last) < 2 or not all(a["base_pct"] is not None and a["base_pct"] - a["bot_pct"] <= GOOD_GAP
                                 and a["wrong"] <= GOOD_WRONG for a in last):
@@ -159,10 +158,10 @@ def selftest():
             json.dump({"grades": {f"c{k}": {"sys_normal": {"score": bot[k]}, "baseline": {"score": base[k]}} for k in range(3)}},
                       open(os.path.join(d, "cases_state.json"), "w"))
             open(os.path.join(d, "DONE"), "w").close()
-        run("r1", [3, 3, 2], [3, 3, 2]); run("r2", [3, 2, 3], [3, 2, 3])
+        run("20261001", [3, 3, 2], [3, 3, 2]); run("20261002", [3, 2, 3], [3, 2, 3])
         got = ready_for_new_product(ops)
         assert got.startswith("The last two blind runs scored 88.9 and 88.9"), got
-        run("r3", [3, 0, 2], [3, 3, 3])
+        run("20261003", [3, 0, 2], [3, 3, 3])
         assert ready_for_new_product(ops) == "", "a bad run: keep fixing"
     print("selftest ok")
 

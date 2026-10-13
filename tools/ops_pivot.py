@@ -229,9 +229,19 @@ def real_counts(run_dir):
     return _load(cp) if os.path.exists(cp) else None
 
 
+TEST_RUN = re.compile(r"^\d{8}[a-z]?$")   # Customer's runs: 20261013, 20261013b; never a gate or experiment copy
+
+
+def test_runs(ops):
+    """Customer's finished 40-question test runs, oldest first. A folder named otherwise (20261010c-d05chk,
+    a session's one-question experiment) or without DONE is not the product's status (the CEO, 2026-10-13)."""
+    return sorted(d for d in glob.glob(os.path.join(ops, "runs", "*"))
+                  if TEST_RUN.match(os.path.basename(d)) and all(os.path.exists(os.path.join(d, f))
+                                                                 for f in ("DONE", "cases.json", "cases_state.json")))
+
+
 def build(ops, repo=None):
-    runs = sorted(d for d in glob.glob(os.path.join(ops, "runs", "*"))
-                  if os.path.exists(os.path.join(d, "cases_state.json")) and os.path.exists(os.path.join(d, "cases.json")))
+    runs = test_runs(ops)
     runs = [d for d in runs if run_facts(d)][-KEEP_RUNS:]
     names = [os.path.basename(d) for d in runs]
     overall, blind, real = {}, {dim: defaultdict(dict) for dim in DIMS}, {}
@@ -367,6 +377,13 @@ def _selftest():
         grades = {f"C-{i}": {"sys_normal": {"score": s, "verdict": verdict[s]}, "baseline": {"score": 3}} for i, s in enumerate(scores)}
         json.dump({"cases": cases}, open(os.path.join(d, "cases.json"), "w"))
         json.dump({"grades": grades}, open(os.path.join(d, "cases_state.json"), "w"))
+        open(os.path.join(d, "DONE"), "w").close()
+    for name in ("20261012-d05chk", "20261013"):   # an experiment copy, and a run that has not finished: neither counts
+        d = os.path.join(ops, "runs", name)
+        os.makedirs(d)
+        json.dump({"cases": [{"id": "C-0", "q": "q0", "type": "lookup", "category": "simple"}]}, open(os.path.join(d, "cases.json"), "w"))
+        json.dump({"grades": {"C-0": {"sys_normal": {"score": 3, "verdict": "correct"}}}}, open(os.path.join(d, "cases_state.json"), "w"))
+    open(os.path.join(ops, "runs", "20261012-d05chk", "DONE"), "w").close()
     json.dump([{"q": "price?", "category": "commercial", "type": "lookup", "outcome": "refused"},
                {"q": "jam", "category": "technical", "type": "procedure_or_troubleshoot", "outcome": "answered"}],
               open(os.path.join(ops, "runs", "20261012", "real_categorised.json"), "w"))
@@ -401,6 +418,7 @@ def _selftest():
         if name != "notadate":                                     # an undated folder is no graded run (build would choke on its name)
             json.dump(one, open(os.path.join(d, "cases.json"), "w"))
             json.dump({"grades": {"C-0": {"sys_normal": {"score": 3, "verdict": "correct"}}}}, open(os.path.join(d, "cases_state.json"), "w"))
+            open(os.path.join(d, "DONE"), "w").close()
         json.dump({"old": {"question": "q", "vote": "down", "created_at": "2026-07-04T00:00:00+00:00"}, "new": {"question": "q", "vote": "up", "created_at": "2026-10-01T00:00:00+00:00"}}, open(os.path.join(d, "widget_feedback.json"), "w"))
         json.dump([{"q": "jam", "outcome": "answered", "when": "x"}], open(os.path.join(d, "real_questions.json"), "w"))
         json.dump([{"q": "jam", "category": "technical", "outcome": "answered"}], open(os.path.join(d, "real_categorised.json"), "w"))
