@@ -477,7 +477,8 @@ def close_model_names(name: str, forms: dict[str, list[str]]) -> list[str]:
     for names in forms.values():
         codes = {m.group(0).lower().replace("-", "") for n in names
                  for m in re.finditer(r"\b[a-z]{2,4}-?\d+[a-z+]*", n or "", re.I)}
-        if names and difflib.get_close_matches(want, codes, n=1, cutoff=0.8)                 and names[0] not in out:
+        if (names and difflib.get_close_matches(want, codes, n=1, cutoff=0.8)
+                and names[0] not in out):
             out.append(names[0])
     return out
 
