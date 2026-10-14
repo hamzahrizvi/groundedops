@@ -192,6 +192,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/20261010c-table-condition | Table answers drop a clause or swap columns | proposed | the product owner triages it |
 | customer/20261010c-vague | Vague messages are guessed at or declined instead of getting a clarifying question | proposed | the product owner triages it |
 | customer/D-20261009-02-done | D-20261009-02-done | proposed | the product owner triages it |
+| customer/D-20261010-10-done | D-20261010-10-done | proposed | the product owner triages it |
 | marketing/D-20261009-03-done | D-20261009-03-done | proposed | the product owner triages it |
 | security/20261009 | Security item security/20261009, details in the office | proposed | the product owner triages it |
 | D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
