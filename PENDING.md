@@ -178,7 +178,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261014-01 | Sign up the trial accounts for the competitor score | approved, queued | Dev builds it |
-| D-20261014-03 | The competitor test's hidden questions sit in a folder Dev can read | approved, queued | Dev builds it |
+| D-20261014-03 | The competitor test's hidden questions sit in a folder Dev can read | ready to merge | merges once Security clears it |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
 | customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
 | customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
