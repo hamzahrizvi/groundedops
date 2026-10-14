@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
 
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
@@ -54,6 +55,8 @@ def decisions(ops):
                     it["last_source"] = v.strip()
                     it.setdefault("sources", []).append(v.strip().replace("\\", "/"))
                 if k == "Verdict":
+                    if "DEFER" in it["history"] and v.strip().upper() in ("NEEDS CEO", "AUTO-APPROVED"):
+                        it["reopened"] = os.path.basename(path)[:8]   # back from the parked list: an older attempt is void
                     it["history"].append(v.strip().upper())
                 else:
                     it.setdefault(k.lower(), v.strip())
@@ -61,6 +64,8 @@ def decisions(ops):
                 it["security"] = True
             if re.search(r"(?mi)^- \[x\] CEO approved", body):
                 it["ceo_approved"] = True
+            elif re.search(r"(?m)^- Verdict:\s*NEEDS CEO", body) and re.search(r"(?mi)^- \[ \] CEO approved", body):
+                it["ceo_approved"] = False   # decided again with an unticked box: it needs a fresh yes, an old tick does not carry
     return items
 
 
@@ -105,6 +110,11 @@ def stage_of(it, ops, merged, reverted):
         return "deferred"
     if "NEEDS CEO" in it["history"] and not it.get("ceo_approved"):
         return "waiting for CEO"
+    stamp = lambda p: time.strftime("%Y%m%d", time.localtime(os.path.getmtime(p)))
+    if os.path.exists(dev + ".md") and it.get("reopened") and stamp(dev + ".md") < it["reopened"]:
+        return "sent back, rebuilding"   # handed back before it was parked and reopened: Dev builds it again
+    if gate and os.path.getmtime(dev + ".gate/gate.json") < os.path.getmtime(dev + ".md"):
+        gate = None   # a check of an earlier hand-back, not of this one
     if os.path.exists(dev + ".md"):
         if re.search(r"(?m)^Status:\s*BLOCKED", _read(dev + ".md")):
             return "blocked"
@@ -232,6 +242,21 @@ def _selftest():
     row = {t["dept"]: t for t in ledger(ops, merged={"D-20261013-01", "D-20261013-05"}, today=day)["rewards"]["table"]}
     assert (row["audit"]["merged"], row["audit"]["fixed"], row["audit"]["points"]) == (1, 0, 2 + 5), row["audit"]
     assert (row["dev"]["merged"], row["dev"]["fixed"]) == (2, 3), row["dev"]
+    # parked and reopened (D-20261009-09, 2026-10-14): an unticked NEEDS CEO asks again; the old hand-back and its check are void
+    w("decisions/20261013e.md", "## D-20261013-06 | Several asks\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
+    w("inbox/dev/D-20261013-06.md", "Status: READY\n")
+    os.makedirs(os.path.join(ops, "inbox/dev/D-20261013-06.gate"))
+    w("inbox/dev/D-20261013-06.gate/gate.json", json.dumps({"verdict": "FAIL"}))
+    old = datetime.datetime(2026, 10, 10, 12).timestamp()
+    os.utime(os.path.join(ops, "inbox/dev/D-20261013-06.md"), (old, old))
+    os.utime(os.path.join(ops, "inbox/dev/D-20261013-06.gate/gate.json"), (old + 60, old + 60))
+    six = lambda: {c["id"]: c["stage"] for c in ledger(ops, today=day)["cards"]}["D-20261013-06"]
+    assert six() == "check failed", six()
+    w("decisions/20261014.md", "## D-20261013-06 | Several asks\n- Verdict: DEFER\n")
+    w("decisions/20261015.md", "## D-20261013-06 | Several asks\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n")
+    assert six() == "waiting for CEO", six()
+    w("decisions/20261015b.md", "## D-20261013-06 | Several asks\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
+    assert six() == "sent back, rebuilding", six()
     print("selftest ok")
 
 
