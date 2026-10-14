@@ -783,7 +783,7 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
                 "products": [h["product"] for h in chosen]}
 
     # 2. A need described in words ("anything that sorts and pays out coins").
-    terms = _terms(question)
+    terms = {t for t in _terms(question) if t not in _STOP}
     if terms and not scoped:
         scored = []
         for f in _overviews(faq_items):

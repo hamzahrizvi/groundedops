@@ -43,6 +43,7 @@ TWO FAULTS, measured on 2026-09-26 on the blind sets and a probe set.
 from __future__ import annotations
 
 import logging
+import difflib
 import re
 import threading
 
@@ -467,10 +468,28 @@ def unknown_model_name(query: str, known_words: set[str], vocab: dict,
     return None
 
 
-def unknown_product_reply(name: str, product_names: list[str]) -> str:
+def close_model_names(name: str, forms: dict[str, list[str]]) -> list[str]:
+    """Products whose own model codes are one slip from `name`, as their
+    first form (the display name): "NV99" -> NV9 Spectral, NV9USB+;
+    "BV300" -> BV30. `forms` is product key -> [display name, *aliases]."""
+    want = (name or "").lower().replace("-", "")
+    out = []
+    for names in forms.values():
+        codes = {m.group(0).lower().replace("-", "") for n in names
+                 for m in re.finditer(r"\b[a-z]{2,4}-?\d+[a-z+]*", n or "", re.I)}
+        if names and difflib.get_close_matches(want, codes, n=1, cutoff=0.8)                 and names[0] not in out:
+            out.append(names[0])
+    return out
+
+
+def unknown_product_reply(name: str, product_names: list[str],
+                          close: list[str] | None = None) -> str:
+    if close:
+        return (f"I have no documentation for a product called {name}. "
+                f"Did you mean the {' or the '.join(close)}?")
     names = [n for n in product_names if n]
     listed = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 \
         else "".join(names)
-    return (f"I don't have a product called {name}. "
+    return (f"I have no documentation for a product called {name}. "
             + (f"The products I cover are {listed}. " if listed else "")
             + "Which one did you mean?")

@@ -120,8 +120,18 @@ def test_an_unknown_model_name_is_found():
               "nv4000 cashbox", "bv30 pinout"):
         assert find(q) is None, q
     text = clarify.unknown_product_reply("NV300", ["NV4000", "BV30", "MyCheckr"])
-    assert text.startswith("I don't have a product called NV300.")
+    assert text.startswith("I have no documentation for a product called NV300.")
     assert "NV4000, BV30 and MyCheckr" in text
+
+
+def test_a_close_model_name_is_offered():
+    forms = {"nv9_spectral": ["NV9 Spectral", "NV9S", "NV22"], "nv9usb": ["NV9USB+", "NV9 USB"],
+             "bv30": ["BV30"], "nv4000": ["NV4000"], "mycheckr": ["MyCheckr"]}
+    assert clarify.close_model_names("NV99", forms) == ["NV9 Spectral", "NV9USB+"]
+    assert clarify.close_model_names("BV300", forms) == ["BV30"]
+    assert clarify.close_model_names("NV57", forms) == []
+    assert clarify.unknown_product_reply("BV300", ["BV30"], ["BV30"]) == \
+        "I have no documentation for a product called BV300. Did you mean the BV30?"
 
 
 def test_the_gate_is_scoped_first_turn_only():
