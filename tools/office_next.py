@@ -175,6 +175,14 @@ def waiting(ops, repo, now, taken=()):
     free = [i for i in build if f"dev-{i}" not in taken]
     if free:
         out.append(("dev", f"build {free[0]}" + (f" (+{len(free) - 1} queued)" if len(free) > 1 else ""), f"dev-{free[0]}"))
+    # approved work for another department (2026-10-14: five such orders sat untouched): one at a time each, until it
+    # files OPS/inbox/<dept>/<id>-done.md, which wakes the product owner to close it
+    for i, it in sorted(items.items()):
+        dept = it.get("assigned", "dev")
+        if (dept in COST and dept not in ("dev", "product-owner", "diary") and stage_of(it, ops, merged, reverted) == "approved, queued"
+                and not os.path.exists(os.path.join(ops, "inbox", dept, f"{i}-done.md"))
+                and not any(d == dept and why.startswith("work order") for d, why, _ in out)):
+            out.append((dept, f"work order {i}", f"{dept}-{i}"))
     age = lambda t: (now.timestamp() - t) / 86400
     last_run = _mtime(os.path.join(ops, "runs", "*", "DONE"))
     try:
@@ -370,6 +378,11 @@ def selftest():
         assert "5-hour window at 92%" in plan(ops, ops, 92, 38, resets, now)[0], "but not the 5-hour limit itself"
         assert take(ops, ops, 60, 38, resets, now, 7)[-1].startswith("TOOK customer") and not run_now(ops), "used up"
         release(ops, 7)
+        w("decisions/20261008w.md", "## D-20261008-20 | Fresh hidden questions\n- From: customer\n- Assigned: customer\n- Verdict: AUTO-APPROVED\n")
+        assert any(x.startswith("RUN  groundedops-office-customer  work order D-20261008-20") for x in plan(ops, ops, 11, 38, resets, now)), "a customer work order runs"
+        os.makedirs(os.path.join(ops, "inbox", "customer"), exist_ok=True); w("inbox/customer/D-20261008-20-done.md", "Done.\n")
+        assert not any("work order" in x for x in plan(ops, ops, 11, 38, resets, now)), "filed: the product owner closes it"
+        os.remove(os.path.join(ops, "decisions", "20261008w.md")); os.remove(os.path.join(ops, "inbox", "customer", "D-20261008-20-done.md"))
         w("state/run_now/audit")
         assert any(x.startswith("RUN  groundedops-office-audit  you asked for it now") for x in plan(ops, ops, 11, 38, resets, now)), "Do it now, nothing due"
         os.remove(os.path.join(ops, "state", "run_now", "audit"))

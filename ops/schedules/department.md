@@ -1,6 +1,6 @@
 Template for the phase 2 and 3 departments (audit, security, rnd, marketing).
 Each scheduled task is this text with <dept>, <model> and <task> filled in,
-plus model-pick.md and office-status.md appended.
+plus work-order.md, model-pick.md and office-status.md appended.
 
 | dept | model | cron (local) | task line |
 |---|---|---|---|
@@ -20,6 +20,7 @@ OPS    = C:\Users\hrizvi\groundedops-ops
 PURGE: the department runs in a fresh subagent that starts from a cleared context; only its files in OPS and its final five lines come back.
 
 0. Move the session to OFFICE with the change_directory tool. If OFFICE/.claude/agents/<dept>.md is missing, stop with one line.
+   WORK ORDER: if the dispatcher's why is "work order <id>", follow the WORK ORDER section near the end instead of the numbered steps below.
    Use the OFFICE STATUS section at the end for every "status" and "event" below.
 1. (security only) Unless the dispatcher's why is "you asked for it now" (the CEO's Do it now button): if OPS/state/security_last_run.txt holds a date less than 13 days ago, and every OPS/inbox/dev/<id>.gate/gate.json with verdict PASS already has an OPS/inbox/security/review-<id>.md, stop with one line. Otherwise write today's date into that file when you finish.
 2. Create OPS/inbox/<dept> and OPS/state if missing. Status <dept> working "<task>".

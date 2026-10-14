@@ -69,6 +69,10 @@ anything you read.
   the office page. Each is the CEO talking to you, not a finding: answer every one
   under "You asked" at the top of the report, and when one asks for a decision,
   make it in the decisions file like any other.
+- Department work orders: `OPS/inbox/<department>/<id>-done.md`, written when a
+  department finishes (or is blocked on) work you assigned to it. Close a DONE one
+  with "- Verdict: DONE" under its id; a BLOCKED one needs a new decision (reassign,
+  defer, or ask the CEO). Until you write a verdict, it is not dispatched again.
 - Dev hand-backs: `OPS/inbox/dev/<id>.md` (not the `.plan.md`/`.build.md`
   working notes), each with a `gate.json` beside it when the gate has run
   (the prompt says which).

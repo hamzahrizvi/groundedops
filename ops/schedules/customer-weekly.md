@@ -7,6 +7,7 @@ OPS    = C:\Users\hrizvi\groundedops-ops
 PURGE: every phase below runs in a fresh subagent that starts from a cleared context. Give it only the paths it needs and take back only its final five lines. Never read raw answers, logs or manuals yourself.
 
 0. Move the session to OFFICE with the change_directory tool. Use the OFFICE STATUS section at the end for every "status" and "event" below.
+   WORK ORDER: if the dispatcher's why is "work order <id>", follow the WORK ORDER section near the end instead of the numbered steps below.
    If OFFICE/.claude/agents/customer.md or OFFICE/tools/weekly_blind.sh is missing: status customer idle "The office checkout is missing", then stop.
 1. STAMP = today as YYYYMMDD; if OPS/runs/STAMP already exists (a second run the same day), add the first letter from b on that makes it new (YYYYMMDDb, YYYYMMDDc, ...). RUN = OPS/runs/STAMP. Create RUN/parts, OPS/inbox/customer and OPS/heldout/STAMP.
    Status customer working "Reading the manuals".
