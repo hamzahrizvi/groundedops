@@ -6,6 +6,8 @@ Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
 
   python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | remark | reset | models
   python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
+  python tools/blind_eval.py <run_dir> vendor kapa|fin    (a market leader answers the cases; then
+           SYSTEMS=sys_normal,baseline,kapa,fin ... remark grades all of them blind together)
 
 <run_dir> holds <SET>.json ({"cases": [...]}) and manuals/<product>.txt
 (tools/export_manuals.py). Each phase caches into <run_dir>/<SET>_state.json, so a
@@ -292,3 +294,58 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
     summary["lab_wait_s"] = state.get("lab_wait_s", {})   # how long the system phase waited for the lab lock
     state["summary"] = summary; save()
     print(json.dumps(summary, indent=1))
+
+elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its subscription, not per answer
+    vendor = sys.argv[3]
+    sys.path.insert(0, CODE); os.chdir(DATA)
+    import catalog, html
+    names = {p["key"]: p.get("name", p["key"]) for cat in catalog.catalog().get("categories") or [] for p in cat.get("products") or [] if p.get("key")}
+    def plain(h): return html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"</p>|<br\s*/?>|</li>", "\n", h or ""))).strip()
+
+    def kapa(turns):
+        # needs KAPA_PROJECT_ID and KAPA_INTEGRATION_ID (kapa platform > project / integrations) beside KAPA_API_KEY
+        h = {"X-API-KEY": os.environ["KAPA_API_KEY"]}
+        url, a = f"https://api.kapa.ai/query/v1/projects/{os.environ['KAPA_PROJECT_ID']}/chat/", ""
+        for q in turns:
+            r = requests.post(url, headers=h, timeout=180, json={"query": q, "integration_id": os.environ["KAPA_INTEGRATION_ID"]})
+            r.raise_for_status(); j = r.json(); a = j.get("answer", "")
+            url = f"https://api.kapa.ai/query/v1/threads/{j['thread_id']}/chat/"   # follow-up keeps Kapa's thread
+        return a
+
+    def fin(turns):
+        # Intercom's Fin Agent API (managed availability: Fin AI Agent > Deploy > Fin Agent API). Replies come
+        # only over SSE; parts are joined until Fin waits for the user, escalates or finishes.
+        h = {"Authorization": f"Bearer {os.environ['FIN_API_KEY']}", "Intercom-Version": "2.16"}
+        cid, user, a = f"{SET}-{uuid.uuid4()}", {"id": "groundedops-blind"}, ""
+        for i, q in enumerate(turns):
+            msg = {"author": "user", "body": q, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}
+            r = requests.post(f"https://api.intercom.io/fin/{'reply' if i else 'start'}", headers=h, timeout=60,
+                              json={"conversation_id": cid, "message": msg, "user": user})
+            r.raise_for_status(); sse, parts, seen = r.json()["sse_subscription_url"], [], set()
+            with requests.get(sse, stream=True, timeout=180, headers={"Accept": "text/event-stream"}) as s:
+                for line in s.iter_lines(decode_unicode=True):
+                    if not line or not line.startswith("data:"): continue
+                    try: ev = json.loads(line[5:])
+                    except ValueError: continue
+                    m = ev.get("message") or {}
+                    if ev.get("event_name") == "fin_replied" and m.get("id") not in seen:
+                        seen.add(m.get("id")); parts.append(plain(m.get("body")))
+                    if ev.get("status") in ("awaiting_user_reply", "escalated", "resolved", "complete"): break
+            a = "\n\n".join(parts)
+        return a
+
+    ask = {"kapa": kapa, "fin": fin}[vendor]
+    need = {"kapa": ("KAPA_API_KEY", "KAPA_PROJECT_ID", "KAPA_INTEGRATION_ID"), "fin": ("FIN_API_KEY",)}[vendor]
+    if [k for k in need if not os.environ.get(k)]: sys.exit(f"{vendor}: set {', '.join(k for k in need if not os.environ.get(k))} in {DATA}/.env")
+    def run(c):
+        sel = f"(I'm asking about the {names.get(c['product'], c['product'])})\n" if c.get("product") else ""
+        turns = [sel + c["turn1"], c["q"]] if c.get("turn1") else [sel + c["q"]]
+        t = time.time()
+        try: a = ask(turns)
+        except Exception as e: return c["id"], None, e
+        return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": 0, "model": vendor, "at": time.strftime("%Y-%m-%d")}, None
+    rows = state.setdefault(vendor, {})
+    with ThreadPoolExecutor(3) as ex:
+        for cid, out, err in ex.map(run, [c for c in cases if c["id"] not in rows]):
+            if err: print(vendor, cid, "ERROR", err, flush=True); continue   # not saved: a rerun retries it
+            rows[cid] = out; save(); print(vendor, cid, out["wall"], repr(out["answer"][:60]), flush=True)

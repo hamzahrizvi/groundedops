@@ -213,6 +213,7 @@ button{font:inherit;color:inherit}
 .detail dt{color:var(--muted);font:12px/1.6 var(--display);letter-spacing:.04em}
 .detail dd{margin:0}
 .detail .donow{margin-top:12px}
+.kcard .donow{margin-top:6px}
 .detail p{margin:0;font-size:14.5px}
 
 .rhythm{margin-top:20px}
@@ -821,6 +822,14 @@ function renderDiary(){
     }
     return sec; }));
 }
+/* Plan board "Do it now": the department that moves a card next starts at the next hourly check (tools/ceo_inbox.py run_now).
+   Cards waiting for the CEO are decided in "Waiting for you"; ready-to-merge and blocked ones wait on a person. */
+const DEPT_KEY = {customer:"customer", po:"product-owner", dev:"dev", security:"security", audit:"audit", rnd:"rnd", marketing:"marketing"};
+function cardNow(c){
+  const who = /^(proposed|deferred)$/.test(c.stage) ? "po"
+    : /^(approved, queued|sent back, rebuilding|built, waiting for the check|check failed)$/.test(c.stage) ? c.assigned : null;
+  return who && DEPT_KEY[who] && hired(who) ? {key: DEPT_KEY[who], dept: nameOf(who), why: c.title} : null;
+}
 function renderBoards(){
   const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
   const chip = document.getElementById("ledgerChip"); chip.textContent = isSample ? "Sample" : "Live"; chip.className = "chip " + (isSample ? "sample" : "live");
@@ -837,7 +846,10 @@ function renderBoards(){
       const meta = document.createElement("div"); meta.className = "kmeta";
       const st = document.createElement("span"); st.className = "kstage"; st.textContent = c.stage;
       const who = document.createElement("span"); who.textContent = `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
-      meta.append(st, who); li.append(meta); ul.append(li);
+      meta.append(st, who); li.append(meta);
+      const now = cardNow(c);
+      if(now && !isSample && live.available && !(live.brief && live.brief.off)){ const b = runNowBtn(now, "Do it now"); b.classList.add("donow"); if(now.key === "dev") devNow(b); li.append(b); }
+      ul.append(li);
     }
     lane.append(h, ul); return lane; }));
   document.getElementById("p-depts").replaceChildren(...Object.entries(L.boards || {}).filter(([id]) => D[id] || id === "po").map(([id, b]) => {
@@ -1157,7 +1169,7 @@ function renderDetail(){
   const dl = el.querySelector("dl");
   for(const [k, v] of rows){ const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; if(k === "Doing now") dd.id = "doingNow"; dl.append(dt, dd); }
   // "Do it now": this department's scheduled task at the next hourly check, due or not (tools/ceo_inbox.py run_now)
-  const key = {customer:"customer", po:"product-owner", dev:"dev", security:"security", audit:"audit", rnd:"rnd", marketing:"marketing"}[d.id];
+  const key = DEPT_KEY[d.id];
   if(key && live.available && hired(d.id) && !(live.brief && live.brief.off)){
     const b = runNowBtn({key, dept: d.name, why: "do it now"}, "Do it now"); b.classList.add("donow");
     b.title = "Starts this department's run at the next hourly check, even if nothing is due, past the budget pace. The 5-hour limit and the lab spending cap still apply.";
