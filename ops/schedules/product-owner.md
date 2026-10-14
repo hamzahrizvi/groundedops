@@ -13,7 +13,7 @@ PURGE: the triage runs in a fresh subagent that starts from a cleared context; t
    find its work order in OPS/decisions/*.md for the run folder and the hidden sibling file paths, and the worktree path in the hand-back.
    Status lab working "Checking Dev's fix against hidden questions". Event po -> lab "Check <id>".
    Run `PY="<REPO>/.venv/Scripts/python.exe" GO_DATA="<REPO>/src" bash "<OFFICE>/tools/gate_run.sh" "<worktree>" "<OPS>/runs/<stamp>" "<OPS>/inbox/dev/<id>.gate" <sibling files...>` with run_in_background and wait for its completion notice.
-   Status lab idle with last "Gate PASS for <id>" or "Gate FAIL for <id>". Event lab -> po "Gate passed" or "Gate failed".
+   Status lab idle with last "Fix passed its check" or "Fix failed its check" (plain words, no id). Event lab -> po "Fix passed its check" or "Fix failed its check, for the product owner to decide".
    If <id>.gate/FAILED reads "lab stopped at the cap": no verdict (it is not a FAIL); status lab idle with last "Lab stopped at the cap" and skip the remaining gates this run. The gate runs again at a later triage, once the CEO raises the cap on the Costs tab.
 3. Refresh the product figures, so the report and the graph see every merged fix: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/ops_pivot.py" --ops "<OPS>" --repo "<REPO>" > "<OPS>/pivot.json"`.
    MODEL PICK (agent product-owner, job triage, with how many new findings, hand-backs and gates there are; inputs OPS/inbox/*/ and the gate.json files run this time), then spawn the product owner with it: Agent tool with subagent_type "product-owner"; if not listed, use general-purpose with model "fable" and tell it to read OFFICE/.claude/agents/product-owner.md and follow it exactly.

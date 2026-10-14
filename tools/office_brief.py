@@ -18,7 +18,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
-from ops_pivot import agg, run_facts, test_runs  # noqa: E402
+from ops_costs import cap_status  # noqa: E402
+from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
@@ -76,6 +77,41 @@ def ready_for_new_product(ops):
             " never tested and ask the product owner to point Customer's next run at it.")
 
 
+def alerts(ops, cards, stalled, off):
+    """What is stopping office work right now, for the page's pop-up: [{id, title, why}]. The id is stable
+    while the problem lasts, so the page pops each problem once. A failed gate is not here: it is the
+    check doing its job, and the product owner decides what happens next."""
+    out = []
+    if off:
+        out.append({"id": "off", "title": "The office is switched off", "why": "Nothing new starts until you switch it on with the Power button."})
+    elif stalled.startswith("Paused"):
+        out.append({"id": "paused", "title": "The office is paused", "why": stalled})
+    lab = cap_status(ops)
+    if lab["stopped"]:
+        out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",
+                    "why": "Test runs and fix checks wait until you raise the cap on the Costs tab."})
+    runs = sorted(d for d in glob.glob(os.path.join(ops, "runs", "*")) if TEST_RUN.match(os.path.basename(d)))
+    if runs and os.path.exists(os.path.join(runs[-1], "FAILED")):
+        step = open(os.path.join(runs[-1], "FAILED"), encoding="utf-8").read().strip()
+        out.append({"id": "run-" + os.path.basename(runs[-1]), "title": "The latest test run failed",
+                    "why": f"The 40-question test stopped at its \u201c{step}\u201d step, so the score is not updated. See the run log."})
+    for g in glob.glob(os.path.join(ops, "inbox", "dev", "*.gate")):
+        i = os.path.basename(g)[:-5]
+        if os.path.exists(os.path.join(g, "FAILED")) and not os.path.exists(os.path.join(g, "gate.json")):
+            out.append({"id": "gate-" + i, "title": f"The check of \u201c{cards.get(i, {}).get('title', i)}\u201d could not run",
+                        "why": open(os.path.join(g, "FAILED"), encoding="utf-8").read().strip()[:200] or "It stopped before giving a verdict."})
+    for i, c in cards.items():
+        if c["stage"] == "blocked":
+            out.append({"id": "blocked-" + i, "title": f"Dev is stuck on \u201c{c['title']}\u201d",
+                        "why": "Dev handed it back blocked. The product owner decides at the next triage."})
+        done = os.path.join(ops, "inbox", c["assigned"], f"{i}-done.md")
+        if c["stage"] == "approved, queued" and os.path.exists(done) and \
+                open(done, encoding="utf-8").readline().strip().upper().startswith("STATUS: BLOCKED"):
+            out.append({"id": "wo-" + i, "title": f"{DEPT.get(c['assigned'], c['assigned'])} is stuck on \u201c{c['title']}\u201d",
+                        "why": open(done, encoding="utf-8").readline().strip()[len("Status: "):][:200]})
+    return out
+
+
 def brief(ops, repo, now=None, usage=None):
     now = now or datetime.datetime.now(datetime.timezone.utc)
     items, texts = decisions(ops), blocks(ops)
@@ -120,7 +156,7 @@ def brief(ops, repo, now=None, usage=None):
         stalled = ""   # waiting behind work that is running is not a stall
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
             "minutes_old": None if old == float("inf") else round(old)}, "running": running, "moving": moving, "stalled": stalled, "off": is_off(ops),
-            "todo": todo, "items": cards,
+            "todo": todo, "items": cards, "alerts": alerts(ops, cards, stalled, is_off(ops)),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
 
@@ -162,6 +198,10 @@ def selftest():
         got = ready_for_new_product(ops)
         assert got.startswith("The last two blind runs scored 88.9 and 88.9"), got
         run("20261003", [3, 0, 2], [3, 3, 3])
+        os.makedirs(os.path.join(ops, "runs", "20261009")); w("runs/20261009/FAILED", "grade\n")
+        a = alerts(ops, {}, "", False)
+        assert [x["id"] for x in a] == ["run-20261009"] and "grade" in a[0]["why"], a
+        assert alerts(ops, {}, "", True)[0]["id"] == "off"
         assert ready_for_new_product(ops) == "", "a bad run: keep fixing"
     print("selftest ok")
 
