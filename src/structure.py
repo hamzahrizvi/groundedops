@@ -5,6 +5,7 @@ Detects checklist/step-list content in retrieved chunks by combining
 the chunk's actual semantic relevance (rerank_score, from reranker.py)
 with structural heuristics (verb-led lines, list density, consistent
 line length) and lexical query overlap.
+A message that reports a failure is never answered with a copied list (reports_failure).
 """
 
 import re
@@ -314,6 +315,24 @@ def _format_as_list(lines: list[str]) -> str | None:
 # Main extractor
 # ─────────────────────────────────────────────
 
+# D-20261008-05: a message saying something went wrong ("won't find",
+# "keeps failing", "stuck at", "shows an error") is not asking for the
+# procedure; its fix sits in another passage (troubleshooting, "if it
+# fails"), which the normal answer path finds. Negation and failure words
+# are grammar, not one question's wording. A false hit costs only a
+# model-written answer instead of the copied list.
+_FAILURE_RE = re.compile(
+    r"\b(?:won|can|don|doesn|isn|aren|wasn|weren|didn|couldn|wouldn|hasn|haven)'?t\b"
+    r"|\b(?:not|cannot|never|nothing|no longer)\b"
+    r"|\bfail|\berror|\bfault|\bstuck\b|\bproblems?\b|\bissues?\b",
+    re.I)
+
+
+def reports_failure(query: str | None) -> bool:
+    """True when the message reports a step or device failing."""
+    return bool(query and _FAILURE_RE.search(query.replace("\u2019", "'")))
+
+
 def extract_structured_block(chunks: list[dict], query: str | None = None) -> str | None:
     """
     Score each chunk and return the best one's content as a markdown list,
@@ -337,6 +356,8 @@ def extract_structured_block(chunks: list[dict], query: str | None = None) -> st
     backwards position_weight term (which rewarded LATER, i.e. less
     relevant, chunks in the rerank-sorted input) has been removed.
     """
+    if reports_failure(query):
+        return None
     best_block: list[str] | None = None
     best_score: float = 0.0
 
