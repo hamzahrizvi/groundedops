@@ -1,10 +1,14 @@
 """Market comparison on the hidden sets (D-20261014-02): this bot vs the baseline vs Kapa/Fin.
 
   python tools/market_compare.py merge <out_run_dir> <heldout_dir> <ops_runs_dir>
+      <out_run_dir> must be under <heldout_dir>/market/ (e.g. OPS/heldout/market/<stamp>); merge refuses
+      anywhere else, because runs/ is readable by every Dev lane and the merged set is hidden.
       every <heldout>/2026*/siblings_*.json into <out>/cases.json, deduplicated on (turn1, q),
       minus any question of an open set (<ops_runs>/<YYYYMMDD[a-z]>/cases.json).
   python tools/market_compare.py report <run_dir> [sys_normal,baseline,fin,...]
       counts from <run_dir>/cases_state.json after `blind_eval.py <run_dir> remark`.
+  python tools/market_compare.py check <ops_dir>
+      counts the files under <ops>/runs that hold a hidden market question (counts only).
   python tools/market_compare.py --selftest
 
 Both print counts only, never a question, reference or answer: the merged set is hidden.
@@ -19,7 +23,30 @@ CITE = re.compile(r"(?i)\b(page|p\.)\s*\d+|\.pdf\b")
 def norm(s): return " ".join((s or "").lower().split())
 
 
+def under(path, root):
+    p, r = os.path.realpath(path), os.path.realpath(root)
+    return p == r or p.startswith(r + os.sep)
+
+
+def check(ops):
+    H = set()
+    for f in glob.glob(os.path.join(ops, "heldout", "market", "*", "cases.json")):
+        H |= {norm(c["q"]) for c in json.load(open(f, encoding="utf-8"))["cases"]}
+    H = {q for q in H if len(q) >= 12}
+    n = k = 0
+    for d, _, fs in os.walk(os.path.join(ops, "runs")):
+        for fn in fs:
+            if not fn.endswith((".json", ".jsonl", ".txt")): continue
+            n += 1
+            try: txt = norm(open(os.path.join(d, fn), encoding="utf-8", errors="replace").read())
+            except OSError: continue
+            if any(q in txt for q in H): k += 1
+    print(json.dumps({"hidden_questions": len(H), "files_scanned": n, "files_holding_one": k}))
+    return k
+
+
 def merge(out, heldout, runs):
+    if not under(out, os.path.join(heldout, "market")): sys.exit("hidden cases go under <heldout>/market/<stamp>, not " + out)
     open_q = set()
     for d in glob.glob(os.path.join(runs, "*")):
         f = os.path.join(d, "cases.json")
@@ -91,10 +118,19 @@ def selftest():
         w(f"{t}/held/gates/D-1.gate/siblings_x.json", cs(("x", "Gate only")))
         w(f"{t}/runs/20261013/cases.json", cs(("o1", "open one")))
         w(f"{t}/runs/20261013-market/cases.json", cs(("o2", "Other")))   # not an open set: name has a suffix
-        n = merge(f"{t}/out", f"{t}/held", f"{t}/runs")
+        try: merge(f"{t}/out", f"{t}/held", f"{t}/runs"); raise AssertionError("merge wrote outside heldout/market")
+        except SystemExit: pass
+        n = merge(f"{t}/held/market/out", f"{t}/held", f"{t}/runs")
         assert (n["files"], n["read"], n["duplicates"], n["open_set_dropped"], n["written"]) == (2, 7, 1, 1, 5), n
-        got = [c["id"] for c in json.load(open(f"{t}/out/cases.json", encoding="utf-8"))["cases"]]
+        got = [c["id"] for c in json.load(open(f"{t}/held/market/out/cases.json", encoding="utf-8"))["cases"]]
         assert got == ["a1", "a3", "20261002/siblings_b:a3", "b2", "b3"], got
+
+        w(f"{t}/heldout/market/m1/cases.json", cs(("m", "How hot does the unit get?")))   # check() reads <ops>/heldout/market
+        assert check(t) == 0
+        w(f"{t}/runs/20261015/cases_state.json", {"x": "asked: how hot does the  unit get? ok"})
+        assert check(t) == 1
+        os.remove(f"{t}/runs/20261015/cases_state.json")
+        assert check(t) == 0
 
         sc = lambda v, s: {"verdict": v, "score": s}
         w(f"{t}/r/cases.json", {"cases": [{"id": i, "type": ty} for i, ty in (("c1", "x"), ("c2", "x"), ("c3", "y"))]})
@@ -117,5 +153,6 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     if a[:1] == ["--selftest"]: selftest()
     elif a[:1] == ["merge"] and len(a) == 4: merge(*a[1:])
+    elif a[:1] == ["check"] and len(a) == 2: check(a[1])
     elif a[:1] == ["report"] and len(a) in (2, 3): report(a[1], a[2].split(",") if len(a) == 3 else None)
     else: sys.exit(__doc__)
