@@ -72,6 +72,7 @@ NOT_MODEL = {None, "none", "structured", "faq-curated", "stub"}   # answers the 
 # gate_rerun.py's copies carry the run's baseline answers along, and siblings ask no baseline, so a
 # baseline is counted under runs/ only. sys_before is the run's own answers copied in, never counted.
 LAB_FILES = (("run", ("runs", "*", "cases_state.json")),
+            ("run", ("heldout", "market", "*", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "after", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "before", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "rerun", "*", "cases_state.run*.json")),
@@ -93,7 +94,7 @@ def lab_rows(ops):
                 continue
             rel = os.path.relpath(p, ops).replace(os.sep, "/")
             if kind == "run":
-                name = rel.split("/")[1]
+                name = rel.split("/")[-2]
                 m = re.match(r"(\d{4})(\d{2})(\d{2})", name)
                 day = f"{m[1]}-{m[2]}-{m[3]}" if m else None
             else:

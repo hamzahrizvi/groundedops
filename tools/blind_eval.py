@@ -9,6 +9,8 @@ Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
   python tools/blind_eval.py <run_dir> vendor kapa|fin    (a market leader answers the cases; then
            SYSTEMS=sys_normal,baseline,kapa,fin ... remark grades all of them blind together)
 
+Cases merged from heldout/ (they carry "src") only run from a folder under OPS/heldout/.
+
 <run_dir> holds <SET>.json ({"cases": [...]}) and manuals/<product>.txt
 (tools/export_manuals.py). Each phase caches into <run_dir>/<SET>_state.json, so a
 crash resumes. Run each "system" phase in its own process (PERFORMANCE_MODE is
@@ -33,6 +35,7 @@ import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also when run via runpy
 from lab_lock import lab_lock
+from market_compare import under
 
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
@@ -41,6 +44,8 @@ SET = os.environ.get("SET", "cases")
 SYSTEMS = os.environ.get("SYSTEMS", "sys_normal,baseline").split(",")
 OUT = os.path.join(RUN, f"{SET}_state.json")
 cases = json.load(open(os.path.join(RUN, f"{SET}.json"), encoding="utf-8"))["cases"]
+# ponytail: only cases stamped "src" by market_compare merge are caught; a hand-built hidden set is not
+if any(c.get("src") for c in cases) and not under(RUN, os.path.join(os.environ.get("LAB_OPS", "C:/Users/hrizvi/groundedops-ops"), "heldout")): sys.exit("these cases are hidden (merged from heldout/); run folder must be under OPS/heldout/")
 state = json.load(open(OUT, encoding="utf-8")) if os.path.exists(OUT) else {}
 def save(): json.dump(state, open(OUT, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
 PROV = os.environ.get("LAB_PROVIDER", "deepseek")
