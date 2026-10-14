@@ -175,7 +175,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
-| D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | approved, queued | Dev builds it |
+| D-20261010-28 | The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented | ready to merge | merges once Security clears it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261014-01 | Sign up the trial accounts for the competitor score | waiting for CEO | your yes |
 | customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
