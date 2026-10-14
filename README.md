@@ -383,7 +383,7 @@ how to disable it for a real production run.
 
 ```bash
 cd src
-pip install -r requirements.txt
+pip install -r requirements.lock
 cd frontend && npm install && cd ..
 uvicorn main:app --port 8000        # terminal 1
 cd frontend && npm run dev          # terminal 2 (Vite on :5173)

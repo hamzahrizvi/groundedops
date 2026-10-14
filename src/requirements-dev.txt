@@ -1,3 +1,3 @@
-# CI-only tools, not shipped. pip-audit checks the environment that
-# requirements.txt resolved to for known vulnerabilities (D-20261008-13).
+# CI-only tools, not shipped. pip-audit checks requirements.lock (the pinned
+# set every install path uses) for known vulnerabilities (D-20261008-13, -17).
 pip-audit==2.10.1
