@@ -176,7 +176,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261008-11 | Security item D-20261008-11, details in the office | waiting for CEO | your yes |
 | D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | check failed | the product owner sends it back |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
