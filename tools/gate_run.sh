@@ -75,6 +75,11 @@ for s in "$@"; do
   SIBS+=("$d/cases_state.json")
 done
 
+# the CEO, 2026-10-14: a hidden sibling under 2 is re-asked 5 more times on the branch and settles at its lower median
+# (it clears only when 4 of 6 answers score 2+); its passes stay in $HELD, never where Dev reads
+if [ ${#SIBS[@]} -gt 0 ]; then
+  BE="$BE" "$PY" "$REPO/tools/gate_rerun.py" --siblings "$HELD" "$DEV" "${SIBS[@]}" >> "$HELD/gate.log" 2>&1 || echo "sibling re-ask failed; single-pass marks stand" >> "$HELD/gate.log"
+fi
 if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$OUT" --cases "$@")"; then
   echo "hidden text under inbox/dev: $hits" > "$OUT/FAILED"; exit 1
 fi

@@ -29,6 +29,62 @@ import tarfile
 from retrofit_gate import wrong   # one rule for "wrong" (D-20261010-11)
 
 ROUNDS, MARGIN, MAX_CASES = 6, 2, 2
+MAX_SIBS = 3   # the CEO, 2026-10-14: a hidden sibling under 2 is re-asked before it fails a fix; more than this many is a real miss
+
+
+def settle(passes):
+    """A re-asked sibling's mark: the lower median of its passes, so it clears 2 only when most passes do
+    (4 of 6). A pass without a grade (None) counts as 0: fail closed."""
+    v = sorted(0 if x is None else x for x in passes)
+    return v[(len(v) - 1) // 2]
+
+
+def sibling_rerun(held, states, dev_src, data):
+    """Re-ask each hidden sibling scored under 2 ROUNDS-1 more times on the branch, in <held> (never where Dev
+    reads), and write its settled mark back into its sib_*/cases_state.json. Too many low siblings, or any
+    failed step: the single-pass marks stand. gate_run.sh calls it as --siblings <held> <state.json...>."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    be = os.environ.get("BE") or os.path.join(here, "blind_eval.py")   # gate_run.sh's BE (a test's fake lab)
+    low = {sp: [c for c, g in json.load(open(sp, encoding="utf-8")).get("grades", {}).items()
+                if isinstance(g.get("sys_normal"), dict) and g["sys_normal"].get("score", 0) < 2] for sp in states}
+    n = sum(len(v) for v in low.values())
+    out = {"asked": n, "rounds": ROUNDS, "cleared": [], "kept": []}
+    if not n or n > MAX_SIBS:
+        out["skipped"] = "none under 2" if not n else f"{n} under 2, more than {MAX_SIBS}: a real miss"
+        return out
+    rr = os.path.join(held, "sib_rerun")
+    shutil.rmtree(rr, ignore_errors=True)
+    log = open(os.path.join(held, "sib_rerun.log"), "a", encoding="utf-8")
+    try:
+        for sp, ids in low.items():
+            if not ids:
+                continue
+            cases = [c for c in json.load(open(os.path.join(os.path.dirname(sp), "cases.json"), encoding="utf-8"))["cases"] if c["id"] in ids]
+            state = json.load(open(sp, encoding="utf-8"))
+            passes = {c: [state["grades"][c]["sys_normal"]["score"]] for c in ids}
+            for r in range(2, ROUNDS + 1):
+                d = os.path.join(rr, os.path.basename(os.path.dirname(sp)), f"r{r}")
+                os.makedirs(d)
+                json.dump({"cases": cases}, open(os.path.join(d, "cases.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+                env = {**os.environ, "GO_CODE": dev_src, "GO_DATA": data, "SYSTEMS": "sys_normal"}
+                for cmd in ([sys.executable, "-X", "faulthandler", be, d, "system", "normal"], [sys.executable, be, d, "grade"]):
+                    log.write(f"== {d}: {' '.join(cmd[-2:])}\n"); log.flush()
+                    if subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT).returncode:
+                        raise RuntimeError(" ".join(cmd))
+                got = json.load(open(os.path.join(d, "cases_state.json"), encoding="utf-8"))
+                for c in ids:
+                    g = grade_of(got, c)
+                    passes[c].append(g["score"] if g else None)
+            for c in ids:
+                mark = settle(passes[c])
+                state["grades"][c]["sys_normal"].update({"score": mark, "passes": passes[c], "single_pass": passes[c][0]})
+                (out["cleared"] if mark >= 2 else out["kept"]).append(c)
+            json.dump(state, open(sp, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    except Exception as e:   # the single-pass marks stand
+        out["error"] = str(e)
+    finally:
+        log.close()
+    return out
 
 
 def held_drop(gate, cids):
@@ -182,12 +238,24 @@ def _selftest():
     r = rerate(one, w1(1, 1, 3, 3, 3, 3), w1(3, 3, 3, 3, 3, 3))
     assert r["verdict"] == "FAIL" and r["rerun"]["c"]["head_wrong"] == 2, r   # a 1-mark "wrong" counts (D-20261010-11)
     assert held_drop({"drop": 2.5, "cases": 40, "flip_before": {"c": 3}, "flip_after": {"c": 1}}, ["c"]) == 0.8
+    assert settle([1, 2, 3, 2, 2, 0]) == 2 and settle([1, 1, 2, 3, 0, 2]) == 1 and settle([1, None, 2, 2, 2, 3]) == 2
+    assert settle([1, None, None, 2, 2, 3]) == 1, "a missing grade fails closed"
+    tmp = __import__("tempfile").mkdtemp()
+    sp = os.path.join(tmp, "sib_a", "cases_state.json"); os.makedirs(os.path.dirname(sp))
+    json.dump({"grades": {f"s{i}": {"sys_normal": {"score": 1}} for i in range(4)}}, open(sp, "w"))
+    assert sibling_rerun(tmp, [sp], tmp, tmp)["skipped"].startswith("4 under 2"), "too many: a real miss, nothing asked"
     print("selftest ok")
 
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         _selftest(); sys.exit(0)
+    if sys.argv[1:2] == ["--siblings"]:   # gate_run.sh, before retrofit_gate.py: <held> <dev> <state.json...>
+        here = os.path.dirname(os.path.abspath(__file__))
+        res = sibling_rerun(os.path.abspath(sys.argv[2]), [os.path.abspath(a) for a in sys.argv[4:]],
+                            os.path.join(os.path.abspath(sys.argv[3]), "src"), os.environ.get("GO_DATA") or os.path.join(here, "..", "src"))
+        print(json.dumps({k: (len(v) if isinstance(v, list) else v) for k, v in res.items()}))   # counts only: ids stay hidden
+        sys.exit(0)
     if sys.argv[1:2] == ["--base-code"]:   # gate_run.sh: the before re-asked on the base code (D-20261010-09)
         here = os.path.dirname(os.path.abspath(__file__))
         print(base_code(os.path.abspath(sys.argv[2]), os.environ.get("GO_DATA") or os.path.join(here, "..", "src"),
