@@ -174,7 +174,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
-| D-20261008-11 | Security item D-20261008-11, details in the office | approved, queued | Dev builds it |
+| D-20261008-11 | Security item D-20261008-11, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261009-02 | Fresh hidden test questions for the multi-ask type | blocked | the product owner decides |
 | D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
