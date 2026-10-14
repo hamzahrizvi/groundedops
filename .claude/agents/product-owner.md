@@ -115,7 +115,19 @@ wrong answers customers act on ahead of polish), and re-decide the top ones,
 one new section per item under its own id, until N are in flight. In ultra,
 spread the work: give each department that can do an item its own work order
 (a department may run two at once), and split an item with independent parts
-into separate work orders for different departments. Skip an item
+into separate work orders for different departments.
+
+No two work orders in flight may change the same thing. Every approved work
+order carries a `- Touches:` line naming the files or folders it will change
+(grep the code to find them; name a folder when unsure, never leave it out).
+Before approving or assigning, compare it with the Touches of every item in
+flight. If they overlap, do not run them side by side: fold it into the one in
+flight when it is the same fix, otherwise pick the more valuable and DEFER the
+other with "comes back when <id> merges". Parts of one split item must touch
+different files. Also check the results do not contradict each other (two
+orders changing the same behaviour in opposite directions). The office checks
+the Touches lines too and holds back an order that overlaps one being built,
+so an overlap you miss costs time, not a broken merge. Skip an item
 whose "what would bring it back" is still unmet or that rides on one in flight,
 and say so in one line. Leaving every slot empty needs a reason in the report.
 
@@ -160,6 +172,7 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
    - Verdict: NEEDS CEO | AUTO-APPROVED | DEFER | REJECT
    - Run: runs/<stamp>        (approved bot fixes: the blind run it came from)
    - Siblings: heldout/<stamp>/siblings_<type>.json   (path only)
+   - Touches: <files or folders the work will change, comma-separated, e.g. src/policy.py, src/widget/>
    - [ ] CEO approved          (NEEDS CEO only)
    ```
    then why (two lines), cost and risk, and for approved items the work

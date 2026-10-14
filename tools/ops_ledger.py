@@ -43,9 +43,12 @@ def decisions(ops):
                 continue
             did, title = m.groups()
             it = items.setdefault(did, {"id": did, "title": title.strip(), "history": [], "decided": did[2:10]})
-            for k, v in re.findall(r"(?m)^- (Source|From|Assigned|Reassigned|Verdict|Run|Siblings):\s*(.+?)\s*$", body):
+            for k, v in re.findall(r"(?m)^- (Source|From|Assigned|Reassigned|Verdict|Run|Siblings|Touches):\s*(.+?)\s*$", body):
                 if k == "Reassigned":   # the CEO moved it to another department (tools/ceo_inbox.py reassign): the latest wins
                     it["assigned"] = v.strip()
+                    continue
+                if k == "Touches":   # files or folders the work order changes (office_next.py keeps overlapping ones apart): the latest wins
+                    it["touches"] = [p.strip().lower().replace("\\", "/").removeprefix("./").rstrip("/") for p in v.split(",") if p.strip()]
                     continue
                 if k == "Source":   # a later triage may cite a newer report for the same item: every one counts as decided
                     it["last_source"] = v.strip()

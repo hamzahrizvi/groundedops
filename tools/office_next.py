@@ -236,17 +236,31 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     if check or findings:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
                                                              findings and f"{len(findings)} new findings"])), "product-owner"))
-    free = [i for i in build if f"dev-{i}" not in taken]
+    # work orders that change the same files never run side by side (the CEO, 2026-10-14): one waits until the other merges
+    stages = {i: stage_of(it, ops, merged, reverted) for i, it in items.items()}
+    busy = {i for i, s in stages.items() if s in IN_FLIGHT - {"approved, queued"}} | \
+           {i for i in items if any(k.endswith("-" + i) for k in taken)}
+    def clash(i):   # the first busy item that touches a file or folder this one touches, with the path
+        for j in sorted(busy - {i}):
+            for a in items[i].get("touches", []):
+                for b in items[j].get("touches", []):
+                    if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                        return j, min(a, b, key=len)
+        return None
+    free = [i for i in build if f"dev-{i}" not in taken and not clash(i)]
     if free:
         out.append(("dev", f"build {free[0]}" + (f" (+{len(free) - 1} queued)" if len(free) > 1 else ""), f"dev-{free[0]}"))
+    out += [("dev", "build {} waits for {}: both change {}".format(i, *clash(i)), None)
+            for i in build if f"dev-{i}" not in taken and clash(i)][:1 if free else 3]
     # approved work for another department (2026-10-14: five such orders sat untouched): one at a time each, until it
     # files OPS/inbox/<dept>/<id>-done.md, which wakes the product owner to close it
     for i, it in sorted(items.items()):
         dept = it.get("assigned", "dev")
-        if (dept in COST and dept not in ("dev", "product-owner", "diary") and stage_of(it, ops, merged, reverted) == "approved, queued"
+        if (dept in COST and dept not in ("dev", "product-owner", "diary") and stages[i] == "approved, queued"
                 and not os.path.exists(os.path.join(ops, "inbox", dept, f"{i}-done.md"))
-                and sum(d == dept and why.startswith("work order") for d, why, _ in out) < mode[2]):
-            out.append((dept, f"work order {i}", f"{dept}-{i}"))
+                and sum(d == dept and why.startswith("work order") and bool(k) for d, why, k in out) < mode[2]):
+            c = f"{dept}-{i}" not in taken and clash(i)
+            out.append((dept, "work order {} waits for {}: both change {}".format(i, *c), None) if c else (dept, f"work order {i}", f"{dept}-{i}"))
     age = lambda t: (now.timestamp() - t) / 86400
     last_run = _mtime(os.path.join(ops, "runs", "*", "DONE"))
     try:
@@ -422,6 +436,14 @@ def selftest():
         release(ops, 1)
         hand(2 ** 31 - 2)
         assert claims(ops) == {}, "a dead blind test's claim is dropped"
+        # overlapping work orders never run side by side: -05 changes src/, -04 (being built) src/policy.py
+        w("decisions/20261008d.md", "## D-20261008-04 | Four\n- Touches: src/policy.py\n\n## D-20261008-05 | Five\n- Touches: .\\SRC\\, tools/x.py\n")
+        w("state/claims/dev-D-20261008-04.json", json.dumps({"lane": 1, "line": "RUN  groundedops-office-dev  build D-20261008-04"}))
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert "WAIT groundedops-office-dev  build D-20261008-05 waits for D-20261008-04: both change src" in p, p
+        assert any(l.startswith("RUN  groundedops-office-dev  build D-20261008-02") for l in p), "a build that touches nothing in common still runs"
+        release(ops, 1)
+        os.remove(os.path.join(ops, "decisions/20261008d.md"))
         os.remove(os.path.join(ops, "decisions/20261008c.md"))
         assert plan(ops, ops, 55, 38, resets, now)[1].startswith("WAIT groundedops-office-dev"), "5-hour cap"
         assert "pace" in plan(ops, ops, 11, 107, resets, now)[0], "weekly pace"
