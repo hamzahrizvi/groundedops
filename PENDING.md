@@ -173,36 +173,12 @@ To change an item, tell the product owner or answer it on the office page; edits
 
 | Item | What | Stage | Next |
 |---|---|---|---|
-| D-20261008-05 | How-to answers stop before the fix, the test or the warning | waiting for CEO | your yes |
+| D-20261008-05 | How-to answers stop before the fix, the test or the warning | built, waiting for the check | the pre-ship check |
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
 | D-20261010-30 | Two MyConnect Environment documents give opposite pins for the under-age beacon relay | approved, queued | Dev builds it |
 | D-20261014-01 | Sign up the trial accounts for the competitor score | approved, queued | Dev builds it |
-| D-20261014-06 | A question about a model we do not make, or about nothing we make, gets a "here is what we make" product blurb | waiting for CEO | your yes |
-| customer/20261010-comparison | Comparisons between two products come back half-empty, refused, or one-sided | proposed | the product owner triages it |
-| customer/20261010-multi-document | Questions that need two or three parts of the documentation get a partial answer or a refusal | proposed | the product owner triages it |
-| customer/20261010-vague | Vague messages with no product get a guessed answer instead of a question back | proposed | the product owner triages it |
-| customer/20261010b-multi-document | Questions that need two or three facts from different places are declined, or answered with one fact missing | proposed | the product owner triages it |
-| customer/20261010b-procedure-or-troubleshoot | Step-by-step set-up answers leave out the first required step | proposed | the product owner triages it |
-| customer/20261010b-table-condition | Lookups in a code or spec table return the neighbouring row, or the other product's row | proposed | the product owner triages it |
-| customer/20261010b-vague | Vague complaints are answered, or declined, instead of asking one question back | proposed | the product owner triages it |
-| customer/20261010c-comparison | Comparison questions get "not in the documentation" when both figures are documented | proposed | the product owner triages it |
-| customer/20261010c-grader | Grader finding: correct declines and a correct baseline were marked down | proposed | the product owner triages it |
-| customer/20261010c-multi-document | Questions with several asks are declined outright when one ask is not found | proposed | the product owner triages it |
-| customer/20261010c-table-condition | Table answers drop a clause or swap columns | proposed | the product owner triages it |
-| customer/20261010c-vague | Vague messages are guessed at or declined instead of getting a clarifying question | proposed | the product owner triages it |
-| customer/20261014-comparison | Comparison questions get declined, or only half answered, when the other product's figure is needed | proposed | the product owner triages it |
-| customer/20261014-multi-document | Questions that need two or three facts from different parts of the documentation get a flat "I don't have that" | proposed | the product owner triages it |
-| customer/20261014-procedure-or-troubleshoot | "It will not connect, what do I try" gets the install checklist back instead of the fix | proposed | the product owner triages it |
-| customer/20261014-yes-no-documented | Yes/no questions with casual wording get "not documented" when the manual has a clear yes or no | proposed | the product owner triages it |
-| customer/D-20261009-02-done | D-20261009-02-done | proposed | the product owner triages it |
-| customer/D-20261010-10-done | D-20261010-10-done | proposed | the product owner triages it |
-| customer/D-20261010-28-done | D-20261010-28-done | proposed | the product owner triages it |
-| customer/D-20261014-02-done | D-20261014-02-done | proposed | the product owner triages it |
-| marketing/D-20261009-03-done | D-20261009-03-done | proposed | the product owner triages it |
-| marketing/D-20261012-01-done | D-20261012-01-done | proposed | the product owner triages it |
-| security/20261009 | Security item security/20261009, details in the office | proposed | the product owner triages it |
-| security/20261014 | Security item security/20261014, details in the office | proposed | the product owner triages it |
+| D-20261014-06 | A question about a model we do not make, or about nothing we make, gets a "here is what we make" product blurb | ready to merge | merges once Security clears it |
 | D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
 | D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
 | D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
