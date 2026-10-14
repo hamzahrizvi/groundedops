@@ -783,7 +783,9 @@ function showTab(name, scroll){
 }
 for(const n of ["status","plan","depts","rewards","costs","diary"]) document.getElementById("t-" + n).addEventListener("click", () => showTab(n));
 const nameOf = id => (D[id] || {name: id === "po" ? "Product owner" : id}).name;
-const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
+/* approved work assigned to the CEO is the CEO's own to-do: no department will pick it up, so say so */
+const shownStage = c => c.assigned === "ceo" && c.stage === "approved, queued" ? "waiting on you" : c.stage;
+const STAGE_CLS = s => s === "merged" ? "s-merged" : s === "ready to merge" || s === "check passed" ? "s-ready" : s === "waiting for CEO" || s === "waiting on you" ? "s-ceo" : /fail|blocked|reverted|sent back/.test(s) ? "s-bad" : "";
 /* the product owner's diary (tools/office_diary.py --json, uploaded by the diary run to diary/current):
    one entry per day, picked by a date range; "**Heading:**" lines and "- " items render as sections and lists */
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -842,9 +844,9 @@ function renderBoards(){
     lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
     if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
     for(const c of cards){
-      const li = document.createElement("li"); li.className = "kcard " + STAGE_CLS(c.stage); li.textContent = c.title;
+      const li = document.createElement("li"); li.className = "kcard " + STAGE_CLS(shownStage(c)); li.textContent = c.title;
       const meta = document.createElement("div"); meta.className = "kmeta";
-      const st = document.createElement("span"); st.className = "kstage"; st.textContent = c.stage;
+      const st = document.createElement("span"); st.className = "kstage"; st.textContent = shownStage(c);
       const who = document.createElement("span"); who.textContent = `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
       meta.append(st, who); li.append(meta);
       const now = cardNow(c);
@@ -1244,7 +1246,7 @@ document.getElementById("modeBtn").addEventListener("click", () => { forced = mo
    ceo_inbox/*        written here, one row per decision; the runner applies them (tools/ceo_inbox.py) and marks them applied */
 const $ = id => document.getElementById(id);
 const KIND = {approve:"Needs your yes", action:"Your to-do", info:"For your information"};
-const STAGE = {"waiting for CEO":"Waiting for your yes", "approved, queued":"Approved and in the queue", "sent back, rebuilding":"Sent back to Dev for another try",
+const STAGE = {"waiting for CEO":"Waiting for your yes", "waiting on you":"Waiting on you: only you can do this", "approved, queued":"Approved and in the queue", "sent back, rebuilding":"Sent back to Dev for another try",
   "built, waiting for the check":"Built, waiting for its check", "check passed":"Passed its check", "ready to merge":"Ready to merge once Security clears it",
   "check failed":"Failed its check", "blocked":"Dev got stuck and handed it back", "deferred":"Parked for now", "rejected":"Turned down",
   "merged":"Finished and in the code", "reverted":"Undone after merging", "done":"Done", "proposed":"New, not decided yet"};
@@ -1387,9 +1389,9 @@ function maybePop(){
 
 function openItem(id){
   const it = itemOf(id), need = needs().find(n => n.id === id) || {}, title = it.title || need.title || id, nodes = [];
-  nodes.push(el("p", "lead", need.why || STAGE[it.stage] || ""));
+  nodes.push(el("p", "lead", need.why || STAGE[shownStage(it)] || ""));
   const dl = el("dl");
-  for(const [k, v] of [["Where it stands", STAGE[it.stage] || it.stage], ["Found by", it.from && nameOf(it.from)], ["Worked on by", it.assigned && (it.assigned === "ceo" ? "You" : nameOf(it.assigned))]])
+  for(const [k, v] of [["Where it stands", STAGE[shownStage(it)] || it.stage], ["Found by", it.from && nameOf(it.from)], ["Worked on by", it.assigned && (it.assigned === "ceo" ? "You" : nameOf(it.assigned))]])
     if(v){ dl.append(el("dt", null, k), el("dd", null, v)); }
   nodes.push(dl);
   const explain = el("button", "btn", "Explain this to me"); explain.type = "button";
