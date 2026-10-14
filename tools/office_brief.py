@@ -23,7 +23,8 @@ from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
-        "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary"}
+        "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
+        "lab": "Test lab"}
 
 
 def blocks(ops):

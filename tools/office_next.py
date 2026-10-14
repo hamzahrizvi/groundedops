@@ -97,13 +97,34 @@ def claims(ops):
     out = {}
     for p in glob.glob(os.path.join(ops, *CLAIMS, "*.json")):
         try:
-            if time.time() - os.path.getmtime(p) > STALE:
+            c = json.load(open(p, encoding="utf-8")) if time.time() - os.path.getmtime(p) <= STALE else None
+            if not c or (c.get("pid") and not _alive(c["pid"])):   # a stopped lane, or a blind test (tools/blind_eval.py) that died
                 os.remove(p)
                 continue
-            out[os.path.basename(p)[:-5]] = json.load(open(p, encoding="utf-8"))
+            out[os.path.basename(p)[:-5]] = c
         except (OSError, ValueError):
             pass
     return out
+
+
+def _alive(pid):
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            pass
+        return True
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    code = ctypes.c_ulong()
+    k.GetExitCodeProcess(h, ctypes.byref(code))
+    k.CloseHandle(h)
+    return code.value == 259   # STILL_ACTIVE
 
 
 def release(ops, lane):
@@ -272,7 +293,7 @@ def entries(ops, repo, five, week, resets, now, taken):
     held, forced = holds(ops, now), run_now(ops)
     if is_off(ops):
         held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken)}
-    cost = lambda k: COST.get("dev" if k.startswith("dev-") else k, (0, 0))
+    cost = lambda k: (0, 0) if taken[k].get("lane") == "hand" else COST.get("dev" if k.startswith("dev-") else k, (0, 0))   # a blind test spends no Claude usage
     five, week = five + sum(cost(k)[0] for k in taken), week + sum(cost(k)[1] for k in taken)
     building = sum(k.startswith("dev-") for k in taken)
     out = []
@@ -337,6 +358,13 @@ def selftest():
         for n in (1, 2):
             release(ops, n)
         assert claims(ops) == {}, claims(ops)
+        hand = lambda pid: w("state/claims/customer.json", json.dumps({"lane": "hand", "pid": pid, "line": "RUN  groundedops-office-lab  blind test"}))
+        hand(os.getpid())
+        assert "customer" in claims(ops) and not take(ops, ops, 11, 38, resets, now, 1)[-1].startswith("TOOK customer"), "a blind test started by hand holds Customer's run"
+        assert not any(l.startswith("RUN  groundedops-office-customer") for l in plan(ops, ops, 11, 38, resets, now)), "no second blind run"
+        release(ops, 1)
+        hand(2 ** 31 - 2)
+        assert claims(ops) == {}, "a dead blind test's claim is dropped"
         os.remove(os.path.join(ops, "decisions/20261008c.md"))
         assert plan(ops, ops, 55, 38, resets, now)[1].startswith("WAIT groundedops-office-dev"), "5-hour cap"
         assert "pace" in plan(ops, ops, 11, 107, resets, now)[0], "weekly pace"

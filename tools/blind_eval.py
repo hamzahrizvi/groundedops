@@ -74,6 +74,19 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
     os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(DATA, ".secrets.enc"))
 
 phase = sys.argv[2]
+# Any blind test, a lane's or one started by hand, holds the office's claim on Customer's test run
+# (tools/office_next.py claims): no lane starts a second one meanwhile, and the office page shows it as running.
+if phase in ("system", "baseline", "grade", "remark", "vendor"):
+    import atexit, datetime
+    _claim = os.path.join(os.environ.get("LAB_OPS", "C:/Users/hrizvi/groundedops-ops"), "state", "claims", "customer.json")
+    try:
+        os.makedirs(os.path.dirname(_claim), exist_ok=True)
+        with os.fdopen(os.open(_claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY), "w", encoding="utf-8") as f:
+            json.dump({"lane": "hand", "pid": os.getpid(), "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                       "line": f"RUN  groundedops-office-lab  blind test {'/'.join(RUN.replace(os.sep, '/').split('/')[-2:])} ({phase})"}, f)
+        atexit.register(lambda: os.path.exists(_claim) and os.remove(_claim))
+    except FileExistsError:
+        pass   # a lane's Customer run (or another test) already holds it
 CAP, spent = None, 0.0   # the CEO's lab cap (D-20261010-31) and what this process has spent against it
 def cap_read():
     global CAP
