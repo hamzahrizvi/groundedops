@@ -17,6 +17,7 @@ import quota
 import widget_config
 import widget_export
 from guards import _require_admin
+from widget_api import Transcript
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -203,7 +204,7 @@ class LeadReq(BaseModel):
     kind: str                      # "sales" | "support"
     values: dict = {}
     product: str | None = None
-    transcript: list | None = None
+    transcript: Transcript | None = None
     # The written-up enquiry (from /widget/draft_enquiry, or typed by the
     # visitor) and which of those it was.
     enquiry: str | None = None
