@@ -31,12 +31,14 @@ import time
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
-from typing import Literal
+from pydantic import BaseModel, Field, StringConstraints
+from typing import Annotated, Literal
 
 import faq_store
+import pipeline_trace
 import jsonstore
 import quota
+from guards import client_ip as _client_ip, is_local_caller
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,14 @@ router = APIRouter(prefix="/widget", tags=["widget"])
 # Maximum question length. Prompt cost scales with input, and nobody
 # legitimately pastes 4,000 characters into a support widget.
 MAX_QUESTION_CHARS = int(os.getenv("WIDGET_MAX_QUESTION_CHARS", "500"))
+
+
+# D-20261008-12: one bound for a chat transcript the widget sends (lead form
+# and enquiry draft). The widget sends 12 turns; 50 turns and 100 000
+# characters a field leave real chats untouched and refuse a megabyte pasted
+# into one turn. widget_config.add_lead still trims what it keeps.
+_TurnValue = Annotated[str, StringConstraints(max_length=100_000)] | int | float | bool | None
+Transcript = Annotated[list[dict[str, _TurnValue]], Field(max_length=50)]
 
 
 class AskRequest(BaseModel):
@@ -137,27 +147,6 @@ PROGRESS_LINES = {
     "escalate":   "Trying our backup service",
     "retry":      "Rewriting the answer and checking it again",
 }
-
-
-def _client_ip(request: Request) -> str:
-    """Real client IP behind a reverse proxy.
-
-    Only honours X-Forwarded-For when TRUST_PROXY is set: if the app is
-    ever reachable directly, an attacker could otherwise spoof the header
-    and mint unlimited anonymous identities.
-    """
-    # CF-Connecting-IP first: Cloudflare sets it and a client cannot forge
-    # it, unlike X-Forwarded-For which any caller can prepend to. Getting
-    # this wrong lets anonymous visitors mint unlimited identities and
-    # bypass the per-IP ceiling.
-    cf = request.headers.get("cf-connecting-ip")
-    if cf:
-        return cf.strip()
-    if os.getenv("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes"):
-        fwd = request.headers.get("x-forwarded-for", "")
-        if fwd:
-            return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 def _caller(request: Request, visitor_id: str | None) -> dict:
@@ -406,7 +395,7 @@ class DraftRequest(BaseModel):
     # same trust level as the transcript /widget/lead already accepts.
     # Bounded here because prompt cost scales with it, and because there is
     # no legitimate 200-turn support chat.
-    transcript: list | None = None
+    transcript: Transcript | None = None
 
 
 def _assemble_enquiry(kind: str, product: str, notes: str,
@@ -513,6 +502,10 @@ def register(app, answer_query, draft_enquiry=None):
 
     @router.post("/ask")
     async def widget_ask(payload: AskRequest, request: Request):
+        # D-20261008-14: a test session prefix counts only from the box or the
+        # LAN. Set in this request's context; run_in_threadpool copies it into
+        # the pipeline, and /ask/stream runs this handler in its own copy.
+        pipeline_trace.set_local_caller(is_local_caller(request))
         caller = _caller(request, payload.visitor_id)
         tier = caller["tier"]
         level, spec = quota.resolve_effort(payload.effort, tier)

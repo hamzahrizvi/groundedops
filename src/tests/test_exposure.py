@@ -10,6 +10,8 @@ _harness adds to PRIVATE_NETWORKS. Sending any proxy header is therefore
 what makes a request look external here, exactly as it does in production
 behind nginx or Cloudflare.
 """
+import os
+
 import _harness
 from fastapi.testclient import TestClient
 
@@ -17,6 +19,10 @@ import main
 
 app = _harness.app
 client = TestClient(app)
+
+# D-20261008-11: X-Forwarded-For is believed only with TRUST_PROXY (the
+# operator says a proxy sets it); the allowlist checks below rely on that.
+os.environ["TRUST_PROXY"] = "1"
 
 ADMIN = {"x-admin-password": _harness.SUPPORT_TOKEN}
 # What a reverse proxy adds. Its presence is the "this came from outside"
