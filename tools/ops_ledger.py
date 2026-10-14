@@ -24,7 +24,7 @@ from collections import defaultdict
 
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
 CAPACITY = {"dev": 3, "po": 8}          # ponytail: everyone else 2; tune when a board shows real overload
-NOTES = re.compile(r"(-weekly|-market)\.md$|^review-")
+NOTES = re.compile(r"(-weekly|-market|-done)\.md$|^review-")   # -done: a department's reply on its work order, not a new finding
 SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Assigned:\s*security\b|Source:\s*inbox[/\\]security[/\\])")   # any entry of a decision
 PAST, FUTURE = {"merged", "rejected", "reverted", "done"}, {"proposed", "waiting for CEO", "deferred"}
 
@@ -47,8 +47,9 @@ def decisions(ops):
                 if k == "Reassigned":   # the CEO moved it to another department (tools/ceo_inbox.py reassign): the latest wins
                     it["assigned"] = v.strip()
                     continue
-                if k == "Source":
+                if k == "Source":   # a later triage may cite a newer report for the same item: every one counts as decided
                     it["last_source"] = v.strip()
+                    it.setdefault("sources", []).append(v.strip().replace("\\", "/"))
                 if k == "Verdict":
                     it["history"].append(v.strip().upper())
                 else:
@@ -115,7 +116,7 @@ def stage_of(it, ops, merged, reverted):
 def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
     today = today or datetime.date.today()
     items = decisions(ops)
-    cited = {it.get("source", "").replace("\\", "/") for it in items.values()}
+    cited = {s for it in items.values() for s in it.get("sources", [])}
     cards = []
     for it in items.values():
         st = stage_of(it, ops, merged, reverted)

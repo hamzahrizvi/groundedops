@@ -61,7 +61,8 @@ HISTORY = os.path.join(os.environ.get("APPDATA", ""), "Claude", "plan-usage-hist
 RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage, 2026-10-08); pass --resets if the plan moves it
 AHEAD = 15            # weekly points the office may run ahead of the week's pace (the CEO, 2026-10-09)
 CLAIMS = ("state", "claims")
-MAX_DEV = 2           # ponytail: Dev builds at once; each has its own worktree, merges are serialized
+MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged items (.claude/agents/product-owner.md)
+MAX_DEV = 2          # ponytail: Dev builds at once; each has its own worktree, merges are serialized
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -211,7 +212,15 @@ def waiting(ops, repo, now, taken=()):
                                         capture_output=True, text=True, timeout=30).stdout.strip() or 0)
     except Exception:
         last_merge = 0
-    asked = _mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
+    # parked work comes back by priority (the CEO, 2026-10-14: 34 deferred items sat with slots free): the product owner
+    # re-decides the DEFER list when a slot is free and it has not looked since one freed up, or daily
+    stages = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") != "ceo"}
+    slots = MAX_APPROVED - sum(s in IN_FLIGHT for s in stages.values())
+    parked = sum(s == "deferred" for s in stages.values())
+    triaged = _mtime(os.path.join(ops, "decisions", "*.md"))
+    if slots > 0 and parked and (last_merge > triaged or age(triaged) >= 1) and not any(d == "product-owner" and k for d, _, k in out):
+        out.append(("product-owner", f"{slots} of {MAX_APPROVED} slots free: re-decide the {parked} parked items, most valuable first", "product-owner"))
+    asked =_mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
     if asked > last_run:   # first in the queue until a run finishes after the press
         out.insert(0, ("customer", "the CEO asked for a fresh score", "customer"))
     elif not last_run or age(last_run) >= 14:

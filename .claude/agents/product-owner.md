@@ -108,6 +108,13 @@ Verdict, one of:
 At most 3 items may be approved and not yet merged at once. Over that, DEFER
 the weakest.
 
+Under that, fill the free slots from the parked (DEFER) list every run: rank
+the parked items on the four lines above, most valuable first (security and
+wrong answers customers act on ahead of polish), and re-decide the top ones,
+one new section per item under its own id, until 3 are in flight. Skip an item
+whose "what would bring it back" is still unmet or that rides on one in flight,
+and say so in one line. Leaving every slot empty needs a reason in the report.
+
 ## Assess each department report
 A note is not a finding: decide whether it is worth the CEO's time. Worth it
 means it changes a decision, a cost, a risk or the plan, with evidence; a
