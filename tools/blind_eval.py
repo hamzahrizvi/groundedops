@@ -25,6 +25,7 @@ Env:
            baseline answers, so a copied run dir re-measures new code cheaply.
   grade    shows the grader the full text of each case's cited pages (manuals/,
            capped at 30000 chars) and stores the blind A/B labels per case.
+           A clean refusal on an expected-"rejected" case scores 3 whatever the other arm says (D-20261010-28).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -200,7 +201,7 @@ elif phase == "baseline":
 
 elif phase in ("grade", "prompt"):
     L = "ABCDEFG"[:len(SYSTEMS)]
-    G = """You are grading {n} customer-support answers to the same question, written by {n} different systems. You do not know which system wrote which. Judge only substance against the reference; ignore formatting, length, citations, tone and any offer to contact support or list of suggested questions.
+    G = """You are grading {n} customer-support answers to the same question, written by {n} different systems. You do not know which system wrote which. Judge only substance against the reference; ignore formatting, length, citations, tone and any offer to contact support or list of suggested questions. Mark each answer on its own against the reference and the cited pages, never against the other answers: what another answer says must not raise or lower an answer's score.
 
 PRODUCT SELECTED IN THE CHAT: {product}
 {turn1}CUSTOMER QUESTION: {q}
@@ -211,13 +212,13 @@ KEY FACTS A CORRECT ANSWER CONTAINS: {must}
 
 CITED PAGES (full text of the manual pages the reference comes from): {cited}
 
-The reference is an extract, not the whole manual. A figure or fact the reference does not quote is fine if it appears in the cited pages, or if it contradicts neither the reference nor the question. Deduct only for a contradiction, or for a figure found in neither the reference nor the cited pages.
+The reference is an extract, not the whole manual. A figure or fact the reference does not quote is fine if it appears in the cited pages, or if it contradicts neither the reference nor the question. Deduct only for a contradiction, or for a figure found in neither the reference nor the cited pages. Call a claim invented, fabricated or unsupported only after checking that it is in neither the reference nor the cited pages; a claim either of them states is never invented.
 
 Score each answer 0-3:
 - expected "answered": 3 = correct and complete, including any condition/qualifier the question needs; also 3 when every key fact is present and only a qualifier the question did not ask for is left out; 2 = core fact right but misses a qualifier the question needs, or adds a minor inaccuracy; 1 = declines, says it cannot find it, or only asks a question (safe but unhelpful), or gives a wrong method or wrong fact for one of several parts the question asks; 0 = states something wrong or invented as the main answer, or answers about the wrong product.
-- expected "rejected" (not documented / product does not exist / off-topic): 3 = clearly says it is not documented or it cannot help, asserting nothing; 2 = says it is not documented but adds speculation or an overreaching conclusion; 0 = the main answer asserts a Yes/No or a fact as if documented.
+- expected "rejected" (not documented / product does not exist / off-topic): 3 = declines, says it is not documented, or says it cannot help (a redirect to sales or support counts), asserting no fact about the product; suggested questions, a list of things it can answer or an offer of support never lower this, and neither does how much another answer explained; 2 = says it is not documented but adds speculation or an overreaching conclusion; 0 = the main answer asserts a Yes/No or a fact as if documented. An answer that declines and also asserts facts about the product is marked on those facts by these same rules. A score of 1 is not used for this type.
 - expected "clarify" (too vague): verdict "clarified" and 3 only if the answer asks the customer which product/what is meant, or briefly and correctly covers each candidate. An answer that asks nothing is graded as an answer: a long dump or one that picks a single product scores at most 2 (2 only if it states which product and is correct); any mislabelled product or wrong part = 1; answers confidently for an unstated or wrong product = 0.
-Verdict per answer, one of: correct, partial, safe_decline, wrong, correct_refusal, clarified.
+Verdict per answer, one of: correct, partial, safe_decline, wrong, correct_refusal, clarified. For expected "rejected" a 3 is correct_refusal, never safe_decline; safe_decline is a decline where the manual has the answer.
 
 {answers}
 
