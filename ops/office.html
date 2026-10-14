@@ -488,13 +488,6 @@ const DEPTS = [
    role:"Compares the product with market leaders and suggests look-and-feel improvements."}
 ];
 const D = Object.fromEntries(DEPTS.map(d => [d.id, d]));
-const CRON = {customer:{d:[1], h:1}, po:{d:[2,5], h:8}, dev:{d:[1,2,3,4,5], h:20}};
-function nextRun(id){
-  const c = CRON[id]; if(!c) return null;
-  const d = new Date(); d.setMinutes(0,0,0);
-  for(let i = 0; i < 24*8; i++){ d.setHours(d.getHours()+1); if(c.d.includes(d.getDay()) && d.getHours() === c.h) return new Date(d); }
-  return null;
-}
 const fmtWhen = d => d ? d.toLocaleString(undefined,{weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "";
 const fmtTime = d => d.toLocaleTimeString(undefined,{hour:"2-digit", minute:"2-digit"});
 
@@ -510,7 +503,17 @@ function worker(id){
   if(!hired(id)) return {state:"planned", task:d.planned};
   const w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
   const fallback = d.planned ? "Off duty until switched on" : mode === "live" ? "No run yet" : "Off shift";
-  return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || fallback, last: w.last || "", next: w.next || "", updated: w.updated || ""};
+  // the schedules write some idle rows with only `last`; a row's own `next` is a parked cron time, so it is not read
+  return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || (w.last ? "Finished its last run" : fallback), last: w.last || "", updated: w.updated || ""};
+}
+/* "Next run": the dispatcher decides runs from the brief's plan (tools/office_brief.py running/moving), not a cron */
+function nextFor(id){
+  const b = live.brief, key = DEPT_KEY[id];
+  if(!b || !key) return "";
+  if(/^Paused/.test(b.stalled || "")) return "When the office is running again";
+  if((b.running || []).some(m => m.key === key)) return "Running now";
+  const m = (b.moving || []).find(m => m.key === key);
+  return !m ? "When there is work for it" : m.state === "run" ? "At the next hourly check" : "Waiting: " + m.why;
 }
 
 /* ================= the floor: grid, walls, furniture ================= */
@@ -1175,7 +1178,7 @@ function renderDetail(){
   const rows = [["Model", d.model], ["Runs", d.sched], ["Status", `${STATE_LABEL[w.state] || w.state}: ${w.task}`]];
   if(AG[d.id] && hired(d.id)) rows.push(["Doing now", activity(AG[d.id])]);
   if(w.last) rows.push(["Last result", w.last]);
-  if(CRON[d.id]) rows.push(["Next run", w.next || fmtWhen(nextRun(d.id))]);
+  if(mode === "live" && hired(d.id) && nextFor(d.id)) rows.push(["Next run", nextFor(d.id)]);
   if(mode === "live" && w.updated) rows.push(["Updated", new Date(w.updated).toLocaleString()]);
   const dl = el.querySelector("dl");
   for(const [k, v] of rows){ const dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = k; dd.textContent = v; if(k === "Doing now") dd.id = "doingNow"; dl.append(dt, dd); }

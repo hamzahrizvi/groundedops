@@ -125,11 +125,13 @@ def alerts(ops, cards, stalled, off):
             if not text.upper().startswith("STATUS: BLOCKED"):
                 continue
             why = re.sub(r"(?i)^status:\s*blocked\s*[-:\u2013\u2014]?\s*", "", text)[:1500]
-            acts = ([{"label": "Give it to Dev", "choice": "reassign", "id": i, "note": "dev"}] if c["assigned"] != "dev" else []) + [po_now, park(i)]
+            # Dev never reads OPS/heldout, so hidden-question work cannot go to it: Dev would know the test for its own fix
+            to_dev = c["assigned"] != "dev" and not re.search(r"hidden|held.?out", c["title"], re.I)
+            acts = ([{"label": "Give it to Dev", "choice": "reassign", "id": i, "note": "dev"}] if to_dev else []) + [po_now, park(i)]
             out.append({"id": "wo-" + i, "title": f"{DEPT.get(c['assigned'], c['assigned'])} is stuck on \u201c{c['title']}\u201d", "why": why,
                         "suggest": ("Give it to Dev: Dev has every tool, including running the bot and the test lab, so it can do what "
                                     f"{DEPT.get(c['assigned'], c['assigned'])} could not. Or let the product owner decide, or park it."
-                                    if c["assigned"] != "dev" else "Let the product owner decide, or park it."),
+                                    if to_dev else "Let the product owner decide, or park it."),
                         "actions": acts})
     return out
 
@@ -225,6 +227,15 @@ def selftest():
         a = alerts(ops, {}, "", False)
         assert [x["id"] for x in a] == ["run-20261009"] and "grade" in a[0]["why"], a
         assert alerts(ops, {}, "", True)[0]["id"] == "off"
+        os.makedirs(os.path.join(ops, "inbox", "customer"))
+        for i in ("D-20261009-02", "D-20261010-10"):
+            w(f"inbox/customer/{i}-done.md", "Status: BLOCKED - no lab tool\n")
+        card = lambda t: {"title": t, "stage": "approved, queued", "assigned": "customer"}
+        a = {x["id"]: [b.get("choice") for b in x["actions"]] for x in alerts(ops, {
+            "D-20261009-02": card("Fresh hidden test questions for the multi-ask type"),
+            "D-20261010-10": card("Re-ask four questions on the lab bot")}, "", False)}
+        assert "reassign" not in a["wo-D-20261009-02"], "Dev must not write the hidden test for its own fix"
+        assert "reassign" in a["wo-D-20261010-10"], a
         assert ready_for_new_product(ops) == "", "a bad run: keep fixing"
     print("selftest ok")
 
