@@ -9,10 +9,13 @@ running in the background so other machines on the network can reach it.
 From the **repo root**, not from here:
 
 ```
+.venv\Scripts\pip.exe install -r src\requirements.lock
 .venv\Scripts\pip.exe install pyinstaller pystray
 .venv\Scripts\pyinstaller.exe packaging\groundedops.spec --noconfirm
 iscc packaging\installer.iss
 ```
+
+The spec refuses to build if the venv differs from `src\requirements.lock`.
 
 `iscc` is [Inno Setup](https://jrsoftware.org/isdl.php). The first command is
 the long one: **15–30 minutes and roughly 2 GB** in `dist\GroundedOps\`.

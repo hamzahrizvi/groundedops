@@ -74,7 +74,7 @@ $venvPy = Join-Path $venvDir "Scripts\python.exe"
 Say ""
 Say "Installing dependencies (~2GB, several minutes on first run)..." Cyan
 & $venvPy -m pip install --upgrade pip --quiet
-& $venvPy -m pip install -r (Join-Path $app "requirements.txt")
+& $venvPy -m pip install -r (Join-Path $app "requirements.lock")
 
 # --- 3. Widget -------------------------------------------------------
 # v15.2: the React frontend was retired, so Node/npm is no longer needed at

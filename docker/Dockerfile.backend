@@ -7,10 +7,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl && rm -rf /var/lib/apt/lists/*
 
-# Python deps first (layer cache)
-COPY requirements.txt .
+# Python deps first (layer cache). Installs the audited lock, not a fresh resolve.
+COPY requirements.lock .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.lock
 
 # Pre-download the three HF models INTO the image so first run is instant
 # and the container works fully offline for the local pipeline. If you'd
