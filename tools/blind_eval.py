@@ -264,14 +264,16 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
     grades, held = state.setdefault("grades", {}), False
     with ThreadPoolExecutor(6) as ex:   # ponytail: as in baseline, calls in flight can pass the cap
-        for cid, g in ex.map(grade, [c for c in cases if c["id"] not in grades or "raw" in grades[c["id"]]]):
+        # only cases every graded system answered: a vendor that missed one must not be marked on "(no answer yet)"
+        for cid, g in ex.map(grade, [c for c in cases if all(c["id"] in state.get(s, {}) for s in SYSTEMS)
+                                     and (c["id"] not in grades or "raw" in grades[c["id"]])]):
             if g is None: held = True; continue
             grades[cid] = g; spent += g["usage"]["usd"]; save(); print("graded", cid, g.get("best"), flush=True)
     if held:
         if REMARK:   # no half re-marked run: it keeps its old grades until the cap rises
             import shutil; shutil.copyfile(REMARK, OUT)
         stop()
-    ok = [c for c in cases if "raw" not in grades[c["id"]]]
+    ok = [c for c in cases if c["id"] in grades and "raw" not in grades[c["id"]]]
     if REMARK and not ok:   # the grader is down (no key, no credit): the run keeps its old grades
         import shutil; shutil.copyfile(REMARK, OUT); sys.exit("re-mark failed: no case graded; old grades kept")
     summary = {"ungraded": [c["id"] for c in cases if c not in ok]}
