@@ -303,11 +303,11 @@ elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its 
     def plain(h): return html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"</p>|<br\s*/?>|</li>", "\n", h or ""))).strip()
 
     def kapa(turns):
-        # needs KAPA_PROJECT_ID and KAPA_INTEGRATION_ID (kapa platform > project / integrations) beside KAPA_API_KEY
+        # needs KAPA_PROJECT_ID (kapa platform > projects) beside KAPA_API_KEY; KAPA_INTEGRATION_ID is optional
         h = {"X-API-KEY": os.environ["KAPA_API_KEY"]}
         url, a = f"https://api.kapa.ai/query/v1/projects/{os.environ['KAPA_PROJECT_ID']}/chat/", ""
         for q in turns:
-            r = requests.post(url, headers=h, timeout=180, json={"query": q, "integration_id": os.environ["KAPA_INTEGRATION_ID"]})
+            r = requests.post(url, headers=h, timeout=180, json={"query": q, **({"integration_id": os.environ["KAPA_INTEGRATION_ID"]} if os.environ.get("KAPA_INTEGRATION_ID") else {})})
             r.raise_for_status(); j = r.json(); a = j.get("answer", "")
             url = f"https://api.kapa.ai/query/v1/threads/{j['thread_id']}/chat/"   # follow-up keeps Kapa's thread
         return a
@@ -335,7 +335,7 @@ elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its 
         return a
 
     ask = {"kapa": kapa, "fin": fin}[vendor]
-    need = {"kapa": ("KAPA_API_KEY", "KAPA_PROJECT_ID", "KAPA_INTEGRATION_ID"), "fin": ("FIN_API_KEY",)}[vendor]
+    need = {"kapa": ("KAPA_API_KEY", "KAPA_PROJECT_ID"), "fin": ("FIN_API_KEY",)}[vendor]
     if [k for k in need if not os.environ.get(k)]: sys.exit(f"{vendor}: set {', '.join(k for k in need if not os.environ.get(k))} in {DATA}/.env")
     def run(c):
         sel = f"(I'm asking about the {names.get(c['product'], c['product'])})\n" if c.get("product") else ""
