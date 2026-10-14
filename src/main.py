@@ -1669,15 +1669,35 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
                         [m.group(0) for m in sales._PRICE.finditer(q)])
             return {"answer": reply, "kind": "deflected"}
 
+        # D-20261014-06: a model we do not make ("the NV99 Titan") is said
+        # to be unknown, with the near name if there is one, before any
+        # catalogue answer can describe a real product under it.
+        unscoped = not _is_product_scope(scope_key)
+        if unscoped:
+            unknown = _unknown_product_text(q)
+            if unknown:
+                return {"answer": unknown, "kind": "unknown_model"}
+
         idx = sales.get_index(docstore.store_dir(), _source_to_product())
         # The products the WORDING names, resolved here because this is
         # where that resolver lives -- aliases, longest-form-wins and all.
         _names = _product_names()
         _named = _products_named_in(q, list(_names.keys()))
-        return sales.answer(q, _fs._load(), idx, _cat.catalog(),
-                            scoped=_is_product_scope(scope_key),
-                            named_products=_named,
-                            product_names=_names)
+        out = sales.answer(q, _fs._load(), idx, _cat.catalog(),
+                           scoped=not unscoped,
+                           named_products=_named,
+                           product_names=_names)
+        # The overview needs one shared word, so "a good pub near your
+        # office" matched MyCheckr on "good". It is given only when the
+        # question is about something our products do; the model decides
+        # that (clarify.classify_unscoped), and only here, so no other
+        # question pays for the call. No verdict keeps the overview.
+        if out and out.get("kind") == "overview_match":
+            import clarify as _clarify
+            if _clarify.classify_unscoped(resolved or raw_q, _cat.catalog()) == "other":
+                return {"answer": _friendly_refusal(None, "", query=raw_q, sources=[]),
+                        "kind": "declined"}
+        return out
     except Exception as exc:
         logger.warning(f"sales answer skipped: {exc}")
         return None
@@ -1798,7 +1818,7 @@ def _vague_fault_checklist(q: str, payload, results: list[dict],
 
 
 def _unknown_product_text(q: str) -> str | None:
-    """"I don't have a product called NV300..." when the question names a
+    """"I have no documentation for a product called NV300..." when the question names a
     model shaped like ours that no product is and no manual prints."""
     try:
         import clarify as _clarify
@@ -1808,7 +1828,13 @@ def _unknown_product_text(q: str) -> str | None:
             shown + [a for v in _product_aliases().values() for a in v])
         found = _clarify.unknown_model_name(
             q, _product_words(), _clarify.product_vocabulary(), prefixes)
-        return _clarify.unknown_product_reply(found, shown) if found else None
+        if not found:
+            return None
+        aliases = _product_aliases()
+        close = _clarify.close_model_names(
+            found, {k: [n] + list(aliases.get(k, [])) for k, n in names.items()
+                    if not k.endswith("_general")})
+        return _clarify.unknown_product_reply(found, shown, close)
     except Exception as _exc:
         logger.warning(f"unknown-product check skipped: {_exc}")
         return None
@@ -3100,6 +3126,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
 
     _sales = _sales_answer(payload.q, resolved_query, payload.product)
     if _sales:
+        _role = {"deflected": "sales", "declined": "rejected",
+                 "unknown_model": "clarify"}.get(_sales.get("kind"), "catalogue")
         ptrace.mark("sales", "answered from the catalogue, no search")
         total_time = time.time() - start_total
         # Same omission as the FAQ path above: a catalogue answer lists
@@ -3108,7 +3136,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         add_to_memory(session_id, q, _sales["answer"])
         ptrace.set_meta(ground_via="verbatim")
         log_interaction(q, _sales["answer"],
-                        "sales" if _sales.get("kind") == "deflected" else "catalogue",
+                        _role,
                         None, [], grounding_score=None, flagged=False,
                         request_id=request_id,
                         timing={"total_time": total_time})
@@ -3117,7 +3145,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "response_time_ms": int(total_time * 1000),
             # "catalogue", not "sales": these are cross-product lookups from
             # the documents. Only a deflected commercial question is sales.
-            "role": "sales" if _sales.get("kind") == "deflected" else "catalogue",
+            "role": _role,
+            "offer_support": _role == "rejected",
             "model": None, "provider": "catalogue",
             "grounding_score": None, "flagged": False,
             "from_faq": False, "sources": [],
