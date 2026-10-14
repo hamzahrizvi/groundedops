@@ -43,7 +43,8 @@ button{font:inherit;color:inherit}
 .btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
 .alertbar{margin:0 0 14px;padding:10px 14px;border-left:4px solid var(--crit);background:var(--surface);font-size:15px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 .alertbar b{color:var(--crit)} .alerts{display:grid;gap:10px;margin:0;padding:0;list-style:none} .alerts li{border-left:3px solid var(--crit);padding:2px 0 2px 10px}
-.alerts strong{display:block}
+.alerts strong{display:block} .alerts .awhy{margin:4px 0;font-size:14px;white-space:pre-wrap;color:var(--muted)}
+.alerts .asug{margin:6px 0;font-size:14.5px} .alerts .actions{margin-top:6px}
 .banner{margin:0 0 14px;padding:10px 14px;border-left:4px solid var(--accent);background:var(--surface);font-size:15px}
 
 .grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
@@ -1325,7 +1326,8 @@ function currentAlerts(){
   if(age > 90) out.unshift({id: "stale-" + live.brief.updated, title: "The office's hourly check has stopped",
     why: `It last ran ${ago(age)} ago. It only runs while this computer is on and the Claude app is open, so nothing moves until then.`});
   for(const [id, w] of Object.entries(live.workers)) if(w.state === "blocked" && D[id])
-    out.push({id: `worker-${id}-${w.updated}`, title: `${D[id].name} is stuck`, why: w.task || "No reason given."});
+    out.push({id: `worker-${id}-${w.updated}`, title: `${D[id].name} is stuck`, why: w.task || "No reason given.",
+      suggest: "Ask the product owner to look at it now.", actions: [{label: "Ask the product owner to decide now", choice: "run_now", id: "product-owner"}]});
   return out;
 }
 function renderAlerts(){
@@ -1342,9 +1344,26 @@ function renderAlerts(){
     openAlerts(list);
   }
 }
+function alertAction(a, act){
+  const sent = act.choice && live.inbox.find(r => r.choice === act.choice && r.id === act.id && r.status === "new");
+  const b = el("button", "btn", sent ? "Sent: applied at the next hourly check" : act.label); b.type = "button"; b.disabled = !!sent;
+  b.addEventListener("click", async () => {
+    if(act.tab){ pop.close(); showTab(act.tab, true); return; }
+    b.disabled = true; b.textContent = "Sending…";
+    try { await decide(act.id, act.choice, act.note || `${act.label}: ${a.title}`, a.title); b.textContent = "Sent: applied at the next hourly check"; }
+    catch(e){ b.disabled = false; b.textContent = act.label; b.title = writeError(e); }
+  });
+  return b;
+}
 function openAlerts(list){
   const ul = el("ul", "alerts");
-  for(const a of list){ const li = el("li"); li.append(el("strong", null, a.title), el("span", "small", a.why)); ul.append(li); }
+  for(const a of list){
+    const li = el("li"), why = el("p", "awhy", a.why);
+    li.append(el("strong", null, a.title), why);
+    if(a.suggest) li.append(el("p", "asug", "Suggested: " + a.suggest));
+    if((a.actions || []).length && live.available){ const acts = el("div", "actions"); for(const act of a.actions) acts.append(alertAction(a, act)); li.append(acts); }
+    ul.append(li);
+  }
   openPop("Something is holding the office up", [ul, el("p", "small", "This pops up once per problem. The red bar stays until it is sorted. Ask the product owner (the chat button) if you are not sure what to do.")]);
 }
 function maybePop(){

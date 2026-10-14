@@ -16,6 +16,8 @@ from the decisions file, and a note is quoted so it can never read as a decision
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
   run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
            (office_next.py); for customer it also files a refresh request, so a held-back test run goes first
+  reassign "- Reassigned: <note>" + approved: an approved or blocked item moves to another department
+           (note = dev, customer, security, audit, rnd or marketing), e.g. a work order its department could not do
   cap      OPS/lab_cap.json {usd, per}: the test lab's spending cap, from note "<usd> [day|week|month]" (0-1000,
            default month); tools/blind_eval.py stops at it (tools/ops_costs.py cap_status)
 """
@@ -34,6 +36,7 @@ from ops_ledger import decisions, stage_of  # noqa: E402
 from office_next import COST, claims  # noqa: E402
 
 CAP_NOTE = re.compile(r"^\s*(\d{1,4}(?:\.\d{1,2})?)\s*(day|week|month)?\s*$")
+REASSIGN = {"dev", "customer", "security", "audit", "rnd", "marketing"}
 CAN = {"approve": {"waiting for CEO", "deferred", "rejected"},
        "defer": {"waiting for CEO", "approved, queued", "sent back, rebuilding", "blocked", "check failed"}}
 
@@ -116,6 +119,12 @@ def apply(ops, folder, now=None):
             out.append(f"SKIPPED {doc_id} no such item {i!r}")
             continue
         st, title = stages[i], items[i]["title"]
+        if choice == "reassign" and str(d.get("note") or "") in REASSIGN and st in CAN["defer"] | CAN["approve"]:
+            body = f"- Reassigned: {d['note']}\n- Verdict: NEEDS CEO\n- [x] CEO approved (office page, {stamp})\n\nThe CEO moved this to {d['note']} from the office page."
+            sections.append(f"## {i} | {title}\n{body}\n")
+            stages[i] = "approved, queued"
+            out.append(f"APPLIED {doc_id} reassign {i} {d['note']}")
+            continue
         if choice == "approve" and st in CAN["approve"]:
             body = f"- Verdict: NEEDS CEO\n- [x] CEO approved (office page, {stamp})"
         elif choice == "defer" and st in CAN["defer"]:
@@ -192,6 +201,14 @@ def selftest():
                        "SKIPPED 14 cap: not a number of dollars from 0 to 1000", "APPLIED 15 cap $7.5 per month"], got
         c = json.load(open(cap, encoding="utf-8"))
         assert (c["usd"], c["per"], c["row"]) == (7.5, "month", "15"), c   # the newest row wins
+        open(os.path.join(ops, "decisions", "20261009.md"), "w", encoding="utf-8").write(
+            "## D-20261009-02 | Fresh questions\n- Assigned: customer\n- Verdict: AUTO-APPROVED\n")
+        row("18", id="D-20261009-02", choice="reassign", note="dev")
+        row("19", id="D-20261009-02", choice="reassign", note="../x")
+        got = apply(ops, os.path.join(ops, "pull"), datetime.datetime(2026, 10, 14, 9, 0))
+        assert got[:2] == ["APPLIED 18 reassign D-20261009-02 dev", "SKIPPED 19 reassign does not apply to D-20261009-02 (approved, queued)"], got
+        it = decisions(ops)["D-20261009-02"]
+        assert it["assigned"] == "dev" and stage_of(it, ops, set(), set()) == "approved, queued", it
         row("16", id="security", choice="run_now")
         row("17", id="../x", choice="run_now")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 16 run_now security", "SKIPPED 17 run_now: no such department '../x'"]

@@ -78,37 +78,58 @@ def ready_for_new_product(ops):
 
 
 def alerts(ops, cards, stalled, off):
-    """What is stopping office work right now, for the page's pop-up: [{id, title, why}]. The id is stable
-    while the problem lasts, so the page pops each problem once. A failed gate is not here: it is the
-    check doing its job, and the product owner decides what happens next."""
+    """What is stopping office work right now, for the page's pop-up: [{id, title, why, suggest, actions}].
+    The id is stable while the problem lasts, so the page pops each problem once. Each action is a button:
+    {label, choice, id, note} sent to tools/ceo_inbox.py, or {label, tab} to open a tab. A failed gate is not
+    here: it is the check doing its job, and the product owner decides what happens next."""
+    po_now = {"label": "Ask the product owner to decide now", "choice": "run_now", "id": "product-owner"}
+    park = lambda i: {"label": "Park it for later", "choice": "defer", "id": i}
     out = []
     if off:
-        out.append({"id": "off", "title": "The office is switched off", "why": "Nothing new starts until you switch it on with the Power button."})
+        out.append({"id": "off", "title": "The office is switched off", "why": "Nothing new starts while it is off.",
+                    "suggest": "Switch it on if you did not mean to leave it off.",
+                    "actions": [{"label": "Switch the office on", "choice": "on", "id": ""}]})
     elif stalled.startswith("Paused"):
-        out.append({"id": "paused", "title": "The office is paused", "why": stalled})
+        out.append({"id": "paused", "title": "The office is paused", "why": stalled,
+                    "suggest": "Nothing to do: the next hourly check fetches fresh usage figures and carries on.", "actions": []})
     lab = cap_status(ops)
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",
-                    "why": "Test runs and fix checks wait until you raise the cap on the Costs tab."})
+                    "why": "Test runs and fix checks wait until the cap is raised.",
+                    "suggest": "Raise the cap on the Costs tab if the spend is expected.",
+                    "actions": [{"label": "Open the Costs tab", "tab": "costs"}]})
     runs = sorted(d for d in glob.glob(os.path.join(ops, "runs", "*")) if TEST_RUN.match(os.path.basename(d)))
     if runs and os.path.exists(os.path.join(runs[-1], "FAILED")):
         step = open(os.path.join(runs[-1], "FAILED"), encoding="utf-8").read().strip()
         out.append({"id": "run-" + os.path.basename(runs[-1]), "title": "The latest test run failed",
-                    "why": f"The 40-question test stopped at its \u201c{step}\u201d step, so the score is not updated. See the run log."})
+                    "why": f"The 40-question test stopped at its \u201c{step}\u201d step, so the score is not updated.",
+                    "suggest": "Run it again. If it fails at the same step twice, ask the product owner to look at the run log.",
+                    "actions": [{"label": "Run the test again", "choice": "run_now", "id": "customer"}, po_now]})
     for g in glob.glob(os.path.join(ops, "inbox", "dev", "*.gate")):
         i = os.path.basename(g)[:-5]
         if os.path.exists(os.path.join(g, "FAILED")) and not os.path.exists(os.path.join(g, "gate.json")):
             out.append({"id": "gate-" + i, "title": f"The check of \u201c{cards.get(i, {}).get('title', i)}\u201d could not run",
-                        "why": open(os.path.join(g, "FAILED"), encoding="utf-8").read().strip()[:200] or "It stopped before giving a verdict."})
+                        "why": open(os.path.join(g, "FAILED"), encoding="utf-8").read().strip() or "It stopped before giving a verdict.",
+                        "suggest": "The product owner's next run retries the check. Start it now if you want the answer sooner.",
+                        "actions": [{**po_now, "label": "Retry the check now"}]})
     for i, c in cards.items():
         if c["stage"] == "blocked":
             out.append({"id": "blocked-" + i, "title": f"Dev is stuck on \u201c{c['title']}\u201d",
-                        "why": "Dev handed it back blocked. The product owner decides at the next triage."})
+                        "why": "Dev handed it back blocked: it could not finish the work as ordered.",
+                        "suggest": "Let the product owner decide (send it back with new instructions, or close it), or park it.",
+                        "actions": [po_now, park(i)]})
         done = os.path.join(ops, "inbox", c["assigned"], f"{i}-done.md")
-        if c["stage"] == "approved, queued" and os.path.exists(done) and \
-                open(done, encoding="utf-8").readline().strip().upper().startswith("STATUS: BLOCKED"):
-            out.append({"id": "wo-" + i, "title": f"{DEPT.get(c['assigned'], c['assigned'])} is stuck on \u201c{c['title']}\u201d",
-                        "why": open(done, encoding="utf-8").readline().strip()[len("Status: "):][:200]})
+        if c["stage"] == "approved, queued" and os.path.exists(done):
+            text = open(done, encoding="utf-8").read().strip()
+            if not text.upper().startswith("STATUS: BLOCKED"):
+                continue
+            why = re.sub(r"(?i)^status:\s*blocked\s*[-:\u2013\u2014]?\s*", "", text)[:1500]
+            acts = ([{"label": "Give it to Dev", "choice": "reassign", "id": i, "note": "dev"}] if c["assigned"] != "dev" else []) + [po_now, park(i)]
+            out.append({"id": "wo-" + i, "title": f"{DEPT.get(c['assigned'], c['assigned'])} is stuck on \u201c{c['title']}\u201d", "why": why,
+                        "suggest": ("Give it to Dev: Dev has every tool, including running the bot and the test lab, so it can do what "
+                                    f"{DEPT.get(c['assigned'], c['assigned'])} could not. Or let the product owner decide, or park it."
+                                    if c["assigned"] != "dev" else "Let the product owner decide, or park it."),
+                        "actions": acts})
     return out
 
 
