@@ -174,7 +174,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
-| D-20261009-02 | Fresh hidden test questions for the multi-ask type | approved, queued | Dev builds it |
 | D-20261009-03 | Security item D-20261009-03, details in the office | approved, queued | Dev builds it |
 | D-20261010-10 | On the new AI the bot gets two questions wrong that it answered right or declined safely before | approved, queued | Dev builds it |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
@@ -193,6 +192,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/20261010c-multi-document | Questions with several asks are declined outright when one ask is not found | proposed | the product owner triages it |
 | customer/20261010c-table-condition | Table answers drop a clause or swap columns | proposed | the product owner triages it |
 | customer/20261010c-vague | Vague messages are guessed at or declined instead of getting a clarifying question | proposed | the product owner triages it |
+| customer/D-20261009-02-done | D-20261009-02-done | proposed | the product owner triages it |
 | security/20261009 | Security item security/20261009, details in the office | proposed | the product owner triages it |
 | D-20261008-01 | Questions that name two products get a figure for each | deferred | parked |
 | D-20261008-02 | A message with two or three asks gets every part answered | deferred | parked |
@@ -205,6 +205,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-14 | Security item D-20261008-14, details in the office | deferred | parked |
 | D-20261008-17 | Security item D-20261008-17, details in the office | deferred | parked |
 | D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
+| D-20261009-02 | Fresh hidden test questions for the multi-ask type | deferred | parked |
 | D-20261009-05 | A table from the next product's section is read as the asked product's | deferred | parked |
 | D-20261009-06 | Security item D-20261009-06, details in the office | deferred | parked |
 | D-20261009-07 | Security item D-20261009-07, details in the office | deferred | parked |
