@@ -251,6 +251,9 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                                              for k, s in zip(L, order[c["id"]])),
                         shape=", ".join(f'"{k}": {{"score": n, "verdict": "..."}}' for k in L),
                         best=" | ".join(f'"{k}"' for k in L) + ' | "tie"')
+    unanswered = [f"{s}:{c['id']}" for c in cases for s in SYSTEMS if c["id"] not in state.get(s, {})]
+    if phase == "grade" and unanswered:   # an empty answer would be graded 0 (Kapa's 429s, 2026-10-14)
+        sys.exit(f"not grading: {len(unanswered)} answers missing, e.g. {unanswered[:5]}")
     if phase == "prompt":
         sys.stdout.reconfigure(encoding="utf-8")  # manuals carry symbols cp1252 cannot print
         print(prompt(next(c for c in cases if c["id"] == sys.argv[3]))); sys.exit(0)
@@ -314,7 +317,10 @@ elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its 
         h = {"X-API-KEY": os.environ["KAPA_API_KEY"]}
         url, a = f"https://api.kapa.ai/query/v1/projects/{os.environ['KAPA_PROJECT_ID']}/chat/", ""
         for q in turns:
-            r = requests.post(url, headers=h, timeout=180, json={"query": q, **({"integration_id": os.environ["KAPA_INTEGRATION_ID"]} if os.environ.get("KAPA_INTEGRATION_ID") else {})})
+            for wait in (30, 60, 120, 240, 0):   # the trial rate-limits bursts (429, no Retry-After): back off and retry
+                r = requests.post(url, headers=h, timeout=180, json={"query": q, **({"integration_id": os.environ["KAPA_INTEGRATION_ID"]} if os.environ.get("KAPA_INTEGRATION_ID") else {})})
+                if r.status_code != 429 or not wait: break
+                time.sleep(wait)
             r.raise_for_status(); j = r.json(); a = j.get("answer", "")
             url = f"https://api.kapa.ai/query/v1/threads/{j['thread_id']}/chat/"   # follow-up keeps Kapa's thread
         return a
@@ -352,7 +358,7 @@ elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its 
         except Exception as e: return c["id"], None, e
         return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": 0, "model": vendor, "at": time.strftime("%Y-%m-%d")}, None
     rows = state.setdefault(vendor, {})
-    with ThreadPoolExecutor(3) as ex:
+    with ThreadPoolExecutor(2) as ex:
         for cid, out, err in ex.map(run, [c for c in cases if c["id"] not in rows]):
             if err: print(vendor, cid, "ERROR", err, flush=True); continue   # not saved: a rerun retries it
             rows[cid] = out; save(); print(vendor, cid, out["wall"], repr(out["answer"][:60]), flush=True)
