@@ -62,7 +62,10 @@ RESET = (4, 19)   # ponytail: weekly window resets Friday ~19:00 UTC (get_usage,
 AHEAD = 15            # weekly points the office may run ahead of the week's pace (the CEO, 2026-10-09)
 CLAIMS = ("state", "claims")
 MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged items (.claude/agents/product-owner.md)
-MAX_DEV = 2          # ponytail: Dev builds at once; each has its own worktree, merges are serialized
+# Work modes (the CEO, 2026-10-14): (approved not merged, Dev builds at once, work orders per department at once).
+# More in flight means more lanes run side by side: two Dev builds, or two copies of one department on different orders.
+MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2)}
+MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, merges are serialized
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -138,12 +141,51 @@ def release(ops, lane):
             pass
 
 
+def work_mode(ops, week, resets, now):
+    """(mode, why): the weekly allowance left against the time left before the reset. 1.5x or more is ultra,
+    1.1x or more high, less easy. OPS/state/mode holding easy, high or ultra overrides it (the CEO's choice)."""
+    try:
+        m = open(os.path.join(ops, "state", "mode"), encoding="utf-8").read().strip().lower()
+        if m in MODES:
+            return m, "set by you"
+    except OSError:
+        pass
+    left, time_left = 100 - week, max(100 * (resets - now) / WEEK, 1)
+    r = left / time_left
+    return ("ultra" if r >= 1.5 else "high" if r >= 1.1 else "easy"), f"{left:.0f}% of the week's allowance left, {time_left:.0f}% of the week"
+
+
+EVERY = (0, 15, 30, 60, 120)   # "Next run" on the office page: minutes between a lane's runs; 0 = back to back
+
+
+def every(ops):
+    """Minutes between a lane's runs, from OPS/state/every (the CEO's "Next run" setting); 60 when unset."""
+    try:
+        m = int(open(os.path.join(ops, "state", "every"), encoding="utf-8").read().strip())
+        return m if m in EVERY else 60
+    except (OSError, ValueError):
+        return 60
+
+
+def lane_cron(lane, minutes):
+    """The lane's cron: every N minutes, the three lanes a third of N apart. Back to back is every 10 minutes:
+    runs of one task never overlap, so the next starts within 10 minutes of the last one ending."""
+    step = minutes or 10
+    off = (lane - 1) * step // 3
+    if step < 60:
+        return ",".join(str(m) for m in range(off, 60, step)) + " * * * *"
+    return f"{off % 60} " + ("*" if step == 60 else f"{off // 60}-23/{step // 60}") + " * * *"
+
+
 def take(ops, repo, five, week, resets, now, lane):
     """The plan, then a claim on its first runnable line no other lane holds. Runs of one lane
     never overlap, so this lane's leftover claims are from its last run and are dropped first."""
     release(ops, lane)
     d = os.path.join(ops, *CLAIMS)
     os.makedirs(d, exist_ok=True)
+    mode, why = work_mode(ops, week, resets, now)   # for the product owner's cap (.claude/agents/product-owner.md)
+    with open(os.path.join(ops, "state", "mode.json"), "w", encoding="utf-8") as f:
+        json.dump({"mode": mode, "why": why, "approved": MODES[mode][0], "builds": MODES[mode][1], "per_department": MODES[mode][2]}, f)
     rows = entries(ops, repo, five, week, resets, now, claims(ops))
     for line, key, ok in rows:
         if not ok:
@@ -162,7 +204,7 @@ def take(ops, repo, five, week, resets, now, lane):
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
 
 
-def waiting(ops, repo, now, taken=()):
+def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     """[(department, why, claim key)] for every office task with work waiting, most urgent first.
     Dev builds skip work orders another lane already holds, so a second lane gets the next one."""
     items = decisions(ops)
@@ -203,7 +245,7 @@ def waiting(ops, repo, now, taken=()):
         dept = it.get("assigned", "dev")
         if (dept in COST and dept not in ("dev", "product-owner", "diary") and stage_of(it, ops, merged, reverted) == "approved, queued"
                 and not os.path.exists(os.path.join(ops, "inbox", dept, f"{i}-done.md"))
-                and not any(d == dept and why.startswith("work order") for d, why, _ in out)):
+                and sum(d == dept and why.startswith("work order") for d, why, _ in out) < mode[2]):
             out.append((dept, f"work order {i}", f"{dept}-{i}"))
     age = lambda t: (now.timestamp() - t) / 86400
     last_run = _mtime(os.path.join(ops, "runs", "*", "DONE"))
@@ -215,11 +257,11 @@ def waiting(ops, repo, now, taken=()):
     # parked work comes back by priority (the CEO, 2026-10-14: 34 deferred items sat with slots free): the product owner
     # re-decides the DEFER list when a slot is free and it has not looked since one freed up, or daily
     stages = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") != "ceo"}
-    slots = MAX_APPROVED - sum(s in IN_FLIGHT for s in stages.values())
+    slots = mode[0] - sum(s in IN_FLIGHT for s in stages.values())
     parked = sum(s == "deferred" for s in stages.values())
     triaged = _mtime(os.path.join(ops, "decisions", "*.md"))
     if slots > 0 and parked and (last_merge > triaged or age(triaged) >= 1) and not any(d == "product-owner" and k for d, _, k in out):
-        out.append(("product-owner", f"{slots} of {MAX_APPROVED} slots free: re-decide the {parked} parked items, most valuable first", "product-owner"))
+        out.append(("product-owner", f"{slots} of {mode[0]} slots free: re-decide the {parked} parked items, most valuable first", "product-owner"))
     asked =_mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
     if asked > last_run:   # first in the queue until a run finishes after the press
         out.insert(0, ("customer", "the CEO asked for a fresh score", "customer"))
@@ -300,13 +342,14 @@ def entries(ops, repo, five, week, resets, now, taken):
     """[(line, claim key, runnable)]. Work other lanes are running counts against the budget,
     since two lanes starting together both see the same usage figures."""
     held, forced = holds(ops, now), run_now(ops)
+    mode = MODES[work_mode(ops, week, resets, now)[0]]
     if is_off(ops):
-        held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken)}
+        held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken, mode)}
     cost = lambda k: (0, 0) if taken[k].get("lane") == "hand" else COST.get("dev" if k.startswith("dev-") else k, (0, 0))   # a blind test spends no Claude usage
     five, week = five + sum(cost(k)[0] for k in taken), week + sum(cost(k)[1] for k in taken)
     building = sum(k.startswith("dev-") for k in taken)
     out = []
-    for dept, why, key in waiting(ops, repo, now, taken):
+    for dept, why, key in waiting(ops, repo, now, taken, mode):
         if key is None:   # waits on other work, not on the budget
             out.append((f"WAIT {TASK}{dept}  {why}", None, False))
             continue
@@ -317,7 +360,7 @@ def entries(ops, repo, five, week, resets, now, taken):
             continue
         pressed = dept in forced and not is_off(ops)   # "Run now": skips a hold and the budget, not the 5-hour limit itself
         stop = ("held (OPS/state/hold)" if dept in held and not pressed else f"already running{lane}" if lane else
-                f"{MAX_DEV} builds already running" if dept == "dev" and building >= MAX_DEV else
+                f"{mode[1]} builds already running" if dept == "dev" and building >= mode[1] else
                 f"5-hour window at {five}%" if pressed and five >= 90 else
                 None if pressed else over_budget(dept, five, week, resets, now))
         out.append((f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}", key, not stop))
@@ -337,6 +380,11 @@ def selftest():
         for d in ("decisions", "inbox/dev", "inbox/audit", "runs/20261008", "state"):
             os.makedirs(os.path.join(ops, d))
         w = lambda p, s="": open(os.path.join(ops, p), "w", encoding="utf-8").write(s)
+        # work mode from the allowance left vs the week left (21% of the week left here), then pinned to high for the rest
+        assert [work_mode(ops, wk, resets, now)[0] for wk in (40, 75, 80)] == ["ultra", "high", "easy"]
+        w("state/mode", "high\n")
+        assert work_mode(ops, 40, resets, now) == ("high", "set by you")
+        assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "6,16,26,36,46,56 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
                                    "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
                                    "## D-20261008-07 | Manuals\n- Assigned: ceo\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
@@ -483,14 +531,20 @@ def main():
     ap.add_argument("--lane", type=int, help="this runner's lane number, for --take and --release")
     ap.add_argument("--take", action="store_true", help="claim the first runnable line for --lane; last line TOOK <key> | <line> or TOOK nothing")
     ap.add_argument("--release", action="store_true", help="drop every claim --lane holds")
+    ap.add_argument("--cron-set", action="store_true", help="record that --lane's scheduled task now has the CRON --release printed")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    if (a.take or a.release) and not a.lane:
-        ap.error("--take and --release need --lane")
-    if a.release:
-        return release(a.ops, a.lane) or print(f"RELEASED lane {a.lane}")
+    if (a.take or a.release or a.cron_set) and not a.lane:
+        ap.error("--take, --release and --cron-set need --lane")
+    if a.release:   # and the lane's schedule, when the CEO changed "Next run" on the page
+        release(a.ops, a.lane)
+        want, path = lane_cron(a.lane, every(a.ops)), os.path.join(a.ops, "state", f"cron-{a.lane}")
+        have = open(path, encoding="utf-8").read().strip() if os.path.exists(path) else ""
+        return print(f"RELEASED lane {a.lane}" + (f"\nCRON {want}" if want != have else ""))
+    if a.cron_set:   # the lane set its scheduled task to the CRON line --release printed
+        return open(os.path.join(a.ops, "state", f"cron-{a.lane}"), "w", encoding="utf-8").write(lane_cron(a.lane, every(a.ops)))
     now = datetime.datetime.now(datetime.timezone.utc)
     if a.five is None or a.week is None:
         a.five, a.week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
@@ -498,7 +552,8 @@ def main():
             return print(f"STALE usage figures are {old:.0f} minutes old; start nothing"
                          ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}} from get_usage to OPS/state/usage.json and run again)')
     resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
-    print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC")
+    print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC;"
+          " work mode {} ({})".format(*work_mode(a.ops, a.week, resets, now)))
     print("\n".join(take(a.ops, a.repo, a.five, a.week, resets, now, a.lane) if a.take else plan(a.ops, a.repo, a.five, a.week, resets, now)))
 
 

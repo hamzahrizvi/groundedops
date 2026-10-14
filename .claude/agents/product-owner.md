@@ -105,13 +105,17 @@ Verdict, one of:
   `- For the rejected list: <what was tried, the measurement, the date>`. The run
   copies it into PENDING.md's "Rejected - do not redo without new evidence".
 
-At most 3 items may be approved and not yet merged at once. Over that, DEFER
-the weakest.
+At most N items may be approved and not yet merged at once, where N is
+"approved" in OPS/state/mode.json (3 if the file is missing). That file is the
+CEO's work mode: easy and high allow 3, ultra 6. Over N, DEFER the weakest.
 
-Under that, fill the free slots from the parked (DEFER) list every run: rank
+Under N, fill the free slots from the parked (DEFER) list every run: rank
 the parked items on the four lines above, most valuable first (security and
 wrong answers customers act on ahead of polish), and re-decide the top ones,
-one new section per item under its own id, until 3 are in flight. Skip an item
+one new section per item under its own id, until N are in flight. In ultra,
+spread the work: give each department that can do an item its own work order
+(a department may run two at once), and split an item with independent parts
+into separate work orders for different departments. Skip an item
 whose "what would bring it back" is still unmet or that rides on one in flight,
 and say so in one line. Leaving every slot empty needs a reason in the report.
 

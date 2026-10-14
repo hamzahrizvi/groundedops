@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
-from office_next import claims, holds, is_off, latest_usage, next_reset, plan  # noqa: E402
+from office_next import claims, every, holds, is_off, latest_usage, next_reset, plan, work_mode  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
@@ -177,7 +177,8 @@ def brief(ops, repo, now=None, usage=None):
     if running and stalled.startswith("Everything with work is waiting"):
         stalled = ""   # waiting behind work that is running is not a stall
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
-            "minutes_old": None if old == float("inf") else round(old)}, "running": running, "moving": moving, "stalled": stalled, "off": is_off(ops),
+            "minutes_old": None if old == float("inf") else round(old)}, "running": running,
+            "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
             "todo": todo, "items": cards, "alerts": alerts(ops, cards, stalled, is_off(ops)),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 

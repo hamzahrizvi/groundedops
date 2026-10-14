@@ -244,6 +244,7 @@ button{font:inherit;color:inherit}
 .actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .pvrefresh{margin:0 0 6px}
 .btn.go{background:var(--accent);color:var(--accent-ink)}
+#everySel{font:13px var(--display);letter-spacing:.04em;padding:6px 8px;border:2px solid var(--ink);border-radius:3px;background:var(--surface);color:var(--ink);max-width:100%}
 .btn.pon{background:var(--ok);color:#fff} .btn.poff{background:var(--crit);color:#fff}
 .btn:disabled{opacity:.55;cursor:default;transform:none}
 dialog.pop{border:2px solid var(--ink);border-radius:4px;background:var(--surface);color:var(--ink);padding:0;width:min(580px,calc(100vw - 32px));max-height:min(88vh,780px);box-shadow:6px 6px 0 var(--ink)}
@@ -295,6 +296,14 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
       <span class="clock" id="clock">--:--</span>
       <span class="chip" id="modeChip">Sample week</span>
       <button class="btn" id="modeBtn" type="button" hidden>Show live office</button>
+      <button class="btn" id="workBtn" type="button" hidden>Work mode</button>
+      <select id="everySel" hidden aria-label="When each lane runs next" title="When each office lane starts its next run. Applies at the end of each lane's next run.">
+        <option value="0">Next run: as soon as the last ends</option>
+        <option value="15">Next run: every 15 min</option>
+        <option value="30">Next run: every 30 min</option>
+        <option value="60">Next run: every hour</option>
+        <option value="120">Next run: every 2 hours</option>
+      </select>
       <button class="btn" id="powerBtn" type="button" hidden aria-pressed="true">Power</button>
     </div>
   </header>
@@ -1415,7 +1424,7 @@ function openItem(id){
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
-const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on", cap:"Lab cap"};
+const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on", cap:"Lab cap", mode:"Work mode", every:"Next run"};
 async function decide(id, choice, note, title){
   if(!live.db) throw {code:"no_db"};
   await live.db.collection("ceo_inbox").add({id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
@@ -1554,6 +1563,31 @@ function renderPower(){
     : powerArmed ? "Click again: all agents sleep" : off ? "Office off" : "Office on");
   $("sign").textContent = off ? "CLOSED" : "OPEN";
 }
+/* the CEO's work mode and "Next run" (tools/ceo_inbox.py mode / every; office_next.py work_mode / every). Each click
+   sends a row; the next run applies them in order, so the last click wins. */
+const WORK = ["auto", "easy", "high", "ultra"], cap1 = s => s[0].toUpperCase() + s.slice(1);
+const WORK_TIP = {auto: "Picks easy, high or ultra from the Claude allowance left against the time left before the weekly reset",
+  easy: "Easy: one Dev build at a time", high: "High: two Dev builds at once",
+  ultra: "Ultra: up to 6 approved items, three Dev builds at once, and two copies of a department on different work orders"};
+const newest = c => live.inbox.find(r => r.choice === c && r.status === "new");   // the inbox is newest first
+const workNow = () => { const m = live.brief && live.brief.mode, p = newest("mode"); return p ? p.note : m && m.why === "set by you" ? m.mode : "auto"; };
+function renderWork(){
+  const b = $("workBtn"), s = $("everySel"), m = live.brief && live.brief.mode, p = newest("mode"), e = newest("every");
+  b.hidden = s.hidden = !live.available;
+  const w = workNow();
+  b.textContent = "Work: " + (w === "auto" ? "Auto" + (m && !p ? " · " + cap1(m.mode) : "") : cap1(w)) + (p ? " (next run)" : "");
+  b.title = WORK_TIP[w] + (m && m.why !== "set by you" ? `. Now ${m.mode}: ${m.why}` : "") + ". Click to change; it applies at the next run.";
+  if(document.activeElement !== s) s.value = String(e ? e.note : m ? m.every : 60);
+}
+$("workBtn").addEventListener("click", async () => {
+  const next = WORK[(WORK.indexOf(workNow()) + 1) % WORK.length];
+  try { await decide("", "mode", next, "Work mode: " + next); } catch(e){ $("banner").textContent = writeError(e); }
+  renderWork();
+});
+$("everySel").addEventListener("change", async e => {
+  try { await decide("", "every", e.target.value, "Next run"); } catch(x){ $("banner").textContent = writeError(x); }
+  renderWork();
+});
 $("powerBtn").addEventListener("click", async () => {
   const off = !!(live.brief && live.brief.off);
   if(!off && !powerArmed){ powerArmed = true; renderPower(); setTimeout(() => { powerArmed = false; renderPower(); }, 6000); return; }
@@ -1704,8 +1738,8 @@ setInterval(sampleStep, 9000);
   live.available = true; live.db = db;
   let firstEvents = true;
   try {
-    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderLab(); }, () => {});
+    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); renderWork(); setTimeout(maybePop, 1500); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); renderAlerts(); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());

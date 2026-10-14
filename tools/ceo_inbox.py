@@ -18,6 +18,9 @@ from the decisions file, and a note is quoted so it can never read as a decision
            (office_next.py); for customer it also files a refresh request, so a held-back test run goes first
   reassign "- Reassigned: <note>" + approved: an approved or blocked item moves to another department
            (note = dev, customer, security, audit, rnd or marketing), e.g. a work order its department could not do
+  mode     OPS/state/mode: easy, high or ultra; auto removes it (office_next.py picks from the weekly allowance left)
+  every    OPS/state/every: minutes between a lane's runs (0 = back to back, 15, 30, 60, 120); the lanes change
+           their own schedules at the end of their next run (office_next.py --release prints CRON)
   cap      OPS/lab_cap.json {usd, per}: the test lab's spending cap, from note "<usd> [day|week|month]" (0-1000,
            default month); tools/blind_eval.py stops at it (tools/ops_costs.py cap_status)
 """
@@ -33,7 +36,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions, stage_of  # noqa: E402
-from office_next import COST, claims  # noqa: E402
+from office_next import COST, EVERY, MODES, claims  # noqa: E402
 
 CAP_NOTE = re.compile(r"^\s*(\d{1,4}(?:\.\d{1,2})?)\s*(day|week|month)?\s*$")
 REASSIGN = {"dev", "customer", "security", "audit", "rnd", "marketing"}
@@ -103,6 +106,21 @@ def apply(ops, folder, now=None):
             if i == "customer" and "customer" not in claims(ops):
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
             out.append(f"APPLIED {doc_id} run_now {i}")
+            continue
+        if choice in ("mode", "every"):   # the work mode and "Next run" buttons (office_next.py work_mode, every)
+            note = str(d.get("note") or "").strip().lower()
+            ok = note in ("auto", *MODES) if choice == "mode" else note in map(str, EVERY)
+            if not ok:
+                out.append(f"SKIPPED {doc_id} {choice}: {note!r} is not one of the choices")
+                continue
+            path = os.path.join(ops, "state", choice)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if note == "auto":
+                if os.path.exists(path):
+                    os.remove(path)
+            else:
+                open(path, "w", encoding="utf-8").write(note + "\n")
+            out.append(f"APPLIED {doc_id} {choice} {note}")
             continue
         if choice == "cap":   # the CEO's lab spending cap, from the Costs tab
             m = CAP_NOTE.match(str(d.get("note") or ""))
@@ -212,6 +230,14 @@ def selftest():
         row("16", id="security", choice="run_now")
         row("17", id="../x", choice="run_now")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 16 run_now security", "SKIPPED 17 run_now: no such department '../x'"]
+        row("20", id="", choice="mode", note="Ultra")
+        row("21", id="", choice="every", note="7")
+        row("22", id="", choice="every", note="0")
+        got = apply(ops, os.path.join(ops, "pull"))
+        assert got == ["APPLIED 20 mode ultra", "SKIPPED 21 every: '7' is not one of the choices", "APPLIED 22 every 0"], got
+        assert open(os.path.join(ops, "state", "mode"), encoding="utf-8").read().strip() == "ultra"
+        row("23", id="", choice="mode", note="auto")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 23 mode auto"] and not os.path.exists(os.path.join(ops, "state", "mode"))
         assert os.path.exists(os.path.join(ops, "state", "run_now", "security"))
     print("selftest ok")
 
