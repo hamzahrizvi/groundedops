@@ -96,7 +96,19 @@ button{font:inherit;color:inherit}
 /* zoomed 2.6x: bubbles and name tags drawn small so they land at their normal size */
 .scroller.zoomed .bub{font-size:7px;max-width:76px;padding:1px 3px;border-width:1px;box-shadow:1px 1px 0 #17212B;--ty:calc(-100% - 5px)}
 .scroller.zoomed .bub.below{--ty:6px} .scroller.zoomed .tag{font-size:5px}
-.bub.think{background:#F3F0FF;border-style:dotted;border-radius:12px;font-style:italic;-webkit-line-clamp:3}
+.bub.think{background:#FFFFFF;border-radius:999px;padding:5px 12px 6px;font-style:italic;display:block;overflow:visible;box-shadow:none;
+  --ty:calc(-100% - max(30px,calc(var(--s,2)*13px)));max-width:max(170px,calc(var(--s,2)*80px));text-align:center;line-height:1.05}
+.bub.think::before,.bub.think::after{content:"";position:absolute;background:#FFFFFF;border:2px solid #17212B;border-radius:50%;left:var(--px,50%)}
+.bub.think::before{width:9px;height:9px;bottom:-14px;margin-left:-6px}
+.bub.think::after{width:5px;height:5px;bottom:-23px;margin-left:-2px}
+.bub.think.l{--px:16px} .bub.think.r{--px:calc(100% - 16px)}
+.bub.think.below{--ty:max(30px,calc(var(--s,2)*16px))}
+.bub.think.below::before{bottom:auto;top:-14px} .bub.think.below::after{bottom:auto;top:-23px}
+.scroller.zoomed .bub.think{padding:2px 5px 3px;max-width:86px;--ty:calc(-100% - 14px)}
+.scroller.zoomed .bub.think::before{width:4px;height:4px;bottom:-6px;margin-left:-2px;border-width:1px}
+.scroller.zoomed .bub.think::after{width:2px;height:2px;bottom:-10px;margin-left:-1px;border-width:1px}
+.scroller.zoomed .bub.think.below{--ty:14px}
+.scroller.zoomed .bub.think.below::before{bottom:auto;top:-6px} .scroller.zoomed .bub.think.below::after{bottom:auto;top:-10px}
 
 .roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:8px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:9px 10px;text-align:left;cursor:pointer;display:grid;gap:3px;min-width:0}
@@ -2162,7 +2174,7 @@ const THINGS = [{id:"meeting", x0:13, x1:25.5, y0:2, y1:9.5}, {id:"planboard", x
 let zoomed = null, zoomLeft = true, screenText = "";
 const screenEl = $("screen");
 function zoomTo(id, tx, ty){
-  nextThought = now + 5;   // the first one soon after you start watching
+  nextThought = now + 4;   // the first one soon after you start watching
   zoomed = id; zoomLeft = tx/MW < .5; scroller.scrollLeft = 0; scroller.classList.add("zoomed"); aim(tx, ty);
   screenEl.classList.toggle("r", zoomLeft); screenEl.classList.toggle("l", !zoomLeft);   // the screen keeps its side while they walk
   screenText = ""; renderScreen(true); screenEl.hidden = false; $("screenBack").focus({preventScroll:true});
@@ -2174,38 +2186,103 @@ function aim(tx, ty){   // also every 600 ms from loop(), so the zoom follows so
   // the target sits off-centre, on the side away from its screen
   floorwrap.style.transform = `translate(${clamp(vw*(left ? .2 : .8) - tx/MW*fw*s, vw - fw*s)}px, ${clamp(vh*.5 - ty/MH*fh*s, vh - fh*s)}px) scale(${s})`;
 }
-/* Someone looking over their shoulder: while you are zoomed on a person they think out loud now and then.
-   Canned lines, picked on the page: no AI calls, no tokens. {task} is what they are working on. */
+/* Thoughts: whoever you zoom on thinks out loud now and then, and people you are not watching
+   sometimes do too. Canned lines picked on the page: no AI calls, no tokens.
+   {task} = what they are working on, {other} = a colleague's name. The CEO is you, so the CEO never
+   feels watched: zoomed on your own desk you get your own inner voice. */
 const THOUGHTS = {
-  any: ["Oh great, the boss is watching again.", "Is he going to stand there the whole time?", "I can feel someone breathing on my neck.",
-        "Micromanagement level: expert.", "Act natural. Type something. Anything.", "If I look busy maybe he'll go away.",
-        "He's zoomed in on me. On ME. Brilliant.", "Pretty sure this is in breach of the Geneva Conventions.",
-        "Does he know I can see him in the monitor reflection?", "I bet he can't even read this.",
-        "Somebody give that man a hobby.", "One day I'll get a desk facing the wall.", "Should I wave? I feel like I should wave."],
-  customer: ["Question 23: 'does it work?' Work how? Work WHERE?", "I asked the bot for the belt interval and it gave me a poem. Basically.",
-             "40 questions a week and nobody asks how I'M doing.", "Writing a question so vague even I don't know the answer.",
-             "Fun fact: the manual answers this on page 7. The bot did not know that fun fact."],
+  watched: ["Oh great, the boss is watching again.", "Is he going to stand there the whole time?", "I can feel someone breathing down my neck.",
+    "Micromanagement level: expert.", "Act natural. Type something. Anything.", "If I look busy maybe he'll go away.",
+    "Zoomed in on me. On ME. Brilliant.", "Does he know I can see him in the monitor reflection?", "I bet he can't even read this.",
+    "Somebody give that man a hobby.", "One day I'll get a desk facing the wall.", "Should I wave? I feel like I should wave.",
+    "He's watching {other} next, right? Please say he's watching {other} next.", "Bold of him to supervise a job he couldn't do.",
+    "Whatever he's about to suggest, the answer is no.", "Every time he zooms in, a test fails. Coincidence? No.",
+    "If he asks for a 'quick update' I'm resigning.", "Smile and nod. Smile and nod."],
+  ceo: ["Am I the micromanager? ...No. Surely not.", "I should approve something. Look decisive.", "One more look at the dashboard. Just one.",
+    "Why is the score still not 10?", "Is anyone actually working, or is it all table football?", "{other} has been suspiciously quiet today.",
+    "Maybe I'll just zoom in on {other} for a bit.", "I pay for these tokens, you know.", "Note to self: ask the product owner why. Again.",
+    "Kapa got 95. Ninety. Five.", "If I refresh it, the number goes up. That's how it works, right?", "I could do Dev's job. Probably. Maybe.",
+    "Big decisions today. Like whether to have another coffee.", "Who approved this? ...Oh, me."],
+  po: ["Everything is a priority, so nothing is a priority.", "Another finding. Love that for me.", "If I defer it, it can't go wrong. Strategy.",
+    "The CEO wants it 'by Friday'. Which Friday, though?", "I'm not saying no, I'm saying 'not this sprint'.", "Customer filed eleven findings. Eleven.",
+    "{other} says it's 'basically done'. It is not basically done.", "My calendar is just the word 'triage' forty times.",
+    "I write the CEO's report in plain English and he still asks what it means.", "Somewhere a retrofit is trying to sneak past me.",
+    "The CEO is hovering. Look strategic.", "If the boss asks, this was always the plan.", "Nod at the CEO. Say 'great question'. Buy time.",
+    "Dev wants scope. Customer wants fixes. I want a nap."],
+  customer: ["Question 23: 'does it work?' Work how? Work WHERE?", "The bot gave me setup steps. I asked for troubleshooting. Again.",
+    "40 questions a week and nobody asks how I'M doing.", "Writing a question so vague even I don't know the answer.",
+    "Fun fact: the manual answers this on page 7. The bot did not know that fun fact.", "I break the chatbot for a living. Best job in the building.",
+    "{other} fixed it? Let me just... ask it a slightly different way.", "Nine wrong answers. My best week ever.",
+    "The bot said 'not in the manual'. It's in the manual. It's in BOLD."],
   dev: ["Does this guy even know how to code? Then why is he reading my diff?", "It works on my machine. My machine is the only machine that matters.",
-        "If he asks 'is it done yet' I'm adding a bug.", "Who wrote this? ...oh. Me. Last Tuesday.",
-        "Tests passing, nobody touch anything.", "{task}. Sure. Easy. Totally easy.", "Rubber duck, please explain to the boss what a merge is."],
-  po: ["Everything is a priority, so nothing is a priority.", "Another finding. Love that for me.",
-       "If I defer it, it can't go wrong. Strategy.", "The CEO wants it 'by Friday'. Which Friday, though?",
-       "I'm not saying no, I'm saying 'not this sprint'."],
+    "If he asks 'is it done yet' I'm adding a bug.", "Who wrote this? ...oh. Me. Last Tuesday.", "Tests passing, nobody touch anything.",
+    "{task}. Sure. Easy. Totally easy.", "Rubber duck, please explain to the boss what a merge is.", "{other} filed a bug. I'll be filing a complaint.",
+    "The gate failed. The gate is wrong. The gate is always wrong.", "Senior dev wrote the plan. Junior dev writes the code. I write the excuses.",
+    "I didn't break it, I revealed it."],
   lab: ["BEEP. Asking the chatbot the same question for the 400th time.", "I don't get paid. I don't get coffee. I get graded answers.",
-        "Error 418: I am a teapot. Just kidding. Or am I.", "Charging... emotionally."],
-  ceo: ["Am I the micromanager? ...No. Surely not.", "I should approve something. Look decisive.", "I'll just check the dashboard one more time."],
-  security: ["Who put an API key in a comment? WHO?", "Trust no one. Especially the dependencies."],
-  audit: ["That answer cost a fifth of a penny. Outrageous.", "Somebody ran the lab twice. I will find you."],
-  rnd: ["What if we just used a bigger model? ...no? Okay.", "Reading paper number 14 on retrieval. Still no answer."],
-  marketing: ["Can we make the chatbot... pop more?", "Kapa uses a gradient. Just saying."]
+    "Error 418: I am a teapot. Just kidding. Or am I.", "Charging... emotionally.", "Grading is easy. Being right is optional for the bot, apparently.",
+    "My spending cap is lower than the coffee budget.", "Beep boop. That's robot for 'leave me alone'."],
+  security: ["Who put an API key in a comment? WHO?", "Trust no one. Especially the dependencies.", "{other} pasted a password in chat. I saw. I always see.",
+    "That's not paranoia if the logs agree with me."],
+  audit: ["That answer cost a fifth of a penny. Outrageous.", "Somebody ran the lab twice. I will find you.", "{other} is on the arcade. I'm logging that as overhead."],
+  rnd: ["What if we just used a bigger model? ...no? Okay.", "Reading paper number 14 on retrieval. Still no answer.", "In theory this works. In theory."],
+  marketing: ["Can we make the chatbot... pop more?", "Kapa uses a gradient. Just saying.", "We're not a chatbot, we're a 'grounded support experience'."],
+  // where they are and what they are doing; {role:act} lines beat the shared ones
+  act: {
+    pool: ["Can't even play pool in peace.", "Have I been playing too long? ...One more frame.", "If I sink this, I'm taking the afternoon off.",
+      "This is strategic thinking. With a cue.", "{other} cheats at pool. Everyone knows. Nobody says."],
+    foos: ["Table football is a team-building exercise. Look it up.", "Spin the goalie and they ban you. Rules are for {other}.", "Not losing to {other}. Not today."],
+    arcade: ["High score. Put THAT in the weekly report.", "Five more minutes. It's research.", "This machine has a better uptime than our chatbot."],
+    tv: ["Is this a meeting? It's a meeting now.", "I'm watching the news. Industry news. Kind of.", "Who keeps putting the cooking channel on?"],
+    coffee: ["Third coffee. Or fourth. Who's counting.", "The machine is broken again. Like the build.", "{other} took the last oat milk. War."],
+    snack: ["Whose sandwich is this? Mine now.", "Carbs are a coding requirement.", "If I eat slowly, the meeting might end without me."],
+    cooler: ["Water cooler gossip: {other} was asleep at their desk.", "Hydrating. Avoiding work. Both, really.", "Did you hear what {other} merged? Yikes."],
+    bean: ["Beanbag. Horizontal thinking.", "If I don't move, nobody can assign me anything.", "This is where ideas come from. Or naps."],
+    smoke: ["Fresh air. Well. Air.", "Five minutes away from {other}. Bliss.", "Not a break. A 'reflection session'."],
+    picnic: ["Working from outside. Same work, better view.", "The grass doesn't file findings."],
+    plan: ["So many cards. So few people.", "If I move this card left, is that progress?", "Who keeps putting 'urgent' on everything?"],
+    meeting: ["This could have been an email.", "Nodding. Thinking about lunch.", "I said 'circle back' twice already. Running out of phrases."],
+    type: ["{task}. Focus. Focus.", "Typing loudly so everyone knows I'm busy.", "Where was I? ...Oh, right. Nowhere."],
+    wait: ["Waiting. My favourite part of the job.", "Still waiting. I'm getting really good at it.", "If I stare at the progress bar, it goes faster."],
+    blocked: ["Stuck. Again. Who do I blame? {other}. Easy.", "Blocked. Time for coffee then.", "Can't move until someone else does their job."],
+    walk: ["Walking with purpose. No purpose. But walking.", "If I walk fast, people think I'm important.", "Where was I going? Keep walking. Look sure."],
+    rack: ["Racks humming. Chatbot sweating.", "Running the tests. Judging the answers. Silently."],
+    charge: ["Charging. Do not disturb.", "Battery at 40%. Patience at 2%."],
+    rest: ["Five minutes on the sofa. Executive privilege.", "I'm not napping, I'm strategising horizontally."],
+    office: ["The view from the top is mostly emails.", "Door's open. Please nobody come in."]
+  },
+  roleact: {
+    "dev:pool": ["A bug is a pool ball you didn't see coming. Deep.", "Merge conflicts? Not my problem while I'm holding this cue."],
+    "customer:tv": ["The chatbot could answer TV quiz questions. Badly."],
+    "po:coffee": ["Coffee is the only thing in this building that ships on time."],
+    "ceo:pool": ["The CEO plays pool. It's called leadership.", "Everyone's letting me win, aren't they."],
+    "ceo:coffee": ["Even the coffee machine needs approval from me now."],
+    "lab:walk": ["Rolling, not walking. Precision locomotion."]
+  }
 };
-let nextThought = 0;
-function think(){
-  const a = AG[zoomed], w = worker(zoomed);
-  if(!a || !hired(zoomed)) return;
-  const pool = [...(THOUGHTS[zoomed] || []), ...THOUGHTS.any].filter(t => t !== a.thought);
-  a.thought = pool[Math.floor(Math.random()*pool.length)].replace("{task}", (w.task || "This").replace(/[.!]$/, ""));
-  a.thoughtUntil = now + 9; nextThought = now + 120 + Math.random()*60;   // every 2 to 3 minutes
+const pickFrom = l => l[Math.floor(Math.random()*l.length)];
+let nextThought = 0, nextAmbient = 0;
+function think(id, watched){
+  const a = AG[id], w = worker(id);
+  if(!a || !hired(id)) return;
+  const act = a.moving || a.errand ? "walk" : a.spot === a.desk && !a.robot ? (w.state === "waiting" ? "wait" : w.state === "blocked" ? "blocked" : id === "ceo" ? "office" : "type") : a.spot && a.spot.act;
+  const here = [...(THOUGHTS.roleact[id + ":" + act] || []), ...(THOUGHTS.act[act] || [])];
+  // what they are doing comes up most, then who they are, then (when you are watching) being watched
+  const pools = [[here, 4], [THOUGHTS[id] || [], 3], [watched && id !== "ceo" ? THOUGHTS.watched : [], 3]].filter(([l]) => l.length);
+  let r = Math.random()*pools.reduce((n, [, w]) => n + w, 0), pool = pools[0][0];
+  for(const [l, wt] of pools){ if((r -= wt) < 0){ pool = l; break; } }
+  const others = DEPTS.filter(d => d.id !== id && d.id !== "ceo" && hired(d.id)).map(d => d.name);
+  let t = pickFrom(pool); for(let i = 0; i < 4 && t === a.thought; i++) t = pickFrom(pool);
+  a.thought = t.replace("{task}", (w.task || "This").replace(/[.!]$/, "")).replace(/\{other\}/g, others.length ? pickFrom(others) : "someone");
+  a.thoughtUntil = now + 7 + Math.min(5, a.thought.length/12);
+}
+function thoughts(){
+  if(zoomed && AG[zoomed] && now >= nextThought){ think(zoomed, true); nextThought = now + 45 + Math.random()*60; }   // watched: every 45 to 105 s
+  if(now >= nextAmbient){   // somebody else on the floor, every 30 to 90 s
+    const pool = AGENTS.filter(a => hired(a.id) && a.id !== zoomed && !(a.thoughtUntil > now));
+    if(pool.length) think(pickFrom(pool).id, false);
+    nextAmbient = now + 30 + Math.random()*60;
+  }
 }
 function unzoom(){
   if(!zoomed) return;
@@ -2304,7 +2381,7 @@ function loop(ts){
   for(const a of AGENTS) if(hired(a.id)) update(a, reduce ? 1 : dt);
   tickMeeting(); poolStep(dt); partsStep(dt);
   if(!document.hidden && (ts - lastFrame > (reduce ? 1000 : 60))){ lastFrame = ts; draw(reduce ? 0 : t); placeOverlay(); }
-  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); renderScreen(false); if(zoomed && AG[zoomed]) aim(AG[zoomed].x + .5, AG[zoomed].y); if(zoomed && AG[zoomed] && now >= nextThought) think(); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
+  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); renderScreen(false); if(zoomed && AG[zoomed]) aim(AG[zoomed].x + .5, AG[zoomed].y); thoughts(); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
