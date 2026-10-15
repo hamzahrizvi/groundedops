@@ -534,7 +534,8 @@ function worker(id){
   const w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
   const fallback = d.planned ? "Off duty until switched on" : mode === "live" ? "No run yet" : "Off shift";
   // the schedules write some idle rows with only `last`; a row's own `next` is a parked cron time, so it is not read
-  return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || (w.last ? "Finished its last run" : fallback), last: w.last || "", updated: w.updated || ""};
+  return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || (w.last ? "Finished its last run" : fallback), last: w.last || "", updated: w.updated || "",
+          screen: Array.isArray(w.screen) ? w.screen.slice(-8).map(String) : []};   // the run's own terminal lines (office-status.md)
 }
 /* "Next run": the dispatcher decides runs from the brief's plan (tools/office_brief.py running/moving), not a cron */
 function nextFor(id){
@@ -2219,6 +2220,8 @@ function screenFor(id){
   const send = (id, choice, title) => async b => { b.disabled = true; b.textContent = "Sending…";
     try { await decide(id, choice, "", title); b.textContent = "Sent"; } catch(e){ b.disabled = false; b.textContent = "Couldn't send"; b.title = writeError(e); } };
   const runs = (list, label) => (list || []).forEach(m => line(`${label} ${m.dept}: ${m.why}` + (m.since ? ` (since ${hhmm(m.since)})` : ""), m.state === "wait" ? "dim" : ""));
+  // what the run itself wrote with its status updates: a few lines per run, not a live stream
+  function terminal(w){ if(!w.screen.length) return; head("TERMINAL" + (w.updated ? " · updated " + hhmm(w.updated) : "")); w.screen.forEach(t => line(t)); }
   if(id === "meeting"){   // the product owner's last triage: what it decided, and where each one is now
     if(meeting.on && meeting.text) { head("IN THE MEETING NOW"); line(meeting.text); }
     const ds = L.cards.filter(c => /^D-/.test(c.id) && c.decided), day = ds.reduce((m, c) => c.decided > m ? c.decided : m, "");
@@ -2243,6 +2246,7 @@ function screenFor(id){
   }
   if(id === "lab"){   // the lab robot and its racks show the same screen: every routine
     line("> " + worker("lab").task); if(worker("lab").last) line("last: " + worker("lab").last, "dim");
+    terminal(worker("lab"));
     head("ROUTINES RUNNING"); runs(b.running, ">"); if(!(b.running || []).length) line("nothing running", "dim");
     head("STARTING NEXT"); runs(b.moving, "next"); if(!(b.moving || []).length) line("nothing queued", "dim");
     if(b.stalled) line("held: " + b.stalled, "h");
@@ -2257,6 +2261,7 @@ function screenFor(id){
   const d = D[id], w = worker(id), key = DEPT_KEY[id];
   line("> " + w.task);
   if(AG[id] && hired(id)) line("now: " + activity(AG[id]).toLowerCase(), "dim");
+  terminal(w);
   const mine = l => (l || []).filter(m => key && m.key === key);
   if(mine(b.running).length || mine(b.moving).length){ head("RUNS"); runs(mine(b.running), ">"); runs(mine(b.moving), "next"); }
   const bd = (L.boards || {})[id];
