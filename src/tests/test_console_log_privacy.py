@@ -142,8 +142,11 @@ def test_guard_flags_payload_attribute():
     import ast
     code = "\n".join(['logger.info("%r", payload.q)',
                       'logger.info("%s", query)',
-                      'logger.info("%s", redact(payload.q))'])
-    assert len(_offenders(ast.parse(code), "x.py")) == 2
+                      'logger.info("%s", redact(payload.q))',
+                      'logger.info("%s", n, extra=text)',
+                      'logger.info("%d", len(text))'])
+    assert _offenders(ast.parse(code), "x.py") == [
+        "x.py:1 payload.q", "x.py:2 query", "x.py:4 text"]
 
 
 if __name__ == "__main__":
