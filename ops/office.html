@@ -70,6 +70,9 @@ button{font:inherit;color:inherit}
 .screen .sbody p{margin:0 0 3px;overflow-wrap:anywhere}
 .screen .sbody .h{color:#F3BD48;margin-top:8px}
 .screen .sbody .dim{color:#5FA57E}
+.screen .sbody .acts{display:flex;flex-wrap:wrap;gap:6px;margin:3px 0 8px}
+.screen .sbody .acts .btn{font-size:10px;padding:3px 7px;box-shadow:2px 2px 0 #000;background:#16302A;color:#D6FFE6;border-color:#9FF2C2}
+.screen .sbody .acts .btn.go{background:#F3BD48;color:#2A1E02;border-color:#F3BD48}
 .screen.typing .sbody p{opacity:0;animation:typeon .01s forwards}
 @keyframes typeon{to{opacity:1}}
 .screen .sbody p:last-child::after{content:"_";animation:blink 1s steps(1) infinite}
@@ -2154,7 +2157,7 @@ cv.addEventListener("click", e => {
 });
 
 /* ---------- close-up: zoom the floor on a person or a thing, and show its screen ---------- */
-const THINGS = [{id:"planboard", x0:20, x1:29, y0:10.5, y1:13.5}, {id:"lab", x0:27, x1:35.5, y0:2, y1:9.5}, {id:"tv", x0:37.5, x1:42.5, y0:12.5, y1:15}];
+const THINGS = [{id:"meeting", x0:13, x1:25.5, y0:2, y1:9.5}, {id:"planboard", x0:20, x1:29, y0:10.5, y1:13.5}, {id:"lab", x0:27, x1:35.5, y0:2, y1:9.5}, {id:"tv", x0:37.5, x1:42.5, y0:12.5, y1:15}];
 let zoomed = null, zoomLeft = true, screenText = "";
 const screenEl = $("screen");
 function zoomTo(id, tx, ty){
@@ -2211,8 +2214,24 @@ document.addEventListener("keydown", e => { if(e.key === "Escape" && zoomed && !
 const hhmm = v => v ? fmtTime(new Date(v)) : "";
 function screenFor(id){
   const L = live.ledger || SAMPLE_LEDGER, b = live.brief || {}, out = [], foot = [];
-  const line = (t, cls) => out.push([cls || "", t]), head = t => line(t, "h");
+  const line = (t, cls, acts) => out.push([cls || "", t, acts]), head = t => line(t, "h");
+  // a decision sent from this screen: the buttons say so, and the item leaves the list once the inbox shows it
+  const send = (id, choice, title) => async b => { b.disabled = true; b.textContent = "Sending…";
+    try { await decide(id, choice, "", title); b.textContent = "Sent"; } catch(e){ b.disabled = false; b.textContent = "Couldn't send"; b.title = writeError(e); } };
   const runs = (list, label) => (list || []).forEach(m => line(`${label} ${m.dept}: ${m.why}` + (m.since ? ` (since ${hhmm(m.since)})` : ""), m.state === "wait" ? "dim" : ""));
+  if(id === "meeting"){   // the product owner's last triage: what it decided, and where each one is now
+    if(meeting.on && meeting.text) { head("IN THE MEETING NOW"); line(meeting.text); }
+    const ds = L.cards.filter(c => /^D-/.test(c.id) && c.decided), day = ds.reduce((m, c) => c.decided > m ? c.decided : m, "");
+    const when = /^\d{8}$/.test(day) ? new Date(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6)).toLocaleDateString(undefined, {day:"numeric", month:"short"}) : "";
+    const last = day ? ds.filter(c => c.decided === day) : L.cards.filter(c => c.lane !== "past");
+    head(day ? `LAST TRIAGE · ${when} (${last.length} decided)` : "ON THE TABLE");
+    last.slice(0, 8).forEach(c => { line(`- ${c.title}`); line(`  ${nameOf(c.from)} -> ${c.assigned === "ceo" ? "You" : nameOf(c.assigned)}: ${c.stage}`, "dim"); });
+    if(!last.length) line("no decisions yet", "dim");
+    const props = L.cards.filter(c => c.stage === "proposed").length;
+    if(props) line(`${props} more waiting for the next triage`, "dim");
+    foot.push(["Ask the product owner", () => { unzoom(); openChat(); }]);
+    return {title: "MEETING ROOM · DECISIONS" + (live.ledger ? "" : " · SAMPLE"), out, foot};
+  }
   if(id === "planboard"){
     for(const [k, title] of [["future","COMING UP"],["ongoing","IN PROGRESS"],["past","DONE"]]){
       const cs = L.cards.filter(c => c.lane === k); head(`${title} (${cs.length})`);
@@ -2244,7 +2263,13 @@ function screenFor(id){
   if(bd){ if(bd.doing.length){ head("WORKING ON"); bd.doing.slice(0, 4).forEach(t => line("- " + t)); }
           if(bd.queue.length){ head(id === "po" ? "TO TRIAGE" : "QUEUED"); bd.queue.slice(0, 4).forEach(t => line("- " + t)); } }
   const waiting = id === "ceo" ? needs().filter(x => !replied(x.id)) : [];
-  if(id === "ceo"){ head(`WAITING FOR YOU (${waiting.length})`); waiting.slice(0, 5).forEach(x => line("- " + (x.title || x.id))); }
+  if(id === "ceo"){ head(`WAITING FOR YOU (${waiting.length})`);
+    waiting.slice(0, 6).forEach(x => {
+      const title = x.title || x.id, more = ["More", () => openItem(x.id), "btn"];
+      line("- " + title, "", x.kind === "approve" ? [["Approve", send(x.id, "approve", title), "btn go"], ["Not now", send(x.id, "defer", title), "btn"], more]
+                          : x.kind === "action" ? [["Mark it done", send(x.id, "done", title), "btn go"], more] : [more]);
+    });
+    if(!live.db && waiting.length) line("not connected: open the live office to decide", "dim"); }
   if(w.last){ head("LAST RESULT"); line(w.last); }
   if(mode === "live" && hired(id) && nextFor(id)) line("next run: " + nextFor(id), "dim");
   const ev = view().events.filter(e => e.from === id || e.to === id).slice(0, 4);
@@ -2258,7 +2283,12 @@ function renderScreen(typing){
   if(text === screenText) return; screenText = text;
   $("screenH").textContent = title; $("screenClock").textContent = fmtTime(new Date());
   screenEl.classList.toggle("typing", !!typing);
-  $("screenBody").replaceChildren(...out.map(([cls, t], i) => { const p = el("p", cls || null, t); if(typing) p.style.animationDelay = (i*0.07) + "s"; return p; }));
+  $("screenBody").replaceChildren(...out.map(([cls, t, acts], i) => {
+    const p = el("p", cls || null, t); if(typing) p.style.animationDelay = (i*0.07) + "s";
+    if(acts && acts.length){ const a = el("span", "acts");
+      for(const [label, fn, c] of acts){ const b = el("button", c || "btn", label); b.type = "button"; b.disabled = !live.db && label !== "More"; b.addEventListener("click", () => fn(b)); a.append(b); }
+      p.append(a); }
+    return p; }));
   const back = el("button", "btn", "Back to the floor"); back.type = "button"; back.id = "screenBack"; back.addEventListener("click", unzoom);
   $("screenFoot").replaceChildren(back, ...foot.map(([label, fn]) => { const x = el("button", "btn", label); x.type = "button"; x.addEventListener("click", fn); return x; }));
 }
