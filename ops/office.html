@@ -445,6 +445,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <p class="lead" id="moveLead">Waiting for the office's first status report. It comes with the next hourly check.</p>
         <ul class="mlist" id="moveList"></ul>
         <div class="actions"><button class="link" id="whyBtn" type="button">Ask the product owner why</button></div>
+        <ul class="mlist" id="laneClock" aria-label="When each lane checks next"></ul>
         <p class="small" id="moveWhen"></p>
       </section>
       <section class="panel" aria-labelledby="trayH">
@@ -1338,7 +1339,30 @@ function renderMove(){
     if(m.can_run && live.available && !b.off) d.append(runNowBtn(m));
     li.append(s, d); return li; }));
   $("moveWhen").textContent = `Checked at ${fmtTime(at)}.` + (b.usage ? ` Claude usage: ${b.usage.five}% of the 5-hour limit, ${b.usage.week}% of the week.` : "");
+  renderLanes();
 }
+/* each lane's next check, counting down: the cron its scheduled task has (tools/office_next.py lane_cron makes only
+   "m,m,.. * * * *" and "m a-23/n * * *"), read in this computer's time, which is the time the tasks run in */
+function nextFire(cron, from){
+  const [mi, hr] = String(cron).split(" "), mins = mi.split(",").map(Number), hm = hr === "*" ? null : hr.match(/^(\d+)-(\d+)\/(\d+)$/);
+  const t = new Date(from); t.setSeconds(0, 0);
+  for(let i = 0; i < 2880; i++){ t.setMinutes(t.getMinutes() + 1);
+    if(mins.includes(t.getMinutes()) && (!hm || (t.getHours() >= +hm[1] && t.getHours() <= +hm[2] && (t.getHours() - hm[1]) % hm[3] === 0))) return t; }
+  return null;
+}
+function renderLanes(){
+  const ul = $("laneClock"), b = live.brief;
+  if(!b || !b.lanes || !live.available){ ul.replaceChildren(); return; }
+  const now = Date.now();
+  ul.replaceChildren(...b.lanes.map(l => {
+    const li = el("li"), run = (b.running || []).find(m => String(m.lane) === String(l.lane)), t = nextFire(l.cron, now);
+    const left = t ? Math.max(0, Math.round((t - now) / 1000)) : null, mmss = left == null ? "" : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    li.append(el("span", "state " + (b.off ? "off" : run ? "working" : "idle"), `Lane ${l.lane}`),
+      el("div", null, b.off ? "Office switched off" : run ? `Running now: ${run.dept}` + (t ? `; checks again at ${fmtTime(t)}` : "")
+        : t ? `Next check in ${mmss} (${fmtTime(t)})` : "No schedule"));
+    return li; }));
+}
+setInterval(renderLanes, 1000);
 
 /* "Run now": the CEO lifts a budget, hold or fixes-in-flight wait for one start (tools/ceo_inbox.py run_now) */
 function runNowBtn(m, label = "Run now"){

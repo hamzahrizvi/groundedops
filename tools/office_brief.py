@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
-from office_next import claims, every, holds, is_off, latest_usage, next_reset, plan, work_mode  # noqa: E402
+from office_next import claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan, work_mode  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
@@ -137,6 +137,14 @@ def alerts(ops, cards, stalled, off):
     return out
 
 
+def lane_cron_now(ops, lane):
+    """The cron the lane's scheduled task has now (OPS/state/cron-<lane>, written by --cron-set); the CEO's setting if unset."""
+    try:
+        return open(os.path.join(ops, "state", f"cron-{lane}"), encoding="utf-8").read().strip() or lane_cron(lane, every(ops))
+    except OSError:
+        return lane_cron(lane, every(ops))
+
+
 def brief(ops, repo, now=None, usage=None):
     now = now or datetime.datetime.now(datetime.timezone.utc)
     items, texts = decisions(ops), blocks(ops)
@@ -182,6 +190,7 @@ def brief(ops, repo, now=None, usage=None):
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
             "minutes_old": None if old == float("inf") else round(old)}, "running": running,
             "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
+            "lanes": [{"lane": n, "cron": lane_cron_now(ops, n)} for n in (1, 2, 3)],   # the page's countdown to each lane's next check
             "todo": todo, "items": cards, "alerts": alerts(ops, cards, stalled, is_off(ops)),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
