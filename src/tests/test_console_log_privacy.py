@@ -76,39 +76,77 @@ def test_redact_keeps_length_not_text():
     assert redact("a") == redact("a")
 
 
+def test_redact_tag_is_keyed_per_process():
+    import pathlib
+    import subprocess
+    import sys
+    src = pathlib.Path(__file__).resolve().parent.parent
+    cmd = [sys.executable, "-c", "from logger import redact; print(redact('yes'))"]
+    a, b = (subprocess.run(cmd, cwd=src, capture_output=True, text=True,
+                           check=True).stdout for _ in range(2))
+    assert a != b and "yes" not in a and "yes" not in b
+    from logger import redact
+    assert redact("yes") == redact("yes")
+
+
 # The names a visitor's question travels under in the server's modules.
 _VISITOR_TEXT = {"question", "resolved_query", "q", "english", "_as_typed",
-                 "last_q", "frag"}
+                 "last_q", "frag", "query", "msg", "answer", "text"}
+
+
+def _offenders(tree, name):
+    """Log calls in one parsed module that print visitor text unredacted.
+    Checks bare names and attribute access on a request payload, in
+    positional and keyword args."""
+    import ast
+    bad = []
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr in ("debug", "info", "warning",
+                                       "error", "exception", "critical")):
+            continue
+        stack = list(call.args) + [k.value for k in call.keywords]
+        while stack:
+            n = stack.pop()
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") in ("redact", "len", "_digits"):
+                continue
+            if isinstance(n, (ast.ListComp, ast.GeneratorExp,
+                              ast.SetComp, ast.DictComp)):
+                continue
+            if isinstance(n, ast.Name) and n.id in _VISITOR_TEXT:
+                bad.append(f"{name}:{call.lineno} {n.id}")
+            if (isinstance(n, ast.Attribute) and n.attr in _VISITOR_TEXT
+                    and isinstance(n.value, ast.Name)
+                    and n.value.id in ("payload", "req", "request", "body")):
+                bad.append(f"{name}:{call.lineno} {n.value.id}.{n.attr}")
+            stack.extend(ast.iter_child_nodes(n))
+    return bad
 
 
 def test_no_log_call_in_a_server_module_prints_the_question():
     """Every log call, not just the ones a test reaches: a call that passes
-    one of these names must wrap it in redact(). Comprehensions are skipped
-    (they log what matched, e.g. a price keyword, not the question)."""
+    one of these names (or an attribute of a request payload) must wrap it
+    in redact(). Comprehensions are skipped (they log what matched, e.g. a
+    price keyword, not the question)."""
     import ast
     import pathlib
     src = pathlib.Path(__file__).resolve().parent.parent
     bad = []
     for path in sorted(src.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for call in ast.walk(tree):
-            if not (isinstance(call, ast.Call)
-                    and isinstance(call.func, ast.Attribute)
-                    and call.func.attr in ("debug", "info", "warning",
-                                           "error", "exception", "critical")):
-                continue
-            stack = list(call.args)
-            while stack:
-                n = stack.pop()
-                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "redact":
-                    continue
-                if isinstance(n, (ast.ListComp, ast.GeneratorExp,
-                                  ast.SetComp, ast.DictComp)):
-                    continue
-                if isinstance(n, ast.Name) and n.id in _VISITOR_TEXT:
-                    bad.append(f"{path.name}:{call.lineno} {n.id}")
-                stack.extend(ast.iter_child_nodes(n))
+        bad += _offenders(ast.parse(path.read_text(encoding="utf-8")), path.name)
     assert not bad, "log calls printing visitor text: " + ", ".join(bad)
+
+
+def test_guard_flags_payload_attribute():
+    import ast
+    code = "\n".join(['logger.info("%r", payload.q)',
+                      'logger.info("%s", query)',
+                      'logger.info("%s", redact(payload.q))',
+                      'logger.info("%s", n, extra=text)',
+                      'logger.info("%d", len(text))'])
+    assert _offenders(ast.parse(code), "x.py") == [
+        "x.py:1 payload.q", "x.py:2 query", "x.py:4 text"]
 
 
 if __name__ == "__main__":
