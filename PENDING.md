@@ -174,7 +174,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
-| D-20261009-06 | Security item D-20261009-06, details in the office | approved, queued | Dev builds it |
+| D-20261009-06 | Security item D-20261009-06, details in the office | ready to merge | merges once Security clears it |
 | D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | waiting for CEO | your yes |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
