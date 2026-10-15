@@ -43,6 +43,7 @@ TWO FAULTS, measured on 2026-09-26 on the blind sets and a probe set.
 from __future__ import annotations
 
 import logging
+from logger import redact
 import difflib
 import re
 import threading
@@ -408,7 +409,7 @@ def checklist_for(query: str, product_name: str,
     if not out or out.get("provider") in (None, "none"):
         return None
     reply = (out.get("text") or "").strip()
-    logging.getLogger(__name__).info("checklist_for %r -> %r", msg[:60], reply[:60])
+    logging.getLogger(__name__).info("checklist_for %s -> %r", redact(msg), reply[:60])
     m = re.match(r"[\W_]*CHECK\W*([\d,\s]+)", reply, re.I)
     if not m:
         return None

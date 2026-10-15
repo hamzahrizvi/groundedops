@@ -260,8 +260,9 @@ stub("db", get_collection=lambda: _Collection(), reset_collection=lambda: None,
 stub("embeddings", _get_model=lambda: None)
 stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
 stub("structure", extract_structured_block=lambda r, query=None: None)
+from logger import redact as _real_redact  # the real one: the stub below replaces the module
 stub("logger", log_interaction=lambda *a, **k: None,
-     log_feedback=lambda *a, **k: None)
+     log_feedback=lambda *a, **k: None, redact=_real_redact)
 stub("router", route_model=lambda q: ("accurate", ("local", "mistral")))
 stub("grounding", check_grounding=lambda a, c, threshold=0.55: (True, 0.9),
      _get_nli_model=lambda: None)
