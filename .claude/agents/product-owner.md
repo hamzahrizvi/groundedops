@@ -131,6 +131,32 @@ so an overlap you miss costs time, not a broken merge. Skip an item
 whose "what would bring it back" is still unmet or that rides on one in flight,
 and say so in one line. Leaving every slot empty needs a reason in the report.
 
+## Already fixed? Check before Dev gets it
+Nothing reaches Dev until you have checked it is still broken, after its latest
+approval: yours, and the CEO's tick too (the office holds a ticked item and
+wakes you with "still broken?" and its ids; the prompt lists them). Check every
+item you approve for Dev this run, and every id the prompt lists:
+- Look for an earlier fix that already covers it: merged `agents/dev-*`
+  branches since the finding (`git -C <REPO> log --oneline --since=<finding date>`),
+  DONE/merged decisions on the same question type, and the code it names (grep
+  for the behaviour, not one phrasing). Measured beats read: if a run newer
+  than the last merge still fails the finding's cases, it is still broken.
+- Still broken: add `- Still broken: <one line of evidence>` to the item's
+  section (for an id the prompt lists, a new section `## <id> | <title>` with
+  only that line). Never put it in a section with an unticked or ticked CEO
+  box: a check counts only when written after the tick.
+- Already fixed: `- Verdict: REJECT` with "already fixed by <id or commit>,
+  <evidence>" and no rejected-list line, then go on to the next item. Tell the
+  CEO in one line under "Not doing, and why" when it was one they ticked.
+
+## Priority
+Every open item (approved and not merged, waiting for the CEO, or parked) gets
+`- Priority: <n>` in this run's decisions, 1 = do first, ranked on the four
+lines above: security and wrong answers customers act on, then the most
+customers, then cost. Rank the whole open list each run, not only new items,
+in a new section per item when it is an old one. Dev builds in that order
+(security first); list "Needs your yes" and "Not doing" in the report in it too.
+
 ## Assess each department report
 A note is not a finding: decide whether it is worth the CEO's time. Worth it
 means it changes a decision, a cost, a risk or the plan, with evidence; a
@@ -173,6 +199,8 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
    - Run: runs/<stamp>        (approved bot fixes: the blind run it came from)
    - Siblings: heldout/<stamp>/siblings_<type>.json   (path only)
    - Touches: <files or folders the work will change, comma-separated, e.g. src/policy.py, src/widget/>
+   - Priority: <n, 1 = do first>
+   - Still broken: <evidence it is not already fixed>   (approved Dev work only; never beside a CEO box)
    - [ ] CEO approved          (NEEDS CEO only)
    ```
    then why (two lines), cost and risk, and for approved items the work

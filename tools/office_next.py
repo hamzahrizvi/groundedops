@@ -212,7 +212,11 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     dev = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") == "dev"}
     check = [i for i, s in dev.items() if s == "built, waiting for the check"]
     build = sorted((i for i, s in dev.items() if s in ("approved, queued", "sent back, rebuilding")),
-                   key=lambda i: items[i].get("from") != "security")   # security fixes first, then id order
+                   key=lambda i: (items[i].get("from") != "security", items[i].get("priority", 99), i))   # security, then the PO's rank
+    # the CEO, 2026-10-15: nothing reaches Dev until the product owner has checked, after its latest approval (a CEO tick
+    # too), that an earlier fix has not already fixed it ("- Still broken:"); an already fixed one it rejects
+    recheck = [i for i in build if items[i].get("checked", -1) < items[i].get("approved", 0)]
+    build = [i for i in build if i not in recheck]
     review = lambda i: os.path.join(ops, "inbox", "security", f"review-{i}.md")
     def verdict(i):   # Security's review of the branch: CLEAR, BLOCK or ""
         if not os.path.exists(review(i)):
@@ -233,8 +237,9 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     if capped and check:   # a gate check spends lab money: it waits with the lab
         out.append(("product-owner", f"check {', '.join(check)} waits: {capped}", None))
         check = []
-    if check or findings:
+    if check or findings or recheck:
         out.append(("product-owner", "; ".join(filter(None, [check and "check " + ", ".join(check),
+                                                             recheck and "still broken? " + ", ".join(recheck),
                                                              findings and f"{len(findings)} new findings"])), "product-owner"))
     # work orders that change the same files never run side by side (the CEO, 2026-10-14): one waits until the other merges
     stages = {i: stage_of(it, ops, merged, reverted) for i, it in items.items()}
@@ -401,7 +406,7 @@ def selftest():
         assert work_mode(ops, 40, resets, now) == ("high", "set by you")
         assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "6,16,26,36,46,56 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
-                                   "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
+                                   "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n\n"
                                    "## D-20261008-07 | Manuals\n- Assigned: ceo\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
         w("inbox/dev/D-20261008-01.md", "Status: READY\n")
         for p in ("runs/20261008/DONE", "state/security_last_run.txt", "inbox/audit/20261008-weekly.md",
@@ -415,11 +420,20 @@ def selftest():
         os.remove(os.path.join(ops, "state/rnd_last_run.txt"))
         assert any("office-rnd  monthly research due" in x for x in plan(ops, ops, 11, 38, resets, now)), "R&D due monthly"
         w("state/rnd_last_run.txt")
-        w("decisions/20261008b.md", "## D-20261008-08 | Key leak\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        w("decisions/20261008b.md", "## D-20261008-08 | Key leak\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
         assert "build D-20261008-08 (+1 queued)" in plan(ops, ops, 11, 38, resets, now)[1], "security first"
         os.remove(os.path.join(ops, "decisions/20261008b.md"))
-        w("decisions/20261008c.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
-                                    "## D-20261008-05 | Five\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        # nothing reaches Dev unchecked, a CEO tick included; the product owner's rank orders the rest
+        w("decisions/20261008r.md", "## D-20261008-03 | Three\n- Assigned: dev\n- Verdict: NEEDS CEO\n- Still broken: yes\n- [x] CEO approved\n\n"
+                                    "## D-20261008-06 | Six\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Priority: 1\n- Still broken: yes\n")
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert "still broken? D-20261008-03" in p[0] and "build D-20261008-06 (+1 queued)" in p[1], p
+        w("decisions/20261008s.md", "## D-20261008-03 | Three\n- Still broken: yes, src/x.py still has it\n")
+        assert "build D-20261008-06 (+2 queued)" in plan(ops, ops, 11, 38, resets, now)[1], "checked after the tick: it queues"
+        for f in ("r", "s"):
+            os.remove(os.path.join(ops, f"decisions/20261008{f}.md"))
+        w("decisions/20261008c.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n\n"
+                                    "## D-20261008-05 | Five\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
         took = [take(ops, ops, 11, 38, resets, now, n)[-1].split(" |")[0] for n in (1, 2, 3, 4)]
         assert took == ["TOOK product-owner", "TOOK dev-D-20261008-02", "TOOK dev-D-20261008-04", "TOOK nothing"], took
         p = plan(ops, ops, 11, 38, resets, now)
@@ -486,7 +500,7 @@ def selftest():
         assert "5-hour window at 92%" in plan(ops, ops, 92, 38, resets, now)[0], "but not the 5-hour limit itself"
         assert take(ops, ops, 60, 38, resets, now, 7)[-1].startswith("TOOK customer") and not run_now(ops), "used up"
         release(ops, 7)
-        w("decisions/20261008w.md", "## D-20261008-20 | Fresh hidden questions\n- From: customer\n- Assigned: customer\n- Verdict: AUTO-APPROVED\n")
+        w("decisions/20261008w.md", "## D-20261008-20 | Fresh hidden questions\n- From: customer\n- Assigned: customer\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
         assert any(x.startswith("RUN  groundedops-office-customer  work order D-20261008-20") for x in plan(ops, ops, 11, 38, resets, now)), "a customer work order runs"
         os.makedirs(os.path.join(ops, "inbox", "customer"), exist_ok=True); w("inbox/customer/D-20261008-20-done.md", "Done.\n")
         assert not any("work order" in x for x in plan(ops, ops, 11, 38, resets, now)), "filed: the product owner closes it"
@@ -505,7 +519,7 @@ def selftest():
         w("runs/20261008/DONE")
         old = now.timestamp() - 8 * 86400
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (old, old))
-        w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
         cust = lambda: next(x for x in plan(ops, ops, 11, 38, resets, now) if "customer" in x)
         assert cust().startswith("WAIT") and "D-20261008-09" in cust(), "no new bank while a customer fix is in flight"
         git = os.path.join(ops, "git")
@@ -517,7 +531,7 @@ def selftest():
         assert cust().startswith("RUN") and "all through" in cust(), "a new bank once they are through"
         old = now.timestamp() - 15 * 86400
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (old, old))
-        w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        w("decisions/20261008d.md", "## D-20261008-09 | Vague asks\n- From: customer\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
         assert cust().startswith("RUN") and "14 days" in cust(), "never more than 14 days without a bank"
         os.remove(os.path.join(ops, "decisions/20261008d.md"))
         os.remove(os.path.join(ops, "runs/20261008/DONE"))
@@ -536,7 +550,7 @@ def selftest():
         cust = next(x for x in p if "customer" in x)
         assert cust.startswith("WAIT groundedops-office-customer  lab stopped at the cap ($0.00 of $0.00 this month)"), p
         w("inbox/dev/D-20261008-04.md", "Status: READY\n")
-        w("decisions/20261008e.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+        w("decisions/20261008e.md", "## D-20261008-04 | Four\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
         p = plan(ops, ops, 11, 38, resets, now)
         assert any(x.startswith("WAIT groundedops-office-product-owner  check D-20261008-04 waits: lab stopped") for x in p), p
         assert any(x.startswith("RUN  groundedops-office-product-owner  1 new findings") for x in p), "findings still wake the PO"

@@ -35,21 +35,28 @@ def _read(p):
 
 
 def decisions(ops):
-    items = {}
+    items, seq = {}, 0
     for path in sorted(glob.glob(os.path.join(ops, "decisions", "*.md"))):
         for block in re.split(r"(?m)^## ", _read(path))[1:]:
+            seq += 1
             head, _, body = block.partition("\n")
             m = re.match(r"(D-\d{8}-\d+)\s*\|\s*(.+)", head.strip())
             if not m:
                 continue
             did, title = m.groups()
             it = items.setdefault(did, {"id": did, "title": title.strip(), "history": [], "decided": did[2:10]})
-            for k, v in re.findall(r"(?m)^- (Source|From|Assigned|Reassigned|Verdict|Run|Siblings|Touches):\s*(.+?)\s*$", body):
+            for k, v in re.findall(r"(?m)^- (Source|From|Assigned|Reassigned|Verdict|Run|Siblings|Touches|Priority|Still broken):\s*(.+?)\s*$", body):
                 if k in ("Assigned", "Reassigned"):   # the CEO's move (tools/ceo_inbox.py reassign) or a later triage's: the latest wins
                     it["assigned"] = v.strip()
                     continue
                 if k == "Touches":   # files or folders the work order changes (office_next.py keeps overlapping ones apart): the latest wins
                     it["touches"] = [p.strip().lower().replace("\\", "/").removeprefix("./").rstrip("/") for p in v.split(",") if p.strip()]
+                    continue
+                if k == "Priority":   # the product owner's rank of open work, 1 = first (office_next.py builds in this order)
+                    it["priority"] = int(re.match(r"\d+", v.strip()).group()) if re.match(r"\d+", v.strip()) else 99
+                    continue
+                if k == "Still broken":   # the product owner re-checked it is not already fixed (the CEO, 2026-10-15)
+                    it["checked"] = seq
                     continue
                 if k == "Source":   # a later triage may cite a newer report for the same item: every one counts as decided
                     it["last_source"] = v.strip()
@@ -59,12 +66,14 @@ def decisions(ops):
                     if "DEFER" in it["history"] and v.strip().upper() in ("NEEDS CEO", "AUTO-APPROVED"):
                         it["reopened"] = os.path.basename(path)[:8]   # back from the parked list: an older attempt is void
                     it["history"].append(v.strip().upper())
+                    if v.strip().upper() == "AUTO-APPROVED":
+                        it["approved"] = seq
                 else:
                     it.setdefault(k.lower(), v.strip())
             if SECURITY.search(body):
                 it["security"] = True
             if re.search(r"(?mi)^- \[x\] CEO approved", body):
-                it["ceo_approved"] = True
+                it["ceo_approved"], it["approved"] = True, seq + 0.5   # a tick needs a "Still broken" check in a later section
             elif re.search(r"(?m)^- Verdict:\s*NEEDS CEO", body) and re.search(r"(?mi)^- \[ \] CEO approved", body):
                 it["ceo_approved"] = False   # decided again with an unticked box: it needs a fresh yes, an old tick does not carry
     return items
