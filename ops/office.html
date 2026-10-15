@@ -58,7 +58,25 @@ button{font:inherit;color:inherit}
 .scenebtn{font:12px/1 var(--display);letter-spacing:.06em;background:transparent;color:var(--facade-ink);border:1px solid currentColor;border-radius:2px;padding:5px 8px;cursor:pointer}
 .scenebtn[aria-pressed="true"]{background:#3CC6C6;color:#0A2A2A;border-color:#3CC6C6}
 .scroller{overflow-x:auto;overflow-y:hidden;border-radius:3px;-webkit-overflow-scrolling:touch}
-.floorwrap{position:relative;margin:0 auto;line-height:0}
+.floorwrap{position:relative;margin:0 auto;line-height:0;transform-origin:0 0;transition:transform .45s cubic-bezier(.3,.7,.2,1)}
+/* close-up: the floor zooms on a person or a thing and its screen opens beside it */
+.scroller{position:relative}
+.scroller.zoomed{overflow:hidden}
+.screen{position:absolute;top:6%;bottom:6%;width:min(58%,560px);display:flex;flex-direction:column;background:#0B1A14;color:#9FF2C2;border:3px solid #2E3A44;border-radius:6px;box-shadow:0 0 0 3px #11181D,6px 6px 0 rgba(0,0,0,.45);line-height:1.15;z-index:2}
+.screen.r{right:3%} .screen.l{left:3%}
+@media (max-width:640px){.screen{left:3%;right:3%;width:auto;top:auto;height:72%}}
+.screen .sbar{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:6px 10px;background:#16302A;font:12px/1.2 var(--display);letter-spacing:.05em;color:#D6FFE6}
+.screen .sbody{flex:1;min-height:0;overflow:auto;padding:8px 12px;font:19px/1.2 var(--data)}
+.screen .sbody p{margin:0 0 3px;overflow-wrap:anywhere}
+.screen .sbody .h{color:#F3BD48;margin-top:8px}
+.screen .sbody .dim{color:#5FA57E}
+.screen.typing .sbody p{opacity:0;animation:typeon .01s forwards}
+@keyframes typeon{to{opacity:1}}
+.screen .sbody p:last-child::after{content:"_";animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.screen .sfoot{display:flex;flex-wrap:wrap;gap:8px;padding:8px 10px;border-top:1px solid #1F3B32}
+.screen .sfoot .btn{font-size:11px;padding:4px 9px;box-shadow:2px 2px 0 #000;background:#16302A;color:#D6FFE6;border-color:#9FF2C2}
+@media (prefers-reduced-motion: reduce){.floorwrap{transition:none}.screen.typing .sbody p{animation:none;opacity:1}.screen .sbody p:last-child::after{animation:none}}
 .floorwrap canvas{width:100%;height:auto;aspect-ratio:416/272;image-rendering:pixelated;image-rendering:crisp-edges;display:block;cursor:pointer}
 .overlay{position:absolute;inset:0;pointer-events:none;line-height:1.1}
 .zl{position:absolute;transform:translate(-50%,-50%);font-family:var(--display);font-size:max(9px,calc(var(--s,2)*3.4px));letter-spacing:.08em;color:#F3F6F8;background:rgba(18,24,30,.62);padding:.2em .45em;border-radius:2px;white-space:nowrap}
@@ -319,6 +337,11 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
             <canvas id="floor" width="416" height="272" aria-label="Animated office floor plan"></canvas>
             <div class="overlay" id="overlay" aria-hidden="true"></div>
           </div>
+          <section class="screen" id="screen" role="dialog" aria-labelledby="screenH" hidden>
+            <div class="sbar"><span id="screenH"></span><span id="screenClock"></span></div>
+            <div class="sbody" id="screenBody" aria-live="polite"></div>
+            <div class="sfoot" id="screenFoot"></div>
+          </section>
         </div>
       </section>
       <section class="roster" id="roster" aria-label="Departments"></section>
@@ -2120,9 +2143,86 @@ cv.addEventListener("click", e => {
   const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left)/r.width*MW, my = (e.clientY - r.top)/r.height*MH;
   let best = null, bd = 2.2;
   for(const a of AGENTS){ if(!hired(a.id)) continue; const d = Math.hypot(mx - (a.x + .5), my - (a.y + .2)); if(d < bd){ bd = d; best = a; } }
-  if(best) select(best.id);
-  else if(mx >= 20 && mx <= 29 && my >= 10.5 && my <= 13.5) showTab("plan", true);
+  if(best){ select(best.id); zoomTo(best.id, best.x + .5, best.y); return; }
+  const thing = THINGS.find(o => mx >= o.x0 && mx <= o.x1 && my >= o.y0 && my <= o.y1);
+  if(thing) zoomTo(thing.id, (thing.x0 + thing.x1)/2, (thing.y0 + thing.y1)/2);
 });
+
+/* ---------- close-up: zoom the floor on a person or a thing, and show its screen ---------- */
+const THINGS = [{id:"planboard", x0:20, x1:29, y0:10.5, y1:13.5}, {id:"lab", x0:27, x1:35.5, y0:2, y1:9.5}, {id:"tv", x0:37.5, x1:42.5, y0:12.5, y1:15}];
+let zoomed = null, zoomLeft = true, screenText = "";
+const screenEl = $("screen");
+function zoomTo(id, tx, ty){
+  zoomed = id; zoomLeft = tx/MW < .5; scroller.scrollLeft = 0; scroller.classList.add("zoomed"); aim(tx, ty);
+  screenEl.classList.toggle("r", zoomLeft); screenEl.classList.toggle("l", !zoomLeft);   // the screen keeps its side while they walk
+  screenText = ""; renderScreen(true); screenEl.hidden = false; $("screenBack").focus({preventScroll:true});
+}
+function aim(tx, ty){   // also every 600 ms from loop(), so the zoom follows someone walking
+  // in pixels of the visible floor: the floor can be wider than its box on a phone (fit())
+  const s = 2.6, left = zoomLeft, vw = scroller.clientWidth, vh = scroller.clientHeight, fw = floorwrap.offsetWidth, fh = floorwrap.offsetHeight;
+  const clamp = (v, lo) => Math.max(lo, Math.min(0, v));
+  // the target sits off-centre, on the side away from its screen
+  floorwrap.style.transform = `translate(${clamp(vw*(left ? .28 : .72) - tx/MW*fw*s, vw - fw*s)}px, ${clamp(vh*.5 - ty/MH*fh*s, vh - fh*s)}px) scale(${s})`;
+}
+function unzoom(){
+  if(!zoomed) return;
+  zoomed = null; screenEl.hidden = true; floorwrap.style.transform = ""; scroller.classList.remove("zoomed");
+}
+document.addEventListener("keydown", e => { if(e.key === "Escape" && zoomed && !pop.open) unzoom(); });
+const hhmm = v => v ? fmtTime(new Date(v)) : "";
+function screenFor(id){
+  const L = live.ledger || SAMPLE_LEDGER, b = live.brief || {}, out = [], foot = [];
+  const line = (t, cls) => out.push([cls || "", t]), head = t => line(t, "h");
+  const runs = (list, label) => (list || []).forEach(m => line(`${label} ${m.dept}: ${m.why}` + (m.since ? ` (since ${hhmm(m.since)})` : ""), m.state === "wait" ? "dim" : ""));
+  if(id === "planboard"){
+    for(const [k, title] of [["future","COMING UP"],["ongoing","IN PROGRESS"],["past","DONE"]]){
+      const cs = L.cards.filter(c => c.lane === k); head(`${title} (${cs.length})`);
+      cs.slice(0, k === "past" ? 3 : 5).forEach(c => line(`- ${c.title} [${c.stage}]`));
+      if(!cs.length) line("nothing here", "dim");
+    }
+    foot.push(["Open the plan board", () => { unzoom(); showTab("plan", true); }]);
+    return {title: "PLAN BOARD" + (live.ledger ? "" : " · SAMPLE"), out, foot};
+  }
+  if(id === "lab"){   // the lab robot and its racks show the same screen: every routine
+    line("> " + worker("lab").task); if(worker("lab").last) line("last: " + worker("lab").last, "dim");
+    head("ROUTINES RUNNING"); runs(b.running, ">"); if(!(b.running || []).length) line("nothing running", "dim");
+    head("STARTING NEXT"); runs(b.moving, "next"); if(!(b.moving || []).length) line("nothing queued", "dim");
+    if(b.stalled) line("held: " + b.stalled, "h");
+    return {title: "TEST LAB · ROUTINES" + (live.brief ? "" : " · NO LIVE DATA"), out, foot};
+  }
+  if(id === "tv"){
+    head("IS THE PRODUCT GETTING BETTER?"); line([...$("trVerdict").childNodes].map(n => n.textContent.trim()).filter(Boolean).join(": ") || "no score yet");
+    for(const t of document.querySelectorAll("#pvTiles .tile")) line(`${t.querySelector(".k")?.textContent || ""}: ${t.querySelector(".v")?.textContent || ""}`);
+    foot.push(["Open product status", () => { unzoom(); showTab("status", true); }]);
+    return {title: "LOUNGE TV · PRODUCT SCORE", out, foot};
+  }
+  const d = D[id], w = worker(id), key = DEPT_KEY[id];
+  line("> " + w.task);
+  if(AG[id] && hired(id)) line("now: " + activity(AG[id]).toLowerCase(), "dim");
+  const mine = l => (l || []).filter(m => key && m.key === key);
+  if(mine(b.running).length || mine(b.moving).length){ head("RUNS"); runs(mine(b.running), ">"); runs(mine(b.moving), "next"); }
+  const bd = (L.boards || {})[id];
+  if(bd){ if(bd.doing.length){ head("WORKING ON"); bd.doing.slice(0, 4).forEach(t => line("- " + t)); }
+          if(bd.queue.length){ head(id === "po" ? "TO TRIAGE" : "QUEUED"); bd.queue.slice(0, 4).forEach(t => line("- " + t)); } }
+  const waiting = id === "ceo" ? needs().filter(x => !replied(x.id)) : [];
+  if(id === "ceo"){ head(`WAITING FOR YOU (${waiting.length})`); waiting.slice(0, 5).forEach(x => line("- " + (x.title || x.id))); }
+  if(w.last){ head("LAST RESULT"); line(w.last); }
+  if(mode === "live" && hired(id) && nextFor(id)) line("next run: " + nextFor(id), "dim");
+  const ev = view().events.filter(e => e.from === id || e.to === id).slice(0, 4);
+  if(ev.length){ head("RECENT"); ev.forEach(e => line(`${hhmm(e.at)} ${(D[e.from] || {name: e.from}).name} -> ${(D[e.to] || {name: e.to}).name}: ${e.text}`, "dim")); }
+  if(waiting.length) foot.push(["Open what is waiting", () => { unzoom(); openNeeds(); }]);
+  return {title: `${d.name.toUpperCase()} · ${(STATE_LABEL[w.state] || w.state).toUpperCase()}`, out, foot};
+}
+function renderScreen(typing){
+  if(!zoomed) return;
+  const {title, out, foot} = screenFor(zoomed), text = title + JSON.stringify(out);
+  if(text === screenText) return; screenText = text;
+  $("screenH").textContent = title; $("screenClock").textContent = fmtTime(new Date());
+  screenEl.classList.toggle("typing", !!typing);
+  $("screenBody").replaceChildren(...out.map(([cls, t], i) => { const p = el("p", cls || null, t); if(typing) p.style.animationDelay = (i*0.07) + "s"; return p; }));
+  const back = el("button", "btn", "Back to the floor"); back.type = "button"; back.id = "screenBack"; back.addEventListener("click", unzoom);
+  $("screenFoot").replaceChildren(back, ...foot.map(([label, fn]) => { const x = el("button", "btn", label); x.type = "button"; x.addEventListener("click", fn); return x; }));
+}
 
 let last = 0, lastUi = 0, lastFrame = 0;
 function loop(ts){
@@ -2130,7 +2230,7 @@ function loop(ts){
   for(const a of AGENTS) if(hired(a.id)) update(a, reduce ? 1 : dt);
   tickMeeting(); poolStep(dt); partsStep(dt);
   if(!document.hidden && (ts - lastFrame > (reduce ? 1000 : 60))){ lastFrame = ts; draw(reduce ? 0 : t); placeOverlay(); }
-  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
+  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); renderScreen(false); if(zoomed && AG[zoomed]) aim(AG[zoomed].x + .5, AG[zoomed].y); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
