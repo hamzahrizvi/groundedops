@@ -70,6 +70,7 @@ STREAM_429 = _sse(
 posted = []
 stream_body = [STREAM_OK]
 host_token = [""]
+widget_cfg = [{}]
 
 
 def _stub(route):
@@ -85,6 +86,8 @@ def _stub(route):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(FAQ))
     if "/widget/catalog" in url:
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(CATALOG))
+    if "/widget/config" in url:
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(widget_cfg[0]))
     if url.endswith("/widget/ask/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body=stream_body[0])
     if url.endswith("/widget/lead"):
@@ -117,6 +120,7 @@ def setup_function(func):
     global _page
     posted.clear()
     stream_body[0] = STREAM_OK
+    widget_cfg[0] = {}
     host_token[0] = 'data-token="member-token"' if "signed_in" in func.__name__ else ""
     _page = _browser.new_page()
     _page.route("**/*", _stub)
@@ -217,3 +221,79 @@ def test_a_guest_is_not_offered_a_document_it_cannot_open():
     _ask("Can it make coffee?")
     _page.wait_for_selector("button:has-text('Email support')")
     assert _page.locator("button:has-text('Open NV9 Manual')").count() == 0
+
+
+PHONE = "+44 161 000 0000"
+SUPPORT_FORM = {"title": "Talk to support", "allow_summary": False, "routed": False,
+                "phone": PHONE,
+                "fields": [{"id": "s_email", "label": "Email", "type": "email", "required": True}]}
+# The four endings src/main.py _friendly_refusal can give a refusal.
+SERVER_REFUSALS = [
+    "I don't have that in the product documentation about the NV9.\n\nOur support team can help with this one.",
+    "I don't have that in the product documentation about the NV9.\n\nHere are some things I can answer:\n- How do I remove the bezel?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
+    "I don't have that in the product documentation about the NV9.\n\nThe manual refers you to the Technical Data sheet for this.\n\nOur support team can send you that, or I can answer anything the user manual does cover.",
+    "I don't have that in the product documentation about the NV9.\n\nThe manual covers this in its drawings section.\n\nOur support team can help with that, or I can answer anything else the user manual covers.",
+]
+HANDOFF = ("Of course \u2014 I'll hand this over to a person. Use the support button below "
+           "to leave your details and a short note of what you need, and our support team "
+           "will pick it up from there.")
+BOTS_AFTER_QUESTION = """(() => { const all = [...document.querySelectorAll('.go-b')];
+  const i = all.map(b => b.classList.contains('usr')).lastIndexOf(true);
+  return all.slice(i + 1).filter(b => b.classList.contains('bot')).length; })()"""
+
+
+def _refusal(text, role="rejected"):
+    return _sse(("meta", {"sources": [], "request_id": "rid-r", "role": role,
+                          "offer_support": True}),
+                ("delta", {"text": text}))
+
+
+def _reopen():
+    global _page
+    _page.close()
+    _page = _browser.new_page()
+    _page.route("**/*", _stub)
+    _page.goto("https://example.test/")
+    _page.click(".go-launch")
+
+
+def test_a_server_refusal_that_offers_support_is_one_bubble():
+    for i, text in enumerate(SERVER_REFUSALS):
+        if i:
+            _reopen()
+        stream_body[0] = _refusal(text)
+        _ask("Can it make coffee?")
+        _page.wait_for_selector("button:has-text('Email support')")
+        assert _page.evaluate(BOTS_AFTER_QUESTION) == 1, text
+        assert _page.locator("text=rather point you at someone").count() == 0, text
+        assert _page.locator("button:has-text('Try rewording my question')").count() == 1
+
+
+def test_a_refusal_without_a_support_line_keeps_the_widget_offer():
+    stream_body[0] = _refusal("The NV9 documentation doesn't mention Bluetooth, so I can't confirm it either way rather than guess.")
+    _ask("Does it have Bluetooth?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator(".go-b.bot:has-text('rather point you at someone')").count() == 1
+    assert _page.evaluate(BOTS_AFTER_QUESTION) == 2
+
+
+def test_with_a_phone_the_refusal_offers_it_as_a_chip_not_a_second_bubble():
+    widget_cfg[0] = {"support_form": SUPPORT_FORM}
+    _reopen()   # config is read when the panel first opens
+    stream_body[0] = _refusal(SERVER_REFUSALS[0])
+    _ask("Can it make coffee?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.evaluate(BOTS_AFTER_QUESTION) == 1
+    labels = _page.locator(".go-chip").all_inner_texts()
+    assert labels.index("Email support") < labels.index("Call " + PHONE), labels
+
+
+def test_the_handoff_turn_is_unchanged():
+    widget_cfg[0] = {"support_form": SUPPORT_FORM}
+    _reopen()
+    stream_body[0] = _refusal(HANDOFF, role="handoff")
+    _ask("I want to talk to a person")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator(".go-b.bot:has-text('call them on " + PHONE + "')").count() == 1
+    assert _page.locator("button:has-text('Call " + PHONE + "')").count() == 0
+    assert _page.locator("text=rather point you at someone").count() == 0

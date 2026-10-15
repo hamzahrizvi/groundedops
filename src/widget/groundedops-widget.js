@@ -2216,17 +2216,26 @@
           // knows. The backend's refusal text is accurate but bare, and
           // "I cannot answer that" with no route onward reads as a brush-off.
           var sForm = formFor("support");
-          // A handoff turn ("I want to talk to a person") has already said
-          // what happens next; repeating "that is not in my knowledge base"
-          // under it would contradict the answer. Only the route is added.
-          var offer = d.role === "handoff" ? ""
-            : "That is not something I have in my knowledge base, so I "
-            + "would rather point you at someone than guess.";
-          if (sForm.phone) {
-            offer += (offer ? " You" : "You") + " can email our support team, or call them on "
-                   + sForm.phone + ".";
-          } else if (offer) {
-            offer += " I can pass it to our support team by email.";
+          // D-20261010-13: every refusal the server words itself
+          // (_friendly_refusal, the handoff reply) already ends by offering
+          // the support team, so a second bubble saying the same reads as the
+          // bot talking to itself. The widget's own sentence is kept only for
+          // a refusal whose text has no such offer ("not mentioned", the
+          // verifier-unavailable notice).
+          // ponytail: matched on the server's wording; swap for a server
+          // flag when main.py next changes (part 2 of this order).
+          var serverOffered = d.role === "handoff"
+            || /support team|contact support/i.test(d.answer || "");
+          var offer = "";
+          if (!serverOffered) {
+            offer = "That is not something I have in my knowledge base, so I "
+              + "would rather point you at someone than guess."
+              + (sForm.phone
+                 ? " You can email our support team, or call them on " + sForm.phone + "."
+                 : " I can pass it to our support team by email.");
+          } else if (d.role === "handoff" && sForm.phone) {
+            // Unchanged handoff behaviour: the route, as its own line.
+            offer = "You can email our support team, or call them on " + sForm.phone + ".";
           }
           if (offer) say(offer);
 
@@ -2247,6 +2256,17 @@
           // 8.12: the closest page the search did find, when there is one.
           var nearDoc = docChip(d.more_context);
           if (nearDoc) supportChips.splice(1, 0, nearDoc);
+          // The phone, when the server's text made the offer: a tappable
+          // chip right after "Email support", not a second bubble.
+          if (serverOffered && d.role !== "handoff" && sForm.phone) {
+            supportChips.splice(1, 0, {
+              label: "Call " + sForm.phone,
+              style: "alt",
+              onClick: function () {
+                window.location.href = "tel:" + sForm.phone.replace(/[^\d+]/g, "");
+              },
+            });
+          }
           chips(supportChips, "What would you like to do?");
         } else if (!d.flagged && !d.service_degraded && !d.needs_sign_in) {
           afterAnswer(d);
