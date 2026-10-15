@@ -19,6 +19,7 @@ If you have an existing logs.json, archive or delete it — nothing here
 reads it.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -31,6 +32,14 @@ MAX_ANSWER_LEN = 500
 
 _logger = logging.getLogger(__name__)
 _lock   = threading.Lock()
+
+
+def redact(text) -> str:
+    """What a console log line may say about visitor text: its length and a
+    short hash, never the text. The process log is outside retention.py's
+    reach (D-20261009-06), so visitor text must never be written there."""
+    t = str(text or "")
+    return f"<{len(t)} chars #{hashlib.sha1(t.encode('utf-8')).hexdigest()[:8]}>"
 
 
 def _truncate_answer(answer: str, max_len: int = MAX_ANSWER_LEN) -> str:

@@ -44,6 +44,7 @@ every turn, and it is why a wrong classification costs a worse refusal
 rather than a wrong answer.
 """
 import logging
+from logger import redact
 import re
 
 logger = logging.getLogger(__name__)
@@ -246,8 +247,8 @@ def _as_documented(words: list[str], target: str,
             continue
         near = difflib.get_close_matches(w, vocab, n=1, cutoff=0.8)
         if near:
-            logger.info("capability target respelled: %r -> %r "
-                        "(from the retrieved passages)", w, near[0])
+            logger.info("capability target respelled: %s -> %r "
+                        "(from the retrieved passages)", redact(w), near[0])
             out.append(near[0])
             fixed = fixed.replace(w, near[0])
         else:

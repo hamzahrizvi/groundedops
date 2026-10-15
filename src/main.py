@@ -63,7 +63,7 @@ from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
 from structure import extract_structured_block
-from logger import log_interaction
+from logger import log_interaction, redact
 from router import route_model
 from grounding import check_grounding, _get_nli_model
 import answerability
@@ -1345,12 +1345,12 @@ def _inference_answer(query: str, chunks: list[dict],
         ok, report = check_inference(text, chunks,
                                      threshold=GROUNDING_THRESHOLD)
         if not ok:
-            logger.info("inference refused by contract 2: %s | %r",
-                        report.get("reason"), text[:90])
+            logger.info("inference refused by contract 2: %s | %s",
+                        report.get("reason"), redact(text))
             return None
-        logger.info("inference served: %d premise(s), %d conclusion(s) | %r",
+        logger.info("inference served: %d premise(s), %d conclusion(s) | %s",
                     report.get("premises"), report.get("conclusions"),
-                    query[:60])
+                    redact(query))
         return text
     except Exception as exc:
         logger.warning(f"inference attempt failed, refusing as before: {exc}")
@@ -2628,8 +2628,8 @@ def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
     lang, english = got
     ptrace.set_meta(language=lang)
     ptrace.mark("language", f"{lang} -> English ({time.time() - t0:.1f}s)")
-    logger.info("question in %s translated for the pipeline: %r -> %r",
-                lang, q[:80], english[:80])
+    logger.info("question in %s translated for the pipeline: %s -> %s",
+                lang, redact(q), redact(english))
 
     result = query(payload.model_copy(update={"q": english}),
                              x_user_id)
@@ -2849,7 +2849,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 resolved_query = f"{frag} ({last_q})"
             else:
                 resolved_query = f"{frag} — {last_q}"
-            logger.info(f"Follow-up fallback combined query: {resolved_query[:80]}")
+            logger.info(f"Follow-up fallback combined query: {redact(resolved_query)}")
             ptrace.mark("followup", resolved_query[:80])
 
     # ── Retrieval ────────────────────────────
@@ -2952,7 +2952,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         resolved_query, _named, _scope)
     if _contextual_query != resolved_query:
         resolved_query = _contextual_query
-        logger.info(f"Added product context -> {resolved_query!r}")
+        logger.info(f"Added product context -> {redact(resolved_query)}")
 
     # ── The phrasings retrieval will search on ───────────────────────────
     #
@@ -2975,9 +2975,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _normalize_query(q), _named, _scope)
         if _as_typed.strip().lower() != resolved_query.strip().lower():
             _retrieval_queries.append(_as_typed)
-            logger.info("Fusing %d phrasings: rewritten=%r as-typed=%r",
-                        len(_retrieval_queries), resolved_query[:60],
-                        _as_typed[:60])
+            logger.info("Fusing %d phrasings: rewritten=%s as-typed=%s",
+                        len(_retrieval_queries), redact(resolved_query),
+                        redact(_as_typed))
 
     # ── Curated FAQ (v12.0: ask, don't guess) ─────────────────────────
     # Earlier versions DECIDED whether the user's question was equivalent to
@@ -3797,8 +3797,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                       len(_cands))
         top_chunks, reanswer_mode = _re.chosen_passages(_picked, _cands)
         top_chunks = [_strip_breadcrumb(dict(c)) for c in top_chunks]
-        logger.info("reanswer: %s -> %d passage(s) for %r",
-                    reanswer_mode, len(top_chunks), resolved_query[:60])
+        logger.info("reanswer: %s -> %d passage(s) for %s",
+                    reanswer_mode, len(top_chunks), redact(resolved_query))
 
     # THE STEPS A RETRIEVED PASSAGE POINTS AT, fetched rather than ranked.
     # From the widget transcript of 2026-09-21: "how to get RNDIS working
@@ -3931,8 +3931,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _again_text = ((_again or {}).get("text") or "").strip()
         if _again_text and (_again or {}).get("model") != "none" \
                 and not is_refusal(_again_text):
-            logger.info("follow-up refusal retried without history: answered %r",
-                        resolved_query[:60])
+            logger.info("follow-up refusal retried without history: answered %s",
+                        redact(resolved_query))
             ptrace.mark("regen.nohist", "refused with history, answered without")
             output, raw_text = _again, _again_text
             answer = normalize_markdown_tables(_strip_meta(_strip_preamble(raw_text)))
@@ -4018,9 +4018,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         except Exception as _exc:
             logger.warning(f"not-mentioned check skipped: {_exc}")
         if _not_mentioned:
-            logger.info("unsupported No: %r never mentions %r; answering "
-                        "'not mentioned' instead of %r",
-                        _nm_product, _not_mentioned, answer[:60])
+            logger.info("unsupported No: %r never mentions %s; answering "
+                        "'not mentioned' instead of %s",
+                        _nm_product, redact(_not_mentioned), redact(answer))
             ptrace.mark("not_mentioned", _not_mentioned[:60])
             answer = mentions.reply(_nm_label, _not_mentioned)
 
@@ -4382,10 +4382,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                        else "template_leak" if template_leak
                        else "ungrounded_answer_suppressed")
         else:
-            logger.error("%s; refused %r without recording a gap "
+            logger.error("%s; refused %s without recording a gap "
                          "(retrieval was fine)",
                          "Verifier unavailable" if verifier_unavailable
-                         else "No provider reachable", q[:80])
+                         else "No provider reachable", redact(q))
 
     # ── Memory + logging ──────────────────────
     # The "not mentioned" reply is a rejection is_refusal does not
@@ -4514,7 +4514,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             offer_support = False
             flagged = False
             logger.info(f"capability question answered from the corpus: "
-                        f"{_t!r} -> {_where['source']} p{_where['page']}")
+                        f"{redact(_t)} -> {_where['source']} p{_where['page']}")
         elif offer_support and not system_refusal:
             # CONTRACT 2, and it is checked before the clarify gate for
             # the same reason the capability branch is: a question we can
@@ -4538,7 +4538,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 # flag here would bury the real ungrounded answers in the
                 # console under every inference the operator asked for.
                 flagged = False
-                logger.info("answered under the inference contract: %r", q[:60])
+                logger.info("answered under the inference contract: %s", redact(q))
 
             # THE CLARIFY GATE, MOVED. Every clarify branch in this file used
             # to sit inside `if confidence == "none"` — and with

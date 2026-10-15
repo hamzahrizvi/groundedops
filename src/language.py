@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+from logger import redact
 import os
 import re
 
@@ -161,7 +162,7 @@ def to_english(text: str, api_keys: dict | None = None) -> tuple[str, str] | Non
         return None
     lang, en = _LANG_LINE.search(out), _EN_LINE.search(out)
     if not lang or not en:
-        logger.warning("question translation unparseable: %r", out[:120])
+        logger.warning("question translation unparseable: %s", redact(out))
         return None
     language = lang.group(1).strip().strip(".").strip()
     english = en.group(1).strip().strip('"').strip()
@@ -273,12 +274,12 @@ def translate_faq_pair(question: str, answer: str,
     text = (out.get("text") or "").strip()
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        logger.warning("FAQ translation to %s unparseable: %r", name, text[:120])
+        logger.warning("FAQ translation to %s unparseable: %s", name, redact(text))
         return None
     try:
         data = json.loads(text[start:end + 1])
     except Exception:
-        logger.warning("FAQ translation to %s: bad JSON: %r", name, text[:120])
+        logger.warning("FAQ translation to %s: bad JSON: %s", name, redact(text))
         return None
     tq, ta = (data.get("question") or "").strip(), (data.get("answer") or "").strip()
     return (tq, ta) if tq and ta else None
