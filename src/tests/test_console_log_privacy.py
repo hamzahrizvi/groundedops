@@ -76,6 +76,41 @@ def test_redact_keeps_length_not_text():
     assert redact("a") == redact("a")
 
 
+# The names a visitor's question travels under in the server's modules.
+_VISITOR_TEXT = {"question", "resolved_query", "q", "english", "_as_typed",
+                 "last_q", "frag"}
+
+
+def test_no_log_call_in_a_server_module_prints_the_question():
+    """Every log call, not just the ones a test reaches: a call that passes
+    one of these names must wrap it in redact(). Comprehensions are skipped
+    (they log what matched, e.g. a price keyword, not the question)."""
+    import ast
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parent.parent
+    bad = []
+    for path in sorted(src.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for call in ast.walk(tree):
+            if not (isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Attribute)
+                    and call.func.attr in ("debug", "info", "warning",
+                                           "error", "exception", "critical")):
+                continue
+            stack = list(call.args)
+            while stack:
+                n = stack.pop()
+                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "redact":
+                    continue
+                if isinstance(n, (ast.ListComp, ast.GeneratorExp,
+                                  ast.SetComp, ast.DictComp)):
+                    continue
+                if isinstance(n, ast.Name) and n.id in _VISITOR_TEXT:
+                    bad.append(f"{path.name}:{call.lineno} {n.id}")
+                stack.extend(ast.iter_child_nodes(n))
+    assert not bad, "log calls printing visitor text: " + ", ".join(bad)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

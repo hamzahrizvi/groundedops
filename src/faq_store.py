@@ -1776,7 +1776,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         if _verbatim or _paraphrase:
             logger.info(
                 f"FAQ auto-serve ({'verbatim' if _verbatim else 'paraphrase'}"
-                f" sem={s_sem:.3f} jac={s_verb:.3f}): {question!r}")
+                f" sem={s_sem:.3f} jac={s_verb:.3f}): {redact(question)}")
             return {"mode": "answer", "entry": it,
                     "score": round(max(s_verb, s_sem), 3)}
         if s_sem >= CANDIDATE_COSINE_FLOOR or s_lex >= CANDIDATE_LEXICAL_FLOOR:
@@ -1856,7 +1856,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         scored = [t for t in scored if not _is_definitional(t[1])]
         if len(scored) != _before:
             logger.info(f"FAQ: dropped {_before - len(scored)} definitional "
-                        f"entr(ies) for the attribute question {question!r}")
+                        f"entr(ies) for the attribute question {redact(question)}")
 
     # Harvested reference material -- a verbatim spec table, a product
     # overview -- is scored on a stricter bar than curated Q&A.
@@ -1905,7 +1905,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         if record:
             record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: top match {_best_sem:.3f} semantic with no lexical "
-                    f"overlap for {question!r} - going to retrieval")
+                    f"overlap for {redact(question)} - going to retrieval")
         return {"mode": "none"}
 
     # 0.45 was set when the semantic half of this scoring was dead -- the
@@ -1930,7 +1930,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         if record:
             record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: best candidate {scored[0][0]:.3f} < {_floor} for "
-                    f"{question!r} - going to retrieval")
+                    f"{redact(question)} - going to retrieval")
         return {"mode": "none"}
 
     # Relative cut: keep only what's competitive with the best match.
@@ -1973,7 +1973,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
             if record:
                 record_gap(question, scope_key, [], language=language)
             logger.info(f"FAQ: every candidate shared only the product name "
-                        f"for {question!r} - going to retrieval")
+                        f"for {redact(question)} - going to retrieval")
             return {"mode": "none"}
         scored = _kept
 

@@ -4069,7 +4069,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                   answer, top_chunks, deepseek_api_key, resolved_query):
             is_grounded, ground_via = True, "llm"
             logger.info("Table answer verified by LLM verifier for: "
-                        f"{resolved_query[:60]}")
+                        f"{redact(resolved_query)}")
         flagged = not is_grounded
     else:
         is_grounded, grounding_score = _timed(
@@ -4083,7 +4083,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 and _timed("verify", _lexically_supported, answer, top_chunks)):
             is_grounded, ground_via = True, "lexical"
             logger.info("Grounding rescued by lexical containment "
-                        f"(nli={grounding_score}) for: {resolved_query[:60]}")
+                        f"(nli={grounding_score}) for: {redact(resolved_query)}")
         # The NLI model cannot read a flattened table row, and these manuals
         # keep their facts in tables. Ask a model that can, before throwing a
         # correct answer away. See _llm_verified.
@@ -4093,7 +4093,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                          resolved_query)):
             is_grounded, ground_via = True, "llm"
             logger.info("Grounding rescued by LLM verifier "
-                        f"(nli={grounding_score}) for: {resolved_query[:60]}")
+                        f"(nli={grounding_score}) for: {redact(resolved_query)}")
         flagged = not is_grounded
 
     # ── Escalation to the BACKUP provider on grounding failure ──
@@ -4124,7 +4124,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             f"Flagged answer (grounding={grounding_score}, "
             f"template_leak={template_leak}, failed={generation_failed}) — "
             f"escalating to backup provider '{_backup_provider}' "
-            f"for: {resolved_query[:60]}"
+            f"for: {redact(resolved_query)}"
         )
         # The BACKUP role's model: its own override (MODEL_ROLE_BACKUP) or
         # the provider's configured model -- never a hardcoded default.
@@ -4192,7 +4192,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         for _attempt in range(1, _max_retries + 1):
             logger.info(
                 f"Grounding retry {_attempt}/{_max_retries} "
-                f"(score={grounding_score}) for: {resolved_query[:60]}")
+                f"(score={grounding_score}) for: {redact(resolved_query)}")
             _retry = _timed("regen", generate_with_fallback,
                             role, prompt, deepseek_api_key=deepseek_api_key,
                             api_keys=api_keys)
@@ -4630,8 +4630,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                       "on our side, not a gap in the documentation. Please "
                       "try again shortly, or contact support if it persists.")
             logger.error(
-                "SERVICE DEGRADED: no provider could generate for %r "
-                "(provider=%s)", resolved_query[:60], output.get("provider"))
+                "SERVICE DEGRADED: no provider could generate for %s "
+                "(provider=%s)", redact(resolved_query), output.get("provider"))
     except Exception:
         offer_support = False
     if _not_mentioned:
