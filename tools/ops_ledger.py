@@ -113,7 +113,7 @@ def stage_of(it, ops, merged, reverted):
     stamp = lambda p: time.strftime("%Y%m%d", time.localtime(os.path.getmtime(p)))
     if os.path.exists(dev + ".md") and it.get("reopened") and stamp(dev + ".md") < it["reopened"]:
         return "sent back, rebuilding"   # handed back before it was parked and reopened: Dev builds it again
-    if gate and os.path.getmtime(dev + ".gate/gate.json") < os.path.getmtime(dev + ".md"):
+    if gate and os.path.exists(dev + ".md") and os.path.getmtime(dev + ".gate/gate.json") < os.path.getmtime(dev + ".md"):
         gate = None   # a check of an earlier hand-back, not of this one
     if os.path.exists(dev + ".md"):
         if re.search(r"(?m)^Status:\s*BLOCKED", _read(dev + ".md")):
