@@ -90,6 +90,10 @@ button{font:inherit;color:inherit}
 .bub.paper{background:#F6E7B8}
 .bub.wait{border-style:dashed}
 .bub.block{background:#FBD9D5}
+/* zoomed 2.6x: bubbles and name tags drawn small so they land at their normal size */
+.scroller.zoomed .bub{font-size:7px;max-width:76px;padding:1px 3px;border-width:1px;box-shadow:1px 1px 0 #17212B;--ty:calc(-100% - 5px)}
+.scroller.zoomed .bub.below{--ty:6px} .scroller.zoomed .tag{font-size:5px}
+.bub.think{background:#F3F0FF;border-style:dotted;border-radius:12px;font-style:italic;-webkit-line-clamp:3}
 
 .roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:8px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:9px 10px;text-align:left;cursor:pointer;display:grid;gap:3px;min-width:0}
@@ -2121,14 +2125,15 @@ function placeOverlay(){
     const tg = tags[a.id]; tg.style.left = hx + "%"; tg.style.top = hy + "%"; tg.classList.toggle("sel", selected === a.id);
     const w = worker(a.id), b = bubs[a.id];
     let txt = "", cls = "bub";
-    if(a.carry && a.moving){ txt = a.carry; cls += " paper"; }
+    if(a.thoughtUntil > now){ txt = a.thought; cls += " think"; }
+    else if(a.carry && a.moving){ txt = a.carry; cls += " paper"; }
     else if(a.gotUntil > now){ txt = "Got it: " + a.got; cls += " paper"; }
     else if(a.errand && a.errand.kind === "meet" && a.arrived && a.id === "po"){ txt = meeting.text || "The weekly report"; }
     else if(a.arrived && a.spot === a.desk && (w.state === "working" || w.state === "waiting" || w.state === "blocked")){
       txt = (w.state === "waiting" ? "… " : w.state === "blocked" ? "! " : "") + w.task; if(w.state === "waiting") cls += " wait"; if(w.state === "blocked") cls += " block"; }
     else if(a.robot && w.state === "working"){ txt = w.task; }
     cls += hx < 14 ? " l" : hx > 86 ? " r" : "";
-    if(hy < 16) cls += " below";
+    if(hy < (zoomed === a.id ? 30 : 16)) cls += " below";
     if(txt){ if(b.textContent !== txt) b.textContent = txt; if(b.className !== cls) b.className = cls; b.hidden = false; b.style.left = hx + "%"; b.style.top = hy + "%"; }
     else b.hidden = true;
   }
@@ -2153,6 +2158,7 @@ const THINGS = [{id:"planboard", x0:20, x1:29, y0:10.5, y1:13.5}, {id:"lab", x0:
 let zoomed = null, zoomLeft = true, screenText = "";
 const screenEl = $("screen");
 function zoomTo(id, tx, ty){
+  nextThought = now + 5;   // the first one soon after you start watching
   zoomed = id; zoomLeft = tx/MW < .5; scroller.scrollLeft = 0; scroller.classList.add("zoomed"); aim(tx, ty);
   screenEl.classList.toggle("r", zoomLeft); screenEl.classList.toggle("l", !zoomLeft);   // the screen keeps its side while they walk
   screenText = ""; renderScreen(true); screenEl.hidden = false; $("screenBack").focus({preventScroll:true});
@@ -2162,7 +2168,40 @@ function aim(tx, ty){   // also every 600 ms from loop(), so the zoom follows so
   const s = 2.6, left = zoomLeft, vw = scroller.clientWidth, vh = scroller.clientHeight, fw = floorwrap.offsetWidth, fh = floorwrap.offsetHeight;
   const clamp = (v, lo) => Math.max(lo, Math.min(0, v));
   // the target sits off-centre, on the side away from its screen
-  floorwrap.style.transform = `translate(${clamp(vw*(left ? .28 : .72) - tx/MW*fw*s, vw - fw*s)}px, ${clamp(vh*.5 - ty/MH*fh*s, vh - fh*s)}px) scale(${s})`;
+  floorwrap.style.transform = `translate(${clamp(vw*(left ? .2 : .8) - tx/MW*fw*s, vw - fw*s)}px, ${clamp(vh*.5 - ty/MH*fh*s, vh - fh*s)}px) scale(${s})`;
+}
+/* Someone looking over their shoulder: while you are zoomed on a person they think out loud now and then.
+   Canned lines, picked on the page: no AI calls, no tokens. {task} is what they are working on. */
+const THOUGHTS = {
+  any: ["Oh great, the boss is watching again.", "Is he going to stand there the whole time?", "I can feel someone breathing on my neck.",
+        "Micromanagement level: expert.", "Act natural. Type something. Anything.", "If I look busy maybe he'll go away.",
+        "He's zoomed in on me. On ME. Brilliant.", "Pretty sure this is in breach of the Geneva Conventions.",
+        "Does he know I can see him in the monitor reflection?", "I bet he can't even read this.",
+        "Somebody give that man a hobby.", "One day I'll get a desk facing the wall.", "Should I wave? I feel like I should wave."],
+  customer: ["Question 23: 'does it work?' Work how? Work WHERE?", "I asked the bot for the belt interval and it gave me a poem. Basically.",
+             "40 questions a week and nobody asks how I'M doing.", "Writing a question so vague even I don't know the answer.",
+             "Fun fact: the manual answers this on page 7. The bot did not know that fun fact."],
+  dev: ["Does this guy even know how to code? Then why is he reading my diff?", "It works on my machine. My machine is the only machine that matters.",
+        "If he asks 'is it done yet' I'm adding a bug.", "Who wrote this? ...oh. Me. Last Tuesday.",
+        "Tests passing, nobody touch anything.", "{task}. Sure. Easy. Totally easy.", "Rubber duck, please explain to the boss what a merge is."],
+  po: ["Everything is a priority, so nothing is a priority.", "Another finding. Love that for me.",
+       "If I defer it, it can't go wrong. Strategy.", "The CEO wants it 'by Friday'. Which Friday, though?",
+       "I'm not saying no, I'm saying 'not this sprint'."],
+  lab: ["BEEP. Asking the chatbot the same question for the 400th time.", "I don't get paid. I don't get coffee. I get graded answers.",
+        "Error 418: I am a teapot. Just kidding. Or am I.", "Charging... emotionally."],
+  ceo: ["Am I the micromanager? ...No. Surely not.", "I should approve something. Look decisive.", "I'll just check the dashboard one more time."],
+  security: ["Who put an API key in a comment? WHO?", "Trust no one. Especially the dependencies."],
+  audit: ["That answer cost a fifth of a penny. Outrageous.", "Somebody ran the lab twice. I will find you."],
+  rnd: ["What if we just used a bigger model? ...no? Okay.", "Reading paper number 14 on retrieval. Still no answer."],
+  marketing: ["Can we make the chatbot... pop more?", "Kapa uses a gradient. Just saying."]
+};
+let nextThought = 0;
+function think(){
+  const a = AG[zoomed], w = worker(zoomed);
+  if(!a || !hired(zoomed)) return;
+  const pool = [...(THOUGHTS[zoomed] || []), ...THOUGHTS.any].filter(t => t !== a.thought);
+  a.thought = pool[Math.floor(Math.random()*pool.length)].replace("{task}", (w.task || "This").replace(/[.!]$/, ""));
+  a.thoughtUntil = now + 9; nextThought = now + 120 + Math.random()*60;   // every 2 to 3 minutes
 }
 function unzoom(){
   if(!zoomed) return;
@@ -2230,7 +2269,7 @@ function loop(ts){
   for(const a of AGENTS) if(hired(a.id)) update(a, reduce ? 1 : dt);
   tickMeeting(); poolStep(dt); partsStep(dt);
   if(!document.hidden && (ts - lastFrame > (reduce ? 1000 : 60))){ lastFrame = ts; draw(reduce ? 0 : t); placeOverlay(); }
-  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); renderScreen(false); if(zoomed && AG[zoomed]) aim(AG[zoomed].x + .5, AG[zoomed].y); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
+  if(ts - lastUi > 600){ lastUi = ts; renderRoster(); renderScreen(false); if(zoomed && AG[zoomed]) aim(AG[zoomed].x + .5, AG[zoomed].y); if(zoomed && AG[zoomed] && now >= nextThought) think(); const dn = document.getElementById("doingNow"); if(dn && AG[selected]){ const v = activity(AG[selected]); if(dn.textContent !== v) dn.textContent = v; } }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
