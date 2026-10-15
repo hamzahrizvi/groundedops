@@ -106,7 +106,9 @@ def review(run_dir):
             other = "B" if bot == "A" else "A"   # whole words only: "1.50A" stays
             why = re.sub(rf"\b{other}\b", "the whole-manual AI", re.sub(rf"\b{bot}\b", "the bot", why))
         row = (st.get("sys_normal") or {}).get(f["id"], {})
-        out.append(dict(f, answer=str(row.get("answer", ""))[:600], why=why[:400], trace=trace(row, logs.get(f["q"]), labels)))
+        base = (st.get("baseline") or {}).get(f["id"], {})
+        out.append(dict(f, answer=str(row.get("answer", ""))[:600], base_answer=str(base.get("answer", ""))[:600] if f["base"] != f["bot"] else "",   # only where it differs: the page's db doc caps at 256 KB
+                        why=why[:400], trace=trace(row, logs.get(f["q"]), labels)))
     return out
 
 

@@ -987,7 +987,8 @@ function openReview(g, run, pick, title){
     if(hist.length > 1){ const h = el("p", "qhist", "Every run that asked it: ");
       for(const [r, x] of hist){ const [l, k] = VERDICT[x.verdict] || [x.verdict, ""], pill = el("span", "vpill " + k, `${runLabel(r)}: ${x.bot}/3`); pill.title = l; h.append(pill); }
       box.append(h); }
-    if(c.answer){ const d = el("details"); d.append(el("summary", null, "The bot's answer"), el("p", "ans", c.answer)); box.append(d); }
+    for(const [k, t] of [["answer", "The bot's answer"], ["base_answer", "The whole-manual AI's answer"]])
+      if(c[k]){ const d = el("details"); d.append(el("summary", null, t), el("p", "ans", c[k])); box.append(d); }
     if(c.why) box.append(el("p", "why", "Grader: " + c.why));
     box.append(traceBox(c.trace, c, lab));
     (panes[cls] || panes.warn).append(box);
