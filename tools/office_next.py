@@ -47,7 +47,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
+from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from office_diary import due as diary_due  # noqa: E402
 
@@ -257,7 +257,8 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     for i, it in sorted(items.items()):
         dept = it.get("assigned", "dev")
         if (dept in COST and dept not in ("dev", "product-owner", "diary") and stages[i] == "approved, queued"
-                and not os.path.exists(os.path.join(ops, "inbox", dept, f"{i}-done.md"))
+                and (not os.path.exists(os.path.join(ops, "inbox", dept, f"{i}-done.md"))   # done, unless a triage resent it
+                     or answered(it, ops, os.path.join(ops, "inbox", dept, f"{i}-done.md")))
                 and sum(d == dept and why.startswith("work order") and bool(k) for d, why, k in out) < mode[2]):
             c = f"{dept}-{i}" not in taken and clash(i)
             out.append((dept, "work order {} waits for {}: both change {}".format(i, *c), None) if c else (dept, f"work order {i}", f"{dept}-{i}"))

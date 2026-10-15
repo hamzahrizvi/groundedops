@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import decisions, git_sets, stage_of  # noqa: E402
+from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import claims, every, holds, is_off, latest_usage, next_reset, plan, work_mode  # noqa: E402
@@ -113,6 +113,7 @@ def alerts(ops, cards, stalled, off):
                         "why": open(os.path.join(g, "FAILED"), encoding="utf-8").read().strip() or "It stopped before giving a verdict.",
                         "suggest": "The product owner's next run retries the check. Start it now if you want the answer sooner.",
                         "actions": [{**po_now, "label": "Retry the check now"}]})
+    items = decisions(ops)
     for i, c in cards.items():
         if c["stage"] == "blocked":
             out.append({"id": "blocked-" + i, "title": f"Dev is stuck on \u201c{c['title']}\u201d",
@@ -120,7 +121,7 @@ def alerts(ops, cards, stalled, off):
                         "suggest": "Let the product owner decide (send it back with new instructions, or close it), or park it.",
                         "actions": [po_now, park(i)]})
         done = os.path.join(ops, "inbox", c["assigned"], f"{i}-done.md")
-        if c["stage"] == "approved, queued" and os.path.exists(done):
+        if c["stage"] == "approved, queued" and os.path.exists(done) and not answered(items.get(i, {}), ops, done):   # a resend is not stuck
             text = open(done, encoding="utf-8").read().strip()
             if not text.upper().startswith("STATUS: BLOCKED"):
                 continue

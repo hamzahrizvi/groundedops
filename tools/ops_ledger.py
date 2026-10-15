@@ -45,7 +45,7 @@ def decisions(ops):
             did, title = m.groups()
             it = items.setdefault(did, {"id": did, "title": title.strip(), "history": [], "decided": did[2:10]})
             for k, v in re.findall(r"(?m)^- (Source|From|Assigned|Reassigned|Verdict|Run|Siblings|Touches):\s*(.+?)\s*$", body):
-                if k == "Reassigned":   # the CEO moved it to another department (tools/ceo_inbox.py reassign): the latest wins
+                if k in ("Assigned", "Reassigned"):   # the CEO's move (tools/ceo_inbox.py reassign) or a later triage's: the latest wins
                     it["assigned"] = v.strip()
                     continue
                 if k == "Touches":   # files or folders the work order changes (office_next.py keeps overlapping ones apart): the latest wins
@@ -54,6 +54,7 @@ def decisions(ops):
                 if k == "Source":   # a later triage may cite a newer report for the same item: every one counts as decided
                     it["last_source"] = v.strip()
                     it.setdefault("sources", []).append(v.strip().replace("\\", "/"))
+                    it.setdefault("cited", {})[v.strip().replace("\\", "/")] = path   # for answered()
                 if k == "Verdict":
                     if "DEFER" in it["history"] and v.strip().upper() in ("NEEDS CEO", "AUTO-APPROVED"):
                         it["reopened"] = os.path.basename(path)[:8]   # back from the parked list: an older attempt is void
@@ -67,6 +68,15 @@ def decisions(ops):
             elif re.search(r"(?m)^- Verdict:\s*NEEDS CEO", body) and re.search(r"(?mi)^- \[ \] CEO approved", body):
                 it["ceo_approved"] = False   # decided again with an unticked box: it needs a fresh yes, an old tick does not carry
     return items
+
+
+def answered(it, ops, path):
+    """A hand-back or <id>-done.md that a decision cites as its Source, in a decisions file written after it:
+    the product owner has answered it, so it no longer says the item is stuck."""
+    # ponytail: by file mtime, and decisions files are appended all day, so a hand-back rewritten after the citing
+    # triage but before a later append to the same file reads as answered; date each section if that bites
+    f = it.get("cited", {}).get(os.path.relpath(path, ops).replace("\\", "/"))
+    return bool(f) and os.path.exists(path) and os.path.getmtime(path) <= os.path.getmtime(f)
 
 
 def git_sets(repo):
@@ -115,9 +125,11 @@ def stage_of(it, ops, merged, reverted):
         return "sent back, rebuilding"   # handed back before it was parked and reopened: Dev builds it again
     if gate and os.path.exists(dev + ".md") and os.path.getmtime(dev + ".gate/gate.json") < os.path.getmtime(dev + ".md"):
         gate = None   # a check of an earlier hand-back, not of this one
-    if os.path.exists(dev + ".md"):
-        if re.search(r"(?m)^Status:\s*BLOCKED", _read(dev + ".md")):
+    if os.path.exists(dev + ".md") and re.search(r"(?m)^Status:\s*BLOCKED", _read(dev + ".md")):
+        # stuck only while it is Dev's and no triage has answered it (D-20261009-02 looped on "Dev is stuck", 2026-10-14)
+        if it.get("assigned", "dev") == "dev" and not answered(it, ops, dev + ".md"):
             return "blocked"
+    elif os.path.exists(dev + ".md"):
         if gate:
             if gate.get("verdict") == "PASS":
                 return "ready to merge" if latest == "READY TO MERGE" else "check passed"
@@ -257,6 +269,19 @@ def _selftest():
     assert six() == "waiting for CEO", six()
     w("decisions/20261015b.md", "## D-20261013-06 | Several asks\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
     assert six() == "sent back, rebuilding", six()
+    # D-20261009-02 (2026-10-14): CEO moves it to Dev, Dev hands back BLOCKED, a later triage gives it back to Customer
+    w("decisions/20261017.md", "## D-20261013-07 | Hidden questions\n- From: customer\n- Assigned: customer\n- Verdict: AUTO-APPROVED\n\n"
+      "# CEO decisions\n\n## D-20261013-07 | Hidden questions\n- Reassigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
+    w("inbox/dev/D-20261013-07.md", "Status: BLOCKED\nDev must not write the hidden test for its own fix.\n")
+    seven = lambda: next((c["assigned"], c["stage"]) for c in ledger(ops, today=day)["cards"] if c["id"] == "D-20261013-07")
+    assert seven() == ("dev", "blocked"), seven()
+    os.utime(os.path.join(ops, "inbox/dev/D-20261013-07.md"), (old, old))   # the triage below is written after the hand-back
+    w("decisions/20261017b.md", "## D-20261013-07 | Hidden questions\n- Source: inbox/dev/D-20261013-07.md\n- Assigned: customer\n- Verdict: AUTO-APPROVED\n")
+    assert seven() == ("customer", "approved, queued"), "a later Assigned wins, and an answered hand-back is not stuck"
+    w("decisions/20261017b.md", "## D-20261013-07 | Hidden questions\n- Source: inbox/dev/D-20261013-07.md\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
+    assert seven() == ("dev", "approved, queued"), "resent to Dev: it builds again"
+    w("inbox/dev/D-20261013-07.md", "Status: BLOCKED\nStill no.\n")   # a newer hand-back than the triage: stuck again
+    assert seven() == ("dev", "blocked"), seven()
     print("selftest ok")
 
 
