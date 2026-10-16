@@ -175,7 +175,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | approved, queued | Dev builds it |
 | D-20261010-21 | Security item D-20261010-21, details in the office | approved, queued | Dev builds it |
-| D-20261015-02 | A well-found answer is thrown away by the grounding check | approved, queued | Dev builds it |
+| D-20261015-02 | A well-found answer is thrown away by the grounding check | sent back, rebuilding | Dev rebuilds it |
 | D-20261015-11 | Security item D-20261015-11, details in the office | waiting for CEO | your yes |
 | D-20261015-12 | The "allowance used up" message tells the visitor to contact support | approved, queued | Dev builds it |
 | D-20261016-09 | Security item D-20261016-09, details in the office | waiting for CEO | your yes |
