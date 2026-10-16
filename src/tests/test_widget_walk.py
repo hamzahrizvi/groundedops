@@ -178,9 +178,16 @@ def test_the_contact_form_gives_a_reference():
 SAVED_COUNT = "JSON.parse(localStorage.getItem('groundedops_widget_v2') || '{}').messages.length"
 
 
+def _open_chips():
+    """The chips after an answer sit folded behind one pill; open the newest."""
+    _page.wait_for_selector(".go-chipfold > summary")
+    _page.locator(".go-chipfold > summary").last.click()
+
+
 def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
     stream_body[0] = STREAM_DETAIL
     _ask("How do I remove the bezel?")
+    _open_chips()
     _page.wait_for_selector("button:has-text('Show more from the manual')")
     assert _page.locator("summary:has-text('Verified against NV9 Manual, page 12')").count() == 1
     assert _page.locator("button:has-text('Open NV9 Manual, page 12')").count() == 1
@@ -198,6 +205,7 @@ def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
 def test_a_related_question_is_asked_by_id():
     stream_body[0] = STREAM_DETAIL
     _ask("How do I remove the bezel?")
+    _open_chips()
     _page.wait_for_selector("button:has-text('What voltage does it need?')")
     _page.click("button:has-text('What voltage does it need?')")
     _page.wait_for_function("document.querySelectorAll('.go-b.usr').length >= 2")

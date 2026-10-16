@@ -377,6 +377,12 @@
     ".go-chip.alt:hover{background:var(--pane)}" +
     ".go-chip.q{background:var(--bg);color:var(--ink);border:1.5px solid var(--line);font-weight:500;text-align:left}" +
     ".go-chip.q:hover{border-color:var(--a);background:var(--pane)}" +
+    ".go-chipfold{display:flex;flex-direction:column;align-items:flex-end;margin-top:2px}" +
+    ".go-chipfold>summary{list-style:none;align-self:flex-end;font-size:13px;padding:8px 14px}" +
+    ".go-chipfold>summary::-webkit-details-marker{display:none}" +
+    ".go-chipfold>summary::after{content:' \\25BE'}" +
+    ".go-chipfold[open]>summary::after{content:' \\25B4'}" +
+    ".go-chipfold>.go-chips{margin-top:8px}" +
     ".go-chiplabel{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);" +
     "align-self:flex-end;margin-top:6px}" +
     // contact forms (sales / support), built from the console's config
@@ -1180,10 +1186,23 @@
    *  from the current stage — deliberately NOT stored in messages, so a
    *  resumed conversation doesn't show stale buttons for choices that
    *  were already made. */
-  function chips(items, label) {
+  function chips(items, label, collapsed) {
     var wrap = document.createElement("div");
     wrap.className = "go-chips";
-    wrap.setAttribute("data-chips", "");
+    var outer = wrap;
+    if (collapsed) {
+      // Folded behind one pill so suggestions don't push the answer away.
+      outer = document.createElement("details");
+      outer.className = "go-chipfold";
+      var sm = document.createElement("summary");
+      sm.className = "go-chip alt";
+      sm.textContent = (label || "Suggestions") + " (" + items.length + ")";
+      outer.appendChild(sm);
+      outer.appendChild(wrap);
+      outer.addEventListener("toggle", scrollDown);
+      label = null;
+    }
+    outer.setAttribute("data-chips", "");
     if (label) {
       var l = document.createElement("div");
       l.className = "go-chiplabel";
@@ -1201,7 +1220,7 @@
       });
       wrap.appendChild(b);
     });
-    $log.appendChild(wrap);
+    $log.appendChild(outer);
     scrollDown();
   }
 
@@ -2307,7 +2326,7 @@
         items.push({ label: f.question, style: "q",
                      onClick: function () { ask(f.question, { faqId: f.id }); } });
       });
-      if (items.length) chips(items, rel.length ? "Related questions" : null);
+      if (items.length) chips(items, rel.length ? "Related questions" : "Suggestions", true);
     });
   }
 
