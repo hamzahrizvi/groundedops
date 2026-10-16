@@ -4874,6 +4874,7 @@ try:
         "Rethink" control already uses - so no change to the pipeline is
         needed. The MODEL NAME comes from the environment, never from the
         request, so a browser cannot select an expensive model.
+        The provider is the Advanced role's, and only in api mode (llm.effort_model).
         """
         req = QueryRequest(
             q=q,
@@ -4883,14 +4884,15 @@ try:
             faq_id=faq_id,
             skip_faq=skip_faq,
         )
-        if model_env:
-            forced = os.getenv(model_env, "").strip()
-            if forced:
-                req.force_provider = os.getenv("ONLINE_PROVIDER", "deepseek")
-                req.force_model = forced
-                # An effort level, not a console "Rethink": the pipeline
-                # keeps its retries and escalation (see QueryRequest).
-                req.forced_by_effort = True
+        # The provider follows the mode and the Advanced role, never
+        # ONLINE_PROVIDER: in local mode nothing is forced (D-20261016-05).
+        import llm
+        forced = llm.effort_model(model_env)
+        if forced:
+            req.force_provider, req.force_model = forced
+            # An effort level, not a console "Rethink": the pipeline
+            # keeps its retries and escalation (see QueryRequest).
+            req.forced_by_effort = True
         if top_k:
             req.top_k = int(top_k)
 

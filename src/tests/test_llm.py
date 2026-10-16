@@ -14,6 +14,7 @@ the role="reasoning" chain never appeared to reach deepseek within the
 client's request timeout.
 """
 
+import os
 from unittest.mock import patch
 
 import llm
@@ -409,3 +410,26 @@ def test_the_verifier_and_selection_calls_are_judgements():
     assert "judging() if _think" in inspect.getsource(main._llm_verified)
     assert "_needs_judgement(question, answer)" in inspect.getsource(main._llm_verified)
     assert inspect.getsource(main.query).count("with judging():") >= 1
+
+
+# D-20261016-05: the deep effort level's forced model.
+def test_deep_effort_in_local_mode_forces_nothing_so_it_stays_local():
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": "deepseek-v4", "ONLINE_PROVIDER": "deepseek"}),          roles({"default": "openai"}):
+        runtime_config.set_generation_mode("local")
+        try:
+            assert llm.effort_model("ONLINE_DEEP_MODEL") is None
+            assert "deepseek" not in llm.outside_providers()
+        finally:
+            runtime_config.set_generation_mode("api")
+
+
+def test_deep_effort_in_api_mode_uses_the_advanced_role_not_online_provider():
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": "claude-opus-x", "ONLINE_PROVIDER": "deepseek"}):
+        with roles({"default": "openai", "advanced": "anthropic"}):
+            assert llm.effort_model("ONLINE_DEEP_MODEL") == ("anthropic", "claude-opus-x")
+            assert "anthropic" in llm.outside_providers()
+        with roles({"default": "openai"}):
+            assert llm.effort_model("ONLINE_DEEP_MODEL") == ("openai", "claude-opus-x")
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}):
+        assert llm.effort_model("ONLINE_DEEP_MODEL") is None
+    assert llm.effort_model(None) is None
