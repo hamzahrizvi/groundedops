@@ -612,7 +612,7 @@ _VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send
 
 The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
 
-Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label,.
+Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label.
 
 Judge two things separately.
 
