@@ -23,6 +23,14 @@ CITE = re.compile(r"(?i)\b(page|p\.)\s*\d+|\.pdf\b")
 def norm(s): return " ".join((s or "").lower().split())
 
 
+def clamp_refusal(c, g, systems):
+    """Only a case expected "rejected" can earn correct_refusal; elsewhere it is a safe_decline worth <= 1."""
+    for s in systems:
+        if isinstance(g.get(s), dict) and c.get("expected") != "rejected" and g[s].get("verdict") == "correct_refusal":
+            g[s] = {**g[s], "verdict": "safe_decline", "score": min(g[s].get("score", 1), 1)}
+    return g
+
+
 def under(path, root):
     p, r = os.path.realpath(path), os.path.realpath(root)
     return p == r or p.startswith(r + os.sep)
@@ -146,6 +154,10 @@ def selftest():
         assert f["citation_rate"] == .5 and f["median_s"] == 2, f
         assert f["gap_vs_sys_normal"]["points"] == -33.3, f   # d = [-2, 0]
         assert r["systems"]["sys_normal"]["by_type"] == {"x": {"right": 1, "half": 1}}, r
+    g = clamp_refusal({"expected": "answered"}, {"sys_normal": sc("correct_refusal", 3)}, ["sys_normal"])
+    assert g["sys_normal"] == sc("safe_decline", 1), g
+    g = clamp_refusal({"expected": "rejected"}, {"sys_normal": sc("correct_refusal", 3)}, ["sys_normal"])
+    assert g["sys_normal"] == sc("correct_refusal", 3), g
     print("selftest ok")
 
 
