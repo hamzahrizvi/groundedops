@@ -912,7 +912,7 @@ const DEPT_KEY = {customer:"customer", po:"product-owner", dev:"dev", security:"
 function cardNow(c){
   const who = /^(proposed|deferred)$/.test(c.stage) ? "po"
     : /^(approved, queued|sent back, rebuilding|built, waiting for the check|check failed)$/.test(c.stage) ? c.assigned : null;
-  return who && DEPT_KEY[who] && hired(who) ? {key: DEPT_KEY[who], dept: nameOf(who), why: c.title} : null;
+  return who && DEPT_KEY[who] && hired(who) ? {key: DEPT_KEY[who], dept: nameOf(who), why: c.title, item: c.id} : null;
 }
 function renderBoards(){
   const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
@@ -1429,7 +1429,7 @@ function runNowBtn(m, label = "Run now"){
   go.title = "Start this at the next hourly check, past the budget pace or a hold. The lab spending cap and the 5-hour limit still apply.";
   go.addEventListener("click", async () => {
     go.disabled = true; go.textContent = "Sending…";
-    try { await decide(m.key, "run_now", `Run now: ${m.dept} (${m.why})`, m.dept); go.textContent = "Sent: starts at the next check"; }
+    try { await decide(m.key, "run_now", `Run now: ${m.dept} (${m.why})`, m.dept, m.item ? {item: m.item} : {}); go.textContent = "Sent: starts at the next check"; }
     catch(e){ go.disabled = false; go.textContent = label; go.title = writeError(e); }
   });
   return go;
@@ -1560,9 +1560,9 @@ function openItem(id){
   openPop(title, nodes);
 }
 const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on", cap:"Lab cap", mode:"Work mode", every:"Next run"};
-async function decide(id, choice, note, title){
+async function decide(id, choice, note, title, extra = {}){
   if(!live.db) throw {code:"no_db"};
-  await live.db.collection("ceo_inbox").add({id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
+  await live.db.collection("ceo_inbox").add({...extra, id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
 }
 const writeError = e => e && e.code === "invalid_argument" ? "This view can't send decisions: it needs edit access to the page." :
   e && e.code === "no_db" ? "The office isn't connected in this view, so nothing was sent." : "Couldn't send it. Try again in a moment.";

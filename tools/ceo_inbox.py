@@ -15,7 +15,8 @@ from the decisions file, and a note is quoted so it can never read as a decision
   off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
   run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
-           (office_next.py); for customer it also files a refresh request, so a held-back test run goes first
+           (office_next.py); for customer it also files a refresh request, so a held-back test run goes first;
+           with item (a Plan board card) for the product owner, also a note naming that item, so the run decides it
   run_all  OPS/state/run_now/all: for one lane tick every department with work waiting skips the budget pace and holds
   reassign "- Reassigned: <note>" + approved: an approved or blocked item moves to another department
            (note = dev, customer, security, audit, rnd or marketing), e.g. a work order its department could not do
@@ -111,6 +112,17 @@ def apply(ops, folder, now=None):
             open(os.path.join(ops, "state", "run_now", i), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
             if i == "customer" and "customer" not in claims(ops):
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
+            item = str(d.get("item") or "")
+            NL2 = chr(10) * 2
+            if i == "product-owner" and item in items:   # a card's "Do it now": without its id the run saw nothing new (2026-10-16)
+                os.makedirs(os.path.join(ops, "inbox", "ceo"), exist_ok=True)
+                path = os.path.join(ops, "inbox", "ceo", f"{now:%Y%m%d-%H%M%S}-{re.sub(r'[^A-Za-z0-9-]', '', doc_id)[:40]}.md")
+                open(path, "w", encoding="utf-8").write(
+                    f"# A note from the CEO about {item} ({items[item]['title']})" + NL2 + f"Sent from the office page, {stamp}: the CEO pressed"
+                    f" \"Do it now\" on this card, now {stages[item]}. Decide it in this run: approve it if a slot is free and"
+                    " nothing blocks it, or say in the report exactly what stops it and what would unblock it." + chr(10))
+                out.append(f"APPLIED {doc_id} run_now {i} for {item}")
+                continue
             out.append(f"APPLIED {doc_id} run_now {i}")
             continue
         if choice in ("mode", "every"):   # the work mode and "Next run" buttons (office_next.py work_mode, every)
@@ -233,6 +245,9 @@ def selftest():
         assert got[:2] == ["APPLIED 18 reassign D-20261009-02 dev", "SKIPPED 19 reassign does not apply to D-20261009-02 (approved, queued)"], got
         it = decisions(ops)["D-20261009-02"]
         assert it["assigned"] == "dev" and stage_of(it, ops, set(), set()) == "approved, queued", it
+        row("24", id="product-owner", choice="run_now", item="D-20261008-01")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 24 run_now product-owner for D-20261008-01"]
+        assert "D-20261008-01" in open(glob.glob(os.path.join(ops, "inbox", "ceo", "*-24.md"))[0], encoding="utf-8").read()
         row("16", id="security", choice="run_now")
         row("17", id="../x", choice="run_now")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 16 run_now security", "SKIPPED 17 run_now: no such department '../x'"]
