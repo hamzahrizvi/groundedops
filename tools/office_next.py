@@ -67,6 +67,7 @@ MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged item
 # More in flight means more lanes run side by side: two Dev builds, or two copies of one department on different orders.
 MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2)}
 MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, merges are serialized
+RUN_ALL = 1800        # ponytail: "Run all now" lasts 30 min, about one tick of every lane; no per-tick bookkeeping
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -319,7 +320,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         out.append(("diary", "you asked for it now", "diary"))
     elif days:
         out.append(("diary", f"diary for {', '.join(str(d) for d in days[:3])}" + (" and more" if len(days) > 3 else ""), "diary"))
-    for dept in sorted(run_now(ops) - {d for d, _, _ in out} - {"dev"}):   # "Do it now" with nothing due (Dev needs a work order)
+    for dept in sorted(run_now(ops) - {d for d, _, _ in out} - {"dev", "all"}):   # "Do it now" with nothing due (Dev needs a work order)
         out.append((dept, "you asked for it now", dept))
     if capped:   # a blind run spends lab money too
         out = [("customer", capped, None) if x[0] == "customer" else x for x in out]
@@ -357,10 +358,11 @@ def holds(ops, now):
 
 def run_now(ops):
     """Departments the CEO pressed "Run now" for (OPS/state/run_now/<dept>, via tools/ceo_inbox.py): their next
-    start skips the budget pace and a hold. A press lapses after a day, and taking the work uses it up."""
+    start skips the budget pace and a hold. A press lapses after a day, and taking the work uses it up.
+    "all" (the page's "Run all now") lifts both for every department with work waiting, for RUN_ALL seconds."""
     d = os.path.join(ops, "state", "run_now")
     return {n for n in (os.listdir(d) if os.path.isdir(d) else [])
-            if time.time() - os.path.getmtime(os.path.join(d, n)) < 86400}
+            if time.time() - os.path.getmtime(os.path.join(d, n)) < (RUN_ALL if n == "all" else 86400)}
 
 
 def is_off(ops):
@@ -387,7 +389,7 @@ def entries(ops, repo, five, week, resets, now, taken):
             stop = "held (OPS/state/hold)" if "merge" in held else f"another merge is running{lane}" if lane else None
             out.append((f"WAIT merge {why}  {stop}" if stop else f"MERGE {why}  gate PASS, READY TO MERGE, Security CLEAR", key, not stop))
             continue
-        pressed = dept in forced and not is_off(ops)   # "Run now": skips a hold and the budget, not the 5-hour limit itself
+        pressed = (dept in forced or "all" in forced) and not is_off(ops)   # "Run now": skips a hold and the budget, not the 5-hour limit itself
         stop = ("held (OPS/state/hold)" if dept in held and not pressed else f"already running{lane}" if lane else
                 f"{mode[1]} builds already running" if dept == "dev" and building >= mode[1] else
                 f"5-hour window at {five}%" if pressed and five >= 90 else
@@ -517,6 +519,10 @@ def selftest():
         w("state/run_now/audit")
         assert any(x.startswith("RUN  groundedops-office-audit  you asked for it now") for x in plan(ops, ops, 11, 38, resets, now)), "Do it now, nothing due"
         os.remove(os.path.join(ops, "state", "run_now", "audit"))
+        w("state/run_now/all")
+        p = plan(ops, ops, 60, 38, resets, now)
+        assert p[0].startswith("RUN  groundedops-office-customer") and not any("you asked for it now" in x for x in p), "Run all lifts the budget, adds no work"
+        os.remove(os.path.join(ops, "state", "run_now", "all"))
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (time.time() + 10, time.time() + 10))
         assert not any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "a run finished after the press answers it"
         os.remove(os.path.join(ops, "state/refresh_request"))

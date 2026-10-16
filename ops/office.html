@@ -295,6 +295,13 @@ button{font:inherit;color:inherit}
 .btn.go{background:var(--accent);color:var(--accent-ink)}
 #everySel{font:13px var(--display);letter-spacing:.04em;padding:6px 8px;border:2px solid var(--ink);border-radius:3px;background:var(--surface);color:var(--ink);max-width:100%}
 .btn.pon{background:var(--ok);color:#fff} .btn.poff{background:var(--crit);color:#fff}
+.pill{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--ink);background:var(--surface);color:var(--ink);padding:3px 11px 3px 8px;border-radius:999px;cursor:pointer;font-family:var(--display);font-size:11px;letter-spacing:.05em;transition:background .15s,color .15s}
+.pill::before{content:"";width:0;height:0;border-left:7px solid currentColor;border-top:4.5px solid transparent;border-bottom:4.5px solid transparent}
+.pill:hover:not(:disabled){background:var(--ink);color:var(--surface)}
+.pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pill:disabled{opacity:.55;cursor:default}
+.pill.sent::before{border:0;width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.lanehead{display:flex;justify-content:flex-end;margin-top:10px}
 .btn:disabled{opacity:.55;cursor:default;transform:none}
 dialog.pop{border:2px solid var(--ink);border-radius:4px;background:var(--surface);color:var(--ink);padding:0;width:min(580px,calc(100vw - 32px));max-height:min(88vh,780px);box-shadow:6px 6px 0 var(--ink)}
 dialog.pop[open]{display:flex;flex-direction:column}
@@ -463,6 +470,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <p class="lead" id="moveLead">Waiting for the office's first status report. It comes with the next hourly check.</p>
         <ul class="mlist" id="moveList"></ul>
         <div class="actions"><button class="link" id="whyBtn" type="button">Ask the product owner why</button></div>
+        <div class="lanehead"><button class="pill" id="runAllBtn" type="button" hidden>Run all now</button></div>
         <ul class="mlist" id="laneClock" aria-label="When each lane checks next"></ul>
         <p class="small" id="moveWhen"></p>
       </section>
@@ -1376,7 +1384,7 @@ function renderMove(){
     if(m.can_run && live.available && !b.off) d.append(runNowBtn(m));
     li.append(s, d); return li; }));
   $("moveWhen").textContent = `Checked at ${fmtTime(at)}.` + (b.usage ? ` Claude usage: ${b.usage.five}% of the 5-hour limit, ${b.usage.week}% of the week.` : "");
-  renderLanes();
+  renderLanes(); renderRunAll();
 }
 /* each lane's next check, counting down: the cron its scheduled task has (tools/office_next.py lane_cron makes only
    "m,m,.. * * * *" and "m a-23/n * * *"), read in this computer's time, which is the time the tasks run in */
@@ -1400,6 +1408,19 @@ function renderLanes(){
     return li; }));
 }
 setInterval(renderLanes, 1000);
+/* "Run all now": every department with work waiting starts at the next lane check, past the budget pace and holds, for 30 min (tools/ceo_inbox.py run_all) */
+function renderRunAll(){
+  const b = $("runAllBtn"), sent = live.inbox.find(r => r.choice === "run_all" && r.status === "new");
+  b.hidden = !live.available || !!(live.brief && live.brief.off);
+  b.disabled = !!sent; b.classList.toggle("sent", !!sent);
+  b.textContent = sent ? "Sent: next check" : "Run all now";
+  b.title = "Start everything waiting at the next lane check, past the budget pace and holds, for 30 minutes. The lab cap and the 5-hour limit still apply.";
+}
+$("runAllBtn").addEventListener("click", async () => {
+  const b = $("runAllBtn"); b.disabled = true; b.textContent = "Sending…";
+  try { await decide("office", "run_all", "Run all now", "Office"); b.classList.add("sent"); b.textContent = "Sent: next check"; }
+  catch(e){ b.disabled = false; b.textContent = "Run all now"; b.title = writeError(e); }
+});
 
 /* "Run now": the CEO lifts a budget, hold or fixes-in-flight wait for one start (tools/ceo_inbox.py run_now) */
 function runNowBtn(m, label = "Run now"){

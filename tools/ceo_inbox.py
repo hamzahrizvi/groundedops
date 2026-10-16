@@ -16,6 +16,7 @@ from the decisions file, and a note is quoted so it can never read as a decision
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
   run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
            (office_next.py); for customer it also files a refresh request, so a held-back test run goes first
+  run_all  OPS/state/run_now/all: for 30 minutes every department with work waiting skips the budget pace and holds
   reassign "- Reassigned: <note>" + approved: an approved or blocked item moves to another department
            (note = dev, customer, security, audit, rnd or marketing), e.g. a work order its department could not do
   mode     OPS/state/mode: easy, high or ultra; auto removes it (office_next.py picks from the weekly allowance left)
@@ -96,6 +97,11 @@ def apply(ops, folder, now=None):
                 os.makedirs(os.path.join(ops, "state"), exist_ok=True)
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
                 out.append(f"APPLIED {doc_id} refresh")
+            continue
+        if choice == "run_all":   # the page's "Run all now" pill (office_next.py RUN_ALL)
+            os.makedirs(os.path.join(ops, "state", "run_now"), exist_ok=True)
+            open(os.path.join(ops, "state", "run_now", "all"), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
+            out.append(f"APPLIED {doc_id} run_all")
             continue
         if choice == "run_now":   # "Run now" on a waiting department in the office page's Moving panel
             if i not in COST:
