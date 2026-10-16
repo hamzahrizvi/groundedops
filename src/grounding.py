@@ -249,10 +249,18 @@ def _scoring_premises(unit: str, premises: list[str]) -> list[str]:
     return cand
 
 
+def _best_entailment(model, col: int, unit: str, premises: list[str]) -> float:
+    """Highest entailment of `unit` over the premises check_grounding scores it on."""
+    cand = _scoring_premises(unit, premises)
+    logits = model.predict([(p, unit) for p in cand], apply_softmax=True)
+    return float(max(logits[:, col]))
+
+
 def check_grounding(
     answer: str,
     context_chunks: list[dict],
     threshold: float = 0.35,
+    extra_chunks: list[dict] | None = None,
 ) -> tuple[bool, float | None]:
     """
     Returns (is_grounded, min_entailment_score).
@@ -262,6 +270,13 @@ def check_grounding(
     A verifier outage is distinct from an unsupported answer: it returns
     ``(False, None)``. Callers must treat that as a temporary verification
     failure, not as permission to serve an unverified answer.
+
+    extra_chunks (D-20261015-02): more text the answer cites (the rest of its
+    cited pages). A unit is scored on context_chunks first, as before; only a
+    unit under the threshold is scored again on context + extra, and the
+    higher score counts. So extra text can rescue a unit but never sink one
+    that passed: extra premises can push a ranked premise out of the
+    MAX_PREMISES cut.
     """
     try:
         model = _get_nli_model()
@@ -282,6 +297,10 @@ def check_grounding(
         premises = _premises(context_texts)
         if not premises:
             return False, 0.0
+        _have = set(premises)
+        extra = [p for p in _premises([c["text"] if isinstance(c, dict) else str(c)
+                                       for c in (extra_chunks or [])])
+                 if p not in _have]
 
         col = _entailment_index()
         min_score = 1.0
@@ -297,10 +316,10 @@ def check_grounding(
         # ~8s scoring the rest. (Batching every pair into one predict()
         # was measured first: same verdict, no gain; the cost is per pair.)
         for unit in units:
-            cand = _scoring_premises(unit, premises)
-            logits = model.predict([(p, unit) for p in cand],
-                                   apply_softmax=True)
-            best_entailment = float(max(logits[:, col]))
+            best_entailment = _best_entailment(model, col, unit, premises)
+            if best_entailment < threshold and extra:
+                best_entailment = max(best_entailment, _best_entailment(
+                    model, col, unit, premises + extra))
             min_score = min(min_score, best_entailment)
             if min_score < threshold:
                 break

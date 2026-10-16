@@ -612,7 +612,7 @@ _VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send
 
 The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
 
-Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label, and not supported when it gives a product a value from another product's passage.
+Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label,.
 
 Judge two things separately.
 
@@ -3979,16 +3979,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
 
     # THE VERIFIERS READ THE PAGES THE ANSWER CITES (D-20261015-02). Sources
     # name whole pages; the checks saw only the ranked fragments of them.
-    # Citations and the number-match rescue keep top_chunks.
-    _verify_chunks = top_chunks
+    # NLI scores them only where the passages fail (check_grounding extra_chunks);
+    # citations and the number-match rescue keep top_chunks.
+    _cited = []
     if top_chunks and not generation_failed:
         try:
             from retrieval_db import cited_pages
-            _verify_chunks = top_chunks + [
-                _strip_breadcrumb(c) for c in
-                cited_pages(top_chunks, budget=CONTEXT_K * CHUNK_CHAR_CAP)]
+            _cited = [_strip_breadcrumb(c) for c in
+                      cited_pages(top_chunks, budget=CONTEXT_K * CHUNK_CHAR_CAP)]
         except Exception as _exc:
             logger.warning(f"cited pages skipped: {_exc}")
+    _verify_chunks = top_chunks + _cited
     _shown = (f"{len(top_chunks)} passage(s) + "
               f"{len(_verify_chunks) - len(top_chunks)} from the cited pages, "
               f"{sum(len(c.get('text') or '') for c in _verify_chunks)} chars")
@@ -4107,7 +4108,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     else:
         is_grounded, grounding_score = _timed(
             "verify", check_grounding,
-            answer, _verify_chunks, threshold=GROUNDING_THRESHOLD
+            answer, top_chunks, threshold=GROUNDING_THRESHOLD, extra_chunks=_cited
         )
         verifier_unavailable = grounding_score is None
         # NLI fails on table-shredded text; give short numeric answers a
@@ -4189,7 +4190,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             else:
                 is_grounded, grounding_score = _timed(
                     "verify", check_grounding,
-                    answer, _verify_chunks, threshold=GROUNDING_THRESHOLD
+                    answer, top_chunks, threshold=GROUNDING_THRESHOLD, extra_chunks=_cited
                 )
                 verifier_unavailable = grounding_score is None
                 if (not is_grounded and not verifier_unavailable
@@ -4250,8 +4251,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 break
             if is_template_leak(_text):
                 continue
-            _ok, _score = _timed("verify", check_grounding, _text, _verify_chunks,
-                                 threshold=GROUNDING_THRESHOLD)
+            _ok, _score = _timed("verify", check_grounding, _text, top_chunks,
+                                 threshold=GROUNDING_THRESHOLD, extra_chunks=_cited)
             if _score is None:
                 verifier_unavailable = True
                 break
