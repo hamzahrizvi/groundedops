@@ -164,6 +164,18 @@ def test_a_limit_reached_says_so_instead_of_blaming_the_connection():
     _page.wait_for_selector(".go-b.bot:has-text('reached its limit')")
     assert _page.locator("text=check your connection").count() == 0
     assert _page.locator("button:has-text('Start a new chat')").count() == 1
+    assert _page.locator("button:has-text('Email support')").count() == 0
+
+
+def test_a_daily_allowance_stop_offers_a_route_to_a_person():
+    stream_body[0] = _sse(("error", {"status": 429, "detail": {
+        "error": "quota_exceeded", "reason": "quota",
+        "message": "You have used your allowance for today. It resets in 24 hours. "
+                   "For help with your question, contact our team."}}))
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-b.bot:has-text('contact our team')")
+    assert _page.locator("button:has-text('Email support')").count() == 1
+    assert _page.locator("button:has-text('Start a new chat')").count() == 0
 
 
 def test_the_contact_form_gives_a_reference():

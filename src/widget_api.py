@@ -625,7 +625,8 @@ def register(app, answer_query, draft_enquiry=None):
                 "message": ("The assistant has reached its limit for today. "
                             "Please try again tomorrow, or contact our team."
                             if gate["reason"] == "global_quota" else
-                            "You have used your allowance for today. It resets in 24 hours."),
+                            "You have used your allowance for today. It resets in 24 hours. "
+                            "For help with your question, contact our team."),
             })
 
         started = time.time()
