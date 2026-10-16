@@ -2666,6 +2666,23 @@ def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
     return result
 
 
+def _send_none_reply(reply: dict, q: str, gap_scope, request_id,
+                     start_total: float) -> dict:
+    """Serve the retrieval gate's "nothing matched" reply: record the gap
+    (a rejection only; asking which product is a working conversation),
+    log it, stamp the time. Shared by the early return and by a product
+    chat whose whole-manual read (self_route) did not answer either."""
+    total_time = time.time() - start_total
+    reply = dict(reply, response_time_ms=round(total_time * 1000),
+                 response_time=round(total_time, 3))
+    if reply["role"] == "rejected":
+        faq_store.record_gap(q, gap_scope, reason=reply["reason"])
+    log_interaction(q, reply["answer"], reply["role"], "none", [],
+                    grounding_score=None, flagged=False, request_id=request_id,
+                    timing={"total_time": total_time})
+    return reply
+
+
 def query(payload: QueryRequest, x_user_id: str | None = None):
     # Answering needs the whole retrieval pipeline, but not the spec index:
     # sales.get_index is consulted lazily further down and builds itself if
@@ -3358,6 +3375,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _checklist:
             return _checklist
 
+    # Set when a product chat's "nothing matched" is held back to read the
+    # whole manual first (self_route, below); holds the reply to serve if
+    # that read does not answer either.
+    _wm_none = None
     # ── No relevant content at all ───────────
     if confidence == "none":
         total_time = time.time() - start_total
@@ -3451,14 +3472,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # so the console's "People asked, we could not answer" list
             # reflects reality. The clarify branches above are deliberately
             # NOT recorded: asking which product was meant is a working
-            # conversation, not a gap.
-            faq_store.record_gap(q, payload.product or payload.category,
-                                 reason=reason)
+            # conversation, not a gap. (_send_none_reply records it.)
 
-        log_interaction(q, answer, role_out, "none", [], grounding_score=None,
-                        flagged=False, request_id=request_id,
-                        timing={"total_time": total_time})
-        return {
+        _none_reply = {
             "answer": answer,
         "response_time_ms": round(total_time * 1000),
             "model": "none",
@@ -3486,6 +3502,22 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "sources": [],
             "response_time": round(total_time, 3),
         }
+        _none_scope = payload.product or payload.category
+        # SELF_ROUTE (D-20261010-17): in a product chat a "nothing matched"
+        # usually means the passages missed, not the manual (11 of 41
+        # counted declines). Read the product's whole manual once before
+        # saying so; the reply above is served if that does not answer.
+        _wm_keys = (sorted(_both_named) if len(_both_named) >= 2
+                    else [payload.product] if payload.product else [])
+        if (role_out == "rejected" and _wm_keys
+                and _unscoped_verdict != "other"
+                and _policy_setting("self_route", True)
+                and not (payload.force_provider and payload.force_model
+                         and not payload.forced_by_effort)):
+            _wm_none = _none_reply
+        else:
+            return _send_none_reply(_none_reply, q, _none_scope, request_id,
+                                    start_total)
 
     # ── Ambiguous: ask a clarifying question instead of guessing ──
     # (helpers for product resolution live at module level; see
@@ -3581,7 +3613,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         confidence = "ambiguous"
 
     # The product came from the wording ("my nv4000 is showing an error").
-    if _symptom_open and payload.product:
+    if _symptom_open and payload.product and not _wm_none:
         _checklist = _vague_fault_checklist(q, payload, results, session_id,
                                             request_id, start_total,
                                             resolved_query, top_score)
@@ -3642,7 +3674,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         extraction_time = time.time() - t2
         ptrace.mark("route", role)
 
-        if extracted and role == "extract":
+        if extracted and role == "extract" and not _wm_none:
             total_time = time.time() - start_total
             sources = _build_sources(results)
             ptrace.mark("extract", "checklist copied from the document")
@@ -3855,27 +3887,49 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # so the provider caches it. The ranked passages stay the numbered
     # <context>. A comparison reads each named product's documents, sorted
     # so the block does not depend on the order the question named them.
+    def _read_bundle(keys: list) -> tuple[list[dict], str]:
+        # A failed read is "no bundle": the turn goes on as if the product
+        # had none (self_route then serves the refusal it would have served
+        # anyway) instead of failing.
+        try:
+            from retrieval_db import product_bundle, PERFORMANCE_BUDGET_CHARS
+            _ids: set = set()
+            bundle: list[dict] = []
+            for _k in keys:
+                for c in product_bundle(_k, _retrieved,
+                                        budget=PERFORMANCE_BUDGET_CHARS // len(keys),
+                                        excluded=EXCLUDED_SOURCES):
+                    if c.get("id") not in _ids:
+                        _ids.add(c.get("id"))
+                        bundle.append(c)
+            # Flash-code tables read out row by row here too: the bundle
+            # reached the model raw, and it mispaired the NV4000 conveyor
+            # codes (N4-21).
+            import tables as _tables
+            return bundle, "\n\n".join(
+                f"[{c.get('source')} p{c.get('page')}]\n{_tables.spell_out(c.get('text') or '')}"
+                for c in bundle)
+        except Exception as exc:
+            logger.warning(f"whole-manual read skipped: {exc}")
+            return [], ""
+
+    def _self_route_done(outcome: str) -> None:
+        logger.info("self_route %s: %s", outcome, redact(resolved_query))
+        ptrace.set_meta(self_route=outcome)
+
     _bundle: list[dict] = []
     _library = ""
     _perf = (sorted(_both_named) if len(_both_named) >= 2
              else [payload.product] if payload.product else [])
-    if _perf and _policy_setting("performance_mode", False):
-        from retrieval_db import product_bundle, PERFORMANCE_BUDGET_CHARS
-        _ids: set = set()
-        for _k in _perf:
-            for c in product_bundle(_k, _retrieved,
-                                    budget=PERFORMANCE_BUDGET_CHARS // len(_perf),
-                                    excluded=EXCLUDED_SOURCES):
-                if c.get("id") not in _ids:
-                    _ids.add(c.get("id"))
-                    _bundle.append(c)
-        # Flash-code tables read out row by row here too: the bundle reached
-        # the model raw, and it mispaired the NV4000 conveyor codes (N4-21).
-        import tables as _tables
-        _library = "\n\n".join(
-            f"[{c.get('source')} p{c.get('page')}]\n{_tables.spell_out(c.get('text') or '')}"
-            for c in _bundle)
-        ptrace.mark("performance", f"{len(_bundle)} passages from {_perf}")
+    _perf_on = _policy_setting("performance_mode", False)
+    if _perf and (_perf_on or _wm_none):
+        _bundle, _library = _read_bundle(_perf)
+        ptrace.mark("performance" if _perf_on else "widen",
+                    f"{len(_bundle)} passages from {_perf}")
+    if _wm_none and not _library:
+        _self_route_done("no_bundle")
+        return _send_none_reply(_wm_none, q, _none_scope, request_id,
+                                start_total)
     _names_now = _product_names()
     context = "\n\n".join(
         f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}]\n"
@@ -3968,6 +4022,38 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             output, raw_text = _again, _again_text
             answer = normalize_markdown_tables(_strip_meta(_strip_preamble(raw_text)))
             _bundle, _library, prompt = [], "", _plain
+    # SELF_ROUTE (D-20261010-17): A REFUSAL WITH PASSAGES IN HAND. 30 of 41
+    # counted declines had the product's manual cover the fact on pages the
+    # ranking missed. Ask once more with the product's whole manual
+    # attached; the answer is served only if every check below passes
+    # (restore point after the grounding retry), else this refusal stands.
+    _wm_first = None
+    if (_perf and not _library and not _wm_none and role != "rethink"
+            and not generation_failed and is_refusal(answer)
+            and _policy_setting("self_route", True)):
+        _wb, _wl = _read_bundle(_perf)
+        ptrace.mark("widen", f"{len(_wb)} passages from {_perf}")
+        if not _wb:
+            _self_route_done("no_bundle")
+        else:
+            _wprompt = build_answer_prompt(_hist, context, resolved_query,
+                                           library=_wl)
+            _wout = generate_with_fallback(role, _wprompt,
+                                           deepseek_api_key=deepseek_api_key,
+                                           api_keys=api_keys)
+            _wtext = ((_wout or {}).get("text") or "").strip()
+            if not _wtext or (_wout or {}).get("model") == "none":
+                _self_route_done("failed_checks")
+            elif is_refusal(_wtext):
+                _self_route_done("still_refused")
+            else:
+                _wm_first = {"output": output, "raw_text": raw_text,
+                             "answer": answer, "prompt": prompt,
+                             "top_chunks": top_chunks}
+                output, raw_text = _wout, _wtext
+                answer = normalize_markdown_tables(
+                    _strip_meta(_strip_preamble(raw_text)))
+                _bundle, _library, prompt = _wb, _wl, _wprompt
     llm_time = time.time() - t3
     # The checks and citations below read top_chunks; give them the bundle
     # passages this answer drew on. ponytail: picked from the first answer
@@ -4162,7 +4248,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _backup_provider = keystore.get_role(_esc_role) if _esc_role else None
     if (flagged and not verifier_unavailable and role != "rethink"
             and output.get("provider") in ("local", "none")
-            and _backup_provider):
+            and not (_wm_first or _wm_none) and _backup_provider):
         logger.warning(
             f"Flagged answer (grounding={grounding_score}, "
             f"template_leak={template_leak}, failed={generation_failed}) — "
@@ -4230,7 +4316,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # that we retrieved context at all and the model produced something we
     # could not verify.
     if (flagged and not verifier_unavailable and not generation_failed and top_chunks
-            and role != "rethink" and grounding_retries() > 0):
+            and role != "rethink" and grounding_retries() > 0
+            and not (_wm_first or _wm_none)):
         _max_retries = grounding_retries()
         for _attempt in range(1, _max_retries + 1):
             logger.info(
@@ -4276,6 +4363,30 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                     not isinstance(grounding_score, float)
                     or _score > grounding_score):
                 grounding_score = _score
+
+    # SELF_ROUTE restore point: a whole-manual answer is served only if it
+    # passed every check above. Otherwise the turn ends as it would have
+    # without the read: the first refusal, or the retrieval gate's reply.
+    if _wm_first or _wm_none:
+        if (flagged or template_leak or generation_failed or _not_mentioned
+                or is_refusal(answer)):
+            _self_route_done("still_refused" if is_refusal(answer)
+                             and not _not_mentioned else "failed_checks")
+            if _wm_none:
+                return _send_none_reply(_wm_none, q, _none_scope, request_id,
+                                        start_total)
+            answer, output, raw_text, prompt, top_chunks = (
+                _wm_first["answer"], _wm_first["output"],
+                _wm_first["raw_text"], _wm_first["prompt"],
+                _wm_first["top_chunks"])
+            _bundle, _library = [], ""
+            refusal, is_grounded, grounding_score = True, True, None
+            flagged = template_leak = generation_failed = False
+            verifier_unavailable = False
+            _not_mentioned = None
+            ground_via = "nli"
+        else:
+            _self_route_done("answered")
 
     # grounding_time is now ONLY the verification work (NLI, the lexical
     # rescue, the LLM verifier). escalation_time is the regeneration the
