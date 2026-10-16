@@ -45,10 +45,11 @@ def test_query_checks_the_cited_pages_but_cites_only_the_passages():
         "category": "", "rerank_score": 0.99,
     }
     sibling = dict(chunk, id="unit-2", text="USB 2.0 full speed.")
-    grounded, lexical = [], []
+    grounded, lexical, grounded_extra = [], [], []
 
     def _ground(ans, chunks, **k):
         grounded.extend(c["id"] for c in chunks)
+        grounded_extra.extend(c["id"] for c in (k.get("extra_chunks") or []))
         return (False, 0.1)
 
     def _lex(ans, chunks):
@@ -75,6 +76,6 @@ def test_query_checks_the_cited_pages_but_cites_only_the_passages():
         result = main.query(main.QueryRequest(
             q="Does the product support USB?", skip_faq=True))
 
-    assert "unit-2" in grounded
+    assert "unit-2" in grounded_extra and "unit-2" not in grounded
     assert "unit-1" in lexical and "unit-2" not in lexical
     assert all("unit-2" not in s.get("chunk_ids", []) for s in result["sources"])
