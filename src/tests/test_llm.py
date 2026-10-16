@@ -414,7 +414,8 @@ def test_the_verifier_and_selection_calls_are_judgements():
 
 # D-20261016-05: the deep effort level's forced model.
 def test_deep_effort_in_local_mode_forces_nothing_so_it_stays_local():
-    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": "deepseek-v4", "ONLINE_PROVIDER": "deepseek"}),          roles({"default": "openai"}):
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": "deepseek-v4", "ONLINE_PROVIDER": "deepseek"}), \
+         roles({"default": "openai"}):
         runtime_config.set_generation_mode("local")
         try:
             assert llm.effort_model("ONLINE_DEEP_MODEL") is None
