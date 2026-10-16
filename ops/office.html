@@ -180,6 +180,7 @@ button{font:inherit;color:inherit}
 .pivot td.g{text-align:left;white-space:normal;min-width:150px;cursor:pointer}
 .pivot th,.pivot td{min-width:76px}
 .pivot th:first-child,.pivot td.g{position:sticky;left:0;z-index:1;background:var(--surface);box-shadow:2px 0 0 var(--surface)}
+#pvTable tr:not(.drill)>:last-child:not(:first-child){position:sticky;right:0;z-index:1;background:var(--surface);box-shadow:-2px 0 0 var(--surface)}
 .pvbars{display:grid;grid-template-columns:minmax(110px,max-content) minmax(0,1fr) auto;gap:8px 10px;align-items:center;font-size:14px;font-variant-numeric:tabular-nums}
 .pvbars .bl{cursor:pointer} .pvbars .bl:hover{text-decoration:underline}
 .pvbars .bt{position:relative;height:22px;background:var(--bg);border-radius:3px;cursor:pointer}
