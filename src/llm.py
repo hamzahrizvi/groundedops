@@ -272,6 +272,21 @@ def _chain_for(role: str) -> list[tuple[str, str]]:
         return chain
     return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
 
+
+def outside_providers() -> list[str]:
+    """Provider ids that may receive a visitor's text: what _chain_for can
+    call in api mode (default, advanced, backup) plus the backup escalation
+    in main.py, which runs in any mode. Read live, so the widget's notice
+    (widget_config.ai_notice) follows the API keys page."""
+    import keystore
+    from runtime_config import get_generation_mode
+    out = []
+    if get_generation_mode() == "api":
+        out += [_provider_for_job("default"), _provider_for_job("advanced")]
+    out.append(keystore.get_role("backup"))
+    return [p for i, p in enumerate(out) if p and p not in out[:i]]
+
+
 # Models offered for the manual "rethink with a different model" feature.
 # The manual "Re-answer with another model" menu. deepseek was pinned to
 # "deepseek-chat" here, retired by DeepSeek on 24 July 2026 -- the FOURTH copy

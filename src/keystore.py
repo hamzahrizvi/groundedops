@@ -33,6 +33,22 @@ _PROVIDER_LABEL = {
     "anthropic": "Claude",
 }
 
+# Who processes a visitor's text, and where, for the widget's fixed notice
+# (D-20261015-10). Keyed by provider id, never operator text.
+_PROVIDER_PROCESSOR = {
+    "deepseek": "DeepSeek (China)",
+    "openai": "OpenAI (USA)",
+    "anthropic": "Anthropic (USA)",
+}
+
+
+def processor_label(provider: str) -> str:
+    """'OpenAI (USA)'. An openai slot pointed at another base URL (the on-prem
+    gateway) is not OpenAI, and its location is not known here."""
+    if kind_label(provider) == "OpenAI-compatible":
+        return "an OpenAI-compatible service"
+    return _PROVIDER_PROCESSOR.get(provider, provider)
+
 # Overridable so tests can point this at a scratch file instead of the real
 # .env — see _harness.py. Resolved lazily (a function, not a constant) so
 # a test can set the env var before the first call.

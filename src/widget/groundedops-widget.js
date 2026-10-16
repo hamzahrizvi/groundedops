@@ -98,6 +98,10 @@
     // French subdomain). Falls back to the page's own declared language,
     // then the browser's, when not set -- see detectedLanguage().
     language: attr("data-language", ""),
+    // D-20261015-10: replaced by the server's live line from /widget/config.
+    // Deliberately no data- attribute: the embed must not be able to change it.
+    aiNotice: "AI assistant: answers come from our manuals and can be wrong.",
+    privacyUrl: "",
   };
 
   // The anonymous FAQ-only path uses this to match same-language curated
@@ -129,6 +133,8 @@
     if (d.name && !hasAttr("data-agent-name")) cfg.agent = d.name;
     if (d.name && !hasAttr("data-title")) cfg.title = d.name;
     if (d.welcome && !hasAttr("data-welcome")) cfg.welcome = d.welcome;
+    if (d.ai_notice) cfg.aiNotice = d.ai_notice;
+    cfg.privacyUrl = /^https?:\/\//i.test(d.privacy_url || "") ? secureUrl(d.privacy_url) : "";
     if (d.color && !hasAttr("data-accent")) {
       cfg.accent = d.color;
       // The stylesheet bakes the accent in as `.go-w{--a:...}`; an inline
@@ -332,6 +338,8 @@
     ".go-mav img{width:100%;height:100%;object-fit:cover}" +
     ".go-b{max-width:78%;min-width:0;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}" +
     ".go-b.bot{background:var(--pane);border-bottom-left-radius:5px}" +
+    ".go-notice{margin:-4px 0 0 37px;font-size:12px;line-height:1.4;color:var(--mut)}" +
+    ".go-notice a{color:var(--a)}" +
     // Markdown blocks. The bubble sets white-space:pre-wrap for plain text,
     // which would add phantom blank lines around real block elements, so
     // rendered markdown resets it to normal.
@@ -1073,6 +1081,25 @@
     save();
   }
 
+  // D-20261015-10: who answers, how long questions are kept, who processes
+  // them. Not a message: kept out of state.messages so it is never sent back
+  // as conversation history, and not a .go-b bubble.
+  function showNotice() {
+    var p = document.createElement("p");
+    p.className = "go-notice";
+    p.textContent = cfg.aiNotice;
+    if (cfg.privacyUrl) {
+      var a = document.createElement("a");
+      a.href = cfg.privacyUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Privacy notice";
+      p.appendChild(document.createTextNode(" "));
+      p.appendChild(a);
+    }
+    $log.appendChild(p);
+  }
+
   // Turns a reset_at epoch-seconds (quota.py's WINDOW_SECONDS boundary)
   // into "It resets at 3:00 PM." / "It resets tomorrow at 3:00 PM." so a
   // quota message tells the visitor when to come back instead of just
@@ -1295,6 +1322,7 @@
     renderScopeBar();
     lockComposer();
     say(cfg.welcome);
+    showNotice();
     // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
     // quota fetch that can resolve AFTER these two synchronous calls would
     // already have put askIntent()'s menu on screen. The visible effect was
@@ -1948,6 +1976,7 @@
         (last ? ', and your last question was "' + last + '"' : "") +
         ". Would you like to carry on or start again?"
     );
+    showNotice();
     lockComposer("Choose continue or start over…");
     chips(
       [
