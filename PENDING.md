@@ -64,6 +64,26 @@ is **still NXDOMAIN**. `log_report --since 7d`: 1963 questions, 1469
 answered, 387 refused, 107 asked back, 0 handoffs, 0 votes, p50 5.26s /
 p90 17.25s. All of these are harness numbers (see the new item).
 
+**Friday review 2026-10-16 (automated, not yet reviewed by hand).** 28
+code commits since 10-09 (office work orders: privacy of the process log,
+one client-IP trust rule, the lock file, the vague-fault checklist, the
+overview gate, the AI notice, the deep-effort privacy fix), plus the
+office plan's own commits. Ticked off: the `eval.py` grader preflight
+(done in `21698b0` three weeks ago and never struck), the verifier
+thinking latency (measured and gated in `15a776e`), and the 10-09 note
+about the uncommitted widget edit (committed as `606627f`). Obsolete: "the
+blind set trails v16.3", superseded by M5's 3x3 run. Corrected: nothing
+contradicted. Added: the office's builds lose backslash-newlines (three
+repair commits this week). Checked in this review: `run_tests.py`
+**339/339 passed, 1 skipped, 0 failed** (10-09: 329/330, 1 failed); `test_widget_walk` passes again. Retrieval baseline `--selfcheck` OK (35 cases,
+armed). The LiteLLM gateway is **still NXDOMAIN**. `log_report --since
+7d`: 269 questions, 164 answered, 98 refused, 5 asked back, 0 handoffs,
+0 votes, p50 5.77s / p90 14.41s (10-09: 1963 / 1469 / 387 / 107 / 0 / 0,
+5.26s / 17.25s). Every row is still a harness run; see the "real use"
+item, re-measured. While this review ran, the office plan writer
+committed PENDING.md (`97c86c9`, 16:41, its own table only); the edits
+from this review are uncommitted on top of it.
+
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
 independent planners (59 proposals) and an adversarial verdict on each of 37
@@ -2497,6 +2517,39 @@ see *Shipped — the four follow-ups* above; kept for the record.
   honest. No week-on-week comparison is possible: no earlier Friday review
   recorded log_report numbers, and these are not a baseline.
 
+  **Still open, re-measured in the Friday review 2026-10-16.**
+  `origin_for` (`src/pipeline_trace.py:162`) still knows only `eval-`,
+  `live-`, `preflight-`; `cecd2d0` changed only when those count on the
+  widget. `log_report --since 7d`: 269 questions, 164 answered, 98 refused,
+  5 asked back, 0 handoffs, 116 of 187 conversations "resolved", 0 votes,
+  p50 5.77s / p90 14.41s. By session prefix: `cases-` 182, `replay-` 30,
+  `at-` 23, `probe-` 11, `e2e-ce…` 8, `map-` 7, `reg-` 4, `warm…` 2, and 2
+  rows with no session id (pre-M2). **Every row this week looks like a
+  harness run; real use is 0-2.** Not one row was labelled `eval`, so
+  `log_report` excluded nothing. The 10-09 numbers (1963 questions) were
+  the same kind of noise, so the drop to 269 says the lab ran less, not
+  that customers left. The prefix list has grown (`replay-`, `at-`, `map-`,
+  `reg-`, `e2e-` are new since 10-09), which argues for the runners
+  sending `eval-…`, not for a longer list in `origin_for`.
+
+- **The office's Dev builds lose backslash-newlines, and a person repairs
+  them afterwards.** Found in the Friday review 2026-10-16. Three of this
+  week's 28 code commits exist only to put a lost line continuation back:
+  `fb83dbb` (`tests/test_provider_outage.py`, four context managers run
+  together on one line), `c31e3ee` (`tests/test_llm.py`, same shape; its
+  message says "the build wrote both context managers on one line with a
+  run of spaces where the backslash-newline was eaten"), `60c2f7f`
+  (`src/clarify.py`, an `if` condition). Each was valid Python, so
+  `py_compile` and the tests passed and nothing caught it; a backslash lost
+  inside a string literal or a regex would change behaviour silently. A
+  scan of `src/` and `tools/` for the signature (a code token, eight or
+  more spaces, then `and`/`or`/`patch.`/a call, outside strings) finds no
+  other cases left in the tree today. It is the same trap as the
+  session-tooling note that heredocs eat backslashes. Done looks like: the
+  office gate (or the Dev write step) rejects a diff whose added lines
+  match that signature, so the repair is not a separate commit; or the
+  build stops writing files through a shell heredoc.
+
 - **Staging deploy is prepared but has never been run.** `STAGING.md` is the
   runbook; `docker/.env.example` is the template. **Carries two deferred
   decisions from 2026-08-27:** the nightly backup cron belongs here (see the
@@ -3196,38 +3249,10 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   interface`, `ok and what about the full size one?`), which is the
   conversational layer doing exactly the job it was added for: it is the
   part of the suite that does not yet hold still.
-- **The blind set trails v16.3 by 2-3 cases, and nobody has shown that is
-  noise.** `src/eval_cases_blind.json` (added in `1f594c0`), grader-judged:
-  v16.3 **28/34**, this branch **25-26/34** after the verifier fix. The
-  commit calls that "within run-to-run noise". The original suite's own noise
-  (±3 cases between two runs of one baseline, 2026-08-28) makes that
-  plausible, but that noise figure is from a different suite. Two blind runs per
-  side cannot tell a regression from noise. It matters because the branch
-  is about to be rated against v16.3, and the blind set is the only
-  measure that nothing has been tuned against. Done looks like: 3 runs
-  each of v16.3 and HEAD, per-case outcome diff, and every case that fails
-  on HEAD in all 3 runs but passes on v16.3 in all 3 either explained or
-  filed. **Measure only. Do not tune against this set.**
-- **The verifier's thinking has a latency cost nobody has measured.**
-  `1f594c0` turned DeepSeek thinking back on for the verifier, the
-  inference contract and re-answer selection. On an answer-sized prompt,
-  thinking cost 3.15s against 0.94s per call (see *Shipped — latency*).
-  From 792 logged turns, 284 (36%) were settled by the LLM verifier, plus
-  every table answer, which skips NLI. So roughly a third or more of answered
-  turns may have gained ~2s. That is an estimate from two separate
-  measurements, not a measurement. Done looks like: `verifier_llm_time` median and
-  p90 from `logs.jsonl`, turns before `1f594c0` against turns after, and
-  the figure recorded here.
-- **`eval.py` grades nothing unless `DEEPSEEK_API_KEY` is exported, and
-  the preflight does not notice.** Re-checked 2026-09-25 in the code:
-  `_deepseek_key()` reads the environment, then falls back to
-  `keyvault.load_key()`. Nothing loads `src/.env`, and `preflight()`
-  checks only that `/query` generates. The night run lost a full graded
-  pass to this: every check came back "grader returned nothing". Done
-  looks like: the preflight makes one grader call and aborts on an empty
-  verdict, or eval.py loads `src/.env` itself. The preflight check is safer, because it also
-  catches a bad key. Pinned by a test that runs the preflight with no key
-  in the environment.
+- *(Removed 2026-10-16, Friday review: "the blind set trails v16.3 by
+  2-3 cases" is superseded by M5, which ran blind2 three times per side on
+  2026-09-28 (v16.3 22/34 stable, HEAD 30/34, one case lost); see M5 above.
+  The two other items that sat here were done and moved to Resolved.)*
 
 **Serving**
 
@@ -3331,6 +3356,25 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   running before).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-10-16 (Friday review) — ticked off from the open list:**
+  - ~~**`eval.py` grades nothing unless `DEEPSEEK_API_KEY` is exported, and
+    the preflight does not notice.**~~ `21698b0` (M1): `preflight_grader()`
+    (`src/eval.py:475`) makes one real grader call before case 1 and aborts
+    on "grader returned nothing" or a failed grader import; `preflight()`
+    runs it whenever grading is on. Pinned in `tests/test_eval.py`. The
+    item had stayed open three weeks after the fix.
+  - ~~**The verifier's thinking has a latency cost nobody has measured.**~~
+    Measured 2026-09-27 and fixed in `15a776e`: thinking on every check put
+    396s of a 766s live run into the verifier (median 9.7s vs 0.9s on
+    09-25), and changed exactly one verdict class (flash code paired with the
+    wrong meaning). The verifier now thinks only on flash/LED/colour/code
+    questions or answers (`main._needs_judgement`, `src/main.py:635`);
+    `VERIFIER_THINKING=always` restores the old behaviour.
+  - ~~**`test_widget_walk` fails on the uncommitted 10-02 widget edit.**~~
+    (Noted in the 10-09 review header.) The edit was committed as `606627f`
+    and `widget_feedback.json` is gitignored (`9f48cd9`); the working tree
+    holds no widget changes now.
 
 - **2026-10-09 (Friday review) — ticked off from the open list:**
   - ~~**One eval case asks about a product name that is in no document.**~~
