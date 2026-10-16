@@ -1408,13 +1408,13 @@ function renderLanes(){
     return li; }));
 }
 setInterval(renderLanes, 1000);
-/* "Run all now": every department with work waiting starts at the next lane check, past the budget pace and holds, for 30 min (tools/ceo_inbox.py run_all) */
+/* "Run all now": every department with work waiting starts at the next lane check, past the budget pace and holds, for that one tick (tools/ceo_inbox.py run_all) */
 function renderRunAll(){
   const b = $("runAllBtn"), sent = live.inbox.find(r => r.choice === "run_all" && r.status === "new");
   b.hidden = !live.available || !!(live.brief && live.brief.off);
   b.disabled = !!sent; b.classList.toggle("sent", !!sent);
   b.textContent = sent ? "Sent: next check" : "Run all now";
-  b.title = "Start everything waiting at the next lane check, past the budget pace and holds, for 30 minutes. The lab cap and the 5-hour limit still apply.";
+  b.title = "Start everything waiting at the next lane check, past the budget pace and holds, for that one tick. The lab cap and the 5-hour limit still apply.";
 }
 $("runAllBtn").addEventListener("click", async () => {
   const b = $("runAllBtn"); b.disabled = true; b.textContent = "Sending…";

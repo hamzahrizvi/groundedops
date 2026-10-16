@@ -67,7 +67,7 @@ MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged item
 # More in flight means more lanes run side by side: two Dev builds, or two copies of one department on different orders.
 MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2)}
 MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, merges are serialized
-RUN_ALL = 1800        # ponytail: "Run all now" lasts 30 min, about one tick of every lane; no per-tick bookkeeping
+RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that picks it up (take stamps it, end_tick removes it)
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -143,6 +143,27 @@ def release(ops, lane):
             pass
 
 
+def stamp_run_all(ops, lane):
+    """The first lane to look for work after a "Run all now" press owns it for the rest of its tick."""
+    p = os.path.join(ops, "state", "run_now", "all")
+    try:
+        if os.path.exists(p) and not open(p, encoding="utf-8").read().startswith("lane "):
+            open(p, "w", encoding="utf-8").write(f"lane {lane}" + chr(10))
+    except OSError:
+        pass
+
+
+def end_tick(ops, lane):
+    """--release at the end of a lane's tick: its claims go, and a "Run all now" press it owns is used up."""
+    release(ops, lane)
+    p = os.path.join(ops, "state", "run_now", "all")
+    try:
+        if open(p, encoding="utf-8").read().split() == ["lane", str(lane)]:
+            os.remove(p)
+    except OSError:
+        pass
+
+
 def work_mode(ops, week, resets, now):
     """(mode, why): the weekly allowance left against the time left before the reset. 1.5x or more is ultra,
     1.1x or more high, less easy. OPS/state/mode holding easy, high or ultra overrides it (the CEO's choice)."""
@@ -183,6 +204,7 @@ def take(ops, repo, five, week, resets, now, lane):
     """The plan, then a claim on its first runnable line no other lane holds. Runs of one lane
     never overlap, so this lane's leftover claims are from its last run and are dropped first."""
     release(ops, lane)
+    stamp_run_all(ops, lane)
     d = os.path.join(ops, *CLAIMS)
     os.makedirs(d, exist_ok=True)
     mode, why = work_mode(ops, week, resets, now)   # for the product owner's cap (.claude/agents/product-owner.md)
@@ -359,7 +381,8 @@ def holds(ops, now):
 def run_now(ops):
     """Departments the CEO pressed "Run now" for (OPS/state/run_now/<dept>, via tools/ceo_inbox.py): their next
     start skips the budget pace and a hold. A press lapses after a day, and taking the work uses it up.
-    "all" (the page's "Run all now") lifts both for every department with work waiting, for RUN_ALL seconds."""
+    "all" (the page's "Run all now") lifts both for every department with work waiting, for one tick: the first lane
+    to take work after the press stamps it, and that lane's end of tick removes it."""
     d = os.path.join(ops, "state", "run_now")
     return {n for n in (os.listdir(d) if os.path.isdir(d) else [])
             if time.time() - os.path.getmtime(os.path.join(d, n)) < (RUN_ALL if n == "all" else 86400)}
@@ -522,7 +545,13 @@ def selftest():
         w("state/run_now/all")
         p = plan(ops, ops, 60, 38, resets, now)
         assert p[0].startswith("RUN  groundedops-office-customer") and not any("you asked for it now" in x for x in p), "Run all lifts the budget, adds no work"
-        os.remove(os.path.join(ops, "state", "run_now", "all"))
+        take(ops, ops, 60, 38, resets, now, 5); take(ops, ops, 60, 38, resets, now, 6); end_tick(ops, 6)
+        assert "all" in run_now(ops), "another lane's tick end leaves it"
+        take(ops, ops, 60, 38, resets, now, 5)
+        assert "all" in run_now(ops), "lasts the whole tick, past its own next take"
+        end_tick(ops, 5)
+        assert "all" not in run_now(ops), "used up at the end of the tick that took it"
+        release(ops, 6)
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (time.time() + 10, time.time() + 10))
         assert not any("customer" in x for x in plan(ops, ops, 11, 38, resets, now)), "a run finished after the press answers it"
         os.remove(os.path.join(ops, "state/refresh_request"))
@@ -591,7 +620,7 @@ def main():
     if (a.take or a.release or a.cron_set) and not a.lane:
         ap.error("--take, --release and --cron-set need --lane")
     if a.release:   # and the lane's schedule, when the CEO changed "Next run" on the page
-        release(a.ops, a.lane)
+        end_tick(a.ops, a.lane)
         want, path = lane_cron(a.lane, every(a.ops)), os.path.join(a.ops, "state", f"cron-{a.lane}")
         have = open(path, encoding="utf-8").read().strip() if os.path.exists(path) else ""
         return print(f"RELEASED lane {a.lane}" + (f"\nCRON {want}" if want != have else ""))
