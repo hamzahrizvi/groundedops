@@ -240,6 +240,25 @@ def test_local_mode_ignores_key_roles_entirely():
             runtime_config.set_generation_mode("api")
 
 
+# D-20261015-10: the widget's fixed notice names these providers.
+def test_outside_providers_names_default_advanced_and_backup_once_each():
+    with roles({"default": "openai", "advanced": "anthropic", "backup": "deepseek"}):
+        assert llm.outside_providers() == ["openai", "anthropic", "deepseek"]
+    with roles({"default": "openai", "backup": "openai"}):
+        assert llm.outside_providers() == ["openai"]
+
+
+def test_outside_providers_in_local_mode_is_only_the_backup_escalation():
+    for assigned, expected in (({"default": "openai", "backup": "deepseek"}, ["deepseek"]),
+                               ({"default": "openai"}, [])):
+        with roles(assigned):
+            runtime_config.set_generation_mode("local")
+            try:
+                assert llm.outside_providers() == expected
+            finally:
+                runtime_config.set_generation_mode("api")
+
+
 def test_deepseek_calls_disable_thinking_unless_asked(monkeypatch=None):
     """DeepSeek V4 thinks by default and bills the thought. Every DeepSeek
     request -- answer and stream alike -- must say so explicitly, and the

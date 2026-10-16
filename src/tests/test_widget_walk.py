@@ -305,3 +305,25 @@ def test_the_handoff_turn_is_unchanged():
     assert _page.locator(".go-b.bot:has-text('call them on " + PHONE + "')").count() == 1
     assert _page.locator("button:has-text('Call " + PHONE + "')").count() == 0
     assert _page.locator("text=rather point you at someone").count() == 0
+
+
+NOTICE = ("AI assistant: answers come from our manuals and can be wrong. Questions are kept "
+          "for 90 days and may be processed by OpenAI (USA) and DeepSeek (China).")
+
+
+def test_the_ai_notice_sits_under_the_welcome_line_for_a_guest():
+    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
+    _reopen()
+    _page.wait_for_selector(".go-notice")
+    assert _page.inner_text(".go-notice") == NOTICE
+    assert _page.locator(".go-notice a").count() == 0
+    assert _page.locator(".go-log > .go-notice").count() == 1
+
+
+def test_the_ai_notice_and_privacy_link_show_signed_in():
+    widget_cfg[0] = {"ai_notice": NOTICE, "privacy_url": "https://example.test/privacy",
+                     "welcome": "Hello from the operator"}
+    _reopen()
+    _page.wait_for_selector(".go-notice a")
+    assert _page.get_attribute(".go-notice a", "href") == "https://example.test/privacy"
+    assert NOTICE in _page.inner_text(".go-notice")
