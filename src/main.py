@@ -68,7 +68,7 @@ from router import route_model
 from grounding import check_grounding, _get_nli_model
 import answerability
 import language
-from llm import generate, generate_with_fallback, condense_query
+from llm import generate, generate_with_fallback, condense_query, escalation_role
 
 import faq_store
 import mentions
@@ -4096,7 +4096,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                         f"(nli={grounding_score}) for: {redact(resolved_query)}")
         flagged = not is_grounded
 
-    # ── Escalation to the BACKUP provider on grounding failure ──
+    # ── Escalation to a second provider on grounding failure ──
     # Retry on a second provider whenever the first answer is flagged (bad
     # grounding, a template leak, or a total generation failure).
     #
@@ -4115,21 +4115,27 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # That makes "never bill this provider automatically" expressible: leave
     # it out of the roles. An operator who wants the old behaviour assigns
     # DeepSeek as backup, deliberately, and can see that they have.
+    #
+    # Which role: Backup in api mode; in local mode the Default role
+    # (llm.escalation_role, D-20261016-09, the CEO's choice). Unassigned or
+    # unkeyed means no escalation, so local mode with no Default role sends
+    # nothing out.
     escalated = False
-    _backup_provider = keystore.get_role("backup")
+    _esc_role = escalation_role()
+    _backup_provider = keystore.get_role(_esc_role)
     if (flagged and not verifier_unavailable and role != "rethink"
             and output.get("provider") in ("local", "none")
             and _backup_provider):
         logger.warning(
             f"Flagged answer (grounding={grounding_score}, "
             f"template_leak={template_leak}, failed={generation_failed}) — "
-            f"escalating to backup provider '{_backup_provider}' "
+            f"escalating to {_esc_role} provider '{_backup_provider}' "
             f"for: {redact(resolved_query)}"
         )
-        # The BACKUP role's model: its own override (MODEL_ROLE_BACKUP) or
+        # That role's model: its own override (MODEL_ROLE_<ROLE>) or
         # the provider's configured model -- never a hardcoded default.
         try:
-            _bk_model = keystore.model_for_role("backup", _backup_provider)
+            _bk_model = keystore.model_for_role(_esc_role, _backup_provider)
         except Exception:
             _bk_model = _default_model_for(_backup_provider)
         backup_result = _timed("regen", generate,
