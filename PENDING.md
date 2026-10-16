@@ -178,7 +178,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261015-02 | A well-found answer is thrown away by the grounding check | waiting for CEO | your yes |
 | D-20261015-11 | Security item D-20261015-11, details in the office | waiting for CEO | your yes |
 | D-20261015-12 | The "allowance used up" message tells the visitor to contact support | waiting for CEO | your yes |
-| D-20261016-05 | Security item D-20261016-05, details in the office | approved, queued | Dev builds it |
+| D-20261016-05 | Security item D-20261016-05, details in the office | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
