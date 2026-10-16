@@ -76,5 +76,5 @@ def test_query_checks_the_cited_pages_but_cites_only_the_passages():
             q="Does the product support USB?", skip_faq=True))
 
     assert "unit-2" in grounded
-    assert "unit-2" not in lexical
+    assert "unit-1" in lexical and "unit-2" not in lexical
     assert all("unit-2" not in s.get("chunk_ids", []) for s in result["sources"])
