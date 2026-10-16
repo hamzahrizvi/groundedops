@@ -30,12 +30,13 @@ Env:
   grade    shows the grader the full text of each case's cited pages (manuals/,
            capped at 30000 chars) and stores the blind A/B labels per case.
            A clean refusal on an expected-"rejected" case scores 3 whatever the other arm says (D-20261010-28).
+           A correct_refusal on a case not expected 'rejected' is stored as safe_decline, score <= 1 (D-20261016-14).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also when run via runpy
 from lab_lock import lab_lock
-from market_compare import under
+from market_compare import under, clamp_refusal
 
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
@@ -281,8 +282,9 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
             g = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
         except Exception:
             return c["id"], {"raw": raw, "usage": use}
-        return c["id"], {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
+        out = {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
+        return c["id"], clamp_refusal(c, out, SYSTEMS)
     grades, held = state.setdefault("grades", {}), False
     with ThreadPoolExecutor(6) as ex:   # ponytail: as in baseline, calls in flight can pass the cap
         # only cases every graded system answered: a vendor that missed one must not be marked on "(no answer yet)"
