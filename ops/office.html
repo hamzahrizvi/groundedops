@@ -178,6 +178,17 @@ button{font:inherit;color:inherit}
 .pivot th:first-child{text-align:left}
 .pivot td{padding:7px 9px;text-align:right;border-radius:3px;white-space:nowrap}
 .pivot td.g{text-align:left;white-space:normal;min-width:150px;cursor:pointer}
+.pivot th,.pivot td{min-width:76px}
+.pivot th:first-child,.pivot td.g{position:sticky;left:0;z-index:1;background:var(--surface);box-shadow:2px 0 0 var(--surface)}
+.pvbars{display:grid;grid-template-columns:minmax(110px,max-content) minmax(0,1fr) auto;gap:8px 10px;align-items:center;font-size:14px;font-variant-numeric:tabular-nums}
+.pvbars .bl{cursor:pointer} .pvbars .bl:hover{text-decoration:underline}
+.pvbars .bt{position:relative;height:22px;background:var(--bg);border-radius:3px;cursor:pointer}
+.pvbars .bt:hover{outline:2px solid var(--accent);outline-offset:1px}
+.pvbars .bb{position:absolute;top:0;bottom:0;background:var(--seq);border-radius:3px}
+.pvbars .bb.neg{background:var(--div-neg)}
+.pvbars .bp{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink)}
+.pvbars .bz{position:absolute;top:0;bottom:0;width:1px;background:var(--muted)}
+.pvbars .bv{text-align:right;white-space:nowrap} .pvbars .bv small{color:var(--muted);margin-left:6px}
 .pivot td.g:hover{text-decoration:underline}
 .pivot td.cell{cursor:pointer}
 .pivot td.cell:hover{outline:2px solid var(--accent);outline-offset:-2px}
@@ -402,9 +413,15 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
               <option value="declined">Said "not in the manual" when it was</option>
               <option value="n">Questions asked</option>
             </select>
+            <div class="seg" role="group" aria-label="View">
+              <span class="lbl">View</span>
+              <button type="button" data-view="table" aria-pressed="true">Table</button>
+              <button type="button" data-view="chart" aria-pressed="false">Chart</button>
+            </div>
           </div>
           <p class="lnote" id="pvLegend"></p>
-          <div class="rscroll"><table class="pivot" id="pvTable"></table></div>
+          <div class="rscroll" id="pvTableWrap"><table class="pivot" id="pvTable"></table></div>
+          <div class="pvbars" id="pvChart" hidden></div>
           <h3 class="pvh">What customers asked on the website</h3>
           <div class="rscroll"><table class="pivot real" id="pvReal"></table></div>
           <p class="lnote" id="pvCats"></p>
@@ -952,7 +969,7 @@ const SAMPLE_PIVOT = {sample:true, runs:["20261001","20261008"], categories:{sim
   trend:{points:[{run:"20261001",n:40,adj:70,lo:63.7,hi:76.3,raw:70,wrong:2,when:1},{run:"20261008",n:40,adj:76,lo:69.7,hi:82.3,raw:76,wrong:1,when:3}],
     steps:[{from:"20261001",to:"20261008",delta:6,noise:8.9,call:"same",fixes:[{id:"D-20261003-01",title:"Comparisons pick each product's manual",when:2,gate:{verdict:"PASS",before:70,after:74}}]}],
     waiting:[], verdict:"No change we can tell yet: the adjusted score moved +6 points from 1 Oct to 8 Oct, inside the 8.9-point noise. 1 fix merged in that time."}};
-let pv = {dim:"category", metric:"score", open:null};
+let pv = {dim:"category", metric:"score", open:null, view:"table"};
 const runLabel = r => { const d = new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8)); return d.toLocaleDateString(undefined, {day:"numeric", month:"short"}) + (r.length > 8 ? `, run ${r.charCodeAt(8) - 96}` : ""); };
 const TYPE_NAMES = {lookup:"Look up a fact", yes_no_documented:"Yes/no from the manual", table_condition:"A limit in a table", procedure_or_troubleshoot:"How-to and troubleshooting",
   comparison:"Two products compared", followup:"Follow-up in a chat", multi_document:"Several asks in one message", absent_feature:"A feature it doesn't have",
@@ -1159,7 +1176,8 @@ function renderPivot(){
   groups.sort((x, y) => M.worstFirst === "asc" ? sortVal(x[1]) - sortVal(y[1]) : sortVal(y[1]) - sortVal(x[1]));
   const tbl = document.getElementById("pvTable"); tbl.replaceChildren();
   const head = document.createElement("tr"), th0 = document.createElement("th"); th0.textContent = {category:"Category", type:"Question type", product:"Product"}[pv.dim]; head.append(th0);
-  for(const r of runs){ const th = document.createElement("th"); th.textContent = runLabel(r); head.append(th); }
+  const cols = runs.slice().reverse();   // newest run first, so the latest is in view without scrolling
+  for(const r of cols){ const th = document.createElement("th"); th.textContent = runLabel(r); head.append(th); }
   const thn = document.createElement("th"); thn.textContent = "Questions"; head.append(thn); tbl.append(head);
   if(!groups.length){ const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan = runs.length + 2; td.className = "g"; td.textContent = "No graded questions yet."; tr.append(td); tbl.append(tr); }
   for(const [g, byRun] of groups){
@@ -1169,7 +1187,7 @@ function renderPivot(){
     const toggle = () => openReview(g, last);
     tg.addEventListener("click", toggle); tg.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); } });
     tr.append(tg);
-    for(const r of runs){
+    for(const r of cols){
       const td = document.createElement("td"), a = byRun[r], v = a ? M.val(a) : null;
       td.textContent = v == null ? "–" : M.fmt(v);
       if(v != null){ td.style.background = M.shade(v, mx); td.className = "cell"; td.tabIndex = 0;
@@ -1182,6 +1200,23 @@ function renderPivot(){
     }
     const tn = document.createElement("td"); tn.textContent = byRun[last] ? byRun[last].n : 0; tr.append(tn); tbl.append(tr);
   }
+  // chart view: one bar per group for the latest run, a tick where the run before it was
+  document.getElementById("pvTableWrap").hidden = pv.view === "chart"; const ch = document.getElementById("pvChart"); ch.hidden = pv.view !== "chart";
+  for(const b of document.querySelectorAll(".seg button[data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === pv.view));
+  const vals = groups.flatMap(([, byRun]) => [last, prev].map(r => byRun[r] ? M.val(byRun[r]) : null)).filter(v => v != null);
+  const lo = Math.min(0, ...vals), hi = Math.max(pv.metric === "score" ? 100 : 1, ...vals), pct = v => (v - lo) / (hi - lo) * 100;
+  ch.replaceChildren(...(!groups.length ? [Object.assign(document.createElement("p"), {className: "small", textContent: "No graded questions yet."})] : groups.flatMap(([g, byRun]) => {
+    const a = byRun[last], v = a ? M.val(a) : null, pa = prev && byRun[prev], pvv = pa ? M.val(pa) : null;
+    const lab = el("div", "bl", groupName(pv.dim, g)), tr = el("div", "bt"), val = el("div", "bv", v == null ? "–" : String(M.fmt(v)));
+    tr.title = a ? `${groupName(pv.dim, g)}, ${runLabel(last)}: score ${a.bot_pct}%, ${a.n} questions, ${a.right} right, ${a.wrong} wrong, ${a.declined} said not found` : "";
+    if(lo < 0){ const z = el("span", "bz"); z.style.left = pct(0) + "%"; tr.append(z); }
+    if(v != null){ const b = el("span", "bb" + (v < 0 ? " neg" : "")); b.style.left = Math.min(pct(0), pct(v)) + "%"; b.style.width = Math.abs(pct(v) - pct(0)) + "%"; tr.append(b); }
+    if(pvv != null){ const t = el("span", "bp"); t.style.left = `calc(${pct(pvv)}% - 1px)`; t.title = `${runLabel(prev)}: ${M.fmt(pvv)}`; tr.append(t);
+      if(v != null && v !== pvv) val.append(el("small", "", `${v > pvv ? "▲" : "▼"} ${Math.abs(Math.round((v - pvv) * 10) / 10)}`)); }
+    const go = () => openReview(g, last); lab.addEventListener("click", go); tr.addEventListener("click", go);
+    return [lab, tr, val];
+  })));
+  if(prev && groups.length) ch.append(Object.assign(el("p", "small", `Bars: ${runLabel(last)}. Thin line: ${runLabel(prev)}. Click a bar to review those questions.`), {style: "grid-column:1/-1"}));
   // real website questions
   const rt = document.getElementById("pvReal"); rt.replaceChildren();
   const OUT = [["answered","Answered"],["refused","Couldn't answer"],["clarify","Asked back"],["handoff","Handed to a person"]];
@@ -1199,6 +1234,7 @@ function renderPivot(){
 }
 for(const b of document.querySelectorAll(".seg button[data-dim]")) b.addEventListener("click", () => { pv.dim = b.dataset.dim; pv.open = null; renderPivot(); });
 document.getElementById("pvMetric").addEventListener("change", e => { pv.metric = e.target.value; renderPivot(); });
+for(const b of document.querySelectorAll(".seg button[data-view]")) b.addEventListener("click", () => { pv.view = b.dataset.view; renderPivot(); });
 
 function select(id){ selected = id; renderDetail(); renderRoster(true); }
 const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked", off:"Off duty"};
