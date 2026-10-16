@@ -250,6 +250,20 @@ def _online_provider_model(job: str = "default") -> tuple[str, str]:
 _JOB_FOR_ROLE = {"reasoning": "advanced"}
 
 
+def effort_model(model_env: str | None) -> tuple[str, str] | None:
+    """(provider, model) an effort level forces, or None to answer the
+    normal way. Only in api mode, and only on the Advanced role's provider
+    (the deep level's job, see _JOB_FOR_ROLE): it used to take
+    ONLINE_PROVIDER in any mode, so "local, nothing leaves" could still
+    send a deep question out, past the role settings and the widget's
+    notice (D-20261016-05). Read live, like _chain_for."""
+    from runtime_config import get_generation_mode
+    model = os.getenv(model_env, "").strip() if model_env else ""
+    if not model or get_generation_mode() != "api":
+        return None
+    return _provider_for_job("advanced"), model
+
+
 def _chain_for(role: str) -> list[tuple[str, str]]:
     """v8.6.1: API-mode enforcement moved HERE — the single choke point
     the answering path actually goes through. The v8.6 override lived in

@@ -269,7 +269,7 @@ stub("grounding", check_grounding=lambda a, c, threshold=0.55: (True, 0.9),
 stub("llm", generate=lambda *a, **k: dict(GEN_RESPONSE),
      generate_with_fallback=_generate_with_fallback,
      warmup_local_models=lambda m=None: {}, RETHINK_OPTIONS=[],
-     condense_query=lambda q, h: q)
+     condense_query=lambda q, h: q, effort_model=lambda model_env: None)
 stub("runtime_config", get_settings=lambda: {"mode": "free"},
      set_generation_mode=lambda m: None, set_local_models_loaded=lambda v: None,
      set_online_provider=lambda p: None)

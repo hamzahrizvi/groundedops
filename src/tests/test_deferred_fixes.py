@@ -21,6 +21,9 @@ def test_deep_effort_keeps_the_safety_nets():
         if hasattr(main, "_widget_answer") else True
     assert main.QueryRequest(q="x").forced_by_effort is False
     assert main.QueryRequest(q="x", top_k=10).top_k == 10
+    msrc = inspect.getsource(main)
+    assert 'os.getenv("ONLINE_PROVIDER", "deepseek")' not in msrc.split("async def _widget_answer")[1][:2500]
+    assert "llm.effort_model(model_env)" in msrc
 
 
 def test_a_reranker_outage_is_reported_as_one():
