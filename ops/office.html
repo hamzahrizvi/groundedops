@@ -1472,11 +1472,17 @@ function openNeeds(){
 let popped = false;
 /* what is holding the office up (tools/office_brief.py alerts, plus what only the page can see): a red bar while
    any lasts, and a pop-up the first time each one appears in this browser */
+/* after the page opens or the computer wakes, the first lane check needs a few minutes to refresh the brief:
+   a sleeping computer runs no lanes, so the brief is hours old on waking (2026-10-16: slept 13:37-15:45) */
+const GRACE = 15 * 60000;
+let graceUntil = Date.now() + GRACE, lastBeat = Date.now();
+function beat(){ const t = Date.now(); if(t - lastBeat > 120000) graceUntil = t + GRACE; lastBeat = t; }
+document.addEventListener("visibilitychange", beat);
 function currentAlerts(){
   if(!live.available || !live.brief) return [];
   const out = [...(live.brief.alerts || [])], age = (Date.now() - new Date(live.brief.updated)) / 60000;
-  if(age > 90) out.unshift({id: "stale-" + live.brief.updated, title: "The office's hourly check has stopped",
-    why: `It last ran ${ago(age)} ago. It only runs while this computer is on and the Claude app is open, so nothing moves until then.`});
+  if(age > 90 && Date.now() > graceUntil) out.unshift({id: "stale-" + live.brief.updated, title: "The office's hourly check has stopped",
+    why: `It last ran ${ago(age)} ago. It only runs while this computer is awake and the Claude app is open. If the computer has been on for a while, check that the Claude app is running.`});
   for(const [id, w] of Object.entries(live.workers)) if(w.state === "blocked" && D[id])
     out.push({id: `worker-${id}-${w.updated}`, title: `${D[id].name} is stuck`, why: w.task || "No reason given.",
       suggest: "Ask the product owner to look at it now.", actions: [{label: "Ask the product owner to decide now", choice: "run_now", id: "product-owner"}]});
@@ -2469,7 +2475,7 @@ function loop(ts){
 }
 requestAnimationFrame(loop);
 
-function tick(){ document.getElementById("clock").textContent = new Date().toLocaleTimeString(undefined, {hour:"2-digit", minute:"2-digit"}); renderMove(); renderAlerts(); }
+function tick(){ beat(); document.getElementById("clock").textContent = new Date().toLocaleTimeString(undefined, {hour:"2-digit", minute:"2-digit"}); renderMove(); renderAlerts(); }
 tick(); setInterval(tick, 15000);
 renderWeek(); renderAll();
 })();

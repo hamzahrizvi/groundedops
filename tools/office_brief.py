@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
+from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan, work_mode  # noqa: E402
@@ -42,6 +42,26 @@ def item_text(texts):
     """The first decision (why and work order) plus the latest one, trimmed for a chat prompt."""
     t = texts[0][:1800]
     return t if len(texts) == 1 else t + "\n\n[latest decision]\n" + texts[-1][:2200]
+
+
+DOC_CAP = 230_000   # the page's database refuses a document over 256 KiB; the brief stays well under it
+
+
+def fit(cards):
+    """Finished items keep a short summary; if the brief would still be too big, they lose it, then open
+    items are cut too. Over the cap the lanes' uploads are refused and the page reads 'stopped' (2026-10-16:
+    108 items with their whole decision text made it 254 KB)."""
+    size = lambda: len(json.dumps(cards, ensure_ascii=False).encode())
+    for c in cards.values():
+        if c["stage"] in PAST:
+            c["text"] = c["text"][:400]
+    for keep, done_too in ((0, True), (1200, False), (400, False)):
+        if size() <= DOC_CAP:
+            break
+        for c in cards.values():
+            if done_too == (c["stage"] in PAST):
+                c["text"] = c["text"][:keep]
+    return cards
 
 
 def explain(line, titles):
@@ -191,11 +211,16 @@ def brief(ops, repo, now=None, usage=None):
             "minutes_old": None if old == float("inf") else round(old)}, "running": running,
             "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
             "lanes": [{"lane": n, "cron": lane_cron_now(ops, n)} for n in (1, 2, 3)],   # the page's countdown to each lane's next check
-            "todo": todo, "items": cards, "alerts": alerts(ops, cards, stalled, is_off(ops)),
+            "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops)),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
 
 def selftest():
+    big = {f"D-{n}": {"title": "t", "stage": "merged" if n % 2 else "approved, queued", "text": "x" * 4000} for n in range(120)}
+    fit(big)
+    assert len(json.dumps(big).encode()) <= DOC_CAP and big["D-1"]["text"] == "" and big["D-0"]["text"], "fits, open items keep most"
+    small = fit({"D-1": {"title": "t", "stage": "merged", "text": "y" * 900}, "D-2": {"title": "t", "stage": "proposed", "text": "z" * 900}})
+    assert len(small["D-1"]["text"]) == 400 and len(small["D-2"]["text"]) == 900, "finished items shortened, open ones untouched"
     now = datetime.datetime(2026, 10, 8, 7, 0, tzinfo=datetime.timezone.utc)
     with tempfile.TemporaryDirectory() as ops:
         for d in ("decisions", "inbox/dev", "inbox/audit", "runs/20261008", "state", "reports"):
