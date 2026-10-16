@@ -36,6 +36,13 @@ def git(cwd, *args):
     return r.returncode, r.stdout.rstrip(), r.stderr.strip()   # rstrip: porcelain lines start with a space
 
 
+def in_the_way(branch, target):
+    """Uncommitted files in the target checkout that the branch also changes: the merge never goes over them."""
+    changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
+    dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=no")[1].splitlines()}
+    return sorted(changed & dirty)
+
+
 def merge(did, ops, repo, office=OFFICE):
     """The product branch, then any office-tooling companion Dev made for the same work order."""
     first = merge_branch(did, f"agents/dev-{did}", ops, repo, office)
@@ -62,10 +69,9 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
         return f"FAILED no branch {branch}"
     if ahead[target][1] == "0":
         return f"MERGED {branch} already"
-    changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
-    dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=no")[1].splitlines()}
-    if changed & dirty:
-        return f"WAIT uncommitted changes in {target} touch {sorted(changed & dirty)}"
+    changed, busy = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines()), in_the_way(branch, target)
+    if busy:
+        return f"WAIT uncommitted changes in {target} touch {busy}"
     into = git(target, "rev-parse", "--abbrev-ref", "HEAD")[1]
     title = decisions(ops).get(did, {}).get("title", "")
     rc, out, err = git(target, "merge", "--no-ff", branch, "-m",

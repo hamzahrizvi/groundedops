@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from office_diary import due as diary_due  # noqa: E402
+from office_merge import OFFICE, git as _git, in_the_way  # noqa: E402
 
 TASK = "groundedops-office-"
 IN_FLIGHT = {"approved, queued", "sent back, rebuilding", "built, waiting for the check", "check passed", "check failed", "ready to merge", "blocked"}
@@ -223,7 +224,15 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
             return ""
         m = re.search(r"(?mi)^Verdict:\s*(CLEAR|BLOCK)", open(review(i), encoding="utf-8").read())
         return m.group(1).upper() if m else ""
-    out = [("merge", i, "merge") for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"]   # tools/office_merge.py
+    out = []
+    for i in sorted(i for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"):   # tools/office_merge.py
+        # someone's uncommitted edit in the way waits, and the lanes take the next work (2026-10-16: one such merge
+        # came first in every lane's plan, so nothing else ran for hours)
+        target = next((c for c in dict.fromkeys((repo, OFFICE)) if _git(c, "rev-parse", "--verify", "-q", f"agents/dev-{i}")[0] == 0
+                       and _git(c, "merge-base", "--is-ancestor", "HEAD", f"agents/dev-{i}")[0] in (0, 1)), repo)
+        busy = in_the_way(f"agents/dev-{i}", target)
+        out.append(("merge", f"{i} waits: uncommitted changes in {target} touch {', '.join(busy)}; commit or undo them", None)
+                   if busy else ("merge", i, "merge"))
     blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
     blocked += [review(i) for i, s in dev.items() if s in ("check passed", "ready to merge") and verdict(i) == "BLOCK"]
     findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
