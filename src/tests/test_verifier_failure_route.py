@@ -38,23 +38,25 @@ def test_query_refuses_explicitly_when_the_verifier_is_unavailable():
     assert result["grounding_score"] is None
 
 
-def test_query_checks_the_cited_pages_but_cites_only_the_passages():
+def _route(lexical_ok, llm_ok):
+    """One query with every check stubbed. Returns each check_grounding call as
+    (chunk ids, extra_chunks ids), the ids the number-match rescue saw, and the result."""
     chunk = {
         "id": "unit-1", "text": "The product supports USB.",
         "source": "Manual.pdf", "page": 1, "product": "product",
         "category": "", "rerank_score": 0.99,
     }
     sibling = dict(chunk, id="unit-2", text="USB 2.0 full speed.")
-    grounded, lexical, grounded_extra = [], [], []
+    calls, lexical = [], []
 
     def _ground(ans, chunks, **k):
-        grounded.extend(c["id"] for c in chunks)
-        grounded_extra.extend(c["id"] for c in (k.get("extra_chunks") or []))
+        calls.append(([c["id"] for c in chunks],
+                      [c["id"] for c in (k.get("extra_chunks") or [])]))
         return (False, 0.1)
 
     def _lex(ans, chunks):
         lexical.extend(c["id"] for c in chunks)
-        return True
+        return lexical_ok
 
     main.APP_STATE["ready"] = True
     with patch.object(main, "retrieve_from_db", return_value=[chunk]), \
@@ -70,12 +72,27 @@ def test_query_checks_the_cited_pages_but_cites_only_the_passages():
                       return_value=[sibling], create=True), \
          patch.object(main, "check_grounding", side_effect=_ground), \
          patch.object(main, "_lexically_supported", side_effect=_lex), \
+         patch.object(main, "_llm_verified", return_value=llm_ok), \
+         patch.object(main, "grounding_retries", return_value=0), \
          patch.object(main, "_structures_for", return_value=[]), \
          patch.object(main.more_context, "build", return_value={"kind": "support"}), \
          patch.object(main, "log_interaction"):
         result = main.query(main.QueryRequest(
             q="Does the product support USB?", skip_faq=True))
+    return calls, lexical, result
 
-    assert "unit-2" in grounded_extra and "unit-2" not in grounded
+
+def test_query_checks_the_cited_pages_but_cites_only_the_passages():
+    calls, lexical, result = _route(lexical_ok=False, llm_ok=False)
+    assert calls[0][1] == []                      # first NLI pass: passages only, as base
+    assert any("unit-2" in extra for _, extra in calls[1:])   # cited pages, last
+    assert all("unit-2" not in ids for ids, _ in calls)
     assert "unit-1" in lexical and "unit-2" not in lexical
     assert all("unit-2" not in s.get("chunk_ids", []) for s in result["sources"])
+
+
+def test_cited_pages_cost_no_nli_when_a_cheaper_check_passes():
+    # D-20261015-02 r4: a number-match or LLM pass must not pay for the cited pages.
+    for lex_ok, llm_ok in ((True, False), (False, True)):
+        calls, _, _ = _route(lexical_ok=lex_ok, llm_ok=llm_ok)
+        assert len(calls) == 1 and calls[0][1] == [], (lex_ok, llm_ok, calls)
