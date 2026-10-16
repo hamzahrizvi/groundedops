@@ -249,15 +249,37 @@ def test_outside_providers_names_default_advanced_and_backup_once_each():
         assert llm.outside_providers() == ["openai"]
 
 
-def test_outside_providers_in_local_mode_is_only_the_backup_escalation():
-    for assigned, expected in (({"default": "openai", "backup": "deepseek"}, ["deepseek"]),
-                               ({"default": "openai"}, [])):
+def test_outside_providers_in_local_mode_is_only_the_default_role_escalation():
+    for assigned, expected in (({"default": "openai", "backup": "deepseek"}, ["openai"]),
+                               ({"backup": "deepseek"}, [])):
         with roles(assigned):
             runtime_config.set_generation_mode("local")
             try:
                 assert llm.outside_providers() == expected
             finally:
                 runtime_config.set_generation_mode("api")
+
+
+def test_escalation_role_follows_the_mode():
+    assert llm.escalation_role() == "backup"
+    runtime_config.set_generation_mode("local")
+    try:
+        assert llm.escalation_role() == "default"
+    finally:
+        runtime_config.set_generation_mode("api")
+
+
+def test_local_mode_notice_names_the_default_provider_only():
+    import widget_config
+    runtime_config.set_generation_mode("local")
+    try:
+        with roles({"default": "openai", "backup": "deepseek"}):
+            n = widget_config.ai_notice()
+            assert "OpenAI (USA)" in n and "DeepSeek" not in n, n
+        with roles({"default": "openai"}, keyed=False):
+            assert "processed by" not in widget_config.ai_notice()
+    finally:
+        runtime_config.set_generation_mode("api")
 
 
 def test_deepseek_calls_disable_thinking_unless_asked(monkeypatch=None):
