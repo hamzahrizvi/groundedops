@@ -2335,6 +2335,21 @@
               label: "Start a new chat",
               onClick: function () { startFresh(); },
             });
+          } else {
+            var sForm = formFor("support");
+            quotaChips.push({
+              label: "Email support",
+              onClick: function () { openContactForm("support"); },
+            });
+            if (sForm.phone) {
+              quotaChips.push({
+                label: "Call " + sForm.phone,
+                style: "alt",
+                onClick: function () {
+                  window.location.href = "tel:" + sForm.phone.replace(/[^\d+]/g, "");
+                },
+              });
+            }
           }
           say(msg, { flagged: true });
           if (quotaChips.length) chips(quotaChips, "What would you like to do?");
