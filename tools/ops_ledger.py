@@ -62,7 +62,8 @@ def decisions(ops):
                     it["last_source"] = v.strip()
                     it.setdefault("sources", []).append(v.strip().replace("\\", "/"))
                     it.setdefault("cited", {})[v.strip().replace("\\", "/")] = path   # for answered()
-                if k == "Verdict":
+                if k == "Verdict":   # "READY TO MERGE (unchanged)" is READY TO MERGE: a note in brackets is not a verdict
+                    v = re.sub(r"\s*\([^()]*\)\s*$", "", v)   # (2026-10-16: the suffix dropped a cleared merge off the plan)
                     if "DEFER" in it["history"] and v.strip().upper() in ("NEEDS CEO", "AUTO-APPROVED"):
                         it["reopened"] = os.path.basename(path)[:8]   # back from the parked list: an older attempt is void
                     it["history"].append(v.strip().upper())
@@ -222,7 +223,7 @@ def _selftest():
       "- From: customer\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
       "## D-20261013-02 | Procedures\n- Source: inbox/customer/20261012-procedures.md\n- From: customer\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n\n"
       "## D-20261013-03 | Vague\n- From: customer\n- Assigned: dev\n- Verdict: DEFER\n")
-    w("decisions/20261016.md", "## D-20261013-01 | Fix comparisons\n- Verdict: READY TO MERGE\n\n"
+    w("decisions/20261016.md", "## D-20261013-01 | Fix comparisons\n- Verdict: READY TO MERGE (unchanged)\n\n"
       "## D-20261013-03 | Vague\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")   # a deferred item the CEO approves later
     w("inbox/dev/D-20261013-01.md", "Status: READY\nBranch: agents/dev-D-20261013-01\n")
     os.makedirs(os.path.join(ops, "inbox/dev/D-20261013-01.gate"))
