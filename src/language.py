@@ -211,7 +211,8 @@ def from_english(text: str, language: str,
     # measured 2 of 3 runs on 2026-10-01) and that is a correct translation.
     if _digits(out) != _digits(text):
         logger.warning("answer translation to %s rejected: numbers changed "
-                       "%s -> %s", language, _digits(text), _digits(out))
+                       "(%d -> %d numbers)", language, len(_digits(text)),
+                       len(_digits(out)))
         return None
     return out
 

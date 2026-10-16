@@ -137,6 +137,25 @@ def test_a_translation_that_changes_a_number_is_rejected():
         language._generate = real
 
 
+def test_the_rejected_numbers_are_not_logged():
+    import logging
+    seen = []
+
+    class H(logging.Handler):
+        def emit(self, r):
+            seen.append(r.getMessage())
+    h, real = H(), language._generate
+    language.logger.addHandler(h)
+    try:
+        language._generate = lambda p, k: "Pedido 99999 envio"
+        assert language.from_english("Order 12345 ships", "Spanish") is None
+    finally:
+        language._generate = real
+        language.logger.removeHandler(h)
+    log = " ".join(seen)
+    assert "numbers changed" in log and "12345" not in log and "99999" not in log
+
+
 def _with_pipeline(fake_pipeline, fake_generate):
     # The harness never finishes loading models, so capability("ask") is
     # False there and the wrapper would pass everything straight through.

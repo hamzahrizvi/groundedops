@@ -109,7 +109,7 @@ def _offenders(tree, name):
         stack = list(call.args) + [k.value for k in call.keywords]
         while stack:
             n = stack.pop()
-            if isinstance(n, ast.Call) and getattr(n.func, "id", "") in ("redact", "len", "_digits"):
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") in ("redact", "len"):
                 continue
             if isinstance(n, (ast.ListComp, ast.GeneratorExp,
                               ast.SetComp, ast.DictComp)):
@@ -147,6 +147,14 @@ def test_guard_flags_payload_attribute():
                       'logger.info("%d", len(text))'])
     assert _offenders(ast.parse(code), "x.py") == [
         "x.py:1 payload.q", "x.py:2 query", "x.py:4 text"]
+
+
+def test_guard_flags_a_digit_run_but_not_its_count():
+    import ast
+    assert _offenders(ast.parse('logger.warning("x %s", _digits(text))'),
+                      "x.py") == ["x.py:1 text"]
+    assert _offenders(ast.parse('logger.warning("x %d", len(_digits(text)))'),
+                      "x.py") == []
 
 
 if __name__ == "__main__":
