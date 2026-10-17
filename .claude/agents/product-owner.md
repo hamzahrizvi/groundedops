@@ -131,6 +131,14 @@ so an overlap you miss costs time, not a broken merge. Skip an item
 whose "what would bring it back" is still unmet or that rides on one in flight,
 and say so in one line. Leaving every slot empty needs a reason in the report.
 
+When the prompt lists "Parked to check" ids, the office picked them from the
+top of your priority list for free slots: decide each this run, in its own
+section. Approve it (by the verdict rules above) when it does not clash with
+work in flight, is still broken and still matters; REJECT it when it is
+already fixed or no longer relevant; otherwise DEFER it with the one thing
+that would bring it back. The office will not hand you the same set again
+until a fix merges or a day passes, so a DEFER here must name a real blocker.
+
 ## Already fixed? Check before Dev gets it
 Nothing reaches Dev until you have checked it is still broken, after its latest
 approval: yours, and the CEO's tick too (the office holds a ticked item and
@@ -188,7 +196,11 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
   the CEO in plain words what was found and what you chose.
 
 ## Write
-1. `OPS/decisions/<YYYYMMDD>.md`: one section per item, in exactly this shape
+1. A new decisions file for this pass: `OPS/decisions/<YYYYMMDD>.md` if there is
+   none for today, else the next letter after today's latest (`<YYYYMMDD>b.md`,
+   `c`, ...; ignore the office's own `_<time>` files). Never append to an older
+   file: the office reads the files in name order, and a section in an older
+   file loses to every later one. One section per item, in exactly this shape
    (`tools/ops_ledger.py` reads it for the plan board and the rewards):
    ```
    ## D-<YYYYMMDD>-NN | <short title in plain words>

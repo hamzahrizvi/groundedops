@@ -144,6 +144,7 @@ button{font:inherit;color:inherit}
 .kcard.s-merged{border-left-color:var(--ok)} .kcard.s-ready{border-left-color:var(--ok)}
 .kcard.s-ceo{border-left-color:var(--accent)} .kcard.s-bad{border-left-color:var(--crit)}
 .kmeta{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px;font:15px/1 var(--data);color:var(--muted)}
+.kprio{font:10px/1 var(--display);letter-spacing:.05em;padding:3px 5px;border-radius:2px;background:var(--ink);color:var(--bg)}
 .kstage{font:10px/1 var(--display);letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--line);padding:3px 5px;border-radius:2px}
 .dboards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px}
 .dboard{background:var(--bg);border-radius:4px;padding:10px;min-width:0;font-size:14px}
@@ -922,7 +923,7 @@ function renderBoards(){
     : `Updated ${new Date(L.updated).toLocaleString()} by the product owner's run. Every card and point comes from the departments' files and git, never from what an agent says about itself.`;
   const lanes = [["future","Coming up"],["ongoing","In progress"],["past","Done"]];
   document.getElementById("p-plan").replaceChildren(...lanes.map(([k, title]) => {
-    const cards = L.cards.filter(c => c.lane === k), lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
+    const cards = L.cards.filter(c => c.lane === k).sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999)), lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
     lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
     if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
     for(const c of cards){
@@ -930,7 +931,9 @@ function renderBoards(){
       const meta = document.createElement("div"); meta.className = "kmeta";
       const st = document.createElement("span"); st.className = "kstage"; st.textContent = shownStage(c);
       const who = document.createElement("span"); who.textContent = `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
-      meta.append(st, who); li.append(meta);
+      meta.append(st, who);
+      if(c.priority != null){ const p = el("span", "kprio", `P${c.priority}`); p.title = "The product owner's priority: 1 is done first"; meta.prepend(p); }
+      li.append(meta);
       const now = cardNow(c);
       if(now && !isSample && live.available && !(live.brief && live.brief.off)){ const b = runNowBtn(now, "Do it now"); b.classList.add("donow"); if(now.key === "dev") devNow(b); li.append(b); }
       ul.append(li);

@@ -34,6 +34,17 @@ def _read(p):
     return open(p, encoding="utf-8").read()
 
 
+def new_decisions_file(ops, now=None):
+    """A new decisions file that sorts after every one written so far. decisions() reads files in name order, so an
+    append to an older file is read before newer passes: the CEO's 20:19 tick, appended to 20261016.md, lost to
+    unticked boxes in 20261016h/i.md written at 17:33 and 17:49 (2026-10-16), and Dev never got the item.
+    The product owner names its passes <day>.md, <day>b.md, <day>c.md ...; the office adds <latest>_<HHMMSS>.md."""
+    now = now or datetime.datetime.now()
+    day = f"{now:%Y%m%d}"
+    names = sorted(os.path.basename(p)[:-3] for p in glob.glob(os.path.join(ops, "decisions", day + "*.md")))
+    return os.path.join(ops, "decisions", f"{names[-1].split('_')[0]}_{now:%H%M%S}.md" if names else day + ".md")
+
+
 def decisions(ops):
     items, seq = {}, 0
     for path in sorted(glob.glob(os.path.join(ops, "decisions", "*.md"))):
@@ -158,7 +169,7 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
         cards.append({"id": it["id"], "title": it["title"], "from": it.get("from", ""), "security": it.get("security", False),
                       "assigned": it.get("assigned", "dev"),
                       "stage": st, "lane": "past" if st in PAST else "future" if st in FUTURE else "ongoing",
-                      "decided": it["decided"]})
+                      "decided": it["decided"], "priority": None if st in PAST else it.get("priority")})
     for path in sorted(glob.glob(os.path.join(ops, "inbox", "*", "*.md"))):
         dept, name = os.path.basename(os.path.dirname(path)), os.path.basename(path)
         if dept in ("dev", "ceo") or NOTES.search(name) or f"inbox/{dept}/{name}" in cited:   # ceo: notes, answered in the report
@@ -211,6 +222,17 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
 
 def _selftest():
     import tempfile
+    od = tempfile.mkdtemp()
+    os.makedirs(os.path.join(od, "decisions"))
+    t = datetime.datetime(2026, 10, 16, 20, 19, 5)
+    assert os.path.basename(new_decisions_file(od, t)) == "20261016.md", "first file of the day"
+    for n in ("20261016.md", "20261016h.md"):
+        open(os.path.join(od, "decisions", n), "w").write("## D-20261016-13 | Local\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n")
+    p = new_decisions_file(od, t)
+    assert os.path.basename(p) == "20261016h_201905.md" and "20261016h.md" < os.path.basename(p) < "20261016i.md", p
+    open(p, "w").write("## D-20261016-13 | Local\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
+    assert os.path.basename(new_decisions_file(od, t.replace(minute=30))) == "20261016h_203005.md"
+    assert decisions(od)["D-20261016-13"]["ceo_approved"], "the newest tick wins"
     ops = tempfile.mkdtemp()
     for d in ("decisions", "inbox/customer", "inbox/dev", "inbox/audit"):
         os.makedirs(os.path.join(ops, d))

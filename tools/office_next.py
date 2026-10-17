@@ -68,6 +68,8 @@ MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged item
 MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2)}
 MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, merges are serialized
 RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that picks it up (take stamps it, end_tick removes it)
+IDLE_EVERY = 3        # ponytail: days between discovery runs (security, audit, rnd, marketing) while nothing else waits
+PARKED = ("state", "parked_review")   # the parked ids last handed to the product owner (take() writes it)
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -220,6 +222,9 @@ def take(ops, repo, five, week, resets, now, lane):
             continue
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"lane": lane, "at": now.isoformat(timespec="seconds"), "line": line}, f)
+        if "parked to check: " in line:   # handed over: the same set does not wake the product owner again
+            with open(os.path.join(ops, *PARKED), "w", encoding="utf-8") as f:
+                f.write(" ".join(line.split("parked to check: ")[1].split(";")[0].replace(",", " ").split()))
         try:   # a "Run now" press is used up by the start it allowed
             os.remove(os.path.join(ops, "state", "run_now", "dev" if key.startswith("dev-") else key))
         except OSError:
@@ -308,12 +313,24 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         last_merge = 0
     # parked work comes back by priority (the CEO, 2026-10-14: 34 deferred items sat with slots free): the product owner
     # re-decides the DEFER list when a slot is free and it has not looked since one freed up, or daily
+    # the CEO, 2026-10-17: with slots free, the top parked items (by the product owner's priority, at most 3) go to it to
+    # check - clash with work in flight, already fixed, still relevant - and approve; once per set, so an idle tick
+    # does not re-wake it for the ones it just left parked, unless a merge freed something or a day passed
     stages = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") != "ceo"}
     slots = mode[0] - sum(s in IN_FLIGHT for s in stages.values())
-    parked = sum(s == "deferred" for s in stages.values())
+    top = sorted((i for i, s in stages.items() if s == "deferred"), key=lambda i: (items[i].get("priority", 99), i))[:min(slots, 3)]
     triaged = _mtime(os.path.join(ops, "decisions", "*.md"))
-    if slots > 0 and parked and (last_merge > triaged or age(triaged) >= 1) and not any(d == "product-owner" and k for d, _, k in out):
-        out.append(("product-owner", f"{slots} of {mode[0]} slots free: re-decide the {parked} parked items, most valuable first", "product-owner"))
+    try:
+        seen = open(os.path.join(ops, *PARKED), encoding="utf-8").read().split()
+    except OSError:
+        seen = []
+    if top and (top != seen or last_merge > triaged or age(triaged) >= 1):
+        why = f"parked to check: {', '.join(top)}"
+        po = next((n for n, (d, _, k) in enumerate(out) if d == "product-owner" and k), None)
+        if po is None:
+            out.append(("product-owner", f"{slots} of {mode[0]} slots free; {why}", "product-owner"))
+        else:   # one run does both
+            out[po] = (out[po][0], f"{out[po][1]}; {why}", out[po][2])
     asked =_mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
     if asked > last_run:   # first in the queue until a run finishes after the press
         out.insert(0, ("customer", "the CEO asked for a fresh score", "customer"))
@@ -342,6 +359,15 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         out.append(("diary", "you asked for it now", "diary"))
     elif days:
         out.append(("diary", f"diary for {', '.join(str(d) for d in days[:3])}" + (" and more" if len(days) > 3 else ""), "diary"))
+    # the CEO, 2026-10-17: nothing to build, check or test -> the departments that find work look for more, every IDLE_EVERY days
+    if not any(k for d, _, k in out if d not in ("diary", "merge")):
+        last = {"security": _mtime(os.path.join(ops, "state", "security_last_run.txt")),
+                "audit": _mtime(os.path.join(ops, "inbox", "audit", "*-weekly.md")),
+                "rnd": _mtime(os.path.join(ops, "state", "rnd_last_run.txt")),
+                "marketing": _mtime(os.path.join(ops, "state", "marketing_last_run.txt"))}
+        for dept, t in last.items():
+            if dept not in {d for d, _, _ in out} and age(t) >= IDLE_EVERY:
+                out.append((dept, "office idle: look for new work to improve the product", dept))
     for dept in sorted(run_now(ops) - {d for d, _, _ in out} - {"dev", "all"}):   # "Do it now" with nothing due (Dev needs a work order)
         out.append((dept, "you asked for it now", dept))
     if capped:   # a blind run spends lab money too
@@ -542,6 +568,13 @@ def selftest():
         w("state/run_now/audit")
         assert any(x.startswith("RUN  groundedops-office-audit  you asked for it now") for x in plan(ops, ops, 11, 38, resets, now)), "Do it now, nothing due"
         os.remove(os.path.join(ops, "state", "run_now", "audit"))
+        w("decisions/20261008p.md", "## D-20261008-31 | Parked one\n- Assigned: dev\n- Verdict: DEFER\n- Priority: 2\n\n"
+                                    "## D-20261008-32 | Parked two\n- Assigned: dev\n- Verdict: DEFER\n- Priority: 1\n")
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert any("1 of 3 slots free; parked to check: D-20261008-32" in x for x in p), "highest priority first, one per free slot"
+        w("state/parked_review", "D-20261008-32")
+        assert not any("parked to check" in x for x in plan(ops, ops, 11, 38, resets, now)), "same set: not again"
+        os.remove(os.path.join(ops, "decisions", "20261008p.md")); os.remove(os.path.join(ops, "state", "parked_review"))
         w("state/run_now/all")
         p = plan(ops, ops, 60, 38, resets, now)
         assert p[0].startswith("RUN  groundedops-office-customer") and not any("you asked for it now" in x for x in p), "Run all lifts the budget, adds no work"

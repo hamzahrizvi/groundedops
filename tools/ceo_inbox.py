@@ -37,7 +37,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import decisions, stage_of  # noqa: E402
+from ops_ledger import decisions, new_decisions_file, stage_of  # noqa: E402
 from office_next import COST, EVERY, MODES, claims  # noqa: E402
 
 CAP_NOTE = re.compile(r"^\s*(\d{1,4}(?:\.\d{1,2})?)\s*(day|week|month)?\s*$")
@@ -174,7 +174,7 @@ def apply(ops, folder, now=None):
         stages[i] = {"approve": "approved, queued", "defer": "deferred", "done": "done"}[choice]
         out.append(f"APPLIED {doc_id} {choice} {i}")
     if sections:
-        path = os.path.join(ops, "decisions", f"{now:%Y%m%d}.md")
+        path = new_decisions_file(ops, now)   # never an append to an older file: read in name order, it would lose to newer passes
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"\n\n# CEO decisions from the office page, {stamp}\n\n" + "\n".join(sections))
     if out:
@@ -205,7 +205,7 @@ def selftest():
         assert [g.split()[0] for g in got] == ["APPLIED", "APPLIED", "APPLIED", "SKIPPED", "SKIPPED", "APPLIED"], got
         st = {i: stage_of(it, ops, set(), set()) for i, it in decisions(ops).items()}
         assert st == {"D-20261008-01": "approved, queued", "D-20261008-06": "approved, queued", "D-20261008-07": "done"}, st
-        text = open(os.path.join(ops, "decisions", "20261008.md"), encoding="utf-8").read()
+        text = "".join(open(p, encoding="utf-8").read() for p in sorted(glob.glob(os.path.join(ops, "decisions", "*.md"))))
         assert "> ## D-20261008-06 | Vague" in text and text.count("\n## D-20261008-06") == 2, "a note never forges a block"
         notes = glob.glob(os.path.join(ops, "inbox", "ceo", "*.md"))
         assert len(notes) == 1 and "> Why is the table fix" in open(notes[0], encoding="utf-8").read()

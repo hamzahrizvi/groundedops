@@ -26,7 +26,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import decisions  # noqa: E402
+from ops_ledger import decisions, new_decisions_file  # noqa: E402
 
 OFFICE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -106,7 +106,7 @@ def send_back(did, ops, into, branch, files):
         if os.path.exists(src):
             os.rename(src, f"{src}.{n}")
     title = decisions(ops).get(did, {}).get("title", "")
-    with open(os.path.join(ops, "decisions", time.strftime("%Y%m%d") + ".md"), "a", encoding="utf-8") as f:
+    with open(new_decisions_file(ops), "a", encoding="utf-8") as f:   # sorts after every earlier pass (ops_ledger)
         f.write(f"\n\n## {did} | {title}\n- Verdict: SENT BACK\n\nSent back by the office merge: another fix merged into "
                 f"{into} first and {branch} now conflicts with it in {', '.join(files) or 'files git did not name'}. "
                 f"Rebase {branch} onto {into}, resolve the conflicts keeping both fixes, run the full suite, then CHECK "
@@ -151,7 +151,7 @@ def selftest():
         dev = os.path.join(ops, "inbox", "dev")
         assert sorted(os.listdir(dev)) == ["D-20261008-91.gate", "D-20261008-92.gate", "D-20261008-93.gate", "D-20261008-94.gate.1", "D-20261008-94.md.1"], os.listdir(dev)
         assert os.path.exists(os.path.join(ops, "inbox", "security", "review-D-20261008-94.md.1")), "Security reviews the rebase again"
-        assert "Verdict: SENT BACK" in open(os.path.join(ops, "decisions", time.strftime("%Y%m%d") + ".md")).read()
+        assert any("Verdict: SENT BACK" in open(p).read() for p in glob.glob(os.path.join(ops, "decisions", "*.md")))
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
         assert merge("D-20261008-93", ops, repo, repo).startswith("FAILED"), "broken code is reverted"
         assert not os.path.exists(os.path.join(repo, "c.py")), "the revert removed it"
