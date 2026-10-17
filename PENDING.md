@@ -194,10 +194,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261010-21 | Security item D-20261010-21, details in the office | waiting for CEO | your yes |
 | D-20261015-11 | Security item D-20261015-11, details in the office | waiting for CEO | your yes |
-| D-20261016-10 | The test check scores a hidden question against what it scored before the fix, not against a fixed bar alone | approved, queued | Dev builds it |
-| D-20261016-13 | Security item D-20261016-13, details in the office | approved, queued | Dev builds it |
+| D-20261016-10 | The test check scores a hidden question against what it scored before the fix, not against a fixed bar alone | built, waiting for the check | the pre-ship check |
+| D-20261016-13 | Security item D-20261016-13, details in the office | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
@@ -220,6 +219,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-16 | The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about | deferred | parked |
 | D-20261010-17 | When the passages miss, read the whole manual once before saying "not in the manual" | deferred | parked |
 | D-20261010-18 | Half answers that say "not stated" for a documented fact: search once more for the named gap | deferred | parked |
+| D-20261010-21 | Security item D-20261010-21, details in the office | deferred | parked |
 | D-20261010-27 | A two-product question gets an instant table of the wrong spec rows and "these are the same" | deferred | parked |
 | D-20261010-32 | Security item D-20261010-32, details in the office | deferred | parked |
 | D-20261010-33 | Security item D-20261010-33, details in the office | deferred | parked |
