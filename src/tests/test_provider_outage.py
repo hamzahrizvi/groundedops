@@ -179,6 +179,20 @@ def test_no_escalation_when_the_mode_role_is_unassigned():
         assert gen.called is False
 
 
+def test_local_mode_with_the_switch_off_refuses_and_sends_nothing_out():
+    """D-20261016-13: the harness stubs llm, so the real escalation_role is
+    covered in test_llm; here: when it returns None (switch off) a flagged
+    answer calls no provider."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    with ExitStack() as st:
+        gen = _escalation_stack(st, {"default": "openai", "backup": "deepseek"})
+        with patch.object(main, "escalation_role", return_value=None):
+            r = main.query(main.QueryRequest(q="How do I connect the MyCheckr?"))
+        assert gen.called is False
+        assert "USB-B" not in r["answer"]
+
+
 def test_deep_health_is_private_but_plain_health_is_public():
     """D-20261010-24: from outside, ?deep=1 is a 404 and spends no provider
     call; from the box, the LAN, the docker bridge or with a bearer token

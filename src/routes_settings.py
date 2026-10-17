@@ -96,7 +96,13 @@ def set_mode(payload: ModeRequest,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"Generation mode switched to: {mode}")
-    return {"mode": mode, **get_settings()}
+    import keystore
+    import llm
+    out = [keystore.processor_label(p) for p in llm.outside_providers()]
+    if mode == "local":
+        logger.warning(("Local mode: flagged answers go to " + ", ".join(out)) if out
+                       else "Local mode: nothing is sent outside; flagged answers become refusals")
+    return {"mode": mode, "outside_providers": out, **get_settings()}
 
 
 class ModelsRequest(BaseModel):

@@ -148,6 +148,16 @@ with open(env_path, encoding="utf-8") as f:
     check("PROVIDER_ROLE_DEFAULT" not in f.read(),
           "clearing removes the line rather than writing an empty one")
 
+print(chr(10) + "== local-mode outside escalation (D-20261016-13) ==")
+check(keystore.local_escalation_allowed() is False, "off by default")
+check(client.post("/admin/keys/local_escalation", headers=SUPPORT, json={"allow": True}).status_code == 403,
+      "support cannot switch it on")
+r = client.post("/admin/keys/local_escalation", headers=ROOT, json={"allow": True})
+check(r.status_code == 200 and r.json()["local_escalation"] is True, f"root switches it on ({r.status_code})")
+check(client.get("/admin/keys", headers=ROOT).json()["local_escalation"] is True, "the keys list reports it")
+client.post("/admin/keys/local_escalation", headers=ROOT, json={"allow": False})
+check(keystore.local_escalation_allowed() is False, "and off again")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")

@@ -259,9 +259,9 @@ _ROLE_LABEL = {
 }
 
 _ROLE_HINT = {
-    "default": "Answers a normal question, and condenses follow-ups.",
+    "default": "Answers a normal question, and condenses follow-ups. In local mode it gets flagged answers only if the switch below is on.",
     "advanced": "Answers a 'deep' question, where reasoning is worth the cost.",
-    "backup": "Tried only when the provider above fails on a request.",
+    "backup": "Online mode only: tried when the provider above fails on a request.",
 }
 
 
@@ -280,6 +280,25 @@ def role_label(role: str) -> str:
 
 def role_hint(role: str) -> str:
     return _ROLE_HINT.get(role, "")
+
+
+# D-20261016-13: in local mode a flagged answer may be retried on the Default
+# role's provider (llm.escalation_role). That sends the question and the
+# manual passages outside, so it is OFF unless the operator turns it on.
+_LOCAL_ESCALATION_ENV = "LOCAL_ALLOW_OUTSIDE_ESCALATION"
+
+
+def local_escalation_allowed() -> bool:
+    return (os.getenv(_LOCAL_ESCALATION_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def set_local_escalation_allowed(on: bool) -> None:
+    _rewrite_env_line(_LOCAL_ESCALATION_ENV, "1" if on else None)
+    if on:
+        os.environ[_LOCAL_ESCALATION_ENV] = "1"
+    else:
+        os.environ.pop(_LOCAL_ESCALATION_ENV, None)
+    logger.info(f"local-mode outside escalation {'on' if on else 'off'} (via console)")
 
 
 def get_role_assignment(role: str) -> str | None:

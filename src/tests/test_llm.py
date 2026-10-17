@@ -250,30 +250,44 @@ def test_outside_providers_names_default_advanced_and_backup_once_each():
 
 
 def test_outside_providers_in_local_mode_is_only_the_default_role_escalation():
+    import os
+    from unittest.mock import patch
     for assigned, expected in (({"default": "openai", "backup": "deepseek"}, ["openai"]),
                                ({"backup": "deepseek"}, [])):
-        with roles(assigned):
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": "1"}):
+            with roles(assigned):
+                runtime_config.set_generation_mode("local")
+                try:
+                    assert llm.outside_providers() == expected
+                finally:
+                    runtime_config.set_generation_mode("api")
+    with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": ""}):
+        with roles({"default": "openai", "backup": "deepseek"}):
             runtime_config.set_generation_mode("local")
             try:
-                assert llm.outside_providers() == expected
+                assert llm.outside_providers() == []
             finally:
                 runtime_config.set_generation_mode("api")
 
 
 def test_escalation_role_follows_the_mode():
-    assert llm.escalation_role() == "backup"
-    runtime_config.set_generation_mode("local")
-    try:
-        assert llm.escalation_role() == "default"
-    finally:
-        runtime_config.set_generation_mode("api")
+    import os
+    from unittest.mock import patch
+    for flag in ("", "1"):
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": flag}):
+            assert llm.escalation_role() == "backup"
+            runtime_config.set_generation_mode("local")
+            try:
+                assert llm.escalation_role() == ("default" if flag else None)
+            finally:
+                runtime_config.set_generation_mode("api")
 
 
 def test_local_mode_notice_names_the_default_provider_only():
     import widget_config
     runtime_config.set_generation_mode("local")
     try:
-        with roles({"default": "openai", "backup": "deepseek"}):
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": "1"}),                 roles({"default": "openai", "backup": "deepseek"}):
             n = widget_config.ai_notice()
             assert "OpenAI (USA)" in n and "DeepSeek" not in n, n
         with roles({"default": "openai"}, keyed=False):

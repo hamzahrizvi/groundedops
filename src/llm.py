@@ -287,27 +287,34 @@ def _chain_for(role: str) -> list[tuple[str, str]]:
     return FALLBACK_CHAIN.get(role, FALLBACK_CHAIN["accurate"])
 
 
-def escalation_role() -> str:
+def escalation_role() -> str | None:
     """The key role main.py's escalation retries a flagged answer on:
     Backup in api mode; in local mode the Default role (CEO, 2026-10-16:
     "whatever is the default provider when local mode fails", D-20261016-09).
     keystore.get_role on it is None when unassigned or unkeyed, and then
-    nothing escalates. Read live, like _chain_for."""
+    nothing escalates. In local mode only when keystore.local_escalation_allowed()
+    (off by default, D-20261016-13); otherwise None and nothing escalates.
+    Read live, like _chain_for."""
     from runtime_config import get_generation_mode
-    return "default" if get_generation_mode() == "local" else "backup"
+    if get_generation_mode() != "local":
+        return "backup"
+    import keystore
+    return "default" if keystore.local_escalation_allowed() else None
 
 
 def outside_providers() -> list[str]:
     """Provider ids that may receive a visitor's text: what _chain_for can
     call in api mode (default, advanced, backup) plus main.py's escalation
-    role (escalation_role: Backup in api mode, Default in local mode). Read live, so the widget's notice
+    role (escalation_role: Backup in api mode, Default in local mode when allowed). Read live, so the widget's notice
     (widget_config.ai_notice) follows the API keys page."""
     import keystore
     from runtime_config import get_generation_mode
     out = []
     if get_generation_mode() == "api":
         out += [_provider_for_job("default"), _provider_for_job("advanced")]
-    out.append(keystore.get_role(escalation_role()))
+    role = escalation_role()
+    if role:
+        out.append(keystore.get_role(role))
     return [p for i, p in enumerate(out) if p and p not in out[:i]]
 
 
