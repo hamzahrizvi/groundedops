@@ -287,7 +287,8 @@ def test_local_mode_notice_names_the_default_provider_only():
     import widget_config
     runtime_config.set_generation_mode("local")
     try:
-        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": "1"}),                 roles({"default": "openai", "backup": "deepseek"}):
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": "1"}), \
+                roles({"default": "openai", "backup": "deepseek"}):
             n = widget_config.ai_notice()
             assert "OpenAI (USA)" in n and "DeepSeek" not in n, n
         with roles({"default": "openai"}, keyed=False):
