@@ -612,6 +612,8 @@ _VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send
 
 The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
 
+Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label.
+
 Judge two things separately.
 
 SUPPORT - Does every factual claim in the ANSWER appear in the SOURCE, without pairing values the SOURCE does not pair together? When the ANSWER tells the reader to DO something, the SOURCE must give that step for that purpose. A sentence that only describes what a port or feature can do is not an instruction; an ANSWER that turns one into a step is not supported.
@@ -670,6 +672,17 @@ def _needs_judgement(question: str, answer: str) -> bool:
     return bool(_JUDGEMENT_RE.search(f"{question or ''}\n{answer or ''}"))
 
 
+def _verify_label(chunk: dict, names: dict) -> str:
+    """"[NV4000 Range User Manual-v2.pdf, page 20, from the NV4000
+    documentation]" above a passage the verifier reads, as the answering
+    model sees it (D-20261015-02). "" for a chunk with no source."""
+    src = chunk.get("source")
+    if not src:
+        return ""
+    pg = chunk.get("page")
+    return f"[{src}{f', page {pg}' if pg else ''}{_passage_product(chunk, names)}]\n"
+
+
 def _llm_verified(answer: str, chunks: list[dict],
                   deepseek_api_key: str | None = None,
                   question: str = "") -> bool:
@@ -717,9 +730,11 @@ def _llm_verified(answer: str, chunks: list[dict],
     if not (llm_verify_enabled() and answer and chunks):
         return False
     try:
-        ctx = "\n\n".join(c.get("text", "")[:CHUNK_CHAR_CAP] for c in chunks)
-        if not ctx.strip():
+        if not any((c.get("text") or "").strip() for c in chunks):
             return False
+        _names = _product_names()
+        ctx = "\n\n".join(_verify_label(c, _names) + c.get("text", "")[:CHUNK_CHAR_CAP]
+                          for c in chunks)
         from contextlib import nullcontext
         from llm import judging
         _think = _needs_judgement(question, answer)
@@ -3962,6 +3977,25 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         from retrieval_db import bundle_evidence
         top_chunks = top_chunks + bundle_evidence(_bundle, answer, top_chunks)
 
+    # THE LLM VERIFIER READS THE PAGES THE ANSWER CITES (D-20261015-02). Sources
+    # name whole pages; the checks saw only the ranked fragments of them.
+    # NLI, the number-match rescue and citations keep top_chunks (r5: NLI on the
+    # cited pages served 0 of 80 asks and cost ~2 s at p90, so it was dropped).
+    _cited = []
+    if top_chunks and not generation_failed:
+        try:
+            from retrieval_db import cited_pages
+            _cited = [_strip_breadcrumb(c) for c in
+                      cited_pages(top_chunks, budget=CONTEXT_K * CHUNK_CHAR_CAP)]
+        except Exception as _exc:
+            logger.warning(f"cited pages skipped: {_exc}")
+    _verify_chunks = top_chunks + _cited
+    _shown = (f"{len(top_chunks)} passage(s) + "
+              f"{len(_verify_chunks) - len(top_chunks)} from the cited pages, "
+              f"{sum(len(c.get('text') or '') for c in _verify_chunks)} chars")
+    logger.info("verifier shown: %s", _shown)
+    ptrace.set_meta(verify_shown=_shown)
+
     # ── Grounding check ──────────────────────
     # Two clocks, because one was measuring the wrong thing. `t_grounding`
     # used to be read ~160 lines below, AFTER the backup escalation and the
@@ -4066,7 +4100,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         verifier_unavailable = False
         ptrace.mark("verify", "table answer: NLI skipped, LLM verifier decides")
         if _timed("llm_verify", _llm_verified,
-                  answer, top_chunks, deepseek_api_key, resolved_query):
+                  answer, _verify_chunks, deepseek_api_key, resolved_query):
             is_grounded, ground_via = True, "llm"
             logger.info("Table answer verified by LLM verifier for: "
                         f"{redact(resolved_query)}")
@@ -4089,7 +4123,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # correct answer away. See _llm_verified.
         elif (not is_grounded and not verifier_unavailable
               and _timed("llm_verify", _llm_verified,
-                         answer, top_chunks, deepseek_api_key,
+                         answer, _verify_chunks, deepseek_api_key,
                          resolved_query)):
             is_grounded, ground_via = True, "llm"
             logger.info("Grounding rescued by LLM verifier "
@@ -4167,7 +4201,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                 f"containment (nli={grounding_score})")
                 elif (not is_grounded and not verifier_unavailable
                       and _timed("verify", _llm_verified,
-                                 answer, top_chunks, deepseek_api_key,
+                                 answer, _verify_chunks, deepseek_api_key,
                                  resolved_query)):
                     is_grounded, ground_via = True, "llm"
                     logger.info("Escalated answer rescued by LLM verifier "
@@ -4227,7 +4261,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                   _text, top_chunks):
                 _ok, _via = True, "lexical"
             elif not _ok and _timed("verify", _llm_verified,
-                                    _text, top_chunks, deepseek_api_key,
+                                    _text, _verify_chunks, deepseek_api_key,
                                     resolved_query):
                 _ok, _via = True, "llm"
             if _ok:

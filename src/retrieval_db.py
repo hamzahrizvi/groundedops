@@ -945,6 +945,37 @@ def bundle_evidence(bundle: list[dict], answer: str, have: list[dict],
     return (picked[:n] + whole)[:max_chunks]
 
 
+def cited_pages(chunks: list[dict], budget: int) -> list[dict]:
+    """The rest of every page the passages come from (D-20261015-02): the
+    chunks of the index on the same (source, page) as a passage, not
+    already among them, page by page in the passages' order and in document
+    order within a page, until `budget` characters. The answer cites these
+    pages; the verifiers judged it against fragments of them. Never raises."""
+    # ponytail: one scan of the chunk cache per turn; index by (source, page) if it shows in timings.
+    try:
+        _, all_chunks = _get_bm25_index(get_collection())
+    except Exception as exc:
+        logger.warning(f"cited pages skipped: {exc}")
+        return []
+    have = {c.get("id") for c in chunks}
+    keys = list(dict.fromkeys((c.get("source"), c.get("page")) for c in chunks
+                              if c.get("source") and isinstance(c.get("page"), int)))
+    found = {k: [] for k in keys}
+    for a in all_chunks:
+        k = (a.get("source"), a.get("page"))
+        if k in found and a.get("id") not in have:
+            found[k].append(a)
+    out, spent = [], 0
+    for k in keys:
+        for a in sorted(found[k], key=lambda a: _order_key(a["id"])):
+            n = len(a.get("text") or "")
+            if spent + n > budget:
+                return out
+            spent += n
+            out.append(dict(a, retrieval_score=0.0, fetched_by="cited_page"))
+    return out
+
+
 TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))
 
 

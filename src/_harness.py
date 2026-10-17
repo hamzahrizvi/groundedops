@@ -291,6 +291,7 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
      apply_arm_guarantee=lambda ranked_ids, keep_n, *a, **k: list(
          ranked_ids[:keep_n]),
      complete_procedures=lambda chunks, *a, **k: chunks,
+     cited_pages=lambda chunks, *a, **k: [],
      _invalidate_bm25_cache=lambda: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
