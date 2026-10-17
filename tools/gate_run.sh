@@ -17,6 +17,7 @@
 # not asked (D-20261010-07). When the run's stored answers came from another bot model than the
 # lab's today, the before is re-asked on the branch's base code into <out_dir>/before (D-20261010-09).
 # The after pass gets the run's manuals/, the cited pages the run's grader had (D-20261010-23).
+# Each hidden sibling is also asked on the branch's base code and marked in the same pass (sys_before); it fails the gate only when it is under 2 on the branch and 2+ on base (D-20261016-10).
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
@@ -34,6 +35,8 @@ BE="${BE:-$REPO/tools/blind_eval.py}"
 # exit 3 from blind_eval.py: the CEO's lab cap is reached (D-20261010-31); the gate fails closed and says so
 log() { local f="$1"; shift; "$@" >> "$f" 2>&1 && return
   if [ $? -eq 3 ]; then echo "lab stopped at the cap" > "$OUT/FAILED"; else echo "failed: $*" > "$OUT/FAILED"; fi; exit 1; }
+# one state's sys_normal answers ride along in another state as sys_before, so both are marked in one pass (D-20261010-05)
+ride() { "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8")); s["sys_before"]=json.load(open(sys.argv[1],encoding="utf-8"))["sys_normal"]; json.dump(s,open(sys.argv[2],"w",encoding="utf-8"),indent=1,ensure_ascii=False)' "$1" "$2"; }
 # D-20261010-07: the branch's own commits (in neither the office nor the product checkout) touch nothing
 # under src/, so the bot cannot answer differently: PASS without asking it. Any git error runs the full gate.
 not=(); for c in "$REPO" "$GO_DATA"; do h="$(git -C "$c" rev-parse HEAD 2>/dev/null)" && git -C "$DEV" cat-file -e "$h^{commit}" 2>/dev/null && not+=("$h"); done
@@ -45,13 +48,17 @@ fi
 log "$OUT/gate.log" "$PY" "$BE" "$RUN" remark
 # D-20261010-09: stored answers from another bot model are re-asked on the base code with today's model
 "$PY" "$BE" "$RUN" models > "$OUT/models.json" 2>> "$OUT/gate.log" || { echo "failed: models" > "$OUT/FAILED"; exit 1; }
+# the branch's base code: for a before re-asked on today's model, and for every hidden sibling's before (D-20261016-10)
+BASE="$OUT/base_code"; rm -rf "$BASE"; trap 'rm -rf "$BASE"' EXIT
+SAME=0; grep -q '"same": true' "$OUT/models.json" && SAME=1
+if [ $SAME = 0 ] || [ $# -gt 0 ]; then
+  log "$OUT/gate.log" "$PY" "$REPO/tools/gate_rerun.py" --base-code "$DEV" "$BASE"
+fi
 BEFORE="$RUN/cases_state.json"
-if ! grep -q '"same": true' "$OUT/models.json"; then
+if [ $SAME = 0 ]; then
   mkdir -p "$OUT/before"; cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/before/"
   log "$OUT/gate.log" "$PY" "$BE" "$OUT/before" reset
-  log "$OUT/gate.log" "$PY" "$REPO/tools/gate_rerun.py" --base-code "$DEV" "$OUT/base_code"
-  log "$OUT/gate.log" env GO_CODE="$OUT/base_code/src" "$PY" -X faulthandler "$BE" "$OUT/before" system normal
-  rm -rf "$OUT/base_code"
+  log "$OUT/gate.log" env GO_CODE="$BASE/src" "$PY" -X faulthandler "$BE" "$OUT/before" system normal
   BEFORE="$OUT/before/cases_state.json"   # not graded here: the after pass marks it as sys_before
 fi
 
@@ -59,7 +66,7 @@ cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/after/"
 if [ -d "$RUN/manuals" ]; then mkdir -p "$OUT/after/manuals" && cp "$RUN/manuals/"* "$OUT/after/manuals/"; fi   # D-20261010-23
 log "$OUT/gate.log" "$PY" "$BE" "$OUT/after" reset
 # the before answers (stored, or re-asked above) ride along as sys_before, graded with after in one pass (D-20261010-05)
-log "$OUT/gate.log" "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8")); s["sys_before"]=json.load(open(sys.argv[1],encoding="utf-8"))["sys_normal"]; json.dump(s,open(sys.argv[2],"w",encoding="utf-8"),indent=1,ensure_ascii=False)' "$BEFORE" "$OUT/after/cases_state.json"
+log "$OUT/gate.log" ride "$BEFORE" "$OUT/after/cases_state.json"
 log "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal
 log "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade
 
@@ -69,17 +76,21 @@ if [ $# -gt 0 ]; then
   mkdir -p "$HELD" && HELD="$(cd "$HELD" && pwd)"
 fi
 for s in "$@"; do
-  d="$HELD/sib_$(basename "$s" .json)"; mkdir -p "$d"; cp "$s" "$d/cases.json"
+  d="$HELD/sib_$(basename "$s" .json)"; mkdir -p "$d/base"; cp "$s" "$d/cases.json"; cp "$s" "$d/base/cases.json"
+  # D-20261016-10: each sibling is asked on the base code too, and both answers are marked in one pass
+  log "$HELD/gate.log" env GO_CODE="$BASE/src" SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d/base" system normal
   log "$HELD/gate.log" env SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d" system normal
-  log "$HELD/gate.log" env SYSTEMS=sys_normal "$PY" "$BE" "$d" grade
+  log "$HELD/gate.log" ride "$d/base/cases_state.json" "$d/cases_state.json"
+  log "$HELD/gate.log" env SYSTEMS=sys_normal,sys_before "$PY" "$BE" "$d" grade
   SIBS+=("$d/cases_state.json")
 done
 
-# the CEO, 2026-10-14: a hidden sibling under 2 is re-asked 5 more times on the branch and settles at its lower median
+# the CEO, 2026-10-14: a hidden sibling the fix would fail on is re-asked 5 more times on the branch and on its base code, each side settling at its lower median (D-20261016-10)
 # (it clears only when 4 of 6 answers score 2+); its passes stay in $HELD, never where Dev reads
 if [ ${#SIBS[@]} -gt 0 ]; then
-  BE="$BE" "$PY" "$REPO/tools/gate_rerun.py" --siblings "$HELD" "$DEV" "${SIBS[@]}" >> "$HELD/gate.log" 2>&1 || echo "sibling re-ask failed; single-pass marks stand" >> "$HELD/gate.log"
+  BE="$BE" "$PY" "$REPO/tools/gate_rerun.py" --siblings "$HELD" "$DEV" "$BASE" "${SIBS[@]}" >> "$HELD/gate.log" 2>&1 || echo "sibling re-ask failed; single-pass marks stand" >> "$HELD/gate.log"
 fi
+rm -rf "$BASE"   # before the leak check reads $OUT
 if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$OUT" --cases "$@")"; then
   echo "hidden text under inbox/dev: $hits" > "$OUT/FAILED"; exit 1
 fi

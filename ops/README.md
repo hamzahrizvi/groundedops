@@ -137,8 +137,12 @@ weeks, phase 3 once Dev has merged a gated fix.
 ## The retrofit gate
 
 A fix passes only if (`tools/retrofit_gate.py`):
-1. every **hidden sibling question** (same weakness, other products and
-   wording, written by Customer, never shown to Dev) scores at least 2 of 3;
+1. no **hidden sibling question** (same weakness, other products and
+   wording, written by Customer, never shown to Dev) drops: each is asked on
+   the branch and on its base code and marked in one pass, and fails the fix
+   only when it scores under 2 on the branch and 2+ on base (such a sibling is
+   first re-asked 6 times on each side, lower median). Under 2 on both sides is
+   reported as unmoved; raised to 2+ as fixed;
 2. no question that was right before is now **wrong** (when only one or two
    are, `tools/gate_rerun.py` asks each 6 times on the branch and 6 on its base
    code: it stays wrong only if the branch is wrong at least 2 passes more often);
