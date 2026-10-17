@@ -3885,6 +3885,39 @@ function keyRolesCard() {
         modelPicker(r)));
   });
 
+  // D-20261016-13: local mode sends a flagged answer outside only when this
+  // is on, and the page names where it goes.
+  const defRole = (keysCache.roles || []).find(r => r.role === "default") || {};
+  const defLabel = (keysCache.providers.find(p => p.key === defRole.effective) || {}).label;
+  const escNote = el("div", { style: "font-size:12.5px;margin-top:4px;"
+    + "color:color-mix(in srgb,var(--color-text) 60%,transparent)" });
+  const escBox = el("input", { type: "checkbox", style: "margin-top:3px" });
+  escBox.checked = !!keysCache.local_escalation;
+  const drawEsc = () => {
+    escNote.textContent = !escBox.checked
+      ? "Off: in local mode nothing leaves this machine. An answer that fails its check becomes a refusal."
+      : defLabel
+        ? "On: in local mode, when an answer fails its check, the question, the manual passages and the prompt are sent to "
+          + defLabel + " (the Default job) for a second try."
+          + (keysCache.generation_mode === "local" ? " Local mode is active now." : "")
+        : "On, but no Default provider is set, so nothing is sent.";
+  };
+  escBox.addEventListener("change", async () => {
+    try {
+      const res = await api("/admin/keys/local_escalation", {
+        method: "POST", body: JSON.stringify({ allow: escBox.checked }) });
+      keysCache.local_escalation = res.local_escalation;
+      drawEsc();
+      toast("Local mode outside escalation " + (res.local_escalation ? "on" : "off"));
+    } catch (e) { toast(e.message, true); escBox.checked = !escBox.checked; drawEsc(); }
+  });
+  drawEsc();
+  const escRow = el("div", { class: "row", style: "align-items:flex-start;margin-top:6px" },
+    escBox,
+    el("div", { style: "flex:1 1 220px;min-width:0" },
+      el("b", {}, "Local mode: send flagged answers to the Default provider"),
+      escNote));
+
   return el("div", { class: "card elev-sm", "data-sec": "Which key does what",
                      "data-tour": "keys-roles", style: "margin-top:18px" },
     el("h2", {}, "Which key does what"),
@@ -3902,7 +3935,8 @@ function keyRolesCard() {
     configured.length
       ? el("div", {}, rows)
       : el("div", { class: "empty" }, el("b", {}, "No keys configured yet"),
-          "Save a key above and it can then be given a job."));
+          "Save a key above and it can then be given a job."),
+    escRow);
 }
 
 /* ---------------- overview ---------------- */

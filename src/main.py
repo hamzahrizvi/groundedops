@@ -4119,10 +4119,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # Which role: Backup in api mode; in local mode the Default role
     # (llm.escalation_role, D-20261016-09, the CEO's choice). Unassigned or
     # unkeyed means no escalation, so local mode with no Default role sends
-    # nothing out.
+    # nothing out. In local mode only when the operator switched outside
+    # escalation on (keystore.local_escalation_allowed, D-20261016-13, off by
+    # default); off, escalation_role() is None and a flagged answer becomes a
+    # refusal.
     escalated = False
     _esc_role = escalation_role()
-    _backup_provider = keystore.get_role(_esc_role)
+    _backup_provider = keystore.get_role(_esc_role) if _esc_role else None
     if (flagged and not verifier_unavailable and role != "rethink"
             and output.get("provider") in ("local", "none")
             and _backup_provider):

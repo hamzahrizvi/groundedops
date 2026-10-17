@@ -100,7 +100,7 @@ Operator console (internal)
 5. **Live demo block.** An embedded, working widget against a sample manual, with 3 suggested questions: one it answers, one cross-product question, and one it correctly refuses.
 6. **How it works.** A 3-step strip: *Upload your manuals → we index, search and rerank → a verified, cited answer.* Links to /how-it-works.
 7. **Gets better every week.** Split visual: the FAQ approval screen and the "unanswered questions" list. *"Approve answers to your top questions once. See exactly what your docs are missing."*
-8. **Your models, your rules.** Three tiles: *Bring your own key* (DeepSeek, OpenAI, Claude) · *Included credits* (we handle it) · *Fully offline* (your hardware, nothing leaves).
+8. **Your models, your rules.** Three tiles: *Bring your own key* (DeepSeek, OpenAI, Claude) · *Included credits* (we handle it) · *Fully offline* (your hardware, nothing leaves unless you switch outside escalation on).
 9. **Security strip.** *Only the widget is public · Admin stays on your network · SSO with Microsoft or Google · Role-based access.* Links to /security.
 10. **ROI calculator.** Inputs: monthly support tickets, % that are "it's in the manual" questions, cost per ticket. Output: an estimated monthly saving, with the assumption shown and labelled as an estimate.
 11. **Pricing teaser** with 3 plan cards linking to /pricing.
