@@ -194,7 +194,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261015-02 | A well-found answer is thrown away by the grounding check | sent back, rebuilding | Dev rebuilds it |
+| D-20261015-02 | A well-found answer is thrown away by the grounding check | ready to merge | merges once Security clears it |
 | D-20261015-11 | Security item D-20261015-11, details in the office | waiting for CEO | your yes |
 | D-20261017-01 | Security item D-20261017-01, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
