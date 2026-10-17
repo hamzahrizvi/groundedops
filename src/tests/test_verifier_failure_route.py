@@ -39,24 +39,28 @@ def test_query_refuses_explicitly_when_the_verifier_is_unavailable():
 
 
 def _route(lexical_ok, llm_ok):
-    """One query with every check stubbed. Returns each check_grounding call as
-    (chunk ids, extra_chunks ids), the ids the number-match rescue saw, and the result."""
+    """One query with every check stubbed. Returns, per check_grounding call,
+    (chunk ids, keyword names); the ids the number-match rescue saw; the ids
+    each LLM-verifier call saw; and the result."""
     chunk = {
         "id": "unit-1", "text": "The product supports USB.",
         "source": "Manual.pdf", "page": 1, "product": "product",
         "category": "", "rerank_score": 0.99,
     }
     sibling = dict(chunk, id="unit-2", text="USB 2.0 full speed.")
-    calls, lexical = [], []
+    nli, lexical, llm = [], [], []
 
     def _ground(ans, chunks, **k):
-        calls.append(([c["id"] for c in chunks],
-                      [c["id"] for c in (k.get("extra_chunks") or [])]))
+        nli.append(([c["id"] for c in chunks], sorted(k)))
         return (False, 0.1)
 
     def _lex(ans, chunks):
         lexical.extend(c["id"] for c in chunks)
         return lexical_ok
+
+    def _llm(ans, chunks, *a, **k):
+        llm.append([c["id"] for c in chunks])
+        return llm_ok
 
     main.APP_STATE["ready"] = True
     with patch.object(main, "retrieve_from_db", return_value=[chunk]), \
@@ -72,27 +76,27 @@ def _route(lexical_ok, llm_ok):
                       return_value=[sibling], create=True), \
          patch.object(main, "check_grounding", side_effect=_ground), \
          patch.object(main, "_lexically_supported", side_effect=_lex), \
-         patch.object(main, "_llm_verified", return_value=llm_ok), \
+         patch.object(main, "_llm_verified", side_effect=_llm), \
          patch.object(main, "grounding_retries", return_value=0), \
          patch.object(main, "_structures_for", return_value=[]), \
          patch.object(main.more_context, "build", return_value={"kind": "support"}), \
          patch.object(main, "log_interaction"):
         result = main.query(main.QueryRequest(
             q="Does the product support USB?", skip_faq=True))
-    return calls, lexical, result
+    return nli, lexical, llm, result
 
 
-def test_query_checks_the_cited_pages_but_cites_only_the_passages():
-    calls, lexical, result = _route(lexical_ok=False, llm_ok=False)
-    assert calls[0][1] == []                      # first NLI pass: passages only, as base
-    assert any("unit-2" in extra for _, extra in calls[1:])   # cited pages, last
-    assert all("unit-2" not in ids for ids, _ in calls)
+def test_only_the_llm_verifier_reads_the_cited_pages():
+    # D-20261015-02 r5: NLI, the number match and citations see the passages only.
+    nli, lexical, llm, result = _route(lexical_ok=False, llm_ok=False)
+    assert nli and all("unit-2" not in ids and "extra_chunks" not in kw
+                       for ids, kw in nli), nli
+    assert llm and all("unit-1" in ids and "unit-2" in ids for ids in llm), llm
     assert "unit-1" in lexical and "unit-2" not in lexical
     assert all("unit-2" not in s.get("chunk_ids", []) for s in result["sources"])
 
 
-def test_cited_pages_cost_no_nli_when_a_cheaper_check_passes():
-    # D-20261015-02 r4: a number-match or LLM pass must not pay for the cited pages.
+def test_nli_runs_once_when_a_cheaper_check_passes():
     for lex_ok, llm_ok in ((True, False), (False, True)):
-        calls, _, _ = _route(lexical_ok=lex_ok, llm_ok=llm_ok)
-        assert len(calls) == 1 and calls[0][1] == [], (lex_ok, llm_ok, calls)
+        nli, _, _, _ = _route(lexical_ok=lex_ok, llm_ok=llm_ok)
+        assert len(nli) == 1, (lex_ok, llm_ok, nli)
