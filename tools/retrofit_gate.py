@@ -6,8 +6,10 @@
   python tools/retrofit_gate.py --selftest
 
 Reads blind_eval.py state files (0-3 grades per case). PASS needs all three:
-  1. siblings: every hidden sibling question (same failure type, never shown
-     to Dev) scores >= 2 on the new code;
+  1. siblings: no hidden sibling question (same failure type, never shown to Dev) scores under 2 on the
+     new code where its base code scored 2+ (sys_before in its state file, marked in the same pass; no
+     base mark counts as 2+). Under 2 on both sides is listed as siblings_unmoved and passes; raised to
+     2+ is listed as siblings_fixed;
   2. no case that scored >= 2 before is wrong after (0 marks, or the verdict "wrong" at any mark);
   3. the overall score does not drop by more than --noise percentage points.
 Rule 3 and rule 2 use the before answers re-graded in the same pass when --regraded is
@@ -47,8 +49,13 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
     became_wrong = [cid for cid in common if b[cid] >= 2 and wrong(ga[cid])]
     fixed = [cid for cid in common if b[cid] <= 1 and a[cid] >= 2]
     drop = round(pct({c: b[c] for c in common}) - pct({c: a[c] for c in common}), 1)
-    sib_fail = [cid for s in siblings for cid, v in scores(s, system).items() if v < 2]
-    reasons = ([f"hidden siblings below 2: {sib_fail}"] if sib_fail else []) + \
+    sib_after = {cid: v for s in siblings for cid, v in scores(s, system).items()}
+    sib_before = {cid: v for s in siblings for cid, v in scores(s, "sys_before").items()}
+    # D-20261016-10: a sibling fails only when it is under 2 on the branch and 2+ on base; no base mark counts as 2+
+    sib_fail = [c for c, v in sib_after.items() if v < 2 and sib_before.get(c, 2) >= 2]
+    unmoved = [c for c, v in sib_after.items() if v < 2 and sib_before.get(c, 2) < 2]
+    sib_fixed = [c for c, v in sib_after.items() if v >= 2 and sib_before.get(c, 2) < 2]
+    reasons = ([f"hidden siblings below 2 on the branch, 2+ on base: {sib_fail}"] if sib_fail else []) + \
               ([f"became wrong: {became_wrong}"] if became_wrong else []) + \
               ([f"score dropped {drop} pts (> {noise})"] if drop > noise else [])
     if siblings and not any(scores(s, system) for s in siblings):
@@ -60,7 +67,9 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
             "flip_before": {c: b[c] for c in became_wrong},
             "flip_after": {c: a[c] for c in became_wrong},
             "fixed": fixed, "became_wrong": became_wrong, "cases": len(common),
-            "siblings": sum(len(scores(s, system)) for s in siblings)}
+            "siblings": sum(len(scores(s, system)) for s in siblings),
+            "sibling_marks": {c: {"before": sib_before.get(c), "after": v} for c, v in sib_after.items()},
+            "siblings_fixed": sib_fixed, "siblings_unmoved": unmoved}
 
 
 def _needle(text):
@@ -105,6 +114,13 @@ def _selftest():
     r = gate(st({"a": 3, "b": 3}), {"grades": {"a": {"sys_normal": {"score": 1, "verdict": "wrong"}},
                                                "b": {"sys_normal": {"score": 1, "verdict": "safe_decline"}}}})
     assert r["became_wrong"] == ["a"] and r["flip_after"] == {"a": 1}, r   # D-20261010-11: "wrong" with 1 mark
+    st2 = lambda d: {"grades": {k: {"sys_normal": {"score": a}, "sys_before": {"score": b}} for k, (b, a) in d.items()}}
+    fixed_open = st({"a": 3, "b": 3, "c": 2, "d": 3})
+    r = gate(before, fixed_open, [st2({"u": (1, 1), "f": (1, 3), "k": (3, 3)})])
+    assert r["verdict"] == "PASS" and r["siblings_unmoved"] == ["u"] and r["siblings_fixed"] == ["f"], r
+    assert r["sibling_marks"] == {"u": {"before": 1, "after": 1}, "f": {"before": 1, "after": 3}, "k": {"before": 3, "after": 3}}, r
+    r = gate(before, fixed_open, [st2({"u": (1, 1), "x": (2, 1)})])
+    assert r["verdict"] == "FAIL" and r["reasons"] == ["hidden siblings below 2 on the branch, 2+ on base: ['x']"], r
     import tempfile
     sibs = [{"id": "h1", "q": 'What does the "amber" light on the reader mean?'},
             {"id": "h2", "turn1": "Which models accept polymer notes?", "q": "and that one?"}]
