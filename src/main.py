@@ -4059,9 +4059,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # passages this answer drew on. ponytail: picked from the first answer
     # only, so a grounding retry that writes from other sections is checked
     # against these; pick per attempt if that shows up as false refusals.
+    _ev = []
     if _bundle and not generation_failed:
         from retrieval_db import bundle_evidence
-        top_chunks = top_chunks + bundle_evidence(_bundle, answer, top_chunks)
+        _ev = bundle_evidence(_bundle, answer, top_chunks)
+        top_chunks = top_chunks + _ev
 
     # THE LLM VERIFIER READS THE PAGES THE ANSWER CITES (D-20261015-02). Sources
     # name whole pages; the checks saw only the ranked fragments of them.
@@ -4070,9 +4072,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _cited = []
     if top_chunks and not generation_failed:
         try:
+            # A widened turn (self_route, D-20261010-17) answered from the whole
+            # manual after the first passages missed: its evidence's pages go
+            # first in the budget, the missed pages after.
+            _cite_from = (_ev + top_chunks) if (_wm_first or _wm_none) else top_chunks
             from retrieval_db import cited_pages
             _cited = [_strip_breadcrumb(c) for c in
-                      cited_pages(top_chunks, budget=CONTEXT_K * CHUNK_CHAR_CAP)]
+                      cited_pages(_cite_from, budget=CONTEXT_K * CHUNK_CHAR_CAP)]
         except Exception as _exc:
             logger.warning(f"cited pages skipped: {_exc}")
     _verify_chunks = top_chunks + _cited

@@ -17,6 +17,7 @@ CHUNK = {"id": "m-1", "text": "Cleaning the note path.", "source": "Manual.pdf",
          "page": 3, "product": "nv9usb", "category": "", "rerank_score": 0.9}
 BUNDLE = [{"id": "m-9", "text": "Remove the bezel with a 2 mm hex key.",
            "source": "Manual.pdf", "page": 40, "product": "nv9usb"}]
+CITED = []
 
 
 def _refusal(text):
@@ -26,6 +27,7 @@ def _refusal(text):
 def _ask(replies, *, product="nv9usb", band="confident", grounded=True,
          bundle=BUNDLE, policy=None):
     """Run one turn; replies are what each generate call returns, in order."""
+    CITED.clear()
     calls = []
 
     def gen(role, prompt, **kw):
@@ -59,6 +61,7 @@ def _ask(replies, *, product="nv9usb", band="confident", grounded=True,
             (main, "log_interaction", lambda *a, **k: None),
             (rdb, "product_bundle", lambda *a, **k: list(bundle)),
             (rdb, "bundle_evidence", lambda b, a, have: list(b)),
+            (rdb, "cited_pages", lambda chunks, budget: CITED.append([c.get("id") for c in chunks]) or []),
             (rdb, "PERFORMANCE_BUDGET_CHARS", 400_000),
         ]:
             st.enter_context(patch.object(target, name, value, create=True))
@@ -146,3 +149,13 @@ def test_progress_line_for_the_widened_read():
     import widget_api
     assert widget_api.PROGRESS_LINES["widen"] == \
         "Widening the search to the whole manual"
+
+
+def test_widened_turn_reads_the_evidence_pages_first():
+    _ask([REFUSED, ANSWER])
+    assert CITED and CITED[-1][0] == "m-9"
+
+
+def test_normal_turn_keeps_the_passage_order_for_cited_pages():
+    _ask([ANSWER])
+    assert CITED and CITED[-1][0] == "m-1"
