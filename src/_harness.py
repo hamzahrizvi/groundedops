@@ -264,7 +264,7 @@ from logger import redact as _real_redact  # the real one: the stub below replac
 stub("logger", log_interaction=lambda *a, **k: None,
      log_feedback=lambda *a, **k: None, redact=_real_redact)
 stub("router", route_model=lambda q: ("accurate", ("local", "mistral")))
-stub("grounding", check_grounding=lambda a, c, threshold=0.55, extra_chunks=None: (True, 0.9),
+stub("grounding", check_grounding=lambda a, c, threshold=0.55: (True, 0.9),
      _get_nli_model=lambda: None)
 stub("llm", generate=lambda *a, **k: dict(GEN_RESPONSE),
      generate_with_fallback=_generate_with_fallback,

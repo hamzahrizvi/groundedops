@@ -762,7 +762,7 @@ def _llm_verified(answer: str, chunks: list[dict],
         return False
 
 
-_RESCUE_NAMES = {"lexical": "number match", "llm": "LLM verifier", "cited": "NLI on the cited pages"}
+_RESCUE_NAMES = {"lexical": "number match", "llm": "LLM verifier"}
 
 
 def _ground_note(unavailable: bool, flagged: bool, score, via: str) -> str:
@@ -3977,11 +3977,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         from retrieval_db import bundle_evidence
         top_chunks = top_chunks + bundle_evidence(_bundle, answer, top_chunks)
 
-    # THE VERIFIERS READ THE PAGES THE ANSWER CITES (D-20261015-02). Sources
+    # THE LLM VERIFIER READS THE PAGES THE ANSWER CITES (D-20261015-02). Sources
     # name whole pages; the checks saw only the ranked fragments of them.
-    # NLI reads them last, only for an answer the passages, the number match and the
-    # LLM verifier all refused (check_grounding extra_chunks, D-20261015-02 r4);
-    # citations and the number-match rescue keep top_chunks.
+    # NLI, the number-match rescue and citations keep top_chunks (r5: NLI on the
+    # cited pages served 0 of 80 asks and cost ~2 s at p90, so it was dropped).
     _cited = []
     if top_chunks and not generation_failed:
         try:
@@ -4129,17 +4128,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             is_grounded, ground_via = True, "llm"
             logger.info("Grounding rescued by LLM verifier "
                         f"(nli={grounding_score}) for: {redact(resolved_query)}")
-        # Last, NLI with the cited pages (D-20261015-02 r4): only an answer
-        # every cheaper check refused pays for it, so a number-match or LLM
-        # pass costs what it did on base. It can rescue a unit the passages
-        # miss and never sinks one they entail (check_grounding extra_chunks).
-        elif (not is_grounded and not verifier_unavailable and _cited
-              and _timed("verify", check_grounding, answer, top_chunks,
-                         threshold=GROUNDING_THRESHOLD,
-                         extra_chunks=_cited)[0]):
-            is_grounded, ground_via = True, "cited"
-            logger.info("Grounding rescued by NLI on the cited pages "
-                        f"(nli={grounding_score}) for: {redact(resolved_query)}")
         flagged = not is_grounded
 
     # ── Escalation to a second provider on grounding failure ──
@@ -4218,13 +4206,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                     is_grounded, ground_via = True, "llm"
                     logger.info("Escalated answer rescued by LLM verifier "
                                 f"(nli={grounding_score})")
-                elif (not is_grounded and not verifier_unavailable and _cited
-                      and _timed("verify", check_grounding, answer, top_chunks,
-                                 threshold=GROUNDING_THRESHOLD,
-                                 extra_chunks=_cited)[0]):
-                    is_grounded, ground_via = True, "cited"
-                    logger.info("Escalated answer rescued by NLI on the cited "
-                                f"pages (nli={grounding_score})")
                 flagged = not is_grounded
 
     # ── Retry a flagged answer before giving up ──
@@ -4283,10 +4264,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                     _text, _verify_chunks, deepseek_api_key,
                                     resolved_query):
                 _ok, _via = True, "llm"
-            elif not _ok and _cited and _timed(
-                    "verify", check_grounding, _text, top_chunks,
-                    threshold=GROUNDING_THRESHOLD, extra_chunks=_cited)[0]:
-                _ok, _via = True, "cited"
             if _ok:
                 answer, output = _text, _retry
                 is_grounded, grounding_score, flagged = True, _score, False
