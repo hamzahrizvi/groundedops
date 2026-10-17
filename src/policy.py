@@ -169,13 +169,21 @@ _DEFAULTS = {
     # default and the console warns before it is switched on.
     "performance_mode": os.getenv("PERFORMANCE_MODE", "0").strip().lower()
                         in ("1", "true", "yes"),
+    # ── Self-route (D-20261010-17) ─────────────────────────────────────
+    # When a product chat's answer would be "not in the manual", read the
+    # product's whole manual once before saying so. Only the refusing
+    # turns pay for it; the widened answer is served only if it passes
+    # every check, else the first refusal stands.
+    "self_route": os.getenv("SELF_ROUTE", "1").strip().lower()
+                  in ("1", "true", "yes"),
 }
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
                "anon_faq_daily", "anon_ip_daily", "questions_per_session",
                "tokens_per_session", "grounding_retries", "global_llm_daily")
 _BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks",
-               "multilingual_faq_enabled", "performance_mode")
+               "multilingual_faq_enabled", "performance_mode",
+               "self_route")
 _TEXT_FIELDS = ("anon_notice", "sales_reply")
 # faq_enabled_languages is text-shaped (a comma list) but needs its own
 # validation -- a typo'd code would otherwise silently produce a language

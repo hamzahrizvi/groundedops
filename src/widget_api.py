@@ -146,6 +146,7 @@ PROGRESS_LINES = {
     "generate":   "Checking the answer against the manual",
     "escalate":   "Trying our backup service",
     "retry":      "Rewriting the answer and checking it again",
+    "widen":      "Widening the search to the whole manual",
 }
 
 
