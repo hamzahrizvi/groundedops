@@ -160,3 +160,11 @@ src/chroma_db.before-*/
 *deepseek_key*
 *_env_*.txt
 .env
+
+# Manual exports (vendor_upload/ holds the whole ITL manual set as one PDF and
+# one DOCX, made for the competitor upload). This repo is PUBLIC and no tracked
+# file is a PDF or DOCX, so ignore both types everywhere. A PDF that really must
+# be tracked needs `git add -f`.
+vendor_upload/
+*.pdf
+*.docx
