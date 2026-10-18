@@ -31,4 +31,9 @@ with tempfile.TemporaryDirectory() as d:
     assert a["verifier_s"]["median"] == 1.0, a                       # ground stage 1000 ms after the one before it
     assert a["usd_mean_all_cached"] == round(0.0003 - 1000 * (0.30 - 0.006) / 1e6, 6), a
     assert a["completion_tokens_mean"] == 0, a                       # 1000 uncached input tokens = $0.0003, nothing left over
+    for x in state["sys_normal"].values():
+        del x["prompt_tokens"], x["cached"]                            # baseline rows keep usd only
+    json.dump(state, open(os.path.join(d, "cases_state.json"), "w"))
+    b = arm(d)
+    assert b["usd_mean_all_cached"] is None and b["completion_tokens_mean"] is None, b
 print("ok")

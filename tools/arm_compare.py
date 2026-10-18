@@ -53,6 +53,8 @@ def arm(run, system="sys_normal"):
     miss = {c: x.get("prompt_tokens", 0) - x.get("cached", 0) for c, x in r.items()}   # input tokens that missed the cache
     hit = [x["usd"] - miss[c] * (IN - HIT) / 1e6 for c, x in r.items()]
     comp = [round((x["usd"] - miss[c] * IN / 1e6 - x.get("cached", 0) * HIT / 1e6) / (OUT / 1e6)) for c, x in r.items()]
+    if not all("prompt_tokens" in x for x in r.values()):   # baseline rows keep usd only: token split unknown
+        hit = comp = None
     ground = [ms / 1000 for x in r.values() if (ms := stage_ms(x.get("pipeline"), "ground")) is not None]
     sr = {c: ((x.get("pipeline") or {}).get("meta") or {}).get("self_route") for c, x in r.items()}
     turned = [c for c in ok if sr[c] == "answered"]
@@ -64,8 +66,8 @@ def arm(run, system="sys_normal"):
                     for t in types},
         "verdicts": dict(sorted(Counter(x["verdict"] for x in g.values()).items())),
         "median_s": st.median(walls), "p90_s": p90(walls), "max_s": max(walls),
-        "usd_mean": round(st.mean(usd), 6), "usd_mean_all_cached": round(st.mean(hit), 6), "usd_max": max(usd),
-        "completion_tokens_mean": round(st.mean(comp)), "completion_tokens_max": max(comp),
+        "usd_mean": round(st.mean(usd), 6), "usd_mean_all_cached": hit and round(st.mean(hit), 6), "usd_max": max(usd),
+        "completion_tokens_mean": comp and round(st.mean(comp)), "completion_tokens_max": comp and max(comp),
         "verifier_s": {"n": len(ground), "median": st.median(ground) if ground else None, "p90": p90(ground)},
         "self_route": dict(Counter(v for v in sr.values() if v)),
         # the re-read's effect on marks, case by case: refusals it turned into answers and how each was graded
