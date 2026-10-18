@@ -8,7 +8,10 @@
 4. the after pass is marked with the run's manuals/ (D-20261010-23);
 5. blind_eval.py stopped at the lab cap (exit 3): FAILED says so and no gate.json is written (D-20261010-31);
 6. an unmoved hidden sibling (under 2 on base and branch) passes and a raised one is counted (D-20261016-10);
-7. a sibling 2+ on base and under 2 on the branch is settled 6 times on each side and fails the gate.
+7. a sibling 2+ on base and under 2 on the branch is settled 6 times on each side and fails the gate;
+8. REPEATS=2: the before is re-asked twice on the base code, each repeat's before rides into its after, gate.json
+   carries mean_of_repeats; GATE_RULE=mean makes it the verdict (D-20261018-02);
+9. GATE_BASE at the branch tip: no own commits since that base, office_only PASS.
 """
 import json
 import os
@@ -18,16 +21,26 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FAKE = '''import json, os, sys
+FAKE = '''import json, os, subprocess, sys
+if "--repeats" in sys.argv:   # as blind_eval.py: each repeat its own process with REPEAT=k
+    i = sys.argv.index("--repeats"); n = int(sys.argv[i + 1]); a = sys.argv[1:i] + sys.argv[i + 2:]
+    for k in range(1, n + 1):
+        rc = subprocess.call([sys.executable, __file__] + a, env={**os.environ, "REPEAT": str(k)})
+        if rc: sys.exit(rc)
+    sys.exit(0)
+k = int(os.environ.get("REPEAT", "1"))
 run, phase = sys.argv[1], sys.argv[2]
 tag = " manuals" if phase == "grade" and os.path.isdir(os.path.join(run, "manuals")) else ""
-open(os.environ["FAKE_LOG"], "a").write(phase + " " + os.path.basename(run) + tag + "\\n")
-p = os.path.join(run, "cases_state.json")
+open(os.environ["FAKE_LOG"], "a").write(phase + " " + os.path.basename(run) + tag + (" #%d" % k if k > 1 else "") + "\\n")
+p = os.path.join(run, "cases_state.json" if k == 1 else "cases_state.r%d.json" % k)
 if os.environ.get("FAKE_CAP") and phase != "models":
     sys.exit(3)
 if phase == "models":
     same = os.environ["FAKE_SAME"] == "1"
     print(json.dumps({"run": ["deepseek-v4-flash" if same else "gpt-5-mini"], "lab": "deepseek-v4-flash", "same": same}))
+elif phase == "reset":
+    s = json.load(open(p)) if os.path.exists(p) else {}
+    json.dump({x: v for x, v in s.items() if not x.startswith("sys_") and x != "grades"}, open(p, "w"))
 elif phase in ("system", "grade"):
     s = json.load(open(p)) if os.path.exists(p) else {}   # a sibling folder starts without a state
     if phase == "system":
@@ -64,9 +77,9 @@ def main():
     put(os.path.join(run, "manuals", "m.txt"), "[m.pdf p1] text\n")
     put(os.path.join(tmp, "fake_be.py"), FAKE)
 
-    def gate(name, same, cap="", sibs=()):
+    def gate(name, same, cap="", sibs=(), extra=None):
         out, calls = os.path.join(tmp, name), os.path.join(tmp, name + ".calls")
-        e = {**env, "PY": fwd(sys.executable), "BE": fwd(os.path.join(tmp, "fake_be.py")),
+        e = {**env, **(extra or {}), "PY": fwd(sys.executable), "BE": fwd(os.path.join(tmp, "fake_be.py")),
              "GO_DATA": fwd(os.path.join(base, "src")), "FAKE_LOG": calls, "FAKE_SAME": same, "FAKE_CAP": cap,
              "GATE_HELD": fwd(os.path.join(tmp, name + ".held"))}
         r = subprocess.run([os.environ.get("GATE_BASH") or shutil.which("bash"), fwd(os.path.join(HERE, "gate_run.sh")),
@@ -113,6 +126,18 @@ def main():
     held = json.load(open(os.path.join(tmp, "g6.held", "sib_sibB", "cases_state.json")))["grades"]["s31"]
     assert held["sys_normal"]["passes"] == [1] * 6 and held["sys_before"]["passes"] == [3] * 6, held
     assert gate("g4", "1", cap="1") == ("lab stopped at the cap", False)   # fails closed: no PASS without a measurement
+    g, seen, out = gate("g7", "1", extra={"REPEATS": "2"})
+    assert seen == ["remark run", "models run", "reset before", "reset before #2", "system before", "system before #2",
+                    "reset after", "reset after #2", "system after", "system after #2",
+                    "grade after manuals", "grade after manuals #2"], seen
+    assert g["verdict"] == "PASS" and g["mean_of_repeats"]["repeats"] == 2 and g["repeats"] == 1, g
+    r2 = json.load(open(os.path.join(out, "after", "cases_state.r2.json")))
+    assert (r2["sys_before"]["c1"]["answer"], r2["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n"), r2
+    g, _, _ = gate("g8", "1", extra={"REPEATS": "2", "GATE_RULE": "mean"})
+    assert g["repeats"] == 2 and g["r1"]["repeats"] == 1 and "mean_of_repeats" not in g, g
+    tip = subprocess.run(["git", "-C", dev, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    g, seen, _ = gate("g9", "1", extra={"GATE_BASE": tip})
+    assert g.get("office_only") and seen == [], (g, seen)
     git(base, "worktree", "remove", "--force", dev)
     shutil.rmtree(tmp, ignore_errors=True)
     print("selftest ok")

@@ -2,6 +2,7 @@
 
   python tools/retrofit_gate.py --before A_state.json --after B_state.json \
       [--siblings S_state.json ...] [--system sys_normal] [--noise 3] [--regraded sys_before] [--models M.json] [--manuals DIR]
+      [--rule r1|mean]
   python tools/retrofit_gate.py --leakcheck DIR_OR_FILE... --cases SIBLINGS.json...
   python tools/retrofit_gate.py --selftest
 
@@ -17,18 +18,55 @@ given (gate.json keeps before_pct_stored so grader drift shows); tools/gate_reru
 1-2 flipped cases when those flips are the only reason, or the flips plus a drop that is
 within noise once they are held at their before scores. Prints JSON; exit 0 PASS, 1 FAIL.
 
+Repeats (D-20261018-02): X_state.r2.json, .r3.json beside X_state.json are more answers to the same
+questions (blind_eval.py --repeats). When any file given has them, the gate is also read on all of
+them as "mean_of_repeats": marks are per-question means, "became wrong" needs a wrong answer in more
+than half the repeats, a sibling fails on its means. The top-level verdict is the one-answer (r1) gate
+unless --rule mean, which swaps them (the r1 reading is then kept under "r1"). "paired" is the mean
+per-question after-minus-before difference in points with its 90% interval (t, questions paired).
+
 --leakcheck: does any file under the paths hold text of a hidden question?
 Prints case ids and file names only (never the text); exit 1 on a hit.
 """
 import argparse
+import glob
 import json
 import os
 import re
 import sys
 
 
+def repeat_paths(p):
+    """[X_state.json, X_state.r2.json, ...]: the repeats of a run's state that exist, in repeat order."""
+    stem = p[:-5] if p.endswith(".json") else p
+    rs = sorted((int(m.group(1)), f) for f in glob.glob(glob.escape(stem) + ".r*.json")
+                if (m := re.search(r"\.r(\d+)\.json$", f)))
+    return ([p] if os.path.exists(p) else []) + [f for _, f in rs]
+
+
+def _states(x):
+    return x if isinstance(x, list) else [x]
+
+
 def scores(state, system):
-    return {cid: g[system]["score"] for cid, g in state.get("grades", {}).items() if system in g}
+    """case -> mark; a list of repeat states gives each case's mean over the repeats that have it."""
+    per = {}
+    for s in _states(state):
+        for cid, g in s.get("grades", {}).items():
+            if system in g:
+                per.setdefault(cid, []).append(g[system]["score"])
+    return {cid: v[0] if len(v) == 1 else sum(v) / len(v) for cid, v in per.items()}
+
+
+def paired(b, a):
+    """Mean per-question after-minus-before difference in points (x100/3) with its 90% interval."""
+    d = [100 * (a[c] - b[c]) / 3 for c in sorted(set(a) & set(b))]
+    if len(d) < 2:
+        return {"diff": round(d[0], 1) if d else None, "lo": None, "hi": None, "n": len(d)}
+    from scipy.stats import t
+    m = sum(d) / len(d)
+    half = t.ppf(0.95, len(d) - 1) * (sum((x - m) ** 2 for x in d) / (len(d) - 1)) ** 0.5 / len(d) ** 0.5
+    return {"diff": round(m, 1), "lo": round(m - half, 1), "hi": round(m + half, 1), "n": len(d)}
 
 
 def pct(sc):
@@ -41,12 +79,17 @@ def wrong(g):
 
 
 def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=None):
+    """before/after: a state or a list of repeat states; siblings: each one a state or a list of repeats."""
     stored = scores(before, system)
     b = (scores(after, regraded) if regraded else {}) or stored
     a = scores(after, system)
     common = sorted(set(b) & set(a))
-    ga = {cid: g[system] for cid, g in after.get("grades", {}).items() if system in g}
-    became_wrong = [cid for cid in common if b[cid] >= 2 and wrong(ga[cid])]
+    nwrong, nrep = {}, {}   # per case: repeats marked wrong, repeats graded
+    for s in _states(after):
+        for cid, g in s.get("grades", {}).items():
+            if system in g:
+                nwrong[cid] = nwrong.get(cid, 0) + wrong(g[system]); nrep[cid] = nrep.get(cid, 0) + 1
+    became_wrong = [cid for cid in common if b[cid] >= 2 and nwrong[cid] > nrep[cid] / 2]
     fixed = [cid for cid in common if b[cid] <= 1 and a[cid] >= 2]
     drop = round(pct({c: b[c] for c in common}) - pct({c: a[c] for c in common}), 1)
     sib_after = {cid: v for s in siblings for cid, v in scores(s, system).items()}
@@ -67,6 +110,8 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
             "flip_before": {c: b[c] for c in became_wrong},
             "flip_after": {c: a[c] for c in became_wrong},
             "fixed": fixed, "became_wrong": became_wrong, "cases": len(common),
+            "paired": paired({c: b[c] for c in common}, {c: a[c] for c in common}),
+            "repeats": len(_states(after)),
             "siblings": sum(len(scores(s, system)) for s in siblings),
             "sibling_marks": {c: {"before": sib_before.get(c), "after": v} for c, v in sib_after.items()},
             "siblings_fixed": sib_fixed, "siblings_unmoved": unmoved}
@@ -121,7 +166,25 @@ def _selftest():
     assert r["sibling_marks"] == {"u": {"before": 1, "after": 1}, "f": {"before": 1, "after": 3}, "k": {"before": 3, "after": 3}}, r
     r = gate(before, fixed_open, [st2({"u": (1, 1), "x": (2, 1)})])
     assert r["verdict"] == "FAIL" and r["reasons"] == ["hidden siblings below 2 on the branch, 2+ on base: ['x']"], r
+    # D-20261018-02: three repeats. r1 alone fails on one flip; wrong in 1 of 3 passes on the mean, 2 of 3 fails
+    rp = lambda *ds: [st(d) for d in ds]
+    b3 = rp({"a": 3, "c": 3}, {"a": 3, "c": 3}, {"a": 3, "c": 2})
+    assert gate(b3[0], st({"a": 0, "c": 3}))["verdict"] == "FAIL"
+    r = gate(b3, rp({"a": 0, "c": 3}, {"a": 3, "c": 3}, {"a": 3, "c": 3}), noise=40)
+    assert r["verdict"] == "PASS" and r["became_wrong"] == [] and r["repeats"] == 3, r
+    r = gate(b3, rp({"a": 0, "c": 3}, {"a": 0, "c": 3}, {"a": 3, "c": 3}), noise=40)
+    assert r["verdict"] == "FAIL" and r["became_wrong"] == ["a"] and r["flip_after"] == {"a": 1.0}, r
+    sib3 = [st2({"x": (2, 3)}), st2({"x": (2, 1)}), st2({"x": (2, 1)})]       # after mean 1.67 < 2, base 2
+    r = gate(b3, b3, [sib3])
+    assert r["verdict"] == "FAIL" and r["sibling_marks"]["x"]["after"] == 5 / 3, r
+    assert gate(b3[0], b3[0], [sib3[0]])["verdict"] == "PASS"                 # r1's sibling answer alone is 3
+    p = paired({"a": 3, "b": 2, "c": 1}, {"a": 3, "b": 3, "c": 1})
+    assert p["diff"] == 11.1 and p["lo"] < 0 < p["hi"] and p["n"] == 3, p
     import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        for f in ("cases_state.json", "cases_state.r10.json", "cases_state.r2.json", "cases_state.graded-by-gpt-5.json"):
+            open(os.path.join(d, f), "w").write("{}")
+        assert [os.path.basename(f) for f in repeat_paths(os.path.join(d, "cases_state.json"))] ==             ["cases_state.json", "cases_state.r2.json", "cases_state.r10.json"]
     sibs = [{"id": "h1", "q": 'What does the "amber" light on the reader mean?'},
             {"id": "h2", "turn1": "Which models accept polymer notes?", "q": "and that one?"}]
     with tempfile.TemporaryDirectory() as d:
@@ -156,9 +219,15 @@ if __name__ == "__main__":
                     help="system key in --after holding the before answers re-graded in the same pass, e.g. sys_before")
     ap.add_argument("--models")   # blind_eval.py <run> models output (D-20261010-09)
     ap.add_argument("--manuals")   # the manuals/ the one marking pass read (D-20261010-23)
+    ap.add_argument("--rule", choices=("r1", "mean"), default="r1")   # which reading sets the verdict (D-20261018-02)
     o = ap.parse_args()
     load = lambda p: json.load(open(p, encoding="utf-8"))
-    res = gate(load(o.before), load(o.after), [load(p) for p in o.siblings], o.system, o.noise, o.regraded)
+    reps = lambda p: [load(f) for f in repeat_paths(p)]
+    B, A, S = reps(o.before), reps(o.after), [reps(p) for p in o.siblings]
+    res = gate(B[0], A[0], [s[0] for s in S], o.system, o.noise, o.regraded)
+    if max([len(B), len(A)] + [len(s) for s in S]) > 1:
+        mean = gate(B, A, S, o.system, o.noise, o.regraded)
+        res = {**mean, "r1": res} if o.rule == "mean" else {**res, "mean_of_repeats": mean}
     if o.models:   # which before answers the gate marked, and both bot models
         res["models"] = load(o.models)
         res["before"] = "stored" if res["models"]["same"] else "re-asked"
