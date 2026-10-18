@@ -680,7 +680,7 @@ def _verify_label(chunk: dict, names: dict) -> str:
     if not src:
         return ""
     pg = chunk.get("page")
-    return f"[{src}{f', page {pg}' if pg else ''}{_passage_product(chunk, names)}]\n"
+    return f"[{src}{f', page {pg}' if pg else ''}{_passage_product(chunk, names)}{_passage_heading(chunk)}]\n"
 
 
 def _llm_verified(answer: str, chunks: list[dict],
@@ -872,6 +872,7 @@ Support is often conditional. When the context qualifies it by firmware version,
 A value read from a table is conditional in the same way. When its row or cell carries a condition — an operating mode or load, a product variant with its own column, a minimum or maximum, a tolerance, "if no other coins in device", "whichever is greater" — give the value together with that condition, in the manual's own words, even if the question did not ask about it. A figure quoted without the condition it depends on is a wrong answer, not a shorter one.
 The passages are numbered in the order a retrieval system ranked them, so [Passage 1] is the most likely to contain the answer. That is a hint, not a rule: use whichever passage actually answers the question, and prefer an earlier one when two say the same thing.
 If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
+A passage header can name the manual heading the passage sits under (under "Supply Currents › NV11+"). That heading says which product, model, module, option or condition its table belongs to; the table's own rows often do not, so look-alike tables can have identical rows. Take a figure only from a passage whose heading matches what the question names (the product or model, the module or option such as replenishment cassette or bezel, a supply voltage, a specification rather than a test limit), even when a look-alike table under another heading ranks earlier. A heading that names another product or model is that product's table, not the asked one's. Give the matching row's values as written, with their units. When the context holds look-alike tables, say which one your figure is from in the manual's words ("For the Replenishment Cassette: ..."). When the question asks about two conditions that have separate tables, give each figure with its condition; never say they are the same unless the figures are. When two tables for the same thing disagree, give both and say they differ.
 If the context does not contain enough information, respond with exactly:
 "I could not find that in the knowledge base."
 Do not state what the context does or does not contain in any other words.
@@ -2074,6 +2075,17 @@ def _passage_product(chunk: dict, names: dict) -> str:
     if len(tags) != 1 or catalog.is_shared_product(tags[0]) or tags[0] not in names:
         return ""
     return f", from the {names[tags[0]]} documentation"
+
+
+def _passage_heading(chunk: dict) -> str:
+    """', under "Supply Currents › NV11+"' for a passage filed under a manual
+    heading, else "". Look-alike tables (one per module, cassette or model) are
+    separate chunks whose rows are identical; the heading is the only thing that
+    says which one a figure belongs to, and the breadcrumb that carried it is
+    stripped from the text (D-20261016-15)."""
+    sec = " ".join((chunk.get("section") or "").split())
+    sec = sec.replace('"', "'").replace("[", "(").replace("]", ")")[:200]
+    return f', under "{sec}"' if sec else ""
 
 
 def _product_names() -> dict[str, str]:
@@ -3932,7 +3944,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                 start_total)
     _names_now = _product_names()
     context = "\n\n".join(
-        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}]\n"
+        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}{_passage_heading(r)}]\n"
         + r["text"][:CHUNK_CHAR_CAP]
         for i, r in enumerate(top_chunks, 1))
 
