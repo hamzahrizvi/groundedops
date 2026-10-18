@@ -267,6 +267,8 @@ def _public_sources(sources) -> list:
     return [{
         "source": s.get("source"),
         "page_label": s.get("page_label"),
+        # Page numbers as ints, so the widget can open the PDF at the first one (D-20261010-14). Same numbers page_label already prints.
+        "pages": s.get("pages") or [],
         "snippet": s.get("snippet"),
         "download_url": s.get("download_url"),
         # Crops from the cited pages: url, page, caption. Already public
