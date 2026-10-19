@@ -11,7 +11,9 @@
 7. a sibling 2+ on base and under 2 on the branch is settled 6 times on each side and fails the gate;
 8. REPEATS=2: the before is re-asked twice on the base code, each repeat's before rides into its after, gate.json
    carries mean_of_repeats; GATE_RULE=mean makes it the verdict (D-20261018-02);
-9. GATE_BASE at the branch tip: no own commits since that base, office_only PASS.
+9. GATE_BASE at the branch tip: no own commits since that base, office_only PASS;
+10. with REPEATS and GATE_RULE unset the gate asks 3 answers per question and rules on their mean (adopted 2026-10-19).
+Cases 1-7 and 9 pin REPEATS=1, GATE_RULE=r1: the one-answer path.
 """
 import json
 import os
@@ -57,7 +59,8 @@ elif phase in ("system", "grade"):
 
 def main():
     tmp = tempfile.mkdtemp()
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+           "REPEATS": "1", "GATE_RULE": "r1"}
     git = lambda cwd, *a: subprocess.run(["git", "-C", cwd, *a], env=env, check=True, capture_output=True)
     fwd = lambda p: p.replace("\\", "/")
 
@@ -79,7 +82,8 @@ def main():
 
     def gate(name, same, cap="", sibs=(), extra=None):
         out, calls = os.path.join(tmp, name), os.path.join(tmp, name + ".calls")
-        e = {**env, **(extra or {}), "PY": fwd(sys.executable), "BE": fwd(os.path.join(tmp, "fake_be.py")),
+        e = {k: v for k, v in {**env, **(extra or {})}.items() if v is not None}   # None: unset
+        e = {**e, "PY": fwd(sys.executable), "BE": fwd(os.path.join(tmp, "fake_be.py")),
              "GO_DATA": fwd(os.path.join(base, "src")), "FAKE_LOG": calls, "FAKE_SAME": same, "FAKE_CAP": cap,
              "GATE_HELD": fwd(os.path.join(tmp, name + ".held"))}
         r = subprocess.run([os.environ.get("GATE_BASH") or shutil.which("bash"), fwd(os.path.join(HERE, "gate_run.sh")),
@@ -130,7 +134,7 @@ def main():
     assert seen == ["remark run", "models run", "reset before", "reset before #2", "system before", "system before #2",
                     "reset after", "reset after #2", "system after", "system after #2",
                     "grade after manuals", "grade after manuals #2"], seen
-    assert g["verdict"] == "PASS" and g["mean_of_repeats"]["repeats"] == 2 and g["repeats"] == 1, g
+    assert g["verdict"] == "PASS" and g["mean_of_repeats"]["repeats"] == 2 and g["repeats"] == 1 and g["before"] == "re-asked", g
     r2 = json.load(open(os.path.join(out, "after", "cases_state.r2.json")))
     assert (r2["sys_before"]["c1"]["answer"], r2["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n"), r2
     g, _, _ = gate("g8", "1", extra={"REPEATS": "2", "GATE_RULE": "mean"})
@@ -138,6 +142,8 @@ def main():
     tip = subprocess.run(["git", "-C", dev, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     g, seen, _ = gate("g9", "1", extra={"GATE_BASE": tip})
     assert g.get("office_only") and seen == [], (g, seen)
+    g, seen, _ = gate("g10", "1", extra={"REPEATS": None, "GATE_RULE": None})
+    assert g["repeats"] == 3 and g["r1"]["repeats"] == 1 and seen.count("system after #3") == 1, (g, seen)
     git(base, "worktree", "remove", "--force", dev)
     shutil.rmtree(tmp, ignore_errors=True)
     print("selftest ok")

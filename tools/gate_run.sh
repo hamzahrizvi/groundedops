@@ -18,13 +18,14 @@
 # lab's today, the before is re-asked on the branch's base code into <out_dir>/before (D-20261010-09).
 # The after pass gets the run's manuals/, the cited pages the run's grader had (D-20261010-23).
 # Each hidden sibling is also asked on the branch's base code and marked in the same pass (sys_before); it fails the gate only when it is under 2 on the branch and 2+ on base (D-20261016-10).
-# REPEATS=N (default 1, D-20261018-02): every arm answers each question N times (blind_eval.py --repeats N);
-# the before is then always re-asked on the base code, repeat k's before rides into repeat k's after, and
-# gate.json gains "mean_of_repeats" beside the one-answer verdict. GATE_RULE=mean makes the mean the verdict.
+# REPEATS=N (default 3 since 2026-10-19, D-20261018-02): every arm answers each question N times (blind_eval.py
+# --repeats N); the before is then always re-asked on the base code and repeat k's before rides into repeat k's
+# after. GATE_RULE (default mean) rules on the mean of the N answers, keeping the one-answer reading under "r1";
+# GATE_RULE=r1 rules on one answer and adds "mean_of_repeats". REPEATS=1 is the one-answer gate of before.
 # GATE_BASE=<commit>: the branch's base (also for the office-only check), so a merged branch can be re-gated.
 set -u
-REPEATS="${REPEATS:-1}"; REP=(); [ "$REPEATS" -gt 1 ] && REP=(--repeats "$REPEATS")
-RULE=(); [ "${GATE_RULE:-r1}" = mean ] && RULE=(--rule mean)
+REPEATS="${REPEATS:-3}"; REP=(); [ "$REPEATS" -gt 1 ] && REP=(--repeats "$REPEATS")
+RULE=(); [ "${GATE_RULE:-mean}" = mean ] && RULE=(--rule mean)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
 DEV="$(cd "$1" && pwd)" || exit 1

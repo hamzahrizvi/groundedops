@@ -7,10 +7,10 @@
 # (tools/export_manuals.py). Runs the bot (normal mode), the whole-manual
 # baseline and the grade, each resumable, then writes <run_dir>/DONE,
 # or FAILED naming the phase. Log: <run_dir>/run.log.
-# REPEATS=N (default 1, D-20261018-02): the bot answers and is graded N times (cases_state.r<k>.json);
+# REPEATS=N (default 3 since 2026-10-19, D-20261018-02): the bot answers and is graded N times (cases_state.r<k>.json);
 # the baseline answers BASE_REPEATS times (default 1) and each later repeat is graded beside repeat 1's.
 set -u
-REPEATS="${REPEATS:-1}"; BASE_REPEATS="${BASE_REPEATS:-1}"
+REPEATS="${REPEATS:-3}"; BASE_REPEATS="${BASE_REPEATS:-1}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
 RUN="$(cd "$1" && pwd)" || exit 1
