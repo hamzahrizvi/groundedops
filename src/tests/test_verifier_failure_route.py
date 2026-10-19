@@ -54,7 +54,7 @@ def _route(lexical_ok, llm_ok):
         nli.append(([c["id"] for c in chunks], sorted(k)))
         return (False, 0.1)
 
-    def _lex(ans, chunks):
+    def _lex(ans, chunks, **kw):
         lexical.extend(c["id"] for c in chunks)
         return lexical_ok
 
