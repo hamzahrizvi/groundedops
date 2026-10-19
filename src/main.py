@@ -685,6 +685,14 @@ def _needs_judgement(question: str, answer: str) -> bool:
     """Whether the LLM verifier should think on this answer. See above."""
     if os.getenv("VERIFIER_THINKING", "").strip().lower() in ("always", "on", "1"):
         return True
+    # A comparison's winner or a "not found" for one side (D-20261016-08):
+    # judged fast, "the NV9 Spectral (+5C) is better than the NV9USB+ (+3C)
+    # for a cold room" passed 4 of 5 live turns (2026-10-19, C20261017b-34,
+    # C20261016-37) and 1 of 3 on its two passages alone; thinking rejected
+    # it 3/3 and passed the right answer 3/3.
+    if _is_comparison(question) and (_VERDICT_RE.search(answer or "")
+                                     or _ABSENCE_RE.search(answer or "")):
+        return True
     return bool(_JUDGEMENT_RE.search(f"{question or ''}\n{answer or ''}"))
 
 
@@ -928,8 +936,10 @@ that you could not find it for that product, and do not answer Yes or No. Never
 stand in for a missing figure with one worked out from another product's value
 or from a general rule (halving, doubling, adding modules).
 When the question asks which product is better, rated colder, faster,
-longer-lasting or otherwise ahead, write each figure first, compare the numbers,
-and make the conclusion agree with that comparison. Decide which direction is
+longer-lasting or otherwise ahead, do not open with the winner: the first
+sentence gives each product's figure, then compare the numbers, and only the
+last sentence says which one is ahead, agreeing with that comparison. This
+overrides answering directly first. Decide which direction is
 better from what the figure measures: a lower minimum operating temperature
 suits a colder site, a higher MCBF means fewer failures.
 If the question refers to something you said earlier ("the pinout above", "that

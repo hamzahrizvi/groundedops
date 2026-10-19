@@ -213,6 +213,15 @@ def test_comparison_rules_reach_the_answer_and_verifier_prompts():
     p = main.build_answer_prompt("", "ctx", "q")
     assert "compare the numbers," in p and "worked out from another product's value" in p
     assert "agrees with the values the SOURCE gives each product" in main._VERIFY_PROMPT
+    assert "do not open with the winner" in p
+
+
+def test_verifier_thinks_on_a_comparison_verdict_or_absence_only():
+    q = "which is better for low temp, the nv9usb+ or the nv9 spectral?"
+    assert main._needs_judgement(q, "The NV9 Spectral is better: +5C against +3C.")
+    assert main._needs_judgement("nv4000 vs nv200 spectral MCBF?", "I could not find an MCBF for the NV4000.")
+    assert not main._needs_judgement(q, "NV9USB+: +3C. NV9 Spectral: +5C.")
+    assert not main._needs_judgement("what is the nv9 minimum temperature?", "It is lower than 5C: +3C.")
 
 
 if __name__ == "__main__":
