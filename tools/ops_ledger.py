@@ -79,13 +79,14 @@ def decisions(ops):
                         it["reopened"] = os.path.basename(path)[:8]   # back from the parked list: an older attempt is void
                     it["history"].append(v.strip().upper())
                     if v.strip().upper() == "AUTO-APPROVED":
-                        it["approved"] = seq
+                        it["approved"], it["approved_in"] = seq, path
                 else:
                     it.setdefault(k.lower(), v.strip())
             if SECURITY.search(body):
                 it["security"] = True
             if re.search(r"(?mi)^- \[x\] CEO approved", body):
                 it["ceo_approved"], it["approved"] = True, seq + 0.5   # a tick needs a "Still broken" check in a later section
+                it["approved_in"] = path
             elif re.search(r"(?m)^- Verdict:\s*NEEDS CEO", body) and re.search(r"(?mi)^- \[ \] CEO approved", body):
                 it["ceo_approved"] = False   # decided again with an unticked box: it needs a fresh yes, an old tick does not carry
     return items
@@ -97,7 +98,13 @@ def answered(it, ops, path):
     # ponytail: by file mtime, and decisions files are appended all day, so a hand-back rewritten after the citing
     # triage but before a later append to the same file reads as answered; date each section if that bites
     f = it.get("cited", {}).get(os.path.relpath(path, ops).replace("\\", "/"))
-    return bool(f) and os.path.exists(path) and os.path.getmtime(path) <= os.path.getmtime(f)
+    if bool(f) and os.path.exists(path) and os.path.getmtime(path) <= os.path.getmtime(f):
+        return True
+    # approved again after the note (a CEO tick, or the product owner's AUTO-APPROVED): that is the answer, and the
+    # department runs the order again (2026-10-19: R&D's BLOCKED note on the CashGenic check stayed "stuck" after the
+    # CEO did the upload and ticked it, and the check was never re-run)
+    a = it.get("approved_in")
+    return bool(a) and os.path.exists(path) and os.path.exists(a) and os.path.getmtime(path) < os.path.getmtime(a)
 
 
 def git_sets(repo):
@@ -233,6 +240,14 @@ def _selftest():
     open(p, "w").write("## D-20261016-13 | Local\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
     assert os.path.basename(new_decisions_file(od, t.replace(minute=30))) == "20261016h_203005.md"
     assert decisions(od)["D-20261016-13"]["ceo_approved"], "the newest tick wins"
+    os.makedirs(os.path.join(od, "inbox", "rnd"))
+    note = os.path.join(od, "inbox", "rnd", "D-20261016-13-done.md")
+    open(note, "w").write("Status: BLOCKED - needs an upload\n")
+    t0 = time.time() - 600
+    os.utime(note, (t0, t0))
+    assert answered(decisions(od)["D-20261016-13"], od, note), "approved again after a blocked note: answered, runs again"
+    os.utime(note, (time.time() + 60, time.time() + 60))
+    assert not answered(decisions(od)["D-20261016-13"], od, note), "a note newer than the approval is still open"
     ops = tempfile.mkdtemp()
     for d in ("decisions", "inbox/customer", "inbox/dev", "inbox/audit"):
         os.makedirs(os.path.join(ops, d))
@@ -313,6 +328,8 @@ def _selftest():
     w("decisions/20261017b.md", "## D-20261013-07 | Hidden questions\n- Source: inbox/dev/D-20261013-07.md\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
     assert seven() == ("dev", "approved, queued"), "resent to Dev: it builds again"
     w("inbox/dev/D-20261013-07.md", "Status: BLOCKED\nStill no.\n")   # a newer hand-back than the triage: stuck again
+    t7 = time.time() + 5   # newer than the triage for sure: two writes in one instant can share a timestamp
+    os.utime(os.path.join(ops, "inbox/dev/D-20261013-07.md"), (t7, t7))
     assert seven() == ("dev", "blocked"), seven()
     print("selftest ok")
 
