@@ -77,6 +77,9 @@ LAB_FILES = (("run", ("runs", "*", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "before", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "rerun", "*", "cases_state.run*.json")),
              ("gate", ("heldout", "gates", "*", "sib_*", "cases_state.json")))
+# repeats 2..N of the same files (blind_eval.py --repeats, D-20261018-02); an arm copied in from repeat 1
+# ("copied_from_r1") is repeat 1's answer and is not counted again
+LAB_FILES += tuple((k, p[:-1] + ("cases_state.r[0-9]*.json",)) for k, p in LAB_FILES if p[-1] == "cases_state.json")
 
 
 def lab_rows(ops):
@@ -106,6 +109,7 @@ def lab_rows(ops):
                 (g["usage"]["model"] for g in grades.values() if isinstance(g, dict) and (g.get("usage") or {}).get("model")),
                 "lab model (not logged)")
             systems = [k for k in s if k.startswith("sys_") and k != "sys_before"] + (["baseline"] if kind == "run" else [])
+            systems = [k for k in systems if k not in s.get("copied_from_r1", [])]
             for system in systems:
                 what = "baseline" if system == "baseline" else "bot"
                 for r in (s.get(system) or {}).values():
@@ -229,8 +233,15 @@ def lab_selftest():
              "sys_before": {"c1": {"usd": 1.0}}, "grades": {"c1": g(0.125, "2026-10-12")}})
         put("inbox/dev/D-20261012-05.gate/rerun/head/cases_state.run1.json", {"sys_normal": {"c1": {"usd": 0.25}}, "baseline": {"c1": {"usd": 2.0}}})
         put("heldout/gates/D-20261012-05.gate-20261012-1000/sib_x/cases_state.json", {"sys_normal": {"c9": {"usd": 0.5}}})
+        put("runs/20260920/cases_state.r2.json", {"sys_normal": {"c1": {"usd": 1.0}}, "baseline": {"c1": {"usd": 2.0}},
+                                                  "copied_from_r1": ["baseline"], "grades": {"c1": g(0.25, "2026-10-12")}})
+        put("inbox/dev/D-20261012-05.gate/after/cases_state.r2.json", {"sys_normal": {"c1": {"usd": 0.5, "at": "2026-10-12"}}})
         rows = lab_rows(ops)
-        assert sum(r[3] for r in rows if r[2] == "baseline") == 2.0, "a gate's copied baseline is not counted twice"
+        assert sum(r[3] for r in rows if r[2] == "baseline") == 2.0, "a gate's or a repeat's copied baseline is not counted twice"
+        assert sum(r[3] for r in rows if r[4] == "20260920") == 4.75, "repeat 2's bot and grades count (D-20261018-02)"
+        os.remove(os.path.join(ops, "runs", "20260920", "cases_state.r2.json"))
+        os.remove(os.path.join(ops, "inbox", "dev", "D-20261012-05.gate", "after", "cases_state.r2.json"))
+        rows = lab_rows(ops)
         assert {r[4] for r in rows} == {"20260920", "D-20261012-05"}, "a gate is named by its work order, not its folders"
         old = {(r[0], r[2]): r[3] for r in rows if r[4] == "20260920"}
         assert old == {("2026-09-20", "bot"): 1.0, ("2026-09-20", "baseline"): 2.0, ("2026-10-12", "grader"): 0.5}, old
