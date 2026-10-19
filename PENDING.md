@@ -197,7 +197,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-02 | Security item D-20261010-02, details in the office | waiting for CEO | your yes |
 | D-20261010-33 | Security item D-20261010-33, details in the office | waiting for CEO | your yes |
 | D-20261014-05 | Security item D-20261014-05, details in the office | waiting for CEO | your yes |
-| D-20261015-11 | Security item D-20261015-11, details in the office | ready to merge | merges once Security clears it |
+| D-20261015-11 | Security item D-20261015-11, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
 | D-20261019-08 | Security item D-20261019-08, details in the office | approved, queued | Dev builds it |
 | D-20261019-12 | A document marked "Private & Confidential" answers customers today | ready to merge | merges once Security clears it |
