@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E402
@@ -113,6 +114,20 @@ def alerts(ops, cards, stalled, off):
     elif stalled.startswith("Paused"):
         out.append({"id": "paused", "title": "The office is paused", "why": stalled,
                     "suggest": "Nothing to do: the next hourly check fetches fresh usage figures and carries on.", "actions": []})
+    # a lane changes its own schedule when the CEO changes "Next run"; an unattended run cannot approve the
+    # schedule tool, so lanes 2 and 3 kept the old hourly times for days while the page showed the new setting (2026-10-19)
+    try:
+        asked = os.path.getmtime(os.path.join(ops, "state", "every"))
+    except OSError:
+        asked = 0
+    behind = [n for n in (1, 2, 3) if lane_cron_now(ops, n) != lane_cron(n, every(ops))]
+    if behind and time.time() - asked > 90 * 60:
+        out.append({"id": "cron-" + "-".join(map(str, behind)) + f"-{every(ops)}",
+                    "title": "Your \u201cNext run\u201d setting has not reached every lane",
+                    "why": f"Lane {', '.join(map(str, behind))} still runs on its old schedule: changing its own schedule needs"
+                           " a person's approval, and nobody is there during a scheduled run.",
+                    "suggest": "Ask Claude in any session to set the lanes to the page's \u201cNext run\u201d setting, or give those"
+                               " lanes the same permissions as lane 1 in the app's Routines settings.", "actions": []})
     lab = cap_status(ops)
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",
