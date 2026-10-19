@@ -230,7 +230,8 @@ if __name__ == "__main__":
         res = {**mean, "r1": res} if o.rule == "mean" else {**res, "mean_of_repeats": mean}
     if o.models:   # which before answers the gate marked, and both bot models
         res["models"] = load(o.models)
-        res["before"] = "stored" if res["models"]["same"] else "re-asked"
+        # gate_run.sh re-asks the before on base code for another bot model, and always with REPEATS > 1
+        res["before"] = "stored" if res["models"]["same"] and len(A) == 1 else "re-asked"
     if o.manuals is not None:   # before and after are marked in one pass, so with the same pages
         res["manuals"] = sorted(os.listdir(o.manuals)) if os.path.isdir(o.manuals) else []
     print(json.dumps(res, indent=1))

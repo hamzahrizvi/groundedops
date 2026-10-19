@@ -50,6 +50,9 @@ if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own pr
     for _k in range(1, _n + 1):
         _rc = subprocess.call([sys.executable, "-X", "faulthandler", os.path.abspath(__file__)] + _argv, env={**os.environ, "REPEAT": str(_k)})
         if _rc: sys.exit(_rc)
+        # ponytail: a fixed pause longer than lab_lock's 20 s poll, so a job waiting for the lab gets it between
+        # repeats (back to back, 6 gate passes held the weekly run off the lab for over an hour, 2026-10-19)
+        if sys.argv[2:3] == ["system"] and _k < _n: time.sleep(25)
     sys.exit(0)
 REPEAT = int(os.environ.get("REPEAT", "1"))
 RUN = os.path.abspath(sys.argv[1])
