@@ -14,6 +14,9 @@ often than the base, or a pass has no grade (fail closed). gate.json gains "reru
 per-pass grades) and a recomputed verdict; the drop is recomputed with the cleared cases
 held before ruling. Siblings, a drop beyond noise or 3+ cases: untouched.
 Only the open-set ids in gate.json's "became_wrong" are re-run; siblings are never read.
+A gate run with REPEATS>1 (D-20261018-02) already holds that many passes per case (after/cases_state.r<k>.json,
+the base side as their sys_before; each sibling's repeat files): they are the first passes, and only ROUNDS
+minus that many more are asked. A one-answer gate asks all 6 open-set passes afresh, as before.
 
 Env: GO_DATA (as gate_run.sh exports it); GATE_BASE = base commit (default: merge-base
 of the branch and GO_DATA's checkout). A failed step keeps the single-pass FAIL and
@@ -26,7 +29,7 @@ import subprocess
 import sys
 import tarfile
 
-from retrofit_gate import wrong   # one rule for "wrong" (D-20261010-11)
+from retrofit_gate import wrong, repeat_paths, scores   # one rule for "wrong" (D-20261010-11)
 
 ROUNDS, MARGIN, MAX_CASES = 6, 2, 2
 MAX_SIBS = 3   # the CEO, 2026-10-14: a hidden sibling under 2 is re-asked before it fails a fix; more than this many is a real miss
@@ -47,9 +50,12 @@ def sibling_rerun(held, states, dev_src, data, base_src):
     marks stand. gate_run.sh calls it as --siblings <held> <dev> <base_code> <state.json...>."""
     here = os.path.dirname(os.path.abspath(__file__))
     be = os.environ.get("BE") or os.path.join(here, "blind_eval.py")   # gate_run.sh's BE (a test's fake lab)
-    low = {sp: [c for c, g in json.load(open(sp, encoding="utf-8")).get("grades", {}).items()
-                if isinstance(g.get("sys_normal"), dict) and g["sys_normal"].get("score", 0) < 2
-                and (g.get("sys_before") or {}).get("score", 3) >= 2] for sp in states}
+    reps = {sp: [json.load(open(f, encoding="utf-8")) for f in repeat_paths(sp)] for sp in states}
+    def under(ss):   # under 2 on the branch, 2+ on base (no base mark counts as 2+)
+        a, b = scores(ss, "sys_normal"), scores(ss, "sys_before")
+        return {c for c, v in a.items() if v < 2 and b.get(c, 3) >= 2}
+    # low on the one-answer reading or on the mean of the repeats: both readings then see the settled mark
+    low = {sp: sorted(under(rs[:1]) | under(rs)) for sp, rs in reps.items()}
     n = sum(len(v) for v in low.values())
     out = {"asked": n, "rounds": ROUNDS, "cleared": [], "kept": []}
     if not n or n > MAX_SIBS:
@@ -64,10 +70,10 @@ def sibling_rerun(held, states, dev_src, data, base_src):
                 continue
             name = os.path.basename(os.path.dirname(sp))
             cases = [c for c in json.load(open(os.path.join(os.path.dirname(sp), "cases.json"), encoding="utf-8"))["cases"] if c["id"] in ids]
-            state = json.load(open(sp, encoding="utf-8"))
+            rs = reps[sp]
             sides = {"sys_normal": dev_src, "sys_before": base_src}
-            passes = {k: {c: [(state["grades"][c].get(k) or {}).get("score")] for c in ids} for k in sides}
-            for r in range(2, ROUNDS + 1):
+            passes = {k: {c: [((x.get("grades", {}).get(c) or {}).get(k) or {}).get("score") for x in rs] for c in ids} for k in sides}
+            for r in range(len(rs) + 1, ROUNDS + 1):
                 for k, src in sides.items():   # interleaved: branch, then base, each round
                     d = os.path.join(rr, name, k, f"r{r}")
                     os.makedirs(d)
@@ -83,10 +89,13 @@ def sibling_rerun(held, states, dev_src, data, base_src):
                         passes[k][c].append(g["score"] if g else None)
             for c in ids:
                 after, before = settle(passes["sys_normal"][c]), settle(passes["sys_before"][c], missing=3)
-                for k, mark in (("sys_normal", after), ("sys_before", before)):
-                    state["grades"][c].setdefault(k, {}).update({"score": mark, "passes": passes[k][c], "single_pass": passes[k][c][0]})
+                for i, x in enumerate(rs):   # every repeat carries the settled mark, so r1 and the mean agree
+                    for k, mark in (("sys_normal", after), ("sys_before", before)):
+                        x.setdefault("grades", {}).setdefault(c, {}).setdefault(k, {}).update(
+                            {"score": mark, "passes": passes[k][c], "single_pass": passes[k][c][i]})
                 (out["kept"] if after < 2 and before >= 2 else out["cleared"]).append(c)
-            json.dump(state, open(sp, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+            for f, x in zip(repeat_paths(sp), rs):
+                json.dump(x, open(f, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     except Exception as e:   # the single-pass marks stand
         out["error"] = str(e)
     finally:
@@ -183,7 +192,14 @@ def run(dev, run_dir, out):
             shutil.copy(os.path.join(run_dir, "cases_state.json"), d)   # keeps the baseline answers
             shutil.copytree(os.path.join(run_dir, "manuals"), os.path.join(d, "manuals"))
         be, states = os.path.join(here, "blind_eval.py"), {"head": [], "base": []}
-        for n in range(1, ROUNDS + 1):
+        rp = repeat_paths(os.path.join(out, "after", "cases_state.json"))
+        if len(rp) > 1:   # a REPEATS gate: its own answers on the branch (sys_normal) and base (sys_before) are the first passes
+            for f in rp:
+                x = json.load(open(f, encoding="utf-8"))
+                states["head"].append(x)
+                states["base"].append({"grades": {c: {"sys_normal": g["sys_before"]} for c, g in x.get("grades", {}).items() if "sys_before" in g}})
+            log.write(f"seeded {len(rp)} passes from the gate's repeats\n"); log.flush()
+        for n in range(len(states["head"]) + 1, ROUNDS + 1):
             for side, src in sides.items():
                 d = os.path.join(rr, side)
                 env = {**os.environ, "GO_CODE": src, "GO_DATA": data, "SYSTEMS": "sys_normal,baseline"}
@@ -256,6 +272,31 @@ def _selftest():
     json.dump({"grades": {f"s{i}": {"sys_normal": {"score": 1}, "sys_before": {"score": 1}} for i in range(4)}}, open(sp2, "w"))
     r = sibling_rerun(tmp, [sp2], tmp, tmp, tmp)
     assert r["skipped"].startswith("none") and r["asked"] == 0, "unmoved siblings are not re-asked"
+    # D-20261018-02: a sibling with 3 repeat files is seeded with 3 passes per side and asked 3 more
+    fake = os.path.join(tmp, "fake_be.py")
+    open(fake, "w").write("import json, os, sys\nrun, ph = sys.argv[1], sys.argv[2]\np = os.path.join(run, 'cases_state.json')\n"
+                          "s = json.load(open(p)) if os.path.exists(p) else {}\n"
+                          "ids = [c['id'] for c in json.load(open(os.path.join(run, 'cases.json')))['cases']]\n"
+                          "if ph == 'system': s['sys_normal'] = {c: {'answer': os.environ['GO_CODE']} for c in ids}\n"
+                          "else: s['grades'] = {c: {'sys_normal': {'score': 3 if 'base' in os.environ['GO_CODE'] else 1}} for c in ids}\n"
+                          "json.dump(s, open(p, 'w'))\n")
+    d3 = os.path.join(tmp, "sib_c"); os.makedirs(d3)
+    json.dump({"cases": [{"id": "s9"}]}, open(os.path.join(d3, "cases.json"), "w"))
+    for k, (a, b) in enumerate([(1, 3), (3, 3), (1, 2)], 1):
+        json.dump({"grades": {"s9": {"sys_normal": {"score": a}, "sys_before": {"score": b}}}},
+                  open(os.path.join(d3, "cases_state.json" if k == 1 else f"cases_state.r{k}.json"), "w"))
+    old_be = os.environ.get("BE"); os.environ["BE"] = fake
+    try:
+        r = sibling_rerun(tmp, [os.path.join(d3, "cases_state.json")], os.path.join(tmp, "dev"), tmp, os.path.join(tmp, "base"))
+    finally:
+        os.environ.pop("BE") if old_be is None else os.environ.update(BE=old_be)
+    assert r["asked"] == 1 and r["kept"] == ["s9"] and "error" not in r, r
+    assert sorted(os.listdir(os.path.join(tmp, "sib_rerun", "sib_c", "sys_normal"))) == ["r4", "r5", "r6"], "3 seeded, 3 asked"
+    for f in ("cases_state.json", "cases_state.r2.json", "cases_state.r3.json"):
+        g = json.load(open(os.path.join(d3, f)))["grades"]["s9"]
+        assert g["sys_normal"]["passes"] == [1, 3, 1, 1, 1, 1] and g["sys_normal"]["score"] == 1, g
+        assert g["sys_before"]["passes"] == [3, 3, 2, 3, 3, 3] and g["sys_before"]["score"] == 3, g
+    assert json.load(open(os.path.join(d3, "cases_state.r2.json")))["grades"]["s9"]["sys_normal"]["single_pass"] == 3
     print("selftest ok")
 
 

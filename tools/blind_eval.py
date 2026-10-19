@@ -6,6 +6,8 @@ Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
 
   python tools/blind_eval.py <run_dir> system normal|perf | baseline | grade | remark | reset | models
   python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
+  ... --repeats N   (anywhere: runs the phase N times, repeat k in its own process with REPEAT=k;
+           stops at the first non-zero exit and returns it. `reset --repeats N` resets every repeat)
   python tools/blind_eval.py <run_dir> vendor kapa|fin    (a market leader answers the cases; then
            SYSTEMS=sys_normal,baseline,kapa,fin ... remark grades all of them blind together)
 
@@ -17,6 +19,10 @@ crash resumes. Run each "system" phase in its own process (PERFORMANCE_MODE is
 read when policy.py is imported).
 
 Env:
+  REPEAT   which answer of each question this process works on (default 1): repeat 1 is
+           <SET>_state.json, repeat k>1 is <SET>_state.r<k>.json (D-20261018-02). Grading a repeat
+           k>1 copies a SYSTEMS arm it lacks from repeat 1 (listed in "copied_from_r1"), so a weekly
+           with one baseline answer grades every repeat beside the same baseline.
   SET      case file stem (default "cases"; old runs used "blind6" etc.)
   SYSTEMS  graded systems, comma list (default "sys_normal,baseline")
   GO_CODE  src/ whose code is imported (default: this repo's src) -- point at a
@@ -38,12 +44,23 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also 
 from lab_lock import lab_lock
 from market_compare import under, clamp_refusal
 
+if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own process (PERFORMANCE_MODE, torch)
+    _i = sys.argv.index("--repeats"); _n = int(sys.argv[_i + 1]); _argv = sys.argv[1:_i] + sys.argv[_i + 2:]
+    import subprocess
+    for _k in range(1, _n + 1):
+        _rc = subprocess.call([sys.executable, "-X", "faulthandler", os.path.abspath(__file__)] + _argv, env={**os.environ, "REPEAT": str(_k)})
+        if _rc: sys.exit(_rc)
+        # ponytail: a fixed pause longer than lab_lock's 20 s poll, so a job waiting for the lab gets it between
+        # repeats (back to back, 6 gate passes held the weekly run off the lab for over an hour, 2026-10-19)
+        if sys.argv[2:3] == ["system"] and _k < _n: time.sleep(25)
+    sys.exit(0)
+REPEAT = int(os.environ.get("REPEAT", "1"))
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
 DATA = os.path.abspath(os.environ.get("GO_DATA", CODE))
 SET = os.environ.get("SET", "cases")
 SYSTEMS = os.environ.get("SYSTEMS", "sys_normal,baseline").split(",")
-OUT = os.path.join(RUN, f"{SET}_state.json")
+OUT = os.path.join(RUN, f"{SET}_state.json" if REPEAT == 1 else f"{SET}_state.r{REPEAT}.json")
 cases = json.load(open(os.path.join(RUN, f"{SET}.json"), encoding="utf-8"))["cases"]
 # ponytail: only cases stamped "src" by market_compare merge are caught; a hand-built hidden set is not
 if any(c.get("src") for c in cases) and not under(RUN, os.path.join(os.environ.get("LAB_OPS", "C:/Users/hrizvi/groundedops-ops"), "heldout")): sys.exit("these cases are hidden (merged from heldout/); run folder must be under OPS/heldout/")
@@ -75,6 +92,13 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
     os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(DATA, ".secrets.enc"))
 
 phase = sys.argv[2]
+R1 = os.path.join(RUN, f"{SET}_state.json")
+if phase in ("grade", "remark") and REPEAT > 1 and os.path.exists(R1):   # e.g. a weekly's one baseline answer
+    _r1 = json.load(open(R1, encoding="utf-8"))
+    for _s in SYSTEMS:
+        if _s not in state and _s in _r1:
+            state[_s] = _r1[_s]; state.setdefault("copied_from_r1", []).append(_s)
+    save()
 # Any blind test, a lane's or one started by hand, holds the office's claim on Customer's test run
 # (tools/office_next.py claims): no lane starts a second one meanwhile, and the office page shows it as running.
 if phase in ("system", "baseline", "grade", "remark", "vendor"):
@@ -107,6 +131,7 @@ if phase == "models":   # D-20261010-09: the bot model on this run's stored answ
 if phase == "reset":
     for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s")]:
         del state[k]
+    if "copied_from_r1" in state: state["copied_from_r1"] = [s for s in state["copied_from_r1"] if s in state]
     save(); print("reset", OUT, "kept:", list(state)); sys.exit(0)
 if phase == "remark":
     # Grades by another model are kept beside the run and every case is graded again by this one, so a

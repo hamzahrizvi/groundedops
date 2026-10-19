@@ -11,7 +11,10 @@ real_categorised.json for the website questions), and writes per-run
 aggregates the office page pivots, plus `trend`: the difficulty-adjusted score per
 run with its noise band, the product fixes merged between runs (from REPO's git
 merges and their gate.json) and a plain verdict on whether the product got
-better. Export: writes RUN/real_questions.json, the
+better. A run answered more than once (blind_eval.py --repeats: cases_state.r2.json ...,
+D-20261018-02) reads each question's mean mark over its repeats ("bot", "bot_n" repeats) and calls it
+"wrong" only when most repeats were; every aggregate cell carries a 90% interval for bot_pct
+(bot_lo/bot_hi). Export: writes RUN/real_questions.json, the
 week's website-widget questions and how each ended, for Customer to categorise,
 and RUN/widget_feedback.json (the week's widget votes, without session ids).
 Prune: deletes widget_feedback.json, real_questions.json and real_categorised.json
@@ -29,6 +32,9 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from retrofit_gate import repeat_paths   # noqa: E402  one naming rule for a run's repeats (D-20261018-02)
+
 DIMS = ("category", "type", "product")
 RIGHT = ("correct", "correct_refusal", "clarified")   # the page's Right tab; its Wrong tab is verdict "wrong"
 REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens its questions
@@ -45,15 +51,22 @@ def _load(p):
 
 
 def run_facts(run_dir):
-    grades = _load(os.path.join(run_dir, "cases_state.json")).get("grades", {})
+    reps = [_load(f).get("grades", {}) for f in repeat_paths(os.path.join(run_dir, "cases_state.json"))]
+    grades = reps[0] if reps else {}
     out = []
     for c in _load(os.path.join(run_dir, "cases.json"))["cases"]:
         g = grades.get(c["id"], {})
         if "sys_normal" not in g:
             continue
+        mine = [r[c["id"]]["sys_normal"] for r in reps if "sys_normal" in r.get(c["id"], {})]
+        marks = [m["score"] for m in mine]
+        verdicts = [m.get("verdict", "") for m in mine]
+        # most repeats wrong: "wrong"; else the first repeat's verdict that is not "wrong" (one repeat: as before)
+        verdict = "wrong" if verdicts.count("wrong") * 2 > len(verdicts) else next(v for v in verdicts if v != "wrong")
         out.append({"id": c["id"], "q": c["q"], "product": c.get("product") or "none", "type": c["type"],
-                    "category": c.get("category") or "uncategorised", "bot": g["sys_normal"]["score"],
-                    "base": (g.get("baseline") or {}).get("score"), "verdict": g["sys_normal"].get("verdict", "")})
+                    "category": c.get("category") or "uncategorised", "bot": marks[0] if len(marks) == 1 else sum(marks) / len(marks),
+                    "base": (g.get("baseline") or {}).get("score"), "verdict": verdict,
+                    **({"bot_n": len(marks)} if len(marks) > 1 else {})})   # one repeat: no field (the page doc caps at 256 KB)
     return out
 
 
@@ -112,10 +125,17 @@ def review(run_dir):
     return out
 
 
-def agg(facts):
+def agg(facts, ci=True):
+    """ci: bot_lo/bot_hi, the 90% interval of bot_pct; build() keeps it to the overall and per-type cells (256 KB doc)."""
     n = len(facts)
     base = [f["base"] for f in facts if f["base"] is not None]
-    return {"n": n, "bot_pct": round(100 * sum(f["bot"] for f in facts) / (3 * n), 1),
+    k = sum(f["bot"] for f in facts)   # marks scored of 3n; ponytail: marks read as 3n coin flips, a Beta(k+1, 3n-k+1) posterior
+    out = {}
+    if ci:
+        from scipy.stats import beta
+        lo, hi = beta.ppf([0.05, 0.95], k + 1, 3 * n - k + 1)
+        out = {"bot_lo": round(100 * lo, 1), "bot_hi": round(100 * hi, 1)}
+    return {"n": n, "bot_pct": round(100 * k / (3 * n), 1), **out,
             "base_pct": round(100 * sum(base) / (3 * len(base)), 1) if base else None,
             "right": sum(f.get("verdict") in RIGHT for f in facts), "wrong": sum(f.get("verdict") == "wrong" for f in facts),
             "declined": sum(f["verdict"] == "safe_decline" for f in facts)}
@@ -259,7 +279,7 @@ def build(ops, repo=None):
             for f in facts:
                 groups[f[dim]].append(f)
             for g, fs in groups.items():
-                blind[dim][g][name] = agg(fs)
+                blind[dim][g][name] = agg(fs, ci=dim == "type")
         rc = real_counts(d)
         if rc is not None:
             real[name] = rc
@@ -391,9 +411,12 @@ def _selftest():
               open(os.path.join(ops, "runs", "20261012", "real_categorised.json"), "w"))
     r = build(ops)
     assert r["runs"] == ["20261005", "20261012"], r["runs"]
-    assert r["overall"]["20261005"] == {"n": 3, "bot_pct": 44.4, "base_pct": 100.0, "right": 1, "wrong": 1, "declined": 1}, r["overall"]
+    o = r["overall"]["20261005"]
+    assert {k: o[k] for k in o if k not in ("bot_lo", "bot_hi")} == {"n": 3, "bot_pct": 44.4, "base_pct": 100.0, "right": 1, "wrong": 1, "declined": 1}, o
+    assert o["bot_lo"] < 44.4 < o["bot_hi"], o
     assert r["blind"]["category"]["technical"]["20261005"]["wrong"] == 1
     assert r["blind"]["category"]["technical"]["20261012"]["bot_pct"] == 100.0
+    assert "bot_lo" in r["blind"]["type"]["lookup"]["20261012"] and "bot_lo" not in r["blind"]["category"]["simple"]["20261012"]
     assert r["blind"]["product"]["none"]["20261012"]["bot_pct"] == 66.7
     assert r["real"]["20261012"] == {"commercial": {"refused": 1}, "technical": {"answered": 1}}
     assert r["latest"]["run"] == "20261012" and len(r["latest"]["cases"]) == 3
@@ -410,6 +433,21 @@ def _selftest():
     fix = {"id": "D-20261006-01", "title": "x", "when": 2}
     t = trend({"20261005": [easy, hard], "20261012": [easy, easy]}, {"20261005": 1, "20261012": 3}, [fix, dict(fix, when=4)])
     assert len(t["steps"]) == 1 and t["steps"][0]["fixes"] == [fix] and len(t["waiting"]) == 1, t
+    # D-20261018-02: a run with 3 repeats reads the mean mark per question and calls "wrong" on most repeats
+    rr = os.path.join(ops, "runs", "20261019")
+    os.makedirs(rr)
+    json.dump({"cases": [{"id": "C-0", "q": "q0", "type": "lookup", "category": "simple"},
+                         {"id": "C-1", "q": "q1", "type": "lookup", "category": "simple"}]}, open(os.path.join(rr, "cases.json"), "w"))
+    for f, (m0, v0, m1, v1) in (("cases_state.json", (0, "wrong", 3, "correct")), ("cases_state.r2.json", (3, "correct", 0, "wrong")),
+                                ("cases_state.r3.json", (3, "correct", 1, "wrong"))):
+        json.dump({"grades": {"C-0": {"sys_normal": {"score": m0, "verdict": v0}}, "C-1": {"sys_normal": {"score": m1, "verdict": v1}}}},
+                  open(os.path.join(rr, f), "w"))
+    fs = run_facts(rr)
+    assert [(f["bot"], f["bot_n"], f["verdict"]) for f in fs] == [(2.0, 3, "correct"), (4 / 3, 3, "wrong")], fs
+    assert "bot_n" not in run_facts(os.path.join(ops, "runs", "20261012"))[0]
+    a = agg(fs)
+    assert a["bot_pct"] == 55.6 and a["bot_lo"] < 55.6 < a["bot_hi"] and a["wrong"] == 1, a
+    assert run_facts(os.path.join(ops, "runs", "20261012"))[0]["bot"] == 3                   # one repeat: the int, as before
     assert MERGE.match("Merge branch 'agents/dev-D-20261008-16' (D-20261008-16: Adding manuals needs (no) sign-in)")[2]         == "Adding manuals needs (no) sign-in"
     # D-20261010-22: retention on a throwaway OPS
     ops2 = tempfile.mkdtemp()
