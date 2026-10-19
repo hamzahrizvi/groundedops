@@ -41,7 +41,8 @@ STREAM_OK = _sse(
     ("done", {"flagged": False}))
 MANUAL = "NV9 Manual.pdf"
 STREAM_DETAIL = _sse(
-    ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12"}],
+    ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12",
+                           "download_url": "/source_file/x", "pages": [12]}],
               "request_id": "rid-mc", "role": "fast",
               "more_context": {"kind": "detail", "label": "x", "support": False,
                                "document": {"source": MANUAL, "download_url": "/source_file/x",
@@ -205,7 +206,9 @@ def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
     _ask("How do I remove the bezel?")
     _open_chips()
     _page.wait_for_selector("button:has-text('Show more from the manual')")
-    assert _page.locator("summary:has-text('Verified against NV9 Manual, page 12')").count() == 1
+    assert _page.locator(".go-srcline:has-text('Verified against NV9 Manual, page 12')").count() == 1
+    assert _page.locator(".go-srcline a:has-text('Open page 12')").count() == 1
+    assert _page.locator(".go-src").count() == 0, "one source, no figures: no Sources (1) row"
     assert _page.locator("button:has-text('Open NV9 Manual, page 12')").count() == 1
     assert _page.locator("button:has-text('What voltage does it need?')").count() == 1
     assert _page.locator("button:has-text('How do I clean the sensor?')").count() == 1
@@ -234,6 +237,56 @@ def test_a_signed_in_refusal_offers_the_closest_page_beside_support():
     _ask("Can it make coffee?")
     _page.wait_for_selector("button:has-text('Email support')")
     assert _page.locator("button:has-text('Open NV9 Manual, page 30')").count() == 1
+
+
+def test_a_guest_sees_the_source_line_with_a_download():
+    stream_body[0] = STREAM_DETAIL
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-srcline")
+    assert "Verified against NV9 Manual, page 12" in _page.inner_text(".go-srcline")
+    assert _page.locator(".go-srcline a:has-text('Download')").count() == 1
+    assert _page.locator("text=Open page").count() == 0
+
+
+def test_signed_in_two_sources_show_the_first_and_fold_the_rest():
+    stream_body[0] = _sse(
+        ("meta", {"sources": [
+            {"source": MANUAL, "page_label": "page 12", "pages": [12],
+             "download_url": "/source_file/x"},
+            {"source": "NV9 Wiring.pdf", "page_label": "pages 3, 4", "pages": [3, 4],
+             "download_url": "/source_file/y"}],
+            "request_id": "rid-two", "role": "fast"}),
+        ("delta", {"text": ANSWER}))
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-srcline")
+    assert _page.locator(".go-srcline").count() == 1
+    assert "NV9 Manual, page 12" in _page.inner_text(".go-srcline")
+    assert _page.locator("summary:has-text('Sources (2)')").count() == 1
+    _page.click("summary:has-text('Sources (2)')")
+    assert _page.locator(".go-src a:has-text('Open page 3')").count() == 1
+
+
+def test_a_refusal_shows_no_source_line():
+    stream_body[0] = STREAM_REFUSAL.replace(
+        '"sources": []',
+        '"sources": [{"source": "' + MANUAL + '", "page_label": "page 30", "pages": [30], '
+        '"download_url": "/source_file/x"}]')
+    _ask("Can it make coffee?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator(".go-srcline").count() == 0
+    assert _page.locator(".go-src").count() == 0
+
+
+def test_a_faq_answer_says_from_not_verified():
+    stream_body[0] = _sse(
+        ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12", "pages": [12]}],
+                  "request_id": "rid-faq", "from_faq": True, "faq_reviewed": True,
+                  "flagged": False}),
+        ("delta", {"text": ANSWER}))
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-srcline")
+    assert _page.locator(".go-srcline:has-text('From NV9 Manual, page 12')").count() == 1
+    assert _page.locator("text=Verified against").count() == 0
 
 
 def test_a_guest_is_not_offered_a_document_it_cannot_open():

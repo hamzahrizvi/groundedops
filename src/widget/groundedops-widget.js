@@ -408,6 +408,12 @@
     ".go-fnote{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.45}" +
     // sources
     ".go-src{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}" +
+    ".go-srcline{margin-top:9px;border-top:1px solid var(--line);padding-top:8px;font-size:12px;" +
+    "color:var(--mut);display:flex;flex-wrap:wrap;align-items:center;gap:5px;line-height:1.4}" +
+    ".go-srcline svg{width:12px;height:12px;flex:0 0 auto}" +
+    ".go-srcline span{overflow-wrap:anywhere}" +
+    ".go-srcline .go-dl{margin-top:0}" +
+    ".go-srcline+.go-src{margin-top:4px;border-top:0;padding-top:0}" +
     // The summary is the button. list-style:none plus the ::-webkit- rule
     // removes the native triangle in every engine that still ships one, so
     // the chevron below is the only marker and it can be rotated.
@@ -786,66 +792,65 @@
     row._txt = txt;
 
     if (msg.sources && msg.sources.length) {
-      // COLLAPSED by default, and short when open. It used to be an always-
-      // expanded list carrying a text snippet per source, which put several
-      // lines of document prose under every answer -- the answer is the
-      // answer, and provenance is something you go and look at.
-      //
-      // <details>/<summary> rather than a click handler: the open/closed
-      // state, the keyboard behaviour and the ARIA semantics all come free,
-      // which matters in a widget injected into someone else's page.
-      var s = document.createElement("details");
-      s.className = "go-src";
-      var n = Math.min(msg.sources.length, 4);
-      // 8.12: one source on a generated answer is the manual it was checked
-      // against, so say that. A curated answer (badge) was not checked here.
       var one = msg.sources[0];
-      var summaryText = n === 1 && !msg.badge
-        ? "Verified against " + esc(pretty(one.source)) +
-          (one.page_label ? ", " + esc(one.page_label) : "")
-        : "Sources (" + n + ")";
-      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + summaryText + "</summary>";
-      msg.sources.slice(0, 4).forEach(function (x) {
-        var i = document.createElement("div");
-        i.className = "go-srci";
-        // Name, the pages that actually carried the answer, and a way to
-        // open the original. The snippet is deliberately gone: it repeated
-        // in prose what the answer had just said.
-        //
-        // The page label is built server-side so every client renders it
-        // identically ("page 12" / "pages 12, 14").
-        var head = '<span class="go-srcn">' + esc(pretty(x.source)) + "</span>" +
-          (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "");
-        // Fetched with the bearer token rather than a plain link: external
-        // /source_file access now requires a valid member token, and an
-        // <a href> cannot carry an Authorization header.
-        var dl = x.download_url
-          ? ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>'
-          : "";
-        i.innerHTML = head + dl;
-        // The pictures that sat beside the cited text: a wiring diagram is
-        // the answer to "where does pin 3 go" in a way prose is not. Loaded
-        // with the bearer token, like the download: /figure is gated and an
-        // <img src> cannot carry a header. Click toggles full size.
-        if (x.figures && x.figures.length) {
-          var strip = document.createElement("div");
-          strip.className = "go-figs";
-          x.figures.slice(0, 4).forEach(function (f) {
-            var im = document.createElement("img");
-            im.className = "go-fig";
-            im.alt = f.caption || ("Figure, page " + f.page);
-            im.title = (f.caption ? f.caption + " — " : "") + "page " + f.page;
-            im.setAttribute("data-fig", f.url);
-            im.addEventListener("click", function () {
-              im.classList.toggle("big");
+      var line = document.createElement("div");
+      line.className = "go-srcline";
+      // D-20261010-14: the first source is on the answer, not behind a click.
+      // "Verified against" only where the grounding check ran (a generated
+      // answer); a curated FAQ answer (badge) was not checked here: "From".
+      line.innerHTML = I_SHIELD + "<span>" + (msg.badge ? "From " : "Verified against ") +
+        esc(pretty(one.source)) + (one.page_label ? ", " + esc(one.page_label) : "") +
+        "</span>" + srcLink(one);
+      b.appendChild(line);
+      var n = Math.min(msg.sources.length, 4);
+      if (n > 1 || (one.figures || []).length) {
+        // <details>/<summary> rather than a click handler: the open/closed
+        // state, the keyboard behaviour and the ARIA semantics all come free,
+        // which matters in a widget injected into someone else's page.
+        var s = document.createElement("details");
+        s.className = "go-src";
+        s.innerHTML = '<summary class="go-srch">Sources (' + n + ")</summary>";
+        msg.sources.slice(0, 4).forEach(function (x) {
+          var i = document.createElement("div");
+          i.className = "go-srci";
+          // Name, the pages that actually carried the answer, and a way to
+          // open the original. The snippet is deliberately gone: it repeated
+          // in prose what the answer had just said.
+          //
+          // The page label is built server-side so every client renders it
+          // identically ("page 12" / "pages 12, 14").
+          var head = '<span class="go-srcn">' + esc(pretty(x.source)) + "</span>" +
+            (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "");
+          // Fetched with the bearer token rather than a plain link: external
+          // /source_file access now requires a valid member token, and an
+          // <a href> cannot carry an Authorization header.
+          var dl = srcLink(x);
+          i.innerHTML = head + dl;
+          // The pictures that sat beside the cited text: a wiring diagram is
+          // the answer to "where does pin 3 go" in a way prose is not. Loaded
+          // with the bearer token, like the download: /figure is gated and an
+          // <img src> cannot carry a header. Click toggles full size.
+          if (x.figures && x.figures.length) {
+            var strip = document.createElement("div");
+            strip.className = "go-figs";
+            x.figures.slice(0, 4).forEach(function (f) {
+              var im = document.createElement("img");
+              im.className = "go-fig";
+              im.alt = f.caption || ("Figure, page " + f.page);
+              im.title = (f.caption ? f.caption + " — " : "") + "page " + f.page;
+              im.setAttribute("data-fig", f.url);
+              im.addEventListener("click", function () {
+                im.classList.toggle("big");
+              });
+              strip.appendChild(im);
             });
-            strip.appendChild(im);
-          });
-          i.appendChild(strip);
-        }
-        s.appendChild(i);
-      });
-      s.querySelectorAll("[data-fig]").forEach(function (im) {
+            i.appendChild(strip);
+          }
+          s.appendChild(i);
+        });
+        b.appendChild(s);
+      }
+      b.querySelectorAll("[data-fig]").forEach(function (im) {
         var headers = {};
         if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
         fetch(cfg.api + im.getAttribute("data-fig"), { headers: headers })
@@ -853,7 +858,13 @@
           .then(function (blob) { im.src = URL.createObjectURL(blob); })
           .catch(function () { im.remove(); });
       });
-      s.querySelectorAll("[data-dl]").forEach(function (a) {
+      b.querySelectorAll("[data-open]").forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          openDoc(a.getAttribute("data-open"), a.getAttribute("data-page"));
+        });
+      });
+      b.querySelectorAll("[data-dl]").forEach(function (a) {
         a.addEventListener("click", function (ev) {
           ev.preventDefault();
           var headers = {};
@@ -871,7 +882,6 @@
             .catch(function () { a.textContent = "Download unavailable"; });
         });
       });
-      b.appendChild(s);
     }
     if (msg.badge) {
       var bd = document.createElement("div");
@@ -2206,7 +2216,11 @@
           //    reachable" one character at a time is a slow way to deliver
           //    bad news.
           reveal: !d.from_faq && !d.flagged && !d.service_degraded,
-          sources: d.flagged ? null : d.sources,
+          // D-20261010-14: a source line only under an answer. A refusal, a
+          // clarify question or a service notice carries the pages it searched,
+          // which are not where an answer came from.
+          sources: (d.flagged || d.offer_support || d.needs_clarification ||
+                    d.service_degraded) ? null : d.sources,
           flagged: !!d.flagged,
           badge: d.from_faq ? (d.faq_reviewed ? "Reviewed answer" : "From our FAQ") : null,
           // Only a generated answer can be voted on: a curated one has been
@@ -2422,6 +2436,19 @@
         if (w) w.close();
         say("That document could not be opened just now.", { flagged: true });
       });
+  }
+
+  /** D-20261010-14: the link beside a source. Signed in and a page known:
+   *  "Open page N", the PDF at that page (openDoc). Otherwise the old
+   *  whole-file Download: /source_file is token gated, as for docChip. */
+  function srcLink(x) {
+    if (!x.download_url) return "";
+    var page = (x.pages || [])[0];
+    if (cfg.token && page) {
+      return ' <a class="go-dl" href="#" data-open="' + esc(x.download_url) +
+        '" data-page="' + esc(page) + '">Open page ' + esc(page) + "</a>";
+    }
+    return ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>';
   }
 
   /** Document excerpts, labelled with where they came from. Shown as a
