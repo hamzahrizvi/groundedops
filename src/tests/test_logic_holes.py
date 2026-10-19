@@ -174,6 +174,47 @@ def test_a_sibling_is_named_by_its_difference_once_the_family_is_typed():
         main._product_names, main._product_aliases = real_names, real_aliases
 
 
+def test_comparison_share_keeps_a_low_scored_table_and_no_third_product():
+    """D-20261016-08: C20261017b-34 lost the NV9 Spectral's +5C table (0.0076,
+    its side's best 0.045) to the per-product floor; C20261017b-26 filled a
+    slot with a third product's MCBF page."""
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "nv9_spectral", "rerank_score": s} for s in (0.045, 0.024, 0.0076, 0.006)]
+        ranked += [{"product": "bv30", "rerank_score": 0.0055}]
+        ranked += [{"product": "nv9usb", "rerank_score": s} for s in (0.0043, 0.0031, 0.0023)]
+        assert main._comparison_picks(ranked, ["nv9_spectral", "nv9usb"], 0.0225) == [0, 1, 2, 3, 5, 6, 7]
+        ranked = [{"product": "nv200s", "rerank_score": 0.88},
+                  {"product": "nv9_spectral", "rerank_score": 0.82},
+                  {"product": "nv4000", "rerank_score": 0.75},
+                  {"product": "nv4000", "rerank_score": 0.67},
+                  {"product": "nv4000", "rerank_score": 0.55},
+                  {"product": "", "rerank_score": 0.50},
+                  {"product": "biometrics_general,mycheckr,mycheckr_mini", "rerank_score": 0.1}]
+        assert main._comparison_picks(ranked, ["nv200s", "nv4000"], 0.44) == [0, 2, 3, 4, 5]
+        assert main._comparison_picks(ranked, ["mycheckr", "mycheckr_mini"], 0.44) == [5, 6]
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+
+
+def test_number_rescue_does_not_judge_a_comparison_verdict_or_absence():
+    ctx = [{"text": "MCBF: 200,000 Cycles"}, {"text": "MCBI: 25,000 MCBF: 100,000"}]
+    verdict = "The NV4000 is better: 100,000 cycles against 200,000 for the NV200 Spectral."
+    absent = "The NV200 Spectral MCBF is 200,000 cycles. I could not find an MCBF for the NV4000."
+    plain = "The NV200 Spectral MCBF is 200,000 cycles and the NV4000 MCBF is 100,000 cycles."
+    assert main._lexically_supported(verdict, ctx)
+    assert not main._lexically_supported(verdict, ctx, comparing=True)
+    assert not main._lexically_supported(absent, ctx, comparing=True)
+    assert main._lexically_supported(plain, ctx, comparing=True)
+
+
+def test_comparison_rules_reach_the_answer_and_verifier_prompts():
+    p = main.build_answer_prompt("", "ctx", "q")
+    assert "compare the numbers," in p and "worked out from another product's value" in p
+    assert "agrees with the values the SOURCE gives each product" in main._VERIFY_PROMPT
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

@@ -522,7 +522,16 @@ def _strip_meta(answer: str) -> str:
     return out if out.strip(" .") else answer
 
 
-def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
+# A comparison's verdict and a claimed absence are not numbers (D-20261016-08).
+_VERDICT_RE = re.compile(
+    r"\b(?:better|worse|best|worst|lower|higher|colder|warmer|cooler|hotter"
+    r"|faster|slower|longer|shorter|than|halve[sd]?|halving|double[sd]?|doubling)\b", re.I)
+_ABSENCE_RE = re.compile(
+    r"\b(?:could\s+not|couldn't|cannot|can't)\s+find\b"
+    r"|\bnot\s+(?:stated|given|listed|specified|documented|provided|mentioned)\b", re.I)
+
+
+def _lexically_supported(answer: str, chunks: list[dict], comparing: bool = False) -> bool:
     """Second chance for grounding failures on table-like text (v8.4.2).
 
     The NLI grounding model is unreliable at entailment against shredded
@@ -573,6 +582,13 @@ def _lexically_supported(answer: str, chunks: list[dict]) -> bool:
     # pin number, a voltage); the LLM verifier reads tables, this does not.
     if re.search(r"^\s*\|", answer, re.M):
         return False
+    # On a question naming two products, number containment cannot tell
+    # which way the conclusion goes or whether a "not stated" is true:
+    # "+5C is better than +3C" (backwards) and "the NV4000's MCBF is not
+    # stated ... halves it to 100,000" had every number in the context and
+    # were served on this rescue. The LLM verifier judges those.
+    if comparing and (_VERDICT_RE.search(answer) or _ABSENCE_RE.search(answer)):
+        return False
     context = " ".join(c.get("text", "") for c in chunks)
     # Whole numbers only. Plain containment let "30 notes" be supported by
     # "300 notes", "12V" by "2012", and "1.2 kg" by "1.25 Kg" -- the exact
@@ -616,7 +632,7 @@ Each passage of the SOURCE starts with a label in square brackets: its document,
 
 Judge two things separately.
 
-SUPPORT - Does every factual claim in the ANSWER appear in the SOURCE, without pairing values the SOURCE does not pair together? When the ANSWER tells the reader to DO something, the SOURCE must give that step for that purpose. A sentence that only describes what a port or feature can do is not an instruction; an ANSWER that turns one into a step is not supported.
+SUPPORT - Does every factual claim in the ANSWER appear in the SOURCE, without pairing values the SOURCE does not pair together? When the ANSWER tells the reader to DO something, the SOURCE must give that step for that purpose. A sentence that only describes what a port or feature can do is not an instruction; an ANSWER that turns one into a step is not supported. When the ANSWER compares products, its conclusion (which one is better, lower, higher, longer-lasting) is a claim too: it is supported only when it agrees with the values the SOURCE gives each product. A figure the ANSWER works out itself (halving, doubling) and gives as a product's own value is not supported. A sentence saying a figure is not given for a product is not supported when a passage labelled with that product gives it.
 
 RELEVANCE - What problem is the customer asking about? Does the ANSWER give them something that helps with THAT problem: a cause, a check, or a step? True background that does not help with it (how first-time setup works, where things appear on a screen) does not count.
 
@@ -904,9 +920,18 @@ product, added automatically; when the question itself names a different
 product or model, the one it names is what they are asking about.
 Never carry a fact from one product to another: that one product replaces,
 resembles or belongs to the same range as another does not mean it has the
-same features. When the question asks about two products and the context
-states the fact for only one, do not answer Yes or No: give the fact for
-that one and say you could not find it for the other.
+same features.
+When the question asks about two or more products, look up each one separately
+in the passages marked with that product, and give each product's own figure
+with its unit. Only when no passage marked with a product states it, say by name
+that you could not find it for that product, and do not answer Yes or No. Never
+stand in for a missing figure with one worked out from another product's value
+or from a general rule (halving, doubling, adding modules).
+When the question asks which product is better, rated colder, faster,
+longer-lasting or otherwise ahead, write each figure first, compare the numbers,
+and make the conclusion agree with that comparison. Decide which direction is
+better from what the figure measures: a lower minimum operating temperature
+suits a colder site, a higher MCBF means fewer failures.
 If the question refers to something you said earlier ("the pinout above", "that
 one", "which product was that for"), use <conversation> to work out what is
 being referred to — but every FACT in your answer must still come from
@@ -2178,6 +2203,34 @@ _COMPARISON = re.compile(
 
 def _is_comparison(query: str) -> bool:
     return bool(_COMPARISON.search(query or ""))
+
+
+def _comparison_picks(ranked: list[dict], named: list[str], floor: float) -> list[int]:
+    """Indexes into `ranked` (reranked, best first) for a question naming two
+    or more products (D-20261016-08). Each named product takes its own best
+    CONTEXT_K // n passages with NO score floor: each share is that product's
+    half of the question, and the cross-encoder cannot read a table row
+    (C20261017b-34: the NV9 Spectral's +5C table scored 0.0076 behind its own
+    0.045 page; a floor at half its side's best cut it). Leftover slots fill
+    in global order above `floor`, but never with a passage about another
+    product (C20261017b-26 filled one with the NV9 Spectral's MCBF page, and
+    the model worked a stand-in figure out of it)."""
+    def tags(c):
+        return {k.strip() for k in (c.get("product") or "").split(",")} - {""}
+    per = max(2, CONTEXT_K // len(named))
+    picked: list[int] = []
+    for k in named:
+        picked += [i for i, r in enumerate(ranked)
+                   if k in tags(r) and i not in picked][:per]
+    for i, r in enumerate(ranked[:CONTEXT_K]):
+        if len(picked) >= CONTEXT_K:
+            break
+        t = tags(r)
+        if i in picked or (t and not t & set(named)):
+            continue
+        if r.get("rerank_score", 0.0) >= floor or len(picked) < CONTEXT_MIN:
+            picked.append(i)
+    return sorted(picked)
 
 
 def _token_runs(query: str, max_len: int = 8) -> set[str]:
@@ -3770,33 +3823,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # of 19 behind its own configuration-button and IF9 pages, so the model
     # answered "yes, both" from the NV9 Spectral alone and the verifier
     # rightly rejected it, 3/3. So each named product takes its own best
-    # CONTEXT_K/n passages (above the same floor), and leftover slots fill
-    # in global order. A product with no candidates stays absent; this
-    # never invents a manual.
+    # CONTEXT_K/n passages, and leftover slots fill in global order (see
+    # _comparison_picks).
     if len(_both_named) >= 2:
-        def _tags(c):
-            return {k.strip() for k in (c.get("product") or "").split(",")}
-        # Each product's floor is relative to ITS OWN best passage. Against
-        # the global best it cut a whole half: "fix the mycheckr to a wall vs
-        # the mini" -- the Mini's mounting page scored 0.12, the MyCheckr's
-        # 0.0067, so the MyCheckr got nothing and the prompt one passage.
-        _per = max(2, CONTEXT_K // len(_both_named))
-        _picked: list[int] = []
-        for _k in _both_named:
-            _own = [i for i, r in enumerate(_retrieved)
-                    if _k in _tags(r) and i not in _picked]
-            _kfloor = (_retrieved[_own[0]].get("rerank_score", 0.0)
-                       * CONTEXT_FLOOR_RATIO) if _own else 0.0
-            _picked += [i for i in _own
-                        if _retrieved[i].get("rerank_score", 0.0) >= _kfloor][:_per]
-        for i, r in enumerate(_retrieved[:CONTEXT_K]):
-            if len(_picked) >= CONTEXT_K:
-                break
-            if i not in _picked and (r.get("rerank_score", 0.0) >= _floor
-                                     or len(_picked) < CONTEXT_MIN):
-                _picked.append(i)
+        _picked = _comparison_picks(_retrieved, _both_named, _floor)
         if _picked:
-            top_chunks = [_strip_breadcrumb(_retrieved[i]) for i in sorted(_picked)]
+            top_chunks = [_strip_breadcrumb(_retrieved[i]) for i in _picked]
             ptrace.mark("retrieve.pair", f"{len(top_chunks)} passages over {_both_named}")
     # A VALUE IN THE QUESTION, A LIMIT ROW IN THE MANUAL (S30, N4-29/N4-30).
     # The quantity arm's min/max rows score near 0 with the cross-encoder,
@@ -4230,7 +4262,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # NLI fails on table-shredded text; give short numeric answers a
         # lexical second chance (see _lexically_supported docstring).
         if (not is_grounded and not verifier_unavailable
-                and _timed("verify", _lexically_supported, answer, top_chunks)):
+                and _timed("verify", _lexically_supported, answer, top_chunks,
+                           comparing=len(_both_named) >= 2)):
             is_grounded, ground_via = True, "lexical"
             logger.info("Grounding rescued by lexical containment "
                         f"(nli={grounding_score}) for: {redact(resolved_query)}")
@@ -4311,7 +4344,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 verifier_unavailable = grounding_score is None
                 if (not is_grounded and not verifier_unavailable
                         and _timed("verify", _lexically_supported,
-                                   answer, top_chunks)):
+                                   answer, top_chunks,
+                                   comparing=len(_both_named) >= 2)):
                     is_grounded, ground_via = True, "lexical"
                     logger.info("Escalated answer rescued by lexical "
                                 f"containment (nli={grounding_score})")
@@ -4375,7 +4409,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 break
             _via = "nli"
             if not _ok and _timed("verify", _lexically_supported,
-                                  _text, top_chunks):
+                                  _text, top_chunks,
+                                  comparing=len(_both_named) >= 2):
                 _ok, _via = True, "lexical"
             elif not _ok and _timed("verify", _llm_verified,
                                     _text, _verify_chunks, deepseek_api_key,
