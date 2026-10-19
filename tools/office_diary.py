@@ -21,6 +21,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import decisions  # noqa: E402
+from ops_pivot import agg, run_facts  # noqa: E402  the office page's reading of a run (D-20261019-06)
+from retrofit_gate import repeat_paths  # noqa: E402
 
 DAY_ENDS = 22     # ponytail: tonight's entry is written after 22:00; later work that night is not in it
 LOOKBACK = 7
@@ -67,10 +69,16 @@ def facts(ops, repo, day, office=None):
             out.append(f"Test run {name} failed at: " + open(os.path.join(run, "FAILED"), encoding="utf-8").read().strip())
         if os.path.exists(os.path.join(run, "DONE")):
             try:
-                s = json.load(open(os.path.join(run, "cases_state.json"), encoding="utf-8"))["summary"]
-                out.append(f"Test run {name} finished: bot {s['sys_normal']['pct_of_max']}%, "
-                           f"whole-manual AI {s['baseline']['pct_of_max']}%, {s['sys_normal']['verdicts'].get('wrong', 0)} wrong")
-            except (OSError, ValueError, KeyError):
+                n = len(repeat_paths(os.path.join(run, "cases_state.json")))
+                if n > 1:   # each question's mean over the answers, wrong when most are (D-20261019-06)
+                    a = agg(run_facts(run), ci=False)
+                    out.append(f"Test run {name} finished: bot {a['bot_pct']}% (mean of {n} answers), "
+                               f"whole-manual AI {a['base_pct']}%, {a['wrong']} wrong")
+                else:
+                    s = json.load(open(os.path.join(run, "cases_state.json"), encoding="utf-8"))["summary"]
+                    out.append(f"Test run {name} finished: bot {s['sys_normal']['pct_of_max']}% (one answer), "
+                               f"whole-manual AI {s['baseline']['pct_of_max']}%, {s['sys_normal']['verdicts'].get('wrong', 0)} wrong")
+            except (OSError, ValueError, KeyError, ZeroDivisionError):
                 out.append(f"Test run {name} finished")
     for g in sorted(glob.glob(os.path.join(ops, "inbox", "dev", "*.gate", "gate.json"))):
         if _on(g, d):
@@ -147,12 +155,20 @@ def selftest():
         w("runs/20261013/cases_state.json", json.dumps({"summary": {"sys_normal": {"pct_of_max": 70.8, "verdicts": {"wrong": 5}},
                                                                      "baseline": {"pct_of_max": 95.0}}}))
         w("runs/20261013b/FAILED", "grade\n")
+        w("runs/20261013c/DONE")   # three answers per question: read as the office page reads them
+        w("runs/20261013c/cases.json", json.dumps({"cases": [{"id": "a", "q": "x", "type": "t"}, {"id": "b", "q": "y", "type": "t"}]}))
+        gr = lambda a, b, va="correct": {"grades": {"a": {"sys_normal": {"score": a, "verdict": va}, "baseline": {"score": 3}},
+                                                    "b": {"sys_normal": {"score": b, "verdict": "correct" if b else "wrong"}, "baseline": {"score": 2}}}}
+        w("runs/20261013c/cases_state.json", json.dumps({**gr(3, 0), "summary": {"sys_normal": {"pct_of_max": 50.0}}}))
+        w("runs/20261013c/cases_state.r2.json", json.dumps(gr(0, 0, "wrong")))
+        w("runs/20261013c/cases_state.r3.json", json.dumps(gr(3, 3)))
         w("decisions/20261013.md", "## D-1 | x\n- Verdict: DEFER\n\n## D-2 | y\n- Verdict: DEFER\n")
         stamp = datetime.datetime(2026, 10, 13, 12).timestamp()
         for p in glob.glob(os.path.join(ops, "**", "*"), recursive=True):
             os.utime(p, (stamp, stamp))
         f = facts(ops, ops, day, office=ops)
-        assert "Test run 20261013 finished: bot 70.8%, whole-manual AI 95.0%, 5 wrong" in f, f
+        assert "Test run 20261013 finished: bot 70.8% (one answer), whole-manual AI 95.0%, 5 wrong" in f, f
+        assert "Test run 20261013c finished: bot 50.0% (mean of 3 answers), whole-manual AI 83.3%, 1 wrong" in f, f
         assert "Test run 20261013b failed at: grade" in f and "Product owner decisions: 2 defer" in f, f
         assert due(ops, ops, datetime.datetime(2026, 10, 13, 15), office=ops) == [], "not over yet"
         assert due(ops, ops, datetime.datetime(2026, 10, 13, 22, 5), office=ops) == [day], "due tonight"

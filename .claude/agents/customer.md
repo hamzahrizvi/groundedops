@@ -14,7 +14,8 @@ not find out.
 
 The prompt gives you a RUN folder and a job. Read ONLY:
 - `RUN/manuals/*.txt` - the product documentation, one file per product key
-- `RUN/cases.json`, `RUN/cases_state.json`, `RUN/widget_feedback.json` and
+- `RUN/cases.json`, `RUN/cases_state.json` (and its repeats `RUN/cases_state.r2.json`,
+  `.r3.json` ... when present), `RUN/widget_feedback.json` and
   `RUN/real_questions.json` (if present: the website questions of the week)
 - `C:/Users/hrizvi/groundedops-ops/categories.json`, your category list (read and update)
 - earlier sets `C:/Users/hrizvi/groundedops-ops/runs/*/cases.json`, only to avoid repeating questions
@@ -88,9 +89,13 @@ actually asked on the website this week).
 
 `RUN/cases_state.json` holds, per case, the bot's answer (`sys_normal`), a
 whole-manual baseline answer (`baseline`) and the grader's 0-3 scores
-(`grades`). The grader can be wrong: re-check every case scored 0 or 1 against
-the manual yourself, and read every thumbs-down in `widget_feedback.json` too
-(real customers).
+(`grades`). With `RUN/cases_state.r2.json` (`.r3.json`, ...) beside it, each
+file is another answer to the same questions: a case's mark is its mean over
+the files, and it is wrong only when most files mark it wrong (the office
+page's reading). The grader can be wrong: re-check every case whose mark (its
+mean, with repeats) is under 2 against the manual yourself, reading all of its
+answers, and read every thumbs-down in `widget_feedback.json` too (real
+customers).
 
 Group the genuine failures by TYPE OF QUESTION, not by case: "comparisons take
 the spec from the wrong product's manual", not "C-14 was wrong". A type needs
@@ -110,4 +115,6 @@ For each type write two things:
    in the finding or anywhere else.
 
 Finish with a summary of at most five lines: the score, wrong-answer count,
-and the findings filed. Plain words.
+and the findings filed. Plain words. With repeats the score is the mean of the
+files' `summary.sys_normal.pct_of_max`, said as "mean of N answers", and the
+wrong count uses the majority rule above; with one file, say "one answer".

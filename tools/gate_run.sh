@@ -23,7 +23,11 @@
 # after. GATE_RULE (default mean) rules on the mean of the N answers, keeping the one-answer reading under "r1";
 # GATE_RULE=r1 rules on one answer and adds "mean_of_repeats". REPEATS=1 is the one-answer gate of before.
 # GATE_BASE=<commit>: the branch's base (also for the office-only check), so a merged branch can be re-gated.
+# It counts only when it names a commit that both the branch and the product checkout (GO_DATA) contain; any other
+# value is logged and the full gate runs from the merge-base (D-20261019-06). gate.json then carries "gate_base".
+# When the gate is done, tools/ops_costs.py --gate-cost adds its "cost_usd" and "wall_s" to gate.json.
 set -u
+T0=$(date +%s)
 REPEATS="${REPEATS:-3}"; REP=(); [ "$REPEATS" -gt 1 ] && REP=(--repeats "$REPEATS")
 RULE=(); [ "${GATE_RULE:-mean}" = mean ] && RULE=(--rule mean)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,9 +53,19 @@ ride() { "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8
 # D-20261010-07: the branch's own commits (in neither the office nor the product checkout) touch nothing
 # under src/, so the bot cannot answer differently: PASS without asking it. Any git error runs the full gate.
 not=(); for c in "$REPO" "$GO_DATA"; do h="$(git -C "$c" rev-parse HEAD 2>/dev/null)" && git -C "$DEV" cat-file -e "$h^{commit}" 2>/dev/null && not+=("$h"); done
-[ -n "${GATE_BASE:-}" ] && not=("$GATE_BASE")   # the branch's own commits since its stated base
+GB=""
+if [ -n "${GATE_BASE:-}" ]; then   # the branch's own commits since its stated base, once it is checked
+  if GB="$(git -C "$DEV" rev-parse --verify --quiet --end-of-options "$GATE_BASE^{commit}")" \
+     && git -C "$DEV" merge-base --is-ancestor "$GB" HEAD && git -C "$GO_DATA" merge-base --is-ancestor "$GB" HEAD; then
+    not=("$GB"); export GATE_BASE="$GB"
+  else
+    echo "GATE_BASE $GATE_BASE is not a commit both the branch and the product checkout contain: full gate" >> "$OUT/gate.log"
+    GB=""; unset GATE_BASE
+  fi
+fi
+GBJ=""; GBA=(); [ -n "$GB" ] && GBJ=", \"gate_base\": \"$GB\"" && GBA=(--gate-base "$GB")
 if own="$(git -C "$DEV" log -m --format= --name-only HEAD --not "${not[@]}" -- src)" && [ -z "$own" ]; then
-  echo '{"verdict": "PASS", "reasons": ["no product code changed"], "fixed": [], "became_wrong": [], "cases": 0, "siblings": 0, "office_only": true}' > "$OUT/gate.json"
+  echo '{"verdict": "PASS", "reasons": ["no product code changed"], "fixed": [], "became_wrong": [], "cases": 0, "siblings": 0, "office_only": true'"$GBJ"'}' > "$OUT/gate.json"
   cat "$OUT/gate.json"; exit 0
 fi
 # a run graded by an older grader is re-marked first, so before and after share one marker
@@ -106,6 +120,8 @@ if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$
 fi
 
 "$PY" "$REPO/tools/retrofit_gate.py" --before "$RUN/cases_state.json" \
-  --after "$OUT/after/cases_state.json" --regraded sys_before --models "$OUT/models.json" --manuals "$OUT/after/manuals" "${RULE[@]}" --siblings "${SIBS[@]}" > "$OUT/gate.json"
+  --after "$OUT/after/cases_state.json" --regraded sys_before --models "$OUT/models.json" --manuals "$OUT/after/manuals" "${RULE[@]}" "${GBA[@]}" --siblings "${SIBS[@]}" > "$OUT/gate.json"
 cat "$OUT/gate.json"
 "$PY" "$REPO/tools/gate_rerun.py" "$DEV" "$RUN" "$OUT"   # 1-2 case "became wrong": re-ask 6x branch vs base
+# what this gate cost and how long it took, counted over every state it wrote (D-20261019-06)
+"$PY" "$REPO/tools/ops_costs.py" --gate-cost "$OUT/gate.json" "$(( $(date +%s) - T0 ))" "$OUT" ${HELD:+"$HELD"}

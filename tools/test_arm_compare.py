@@ -36,4 +36,16 @@ with tempfile.TemporaryDirectory() as d:
     json.dump(state, open(os.path.join(d, "cases_state.json"), "w"))
     b = arm(d)
     assert b["usd_mean_all_cached"] is None and b["completion_tokens_mean"] is None, b
+    assert a["answers"] == "one answer" and a["by_type"] == {"lookup": "3/3", "phantom": "3/6"}, a
+    # D-20261019-06: three answers per question are read as the office page reads them
+    for k, (marks, wall) in enumerate([((2, 3, 3), 4.0), ((1, 3, 3), 6.0)], 2):
+        v = {"x1": "correct", "x2": "correct", "x3": "correct_refusal"}
+        json.dump({"sys_normal": {c: dict(x, wall=wall) for c, x in state["sys_normal"].items()},
+                   "grades": {c: {"sys_normal": {"score": m, "verdict": v[c]}} for c, m in zip(("x1", "x2", "x3"), marks)}},
+                  open(os.path.join(d, f"cases_state.r{k}.json"), "w"))
+    c = arm(d)
+    assert c["answers"] == "mean of 3 answers" and c["pct_of_max"] == 77.8, c        # means 2, 2, 3
+    assert c["verdicts"] == {"correct": 2, "correct_refusal": 1}, c                    # x2 wrong in 1 of 3: not wrong
+    assert c["by_type"] == {"lookup": "2/3", "phantom": "5/6"}, c
+    assert (c["median_s"], c["max_s"]) == (4.0, 6.0), c                                # every answer of every repeat
 print("ok")

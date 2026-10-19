@@ -41,7 +41,7 @@ REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens 
 FULL_RUNS = 2        # ponytail: only the newest runs keep answers and traces, so the page's doc stays under 256 KB
 SLIM = ("id", "q", "product", "type", "category", "bot", "base", "verdict")
 KEEP_RUNS = 12       # ponytail: the page shows the last 12 runs; ops/runs keeps every run
-NOISE_PTS = 3.0      # the retrofit gate's noise rule: moves under 3 points are the bot's and the marker's own flicker
+NOISE_PTS = 3.0      # the trend's noise floor: moves under 3 points are the bot's and the marker's own flicker (the gate's own bar is 4, D-20261019-06)
 VISITOR_FILES = ("widget_feedback.json", "real_questions.json", "real_categorised.json")  # D-20261010-22: visitor text in a run
 MERGE = re.compile(r"Merge branch 'agents/dev-(D-\d{8}-\d+)' \(D-\d{8}-\d+: (.*)\)$")
 
@@ -50,20 +50,22 @@ def _load(p):
     return json.load(open(p, encoding="utf-8"))
 
 
-def run_facts(run_dir):
+def run_facts(run_dir, system="sys_normal"):
+    """One row per graded question: its mean mark over the run's repeats, "wrong" when most repeats were.
+    Every reader of a run's score shares it (D-20261019-06); system picks the arm (baseline: "bot" is its mark)."""
     reps = [_load(f).get("grades", {}) for f in repeat_paths(os.path.join(run_dir, "cases_state.json"))]
     grades = reps[0] if reps else {}
     out = []
     for c in _load(os.path.join(run_dir, "cases.json"))["cases"]:
         g = grades.get(c["id"], {})
-        if "sys_normal" not in g:
+        if system not in g:
             continue
-        mine = [r[c["id"]]["sys_normal"] for r in reps if "sys_normal" in r.get(c["id"], {})]
+        mine = [r[c["id"]][system] for r in reps if system in r.get(c["id"], {})]
         marks = [m["score"] for m in mine]
         verdicts = [m.get("verdict", "") for m in mine]
         # most repeats wrong: "wrong"; else the first repeat's verdict that is not "wrong" (one repeat: as before)
         verdict = "wrong" if verdicts.count("wrong") * 2 > len(verdicts) else next(v for v in verdicts if v != "wrong")
-        out.append({"id": c["id"], "q": c["q"], "product": c.get("product") or "none", "type": c["type"],
+        out.append({"id": c["id"], "q": c.get("q", ""), "product": c.get("product") or "none", "type": c["type"],
                     "category": c.get("category") or "uncategorised", "bot": marks[0] if len(marks) == 1 else sum(marks) / len(marks),
                     "base": (g.get("baseline") or {}).get("score"), "verdict": verdict,
                     **({"bot_n": len(marks)} if len(marks) > 1 else {})})   # one repeat: no field (the page doc caps at 256 KB)

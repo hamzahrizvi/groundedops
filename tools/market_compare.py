@@ -89,24 +89,32 @@ def bucket(verdict):
 
 
 def report(run, systems=None):
+    """Marks and verdicts as the office page reads a run (tools/ops_pivot.py run_facts, D-20261019-06): with
+    cases_state.r2.json ... beside it, each question's mean mark over the answers, "wrong" when most are.
+    Times and citations are repeat 1's answers."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from ops_pivot import run_facts           # here, not at the top: blind_eval.py imports this module
+    from retrofit_gate import repeat_paths
     cases = json.load(open(os.path.join(run, "cases.json"), encoding="utf-8"))["cases"]
     state = json.load(open(os.path.join(run, "cases_state.json"), encoding="utf-8"))
     grades = {k: g for k, g in state.get("grades", {}).items() if "raw" not in g}
     systems = systems or ["sys_normal", "baseline"]
-    ok = [c for c in cases if c["id"] in grades and all(s in grades[c["id"]] for s in systems)]
-    out = {"cases": len(cases), "graded": len(ok), "systems": {}}
+    facts = {s: {f["id"]: f for f in run_facts(run, s)} for s in systems}
+    ok = [c for c in cases if c["id"] in grades and all(s in grades[c["id"]] and c["id"] in facts[s] for s in systems)]
+    n = len(repeat_paths(os.path.join(run, "cases_state.json")))
+    out = {"cases": len(cases), "graded": len(ok), "answers": "one answer" if n == 1 else f"mean of {n} answers", "systems": {}}
     for s in systems:
-        rows = state.get(s, {})
-        tally = lambda cs: dict(Counter(bucket(grades[c["id"]][s]["verdict"]) for c in cs))
+        rows, fs = state.get(s, {}), facts[s]
+        tally = lambda cs: dict(Counter(bucket(fs[c["id"]]["verdict"]) for c in cs))
         walls = [rows[c["id"]]["wall"] for c in ok if c["id"] in rows]
         ans = [rows[c["id"]].get("answer", "") for c in ok if c["id"] in rows]
         r = {"answered": sum(1 for c in cases if c["id"] in rows), "no_answer": sum(1 for c in cases if c["id"] not in rows),
              "overall": tally(ok), "by_type": {t: tally([c for c in ok if c["type"] == t]) for t in sorted({c["type"] for c in ok})},
-             "pct_of_max": round(100 * sum(grades[c["id"]][s]["score"] for c in ok) / (3 * len(ok)), 1) if ok else None,
+             "pct_of_max": round(100 * sum(fs[c["id"]]["bot"] for c in ok) / (3 * len(ok)), 1) if ok else None,
              "median_s": st.median(walls) if walls else None,
              "citation_rate": round(sum(1 for a in ans if CITE.search(a or "")) / len(ans), 2) if ans else None}
         if s != "sys_normal" and "sys_normal" in systems and len(ok) > 1:
-            d = [grades[c["id"]][s]["score"] - grades[c["id"]]["sys_normal"]["score"] for c in ok]
+            d = [fs[c["id"]]["bot"] - facts["sys_normal"][c["id"]]["bot"] for c in ok]
             r["gap_vs_sys_normal"] = {"points": round(100 * st.mean(d) / 3, 1),
                                       "band95": round(1.96 * 100 * st.stdev(d) / (3 * len(d) ** .5), 1), "n": len(d)}
         out["systems"][s] = r
@@ -154,6 +162,18 @@ def selftest():
         assert f["citation_rate"] == .5 and f["median_s"] == 2, f
         assert f["gap_vs_sys_normal"]["points"] == -33.3, f   # d = [-2, 0]
         assert r["systems"]["sys_normal"]["by_type"] == {"x": {"right": 1, "half": 1}}, r
+        assert r["answers"] == "one answer", r
+        # D-20261019-06: two more answers; c1's fin is wrong in 2 of 3 (wrong), c2's sys_normal in 1 of 3 (not)
+        for k, (fin1, sn2) in ((2, (sc("wrong", 0), sc("wrong", 0))), (3, (sc("wrong", 0), sc("correct", 3)))):
+            w(f"{t}/r/cases_state.r{k}.json", {"grades": {"c1": {"sys_normal": sc("correct", 3), "fin": fin1},
+                                                          "c2": {"sys_normal": sn2, "fin": sc("partial", 2)}}})
+        r = report(f"{t}/r", ["sys_normal", "fin"])
+        assert r["answers"] == "mean of 3 answers" and r["graded"] == 2, r
+        f, n = r["systems"]["fin"], r["systems"]["sys_normal"]
+        assert f["overall"] == {"wrong": 1, "half": 1} and f["pct_of_max"] == round(100 * (1 / 3 + 2) / 6, 1), f
+        assert n["overall"] == {"right": 1, "half": 1} and n["pct_of_max"] == round(100 * (3 + 5 / 3) / 6, 1), n
+        assert f["gap_vs_sys_normal"]["points"] == round(100 * ((1 / 3 - 3) + (2 - 5 / 3)) / 2 / 3, 1), f
+        assert f["median_s"] == 2, f                                                     # times: repeat 1's answers
     g = clamp_refusal({"expected": "answered"}, {"sys_normal": sc("correct_refusal", 3)}, ["sys_normal"])
     assert g["sys_normal"] == sc("safe_decline", 1), g
     g = clamp_refusal({"expected": "rejected"}, {"sys_normal": sc("correct_refusal", 3)}, ["sys_normal"])
