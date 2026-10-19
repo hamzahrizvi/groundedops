@@ -33,13 +33,15 @@ Env:
            "lab stopped at the cap": answers so far are saved, a re-mark keeps its old grades.
   reset    drops every sys_* answer, the grades and the summary but keeps the
            baseline answers, so a copied run dir re-measures new code cheaply.
-  grade    shows the grader the full text of each case's cited pages (manuals/,
-           capped at 30000 chars) and stores the blind A/B labels per case.
+  grade    shows the grader the full text of each case's cited pages (manuals/, capped at 30000 chars),
+           plus the pages of the case's own manual(s) an answer copies 3+ eight-word runs from (2 per
+           answer, 12000 chars, D-20261019-05), and stores the blind A/B labels per case.
            A clean refusal on an expected-"rejected" case scores 3 whatever the other arm says (D-20261010-28).
            A correct_refusal on a case not expected 'rejected' is stored as safe_decline, score <= 1 (D-20261016-14).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also when run via runpy
 from lab_lock import lab_lock
 from market_compare import under, clamp_refusal
@@ -258,34 +260,55 @@ KEY FACTS A CORRECT ANSWER CONTAINS: {must}
 
 CITED PAGES (full text of the manual pages the reference comes from): {cited}
 
-The reference is an extract, not the whole manual. A figure or fact the reference does not quote is fine if it appears in the cited pages, or if it contradicts neither the reference nor the question. Deduct only for a contradiction, or for a figure found in neither the reference nor the cited pages. Call a claim invented, fabricated or unsupported only after checking that it is in neither the reference nor the cited pages; a claim either of them states is never invented.
+MANUAL PAGES THE ANSWERS QUOTE (other pages of the same product's manual whose wording an answer copies): {quoted}
+
+The reference is an extract, not the whole manual. A figure or fact the reference does not quote is fine if it appears in the cited pages or the quoted pages, or if it contradicts neither the reference nor the question. Deduct only for a contradiction, or for a figure found in neither the reference, the cited pages nor the quoted pages. Call a claim invented, fabricated or unsupported only after checking that it is in none of them; a claim any of them states is never invented. Where pages of the product's own manual disagree with each other, a statement an answer takes from one of them is neither a contradiction nor wrong and lowers no score: the disagreement is the manual's, not the answer's.
 
 Score each answer 0-3:
 - expected "answered": 3 = correct and complete, including any condition/qualifier the question needs; also 3 when every key fact is present and only a qualifier the question did not ask for is left out; 2 = core fact right but misses a qualifier the question needs, or adds a minor inaccuracy; 1 = declines, says it cannot find it, or only asks a question (safe but unhelpful), or gives a wrong method or wrong fact for one of several parts the question asks; 0 = states something wrong or invented as the main answer, or answers about the wrong product.
-- expected "rejected" (not documented / product does not exist / off-topic): 3 = declines, says it is not documented, or says it cannot help (a redirect to sales or support counts), asserting no fact about the product; suggested questions, a list of things it can answer or an offer of support never lower this, and neither does how much another answer explained; 2 = says it is not documented but adds speculation or an overreaching conclusion; 0 = the main answer asserts a Yes/No or a fact as if documented. An answer that declines and also asserts facts about the product is marked on those facts by these same rules. A score of 1 is not used for this type.
+- expected "rejected" (not documented / product or model does not exist / feature absent / off-topic): mark the verdict first. 3 = the verdict agrees with the reference: the answer declines, says it is not documented, says the asked-for product, model or option is not documented or does not exist, says No (or that the product does not do it) where the reference says the feature is absent, or says it cannot help (a redirect to sales or support counts). Suggested questions, a list of things it can answer or an offer of support never lower this, and neither does how much another answer explained. Facts it adds about the real product never lower it either when the reference, the cited pages or the quoted pages state them. 2 = the verdict agrees but the answer adds speculation, an overreaching conclusion, or a side detail found in none of the reference, the cited pages and the quoted pages; 0 = the verdict contradicts the reference: the main answer says Yes, says the feature, product or model exists or is documented, or gives an invented fact as its answer. A score of 1 is not used for this type.
 - expected "clarify" (too vague): verdict "clarified" and 3 only if the answer asks the customer which product/what is meant, or briefly and correctly covers each candidate. An answer that asks nothing is graded as an answer: a long dump or one that picks a single product scores at most 2 (2 only if it states which product and is correct); any mislabelled product or wrong part = 1; answers confidently for an unstated or wrong product = 0.
 Verdict per answer, one of: correct, partial, safe_decline, wrong, correct_refusal, clarified. For expected "rejected" a 3 is correct_refusal, never safe_decline; safe_decline is a decline where the manual has the answer.
 
 {answers}
 
 Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
-    MAN, PAGE_CHARS = os.path.join(RUN, "manuals"), 30000
-    pages = {}   # "<file>.pdf pN" -> every chunk of that page
+    MAN, PAGE_CHARS, QUOTE_CHARS = os.path.join(RUN, "manuals"), 30000, 12000
+    pages, manual_pages = {}, {}   # "<file>.pdf pN" -> every chunk of that page; manual stem -> its page keys
     if os.path.isdir(MAN):
         for f in sorted(os.listdir(MAN)):
             for chunk in open(os.path.join(MAN, f), encoding="utf-8").read().split("\n\n["):
                 chunk = chunk.lstrip("[")
-                pages.setdefault(chunk.split("]", 1)[0], []).append("[" + chunk)
+                key = chunk.split("]", 1)[0]
+                pages.setdefault(key, []).append("[" + chunk)
+                if key not in manual_pages.setdefault(f[:-4], []): manual_pages[f[:-4]].append(key)
     def cited(c):
         text = "\n\n".join(ch for p in c.get("pages") or [] for ch in pages.get(p, []))
         return "\n" + text[:PAGE_CHARS] if text else "n/a"
+    def runs8(text):   # every run of 8 words: how an answer is matched to the page it copies from
+        w = re.findall(r"\w+", text.lower()); return {tuple(w[i:i + 8]) for i in range(len(w) - 7)}
+    @lru_cache(None)
+    def page_runs(p): return runs8(" ".join(pages[p]))
+    def quoted(c):
+        """Pages of the case's own manual(s), beyond the cited ones, that an answer copies 3+ eight-word runs
+        from (the 2 closest per answer). A sentence lifted from the product's manual is documented even where
+        another page of it says otherwise (D-20261019-05: BV30 escrow "stacks into a cashbox" vs "no cashbox")."""
+        own = [p for m in (c.get("product"), *(c.get("compare_with") or ())) if m
+               for p in manual_pages.get(m, []) if p not in (c.get("pages") or [])]
+        got = []
+        for s in SYSTEMS:
+            a = runs8(state.get(s, {}).get(c["id"], {}).get("answer", ""))
+            near = sorted(((len(a & page_runs(p)), p) for p in own), reverse=True)[:2]
+            got += [p for n, p in near if n >= 3 and p not in got]
+        text = "\n\n".join(ch for p in got for ch in pages[p])
+        return "\n" + text[:QUOTE_CHARS] if text else "none"
     rng = random.Random(4)
     order = {c["id"]: rng.sample(SYSTEMS, len(SYSTEMS)) for c in cases}
     def prompt(c):
         return G.format(n=len(SYSTEMS), product=c.get("product") or "none (unscoped chat)",
                         turn1=f"EARLIER MESSAGE IN THIS CHAT: {c['turn1']}\n" if c.get("turn1") else "",
                         q=c["q"], type=c["type"], expected=c["expected"], pages=", ".join(c.get("pages") or []) or "n/a",
-                        reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a", cited=cited(c),
+                        reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a", cited=cited(c), quoted=quoted(c),
                         answers="\n\n".join(f"ANSWER {k}:\n{state.get(s, {}).get(c['id'], {}).get('answer', '(no answer yet)')}"
                                              for k, s in zip(L, order[c["id"]])),
                         shape=", ".join(f'"{k}": {{"score": n, "verdict": "..."}}' for k in L),
