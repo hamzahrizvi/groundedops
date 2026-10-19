@@ -11,9 +11,11 @@
 7. a sibling 2+ on base and under 2 on the branch is settled 6 times on each side and fails the gate;
 8. REPEATS=2: the before is re-asked twice on the base code, each repeat's before rides into its after, gate.json
    carries mean_of_repeats; GATE_RULE=mean makes it the verdict (D-20261018-02);
-9. GATE_BASE at the branch tip: no own commits since that base, office_only PASS;
-10. with REPEATS and GATE_RULE unset the gate asks 3 answers per question and rules on their mean (adopted 2026-10-19).
-Cases 1-7 and 9 pin REPEATS=1, GATE_RULE=r1: the one-answer path.
+9. GATE_BASE is checked (D-20261019-06): the unmerged branch tip or an option-looking value runs the full gate
+   (and writes no file); a commit both the branch and the product checkout contain is used and shows as gate_base;
+10. with REPEATS and GATE_RULE unset the gate asks 3 answers per question and rules on their mean (adopted 2026-10-19);
+11. a merged branch re-gated with GATE_BASE at its own tip: office_only PASS with gate_base.
+Every full gate carries cost_usd and wall_s. Cases 1-7, 9 and 11 pin REPEATS=1, GATE_RULE=r1: the one-answer path.
 """
 import json
 import os
@@ -104,6 +106,7 @@ def main():
     assert seen == ["remark run", "models run", "reset after", "system after", "grade after manuals"], seen
     assert g["manuals"] == ["m.txt"], g
     assert json.load(open(os.path.join(out, "after", "cases_state.json")))["sys_before"]["c1"]["answer"] == "stored"
+    assert g["cost_usd"] == 0.0 and isinstance(g["wall_s"], int) and "gate_base" not in g, g   # the fake lab logs no usd
     g, seen, out = gate("g3", "0")
     assert g["before"] == "re-asked" and g["models"]["run"] == ["gpt-5-mini"], g
     assert seen == ["remark run", "models run", "reset before", "system before",
@@ -139,11 +142,21 @@ def main():
     assert (r2["sys_before"]["c1"]["answer"], r2["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n"), r2
     g, _, _ = gate("g8", "1", extra={"REPEATS": "2", "GATE_RULE": "mean"})
     assert g["repeats"] == 2 and g["r1"]["repeats"] == 1 and "mean_of_repeats" not in g, g
-    tip = subprocess.run(["git", "-C", dev, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    g, seen, _ = gate("g9", "1", extra={"GATE_BASE": tip})
-    assert g.get("office_only") and seen == [], (g, seen)
+    rev = lambda c, r: subprocess.run(["git", "-C", c, "rev-parse", r], capture_output=True, text=True).stdout.strip()
+    tip, b0 = rev(dev, "HEAD"), rev(base, "HEAD")
+    g, seen, out = gate("g9", "1", extra={"GATE_BASE": tip})          # unmerged tip: not in the product checkout
+    assert "office_only" not in g and "gate_base" not in g and "system after" in seen, (g, seen)
+    assert "is not a commit both the branch and the product checkout contain" in open(os.path.join(out, "gate.log")).read()
+    g, seen, _ = gate("g9b", "1", extra={"GATE_BASE": "--output=x"})  # never reaches git as an option
+    assert "office_only" not in g and "gate_base" not in g and "system after" in seen, (g, seen)
+    assert not any(os.path.exists(os.path.join(d, "x")) for d in (dev, tmp, base, os.getcwd())), "GATE_BASE wrote a file"
+    g, seen, _ = gate("g9c", "1", extra={"GATE_BASE": b0[:10]})        # the base commit: used, the src change is after it
+    assert "office_only" not in g and g["gate_base"] == b0 and "system after" in seen, (g, seen)
     g, seen, _ = gate("g10", "1", extra={"REPEATS": None, "GATE_RULE": None})
     assert g["repeats"] == 3 and g["r1"]["repeats"] == 1 and seen.count("system after #3") == 1, (g, seen)
+    git(base, "merge", "-q", "--ff-only", "dev")                       # merged: re-gated from its own tip
+    g, seen, _ = gate("g11", "1", extra={"GATE_BASE": tip})
+    assert g.get("office_only") and g["gate_base"] == tip and seen == [], (g, seen)
     git(base, "worktree", "remove", "--force", dev)
     shutil.rmtree(tmp, ignore_errors=True)
     print("selftest ok")

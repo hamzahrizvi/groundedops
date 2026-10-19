@@ -2,6 +2,7 @@
 
   python tools/ops_costs.py [--ops C:/Users/hrizvi/groundedops-ops] [--claude ~/.claude/projects] > costs.json
   python tools/ops_costs.py --cap [--ops ...]    the lab cap as JSON; exit 3 when the lab is stopped at it
+  python tools/ops_costs.py --gate-cost GATE_JSON WALL_S DIR...   gate_run.sh: the gate's cost_usd and wall_s
   python tools/ops_costs.py --selftest
 
 API: the test lab's provider calls (tools/blind_eval.py): each run's cases_state.json and each
@@ -82,6 +83,52 @@ LAB_FILES = (("run", ("runs", "*", "cases_state.json")),
 LAB_FILES += tuple((k, p[:-1] + ("cases_state.r[0-9]*.json",)) for k, p in LAB_FILES if p[-1] == "cases_state.json")
 
 
+def state_rows(s, kind, day):
+    """[(date, model, what, usd)] for one state file's paid calls: what = bot, baseline (kind "run" only) or
+    grader. sys_before and an arm copied from repeat 1 are someone else's answers and are not counted."""
+    out = []
+    grades = s.get("grades") or {}
+    file_model = ((s.get("summary") or {}).get("grader") or {}).get("model") or next(
+        (g["usage"]["model"] for g in grades.values() if isinstance(g, dict) and (g.get("usage") or {}).get("model")),
+        "lab model (not logged)")
+    systems = [k for k in s if k.startswith("sys_") and k != "sys_before"] + (["baseline"] if kind == "run" else [])
+    systems = [k for k in systems if k not in s.get("copied_from_r1", [])]
+    for system in systems:
+        what = "baseline" if system == "baseline" else "bot"
+        for r in (s.get(system) or {}).values():
+            if isinstance(r, dict) and r.get("usd"):
+                model = r.get("model") if r.get("model") not in NOT_MODEL else file_model
+                out.append((r.get("at") or day, model, what, r["usd"]))
+    logged = [g["usage"] for g in grades.values() if isinstance(g, dict) and (g.get("usage") or {}).get("usd")]
+    for u in logged:
+        out.append((u.get("at") or day, u.get("model") or file_model, "grader", u["usd"]))
+    g = (s.get("summary") or {}).get("grader") or {}
+    if not logged and g.get("usd"):   # grades from before 2026-10-10 logged only the run's total
+        out.append((day, file_model, "grader", g["usd"]))
+    return out
+
+
+GATE_STATE = re.compile(r"cases_state(\.r\d+|\.run\d+)?\.json$")
+
+
+def gate_cost(*dirs):
+    """$ one gate spent: every blind_eval state under its folders (after/, before/, rerun/, the held siblings
+    and their re-asks), as kind "gate". gate_rerun.py's cases_state.json beside its cases_state.run<n>.json
+    copies is the last of them and is not counted twice."""
+    usd = 0.0
+    for top in dirs:
+        for root, _, files in os.walk(top):
+            runs = any(re.search(r"\.run\d+\.json$", f) for f in files)
+            for f in files:
+                if GATE_STATE.fullmatch(f) and not (runs and f == "cases_state.json"):
+                    try:
+                        s = json.load(open(os.path.join(root, f), encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    usd += sum(r[3] for r in state_rows(s, "gate", None))
+    return usd
+
+
 def lab_rows(ops):
     """[(date, model, what, usd, name, kind)] for every paid test-lab call: what = bot, baseline or
     grader; kind = run or gate; name = the run folder, or the gate's work-order id (never a hidden
@@ -104,24 +151,8 @@ def lab_rows(ops):
                 m = GATE_ID.search(rel)
                 name, day = (m.group(0) if m else "gate"), None
             day = day or datetime.date.fromtimestamp(os.path.getmtime(p)).isoformat()
-            grades = s.get("grades") or {}
-            file_model = ((s.get("summary") or {}).get("grader") or {}).get("model") or next(
-                (g["usage"]["model"] for g in grades.values() if isinstance(g, dict) and (g.get("usage") or {}).get("model")),
-                "lab model (not logged)")
-            systems = [k for k in s if k.startswith("sys_") and k != "sys_before"] + (["baseline"] if kind == "run" else [])
-            systems = [k for k in systems if k not in s.get("copied_from_r1", [])]
-            for system in systems:
-                what = "baseline" if system == "baseline" else "bot"
-                for r in (s.get(system) or {}).values():
-                    if isinstance(r, dict) and r.get("usd"):
-                        model = r.get("model") if r.get("model") not in NOT_MODEL else file_model
-                        agg[(r.get("at") or day, model, what, name, kind)] += r["usd"]
-            logged = [g["usage"] for g in grades.values() if isinstance(g, dict) and (g.get("usage") or {}).get("usd")]
-            for u in logged:
-                agg[(u.get("at") or day, u.get("model") or file_model, "grader", name, kind)] += u["usd"]
-            g = (s.get("summary") or {}).get("grader") or {}
-            if not logged and g.get("usd"):   # grades from before 2026-10-10 logged only the run's total
-                agg[(day, file_model, "grader", name, kind)] += g["usd"]
+            for d, model, what, usd in state_rows(s, kind, day):
+                agg[(d, model, what, name, kind)] += usd
     return [(d, m, w, usd, n, k) for (d, m, w, n, k), usd in agg.items()]
 
 
@@ -213,7 +244,30 @@ def selftest():
         assert [r["period"] for r in periods([], datetime.date(2026, 2, 15))["month"]] == \
             ["2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"]
     lab_selftest()
+    with tempfile.TemporaryDirectory() as t:   # D-20261019-06: one gate's cost over its own folders
+        def put(rel, d):
+            os.makedirs(os.path.dirname(os.path.join(t, rel)), exist_ok=True)
+            json.dump(d, open(os.path.join(t, rel), "w"))
+        put("out/after/cases_state.json", {"sys_normal": {"c1": {"usd": 0.25}}, "baseline": {"c1": {"usd": 2.0}},
+                                           "sys_before": {"c1": {"usd": 1.0}}, "grades": {"c1": {"usage": {"usd": 0.125}}}})
+        put("out/after/cases_state.graded-by-x.json", {"sys_normal": {"c1": {"usd": 9.0}}})
+        put("out/rerun/head/cases_state.run4.json", {"sys_normal": {"c1": {"usd": 0.0625}}})
+        put("out/rerun/head/cases_state.json", {"sys_normal": {"c1": {"usd": 0.0625}}})   # the same as run4
+        put("held/sib_a/cases_state.r2.json", {"sys_normal": {"c9": {"usd": 0.5}}, "copied_from_r1": []})
+        assert gate_cost(os.path.join(t, "out"), os.path.join(t, "held")) == 0.9375, gate_cost(os.path.join(t, "out"), os.path.join(t, "held"))
+        gp = os.path.join(t, "out", "gate.json")
+        json.dump({"verdict": "PASS"}, open(gp, "w"))
+        add_gate_cost(gp, "12", os.path.join(t, "out"))
+        assert json.load(open(gp)) == {"verdict": "PASS", "cost_usd": 0.4375, "wall_s": 12}, json.load(open(gp))
     print("selftest ok")
+
+
+def add_gate_cost(gate_json, wall_s, *dirs):
+    """gate_run.sh's last step: the gate's cost (4 dp) and wall time in seconds, written into gate.json."""
+    g = json.load(open(gate_json, encoding="utf-8"))
+    g.update(cost_usd=round(gate_cost(*dirs), 4), wall_s=int(wall_s))
+    json.dump(g, open(gate_json, "w", encoding="utf-8"), indent=1)
+    print(f"gate cost ${g['cost_usd']}, wall {g['wall_s']}s")
 
 
 def lab_selftest():
@@ -269,7 +323,13 @@ def main():
     ap.add_argument("--claude", default=os.path.join(os.path.expanduser("~"), ".claude", "projects"))
     ap.add_argument("--cap", action="store_true", help="print the lab cap; exit 3 when the lab is stopped at it")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--gate-cost", nargs="+", metavar="GATE_JSON WALL_S DIR",
+                    help="gate_run.sh: add cost_usd and wall_s to GATE_JSON from the states under the DIRs")
     a = ap.parse_args()
+    if a.gate_cost:
+        if len(a.gate_cost) < 3:
+            ap.error("--gate-cost GATE_JSON WALL_S DIR...")
+        return add_gate_cost(*a.gate_cost)
     if a.selftest:
         return selftest()
     if a.cap:
