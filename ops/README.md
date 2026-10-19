@@ -40,7 +40,10 @@ a gate) held up every other department. Three lanes now run the same steps
 `groundedops-office-lane-2` and `-lane-3` run at about :25 and :52. Each lane
 takes work with `office_next.py --lane N --take`, which claims it with an
 O_EXCL file in `OPS/state/claims`, so no two lanes ever start the same thing.
-Up to two Dev work orders build at once, each in its own worktree on its own
+Lane 1 always takes work. Lanes 2 and 3 first run `office_next.py --lane N --needed` and stop at once
+unless another lane holds work (or lane 1 has not looked for work in 30 minutes): they exist so a long
+build or check does not hold everything else up, and most of their wake-ups used to find nothing (CEO,
+2026-10-19). Up to two Dev work orders build at once, each in its own worktree on its own
 branch, so no commits collide; merges and every other department run one at a
 time; work running in other lanes counts against the budget. Test runs take
 turns (`blind_eval.py` locks the lab for its "system" phase) so timings stay

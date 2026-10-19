@@ -1407,7 +1407,7 @@ function renderLanes(){
     const left = t ? Math.max(0, Math.round((t - now) / 1000)) : null, mmss = left == null ? "" : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
     li.append(el("span", "state " + (b.off ? "off" : run ? "working" : "idle"), `Lane ${l.lane}`),
       el("div", null, b.off ? "Office switched off" : run ? `Running now: ${run.dept}` + (t ? `; checks again at ${fmtTime(t)}` : "")
-        : t ? `Next check in ${mmss} (${fmtTime(t)})` : "No schedule"));
+        : t ? `Next check in ${mmss} (${fmtTime(t)})` + (String(l.lane) !== "1" ? "; works only while another lane is busy" : "") : "No schedule"));
     return li; }));
 }
 setInterval(renderLanes, 1000);

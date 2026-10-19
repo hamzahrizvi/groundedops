@@ -70,6 +70,7 @@ MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, m
 RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that picks it up (take stamps it, end_tick removes it)
 IDLE_EVERY = 3        # ponytail: days between discovery runs (security, audit, rnd, marketing) while nothing else waits
 PARKED = ("state", "parked_review")   # the parked ids last handed to the product owner (take() writes it)
+LANE_ONE_LATE = 30 * 60   # lanes 2 and 3 also work when lane 1 has not looked for work for this long (it stopped)
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -202,10 +203,27 @@ def lane_cron(lane, minutes):
     return f"{off % 60} " + ("*" if step == 60 else f"{off // 60}-23/{step // 60}") + " * * *"
 
 
+def needed(ops, lane):
+    """Lane 1 always runs. Lanes 2 and 3 exist for when a long job (a build, a check) holds a lane, so the
+    rest of the work is not stuck behind it: they run only while another lane holds work, or when lane 1
+    has not looked for work in LANE_ONE_LATE (the CEO, 2026-10-19: most of their wake-ups found nothing)."""
+    if lane == 1:
+        return True, "lane 1 always runs"
+    busy = sorted({c.get("lane") for c in claims(ops).values() if c.get("lane") not in (lane, None, "hand")})
+    if busy:
+        return True, (f"lane {busy[0]} is busy" if len(busy) == 1 else "lanes " + " and ".join(map(str, busy)) + " are busy")
+    seen = _mtime(os.path.join(ops, "state", "lane-1-seen"))
+    if time.time() - seen > LANE_ONE_LATE:
+        return True, "lane 1 has not looked for work in 30 minutes"
+    return False, "no other lane is busy"
+
+
 def take(ops, repo, five, week, resets, now, lane):
     """The plan, then a claim on its first runnable line no other lane holds. Runs of one lane
     never overlap, so this lane's leftover claims are from its last run and are dropped first."""
     release(ops, lane)
+    os.makedirs(os.path.join(ops, "state"), exist_ok=True)
+    open(os.path.join(ops, "state", f"lane-{lane}-seen"), "w").close()   # needed(): lane 1 is alive
     stamp_run_all(ops, lane)
     d = os.path.join(ops, *CLAIMS)
     os.makedirs(d, exist_ok=True)
@@ -575,6 +593,14 @@ def selftest():
         w("state/parked_review", "D-20261008-32")
         assert not any("parked to check" in x for x in plan(ops, ops, 11, 38, resets, now)), "same set: not again"
         os.remove(os.path.join(ops, "decisions", "20261008p.md")); os.remove(os.path.join(ops, "state", "parked_review"))
+        w("state/lane-1-seen"); t = time.time() - 3600; os.utime(os.path.join(ops, "state", "lane-1-seen"), (t, t))
+        assert needed(ops, 1)[0] and needed(ops, 2) == (True, "lane 1 has not looked for work in 30 minutes"), "lane 1 silent"
+        w("state/lane-1-seen")
+        assert needed(ops, 2) == (False, "no other lane is busy")
+        os.makedirs(os.path.join(ops, *CLAIMS), exist_ok=True)
+        w("state/claims/dev-D-1.json", json.dumps({"lane": 1, "at": "x", "line": "RUN dev"}))
+        assert needed(ops, 2) == (True, "lane 1 is busy") and needed(ops, 3)[0]
+        os.remove(os.path.join(ops, "state", "claims", "dev-D-1.json"))
         w("state/run_now/all")
         p = plan(ops, ops, 60, 38, resets, now)
         assert p[0].startswith("RUN  groundedops-office-customer") and not any("you asked for it now" in x for x in p), "Run all lifts the budget, adds no work"
@@ -646,12 +672,16 @@ def main():
     ap.add_argument("--take", action="store_true", help="claim the first runnable line for --lane; last line TOOK <key> | <line> or TOOK nothing")
     ap.add_argument("--release", action="store_true", help="drop every claim --lane holds")
     ap.add_argument("--cron-set", action="store_true", help="record that --lane's scheduled task now has the CRON --release printed")
+    ap.add_argument("--needed", action="store_true", help="NEEDED or NOT NEEDED: lanes 2 and 3 run only while another lane is busy")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    if (a.take or a.release or a.cron_set) and not a.lane:
-        ap.error("--take, --release and --cron-set need --lane")
+    if (a.take or a.release or a.cron_set or a.needed) and not a.lane:
+        ap.error("--take, --release, --cron-set and --needed need --lane")
+    if a.needed:
+        ok, why = needed(a.ops, a.lane)
+        return print(("NEEDED " if ok else "NOT NEEDED ") + why)
     if a.release:   # and the lane's schedule, when the CEO changed "Next run" on the page
         end_tick(a.ops, a.lane)
         want, path = lane_cron(a.lane, every(a.ops)), os.path.join(a.ops, "state", f"cron-{a.lane}")
