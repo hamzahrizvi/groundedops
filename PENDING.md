@@ -194,14 +194,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261015-11 | Security item D-20261015-11, details in the office | waiting for CEO | your yes |
-| D-20261016-08 | A two-product comparison gives both figures right and picks the wrong winner | approved, queued | Dev builds it |
-| D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
-| D-20261019-05 | The marker scored a correct "no, it does not pay out change" answer 0 for quoting the manual's own escrow wording | built, waiting for the check | the pre-ship check |
-| D-20261019-06 | Finish the three-answer reading: a gate drop bar the test can actually see, and the readers still on one answer | built, waiting for the check | the pre-ship check |
-| D-20261019-07 | Security item D-20261019-07, details in the office | waiting for CEO | your yes |
-| D-20261019-10 | Keep the manuals fresh: sync the manual pages from Confluence into the bot every week | waiting for CEO | your yes |
-| D-20261019-12 | A document marked "Private & Confidential" answers customers today | waiting for CEO | your yes |
+| D-20261016-08 | A two-product comparison gives both figures right and picks the wrong winner | ready to merge | merges once Security clears it |
+| D-20261019-05 | The marker scored a correct "no, it does not pay out change" answer 0 for quoting the manual's own escrow wording | ready to merge | merges once Security clears it |
+| D-20261019-06 | Finish the three-answer reading: a gate drop bar the test can actually see, and the readers still on one answer | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
@@ -227,14 +222,19 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261014-04 | Ask Kapa and Fin the same 88 hidden questions once their access works | deferred | parked |
 | D-20261014-05 | Security item D-20261014-05, details in the office | deferred | parked |
 | D-20261015-01 | One "is this the LAN" rule instead of two copies | deferred | parked |
+| D-20261015-11 | Security item D-20261015-11, details in the office | deferred | parked |
 | D-20261017-03 | A table lookup loses the numbers in the row | deferred | parked |
+| D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | deferred | parked |
 | D-20261017-10 | The source line cites every page the bot read, and "Download" fetches the whole manual instead of opening it at the page | deferred | parked |
 | D-20261017-11 | Measure how well the bot answers in other languages before the website claims any | deferred | parked |
 | D-20261017-12 | After a manual is uploaded, show the buyer a sample check on it: answered, refused, poor pages | deferred | parked |
 | D-20261018-03 | When the checker faults one sentence, cut that sentence and keep the rest; a half answer is not a refusal | deferred | parked |
 | D-20261018-05 | A few answers take 50-120 seconds because the checker thinks for that long | deferred | parked |
+| D-20261019-07 | Security item D-20261019-07, details in the office | deferred | parked |
 | D-20261019-08 | Security item D-20261019-08, details in the office | deferred | parked |
 | D-20261019-09 | The bot quotes the right figures, then states the wrong winner or says two disagreeing manuals agree | deferred | parked |
+| D-20261019-10 | Keep the manuals fresh: sync the manual pages from Confluence into the bot every week | deferred | parked |
+| D-20261019-12 | A document marked "Private & Confidential" answers customers today | deferred | parked |
 | D-20261019-13 | The office page's whole-manual baseline still reads the first answer while every other reader reads the mean | deferred | parked |
 | D-20261019-14 | Security item D-20261019-14, details in the office | deferred | parked |
 
