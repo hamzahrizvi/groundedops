@@ -1,8 +1,8 @@
 """Retrofit gate: does a fix generalise, or does it only fix the question that prompted it?
 
   python tools/retrofit_gate.py --before A_state.json --after B_state.json \
-      [--siblings S_state.json ...] [--system sys_normal] [--noise 3] [--regraded sys_before] [--models M.json] [--manuals DIR]
-      [--rule r1|mean]
+      [--siblings S_state.json ...] [--system sys_normal] [--noise 4] [--regraded sys_before] [--models M.json] [--manuals DIR]
+      [--rule r1|mean] [--gate-base SHA]
   python tools/retrofit_gate.py --leakcheck DIR_OR_FILE... --cases SIBLINGS.json...
   python tools/retrofit_gate.py --selftest
 
@@ -12,11 +12,12 @@ Reads blind_eval.py state files (0-3 grades per case). PASS needs all three:
      base mark counts as 2+). Under 2 on both sides is listed as siblings_unmoved and passes; raised to
      2+ is listed as siblings_fixed;
   2. no case that scored >= 2 before is wrong after (0 marks, or the verdict "wrong" at any mark);
-  3. the overall score does not drop by more than --noise percentage points.
+  3. the overall score drops by less than --noise percentage points (default 4, the 3-answer MDE), and the
+     paired 90% interval of the per-question difference is not entirely below zero (D-20261019-06).
 Rule 3 and rule 2 use the before answers re-graded in the same pass when --regraded is
 given (gate.json keeps before_pct_stored so grader drift shows); tools/gate_rerun.py re-asks
 1-2 flipped cases when those flips are the only reason, or the flips plus a drop that is
-within noise once they are held at their before scores. Prints JSON; exit 0 PASS, 1 FAIL.
+under noise once they are held at their before scores (never a FAIL on the interval). Prints JSON; exit 0 PASS, 1 FAIL.
 
 Repeats (D-20261018-02): X_state.r2.json, .r3.json beside X_state.json are more answers to the same
 questions (blind_eval.py --repeats). When any file given has them, the gate is also read on all of
@@ -78,7 +79,7 @@ def wrong(g):
     return g.get("score") == 0 or g.get("verdict") == "wrong"
 
 
-def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=None):
+def gate(before, after, siblings=(), system="sys_normal", noise=4.0, regraded=None):
     """before/after: a state or a list of repeat states; siblings: each one a state or a list of repeats."""
     stored = scores(before, system)
     b = (scores(after, regraded) if regraded else {}) or stored
@@ -92,6 +93,7 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
     became_wrong = [cid for cid in common if b[cid] >= 2 and nwrong[cid] > nrep[cid] / 2]
     fixed = [cid for cid in common if b[cid] <= 1 and a[cid] >= 2]
     drop = round(pct({c: b[c] for c in common}) - pct({c: a[c] for c in common}), 1)
+    p = paired({c: b[c] for c in common}, {c: a[c] for c in common})
     sib_after = {cid: v for s in siblings for cid, v in scores(s, system).items()}
     sib_before = {cid: v for s in siblings for cid, v in scores(s, "sys_before").items()}
     # D-20261016-10: a sibling fails only when it is under 2 on the branch and 2+ on base; no base mark counts as 2+
@@ -100,7 +102,9 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
     sib_fixed = [c for c, v in sib_after.items() if v >= 2 and sib_before.get(c, 2) < 2]
     reasons = ([f"hidden siblings below 2 on the branch, 2+ on base: {sib_fail}"] if sib_fail else []) + \
               ([f"became wrong: {became_wrong}"] if became_wrong else []) + \
-              ([f"score dropped {drop} pts (> {noise})"] if drop > noise else [])
+              ([f"score dropped {drop} pts (>= {noise})"] if drop >= noise else
+               [f"score dropped {drop} pts, 90% interval {p['lo']}..{p['hi']} entirely below zero"]
+               if p["hi"] is not None and p["hi"] < 0 else [])
     if siblings and not any(scores(s, system) for s in siblings):
         reasons.append("sibling files have no grades for " + system)
     return {"verdict": "FAIL" if reasons else "PASS", "reasons": reasons,
@@ -110,7 +114,7 @@ def gate(before, after, siblings=(), system="sys_normal", noise=3.0, regraded=No
             "flip_before": {c: b[c] for c in became_wrong},
             "flip_after": {c: a[c] for c in became_wrong},
             "fixed": fixed, "became_wrong": became_wrong, "cases": len(common),
-            "paired": paired({c: b[c] for c in common}, {c: a[c] for c in common}),
+            "paired": p,
             "repeats": len(_states(after)),
             "siblings": sum(len(scores(s, system)) for s in siblings),
             "sibling_marks": {c: {"before": sib_before.get(c), "after": v} for c, v in sib_after.items()},
@@ -178,6 +182,19 @@ def _selftest():
     r = gate(b3, b3, [sib3])
     assert r["verdict"] == "FAIL" and r["sibling_marks"]["x"]["after"] == 5 / 3, r
     assert gate(b3[0], b3[0], [sib3[0]])["verdict"] == "PASS"                 # r1's sibling answer alone is 3
+    # D-20261019-06: rule 3 is drop >= 4 pts OR the paired 90% interval entirely below zero
+    full = lambda n: {f"q{i}": 3 for i in range(n)}
+    three = lambda n: rp(full(n), full(n), full(n))
+    def low(n, marks):   # n questions at 3, three repeats; marks: {question: [r1, r2, r3]}
+        return [st({**full(n), **{c: m[i] for c, m in marks.items()}}) for i in range(3)]
+    r = gate(three(10), low(10, {"q0": [2, 2, 2]}))                       # 3.3 pts, one question, interval spans 0
+    assert r["verdict"] == "PASS" and r["drop"] == 3.3 and r["paired"]["lo"] < 0 < r["paired"]["hi"], r
+    r = gate(three(10), low(10, {f"q{i}": [2, 3, 3] for i in range(10)}))  # 11.1 pts, every question
+    assert r["verdict"] == "FAIL" and r["paired"]["hi"] < 0 and "(>= 4.0)" in r["reasons"][0], r
+    r = gate(three(10), low(10, {"q0": [1, 1, 3]}))                        # 4.4 pts, interval spans 0: the bar
+    assert r["verdict"] == "FAIL" and r["paired"]["hi"] > 0 and "(>= 4.0)" in r["reasons"][0], r
+    r = gate(three(30), low(30, {f"q{i}": [2, 3, 3] for i in range(9)}))   # 3.3 pts, consistent: the interval
+    assert r["verdict"] == "FAIL" and r["drop"] < 4 and r["reasons"][0].endswith("entirely below zero"), r
     p = paired({"a": 3, "b": 2, "c": 1}, {"a": 3, "b": 3, "c": 1})
     assert p["diff"] == 11.1 and p["lo"] < 0 < p["hi"] and p["n"] == 3, p
     import tempfile
@@ -214,12 +231,13 @@ if __name__ == "__main__":
     ap.add_argument("--after", required=True)
     ap.add_argument("--siblings", nargs="*", default=[])
     ap.add_argument("--system", default="sys_normal")
-    ap.add_argument("--noise", type=float, default=3.0)
+    ap.add_argument("--noise", type=float, default=4.0)
     ap.add_argument("--regraded", default=None,
                     help="system key in --after holding the before answers re-graded in the same pass, e.g. sys_before")
     ap.add_argument("--models")   # blind_eval.py <run> models output (D-20261010-09)
     ap.add_argument("--manuals")   # the manuals/ the one marking pass read (D-20261010-23)
     ap.add_argument("--rule", choices=("r1", "mean"), default="r1")   # which reading sets the verdict (D-20261018-02)
+    ap.add_argument("--gate-base")   # gate_run.sh: the checked GATE_BASE commit this gate was diffed from
     o = ap.parse_args()
     load = lambda p: json.load(open(p, encoding="utf-8"))
     reps = lambda p: [load(f) for f in repeat_paths(p)]
@@ -234,5 +252,7 @@ if __name__ == "__main__":
         res["before"] = "stored" if res["models"]["same"] and len(A) == 1 else "re-asked"
     if o.manuals is not None:   # before and after are marked in one pass, so with the same pages
         res["manuals"] = sorted(os.listdir(o.manuals)) if os.path.isdir(o.manuals) else []
+    if o.gate_base:
+        res["gate_base"] = o.gate_base
     print(json.dumps(res, indent=1))
     sys.exit(0 if res["verdict"] == "PASS" else 1)

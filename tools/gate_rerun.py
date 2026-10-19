@@ -6,13 +6,14 @@
 tools/gate_run.sh calls it after tools/retrofit_gate.py has written <out_dir>/gate.json.
 One blind pass is noisy: C20261008-22 scored 0 in 2 passes of 6 on unchanged code
 (2026-10-08). So when the only reasons for FAIL are "became wrong" on 1-2 cases, alone or
-with a score drop that is within --noise once those cases are held at their before scores
+with a score drop that is under --noise once those cases are held at their before scores
 (D-20261010-05: one 3 -> 0 flip is 2.5 pts of 40 cases), each of
 those cases is asked 6 times on the branch and 6 times on its base code, interleaved.
 A case stays wrong only if the branch answers it wrong (0 marks or verdict "wrong") at least 2 passes more
 often than the base, or a pass has no grade (fail closed). gate.json gains "rerun" (the
 per-pass grades) and a recomputed verdict; the drop is recomputed with the cleared cases
-held before ruling. Siblings, a drop beyond noise or 3+ cases: untouched.
+held before ruling. Siblings, a drop at or beyond noise, 3+ cases or a FAIL on the paired interval
+(D-20261019-06: it cannot be rebuilt from gate.json, so it fails closed): untouched.
 Only the open-set ids in gate.json's "became_wrong" are re-run; siblings are never read.
 A gate run with REPEATS>1 (D-20261018-02) already holds that many passes per case (after/cases_state.r<k>.json,
 the base side as their sys_before; each sibling's repeat files): they are the first passes, and only ROUNDS
@@ -112,11 +113,12 @@ def eligible(gate):
     r, bw = gate.get("reasons", []), gate.get("became_wrong", [])
     if not (gate.get("verdict") == "FAIL" and 1 <= len(bw) <= MAX_CASES
             and all(x.startswith(("became wrong", "score dropped")) for x in r)
-            and any(x.startswith("became wrong") for x in r)):
+            and any(x.startswith("became wrong") for x in r)
+            and not any("interval" in x for x in r)):
         return False
     if any(x.startswith("score dropped") for x in r):
         return ("drop" in gate and all(c in gate.get("flip_before", {}) for c in bw)
-                and held_drop(gate, bw) <= gate.get("noise", 3.0))
+                and held_drop(gate, bw) < gate.get("noise", 4.0))
     return True
 
 
@@ -143,10 +145,10 @@ def rerate(gate, head_states, base_states):
     reasons = [f"became wrong: {kept} (re-run: {rates})"] if kept else []
     extra = {}
     if "drop" in gate:
-        cleared, noise = [c for c in gate["became_wrong"] if c not in kept], gate.get("noise", 3.0)
+        cleared, noise = [c for c in gate["became_wrong"] if c not in kept], gate.get("noise", 4.0)
         d = extra["drop_held"] = held_drop(gate, cleared)
-        if d > noise:
-            reasons.append(f"score dropped {d} pts (> {noise}) with the cleared cases at their before scores")
+        if d >= noise:
+            reasons.append(f"score dropped {d} pts (>= {noise}) with the cleared cases at their before scores")
     return {**gate, **extra, "verdict": "FAIL" if reasons else "PASS", "reasons": reasons, "rerun": rerun}
 
 
@@ -238,7 +240,7 @@ def _selftest():
     assert eligible(one) and eligible({**one, "became_wrong": ["a", "b"]})
     assert not eligible({**one, "became_wrong": ["a", "b", "c"]})       # 3+ cases fail outright
     assert not eligible({**one, "reasons": ["hidden siblings below 2: ['s']", "became wrong: ['c']"]})
-    assert not eligible({**one, "reasons": ["became wrong: ['c']", "score dropped 4 pts (> 3)"]})  # old gate.json without drop/flip_before: fail closed
+    assert not eligible({**one, "reasons": ["became wrong: ['c']", "score dropped 4 pts (>= 4.0)"]})  # old gate.json without drop/flip_before: fail closed
     assert not eligible({**one, "verdict": "PASS", "reasons": []})
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from retrofit_gate import gate as rgate
@@ -256,7 +258,12 @@ def _selftest():
     r = rerate(g, cs(0, 0, 3, 2, 2, 2), cs(2, 2, 3, 2, 2, 2))
     assert r["verdict"] == "FAIL" and r["reasons"][0].startswith("became wrong"), r
     assert r["reasons"][1].startswith("score dropped 4.1"), r
-    assert not eligible({**g, "drop": 6.0})                              # held 3.5 > 3
+    assert eligible({**g, "drop": 6.0})                                  # held 3.5 < 4
+    assert not eligible({**g, "drop": 6.5})                              # held 4.0 >= 4
+    assert not eligible({**g, "reasons": ["became wrong: ['c00']",       # D-20261019-06: interval FAILs fail closed
+                                          "score dropped 3.0 pts, 90% interval -5.0..-1.0 entirely below zero"]})
+    r = rerate({**g, "drop": 6.5}, cs(2, 2, 3, 2, 2, 2), cs(2, 2, 3, 2, 2, 2))
+    assert r["verdict"] == "FAIL" and r["drop_held"] == 4.0 and "(>= 4.0)" in r["reasons"][0], r
     w1 = lambda *sc: [{"grades": {"c": {"sys_normal": {"score": v, "verdict": "wrong" if v == 1 else "correct"}}}} for v in sc]
     r = rerate(one, w1(1, 1, 3, 3, 3, 3), w1(3, 3, 3, 3, 3, 3))
     assert r["verdict"] == "FAIL" and r["rerun"]["c"]["head_wrong"] == 2, r   # a 1-mark "wrong" counts (D-20261010-11)
