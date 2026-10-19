@@ -157,7 +157,8 @@ def base_code(dev, data, dest):
     or the merge-base of the branch and GO_DATA's checkout. gate_run.sh calls it as --base-code <dev> <dest>."""
     git = lambda *a: subprocess.run(["git", *a], capture_output=True, text=True, check=True).stdout.strip()
     base = os.environ.get("GATE_BASE") or git("-C", dev, "merge-base", "HEAD", git("-C", data, "rev-parse", "HEAD"))
-    p = subprocess.Popen(["git", "-C", dev, "archive", base, "src"], stdout=subprocess.PIPE)
+    base = git("-C", dev, "rev-parse", "--verify", "--end-of-options", base + "^{commit}")   # never a git option (D-20261019-06)
+    p =subprocess.Popen(["git", "-C", dev, "archive", base, "src"], stdout=subprocess.PIPE)
     with tarfile.open(fileobj=p.stdout, mode="r|") as t:
         t.extractall(dest, filter="data")
     if p.wait():
