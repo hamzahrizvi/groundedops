@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 RRF_K = 60
 
+# Internal-only documents, never retrieved, listed, cited or exported
+# (comma-separated substrings matched case-insensitively against source
+# names). Override with the EXCLUDED_SOURCES env var; "" exposes the full
+# corpus (internal deployments, eval_cases_api.json runs). Applied in
+# _matches_scope so every reader of the index gets it, not per call site.
+EXCLUDED_SOURCES = [
+    s.strip().lower()
+    for s in os.getenv("EXCLUDED_SOURCES",
+                       "icu_network_api,icu_age_result_quick_guide").split(",")
+    if s.strip()
+]
+
 # How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
 # pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
 # margin retrieve_from_db already computes. See the note at the cut itself.
@@ -300,8 +312,14 @@ def _matches_scope(meta: dict, source_filter: str | None,
     scope = {"product": key} matches chunks tagged with that product;
     scope = {"category": key} matches any chunk in that category. The
     source_filter still supports the single-document 'ask about this doc'
-    flow. None scope = unscoped (whole corpus)."""
+    flow. None scope = unscoped (whole corpus). Internal documents
+    (EXCLUDED_SOURCES) never match unless source_filter names them."""
     if source_filter and meta.get("source") != source_filter:
+        return False
+    # An explicit single-document request (source_filter) still reaches an
+    # internal document, as before; nothing else does.
+    if not source_filter and any(ex in (meta.get("source") or "").lower()
+                                 for ex in EXCLUDED_SOURCES):
         return False
     if scope:
         if "product" in scope:
@@ -409,8 +427,14 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
             return ids[:limit]
         return [cid for cid, m in zip(ids, metas)
                 if _matches_scope(m or {}, source_filter, scope)][:limit]
-    res = collection.query(query_embeddings=[q_vec.tolist()], n_results=limit)
-    return res["ids"][0] if res.get("ids") else []
+    res = collection.query(query_embeddings=[q_vec.tolist()], n_results=limit,
+                           include=["metadatas"])
+    ids = res["ids"][0] if res.get("ids") else []
+    metas = (res.get("metadatas") or [None])[0]
+    if not metas:
+        return ids
+    return [cid for cid, m in zip(ids, metas)
+            if _matches_scope(m or {}, None, None)]
 
 
 def apply_arm_guarantee(ranked_ids, keep_n, *arms, guarantee):

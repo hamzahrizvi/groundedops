@@ -423,15 +423,10 @@ AMBIGUOUS_CEILING = 0.65
 # difficulty. Env-overridable for tuning without a code change.
 CONTEXT_FLOOR_RATIO = float(os.getenv("CONTEXT_FLOOR_RATIO", "0.5"))
 
-# Internal-only documents excluded from answering by default (comma-
-# separated substrings matched case-insensitively against source names).
-# Override with the EXCLUDED_SOURCES env var; set it to "" to expose the
-# full corpus (internal deployments, eval_cases_api.json runs).
-EXCLUDED_SOURCES = [
-    s.strip().lower()
-    for s in os.getenv("EXCLUDED_SOURCES", "icu_network_api").split(",")
-    if s.strip()
-]
+# Internal-only documents: the list and its default live in retrieval_db,
+# which applies them to every read of the index. Kept as main.EXCLUDED_SOURCES
+# for the per-route checks (source_file, figure) and the call sites below.
+from retrieval_db import EXCLUDED_SOURCES  # noqa: E402
 
 SNIPPET_LEN = 160
 
