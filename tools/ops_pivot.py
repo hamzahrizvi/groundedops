@@ -14,9 +14,9 @@ merges and their gate.json) and a plain verdict on whether the product got
 better. A run answered more than once (blind_eval.py --repeats: cases_state.r2.json ...,
 D-20261018-02) reads each question's mean mark over its repeats ("bot", "bot_n" repeats) and calls it
 "wrong" only when most repeats were; every aggregate cell carries a 90% interval for bot_pct
-(bot_lo/bot_hi). Export: writes RUN/real_questions.json, the
-week's website-widget questions and how each ended, for Customer to categorise,
-and RUN/widget_feedback.json (the week's widget votes, without session ids).
+(bot_lo/bot_hi). Export: writes RUN/real_counts.json, the week's website-widget
+questions counted per ISO week and outcome with no text (D-20261015-11), and
+RUN/widget_feedback.json (the week's widget votes, without session ids or question/answer text).
 Prune: deletes widget_feedback.json, real_questions.json and real_categorised.json
 from runs older than RETENTION_DAYS (90, from the env or REPO/src/.env), keeping their counts
 in real_counts.json, and drops older votes by created_at from the newer runs' widget_feedback.json.
@@ -241,8 +241,8 @@ def trend(by_run, ends, fixes):
 
 
 def real_counts(run_dir):
-    """Website questions per category and outcome: from real_categorised.json,
-    or from real_counts.json once retention has deleted the text. None if neither."""
+    """Website questions per category and outcome: from real_categorised.json (runs before D-20261015-11),
+    or from real_counts.json (counts only, or what retention kept). None if neither."""
     rp = os.path.join(run_dir, "real_categorised.json")
     if os.path.exists(rp):
         by = defaultdict(Counter)
@@ -299,20 +299,23 @@ def build(ops, repo=None):
 
 
 def export_real(run, src, days):
-    print(copy_feedback(src, run, days), "widget votes from the last", days, "days (session ids dropped)")
+    """D-20261015-11 (b): counts only. RUN/real_counts.json = {"<ISO year>-W<week>": {outcome: n}} over
+    the widget's questions of the last `days` days; no question or answer text leaves REPO."""
+    print(copy_feedback(src, run, days), "widget votes from the last", days, "days (no session ids, no question or answer text)")
     sys.path.insert(0, src)
     import log_report as L
     since = datetime.datetime.now() - datetime.timedelta(days=days)
-    out = []
+    out = defaultdict(Counter)
     for r in L.load_rows(os.path.abspath(src)):
         ts = L._parse_ts(r.get("timestamp"))
         if r.get("origin") != "widget" or not ts or ts.replace(tzinfo=None) < since:
             continue
         kind = L.turn_kind(r)
         if kind != "other":
-            out.append({"q": (r.get("query") or "")[:300], "outcome": kind, "when": r.get("timestamp")})
-    json.dump(out, open(os.path.join(run, "real_questions.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
-    print(len(out), "website questions")
+            y, w, _ = ts.isocalendar()
+            out[f"{y}-W{w:02d}"][kind] += 1
+    json.dump({k: dict(v) for k, v in sorted(out.items())}, open(os.path.join(run, "real_counts.json"), "w", encoding="utf-8"), indent=1)
+    print(sum(sum(c.values()) for c in out.values()), "website questions counted (no text)")
 
 
 def _since(data, since):
@@ -377,12 +380,12 @@ def prune_runs(ops, days, now=None):
 
 def copy_feedback(src, run, days):
     """Copy the widget votes of the last `days` days (by created_at) into RUN without
-    session ids, so each vote is copied once. Returns how many."""
+    session ids or question/answer text, so each vote is copied once. Returns how many."""
     p = os.path.join(src, "widget_feedback.json")
     if not os.path.exists(p):
         return 0
     data = _load(p)
-    out = {k: {f: x for f, x in v.items() if f != "session_id"}
+    out = {k: {f: x for f, x in v.items() if f not in ("session_id", "question", "answer")}
            for k, v in (data.items() if isinstance(data, dict) else []) if isinstance(v, dict)}
     out = _since(out, datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days))
     json.dump(out, open(os.path.join(run, "widget_feedback.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
@@ -488,6 +491,25 @@ def _selftest():
     assert list(_load(os.path.join(run, "widget_feedback.json"))) == ["b"]
     assert "session_id" not in _load(os.path.join(run, "widget_feedback.json"))["b"]
     assert copy_feedback(run + "/missing", run, 7) == 0
+    # D-20261015-11: the weekly export carries counts only, never a visitor's words
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))   # log_report, text_utils
+    src2, run2 = tempfile.mkdtemp(), tempfile.mkdtemp()
+    now_s = datetime.datetime.now().isoformat()
+    rows = [{"origin": "widget", "timestamp": now_s, "query": "SECRET-VISITOR-TEXT jam", "answer": "Clear the note path.", "outcome": "respond"},
+            {"origin": "widget", "timestamp": now_s, "query": "SECRET-VISITOR-TEXT price", "outcome": "refusal"},
+            {"origin": "eval", "timestamp": now_s, "query": "lab question", "outcome": "respond"}]
+    with open(os.path.join(src2, "logs.jsonl"), "w", encoding="utf-8") as f:
+        f.write("\n".join(json.dumps(x) for x in rows) + "\n")
+    json.dump({"v": {"question": "SECRET-VISITOR-TEXT", "answer": "SECRET-VISITOR-TEXT", "vote": "down", "session_id": "s", "created_at": ago(1)}},
+              open(os.path.join(src2, "widget_feedback.json"), "w"))
+    export_real(run2, src2, 7)
+    assert sorted(os.listdir(run2)) == ["real_counts.json", "widget_feedback.json"], os.listdir(run2)
+    for f in os.listdir(run2):
+        text = open(os.path.join(run2, f), encoding="utf-8").read()
+        assert "SECRET-VISITOR-TEXT" not in text and '"q"' not in text and "note path" not in text and "lab question" not in text, (f, text)
+    wk = "%d-W%02d" % tuple(datetime.datetime.now().isocalendar()[:2])
+    assert real_counts(run2) == {wk: {"answered": 1, "refused": 1}}, real_counts(run2)
+    assert _load(os.path.join(run2, "widget_feedback.json"))["v"]["vote"] == "down"
     saved = os.environ.pop("RETENTION_DAYS", None)
     try:
         repo = tempfile.mkdtemp(); os.makedirs(os.path.join(repo, "src"))
