@@ -2679,14 +2679,16 @@ def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
 
 
 def _send_none_reply(reply: dict, q: str, gap_scope, request_id,
-                     start_total: float) -> dict:
+                     start_total: float, tokens: int = 0) -> dict:
     """Serve the retrieval gate's "nothing matched" reply: record the gap
     (a rejection only; asking which product is a working conversation),
     log it, stamp the time. Shared by the early return and by a product
-    chat whose whole-manual read (self_route) did not answer either."""
+    chat whose whole-manual read (self_route) did not answer either.
+    `tokens` is the turn's model calls, for the per-session cap."""
     total_time = time.time() - start_total
     reply = dict(reply, response_time_ms=round(total_time * 1000),
-                 response_time=round(total_time, 3))
+                 response_time=round(total_time, 3),
+                 total_tokens=int(tokens or 0))
     if reply["role"] == "rejected":
         faq_store.record_gap(q, gap_scope, reason=reply["reason"])
     log_interaction(q, reply["answer"], reply["role"], "none", [],
@@ -3841,6 +3843,16 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # This targets the observed failure directly: for "can I use an nv9
     # spectral with note float?" the passage that answers it ranked #1 at
     # 0.9992 and the served answer was built from #2.
+    # D-20261017-06: the per-session token cap is charged what EVERY model
+    # call of this turn cost, not only the call whose text was served: a
+    # widened read, a retry or a backup answer that was thrown away was
+    # still paid for.
+    _turn_tokens: list[int] = []
+
+    def _billed(out):
+        _turn_tokens.append(int((out or {}).get("tokens") or 0))
+        return out
+
     reanswer_mode = None
     if payload.reanswer and top_chunks:
         import reanswer as _re
@@ -3849,9 +3861,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             resolved_query, [c.get("text", "") for c in _cands])
         from llm import judging
         with judging():
-            _sel_out = generate_with_fallback(
+            _sel_out = _billed(generate_with_fallback(
                 "fast", _sel_prompt, deepseek_api_key=deepseek_api_key,
-                api_keys=api_keys)
+                api_keys=api_keys))
         _picked = _re.parse_selection((_sel_out or {}).get("text", ""),
                                       len(_cands))
         top_chunks, reanswer_mode = _re.chosen_passages(_picked, _cands)
@@ -3941,7 +3953,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if _wm_none and not _library:
         _self_route_done("no_bundle")
         return _send_none_reply(_wm_none, q, _none_scope, request_id,
-                                start_total)
+                                start_total, tokens=sum(_turn_tokens))
     _names_now = _product_names()
     context = "\n\n".join(
         f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}{_passage_heading(r)}]\n"
@@ -3969,7 +3981,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ── LLM ──────────────────────────────────
     t3 = time.time()
     if role == "rethink":
-        output = generate(payload.force_provider, prompt, payload.force_model, deepseek_api_key, api_keys=api_keys)
+        output = _billed(generate(payload.force_provider, prompt, payload.force_model, deepseek_api_key, api_keys=api_keys))
         if not output:
             output = {"text": "", "model": payload.force_model, "provider": payload.force_provider}
         output["fallback_used"] = False
@@ -3977,17 +3989,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # Forced by an effort level: the chosen model answers first, and
         # if it cannot, the role's normal chain does -- with the role kept,
         # so the grounding retry and the backup escalation below still run.
-        output = generate(payload.force_provider, prompt, payload.force_model,
-                          deepseek_api_key, api_keys=api_keys)
+        output = _billed(generate(payload.force_provider, prompt, payload.force_model,
+                                  deepseek_api_key, api_keys=api_keys))
         if output and output.get("text"):
             output["fallback_used"] = False
         else:
             logger.warning(f"effort model {payload.force_provider}/{payload.force_model} "
                            "gave nothing; falling back to the role's chain")
-            output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
+            output = _billed(generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys))
             output["fallback_used"] = True
     else:
-        output = generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys)
+        output = _billed(generate_with_fallback(role, prompt, deepseek_api_key=deepseek_api_key, api_keys=api_keys))
     ptrace.mark("generate", f"{output.get('provider')} / {output.get('model')}")
 
     raw_text = output.get("text", "").strip()
@@ -4007,8 +4019,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if (_hist and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
         _bare = build_answer_prompt("", context, resolved_query, library=_library)
-        _again = generate_with_fallback(role, _bare, deepseek_api_key=deepseek_api_key,
-                                        api_keys=api_keys)
+        _again = _billed(generate_with_fallback(role, _bare, deepseek_api_key=deepseek_api_key,
+                                                api_keys=api_keys))
         _again_text = ((_again or {}).get("text") or "").strip()
         if _again_text and (_again or {}).get("model") != "none" \
                 and not is_refusal(_again_text):
@@ -4025,8 +4037,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if (_library and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
         _plain = build_answer_prompt(_hist, context, resolved_query)
-        _again = generate_with_fallback(role, _plain, deepseek_api_key=deepseek_api_key,
-                                        api_keys=api_keys)
+        _again = _billed(generate_with_fallback(role, _plain, deepseek_api_key=deepseek_api_key,
+                                                api_keys=api_keys))
         _again_text = ((_again or {}).get("text") or "").strip()
         if _again_text and (_again or {}).get("model") != "none" \
                 and not is_refusal(_again_text):
@@ -4050,9 +4062,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         else:
             _wprompt = build_answer_prompt(_hist, context, resolved_query,
                                            library=_wl)
-            _wout = generate_with_fallback(role, _wprompt,
-                                           deepseek_api_key=deepseek_api_key,
-                                           api_keys=api_keys)
+            _wout = _billed(generate_with_fallback(role, _wprompt,
+                                                   deepseek_api_key=deepseek_api_key,
+                                                   api_keys=api_keys))
             _wtext = ((_wout or {}).get("text") or "").strip()
             if not _wtext or (_wout or {}).get("model") == "none":
                 _self_route_done("failed_checks")
@@ -4279,9 +4291,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _bk_model = keystore.model_for_role(_esc_role, _backup_provider)
         except Exception:
             _bk_model = _default_model_for(_backup_provider)
-        backup_result = _timed("regen", generate,
-                               _backup_provider, prompt, _bk_model,
-                               deepseek_api_key=deepseek_api_key)
+        backup_result = _billed(_timed("regen", generate,
+                                       _backup_provider, prompt, _bk_model,
+                                       deepseek_api_key=deepseek_api_key))
         if backup_result and backup_result.get("text"):
             output = backup_result
             answer = normalize_markdown_tables(
@@ -4341,9 +4353,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             logger.info(
                 f"Grounding retry {_attempt}/{_max_retries} "
                 f"(score={grounding_score}) for: {redact(resolved_query)}")
-            _retry = _timed("regen", generate_with_fallback,
-                            role, prompt, deepseek_api_key=deepseek_api_key,
-                            api_keys=api_keys)
+            _retry = _billed(_timed("regen", generate_with_fallback,
+                                    role, prompt, deepseek_api_key=deepseek_api_key,
+                                    api_keys=api_keys))
             _text = normalize_markdown_tables(_strip_meta(
                 _strip_preamble((_retry or {}).get("text", "").strip())))
             if not _text:
@@ -4392,7 +4404,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                              and not _not_mentioned else "failed_checks")
             if _wm_none:
                 return _send_none_reply(_wm_none, q, _none_scope, request_id,
-                                        start_total)
+                                        start_total, tokens=sum(_turn_tokens))
             answer, output, raw_text, prompt, top_chunks = (
                 _wm_first["answer"], _wm_first["output"],
                 _wm_first["raw_text"], _wm_first["prompt"],
@@ -4872,7 +4884,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # From the provider's own usage block (see llm.py's _usage_tokens).
         # 0 means "not reported", never "free" -- the per-session token cap
         # in quota.py treats it as unknown rather than charging nothing.
-        "total_tokens": int(output.get("tokens") or 0),
+        # The sum over every model call of the turn, served or not.
+        "total_tokens": sum(_turn_tokens),
         "fallback_used": output.get("fallback_used", False),
         "escalated_to_deepseek": escalated,
         "request_id": request_id,

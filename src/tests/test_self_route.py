@@ -25,15 +25,18 @@ def _refusal(text):
 
 
 def _ask(replies, *, product="nv9usb", band="confident", grounded=True,
-         bundle=BUNDLE, policy=None):
+         bundle=BUNDLE, policy=None, tokens=None):
     """Run one turn; replies are what each generate call returns, in order."""
     CITED.clear()
     calls = []
 
     def gen(role, prompt, **kw):
         calls.append(prompt)
-        return {"text": replies[min(len(calls), len(replies)) - 1],
-                "model": "m", "provider": "openai"}
+        out = {"text": replies[min(len(calls), len(replies)) - 1],
+               "model": "m", "provider": "openai"}
+        if tokens is not None:
+            out["tokens"] = tokens[min(len(calls), len(tokens)) - 1]
+        return out
 
     over = dict(policy or {})
     saved = main.policy.value
@@ -159,3 +162,25 @@ def test_widened_turn_reads_the_evidence_pages_first():
 def test_normal_turn_keeps_the_passage_order_for_cited_pages():
     _ask([ANSWER])
     assert CITED and CITED[-1][0] == "m-1"
+
+
+def test_token_cap_counts_the_widen_call_when_the_first_refusal_is_restored():
+    result, calls, trace = _ask([REFUSED, ANSWER], grounded=False, tokens=[1000, 90000])
+    assert len(calls) == 2 and _outcome(trace) == "failed_checks"
+    assert result["total_tokens"] == 91000
+
+
+def test_token_cap_counts_the_widen_call_on_the_nothing_matched_path():
+    # band "none": the whole-manual read is the turn's only model call
+    for replies, grounded in (([ANSWER], False), ([REFUSED], True)):
+        result, calls, _ = _ask(replies, band="none", grounded=grounded, tokens=[90000])
+        assert len(calls) == 1 and result["role"] == "rejected"
+        assert result["total_tokens"] == 90000
+
+
+def test_token_cap_counts_every_call_on_a_served_or_retried_turn():
+    result, _, _ = _ask([REFUSED, ANSWER], tokens=[1000, 90000])
+    assert result["answer"] == ANSWER and result["total_tokens"] == 91000
+    result, calls, _ = _ask([ANSWER], product=None, grounded=False,
+                            tokens=[1000], policy={"grounding_retries": 2})
+    assert len(calls) == 3 and result["total_tokens"] == 3000
