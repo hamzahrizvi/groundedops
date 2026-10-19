@@ -195,8 +195,10 @@ def every(ops):
 
 def lane_cron(lane, minutes):
     """The lane's cron: every N minutes, the three lanes a third of N apart. Back to back is every 10 minutes:
-    runs of one task never overlap, so the next starts within 10 minutes of the last one ending."""
-    step = minutes or 10
+    runs of one task never overlap, so the next starts within 10 minutes of the last one ending.
+    Lane 1 always checks every 10 minutes, so the CEO's page decisions (a faster "Next run" too) never wait for a
+    slow schedule; "Next run" spaces only the work it starts (take(), the CEO 2026-10-19)."""
+    step = 10 if lane == 1 else minutes or 10
     off = (lane - 1) * step // 3
     if step < 60:
         return ",".join(str(m) for m in range(off, 60, step)) + " * * * *"
@@ -231,9 +233,15 @@ def take(ops, repo, five, week, resets, now, lane):
     with open(os.path.join(ops, "state", "mode.json"), "w", encoding="utf-8") as f:
         json.dump({"mode": mode, "why": why, "approved": MODES[mode][0], "builds": MODES[mode][1], "per_department": MODES[mode][2]}, f)
     rows = entries(ops, repo, five, week, resets, now, claims(ops))
+    worked = os.path.join(ops, "state", "lane-1-worked")
+    gap, pressed = every(ops), run_now(ops)
+    spaced = lane == 1 and gap > 10 and time.time() - _mtime(worked) < gap * 60
     for line, key, ok in rows:
         if not ok:
             continue
+        dept = line.split()[1].removeprefix(TASK) if line.startswith("RUN") else "merge"
+        if spaced and dept != "merge" and "all" not in pressed and ("dev" if dept == "dev" else dept) not in pressed:
+            continue   # "Next run": lane 1 starts new work only every N minutes; merges and Run now presses go at once
         try:
             fd = os.open(os.path.join(d, key + ".json"), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:   # another lane won the race: try the next line
@@ -243,11 +251,16 @@ def take(ops, repo, five, week, resets, now, lane):
         if "parked to check: " in line:   # handed over: the same set does not wake the product owner again
             with open(os.path.join(ops, *PARKED), "w", encoding="utf-8") as f:
                 f.write(" ".join(line.split("parked to check: ")[1].split(";")[0].replace(",", " ").split()))
+        if lane == 1 and key != "merge":
+            open(worked, "w").close()
         try:   # a "Run now" press is used up by the start it allowed
             os.remove(os.path.join(ops, "state", "run_now", "dev" if key.startswith("dev-") else key))
         except OSError:
             pass
         return [r[0] for r in rows] + [f"TOOK {key} | {line}"]
+    if spaced and any(ok and not r.startswith("MERGE") for r, _, ok in rows):
+        due = datetime.datetime.fromtimestamp(_mtime(worked) + gap * 60).strftime("%H:%M")
+        rows = rows + [(f"SPACED lane 1 starts new work at {due} (Next run: every {gap} min); your decisions were read now", None, False)]
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
 
 
@@ -481,7 +494,9 @@ def selftest():
         # work mode from the allowance left vs the week left (21% of the week left here), then pinned to high for the rest
         assert [work_mode(ops, wk, resets, now)[0] for wk in (40, 75, 80)] == ["ultra", "high", "easy"]
         w("state/mode", "high\n")
+        w("state/every", "0")   # back to back: "Next run" spacing is tested on its own below
         assert work_mode(ops, 40, resets, now) == ("high", "set by you")
+        assert lane_cron(1, 120) == "0,10,20,30,40,50 * * * *", "lane 1 always checks every 10 minutes"
         assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "6,16,26,36,46,56 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
                                    "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n\n"
@@ -601,6 +616,12 @@ def selftest():
         w("state/claims/dev-D-1.json", json.dumps({"lane": 1, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 1 is busy") and needed(ops, 3)[0]
         os.remove(os.path.join(ops, "state", "claims", "dev-D-1.json"))
+        w("state/every", "120"); w("state/lane-1-worked")
+        got = take(ops, ops, 11, 38, resets, now, 1)
+        assert got[-1] == "TOOK nothing" and any(x.startswith("SPACED lane 1") for x in got), got
+        os.makedirs(os.path.join(ops, "state", "run_now"), exist_ok=True); w("state/run_now/customer")
+        assert take(ops, ops, 11, 38, resets, now, 1)[-1].startswith("TOOK customer"), "a Run now press goes at once"
+        release(ops, 1); w("state/every", "0"); os.remove(os.path.join(ops, "state", "lane-1-worked"))
         w("state/run_now/all")
         p = plan(ops, ops, 60, 38, resets, now)
         assert p[0].startswith("RUN  groundedops-office-customer") and not any("you asked for it now" in x for x in p), "Run all lifts the budget, adds no work"

@@ -40,6 +40,8 @@ a gate) held up every other department. Three lanes now run the same steps
 `groundedops-office-lane-2` and `-lane-3` run at about :25 and :52. Each lane
 takes work with `office_next.py --lane N --take`, which claims it with an
 O_EXCL file in `OPS/state/claims`, so no two lanes ever start the same thing.
+Lane 1 always checks every 10 minutes, whatever "Next run" says, so the CEO's page decisions never
+wait for a slow schedule; "Next run" spaces only the new work lane 1 starts (merges and Run now presses go at once).
 Lane 1 always takes work. Lanes 2 and 3 first run `office_next.py --lane N --needed` and stop at once
 unless another lane holds work (or lane 1 has not looked for work in 30 minutes): they exist so a long
 build or check does not hold everything else up, and most of their wake-ups used to find nothing (CEO,
