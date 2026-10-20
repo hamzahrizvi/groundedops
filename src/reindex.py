@@ -293,7 +293,7 @@ def main() -> int:
         return 0
 
     if "--from-store" in argv:
-        if only:
+        if only is not None:
             # A partial rebuild cannot reset the whole collection (also under --dry-run).
             print(PARTIAL_REBUILD_REFUSAL)
             return 2
@@ -337,7 +337,7 @@ def main() -> int:
         return 0
 
     targets = recoverable
-    if only:
+    if only is not None:
         targets = [e for e in targets if fnmatch.fnmatch(e["source"], only)]
         if not targets:
             print(f"No retained document matches {only!r}")
