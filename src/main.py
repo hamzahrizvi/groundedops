@@ -58,7 +58,7 @@ import keystore
 import policy
 from app_state import APP_STATE, APP_STATE_LOCK, _run_stage, _set_app_state, capability
 from db import get_collection
-from guards import _PROXY_HEADERS, _external_ip
+from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
@@ -140,24 +140,41 @@ async def _security_headers(request, call_next):
 MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", str(2 * 1024 * 1024)))
 
 # Paths that legitimately carry a large body: document uploads, and backup
-# archives. Exempt from MAX_BODY_BYTES, not from authentication -- both are
-# admin-gated, and backup import is root-only. backup.py applies its own
-# ceiling (BACKUP_MAX_BYTES) to what an archive may expand to.
-# The admin guard is a call inside each handler (_require_admin), so FastAPI
-# has already read the multipart body to a temp file before it runs: an
-# unauthenticated caller is refused, but only after the upload is received.
+# archives. Exempt from MAX_BODY_BYTES, not from authentication: the
+# sign-in is checked below, BEFORE the body is read (D-20261010-02).
+# backup.py applies its own ceiling (BACKUP_MAX_BYTES) to what an archive
+# may expand to.
 _LARGE_BODY_PATHS = ("/upload", "/admin/backup/import", "/admin/backup/inspect")
+
+
+def _refuse_unsigned_body(request):
+    """401/403 for a body FastAPI would spool to disk before the handler's
+    own guard runs, or None to let it through (D-20261010-02).
+
+    Covers the large-body paths (no size cap) and every multipart request
+    (FastAPI parses the form before the endpoint runs). Every such route
+    is admin-only today; the backup routes are root-only, so they are
+    checked at that level here too. The handlers keep their own checks."""
+    path = request.scope.get("path", "")
+    ctype = request.headers.get("content-type", "").lower()
+    if not (path.startswith(_LARGE_BODY_PATHS) or ctype.startswith("multipart/")):
+        return None
+    guard = _require_root if path.startswith("/admin/backup/") else _require_admin
+    try:
+        guard(request.headers.get("x-admin-password"))
+    except HTTPException as e:
+        return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+    return None
 
 
 @app.middleware("http")
 async def _limit_body_size(request, call_next):
     if request.method in ("POST", "PUT", "PATCH"):
+        refused = _refuse_unsigned_body(request)
+        if refused is not None:
+            return refused
         cl = request.headers.get("content-length")
-        # Uploads are admin-only (guarded in the handler) and LAN-only, so
-        # they are exempt. So is
-        # restoring a backup: an archive is ~100MB of documents by design,
-        # and it is root-gated. Both are held to _LARGE_BODY_PATHS rather
-        # than being unbounded.
+        # Large-body paths skip the size cap; their sign-in was checked above.
         path_ = request.scope.get("path", "")
         if cl and not path_.startswith(_LARGE_BODY_PATHS):
             try:
