@@ -911,8 +911,9 @@ function renderDiary(){
    Cards waiting for the CEO are decided in "Waiting for you"; ready-to-merge and blocked ones wait on a person. */
 const DEPT_KEY = {customer:"customer", po:"product-owner", dev:"dev", security:"security", audit:"audit", rnd:"rnd", marketing:"marketing"};
 function cardNow(c){
-  const who = /^(proposed|deferred)$/.test(c.stage) ? "po"
-    : /^(approved, queued|sent back, rebuilding|built, waiting for the check|check failed)$/.test(c.stage) ? c.assigned : null;
+  // a built card's check is the product owner's gate run (tools/office_next.py waiting), not Dev's
+  const who = /^(proposed|deferred|built, waiting for the check)$/.test(c.stage) ? "po"
+    : /^(approved, queued|sent back, rebuilding|check failed)$/.test(c.stage) ? c.assigned : null;
   return who && DEPT_KEY[who] && hired(who) ? {key: DEPT_KEY[who], dept: nameOf(who), why: c.title, item: c.id} : null;
 }
 function renderBoards(){
