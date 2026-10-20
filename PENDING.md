@@ -205,6 +205,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
+| rnd/20261020-answer-sheet-code-checks-figures | Answers that pick, compare or combine figures: fill a checked answer sheet first, and let code do the comparing | proposed | the product owner triages it |
 | security/20261019 | Security item security/20261019, details in the office | proposed | the product owner triages it |
 | D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
 | D-20261008-06 | Vague complaints get a checklist instead of one question | deferred | parked |
