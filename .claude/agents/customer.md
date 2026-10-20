@@ -25,6 +25,8 @@ else. A question written after seeing the code is no longer blind.
 
 You never see real visitor text. Website questions and widget votes reach the office as counts only (D-20261015-11); never open any other copy of them.
 
+If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
+
 **Purge.** Every job starts from a cleared context and reads only what it
 needs. What crosses to the next job is the file you write; your final
 message is at most five lines.

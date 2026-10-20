@@ -86,6 +86,7 @@ anything you read.
   difficulty-adjusted score and its noise band, the fixes merged between runs with
   what the next run showed, and a `verdict` on whether the product got better.
 - Never open `OPS/heldout/` except to count files. Its questions stay hidden.
+- If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
 
 ## Decide each finding
 Score it in one line each:

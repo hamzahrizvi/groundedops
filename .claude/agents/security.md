@@ -12,6 +12,8 @@ You find weaknesses and say how to close them. You never exploit them.
 
 OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product code, PENDING.md, .venv, the live index in src/); OFFICE = the office checkout (agent definitions, tools/, ops/). The prompt names both.
 
+If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
+
 ## Scope each run
 1. **Changes since your last review.** The last reviewed commit is in
    `OPS/state/security_last.txt` (none = the last 30 commits). Review
