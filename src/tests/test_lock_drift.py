@@ -20,3 +20,9 @@ def test_wrong_version_and_missing_package_are_listed():
     assert len(off) == 2
     assert off[0].startswith("packaging: installed ") and off[0].endswith("lock 0.0.1")
     assert off[1] == "no-such-package-xyz: installed none, lock 1.0"
+
+def test_hashed_lock_lines_are_read():
+    have = version("packaging")
+    text = (f"packaging=={have} \\\n    --hash=sha256:{'0'*64} \\\n    --hash=sha256:{'1'*64}\n"
+            f"    # via x\nno-such-package-xyz==1.0 \\\n    --hash=sha256:{'2'*64}\n")
+    assert drift(_lock(text)) == ["no-such-package-xyz: installed none, lock 1.0"]

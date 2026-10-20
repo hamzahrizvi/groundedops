@@ -1,7 +1,8 @@
 # Inputs only. Every install (install.ps1, install.sh, Docker, CI, the .exe
 # venv) installs from requirements.lock, which pins every package. After
 # changing this file, regenerate the lock from src/:
-#   uv pip compile requirements.txt --universal --python-version 3.11 --no-header -o requirements.lock
+#   uv pip compile requirements.txt --universal --python-version 3.11 --no-header --generate-hashes -o requirements.lock
+# Installs use `pip install --require-hashes -r requirements.lock`.
 # (existing pins are kept as preferences; CI fails if the lock is stale).
 fastapi
 uvicorn[standard]

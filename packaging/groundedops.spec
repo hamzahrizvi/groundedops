@@ -5,7 +5,7 @@ Build it from the REPO ROOT, not from packaging/:
 
     .venv\Scripts\pyinstaller.exe packaging\groundedops.spec --noconfirm
 
-Install the lock into .venv first (.venv\Scripts\pip.exe install -r
+Install the lock into .venv first (.venv\Scripts\pip.exe install --require-hashes -r
 src\requirements.lock); this spec refuses to build otherwise.
 
 Expect 15-30 minutes and about 2GB in dist\GroundedOps\. torch alone is
@@ -26,7 +26,7 @@ SRC = os.path.join(ROOT, "src")
 
 # D-20261008-17: ship only what CI audited. Refuse to build when the build
 # venv differs from src/requirements.lock; fix with
-#   .venv\Scripts\pip.exe install -r src\requirements.lock
+#   .venv\Scripts\pip.exe install --require-hashes -r src\requirements.lock
 import sys
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from lock_drift import drift

@@ -50,7 +50,7 @@ VENV_PY="$ROOT/.venv/bin/python"
 echo
 echo "Installing dependencies (~2GB, several minutes on first run)..."
 "$VENV_PY" -m pip install --upgrade pip --quiet
-"$VENV_PY" -m pip install -r "$APP_DIR/requirements.lock"
+"$VENV_PY" -m pip install --require-hashes -r "$APP_DIR/requirements.lock"
 
 # ── 3. Frontend ──────────────────────────────────────────────────────
 # The release ships a pre-built frontend/dist, so Node is NOT required.

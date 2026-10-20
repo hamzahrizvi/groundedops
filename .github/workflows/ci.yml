@@ -135,12 +135,12 @@ jobs:
       - name: Install deps
         run: |
           cd src
-          pip install -r requirements.lock
+          pip install --require-hashes -r requirements.lock
       - name: Lock matches requirements.txt
         run: |
           cd src
           pip install uv==0.11.17
-          uv pip compile requirements.txt --universal --python-version 3.11 --no-header -o requirements.lock
+          uv pip compile requirements.txt --universal --python-version 3.11 --no-header --generate-hashes -o requirements.lock
           git diff --exit-code requirements.lock
       - name: Audit the lock for known vulnerabilities
         # Audits the pinned lock every install path uses, no install needed.
