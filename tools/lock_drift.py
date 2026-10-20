@@ -11,8 +11,8 @@ LOCK = Path(__file__).resolve().parent.parent / "src" / "requirements.lock"
 def drift(lock=LOCK):
     off = []
     for line in Path(lock).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+        line = line.strip().removesuffix("\\").strip()
+        if not line or line.startswith(("#", "--")):
             continue
         req = Requirement(line)
         if req.marker and not req.marker.evaluate():
