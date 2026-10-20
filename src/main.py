@@ -283,13 +283,15 @@ def _is_private(host: str) -> bool:
     return any(host.startswith(p) for p in PRIVATE_NETWORKS)
 
 
-def _bearer_ok(request) -> bool:
-    """A valid widget/member token in Authorization: Bearer. Never raises."""
+def _bearer_ok(request, min_tier: str = "member") -> bool:
+    """A valid widget token in Authorization: Bearer whose tier is at least
+    min_tier ("member" or "staff"). Never raises."""
     try:
         import quota as _q
         auth = request.headers.get("authorization", "")
         tok = auth[7:].strip() if auth.lower().startswith("bearer ") else None
-        return bool(_q.verify_token(tok))
+        caller = _q.verify_token(tok)
+        return bool(caller) and _q._TIER_RANK[caller["tier"]] >= _q._TIER_RANK[min_tier]
     except Exception:
         return False
 
@@ -300,12 +302,13 @@ async def _restrict_private_surface(request, call_next):
     # D-20261010-24: ?deep=1 calls every configured AI provider with the
     # live keys and returns the provider setup, so only the box or the LAN
     # (no proxy header, a private socket address; PUBLIC_ONLY included) or a
-    # valid bearer token gets it. Any "deep" parameter counts, whatever its
+    # staff-tier bearer token (the company's own monitor) gets it; a website
+    # member token does not (D-20261010-33). Any "deep" parameter counts, whatever its
     # value. Plain /health stays public for load balancers.
     if path.startswith("/health") and "deep" in request.query_params:
         host = request.client.host if request.client else ""
         proxied = any(h in request.headers for h in _PROXY_HEADERS)
-        if (not proxied and host and _is_private(host)) or _bearer_ok(request):
+        if (not proxied and host and _is_private(host)) or _bearer_ok(request, min_tier="staff"):
             return await call_next(request)
         logger.warning("blocked deep health probe from outside")
         return _deny(request)
@@ -1965,7 +1968,7 @@ def health(deep: int = 0):
     """Liveness by default; readiness with ?deep=1.
 
     ?deep=1 is NOT public (D-20261010-24): _restrict_private_surface serves
-    it only to the box/LAN with no proxy header, or to a valid bearer token.
+    it only to the box/LAN with no proxy header, or to a staff-tier bearer token (D-20261010-33).
 
     The plain form stays a cheap "the process is up" probe, because that is
     what a load balancer should hammer.

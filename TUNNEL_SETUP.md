@@ -62,8 +62,8 @@ Check `logs\service.log` says `starting NAMED tunnel`, not `QUICK`, and
 - External uptime pinger (>= 5 min): alert on plain `/health` failing
   ("is it up"). `/health?deep=1` (`provider_reachable`, "is the provider
   up") answers only on the box or the LAN, or through the tunnel with
-  `Authorization: Bearer <member token>` (mint one with
-  `quota.issue_token("uptime", ttl_seconds=...)`); without it, it is a 404.
+  `Authorization: Bearer <staff token>` (mint one with
+  `quota.issue_token("uptime", "staff", ttl_seconds=...)`; a website member token gets a 404); without it, it is a 404.
   Never restart on the deep one.
 - Docker path instead: STAGING.md step 0 first (the override file turns on
   `--reload` and `WIDGET_ALLOWED_ORIGINS=*`).
