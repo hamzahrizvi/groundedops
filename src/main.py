@@ -1659,10 +1659,12 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         # where that resolver lives -- aliases, longest-form-wins and all.
         _names = _product_names()
         _named = _products_named_in(q, list(_names.keys()))
+        _scoped = _is_product_scope(scope_key)
         return sales.answer(q, _fs._load(), idx, _cat.catalog(),
-                            scoped=_is_product_scope(scope_key),
+                            scoped=_scoped,
                             named_products=_named,
-                            product_names=_names)
+                            product_names=_names,
+                            scope_product=scope_key if _scoped else None)
     except Exception as exc:
         logger.warning(f"sales answer skipped: {exc}")
         return None
