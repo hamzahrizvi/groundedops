@@ -39,7 +39,11 @@ logger = logging.getLogger(__name__)
 _CROSS = re.compile(
     # Nouns that only ever mean "across the catalogue".
     r"\b(which|what)\b(?:\s+\w+){0,3}\s+"
-    r"\b(products?|models?|validators?|hoppers?|ranges?)\b"
+    r"\b(products?|models?|validators?|hoppers?)\b"
+    # "range" moved below on 2026-10-20: in a manual it is a voltage or
+    # temperature range far more often than a product range. "what range
+    # does it take with and without the IF5", asked in an NV9USB+ chat, got
+    # every product's supply voltage instead of the NV9USB+ manual's answer.
     # "device", "unit", "option" and "one" are also ordinary manual
     # vocabulary -- "which device settings", "what options are available in
     # Ads mode", "what units is the threshold in" are all questions about
@@ -47,7 +51,7 @@ _CROSS = re.compile(
     # module was hijacking. So those nouns count only with an explicit
     # "your" framing, which no in-manual question has.
     r"|\b(which|what)\b(?:\s+of)?\s+your\s+(?:\w+\s+){0,2}"
-    r"\b(devices?|units?|options?|ones?|machines?)\b"
+    r"\b(devices?|units?|options?|ones?|machines?|ranges?)\b"
     r"|\bdo\s+you\s+(have|make|sell|offer|do|stock)\b"
     r"|\banything\s+(that|which|for)\b"
     # "I need A validator" is someone buying. "I need TO mount it" is
@@ -719,7 +723,8 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
            catalog_tree: dict | None = None,
            scoped: bool = False,
            named_products: list | None = None,
-           product_names: dict | None = None) -> dict | None:
+           product_names: dict | None = None,
+           scope_product: str | None = None) -> dict | None:
     """A cross-product answer, or None to let the normal pipeline run.
 
     Three shapes, in order of specificity:
@@ -739,6 +744,14 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
     word it matched on was usually just the product's own name. The spec and
     catalogue branches still run -- both demand far more of the question,
     and "what else do you sell?" is a fair thing to ask mid-conversation.
+
+    `scope_product` is that picked product's key. When the wording names
+    that product and no other, the spec branch is skipped too: the visitor
+    is asking about the product they picked, and a quantity in the question
+    ("feeds the nv9usb+ 24V") describes their setup, not a shopping
+    requirement. Before this, any _CROSS word in such a question ("what
+    models", "which validators") listed every product's matching table row
+    instead of letting the picked manual answer.
     """
     # 0. A comparison: a cross-product question whose wording looks nothing
     #    like a sales one, so it is checked before that gate.
@@ -752,7 +765,9 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
         return None
 
     # 1. A concrete requirement ("I have a 24V supply").
-    hits = find_by_spec(question, index)
+    about_picked = bool(scoped and scope_product and named_products
+                        and set(named_products) == {scope_product})
+    hits = [] if about_picked else find_by_spec(question, index)
     if hits:
         terms = _terms(question)
         # When the question names a product TYPE ("note validators"), keep
