@@ -4115,6 +4115,58 @@ let pendingReplace = null;
 // Survives render(), which rebuilds the page on every change.
 let docFilter = { cat: "", prod: "" };
 
+// Products whose manuals keep naming another product: a CashGenic's manual
+// names the NV200 Spectral inside it, but the answers sit in the NV200's
+// manuals, which a CashGenic chat never searches until they are filed under
+// it too. The scan reads every section (seconds), so it runs again only when
+// the document list changes -- an upload finishing, a refile -- not on every
+// render. "Not related" is remembered in this browser only.
+let scopeScan = { sig: null, p: null };
+const SCOPE_GONE = "go-scope-not-related";
+const scopeGone = () => { try { return JSON.parse(localStorage.getItem(SCOPE_GONE) || "[]"); } catch (e) { return []; } };
+
+function scopePrompt() {
+  const box = el("div", {});
+  const sig = cache.sources.map(s => s.source + "|" + (s.product || "") + "|" + s.chunks).join("\n");
+  if (scopeScan.sig !== sig)
+    scopeScan = { sig, p: api("/admin/scope_suggestions").then(r => r.suggestions || []).catch(() => []) };
+  scopeScan.p.then(list => {
+    const gone = scopeGone();
+    list.filter(s => !gone.includes(s.product + ">" + s.other)).forEach(s => {
+      const docs = s.sources.length + (s.sources.length === 1 ? " document" : " documents");
+      const card = el("div", { class: "card elev-sm",
+          style: "padding:14px 20px;margin-bottom:12px;display:flex;"
+               + "flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap;"
+               + "box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-accent)" },
+        el("div", { style: "flex:1 1 320px" },
+          el("b", { style: "display:block;font-size:13.5px" },
+            s.product_name + "'s manual names " + s.other_name + " in " + s.hits
+            + " of " + s.chunks + " sections — also search " + s.other_name
+            + "'s manuals in " + s.product_name + " chats?"),
+          el("span", { class: "sec-hint", style: "margin:0" },
+            "Files " + s.other_name + "'s " + docs + " under " + s.product_name
+            + " as well; " + s.other_name + " keeps them.")),
+        el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
+          el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
+            e.target.disabled = true; e.target.textContent = "Filing…";
+            try {
+              for (const d of s.sources)
+                await api("/admin/reassign_source", { method: "POST", body: JSON.stringify({
+                  source: d.source, category_key: d.category, product_key: d.keys.join(",") }) });
+              toast(s.other_name + "'s manuals are now searched in " + s.product_name + " chats");
+            } catch (err) { toast(err.message, true); }
+            await refresh(); render();
+          } }, "Also search them"),
+          el("button", { class: "btn btn-ghost", style: BTN, onclick: () => {
+            try { localStorage.setItem(SCOPE_GONE, JSON.stringify(gone.concat([s.product + ">" + s.other]))); } catch (e) {}
+            card.remove();
+          } }, "Not related")));
+      box.append(card);
+    });
+  });
+  return box;
+}
+
 function viewDocuments() {
   const prods = products();
   let chosenCat = cache.catalog.length === 1 ? cache.catalog[0].key : "";
@@ -4484,6 +4536,7 @@ function viewDocuments() {
     // Sits above the page when a document was just replaced, and stays put
     // across the re-render that follows the upload.
     replacePrompt(),
+    scopePrompt(),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "doc-add", "data-sec": "Add documents" },
       el("div", { class: "sec-title" }, "Add documents"),

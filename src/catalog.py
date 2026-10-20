@@ -454,3 +454,44 @@ def refile_source(source: str, product_keys: list[str]) -> dict:
             prod["sources"].append(source)
         _save(data)
     return catalog()
+
+
+def scope_links(chunks, named_in, min_share: float = 0.10, min_hits: int = 5) -> list[dict]:
+    """Products whose manuals keep naming another product, as suggestions to
+    search that product's manuals in their chats too.
+
+    `chunks` is (source, product keys, category, text) per indexed chunk;
+    `named_in(text, candidates)` is main._products_named_in. A CashGenic
+    contains an NV200 Spectral and a SMART Coin System: its manual names
+    them, but their answers sit in their own manuals, which the CashGenic
+    chat never searched until they were filed under it by hand.
+
+    Only suggests. The threshold keeps a protocol manual that mentions a
+    coin system 20 times in 690 sections (2.9%) off the list, while the
+    NV4000 manual naming its NV200 Spectral head in 42 of 145 passes.
+    ponytail: one share threshold; a per-pair "not related" is the console's.
+    """
+    names = {p["key"]: p["name"] for c in catalog()["categories"] for p in c["products"]
+             if not is_shared_product(p["key"])}
+    total: dict[str, int] = {}
+    hits: dict[tuple[str, str], int] = {}
+    filed: dict[str, dict[str, tuple[list[str], str]]] = {}   # product -> source -> (keys, category)
+    for source, keys, category, text in chunks:
+        for k in keys:
+            filed.setdefault(k, {})[source] = (keys, category)
+        own = [k for k in keys if k in names]
+        if not own:
+            continue
+        found = named_in(text or "", [k for k in names if k not in keys])
+        for p in own:
+            total[p] = total.get(p, 0) + 1
+            for o in found:
+                hits[(p, o)] = hits.get((p, o), 0) + 1
+    out = []
+    for (p, o), n in hits.items():
+        missing = [{"source": s, "category": cat, "keys": keys + [p]}
+                   for s, (keys, cat) in sorted(filed.get(o, {}).items()) if p not in keys]
+        if n >= min_hits and n / total[p] >= min_share and missing:
+            out.append({"product": p, "product_name": names[p], "other": o, "other_name": names[o],
+                        "hits": n, "chunks": total[p], "sources": missing})
+    return sorted(out, key=lambda s: -s["hits"] / s["chunks"])

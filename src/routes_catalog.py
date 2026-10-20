@@ -138,6 +138,22 @@ def admin_champions(x_admin_password: str | None = Header(default=None)):
     return {"champions": rows, "count": len(rows), "delivery": "not configured"}
 
 
+@router.get("/admin/scope_suggestions")
+def admin_scope_suggestions(x_admin_password: str | None = Header(default=None)):
+    """Products whose manuals name another product often enough that its
+    manuals should be searched in their chats too (catalog.scope_links).
+    The console applies one with /admin/reassign_source per listed source."""
+    _require_admin(x_admin_password)
+    from db import get_collection
+    from docindex import product_keys
+    from main import _products_named_in
+    got = get_collection().get(include=["documents", "metadatas"])
+    chunks = [(m.get("source"), product_keys(m), m.get("category", ""), d)
+              for d, m in zip(got.get("documents") or [], got.get("metadatas") or [])
+              if m.get("source")]
+    return {"suggestions": catalog_mod.scope_links(chunks, _products_named_in)}
+
+
 @router.get("/admin/product/{product_key}/contents")
 def admin_product_contents(product_key: str,
                            x_admin_password: str | None = Header(default=None)):
