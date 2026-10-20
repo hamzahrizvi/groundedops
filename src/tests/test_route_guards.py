@@ -147,6 +147,45 @@ for label, headers, want in (("no session", {}, 401), ("basic account", BASIC, 4
     check(r.status_code == want,
           f"{label}: /upload/status/<job> {r.status_code} == {want}")
 
+print("\n== the body is not read before the sign-in check (D-20261010-02) ==")
+import starlette.formparsers as _fp
+
+parses = {"multipart": 0, "form": 0}
+_real_mp, _real_form = _fp.MultiPartParser.parse, _fp.FormParser.parse
+
+
+async def _count_mp(self):
+    parses["multipart"] += 1          # this parser writes the upload to a temp file
+    return await _real_mp(self)
+
+
+async def _count_form(self):
+    parses["form"] += 1
+    return await _real_form(self)
+
+
+_fp.MultiPartParser.parse, _fp.FormParser.parse = _count_mp, _count_form
+FILE = {"file": ("guard-test.txt", b"x" * 4096, "text/plain")}
+for label, path, headers, want in (
+        ("no session", "/upload", {}, 401),
+        ("basic account", "/upload", BASIC, 403),
+        ("no session", "/admin/faq/import", {}, 401),
+        ("no session", "/admin/backup/import", {}, 401),
+        ("support account", "/admin/backup/import", SUPPORT, 403),
+        ("support account", "/admin/backup/inspect", SUPPORT, 403)):
+    before = dict(parses)
+    r = client.post(path, headers=headers, files=FILE)
+    check(r.status_code == want, f"{label}: {path} {r.status_code} == {want}")
+    check(parses == before, f"{label}: {path} body never parsed, nothing spooled to disk")
+before = dict(parses)
+r = client.post("/upload", data={"a": "b"})          # not multipart: the path alone decides
+check(r.status_code == 401 and parses == before,
+      f"no session, url-encoded: /upload {r.status_code} == 401, body never parsed")
+r = upload(SUPPORT)
+check(r.status_code == 200 and parses["multipart"] == before["multipart"] + 1,
+      f"support: /upload {r.status_code}, body parsed once (the counter sees parsing)")
+_fp.MultiPartParser.parse, _fp.FormParser.parse = _real_mp, _real_form
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")
