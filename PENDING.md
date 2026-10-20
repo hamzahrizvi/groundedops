@@ -196,7 +196,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
 | D-20261019-13 | The office page's whole-manual baseline still reads the first answer while every other reader reads the mean | approved, queued | Dev builds it |
-| D-20261020-04 | The marker gives a half answer full marks once and scores one clarifying answer three ways | built, waiting for the check | the pre-ship check |
+| D-20261020-04 | The marker gives a half answer full marks once and scores one clarifying answer three ways | ready to merge | merges once Security clears it |
 | D-20261020-05 | Security item D-20261020-05, details in the office | waiting for CEO | your yes |
 | D-20261020-06 | Security item D-20261020-06, details in the office | waiting for CEO | your yes |
 | D-20261020-07 | Security item D-20261020-07, details in the office | approved, queued | Dev builds it |
