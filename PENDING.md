@@ -175,10 +175,13 @@ Cases that lost one point (partial instead of correct in one or two repeats):
 MyConnect does not change because two of MyCheckr's three documents are already filed
 under `biometrics_general`, which every biometrics product searches. The third, the
 ICU API, was never retrieved.
-**Open, needs your yes:** file the NV200S manuals (`NV200S Range User Manual-v1.pdf`,
-`NV200 Spectral SSP Manual v.1.pdf`) under NV4000 on live. That is one click on the
-NV4000 card in Documents. Live data was not changed. The MyConnect retag measured no
-better; leave it, or click "Not related".
+**Applied on live 2026-10-20 (CEO's go):** both NV200S manuals (`NV200S Range User
+Manual-v1.pdf`, `NV200 Spectral SSP Manual v.1.pdf`) are now filed under NV4000 as well,
+in the index and the catalogue (NV4000 chats search 835 sections, up from 145). Backup:
+`eval_runs/20261020_scope_links/live_backup_before_nv4000`. The running backend's
+keyword index is cached by chunk count, so the keyword half of retrieval picks this up at
+the next backend restart (`run.cmd`); the semantic half already does. The MyConnect retag
+measured no better; leave it, or click "Not related".
 
 ## 2026-10-08 - the agent office (branch experimental/agent-org-phase1)
 
