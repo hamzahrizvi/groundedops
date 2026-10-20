@@ -1544,12 +1544,15 @@ function openItem(id){
   const explain = el("button", "btn", "Explain this to me"); explain.type = "button";
   explain.addEventListener("click", () => { pop.close(); openChat(`Explain "${title}" to me in plain words: what it is, why it matters to customers, where it stands, and what you recommend I do.`, true); });
   const row = pendingRow(id);
+  // Any open item can be ticked off by hand, e.g. work finished outside the office (tools/ceo_inbox.py "done").
+  const open = it.stage && !["merged", "rejected", "reverted", "done"].includes(it.stage);
+  const choices = need.kind === "approve" ? [["approve", "Approve", "btn go"], ["defer", "Not now", "btn"], ["done", "Mark it done", "btn"]]
+    : need.kind === "action" ? [["done", "Mark it done", "btn go"]] : open ? [["done", "Mark it done", "btn"]] : null;
   if(row) nodes.push(el("p", "sent", `You sent "${CHOICE[row.choice] || row.choice}" at ${fmtTime(new Date(row.at))}. The office applies it at its next hourly check.`));
-  else if(need.kind === "approve" || need.kind === "action"){
+  else if(choices){
     const f = el("label", "field"), ta = el("textarea"); ta.id = "popNote"; ta.rows = 2; ta.placeholder = "Anything the product owner should know (optional)";
     f.htmlFor = "popNote"; f.append(el("span", "small", "Add a note"), ta); nodes.push(f);
     const acts = el("div", "actions"), msg = el("p", "small", "");
-    const choices = need.kind === "approve" ? [["approve", "Approve", "btn go"], ["defer", "Not now", "btn"]] : [["done", "Mark it done", "btn go"]];
     for(const [choice, label, cls] of choices){ const b = el("button", cls, label); b.type = "button";
       b.addEventListener("click", async () => {
         acts.querySelectorAll("button").forEach(x => x.disabled = true); msg.className = "small"; msg.textContent = "Sending…";
@@ -1558,7 +1561,7 @@ function openItem(id){
       }); acts.append(b); }
     acts.append(explain); nodes.push(acts, msg);
   } else nodes.push(el("p", "small", "Nothing to decide here. It moves on by itself."));
-  if(row || need.kind === "info" || !need.kind){ const a = el("div", "actions"); a.append(explain); nodes.push(a); }
+  if(row || !choices){ const a = el("div", "actions"); a.append(explain); nodes.push(a); }
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
