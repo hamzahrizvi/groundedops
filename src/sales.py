@@ -214,11 +214,46 @@ _PRICE = re.compile(
     r"|\bquot(?:e|es|ations?)\b|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will|for|per)\b", re.I)
 
 
+# A price word beside a technical ask is not a price question (D-20261020-02,
+# blind set 20261019f): "can i use a cheap amazon fire tablet as the remote"
+# is a yes/no the manual answers ("Amazon devices are not supported"), and
+# "how much is it and does it work with the new notes" asks two things. Both
+# got the sales reply. A question deflects only when the price is ALL it
+# asks: no clause of it is a non-commercial question. A clause whose only
+# money word was "a cheap X" or a "£20" counts only as a yes/no ask, and not
+# "is there / do you / can you", which ask the catalogue or the sales team.
+_CLAUSE_SPLIT = re.compile(r"[?.!;,\n]+|\b(?:and|but|also)\b", re.I)
+_ADJ_PRICE = re.compile(
+    r"\b(?:cheap|cheaper|inexpensive|expensive|low[\s-]cost)\s+(?=[\w£$€])", re.I)
+_AMOUNT = re.compile(r"[£$€]\s*\d[\d,.]*")
+_ASKS = re.compile(
+    r"^\s*(?:can|could|will|would|does|do|did|is|are|should|may|must"
+    r"|what|whats|what's|which|how|where|why|when|who)\b", re.I)
+_YES_NO = re.compile(
+    r"^\s*(?:can|could|will|would|does|do|is|are|should)\s+(?!there\b|you\b)", re.I)
+
+
+def _asks_something_else(q: str) -> bool:
+    """True when some clause of q is a question that is not commercial."""
+    for clause in _CLAUSE_SPLIT.split(q or ""):
+        stripped = _ADJ_PRICE.sub("", _AMOUNT.sub("", clause))
+        if _COMMERCIAL.search(stripped):
+            continue
+        if stripped != clause:
+            if _YES_NO.search(stripped):
+                return True
+        elif _ASKS.search(clause):
+            return True
+    return False
+
+
 def is_price_question(q: str) -> bool:
-    """A commercial question that asks what something costs: deflected
-    before retrieval. Other commercial questions search first."""
+    """A commercial question that asks only what something costs: deflected
+    before retrieval. Other commercial questions, and a price word beside a
+    technical ask, search first."""
     q = q or ""
-    return is_commercial_question(q) and bool(_PRICE.search(q))
+    return (is_commercial_question(q) and bool(_PRICE.search(q))
+            and not _asks_something_else(q))
 
 
 # ── spec index ────────────────────────────────────────────────────────────
