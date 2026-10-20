@@ -195,7 +195,7 @@ def test_local_mode_with_the_switch_off_refuses_and_sends_nothing_out():
 
 def test_deep_health_is_private_but_plain_health_is_public():
     """D-20261010-24: from outside, ?deep=1 is a 404 and spends no provider
-    call; from the box, the LAN, the docker bridge or with a bearer token
+    call; from the box, the LAN, the docker bridge or with a staff-tier bearer token (a website member token is a 404, D-20261010-33)
     it answers in full, PUBLIC_ONLY included. Plain /health stays public."""
     from unittest.mock import patch
     import requests
@@ -220,6 +220,9 @@ def test_deep_health_is_private_but_plain_health_is_public():
             assert c.get(url, headers=ext).status_code == 404, url
         assert c.get("/health?deep=1",
                      headers={**ext, "authorization": "Bearer bad.token"}).status_code == 404
+        member = quota.issue_token("m1", "member")                 # a website customer's token
+        assert c.get("/health?deep=1",
+                     headers={**ext, "authorization": "Bearer " + member}).status_code == 404
         pub = TestClient(main.app, client=("198.51.100.4", 50000))  # no proxy, public socket
         assert pub.get("/health?deep=1").status_code == 404
         r = c.get("/health", headers=ext)
@@ -231,9 +234,14 @@ def test_deep_health_is_private_but_plain_health_is_public():
             assert full(r), (host, r.status_code)
         assert calls, "the local deep probe must still contact the provider"
 
-        tok = quota.issue_token("uptime-monitor")
+        tok = quota.issue_token("uptime-monitor", "staff")
         r = c.get("/health?deep=1", headers={**ext, "authorization": "Bearer " + tok})
         assert full(r), r.status_code
+        from types import SimpleNamespace
+        req = lambda t: SimpleNamespace(headers={"authorization": "Bearer " + t})
+        assert main._bearer_ok(req(member)) and main._bearer_ok(req(tok))
+        assert main._bearer_ok(req(tok), min_tier="staff")
+        assert not main._bearer_ok(req(member), min_tier="staff")
 
         with patch.object(main, "PUBLIC_ONLY", True):
             r = TestClient(main.app, client=("127.0.0.1", 50000)).get("/health?deep=1")
