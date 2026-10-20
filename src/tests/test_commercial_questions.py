@@ -81,6 +81,33 @@ def test_only_a_price_question_deflects_before_the_search():
         assert sales.is_price_question(q), q
 
 
+def test_a_price_word_beside_a_technical_ask_searches_first():
+    """D-20261020-02 (blind set 20261019f): a yes/no about a requirement is
+    technical with "cheap" in it, and "how much is it and does it work with
+    X" asks two things. Both got the sales reply before any search."""
+    for q in ("can i use a cheap amazon fire tablet as the remote for cashgenic?",
+              "how much is it and does it work with the new notes",
+              "will a cheap class 4 sd card work in the nv4000",
+              "are cheap 75mm tickets ok in the bv30?",
+              "whats the part number and price so i can order one",
+              "how much would it cost, and will it take the new £20",
+              "how much does the nv9 cost and what voltage does it need"):
+        assert not sales.is_price_question(q), q
+    # ...and a question that asks only the price still deflects.
+    for q in ("what is the price for 50 NV9s",
+              "how much is a spare part for the bezel",
+              "how much is it?",
+              "what's the cheapest validator",
+              "is there a cheaper alternative to the NV9",
+              "is the nv9 expensive?",
+              "hi, what's the price of an nv9? thanks",
+              "is the NV200 in stock and how much is it",
+              "can I get a quote and how long is the lead time",
+              "do you sell cheap tickets",
+              "can you do a cheaper price for 20"):
+        assert sales.is_price_question(q), q
+
+
 def test_catalogue_navigation_is_not_commercial():
     """"which products run on 24V" IS answerable from the documents and must
     keep going to the catalogue route, not the deflect."""
