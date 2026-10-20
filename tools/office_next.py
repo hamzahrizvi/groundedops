@@ -211,7 +211,10 @@ def needed(ops, lane):
     has not looked for work in LANE_ONE_LATE (the CEO, 2026-10-19: most of their wake-ups found nothing)."""
     if lane == 1:
         return True, "lane 1 always runs"
-    busy = sorted({c.get("lane") for c in claims(ops).values() if c.get("lane") not in (lane, None, "hand")})
+    held = claims(ops).values()
+    if any(c.get("lane") == lane for c in held):   # a leftover claim of this lane's last run: run, so take() drops it (else it blocks every lane until STALE)
+        return True, f"lane {lane} holds a leftover claim"
+    busy = sorted({c.get("lane") for c in held if c.get("lane") not in (lane, None, "hand")})
     if busy:
         return True, (f"lane {busy[0]} is busy" if len(busy) == 1 else "lanes " + " and ".join(map(str, busy)) + " are busy")
     seen = _mtime(os.path.join(ops, "state", "lane-1-seen"))
@@ -615,6 +618,9 @@ def selftest():
         os.makedirs(os.path.join(ops, *CLAIMS), exist_ok=True)
         w("state/claims/dev-D-1.json", json.dumps({"lane": 1, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 1 is busy") and needed(ops, 3)[0]
+        w("state/claims/dev-D-2.json", json.dumps({"lane": 2, "at": "x", "line": "RUN dev"}))
+        assert needed(ops, 2) == (True, "lane 2 holds a leftover claim"), "own leftover claim: lane must run to drop it"
+        os.remove(os.path.join(ops, "state", "claims", "dev-D-2.json"))
         os.remove(os.path.join(ops, "state", "claims", "dev-D-1.json"))
         w("state/every", "120"); w("state/lane-1-worked")
         got = take(ops, ops, 11, 38, resets, now, 1)
