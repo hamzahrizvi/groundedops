@@ -1843,7 +1843,8 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
         out = sales.answer(q, _fs._load(), idx, _cat.catalog(),
                            scoped=not unscoped,
                            named_products=_named,
-                           product_names=_names)
+                           product_names=_names,
+                           scope_product=scope_key if _is_product_scope(scope_key) else None)
         # The overview needs one shared word, so "a good pub near your
         # office" matched MyCheckr on "good". It is given only when the
         # question is about something our products do; the model decides
