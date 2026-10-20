@@ -3,7 +3,7 @@
   python tools/lab_lock.py python tools/test_marker_quotes.py
 
 An answer that copies a sentence from another page of the case's own manual gets that page shown to the
-marker; a page nobody copies, and another product's manual, are not shown; a case with no copy says "none".
+marker; a page nobody copies, and another product's manual, are not shown; a case with no copy says "none". The key-fact cap and the one clarify rule (D-20261020-04) are in the prompt.
 """
 import json
 import os
@@ -48,6 +48,8 @@ def main():
         assert "p3" not in quoted and "Other Manual" not in quoted and "Prod Manual.pdf p1" not in quoted, quoted
         assert P1 in cited, "cited page missing"
         assert "mark the verdict first" in out and "Where pages of the product's own manual disagree" in out
+        assert "leaves out any one of them scores at most 2" in out and 'Verdict "clarified" always scores 3' in out, out
+        assert "whether or not a product is selected in the chat" in out
         assert prompt("c2").split("MANUAL PAGES THE ANSWERS QUOTE", 1)[1].split("The reference is an extract", 1)[0].rstrip().endswith(": none")
     print("selftest ok")
 
