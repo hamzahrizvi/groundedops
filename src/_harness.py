@@ -292,7 +292,8 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
          ranked_ids[:keep_n]),
      complete_procedures=lambda chunks, *a, **k: chunks,
      cited_pages=lambda chunks, *a, **k: [],
-     _invalidate_bm25_cache=lambda: None)
+     _invalidate_bm25_cache=lambda: None,
+     EXCLUDED_SOURCES=["icu_network_api", "icu_age_result_quick_guide"])
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
 # faked: more_context.py depends on it to tell new material from a reworded

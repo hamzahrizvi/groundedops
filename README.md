@@ -458,7 +458,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `FAQ_CANDIDATE_FLOOR` | `0.70` | Cosine floor to offer a candidate |
 | `FAQ_CANDIDATE_LEX_FLOOR` | `0.70` | Lexical floor to offer a candidate |
 | `FAQ_CANDIDATE_MARGIN` | `0.12` | Drop candidates far below the best match |
-| `EXCLUDED_SOURCES` | `icu_network_api` | Internal docs hidden from answering and download |
+| `EXCLUDED_SOURCES` | `icu_network_api,icu_age_result_quick_guide` | Internal docs hidden from answering and download |
 | `CONTEXT_FLOOR_RATIO` | `0.5` | Relative score floor for context chunks |
 | `CORPUS_DIR` | `corpus` | Folder ingested by `/ingest/reload_folder` |
 | `FRONTEND_DIST` | `frontend/dist` | Built UI to serve; API-only if absent |
