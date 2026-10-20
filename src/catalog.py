@@ -473,6 +473,11 @@ def scope_links(chunks, named_in, min_share: float = 0.10, min_hits: int = 5) ->
     """
     names = {p["key"]: p["name"] for c in catalog()["categories"] for p in c["products"]
              if not is_shared_product(p["key"])}
+    # A "<category>_general" document is already searched in every product
+    # of that category (retrieval_db._matches_scope), so filing it again adds
+    # nothing: two of MyCheckr's three documents were, and widening MyConnect
+    # measured as no change.
+    shared = {p["key"]: f'{c["key"]}_general' for c in catalog()["categories"] for p in c["products"]}
     total: dict[str, int] = {}
     hits: dict[tuple[str, str], int] = {}
     filed: dict[str, dict[str, tuple[list[str], str]]] = {}   # product -> source -> (keys, category)
@@ -490,7 +495,8 @@ def scope_links(chunks, named_in, min_share: float = 0.10, min_hits: int = 5) ->
     out = []
     for (p, o), n in hits.items():
         missing = [{"source": s, "category": cat, "keys": keys + [p]}
-                   for s, (keys, cat) in sorted(filed.get(o, {}).items()) if p not in keys]
+                   for s, (keys, cat) in sorted(filed.get(o, {}).items())
+                   if p not in keys and shared[p] not in keys]
         if n >= min_hits and n / total[p] >= min_share and missing:
             out.append({"product": p, "product_name": names[p], "other": o, "other_name": names[o],
                         "hits": n, "chunks": total[p], "sources": missing})

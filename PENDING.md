@@ -132,6 +132,54 @@ dated section below).
 
 ---
 
+## 2026-10-20 - products that contain other products: the console now suggests the retag
+
+**Built.** `catalog.scope_links` and `GET /admin/scope_suggestions` count, for each
+product, how many sections of its manuals name another catalogue product
+(`main._products_named_in`). A product is suggested when the other product appears
+in at least 10% of its sections and at least 5, and when some of the other product's
+documents are not yet searched in its chats. Documents filed under the product, or
+shared to its category as `<category>_general`, count as searched already. The
+Documents view shows a card: "<Product>'s manual names <Other> in N of M sections —
+also search <Other>'s manuals in <Product> chats?". "Also search them" calls
+`/admin/reassign_source` for each listed document, keeping its current products and
+adding this one. "Not related" hides the card, in that browser only. The scan runs
+again when the document list changes, so the card also shows up after an upload.
+Test: `src/tests/test_scope_links.py`. The scan takes about 4 s over 1,918 chunks.
+Over the bank manuals it suggests:
+- NV4000 -> NV200S (42/145)
+- MyConnect -> MyCheckr (38/108; only the ICU API is left once the shared documents are excluded)
+- CashGenic -> SMART Coin System (15/105; already filed on live)
+
+It leaves out the SSP protocol manual's 20/690 coin-system mentions and
+NV9 Spectral -> NV9USB+ (9/113, 8%).
+
+**Measured on a data copy** (`eval_runs/20261020_scope_links`; 61 cases: 38 NV4000
+and 23 MyConnect from the bank plus blind sets 3-6 and NV4000; 3 repeats per arm; each
+repeat graded blind with both arms together; DeepSeek V4 Flash):
+
+| | before | widened |
+|---|---|---|
+| NV4000 | 74.9%, 8 wrong | **80.1%, 6 wrong** |
+| MyConnect | 79.2%, 7 wrong | 79.2%, 7 wrong |
+| all | 76.5%, 15 wrong | 79.8%, 13 wrong |
+
+Prompt tokens rose about 3% (2,525 -> 2,605); latency did not move. NV4000 cases that
+gained:
+- N4-05 PSU, N4-10 coldest temperature, N4-13 84mm notes into the recycler, N4-18
+  dataset from SD, C20261020-29 payout jam: refusals or partial answers became correct.
+
+Cases that lost one point (partial instead of correct in one or two repeats):
+- N4-16 flash code, N4-22 IF17, B6-33.
+
+MyConnect does not change because two of MyCheckr's three documents are already filed
+under `biometrics_general`, which every biometrics product searches. The third, the
+ICU API, was never retrieved.
+**Open, needs your yes:** file the NV200S manuals (`NV200S Range User Manual-v1.pdf`,
+`NV200 Spectral SSP Manual v.1.pdf`) under NV4000 on live. That is one click on the
+NV4000 card in Documents. Live data was not changed. The MyConnect retag measured no
+better; leave it, or click "Not related".
+
 ## 2026-10-08 - the agent office (branch experimental/agent-org-phase1)
 
 Scheduled Claude departments now test, triage, build and report weekly; the
