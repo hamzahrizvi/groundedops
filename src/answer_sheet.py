@@ -12,8 +12,8 @@ import json
 import math
 import re
 
-_NUM = re.compile(r"(?<![A-Za-z0-9.,])([-+−]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?")
-_HEX = re.compile(r"0x[0-9a-fA-F]+")
+_NUM = re.compile(r"(?:(?<![A-Za-z0-9.,])|(?<=\d[xX]))([-+−]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?")
+_HEX = re.compile(r"(?<![A-Za-z0-9])0x[0-9a-fA-F]+")
 _UNIT = re.compile(r"\s*([A-Za-zµ°%]+)")
 _ALIAS = {"amps": "a", "amp": "a", "volts": "v", "volt": "v"}
 _SCALE = {"ma": ("a", 1e-3), "mv": ("v", 1e-3), "mw": ("w", 1e-3), "kw": ("w", 1e3), "g": ("kg", 1e-3)}
@@ -77,6 +77,11 @@ def parse_sheet(raw):
     return d if isinstance(d, dict) and isinstance(d.get("rows"), list) else None
 
 
+def _items(v):
+    it = v.get("items") or []
+    return [it] if isinstance(it, str) else list(it)
+
+
 def _pick(rows, prod, item, cond=None):
     for r in rows:
         if _key(r["product"]) == _key(prod) and _key(r["item"]) == _key(item) \
@@ -109,9 +114,9 @@ def _compare(v, rows, products):
         win = [p for p, n in nums.items() if n == best]
         return (win[0] if len(win) == 1 else "same"), nums, ""
     if kind == "within":
-        p = v.get("product") or products[0]
+        p = v.get("product") or (products[0] if products else "")
         qs = {}
-        for it in list(v.get("items", [])) + [v.get("limit")]:
+        for it in _items(v) + [v.get("limit")]:
             r = get(it, p)
             q = r and _quantity(r["value"])
             if not q:
@@ -131,7 +136,8 @@ def _compare(v, rows, products):
         per = {}
         for p in products:
             r = get(v.get("item"), p)
-            per[p] = ((r.get("answer") or "").lower() or None) if r else None
+            ans = _key(r.get("answer")) if r else ""
+            per[p] = ans if ans in ("yes", "no") else None
             if per[p] is None:
                 return nf(p)
         vals = set(per.values())
@@ -149,7 +155,8 @@ def _compare(v, rows, products):
 
 def check(sheet, passages, products=None, shared=()):
     passages = {str(k): v for k, v in passages.items()}
-    rows_in = sheet.get("rows", [])
+    # model output: skip rows that are not dicts naming a product and an item
+    rows_in = [r for r in sheet.get("rows") or [] if isinstance(r, dict) and r.get("product") and r.get("item")]
     products = products or sheet.get("products") or list(dict.fromkeys(r["product"] for r in rows_in))
     shared = {_key(s) for s in shared}
     kept, dropped = [], []
@@ -189,8 +196,8 @@ def check(sheet, passages, products=None, shared=()):
             conflicts.append({"product": g[0]["product"], "item": g[0]["item"],
                               "condition": g[0].get("condition"), "values": vals})
     verdicts = []
-    for v in sheet.get("verdicts", []):
-        items = {_key(i) for i in [v.get("item"), v.get("limit")] + list(v.get("items", [])) if i}
+    for v in [v for v in sheet.get("verdicts") or [] if isinstance(v, dict)]:
+        items = {_key(i) for i in [v.get("item"), v.get("limit")] + _items(v) if i}
         mine = [r for r in kept if _key(r["item"]) in items
                 and (not v.get("condition") or _key(v["condition"]) in _key(r.get("condition")))]
         if any((_key(r["product"]), _key(r["item"]), _key(r.get("condition"))) in bad for r in mine):

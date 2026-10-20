@@ -129,6 +129,19 @@ def test_C20261019f_03_device_section():
     assert len(a.check({"rows": [ok, pin]}, ps)["rows"]) == 2
 
 
+def test_model_output_edge_cases():
+    assert a._numbers("100x50 mm") == [100.0, 50.0] and a._numbers("0x50") == []
+    v = a.check({"rows": ["junk", {"value": "1"}],
+                 "verdicts": ["junk", {"kind": "within", "items": "x", "limit": "y"}]}, {})
+    assert v["rows"] == [] and v["verdicts"][0]["verdict"] is None
+    ps = {"a": P("yes", "p"), "b": P("yes", "q")}
+    rows = [R("p", "i", "yes", "a", answer="Yes."), R("q", "i", "yes", "b", answer="yes")]
+    each = {"rows": rows, "verdicts": [{"kind": "each", "item": "i"}]}
+    assert a.check(each, ps)["verdicts"][0]["verdict"] == "Yes"
+    rows[1]["answer"] = "unclear"
+    assert a.check(each, ps)["verdicts"][0]["note"] == "not found for q"
+
+
 def test_parse_sheet_fallback():
     for bad in ("", "not json", "[]", '{"rows": 3}'):
         assert a.parse_sheet(bad) is None
