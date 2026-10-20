@@ -24,6 +24,7 @@ Always, in every phase:
   `OPS/inbox/dev/*.gate*` are off limits too (not even a listing of their
   `sib_*`): reading either fails the item. The product owner's reasons carry
   what you need.
+- If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
 - Stop and write `OPS/inbox/dev/<id>.md` with `Status: BLOCKED` instead of
   guessing when the work needs credentials, an outside service, a reindex,
   an .exe rebuild, or a decision that belongs to the CEO, or when a test
