@@ -59,3 +59,20 @@ def test_failed_rebuild_rolls_back_previous_collection():
                 assert "produced no chunks" in str(exc)
 
     assert restored == [snapshot]
+
+
+def test_from_store_with_only_refuses_before_rebuilding():
+    for extra in ([], ["--dry-run"]):
+        argv = ["reindex.py", "--from-store", "--only", "NV9*"] + extra
+        with patch.object(sys, "argv", argv),              patch.object(reindex, "from_store") as from_store,              patch.object(reindex, "rebuild") as rebuild:
+            assert reindex.main() == 2
+        rebuild.assert_not_called()
+        from_store.assert_not_called()
+
+
+def test_from_store_without_only_still_rebuilds():
+    target = {"source": "a.pdf", "path": "a.pdf", "chunks": 1,
+              "category": "c", "product": "p", "filed": True}
+    with patch.object(sys, "argv", ["reindex.py", "--from-store"]),          patch.object(reindex, "from_store", return_value=[target]),          patch.object(reindex, "rebuild") as rebuild:
+        assert reindex.main() == 0
+    rebuild.assert_called_once_with([target], False)
