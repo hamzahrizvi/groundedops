@@ -200,7 +200,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
 | D-20261019-08 | Security item D-20261019-08, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261020-01 | A CashGenic chat can read the coin unit's manual the kit manual points to | waiting for CEO | your yes |
-| D-20261020-02 | A technical yes/no with a price word in it gets the sales brush-off | built, waiting for the check | the pre-ship check |
+| D-20261020-02 | A technical yes/no with a price word in it gets the sales brush-off | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
