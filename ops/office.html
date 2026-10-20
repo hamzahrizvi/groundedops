@@ -1546,10 +1546,12 @@ function openItem(id){
   const row = pendingRow(id);
   // Any open item can be ticked off by hand, e.g. work finished outside the office (tools/ceo_inbox.py "done").
   const open = it.stage && !["merged", "rejected", "reverted", "done"].includes(it.stage);
-  const choices = need.kind === "approve" ? [["approve", "Approve", "btn go"], ["defer", "Not now", "btn"], ["done", "Mark it done", "btn"]]
-    : need.kind === "action" ? [["done", "Mark it done", "btn go"]] : open ? [["done", "Mark it done", "btn"]] : null;
-  if(row) nodes.push(el("p", "sent", `You sent "${CHOICE[row.choice] || row.choice}" at ${fmtTime(new Date(row.at))}. The office applies it at its next hourly check.`));
-  else if(choices){
+  // A pending choice no longer hides the others: the office applies rows oldest first, so a newer one lands after it.
+  const choices = (need.kind === "approve" ? [["approve", "Approve", "btn go"], ["defer", "Not now", "btn"], ["done", "Mark it done", "btn"]]
+    : need.kind === "action" ? [["done", "Mark it done", "btn go"]] : open ? [["done", "Mark it done", "btn"]] : [])
+    .filter(([c]) => !row || c !== row.choice);
+  if(row) nodes.push(el("p", "sent", `You sent "${CHOICE[row.choice] || row.choice}" at ${fmtTime(new Date(row.at))}. The office applies it at the start of its next run.${choices.length ? " Changed your mind? Send another below; the newer one wins." : ""}`));
+  if(choices.length){
     const f = el("label", "field"), ta = el("textarea"); ta.id = "popNote"; ta.rows = 2; ta.placeholder = "Anything the product owner should know (optional)";
     f.htmlFor = "popNote"; f.append(el("span", "small", "Add a note"), ta); nodes.push(f);
     const acts = el("div", "actions"), msg = el("p", "small", "");
@@ -1560,8 +1562,8 @@ function openItem(id){
         catch(e){ msg.className = "oops"; msg.textContent = writeError(e); acts.querySelectorAll("button").forEach(x => x.disabled = false); }
       }); acts.append(b); }
     acts.append(explain); nodes.push(acts, msg);
-  } else nodes.push(el("p", "small", "Nothing to decide here. It moves on by itself."));
-  if(row || !choices){ const a = el("div", "actions"); a.append(explain); nodes.push(a); }
+  } else if(!row) nodes.push(el("p", "small", "Nothing to decide here. It moves on by itself."));
+  if(!choices.length){ const a = el("div", "actions"); a.append(explain); nodes.push(a); }
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
@@ -2443,7 +2445,7 @@ function screenFor(id){
   if(id === "ceo"){ head(`WAITING FOR YOU (${waiting.length})`);
     waiting.slice(0, 6).forEach(x => {
       const title = x.title || x.id, more = ["More", () => openItem(x.id), "btn"];
-      line("- " + title, "", x.kind === "approve" ? [["Approve", send(x.id, "approve", title), "btn go"], ["Not now", send(x.id, "defer", title), "btn"], more]
+      line("- " + title, "", x.kind === "approve" ? [["Approve", send(x.id, "approve", title), "btn go"], ["Not now", send(x.id, "defer", title), "btn"], ["Done", send(x.id, "done", title), "btn"], more]
                           : x.kind === "action" ? [["Mark it done", send(x.id, "done", title), "btn go"], more] : [more]);
     });
     if(!live.db && waiting.length) line("not connected: open the live office to decide", "dim"); }
