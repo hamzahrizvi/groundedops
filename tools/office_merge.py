@@ -37,9 +37,11 @@ def git(cwd, *args):
 
 
 def in_the_way(branch, target):
-    """Uncommitted files in the target checkout that the branch also changes: the merge never goes over them."""
+    """Uncommitted files in the target checkout that the branch also changes: the merge never goes over them.
+    Untracked ones count too: git refuses a merge that adds a path an untracked file holds, and a rebase cannot
+    fix that (D-20261021-11 went back three times over a draft left untracked in the main checkout)."""
     changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
-    dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=no")[1].splitlines()}
+    dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=all")[1].splitlines()}
     return sorted(changed & dirty)
 
 
@@ -79,6 +81,8 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
                        f"(the CEO's standing instruction, 2026-10-08).")
     if rc:
         git(target, "merge", "--abort")
+        if "would be overwritten by merge" in out + err:   # a local file in the way, not a conflict: a rebase cannot help
+            return f"WAIT files in {target} are in the way of the merge: {(out + chr(10) + err).strip()[:300]}"
         files = sorted(set(re.findall(r"(?:Merge conflict in|CONFLICT \([^)]*\):.*? in) (\S+)", out + "\n" + err)))
         send_back(did, ops, into, branch, files)
         return f"FAILED merge conflict into {into} in {files or 'files git did not name'}; sent back to Dev for a rebase"
@@ -153,6 +157,10 @@ def selftest():
         assert os.path.exists(os.path.join(ops, "inbox", "security", "review-D-20261008-94.md.1")), "Security reviews the rebase again"
         assert any("Verdict: SENT BACK" in open(p).read() for p in glob.glob(os.path.join(ops, "decisions", "*.md")))
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
+        w(os.path.join(repo, "c.py"), "def (\n")                                        # the file the branch adds, left untracked
+        r = merge("D-20261008-93", ops, repo, repo)
+        assert r.startswith("WAIT uncommitted") and "c.py" in r and "D-20261008-93.gate" in os.listdir(dev), r   # not sent back
+        os.remove(os.path.join(repo, "c.py"))
         assert merge("D-20261008-93", ops, repo, repo).startswith("FAILED"), "broken code is reverted"
         assert not os.path.exists(os.path.join(repo, "c.py")), "the revert removed it"
         w(os.path.join(ops, "inbox", "security", "review-D-20261008-92.md"), "Verdict: BLOCK\n")
