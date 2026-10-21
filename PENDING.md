@@ -195,12 +195,12 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | waiting for CEO | your yes |
-| D-20261012-07 | Security item D-20261012-07, details in the office | approved, queued | Dev builds it |
+| D-20261012-07 | Security item D-20261012-07, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
 | D-20261020-05 | Security item D-20261020-05, details in the office | waiting for CEO | your yes |
 | D-20261020-06 | Security item D-20261020-06, details in the office | waiting for CEO | your yes |
 | D-20261020-11 | Run the two answer checks at the same time, and the CPU checker on a faster engine: every answer about 1.4 s quicker, no answer changes | approved, queued | Dev builds it |
-| D-20261020-12 | Measure the 49-rule answer prompt against a short one before any more rules are added | approved, queued | Dev builds it |
+| D-20261020-12 | Measure the 49-rule answer prompt against a short one before any more rules are added | built, waiting for the check | the pre-ship check |
 | D-20261021-01 | Figure answers, part B: wire the checked sheet into the answer path | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -1874,6 +1874,7 @@ Gaps, with the evidence:
 - per-answer passage slots to stop two-product and multi-document declines (an asked-figure slot, then a named-document slot, then a document-coverage slot by product tags, plus a figures-first comparison rule), D-20261015-06 in three gated rounds on runs/20261015b: open set +1.6, +8.3 and +11.7 points with nothing made wrong in round 3, but 5, 4 and 4 of the same 10 hidden comparison and multi-document siblings stayed under 2 (H20261015-CMP-04, H20261014-MD-1, -MD-4, -MD-5 failed rounds 2 and 3 alike); 2026-10-16. (D-20261015-06, product owner)
 - reading the whole manual first in a product chat (performance mode on by default): two readings of the same 40 hidden questions on aa404fe against two of normal mode, marks equal within the 11-point noise (86.7/85.0 vs 85.8/88.3), cost per answer 1.4-2.2x, p90 time about double (18.5-21 s vs 10.6-10.9 s); runs/20261018-d01-table.json; 2026-10-18. (D-20261018-04, product owner) (D-20261018-04, product owner)
 - Live website search via DeepSeek Search/Fetch when the manuals are silent; R&D checked 118 declined questions against the whole public site, 0 answered; the API cannot be held to one domain; 2026-10-19. (D-20261019-11, product owner)
+- Adopting the eight-rule answer prompt in place of the 49-rule one (ANSWER_PROMPT=short): measured 21 Oct on runs/20261021, 40 fresh questions x 3 repeats, same model and marker. Marks 92.8% -> 90.8% (level, inside the 4.0 noise, gate PASS); wrong answers 3 -> 2 of 120; safe declines 5 -> 11 of 120; cost per answer +19% as logged and +17% priced uncached, because each extra refusal triggers a whole-manual re-read that outweighs the 1,840 tokens the short block saves. The long prompt stays; a dropped rule may be re-tested one at a time with a measured case. (D-20261020-12, product owner)
 
 ### Waiting on things outside the code
 
