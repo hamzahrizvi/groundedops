@@ -242,10 +242,15 @@ elif phase == "baseline":
                          "model": MODELS["baseline"], "at": time.strftime("%Y-%m-%d")}
     rows = state.setdefault("baseline", {})
     # ponytail: up to 6 calls in flight can pass the cap; the provider's own limit is the hard stop
-    with ThreadPoolExecutor(6) as ex:
-        for cid, out in ex.map(run, [c for c in cases if c["id"] not in rows]):
-            if out is None: continue
-            rows[cid] = out; spent += out["usd"]; save(); print("baseline", cid, out["wall"], flush=True)
+    # one case per distinct manual set goes first, so the rest hit the provider's prompt cache (about 1/50 the
+    # input price) instead of six cold copies of the same 100-180k-token manual at once (runs/20261020b)
+    todo, seen = [c for c in cases if c["id"] not in rows], set()
+    warm = [c for c in todo if (k := (c.get("product"), tuple(c.get("compare_with") or ()))) not in seen and not seen.add(k)]
+    for batch in (warm, [c for c in todo if c not in warm]):
+        with ThreadPoolExecutor(6) as ex:
+            for cid, out in ex.map(run, batch):
+                if out is None: continue
+                rows[cid] = out; spent += out["usd"]; save(); print("baseline", cid, out["wall"], flush=True)
     if any(c["id"] not in rows for c in cases): stop()   # the rest waits for the cap to rise; a rerun resumes
 
 elif phase in ("grade", "prompt"):
