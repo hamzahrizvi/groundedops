@@ -20,6 +20,7 @@ import json
 import os
 import py_compile
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -42,7 +43,20 @@ def in_the_way(branch, target):
     fix that (D-20261021-11 went back three times over a draft left untracked in the main checkout)."""
     changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
     dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=all")[1].splitlines()}
-    return sorted(changed & dirty)
+    return sorted((changed & dirty) - set(strays(branch, target)))   # a stray copy is moved aside by the merge, not waited on
+
+
+def strays(branch, target):
+    """Untracked files in the way that hold, byte for byte, a version of that path the branch commits: git keeps
+    that content, so the merge can move the copy aside (D-20261021-11: a department's draft left in the checkout)."""
+    changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
+    untracked = {line[3:] for line in git(target, "status", "--porcelain", "--untracked-files=all")[1].splitlines() if line.startswith("?? ")}
+    out = []
+    for p in sorted(changed & untracked):
+        h = git(target, "hash-object", "--", p)[1]
+        if any(git(target, "rev-parse", f"{c}:{p}")[1] == h for c in git(target, "log", "--format=%H", f"HEAD..{branch}", "--", p)[1].split()):
+            out.append(p)
+    return out
 
 
 def merge(did, ops, repo, office=OFFICE):
@@ -74,6 +88,12 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
     changed, busy = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines()), in_the_way(branch, target)
     if busy:
         return f"WAIT uncommitted changes in {target} touch {busy}"
+    moved = strays(branch, target)
+    for p in moved:   # kept in OPS as well, though the branch's own commit holds the same bytes
+        dst = os.path.join(ops, "state", "displaced", time.strftime("%Y%m%d-%H%M%S-") + p.replace("/", "__"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.move(os.path.join(target, p), dst)
+    note = f" (moved aside untracked copies of {moved} to OPS/state/displaced)" if moved else ""
     into = git(target, "rev-parse", "--abbrev-ref", "HEAD")[1]
     title = decisions(ops).get(did, {}).get("title", "")
     rc, out, err = git(target, "merge", "--no-ff", branch, "-m",
@@ -94,8 +114,8 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
             bad.append(f)
     if bad:
         git(target, "revert", "-m", "1", "--no-edit", "HEAD")
-        return f"FAILED {bad} do not compile after the merge; the merge was reverted"
-    return f"MERGED {branch} into {into} ({target})"
+        return f"FAILED {bad} do not compile after the merge; the merge was reverted{note}"
+    return f"MERGED {branch} into {into} ({target}){note}"
 
 
 def send_back(did, ops, into, branch, files):
@@ -157,11 +177,15 @@ def selftest():
         assert os.path.exists(os.path.join(ops, "inbox", "security", "review-D-20261008-94.md.1")), "Security reviews the rebase again"
         assert any("Verdict: SENT BACK" in open(p).read() for p in glob.glob(os.path.join(ops, "decisions", "*.md")))
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
-        w(os.path.join(repo, "c.py"), "def (\n")                                        # the file the branch adds, left untracked
+        w(os.path.join(repo, "c.py"), "someone else's c\n")                              # the path the branch adds, other bytes
         r = merge("D-20261008-93", ops, repo, repo)
         assert r.startswith("WAIT uncommitted") and "c.py" in r and "D-20261008-93.gate" in os.listdir(dev), r   # not sent back
-        os.remove(os.path.join(repo, "c.py"))
-        assert merge("D-20261008-93", ops, repo, repo).startswith("FAILED"), "broken code is reverted"
+        assert in_the_way("agents/dev-D-20261008-93", repo) == ["c.py"] and strays("agents/dev-D-20261008-93", repo) == []
+        w(os.path.join(repo, "c.py"), "def (\n")                                        # the branch's own bytes, left untracked
+        assert in_the_way("agents/dev-D-20261008-93", repo) == [], "a stray copy never holds up the plan"
+        r = merge("D-20261008-93", ops, repo, repo)
+        assert r.startswith("FAILED") and "moved aside" in r, "broken code is reverted; the stray copy was moved, not merged over"
+        assert [open(p).read() for p in glob.glob(os.path.join(ops, "state", "displaced", "*-c.py"))] == ["def (\n"]
         assert not os.path.exists(os.path.join(repo, "c.py")), "the revert removed it"
         w(os.path.join(ops, "inbox", "security", "review-D-20261008-92.md"), "Verdict: BLOCK\n")
         assert merge("D-20261008-92", ops, repo, repo) == "WAIT Security blocked it"

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
-from office_next import claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan, work_mode  # noqa: E402
+from office_next import blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan, work_mode  # noqa: E402
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
@@ -99,7 +99,7 @@ def ready_for_new_product(ops):
             " never tested and ask the product owner to point Customer's next run at it.")
 
 
-def alerts(ops, cards, stalled, off):
+def alerts(ops, cards, stalled, off, repo=None):
     """What is stopping office work right now, for the page's pop-up: [{id, title, why, suggest, actions}].
     The id is stable while the problem lasts, so the page pops each problem once. Each action is a button:
     {label, choice, id, note} sent to tools/ceo_inbox.py, or {label, tab} to open a tab. A failed gate is not
@@ -150,6 +150,14 @@ def alerts(ops, cards, stalled, off):
                         "actions": [{**po_now, "label": "Retry the check now"}]})
     items = decisions(ops)
     for i, c in cards.items():
+        if repo and c["stage"] == "ready to merge":   # the merge never goes over someone's edit, so a person must clear it
+            where, busy = blocking(i, repo)
+            if busy:
+                out.append({"id": f"merge-{i}-" + "-".join(busy), "title": f"“{c['title']}” is ready but cannot be merged",
+                            "why": f"It changes {', '.join(busy)}, and {where} has uncommitted or untracked edits to "
+                                   f"{'that file' if len(busy) == 1 else 'those files'}. The office never merges over someone's work.",
+                            "suggest": "Commit, move or undo those edits (ask Claude in any session if you do not know whose they are);"
+                                       " the next lane check then merges it.", "actions": []})
         if c["stage"] == "blocked":
             out.append({"id": "blocked-" + i, "title": f"Dev is stuck on \u201c{c['title']}\u201d",
                         "why": "Dev handed it back blocked: it could not finish the work as ordered.",
@@ -226,7 +234,7 @@ def brief(ops, repo, now=None, usage=None):
             "minutes_old": None if old == float("inf") else round(old)}, "running": running,
             "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
             "lanes": [{"lane": n, "cron": lane_cron_now(ops, n)} for n in (1, 2, 3)],   # the page's countdown to each lane's next check
-            "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops)),
+            "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops), repo),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
 
@@ -287,6 +295,16 @@ def selftest():
         assert "reassign" not in a["wo-D-20261009-02"], "Dev must not write the hidden test for its own fix"
         assert "reassign" in a["wo-D-20261010-10"], a
         assert ready_for_new_product(ops) == "", "a bad run: keep fixing"
+        real, ready = blocking, {"D-1": {"title": "Fix", "stage": "ready to merge", "assigned": "dev"}}
+        try:   # a ready merge held up by someone's edit pops up; a clear one does not
+            globals()["blocking"] = lambda i, repo: ("C:/repo", ["docs/x.md"])
+            m = [x for x in alerts(ops, ready, "", False, "C:/repo") if x["id"].startswith("merge-")]
+            assert len(m) == 1 and "docs/x.md" in m[0]["why"] and "C:/repo" in m[0]["why"], m
+            assert not [x for x in alerts(ops, ready, "", False) if x["id"].startswith("merge-")], "no repo: no git check"
+            globals()["blocking"] = lambda i, repo: ("C:/repo", [])
+            assert not [x for x in alerts(ops, ready, "", False, "C:/repo") if x["id"].startswith("merge-")]
+        finally:
+            globals()["blocking"] = real
     print("selftest ok")
 
 
