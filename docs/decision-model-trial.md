@@ -1,8 +1,8 @@
 # Decision-model trial: does a Jev-style model beat the answerability gate?
 
 Measured 2026-10-20. Measurement only. Nothing in the live app was changed.
-Reproduce with `tools/decision_model_trial.py` (phases `chunks`, `decide`,
-`report`; see its docstring).
+The throwaway script that produced these numbers was deleted after the
+trial; it is in commit 7838764 (`tools/decision_model_trial.py`).
 
 ## Verdict
 
