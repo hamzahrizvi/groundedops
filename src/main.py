@@ -3371,6 +3371,15 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         }
 
     _sales = _sales_answer(payload.q, resolved_query, payload.product)
+    # A spec-table answer covers one dimension at most, so several asks go to
+    # retrieval instead (D-20261009-09): "bv30 vs nv9usb+ - which draws less
+    # running current and which has better MCBF?" got one shared "Maximum
+    # Current Sink" row and nothing on either ask (C20261019c-03). Deflects,
+    # declines and unknown models still answer here.
+    if _sales and _asks and _sales.get("kind") in (
+            "comparison_table", "comparison_specs", "spec_match"):
+        ptrace.mark("sales", f"{_sales.get('kind')} skipped: {len(_asks)} asks")
+        _sales = None
     if _sales:
         _role = {"deflected": "sales", "declined": "rejected",
                  "unknown_model": "clarify"}.get(_sales.get("kind"), "catalogue")

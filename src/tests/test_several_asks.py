@@ -209,6 +209,25 @@ def test_a_single_ask_is_ranked_once_as_before():
     assert "192.168.7.1" in out["answer"]
 
 
+def test_a_spec_table_does_not_answer_several_asks():
+    """C20261019c-03: the catalogue's one shared row answered neither ask."""
+    table = {"answer": "| | **A** | **B** |\n| Current Sink | 50mA | 50mA |",
+             "kind": "comparison_specs", "products": ["a", "b"]}
+    same = lambda qq, rs, *a, **k: [dict(rs[0])]
+    with patch.object(main, "_sales_answer", return_value=table):
+        out, gen, _, _ = _ask("what ip do i hit for the api, and how long does "
+                              "the bearer token last?", "The API is at 192.168.7.1.",
+                              same)
+        assert gen.called and "Current Sink" not in out["answer"], out["answer"]
+        out, gen, _, _ = _ask("what ip do i hit for the api?", "unused", same)
+        assert not gen.called and "Current Sink" in out["answer"], "one ask: unchanged"
+    declined = {"answer": "We do not make that model.", "kind": "unknown_model"}
+    with patch.object(main, "_sales_answer", return_value=declined):
+        out, gen, _, _ = _ask("is there a bv30 xl, and what notes does it take?",
+                              "unused", same)
+        assert not gen.called and out["answer"] == declined["answer"]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
