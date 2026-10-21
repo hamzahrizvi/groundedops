@@ -456,7 +456,7 @@ def _selftest():
     a = agg(fs)
     assert a["bot_pct"] == 55.6 and a["bot_lo"] < 55.6 < a["bot_hi"] and a["wrong"] == 1, a
     assert run_facts(os.path.join(ops, "runs", "20261012"))[0]["bot"] == 3                   # one repeat: the int, as before
-    assert MERGE.match("Merge branch 'agents/dev-D-20261008-16' (D-20261008-16: Adding manuals needs (no) sign-in)")[2]         == "Adding manuals needs (no) sign-in"
+    assert MERGE.match("Merge branch 'agents/dev-D-20261008-16' (D-20261008-16: A title with (nested) parens)")[2]         == "A title with (nested) parens"
     # D-20261010-22: retention on a throwaway OPS
     ops2 = tempfile.mkdtemp()
     one = {"cases": [{"id": "C-0", "q": "q0", "product": "nv200s", "type": "lookup", "category": "simple"}]}
