@@ -463,9 +463,7 @@ def source_file(filename: str):
     basename — without that, "../../etc/passwd" escapes the directory.
     Excluded (internal) sources are refused so they can't be downloaded.
 
-    NOTE: deliberately unauthenticated so the public widget can offer
-    downloads, which means ANY retained document is publicly retrievable by
-    name. Gate this per tenant/product before real customer traffic.
+    Gated in main.py (_TOKEN_GATED_PREFIXES): a proxied caller needs a widget member token; a direct caller does not (D-20261010-32).
     """
     import docstore
     # docstore._safe_basename, not os.path.basename: basename() is

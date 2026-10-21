@@ -511,14 +511,20 @@ table lookup, fixed with a narrow lexical-containment rescue.
 
 - **No authentication.** Admin endpoints are gated only by a shared
   password header. Not suitable for untrusted public traffic as-is.
-- **`/source_file` is unauthenticated** so the public widget can offer
-  downloads, which means any ingested document is retrievable by
-  filename. `EXCLUDED_SOURCES` keeps internal documents out; gate it per
-  product before exposing this publicly.
+- **`/source_file` and `/figure` trust direct callers.** A caller that
+  comes through a proxy or tunnel needs a widget member token
+  (`_TOKEN_GATED_PREFIXES` in `main.py`); a caller that reaches the server
+  directly is not asked for one, so a server listening on a public address
+  serves any retained document by filename. `EXCLUDED_SOURCES` keeps
+  internal documents out.
 - **No rate limiting** on `/query`. A public endpoint backed by a metered
   API key needs it.
-- **No data-retention or PII policy** around `logs.json`, which is also
-  append-only and unbounded — add rotation.
+- **Retention covers visitor text only.** `retention.py` deletes visitor
+  text after `RETENTION_DAYS` (default 90; 0 turns it off): the question
+  log (`logs.jsonl`, rotated at 10 MB, and its rotated files),
+  conversations, feedback votes, unsent enquiries and the
+  unanswered-question list. Documents, the FAQ, the index, staff accounts
+  and quota counts are not touched.
 - **Single tenant.** One collection, one FAQ, one configuration per
   instance, and `runtime_config` is process-wide. Two products can be
   scoped within an instance; two customers cannot share one.
