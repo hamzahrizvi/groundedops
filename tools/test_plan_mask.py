@@ -45,7 +45,8 @@ def main():
         assert "| D-20261020-01 | Security item D-20261020-01, details in the office |" in t, t
         assert "| D-20261020-03 | Comparisons use the wrong manual |" in t, t
         assert "| rnd/20261020-speed | Answers are slow |" in t, t
-        for leak in ("confidential", "customer emails", "private file", "Later triage"):
+        assert "| rnd/20261020 | Security item rnd/20261020, details in the office |" in t, t
+        for leak in ("confidential", "customer emails", "private file", "Later triage", "-leak"):
             assert leak not in t, leak
         assert [d for d, _ in rejected_lines(ops)] == ["D-20261020-04"], rejected_lines(ops)
     print("selftest ok")

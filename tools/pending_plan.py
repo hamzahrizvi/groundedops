@@ -39,7 +39,8 @@ def masked(c):
     """Security's items, and any marked `- Sensitive: yes`, by where they came from, never by name: the repository is public."""
     if not c.get("security"):
         return c
-    cid = c["id"][:len("security/") + 8] if c["id"].startswith("security/") else c["id"]
+    dept, _, name = c["id"].partition("/")   # an inbox card's file name can name the hole: keep only its date
+    cid = f"{dept}/{name[:8]}" if name else dept
     return {**c, "id": cid, "title": f"Security item {cid}, details in the office"}
 
 
