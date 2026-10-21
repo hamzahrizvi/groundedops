@@ -22,6 +22,9 @@
 # --repeats N); the before is then always re-asked on the base code and repeat k's before rides into repeat k's
 # after. GATE_RULE (default mean) rules on the mean of the N answers, keeping the one-answer reading under "r1";
 # GATE_RULE=r1 rules on one answer and adds "mean_of_repeats". REPEATS=1 is the one-answer gate of before.
+# ADAPTIVE (default 1, the CEO 2026-10-21; blind_eval.py ADAPTIVE): repeat 1 of every arm is answered and graded first;
+# repeats 2..N re-ask, on each side on its own, only the questions that side did not score 3 on in repeat 1, and copy
+# the rest. ADAPTIVE=0 asks every question N times on both sides, as before.
 # GATE_BASE=<commit>: the branch's base (also for the office-only check), so a merged branch can be re-gated.
 # It counts only when it names a commit that both the branch and the product checkout (GO_DATA) contain; any other
 # value is logged and the full gate runs from the merge-base (D-20261019-06). gate.json then carries "gate_base".
@@ -29,6 +32,7 @@
 set -u
 T0=$(date +%s)
 REPEATS="${REPEATS:-3}"; REP=(); [ "$REPEATS" -gt 1 ] && REP=(--repeats "$REPEATS")
+export ADAPTIVE="${ADAPTIVE:-1}"
 RULE=(); [ "${GATE_RULE:-mean}" = mean ] && RULE=(--rule mean)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
@@ -78,21 +82,31 @@ SAME=0; grep -q '"same": true' "$OUT/models.json" && SAME=1
 if [ $SAME = 0 ] || [ $# -gt 0 ] || [ "$REPEATS" -gt 1 ]; then
   log "$OUT/gate.log" "$PY" "$REPO/tools/gate_rerun.py" --base-code "$DEV" "$BASE"
 fi
+# repeats 2..N of one phase, each its own process as blind_eval.py --repeats runs them; the pause after a system
+# repeat lets a lab job waiting on lab_lock's 20 s poll in (back to back, gates held the weekly off for an hour, 2026-10-19)
+more() { local f="$1"; shift; local k
+  for k in $(seq 2 "$REPEATS"); do log "$f" env REPEAT="$k" "$@"; case " $* " in *" system "*) sleep "${LAB_PAUSE:-25}";; esac; done; }
 BEFORE="$RUN/cases_state.json"
 if [ $SAME = 0 ] || [ "$REPEATS" -gt 1 ]; then   # N answers cannot be averaged from one stored answer
   mkdir -p "$OUT/before"; cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/before/"
   log "$OUT/gate.log" "$PY" "$BE" "$OUT/before" reset "${REP[@]}"
-  log "$OUT/gate.log" env GO_CODE="$BASE/src" "$PY" -X faulthandler "$BE" "$OUT/before" system normal "${REP[@]}"
+  log "$OUT/gate.log" env GO_CODE="$BASE/src" "$PY" -X faulthandler "$BE" "$OUT/before" system normal   # repeat 1; the rest below
   BEFORE="$OUT/before/cases_state.json"   # not graded here: the after pass marks it as sys_before
 fi
 
 cp "$RUN/cases.json" "$RUN/cases_state.json" "$OUT/after/"
 if [ -d "$RUN/manuals" ]; then mkdir -p "$OUT/after/manuals" && cp "$RUN/manuals/"* "$OUT/after/manuals/"; fi   # D-20261010-23
 log "$OUT/gate.log" "$PY" "$BE" "$OUT/after" reset "${REP[@]}"
+log "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal
 # the before answers (stored, or re-asked above) ride along as sys_before, graded with after in one pass (D-20261010-05)
-for k in $(seq 1 "$REPEATS"); do log "$OUT/gate.log" ride "$(rp "$(dirname "$BEFORE")" "$k")" "$(rp "$OUT/after" "$k")"; done
-log "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal "${REP[@]}"
-log "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade "${REP[@]}"
+log "$OUT/gate.log" ride "$(rp "$(dirname "$BEFORE")" 1)" "$(rp "$OUT/after" 1)"
+log "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade
+if [ "$REPEATS" -gt 1 ]; then   # ADAPTIVE: each side asks again only what it missed in repeat 1 (its mark in after/)
+  more "$OUT/gate.log" env GO_CODE="$BASE/src" ADAPTIVE_FROM="$OUT/after/cases_state.json:sys_before" "$PY" -X faulthandler "$BE" "$OUT/before" system normal
+  more "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal
+  for k in $(seq 2 "$REPEATS"); do log "$OUT/gate.log" ride "$(rp "$(dirname "$BEFORE")" "$k")" "$(rp "$OUT/after" "$k")"; done
+  more "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade
+fi
 
 SIBS=()
 if [ $# -gt 0 ]; then
@@ -102,10 +116,16 @@ fi
 for s in "$@"; do
   d="$HELD/sib_$(basename "$s" .json)"; mkdir -p "$d/base"; cp "$s" "$d/cases.json"; cp "$s" "$d/base/cases.json"
   # D-20261016-10: each sibling is asked on the base code too, and both answers are marked in one pass
-  log "$HELD/gate.log" env GO_CODE="$BASE/src" SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d/base" system normal "${REP[@]}"
-  log "$HELD/gate.log" env SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d" system normal "${REP[@]}"
-  for k in $(seq 1 "$REPEATS"); do log "$HELD/gate.log" ride "$(rp "$d/base" "$k")" "$(rp "$d" "$k")"; done
-  log "$HELD/gate.log" env SYSTEMS=sys_normal,sys_before "$PY" "$BE" "$d" grade "${REP[@]}"
+  log "$HELD/gate.log" env GO_CODE="$BASE/src" SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d/base" system normal
+  log "$HELD/gate.log" env SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d" system normal
+  log "$HELD/gate.log" ride "$(rp "$d/base" 1)" "$(rp "$d" 1)"
+  log "$HELD/gate.log" env SYSTEMS=sys_normal,sys_before "$PY" "$BE" "$d" grade
+  if [ "$REPEATS" -gt 1 ]; then   # ADAPTIVE, as for the open set: each side asks again only what it missed
+    more "$HELD/gate.log" env GO_CODE="$BASE/src" SYSTEMS=sys_normal ADAPTIVE_FROM="$d/cases_state.json:sys_before" "$PY" -X faulthandler "$BE" "$d/base" system normal
+    more "$HELD/gate.log" env SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d" system normal
+    for k in $(seq 2 "$REPEATS"); do log "$HELD/gate.log" ride "$(rp "$d/base" "$k")" "$(rp "$d" "$k")"; done
+    more "$HELD/gate.log" env SYSTEMS=sys_normal,sys_before "$PY" "$BE" "$d" grade
+  fi
   SIBS+=("$d/cases_state.json")
 done
 

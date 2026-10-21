@@ -28,7 +28,10 @@ Env:
            usd 0). The baseline asks only questions no repeat scored 3 on; the rest get a "not_asked" row, graded
            3 / "not_asked" without a call (a whole manual cannot beat a right answer). Order: system, grade
            (SYSTEMS=sys_normal), the later repeats and their grades, baseline, grade (sys_normal,baseline)
-           -- tools/weekly_blind.sh.
+           -- tools/weekly_blind.sh. Grading repeat k>1 marks only the arms asked again; an arm copied from repeat 1
+           (its rows, or a whole arm like the baseline) keeps repeat 1's mark, and a case with none asked costs no call.
+  ADAPTIVE_FROM=<state.json>:<arm>  where repeat k>1's "right first time" is read (default: this run's repeat 1,
+           sys_normal). A gate's before is graded inside the after state as sys_before (tools/gate_run.sh).
   SET      case file stem (default "cases"; old runs used "blind6" etc.)
   SYSTEMS  graded systems, comma list (default "sys_normal,baseline")
   GO_CODE  src/ whose code is imported (default: this repo's src) -- point at a
@@ -103,9 +106,9 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
 phase = sys.argv[2]
 R1 = os.path.join(RUN, f"{SET}_state.json")
 ADAPT = os.environ.get("ADAPTIVE") == "1"
-def right(st):
-    """Ids whose bot answer scored 3 in that state's grades."""
-    return {cid for cid, g in st.get("grades", {}).items() if (g.get("sys_normal") or {}).get("score") == 3}
+def right(st, arm="sys_normal"):
+    """Ids whose answer on that arm scored 3 in that state's grades."""
+    return {cid for cid, g in st.get("grades", {}).items() if (g.get(arm) or {}).get("score") == 3}
 NOT_ASKED = {"score": 3, "verdict": "not_asked"}
 if phase in ("grade", "remark") and REPEAT > 1 and os.path.exists(R1):   # e.g. a weekly's one baseline answer
     _r1 = json.load(open(R1, encoding="utf-8"))
@@ -212,7 +215,8 @@ if phase == "system":
     llm._post = spy
     rows = state.setdefault(f"sys_{mode}", {})
     r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
-    done = right(r1) & set(r1.get(f"sys_{mode}", {}))
+    src, arm = os.environ["ADAPTIVE_FROM"].rsplit(":", 1) if os.environ.get("ADAPTIVE_FROM") else (R1, "sys_normal")
+    done = (right(json.load(open(src, encoding="utf-8")), arm) if r1 else set()) & set(r1.get(f"sys_{mode}", {}))
     for c in cases:
         if c["id"] in rows: continue
         if c["id"] in done:   # ADAPTIVE: right first time, so this repeat is the same answer at no cost
@@ -277,7 +281,14 @@ elif phase == "baseline":
     if any(c["id"] not in rows for c in cases): stop()   # the rest waits for the cap to rise; a rerun resumes
 
 elif phase in ("grade", "prompt"):
-    def asked(c): return [s for s in SYSTEMS if not state.get(s, {}).get(c["id"], {}).get("not_asked")]   # ADAPTIVE
+    r1g = json.load(open(R1, encoding="utf-8")).get("grades", {}) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
+    def skip(c, s):
+        """The mark an arm gets on this case without a grader call (ADAPTIVE), or None when it is graded."""
+        row = state.get(s, {}).get(c["id"], {})
+        if row.get("not_asked"): return NOT_ASKED
+        if (row.get("copied_from_r1") or s in state.get("copied_from_r1", [])) and s in r1g.get(c["id"], {}): return r1g[c["id"]][s]
+        return None
+    def asked(c): return [s for s in SYSTEMS if skip(c, s) is None]
     G = """You are grading {n} customer-support answers to the same question, written by {n} different systems. You do not know which system wrote which. Judge only substance against the reference; ignore formatting, length, citations, tone and any offer to contact support or list of suggested questions. Mark each answer on its own against the reference and the cited pages, never against the other answers: what another answer says must not raise or lower an answer's score.
 
 PRODUCT SELECTED IN THE CHAT: {product}
@@ -362,18 +373,17 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
             return c["id"], {"raw": raw, "usage": use}
         out = {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
-        return c["id"], {**clamp_refusal(c, out, o), **{s: NOT_ASKED for s in SYSTEMS if s not in o}}
+        return c["id"], {**clamp_refusal(c, out, o), **{s: skip(c, s) for s in SYSTEMS if s not in o}}
     grades, held = state.setdefault("grades", {}), False
-    if ADAPT:
-        r1g = (_r1 if REPEAT > 1 and os.path.exists(R1) else {}).get("grades", {})
-        for c in cases:
-            g0, cid = grades.get(c["id"]), c["id"]
-            if g0 is None and state.get("sys_normal", {}).get(cid, {}).get("copied_from_r1") and all(s in r1g.get(cid, {}) for s in SYSTEMS):
-                grades[cid] = {**{s: r1g[cid][s] for s in SYSTEMS}, "copied_from_r1": True,
-                               "usage": {"model": MODELS["grader"], "usd": 0, "at": time.strftime("%Y-%m-%d")}}
-            elif g0 and "raw" not in g0:   # a not_asked arm is marked without a call
-                g0.update({s: NOT_ASKED for s in SYSTEMS if s not in g0 and s not in asked(c)})
-        save()
+    for c in cases:   # arms marked without a call: copied from repeat 1, or not asked
+        g0, cid = grades.get(c["id"]), c["id"]
+        if not all(cid in state.get(s, {}) for s in SYSTEMS): continue
+        if g0 is None and not asked(c):
+            grades[cid] = {**{s: skip(c, s) for s in SYSTEMS}, "copied_from_r1": True,
+                           "usage": {"model": MODELS["grader"], "usd": 0, "at": time.strftime("%Y-%m-%d")}}
+        elif g0 and "raw" not in g0:
+            g0.update({s: skip(c, s) for s in SYSTEMS if s not in g0 and s not in asked(c)})
+    save()
     def todo(c):
         g0 = grades.get(c["id"])
         return g0 is None or "raw" in g0 or (ADAPT and any(s not in g0 for s in SYSTEMS))

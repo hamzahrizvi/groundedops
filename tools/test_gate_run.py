@@ -62,7 +62,7 @@ elif phase in ("system", "grade"):
 def main():
     tmp = tempfile.mkdtemp()
     env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-           "REPEATS": "1", "GATE_RULE": "r1"}
+           "REPEATS": "1", "GATE_RULE": "r1", "LAB_PAUSE": "0"}
     git = lambda cwd, *a: subprocess.run(["git", "-C", cwd, *a], env=env, check=True, capture_output=True)
     fwd = lambda p: p.replace("\\", "/")
 
@@ -134,9 +134,9 @@ def main():
     assert held["sys_normal"]["passes"] == [1] * 6 and held["sys_before"]["passes"] == [3] * 6, held
     assert gate("g4", "1", cap="1") == ("lab stopped at the cap", False)   # fails closed: no PASS without a measurement
     g, seen, out = gate("g7", "1", extra={"REPEATS": "2"})
-    assert seen == ["remark run", "models run", "reset before", "reset before #2", "system before", "system before #2",
-                    "reset after", "reset after #2", "system after", "system after #2",
-                    "grade after manuals", "grade after manuals #2"], seen
+    assert seen == ["remark run", "models run", "reset before", "reset before #2", "system before",   # repeat 1 graded
+                    "reset after", "reset after #2", "system after", "grade after manuals",            # first (ADAPTIVE),
+                    "system before #2", "system after #2", "grade after manuals #2"], seen             # then the rest
     assert g["verdict"] == "PASS" and g["mean_of_repeats"]["repeats"] == 2 and g["repeats"] == 1 and g["before"] == "re-asked", g
     r2 = json.load(open(os.path.join(out, "after", "cases_state.r2.json")))
     assert (r2["sys_before"]["c1"]["answer"], r2["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n"), r2
