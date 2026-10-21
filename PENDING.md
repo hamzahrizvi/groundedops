@@ -194,7 +194,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | built, waiting for the check | the pre-ship check |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | ready to merge | merges once Security clears it |
 | D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | waiting for CEO | your yes |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
 | D-20261020-05 | Security item D-20261020-05, details in the office | waiting for CEO | your yes |
