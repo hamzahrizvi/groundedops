@@ -231,6 +231,7 @@ if phase == "system":
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
                          "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
+                         "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
                          "at": time.strftime("%Y-%m-%d")}   # the day it was spent (tools/ops_costs.py)
         spent += rows[c["id"]]["usd"]
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
