@@ -23,6 +23,12 @@ Env:
            <SET>_state.json, repeat k>1 is <SET>_state.r<k>.json (D-20261018-02). Grading a repeat
            k>1 copies a SYSTEMS arm it lacks from repeat 1 (listed in "copied_from_r1"), so a weekly
            with one baseline answer grades every repeat beside the same baseline.
+  ADAPTIVE=1  the CEO, 2026-10-21: only questions not yet answered right cost more. Repeat k>1 asks only the
+           questions whose repeat-1 answer scored 3; the rest copy repeat 1's answer and grade (copied_from_r1,
+           usd 0). The baseline asks only questions no repeat scored 3 on; the rest get a "not_asked" row, graded
+           3 / "not_asked" without a call (a whole manual cannot beat a right answer). Order: system, grade
+           (SYSTEMS=sys_normal), the later repeats and their grades, baseline, grade (sys_normal,baseline)
+           -- tools/weekly_blind.sh.
   SET      case file stem (default "cases"; old runs used "blind6" etc.)
   SYSTEMS  graded systems, comma list (default "sys_normal,baseline")
   GO_CODE  src/ whose code is imported (default: this repo's src) -- point at a
@@ -96,6 +102,11 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
 
 phase = sys.argv[2]
 R1 = os.path.join(RUN, f"{SET}_state.json")
+ADAPT = os.environ.get("ADAPTIVE") == "1"
+def right(st):
+    """Ids whose bot answer scored 3 in that state's grades."""
+    return {cid for cid, g in st.get("grades", {}).items() if (g.get("sys_normal") or {}).get("score") == 3}
+NOT_ASKED = {"score": 3, "verdict": "not_asked"}
 if phase in ("grade", "remark") and REPEAT > 1 and os.path.exists(R1):   # e.g. a weekly's one baseline answer
     _r1 = json.load(open(R1, encoding="utf-8"))
     for _s in SYSTEMS:
@@ -200,8 +211,12 @@ if phase == "system":
         return r
     llm._post = spy
     rows = state.setdefault(f"sys_{mode}", {})
+    r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
+    done = right(r1) & set(r1.get(f"sys_{mode}", {}))
     for c in cases:
         if c["id"] in rows: continue
+        if c["id"] in done:   # ADAPTIVE: right first time, so this repeat is the same answer at no cost
+            rows[c["id"]] = {**r1[f"sys_{mode}"][c["id"]], "usd": 0, "calls": 0, "copied_from_r1": True}; save(); continue
         if capped(): stop()
         sid = f"{SET}-{uuid.uuid4()}"
         if c.get("turn1"):
@@ -241,6 +256,14 @@ elif phase == "baseline":
         return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": round(usd(u, MODELS["baseline"]), 6),
                          "model": MODELS["baseline"], "at": time.strftime("%Y-%m-%d")}
     rows = state.setdefault("baseline", {})
+    if ADAPT:   # the whole manual only for questions no repeat answered right
+        hit = right(state)
+        for f in os.listdir(RUN):
+            if re.fullmatch(re.escape(SET) + r"_state\.r\d+\.json", f): hit |= right(json.load(open(os.path.join(RUN, f), encoding="utf-8")))
+        for c in cases:
+            if c["id"] in hit and c["id"] not in rows:
+                rows[c["id"]] = {"answer": "", "not_asked": True, "wall": 0, "usd": 0, "model": "none", "at": time.strftime("%Y-%m-%d")}
+        save()
     # ponytail: up to 6 calls in flight can pass the cap; the provider's own limit is the hard stop
     # one case per distinct manual set goes first, so the rest hit the provider's prompt cache (about 1/50 the
     # input price) instead of six cold copies of the same 100-180k-token manual at once (runs/20261020b)
@@ -254,7 +277,7 @@ elif phase == "baseline":
     if any(c["id"] not in rows for c in cases): stop()   # the rest waits for the cap to rise; a rerun resumes
 
 elif phase in ("grade", "prompt"):
-    L = "ABCDEFG"[:len(SYSTEMS)]
+    def asked(c): return [s for s in SYSTEMS if not state.get(s, {}).get(c["id"], {}).get("not_asked")]   # ADAPTIVE
     G = """You are grading {n} customer-support answers to the same question, written by {n} different systems. You do not know which system wrote which. Judge only substance against the reference; ignore formatting, length, citations, tone and any offer to contact support or list of suggested questions. Mark each answer on its own against the reference and the cited pages, never against the other answers: what another answer says must not raise or lower an answer's score.
 
 PRODUCT SELECTED IN THE CHAT: {product}
@@ -302,16 +325,17 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         own = [p for m in (c.get("product"), *(c.get("compare_with") or ())) if m
                for p in manual_pages.get(m, []) if p not in (c.get("pages") or [])]
         got = []
-        for s in SYSTEMS:
+        for s in asked(c):
             a = runs8(state.get(s, {}).get(c["id"], {}).get("answer", ""))
             near = sorted(((len(a & page_runs(p)), p) for p in own), reverse=True)[:2]
             got += [p for n, p in near if n >= 3 and p not in got]
         text = "\n\n".join(ch for p in got for ch in pages[p])
         return "\n" + text[:QUOTE_CHARS] if text else "none"
     rng = random.Random(4)
-    order = {c["id"]: rng.sample(SYSTEMS, len(SYSTEMS)) for c in cases}
+    order = {c["id"]: rng.sample(asked(c), len(asked(c))) for c in cases}
     def prompt(c):
-        return G.format(n=len(SYSTEMS), product=c.get("product") or "none (unscoped chat)",
+        L = "ABCDEFG"[:len(order[c["id"]])]
+        return G.format(n=len(L), product=c.get("product") or "none (unscoped chat)",
                         turn1=f"EARLIER MESSAGE IN THIS CHAT: {c['turn1']}\n" if c.get("turn1") else "",
                         q=c["q"], type=c["type"], expected=c["expected"], pages=", ".join(c.get("pages") or []) or "n/a",
                         reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a", cited=cited(c), quoted=quoted(c),
@@ -327,7 +351,7 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         print(prompt(next(c for c in cases if c["id"] == sys.argv[3]))); sys.exit(0)
     def grade(c):
         if capped(): return c["id"], None
-        o = order[c["id"]]
+        o = order[c["id"]]; L = "ABCDEFG"[:len(o)]
         raw, u = chat(MODELS["grader"], [{"role": "user", "content": prompt(c)}], effort="medium")
         use = {"model": MODELS["grader"], "prompt_tokens": u.get("prompt_tokens", 0), "cached": cached(u),
                "completion_tokens": u.get("completion_tokens", 0), "usd": round(usd(u, MODELS["grader"]), 6),
@@ -338,14 +362,28 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
             return c["id"], {"raw": raw, "usage": use}
         out = {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
-        return c["id"], clamp_refusal(c, out, SYSTEMS)
+        return c["id"], {**clamp_refusal(c, out, o), **{s: NOT_ASKED for s in SYSTEMS if s not in o}}
     grades, held = state.setdefault("grades", {}), False
+    if ADAPT:
+        r1g = (_r1 if REPEAT > 1 and os.path.exists(R1) else {}).get("grades", {})
+        for c in cases:
+            g0, cid = grades.get(c["id"]), c["id"]
+            if g0 is None and state.get("sys_normal", {}).get(cid, {}).get("copied_from_r1") and all(s in r1g.get(cid, {}) for s in SYSTEMS):
+                grades[cid] = {**{s: r1g[cid][s] for s in SYSTEMS}, "copied_from_r1": True,
+                               "usage": {"model": MODELS["grader"], "usd": 0, "at": time.strftime("%Y-%m-%d")}}
+            elif g0 and "raw" not in g0:   # a not_asked arm is marked without a call
+                g0.update({s: NOT_ASKED for s in SYSTEMS if s not in g0 and s not in asked(c)})
+        save()
+    def todo(c):
+        g0 = grades.get(c["id"])
+        return g0 is None or "raw" in g0 or (ADAPT and any(s not in g0 for s in SYSTEMS))
     with ThreadPoolExecutor(6) as ex:   # ponytail: as in baseline, calls in flight can pass the cap
         # only cases every graded system answered: a vendor that missed one must not be marked on "(no answer yet)"
-        for cid, g in ex.map(grade, [c for c in cases if all(c["id"] in state.get(s, {}) for s in SYSTEMS)
-                                     and (c["id"] not in grades or "raw" in grades[c["id"]])]):
+        for cid, g in ex.map(grade, [c for c in cases if all(c["id"] in state.get(s, {}) for s in SYSTEMS) and todo(c)]):
             if g is None: held = True; continue
-            grades[cid] = g; spent += g["usage"]["usd"]; save(); print("graded", cid, g.get("best"), flush=True)
+            spent += g["usage"]["usd"]   # a case marked again with its new arm keeps the earlier call's cost
+            g["usage"]["usd"] = round(g["usage"]["usd"] + grades.get(cid, {}).get("usage", {}).get("usd", 0), 6)
+            grades[cid] = g; save(); print("graded", cid, g.get("best"), flush=True)
     if held:
         if REMARK:   # no half re-marked run: it keeps its old grades until the cap rises
             import shutil; shutil.copyfile(REMARK, OUT)
@@ -357,15 +395,15 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
     for s in SYSTEMS:
         sc = [grades[c["id"]][s]["score"] for c in ok]
         vd = [grades[c["id"]][s]["verdict"] for c in ok]
-        walls = [state[s][c["id"]]["wall"] for c in ok]
-        cost = [state[s][c["id"]]["usd"] for c in ok]
+        real = [state[s][c["id"]] for c in ok if not state[s][c["id"]].get("not_asked")]
+        walls, cost = [r["wall"] for r in real] or [0], [r["usd"] for r in real] or [0]
         summary[s] = {"pct_of_max": round(100 * sum(sc) / (3 * len(sc)), 1), "mean": round(st.mean(sc), 2),
                       "verdicts": {v: vd.count(v) for v in sorted(set(vd))},
                       "median_s": st.median(walls), "p90_s": sorted(walls)[int(.9 * len(walls))],
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
                                   for t in sorted({c['type'] for c in ok})}}
-    used = [g["usage"] for g in grades.values() if "usage" in g]   # grades from before 2026-10-10 logged none
+    used = [g["usage"] for g in grades.values() if "usage" in g and not g.get("copied_from_r1")]   # grades from before 2026-10-10 logged none
     summary["grader"] = {"model": used[-1]["model"] if used else "gpt-5", "calls": len(used),
                          "usd": round(sum(x["usd"] for x in used), 4)}
     bests = [grades[c["id"]].get("best") for c in ok]
