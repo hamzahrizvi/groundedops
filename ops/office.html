@@ -216,8 +216,12 @@ button{font:inherit;color:inherit}
 .trend .pvh{margin-top:0}
 .tverdict{margin:0 0 8px;font-size:15px}
 .tverdict .vpill{margin-right:8px;vertical-align:2px}
-#trChart{display:block;width:100%;height:230px;touch-action:pan-y;overflow:visible}
-#trChart text{font:12px var(--body);fill:var(--muted)}
+.trend .seg{margin-bottom:8px}
+.trwrap{display:flex;align-items:flex-start}
+.trscroll{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden}
+#trAxis{flex:none;width:52px;height:230px}
+#trChart{display:block;height:230px}
+#trChart text,#trAxis text{font:12px var(--body);fill:var(--muted)}
 #trChart .badge text{font:11px var(--display);fill:var(--accent-ink)}
 .tsteps{list-style:none;margin:8px 0 0;padding:0;font-size:14px;display:grid;gap:6px}
 .tsteps li{display:flex;gap:8px;align-items:baseline}
@@ -401,7 +405,9 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
           <div class="trend">
             <h3 class="pvh">Is the product getting better?</h3>
             <p class="tverdict" id="trVerdict"></p>
-            <svg id="trChart" role="img" aria-labelledby="trVerdict"></svg>
+            <div class="seg" role="group" aria-label="Time range"><span class="lbl">Show</span>
+              <button type="button" data-trange="7" aria-pressed="false">7 days</button><button type="button" data-trange="30" aria-pressed="false">30 days</button><button type="button" data-trange="0" aria-pressed="true">All</button></div>
+            <div class="trwrap" id="trWrap"><svg id="trAxis" aria-hidden="true"></svg><div class="trscroll" id="trScroll"><svg id="trChart" role="img" aria-labelledby="trVerdict"></svg></div></div>
             <p class="lnote" id="trNote">Adjusted for difficulty: every question type counts the same in every run, so a set heavy on hard questions does not look like a worse bot. The shaded band is where the true score probably sits, given how few questions one run asks (90%). A move inside the noise, which is never under 3 points, is the bot and the marker flickering, not a change. Numbered marks are fixes merged into the product.</p>
             <ul class="tsteps" id="trSteps"></ul>
           </div>
@@ -1081,25 +1087,35 @@ const pvTip = document.getElementById("pvTip");
 /* the adjusted trend (ops_pivot.py "trend"): one line, its noise band, and the fixes merged between runs */
 const SVGNS = "http://www.w3.org/2000/svg";
 const svgEl = (tag, attrs, parent) => { const e = document.createElementNS(SVGNS, tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(parent) parent.append(e); return e; };
+let trRange = 0; // days back from the latest run; 0 = all
+const runDate = r => new Date(+r.slice(0,4), +r.slice(4,6)-1, +r.slice(6,8));
 function renderTrend(P){
-  const T = P.trend || {points:[], steps:[], waiting:[], verdict:"The graph appears after the next product owner run."}, pts = T.points || [];
+  const T = P.trend || {points:[], steps:[], waiting:[], verdict:"The graph appears after the next product owner run."}, all = T.points || [];
+  const since = all.length ? runDate(all[all.length - 1].run) - trRange * 864e5 : 0;
+  let pts = trRange ? all.filter(p => runDate(p.run) > since) : all;
+  if(pts.length < 2) pts = all.slice(-2); // a range with one run still shows the last step
   const call = /^Better/.test(T.verdict) ? ["Better","ok"] : /^Worse/.test(T.verdict) ? ["Worse","bad"] : ["No change yet",""];
   const vp = document.createElement("span"); vp.className = "vpill " + call[1]; vp.textContent = call[0];
   document.getElementById("trVerdict").replaceChildren(vp, document.createTextNode(T.verdict.replace(/^[^:]*:\s*(.)/, (_, c) => c.toUpperCase())));
-  const svg = document.getElementById("trChart"), list = document.getElementById("trSteps");
-  svg.replaceChildren(); svg.style.display = pts.length < 2 ? "none" : "";
+  const svg = document.getElementById("trChart"), axis = document.getElementById("trAxis"), sc = document.getElementById("trScroll"), list = document.getElementById("trSteps");
+  for(const b of document.querySelectorAll("[data-trange]")) b.setAttribute("aria-pressed", String(+b.dataset.trange === trRange));
+  svg.replaceChildren(); axis.replaceChildren(); document.getElementById("trWrap").style.display = pts.length < 2 ? "none" : "";
   if(pts.length < 2){ list.replaceChildren(); return; }
-  const W = svg.clientWidth || 640, H = 230, L = 52, R = 46, Tp = 28, B = 30;
+  // the y axis sits in its own svg outside the scroller, so it stays put; runs are a fixed step apart and scroll sideways
+  const atEnd = sc.scrollLeft + sc.clientWidth >= sc.scrollWidth - 2;
+  const STEP = 100, L = 50, R = 50, H = 230, Tp = 28, B = 30, W = Math.max(sc.clientWidth || 588, L + R + STEP * (pts.length - 1));
   let lo = Math.floor(Math.min(...pts.map(p => p.lo)) / 10) * 10, hi = Math.ceil(Math.max(...pts.map(p => p.hi)) / 10) * 10;
   if(hi - lo < 20){ lo = Math.max(0, hi - 20); hi = lo + 20; }
   const x = i => L + (W - L - R) * i / (pts.length - 1), y = v => Tp + (H - Tp - B) * (hi - v) / (hi - lo);
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("width", W); svg.setAttribute("height", H);
+  axis.setAttribute("viewBox", `0 0 52 ${H}`);
   for(let v = lo; v <= hi; v += 10){
-    svgEl("line", {x1:L, x2:W - R, y1:y(v), y2:y(v), stroke:"var(--line)", "stroke-width":1}, svg);
-    svgEl("text", {x:L - 6, y:y(v) + 4, "text-anchor":"end"}, svg).textContent = v + "%";
+    svgEl("line", {x1:0, x2:W, y1:y(v), y2:y(v), stroke:"var(--line)", "stroke-width":1}, svg);
+    svgEl("text", {x:46, y:y(v) + 4, "text-anchor":"end"}, axis).textContent = v + "%";
   }
   // fixes, numbered, placed between the two runs they fall between, by time
-  const steps = T.steps || [];
+  const steps = (T.steps || []).filter(st => pts.some(p => p.run === st.from));
+  for(const st of T.steps || []) for(const f of st.fixes) f._n = 0;
   let k = 0;
   for(const st of steps){
     const i = pts.findIndex(p => p.run === st.from), a = pts[i], b = pts[i + 1];
@@ -1146,8 +1162,13 @@ function renderTrend(P){
   }));
   for(const f of T.waiting || []){ const li = document.createElement("li"), t = document.createElement("span"); t.textContent = `Merged since the last test run, not measured yet: ${f.title}.`; li.append(t); lis.push(li); }
   list.replaceChildren(...lis);
+  if(atEnd) sc.scrollLeft = sc.scrollWidth; // newest run in view unless the reader scrolled back
 }
 addEventListener("resize", () => { if(tab === "status") renderTrend(live.pivot || SAMPLE_PIVOT); });
+for(const b of document.querySelectorAll("[data-trange]")) b.addEventListener("click", () => {
+  trRange = +b.dataset.trange; renderTrend(live.pivot || SAMPLE_PIVOT);
+  const sc = document.getElementById("trScroll"); sc.scrollLeft = sc.scrollWidth;
+});
 
 function renderPivot(){
   const P = live.pivot || SAMPLE_PIVOT, M = METRICS[pv.metric], runs = (P.runs || []).slice(-8), last = runs[runs.length-1], prev = runs[runs.length-2];
