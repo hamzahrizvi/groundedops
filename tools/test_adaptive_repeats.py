@@ -6,7 +6,10 @@ Three questions, weekly_blind.sh's order: "good" is right first time, "late" onl
 1. repeats 2-3 ask only late and bad; good's later answers and grades are copied at no cost;
 2. the whole manual is asked once, only for bad; good and late get not_asked rows marked 3 without a grader call;
 3. bad's final mark is graded beside its baseline answer, and the cost of its first mark is kept;
-4. without ADAPTIVE every question is asked every time, as before.
+4. without ADAPTIVE every question is asked every time, as before;
+5. a gate (tools/gate_run.sh's order): "fixed" is wrong on the base code and right on the branch. Repeat 2 asks the
+   base side again only for what its repeat 1 missed (ADAPTIVE_FROM after/:sys_before) and the branch side only for
+   its own misses; grading repeat 2 marks only the arms asked again, copied arms and the baseline keep repeat 1's mark.
 """
 import json
 import os
@@ -34,7 +37,7 @@ STUB = {
         "CALLS = []\n"
         "def _traced_query(req, _x, attach=True):\n"
         "    CALLS.append((os.environ.get('REPEAT', '1'), req.q))\n"
-        "    return {'answer': req.q + ' r' + os.environ.get('REPEAT', '1')}\n"),
+        "    return {'answer': req.q + ' ' + os.environ.get('SIDE', '') + ' r' + os.environ.get('REPEAT', '1')}\n"),
 }
 
 
@@ -44,7 +47,7 @@ def fake_post(url, json=None, **_k):
         calls["grader"].append(text)
         labels = re.findall(r"ANSWER ([A-G]):\n(.*?)(?=\n\nANSWER [A-G]:|\n\nReply with JSON)", text, re.S)
         def mark(a):
-            ok = "good" in a or "BASE" in a or ("late" in a and " r1" not in a)
+            ok = "good" in a or "BASE" in a or ("late" in a and " r1" not in a) or ("fixed" in a and "branch" in a)
             return {"score": 3 if ok else 1, "verdict": "correct" if ok else "safe_decline"}
         content = __import__("json").dumps({**{k: mark(a) for k, a in labels}, "best": "tie", "why": "x"})
     else:
@@ -115,6 +118,31 @@ def main():
             be(run, "grade", repeat=k)
         assert len(bot) == 6 and len(calls["baseline"]) == 3 and len(calls["grader"]) == 6, (bot, calls)   # 4
         assert all(calls["grader"][i].count("\nANSWER ") == 2 for i in range(6))
+        os.environ["ADAPTIVE"] = "1"; bot.clear(); calls["grader"].clear()
+        cases.append({"id": "fixed", "q": "fixed", "type": "fact", "expected": "answered", "reference": "r", "product": "p"})
+        before, after = fresh("before"), fresh("after")
+        st = {"baseline": {c["id"]: {"answer": "BASE answer", "wall": 1, "usd": 0.001} for c in cases}}
+        for d in (before, after):
+            json.dump(st, open(os.path.join(d, "cases_state.json"), "w"))
+        def ride(k):   # gate_run.sh's ride: the before's answers into the after state as sys_before
+            a = state(after, k); a["sys_before"] = state(before, k)["sys_normal"]
+            json.dump(a, open(os.path.join(after, "cases_state.json" if k == 1 else f"cases_state.r{k}.json"), "w"))
+        G = "sys_normal,baseline,sys_before"
+        os.environ["SIDE"] = "base"; be(before, "system", "normal")
+        os.environ["SIDE"] = "branch"; be(after, "system", "normal"); ride(1); be(after, "grade", systems=G)
+        assert len(calls["grader"]) == 4 and all(t.count("\nANSWER ") == 3 for t in calls["grader"])
+        os.environ.update(SIDE="base", ADAPTIVE_FROM=os.path.join(after, "cases_state.json") + ":sys_before")
+        be(before, "system", "normal", repeat=2)
+        os.environ.pop("ADAPTIVE_FROM"); os.environ["SIDE"] = "branch"; be(after, "system", "normal", repeat=2)
+        assert sorted(q for k, q in bot if k == "2") == ["bad", "bad", "fixed", "late", "late"], bot   # base: late bad fixed
+        ride(2); be(after, "grade", repeat=2, systems=G)                                                # branch: late bad
+        r2, r1 = state(after, 2)["grades"], state(after)["grades"]
+        assert len(calls["grader"]) == 4 + 3, len(calls["grader"])                                     # good costs no call
+        assert r2["good"]["copied_from_r1"] and r2["good"]["sys_before"]["score"] == 3
+        assert r2["fixed"]["sys_normal"]["score"] == 3 and r2["fixed"]["sys_before"]["score"] == 1
+        assert r2["fixed"]["labels"] == {"A": "sys_before"}, r2["fixed"]                               # only the base side
+        assert r2["late"]["sys_normal"]["score"] == 3 == r2["late"]["sys_before"]["score"] and len(r2["late"]["labels"]) == 2
+        assert all(r2[c]["baseline"] == r1[c]["baseline"] for c in r2)                                # baseline: repeat 1's
         print("test_adaptive_repeats: OK")
     finally:
         os.chdir(HERE)
