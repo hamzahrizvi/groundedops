@@ -195,11 +195,11 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | approved, queued | Dev builds it |
-| D-20261017-11 | Measure how well the bot answers in other languages before the website claims any | approved, queued | Dev builds it |
+| D-20261017-11 | Measure how well the bot answers in other languages before the website claims any | built, waiting for the check | the pre-ship check |
 | D-20261021-09 | The website screenshots show a dummy phone number, a doubled greeting and an old refusal layout | waiting for CEO | your yes |
 | D-20261021-11 | Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts | blocked | the product owner decides |
 | D-20261021-19 | The installers pre-fetch the wrong embedder, with no pinned version | waiting for CEO | your yes |
-| D-20261021-20 | Security item D-20261021-20, details in the office | waiting for CEO | your yes |
+| D-20261021-20 | Security item D-20261021-20, details in the office | approved, queued | Dev builds it |
 | D-20261021-23 | Security item D-20261021-23, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -208,7 +208,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
 | security/20261019 | Security item security/20261019, details in the office | proposed | the product owner triages it |
 | security/20261020 | Security item security/20261020, details in the office | proposed | the product owner triages it |
-| security/20261021 | Security item security/20261021, details in the office | proposed | the product owner triages it |
 | D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
 | D-20261008-06 | Vague complaints get a checklist instead of one question | deferred | parked |
 | D-20261008-10 | Security item D-20261008-10, details in the office | deferred | parked |
