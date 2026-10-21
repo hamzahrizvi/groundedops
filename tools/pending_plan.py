@@ -6,7 +6,7 @@
 Rewrites one block between the office-plan markers near the top of PENDING.md: every open office
 item with its stage and next step, and what finished or was turned down in the last 30 days. Each
 "- For the rejected list: ..." line in a decision is added once to "Rejected - do not redo without
-new evidence". Then commits PENDING.md alone. Items that came from Security or are assigned to it show only as "Security item
+new evidence". Then commits PENDING.md alone. Items that came from Security, are assigned to it, or carry `- Sensitive: yes` show only as "Security item
 <id>, details in the office": the repository is public.
 
 PENDING.md is also edited by hand and by other sessions (its header, CLAUDE.md P1): when it has
@@ -36,10 +36,11 @@ NEXT = {"waiting for CEO": "your yes", "approved, queued": "Dev builds it", "sen
 
 
 def masked(c):
-    """Security's items by where they came from, never by name: the repository is public."""
+    """Security's items, and any marked `- Sensitive: yes`, by where they came from, never by name: the repository is public."""
     if not c.get("security"):
         return c
-    cid = c["id"][:len("security/") + 8] if c["id"].startswith("security/") else c["id"]
+    dept, _, name = c["id"].partition("/")   # an inbox card's file name can name the hole: keep only its date
+    cid = f"{dept}/{name[:8]}" if name else dept
     return {**c, "id": cid, "title": f"Security item {cid}, details in the office"}
 
 

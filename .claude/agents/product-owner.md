@@ -214,6 +214,7 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
    - Touches: <files or folders the work will change, comma-separated, e.g. src/policy.py, src/widget/>
    - Priority: <n, 1 = do first>
    - Still broken: <evidence it is not already fixed>   (approved Dev work only; never beside a CEO box)
+   - Sensitive: yes            (only when the title would tell an outsider where a hole is: data exposure, access, confidential content; whoever found it. The public plan then shows "Security item <id>")
    - [ ] CEO approved          (NEEDS CEO only)
    ```
    then why (two lines), cost and risk, and for approved items the work

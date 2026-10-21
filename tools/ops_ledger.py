@@ -26,7 +26,7 @@ from collections import defaultdict
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
 CAPACITY = {"dev": 3, "po": 8}          # ponytail: everyone else 2; tune when a board shows real overload
 NOTES = re.compile(r"(-weekly|-market|-done)\.md$|^review-")   # -done: a department's reply on its work order, not a new finding
-SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Assigned:\s*security\b|Source:\s*inbox[/\\]security[/\\])")   # any entry of a decision
+SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Assigned:\s*security\b|Source:\s*inbox[/\\]security[/\\]|Sensitive:\s*yes\b)")   # Security's, or marked sensitive by the product owner (D-20261020-07)
 PAST, FUTURE = {"merged", "rejected", "reverted", "done"}, {"proposed", "waiting for CEO", "deferred"}
 
 
@@ -181,8 +181,9 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
         dept, name = os.path.basename(os.path.dirname(path)), os.path.basename(path)
         if dept in ("dev", "ceo") or NOTES.search(name) or f"inbox/{dept}/{name}" in cited:   # ceo: notes, answered in the report
             continue
-        m = re.search(r"(?m)^#\s+(.+)$", _read(path))
-        cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept, "security": dept == "security",
+        text = _read(path)
+        m = re.search(r"(?m)^#\s+(.+)$", text)
+        cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept, "security": dept == "security" or bool(SECURITY.search(text)),
                       "assigned": "po", "stage": "proposed", "lane": "future", "decided": name[:8]})
 
     boards = {}
