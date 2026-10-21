@@ -42,6 +42,7 @@ import json
 import logging
 import os
 import shutil
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -120,4 +121,14 @@ def save(path: str, data, *, label: str = "", indent: int = 2,
         json.dump(data, fh, indent=indent, sort_keys=sort_keys)
         fh.flush()
         os.fsync(fh.fileno())
+    # On Windows the rename is refused (PermissionError, WinError 5) while
+    # another handle -- indexer, antivirus, a reader -- has the target open.
+    # Same short retries as keystore._rewrite_env_line; the last attempt is left
+    # unguarded so a real permissions problem still raises.
+    for delay in (0.05, 0.1, 0.2, 0.4):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(delay)
     os.replace(tmp, path)
