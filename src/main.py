@@ -3819,6 +3819,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                             scope=_scope),
                              top_k=CONTEXT_K)
             _span = _product_keys_in(results, CONTEXT_K)
+            # The asks were ranked over the unscoped candidates: keep only
+            # the narrowed product's passages in their shares, or a share
+            # brings back another device's page (D-20261009-09).
+            _ask_ranks = [[r for r in _rk if payload.product in
+                           {t.strip() for t in (r.get("product") or "").split(",")}]
+                          for _rk in _ask_ranks]
             # Scoping pulls in the product's shared documents, so the top
             # four span more sources and a confident result read as
             # "ambiguous" ("which part do you mean?") after the visitor's
