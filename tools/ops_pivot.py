@@ -62,12 +62,13 @@ def run_facts(run_dir, system="sys_normal"):
             continue
         mine = [r[c["id"]][system] for r in reps if system in r.get(c["id"], {})]
         marks = [m["score"] for m in mine]
+        bm = [x for x in (r[c["id"]]["baseline"]["score"] for r in reps if "baseline" in r.get(c["id"], {})) if x is not None]   # mean like "bot", not the first repeat
         verdicts = [m.get("verdict", "") for m in mine]
         # most repeats wrong: "wrong"; else the first repeat's verdict that is not "wrong" (one repeat: as before)
         verdict = "wrong" if verdicts.count("wrong") * 2 > len(verdicts) else next(v for v in verdicts if v != "wrong")
         out.append({"id": c["id"], "q": c.get("q", ""), "product": c.get("product") or "none", "type": c["type"],
                     "category": c.get("category") or "uncategorised", "bot": marks[0] if len(marks) == 1 else sum(marks) / len(marks),
-                    "base": (g.get("baseline") or {}).get("score"), "verdict": verdict,
+                    "base": (bm[0] if len(bm) == 1 else sum(bm) / len(bm)) if bm else None, "verdict": verdict,
                     **({"bot_n": len(marks)} if len(marks) > 1 else {})})   # one repeat: no field (the page doc caps at 256 KB)
     return out
 
@@ -443,12 +444,14 @@ def _selftest():
     os.makedirs(rr)
     json.dump({"cases": [{"id": "C-0", "q": "q0", "type": "lookup", "category": "simple"},
                          {"id": "C-1", "q": "q1", "type": "lookup", "category": "simple"}]}, open(os.path.join(rr, "cases.json"), "w"))
-    for f, (m0, v0, m1, v1) in (("cases_state.json", (0, "wrong", 3, "correct")), ("cases_state.r2.json", (3, "correct", 0, "wrong")),
-                                ("cases_state.r3.json", (3, "correct", 1, "wrong"))):
-        json.dump({"grades": {"C-0": {"sys_normal": {"score": m0, "verdict": v0}}, "C-1": {"sys_normal": {"score": m1, "verdict": v1}}}},
+    for f, (m0, v0, m1, v1, b0, b1) in (("cases_state.json", (0, "wrong", 3, "correct", 3, 3)), ("cases_state.r2.json", (3, "correct", 0, "wrong", 0, 3)),
+                                        ("cases_state.r3.json", (3, "correct", 1, "wrong", 3, 0))):
+        json.dump({"grades": {"C-0": {"sys_normal": {"score": m0, "verdict": v0}, "baseline": {"score": b0}}, "C-1": {"sys_normal": {"score": m1, "verdict": v1}, "baseline": {"score": b1}}}},
                   open(os.path.join(rr, f), "w"))
     fs = run_facts(rr)
     assert [(f["bot"], f["bot_n"], f["verdict"]) for f in fs] == [(2.0, 3, "correct"), (4 / 3, 3, "wrong")], fs
+    assert [f["base"] for f in fs] == [2.0, 2.0], fs                                          # baseline is the mean too
+    assert run_facts(os.path.join(ops, "runs", "20261012"))[0]["base"] == 3                    # one repeat: the int
     assert "bot_n" not in run_facts(os.path.join(ops, "runs", "20261012"))[0]
     a = agg(fs)
     assert a["bot_pct"] == 55.6 and a["bot_lo"] < 55.6 < a["bot_hi"] and a["wrong"] == 1, a
