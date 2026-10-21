@@ -308,6 +308,10 @@ from text_utils import normalize_markdown_tables as _real_normalize_markdown  # 
 # which entity a "does X work with Y" question is about, and a lambda here
 # would silently answer None, making every capability test pass vacuously.
 from text_utils import capability_target as _real_capability_target  # noqa: E402
+# Pure, and handed through for the same reason (D-20261009-09): a stub would
+# make every several-ask test pass vacuously.
+from text_utils import split_asks as _real_split_asks  # noqa: E402
+from text_utils import keep_answered_part as _real_keep_answered  # noqa: E402
 
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
@@ -318,7 +322,8 @@ stub("text_utils",
      stem=_real_stem, is_more_request=_real_is_more,
      is_step_reference=_real_is_step_ref,
      capability_target=_real_capability_target,
-     normalize_markdown_tables=_real_normalize_markdown)
+     normalize_markdown_tables=_real_normalize_markdown,
+     split_asks=_real_split_asks, keep_answered_part=_real_keep_answered)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],
      get_conversation=lambda *a: None, delete_conversation=lambda *a: True)
