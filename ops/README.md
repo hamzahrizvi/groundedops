@@ -14,6 +14,7 @@ proposals through the product owner.
 | Product owner | `.claude/agents/product-owner.md` | Fable 5.1, high | when a hand-back or a new finding waits | on |
 | Dev | `.claude/agents/dev.md` | Opus 5.5, high | when an approved work order waits | on |
 | Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | weekly | phase 2, on since 2026-10-08 |
+| Known-holes check | `tools/dep_audit.py` | no model (pip-audit) | weekly, inside Audit's run | on |
 | Security | `.claude/agents/security.md` | Opus 5.5, high | every 2nd week, or when a passed branch waits | phase 2, on since 2026-10-08 |
 | R&D | `.claude/agents/rnd.md` | Opus 5.5, high | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
 | Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
