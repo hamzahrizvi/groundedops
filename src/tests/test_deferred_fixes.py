@@ -40,7 +40,10 @@ def test_a_reranker_outage_is_reported_as_one():
         reranker._get = real
     import inspect
     import main
-    assert 'status_code=503' in inspect.getsource(main.query).split("rerank_failed")[1][:800]
+    # Anchored on the outage check itself: the several-ask ranking (D-20261009-09)
+    # mentions rerank_failed earlier in query().
+    assert 'status_code=503' in inspect.getsource(main.query).split(
+        'if _retrieved and _retrieved[0].get("rerank_failed")')[1][:800]
 
 
 def test_a_provider_call_has_an_overall_deadline():
