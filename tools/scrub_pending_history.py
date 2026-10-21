@@ -14,7 +14,8 @@ tip differs only in PENDING.md, and each branch still merges into the checked-ou
 --apply moves the branches in one compare-and-swap transaction (anything that moved since the
 check fails it whole; run again), keeps the old tips under refs/pre-scrub/<stamp>/, and refreshes
 PENDING.md in every worktree on a moved branch that had no change of its own to it.
-Also prints REVIEW lines: tools/ lines on unpushed branches that share two key words with an open Security item's title (D-20261021-03).
+Also prints REVIEW lines: tools/ lines on unpushed branches, not yet on any remote, that share half (at least two) of
+the key words of an open Security item's title (D-20261021-03).
 """
 import argparse
 import datetime
@@ -64,22 +65,34 @@ COMMON = {"about", "after", "before", "every", "other", "their", "there", "these
 
 
 def title_hits(ops, repo):
-    """Pre-push grep (D-20261021-03): lines under tools/ on an unpushed branch tip that share two key words (5+ letters)
-    with an open Security item's title, read from OPS so the words are never written into tools/ themselves."""
-    tips = [t for t in gs(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split()
-            if gs(repo, "rev-list", "-1", t, "--not", "--remotes")]
+    """Pre-push grep (D-20261021-03): lines under tools/ on an unpushed branch tip that share half (at least two) of the key
+    words (5+ letters) of an open Security item's title, read from OPS so the words are never written into tools/ themselves.
+    A line is reported once however many branches carry it, and not at all when a remote branch already has it."""
+    refs = lambda kind: gs(repo, "for-each-ref", "--format=%(refname:short)", f"refs/{kind}/").split()
+    tips = [t for t in refs("heads") if gs(repo, "rev-list", "-1", t, "--not", "--remotes")]
+    remotes = refs("remotes")
     hits = set()
     for c in ledger(ops, *git_sets(repo))["cards"]:
         words = set(re.findall(r"[a-z][a-z-]{4,}", c["title"].lower())) - COMMON
         if not (tips and c["security"] and c["lane"] != "past" and len(words) >= 2):
             continue
-        # ponytail: one git grep per open item over every unpushed tip; fine for a once-before-push check
-        out = subprocess.run(["git", "-C", repo, "grep", "-n", "-i", "-I", *[a for w in sorted(words) for a in ("-e", w)], *tips, "--", "tools"],
-                             capture_output=True).stdout.decode("utf-8", "replace")
-        for line in out.splitlines():
-            parts = line.split(":", 3)   # branch:path:line:text
-            if len(parts) == 4 and sum(w in parts[3].lower() for w in words) >= 2:
-                hits.add(f"{':'.join(parts[:3])} shares words with {masked(c)['id']}")
+        need = max(2, (len(words) + 1) // 2)
+
+        def grep(on):   # (path, text) -> ["branch:path:line", ...]
+            # ponytail: one git grep per open item over every tip; fine for a once-before-push check
+            out = subprocess.run(["git", "-C", repo, "grep", "-n", "-i", "-I", *[a for w in sorted(words) for a in ("-e", w)], *on, "--", "tools"],
+                                 capture_output=True).stdout.decode("utf-8", "replace") if on else ""
+            found = {}
+            for line in out.splitlines():
+                parts = line.split(":", 3)   # branch:path:line:text
+                if len(parts) == 4 and sum(w in parts[3].lower() for w in words) >= need:
+                    found.setdefault((parts[1], parts[3].strip()), []).append(":".join(parts[:3]))
+            return found
+        pushed = grep(remotes)
+        for key, where in grep(tips).items():
+            if key not in pushed:
+                more = f" (+{len(where) - 1} more branches)" if len(where) > 1 else ""
+                hits.add(f"{min(where)}{more} shares words with {masked(c)['id']}")
     return sorted(hits)
 
 
@@ -295,6 +308,11 @@ def selftest():
         os.makedirs(os.path.join(repo, "tools"))
         commit("tools/t.py", "a = 'security fixture'\nb = 'fixture only'\n", "tools")
         assert title_hits(ops, repo) == ["main:tools/t.py:1 shares words with D-20261010-03"], title_hits(ops, repo)
+        run("branch", "copy")
+        assert title_hits(ops, repo) == ["copy:tools/t.py:1 (+1 more branches) shares words with D-20261010-03"], title_hits(ops, repo)
+        run("update-ref", "refs/remotes/origin/main", "HEAD")
+        commit("x.txt", "after the push\n", "unpushed, tools/ unchanged")
+        assert title_hits(ops, repo) == [], "a line a remote already has is not reported"
     print("selftest ok")
 
 
