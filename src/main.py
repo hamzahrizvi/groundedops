@@ -89,6 +89,8 @@ from text_utils import (
     is_template_leak,
     build_clarification_options,
     normalize_markdown_tables,
+    split_asks,
+    keep_answered_part,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -846,6 +848,18 @@ def _strip_breadcrumb(result: dict) -> dict:
     out["text"] = stripped
     return out
 
+
+def _run_parallel(fn, items: list) -> list:
+    """fn over items in threads, results in input order. Each call runs in a
+    copy of the caller's context so pipeline_trace marks still land."""
+    if not items:
+        return []
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(items)) as ex:
+        futs = [ex.submit(contextvars.copy_context().run, fn, it) for it in items]
+        return [f.result() for f in futs]
+
 # session_id is required for correct multi-turn behaviour. Callers that
 # omit it land in this shared bucket — fine for a one-off manual request,
 # but it means unrelated callers can see each other's "previous query"
@@ -864,8 +878,33 @@ def _escape_prompt_boundaries(text: str) -> str:
         text or "")
 
 
+def _asks_block(asks: list[str] | None) -> str:
+    """The separate asks of a several-ask message, listed right before the
+    question (D-20261009-09). Empty for every other message: this is not a
+    rule added for every answer. Without it an answer that could not find
+    one ask wrote the canonical refusal and the whole reply was thrown away,
+    and a comparison's answer gave the row both manuals share instead of the
+    rows each ask named (C20261019c-03)."""
+    if not asks:
+        return ""
+    items = "\n".join(f"{i}. {_escape_prompt_boundaries(a)}"
+                      for i, a in enumerate(asks, 1))
+    return (f"The question asks {len(asks)} separate things:\n{items}\n"
+            "Answer each of them, in this order, and leave none out. Take each "
+            "answer from the passages that answer that ask: when it names "
+            "particular specifications, give those, not other rows the "
+            "passages happen to share. When it offers alternatives (\"A or "
+            "B\"), give a verdict for each one. When the passages mark a route "
+            "or tool as discontinued and name the one that replaces it, give "
+            "the current one. When no passage answers one of them, say so for "
+            "that one only, naming what you could not find (\"I could not find "
+            "the token lifetime in the documentation.\"), and still answer the "
+            "others. Write \"I could not find that in the knowledge base.\" "
+            "only when none of them can be answered.\n\n")
+
+
 def build_answer_prompt(hist: str, context: str, question: str,
-                        library: str = "") -> str:
+                        library: str = "", asks: list[str] | None = None) -> str:
     """The answering prompt, shared by the normal and streaming paths.
 
     Extracted from answer_query v16.2 so /query/stream cannot drift from
@@ -893,6 +932,7 @@ def build_answer_prompt(hist: str, context: str, question: str,
     _lib = (f"<documentation>\n{_escape_prompt_boundaries(library)}\n"
             f"</documentation>\n\n") if library else ""
     _where = ("<documentation> and <context>" if library else "<context>")
+    _asks = _asks_block(asks)
     # D-20261020-12: arm B of the rule-block ablation. ANSWER_PROMPT=short
     # swaps the 49-rule block below for the eight rules something else
     # depends on (R&D 20261020-short-writer-prompt). Read per call so a lab
@@ -915,7 +955,7 @@ A value read from a table goes with the condition its row or cell carries (an op
 A product name in brackets at the very end of the question is the customer's selected product, added automatically; when the question itself names a different product or model, the one it names is what they are asking about.
 Write a set of values (a pinout, a specification, a list of options) as a markdown list with one item per line, or as a markdown table with a header row when there are two or more columns.
 
-Question: {resolved_query}
+{_asks}Question: {resolved_query}
 Answer:"""
     return f"""{_lib}{_hist}<context>
 {safe_context}
@@ -986,7 +1026,7 @@ one", "which product was that for"), use <conversation> to work out what is
 being referred to — but every FACT in your answer must still come from
 <context>.
 
-Question: {resolved_query}
+{_asks}Question: {resolved_query}
 Answer:"""
 
 
@@ -2254,7 +2294,8 @@ def _is_comparison(query: str) -> bool:
     return bool(_COMPARISON.search(query or ""))
 
 
-def _comparison_picks(ranked: list[dict], named: list[str], floor: float) -> list[int]:
+def _comparison_picks(ranked: list[dict], named: list[str], floor: float,
+                      k: int | None = None) -> list[int]:
     """Indexes into `ranked` (reranked, best first) for a question naming two
     or more products (D-20261016-08). Each named product takes its own best
     CONTEXT_K // n passages with NO score floor: each share is that product's
@@ -2263,16 +2304,19 @@ def _comparison_picks(ranked: list[dict], named: list[str], floor: float) -> lis
     0.045 page; a floor at half its side's best cut it). Leftover slots fill
     in global order above `floor`, but never with a passage about another
     product (C20261017b-26 filled one with the NV9 Spectral's MCBF page, and
-    the model worked a stand-in figure out of it)."""
+    the model worked a stand-in figure out of it). `k` is the size of the
+    whole pick, CONTEXT_K unless one ask's share is being picked."""
+    k = k or CONTEXT_K
+
     def tags(c):
-        return {k.strip() for k in (c.get("product") or "").split(",")} - {""}
-    per = max(2, CONTEXT_K // len(named))
+        return {t.strip() for t in (c.get("product") or "").split(",")} - {""}
+    per = max(2, k // len(named))
     picked: list[int] = []
-    for k in named:
+    for key in named:
         picked += [i for i, r in enumerate(ranked)
-                   if k in tags(r) and i not in picked][:per]
-    for i, r in enumerate(ranked[:CONTEXT_K]):
-        if len(picked) >= CONTEXT_K:
+                   if key in tags(r) and i not in picked][:per]
+    for i, r in enumerate(ranked[:k]):
+        if len(picked) >= k:
             break
         t = tags(r)
         if i in picked or (t and not t & set(named)):
@@ -2280,6 +2324,48 @@ def _comparison_picks(ranked: list[dict], named: list[str], floor: float) -> lis
         if r.get("rerank_score", 0.0) >= floor or len(picked) < CONTEXT_MIN:
             picked.append(i)
     return sorted(picked)
+
+
+def _merge_rankings(rankings: list[list[dict]]) -> list[dict]:
+    """Every candidate once, scored by the best rerank_score any ranking gave
+    it, best first (D-20261009-09). A several-ask message is ranked whole and
+    per ask; the band, top_score and the comparison share then read the
+    strongest ask instead of a whole message that matches no page well."""
+    best: dict = {}
+    for ranking in rankings:
+        for r in ranking or []:
+            key = r.get("id") or id(r)
+            if key not in best or (r.get("rerank_score", 0.0)
+                                   > best[key].get("rerank_score", 0.0)):
+                best[key] = r
+    return sorted(best.values(), key=lambda r: r.get("rerank_score", 0.0),
+                  reverse=True)
+
+
+def _ask_picks(ask_rankings: list[list[dict]], named: list[str],
+               k: int) -> list[dict]:
+    """Each ask's own share of the context (D-20261009-09): in order, each
+    ask takes its best max(2, k // n) passages from its own ranking, with no
+    score floor (the cross-encoder cannot read a table row; see
+    _comparison_picks). With two or more products named, the share is split
+    per product on that ask's ranking. De-duplicated, capped at 2 * CONTEXT_K
+    like the effort top_k."""
+    if not ask_rankings:
+        return []
+    per = max(2, k // len(ask_rankings))
+    out: list[dict] = []
+    seen: set = set()
+    for ranking in ask_rankings:
+        ranking = ranking or []
+        if len(named) >= 2:
+            share = [ranking[i] for i in _comparison_picks(ranking, named, 0.0, k=per)]
+        else:
+            share = ranking[:per]
+        for r in share:
+            if r.get("id") not in seen:
+                seen.add(r.get("id"))
+                out.append(r)
+    return out[:2 * CONTEXT_K]
 
 
 def _token_runs(query: str, max_len: int = 8) -> set[str]:
@@ -3127,6 +3213,18 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                         len(_retrieval_queries), redact(resolved_query),
                         redact(_as_typed))
 
+    # ── One message, several asks (D-20261009-09) ────────────────────────
+    # "what ip do i hit for the api, and how long does the token last?" is
+    # searched, ranked and answered per ask as well as whole (see
+    # text_utils.split_asks). A follow-up stays on the whole-message path:
+    # its asks lack the topic, and the rewrite already carries it.
+    _asks, _ask_lead = (([], "") if _is_followup(q, history, condensed_query)
+                        else split_asks(_normalize_query(q)))
+    _ask_queries = [_add_selected_product_context(
+        f"{_ask_lead} {_a}".strip(), _named, _scope) for _a in _asks]
+    if _asks:
+        ptrace.mark("asks", f"{len(_asks)} asks")
+
     # ── Curated FAQ (v12.0: ask, don't guess) ─────────────────────────
     # Earlier versions DECIDED whether the user's question was equivalent to
     # a curated one and served the answer if so. That failed in production:
@@ -3320,7 +3418,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _comparing = (_is_comparison(resolved_query)
                   and len(_products_named_in(resolved_query,
                                              list(_product_names().keys()))) >= 2)
-    if not payload.skip_faq and not _comparing:
+    # Several asks are never answered by one curated FAQ either, for the same
+    # reason: it answers one of them at most (D-20261009-09).
+    if not payload.skip_faq and not _comparing and not _asks:
         _faq = faq_store.suggest_candidates(resolved_query, _faq_scope)
 
         if _faq["mode"] == "answer":
@@ -3393,6 +3493,23 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                              source_filter=payload.source_filter,
                              scope={"product": _k})
             for _k in _both_named])
+    # SEVERAL ASKS: EACH ONE SEARCHED ON ITS OWN (D-20261009-09). The whole
+    # message finds the pages that match all of it at once, which for
+    # "which draws less running current and which has better MCBF" was the
+    # one row both manuals share. Each ask (with the shared lead) is searched
+    # too, per named product when two are named, side by side. Additive.
+    if _asks:
+        _jobs = []
+        for _aq in _ask_queries:
+            _jobs.append((_aq, _scope))
+            if len(_both_named) >= 2:
+                _jobs += [(_add_selected_product_context(_aq, [_k], {"product": _k}),
+                           {"product": _k}) for _k in _both_named]
+        _found = _run_parallel(
+            lambda job: retrieve_from_db(job[0], top_k=RETRIEVE_K,
+                                         source_filter=payload.source_filter,
+                                         scope=job[1]), _jobs)
+        results = fuse_ranked_results([results] + _found)
     retrieval_db_time = time.time() - t_retrieval_db
     ptrace.mark("retrieve", f"{len(results)} candidates"
             + (f" within {_scope}" if _scope else " across everything"))
@@ -3425,7 +3542,26 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # install and mount the NV9USB+": "Vertical Bezel Mounting" (relevant)
     # scored 0.0164 and "Cleaning the Product" (irrelevant) 0.0156.
     t_rerank = time.time()
-    _retrieved = rerank(resolved_query, results, top_k=len(results))
+    _ask_ranks: list[list[dict]] = []
+    if _asks:
+        # SEVERAL ASKS: RANKED WHOLE AND PER ASK (D-20261009-09). The band
+        # read only the whole-message ranking, and a several-topic message
+        # scores every page in the middle: C20261014-12 was refused at 0.036
+        # whole although its first ask ranked 0.989. Each candidate keeps
+        # the best score any ranking gave it. rerank copies each chunk, so
+        # the threads share no dicts.
+        _ranks = _run_parallel(
+            lambda qq: rerank(qq, results, top_k=len(results)),
+            [resolved_query] + _ask_queries)
+        _whole = _ranks[0]
+        # An ask whose ranking failed counts as empty; the whole message's
+        # failure is the outage check below, unchanged.
+        _ask_ranks = [[] if (r and r[0].get("rerank_failed")) else r
+                      for r in _ranks[1:]]
+        _retrieved = (_whole if (_whole and _whole[0].get("rerank_failed"))
+                      else _merge_rankings([_whole] + _ask_ranks))
+    else:
+        _retrieved = rerank(resolved_query, results, top_k=len(results))
     rerank_time = time.time() - t_rerank
     if _retrieved and _retrieved[0].get("rerank_failed"):
         # The ranking model did not run (see reranker.rerank). Without its
@@ -3438,7 +3574,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         raise HTTPException(status_code=503,
                             detail="The passage ranker isn't available just "
                                    "now - try again in a moment")
-    ptrace.mark("rerank", f"best {(_retrieved[0].get('rerank_score', 0.0) if _retrieved else 0.0):.3f}")
+    ptrace.mark("rerank", f"best {(_retrieved[0].get('rerank_score', 0.0) if _retrieved else 0.0):.3f}"
+                + (", asks best " + ", ".join(
+                    f"{(r[0].get('rerank_score', 0.0) if r else 0.0):.3f}"
+                    for r in _ask_ranks) if _asks else ""))
     # An effort level may ask for more passages than the default. Bounded:
     # the prompt budget was sized for CONTEXT_K and the cap keeps a
     # misconfigured spec from doubling every prompt.
@@ -3879,6 +4018,23 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if _picked:
             top_chunks = [_strip_breadcrumb(_retrieved[i]) for i in _picked]
             ptrace.mark("retrieve.pair", f"{len(top_chunks)} passages over {_both_named}")
+    # SEVERAL ASKS: EACH GETS ITS SHARE OF THE CONTEXT (D-20261009-09). The
+    # whole message keeps its two best passages, each ask's own best come
+    # next (split per product when two are named), and the rest fill.
+    if _asks:
+        _n_before = len(top_chunks)
+        _shares = [_strip_breadcrumb(c) for c in
+                   _ask_picks(_ask_ranks, _both_named, CONTEXT_K)]
+        _seen_ids: set = set()
+        _merged = []
+        for c in top_chunks[:2] + _shares + top_chunks[2:]:
+            if c.get("id") not in _seen_ids:
+                _seen_ids.add(c.get("id"))
+                _merged.append(c)
+        top_chunks = _merged[:max(CONTEXT_K, len(_shares) + 2)]
+        ptrace.mark("retrieve.asks",
+                    f"{len(top_chunks)} passages ({len(_shares)} from the asks, "
+                    f"{_n_before} before)")
     # A VALUE IN THE QUESTION, A LIMIT ROW IN THE MANUAL (S30, N4-29/N4-30).
     # The quantity arm's min/max rows score near 0 with the cross-encoder,
     # which cannot read a table row, so the floor above drops them. They
@@ -4057,7 +4213,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _turns.append(f"You: {(_h.get('a') or '')[:400] or _unanswered}")
         _hist = "<conversation>\n" + "\n".join(_turns) + "\n</conversation>\n\n"
 
-    prompt = build_answer_prompt(_hist, context, resolved_query, library=_library)
+    prompt = build_answer_prompt(_hist, context, resolved_query, library=_library,
+                                 asks=_asks)
 
     # ── LLM ──────────────────────────────────
     t3 = time.time()
@@ -4088,6 +4245,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     answer = normalize_markdown_tables(
         _strip_meta(_strip_preamble(raw_text))) if raw_text else "I could not generate a response."
 
+    # SEVERAL ASKS: A PARTIAL ANSWER IS AN ANSWER (D-20261009-09). One that
+    # answers the IP and writes the canonical refusal for the token lifetime
+    # used to count as a refusal (is_refusal is a substring test), and the
+    # whole reply was replaced. Only on split turns; see keep_answered_part.
+    def _kept(text: str) -> str:
+        return keep_answered_part(text) if _asks else text
+    answer = _kept(answer)
+
     # A REFUSAL ON A FOLLOW-UP, WITH CONFIDENT RETRIEVAL: ask once more
     # without the conversation block. Scenarios 11, 16 and 20 (2026-09-25):
     # "what interfaces does it support then" was refused with the NV9USB+
@@ -4099,10 +4264,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # it is taken as honest and reaches the clarify gate as before.
     if (_hist and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
-        _bare = build_answer_prompt("", context, resolved_query, library=_library)
+        _bare = build_answer_prompt("", context, resolved_query, library=_library,
+                                    asks=_asks)
         _again = _billed(generate_with_fallback(role, _bare, deepseek_api_key=deepseek_api_key,
                                                 api_keys=api_keys))
-        _again_text = ((_again or {}).get("text") or "").strip()
+        _again_text = _kept(((_again or {}).get("text") or "").strip())
         if _again_text and (_again or {}).get("model") != "none" \
                 and not is_refusal(_again_text):
             logger.info("follow-up refusal retried without history: answered %s",
@@ -4117,10 +4283,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # the turn (checks, retries, citations) runs as normal mode.
     if (_library and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
-        _plain = build_answer_prompt(_hist, context, resolved_query)
+        _plain = build_answer_prompt(_hist, context, resolved_query, asks=_asks)
         _again = _billed(generate_with_fallback(role, _plain, deepseek_api_key=deepseek_api_key,
                                                 api_keys=api_keys))
-        _again_text = ((_again or {}).get("text") or "").strip()
+        _again_text = _kept(((_again or {}).get("text") or "").strip())
         if _again_text and (_again or {}).get("model") != "none" \
                 and not is_refusal(_again_text):
             ptrace.mark("regen.nolib", "refused with the documentation, answered from the passages")
@@ -4142,11 +4308,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _self_route_done("no_bundle")
         else:
             _wprompt = build_answer_prompt(_hist, context, resolved_query,
-                                           library=_wl)
+                                           library=_wl, asks=_asks)
             _wout = _billed(generate_with_fallback(role, _wprompt,
                                                    deepseek_api_key=deepseek_api_key,
                                                    api_keys=api_keys))
-            _wtext = ((_wout or {}).get("text") or "").strip()
+            _wtext = _kept(((_wout or {}).get("text") or "").strip())
             if not _wtext or (_wout or {}).get("model") == "none":
                 _self_route_done("failed_checks")
             elif is_refusal(_wtext):
@@ -4378,8 +4544,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                        deepseek_api_key=deepseek_api_key))
         if backup_result and backup_result.get("text"):
             output = backup_result
-            answer = normalize_markdown_tables(
-                _strip_meta(_strip_preamble(output["text"].strip())))
+            answer = _kept(normalize_markdown_tables(
+                _strip_meta(_strip_preamble(output["text"].strip()))))
             escalated = True
             ptrace.mark("escalate", _backup_provider)
             template_leak = is_template_leak(answer)
@@ -4439,8 +4605,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _retry = _billed(_timed("regen", generate_with_fallback,
                                     role, prompt, deepseek_api_key=deepseek_api_key,
                                     api_keys=api_keys))
-            _text = normalize_markdown_tables(_strip_meta(
-                _strip_preamble((_retry or {}).get("text", "").strip())))
+            _text = _kept(normalize_markdown_tables(_strip_meta(
+                _strip_preamble((_retry or {}).get("text", "").strip()))))
             if not _text:
                 continue
             # A model that declines on its own is not a grounding failure and
