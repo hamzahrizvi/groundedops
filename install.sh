@@ -121,7 +121,7 @@ if ! (cd "$APP_DIR" && "$VENV_PY" manage_accounts.py list 2>/dev/null) | grep -E
     echo
     echo "No Owner account yet. Open the admin console on this machine as soon"
     echo "as GroundedOps starts and create it there, or run this in $APP_DIR:"
-    echo "  ../.venv/bin/python manage_accounts.py create you@company.com --level root"
+    echo "  \"$VENV_PY\" manage_accounts.py create you@company.com --level root"
   fi
 fi
 

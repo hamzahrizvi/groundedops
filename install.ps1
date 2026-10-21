@@ -158,7 +158,7 @@ try {
             Say ""
             Say "No Owner account yet. Open the admin console on this PC as soon as" Yellow
             Say "GroundedOps starts and create it there, or run this in $app :" Yellow
-            Say "  ..\.venv\Scripts\python.exe manage_accounts.py create you@company.com --level root" Yellow
+            Say "  & '$venvPy' manage_accounts.py create you@company.com --level root" Yellow
         }
     }
 } finally {
