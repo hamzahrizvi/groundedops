@@ -197,9 +197,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | approved, queued | Dev builds it |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | approved, queued | Dev builds it |
 | D-20261020-05 | Security item D-20261020-05, details in the office | approved, queued | Dev builds it |
+| D-20261020-06 | Security item D-20261020-06, details in the office | approved, queued | Dev builds it |
 | D-20261021-01 | Figure answers, part B: wire the checked sheet into the answer path | approved, queued | Dev builds it |
 | D-20261021-06 | Security item D-20261021-06, details in the office | approved, queued | Dev builds it |
-| D-20261021-11 | Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts | approved, queued | Dev builds it |
 | D-20261021-13 | A known-holes check on the packages that runs every week and lands in the office inbox | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -234,7 +234,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261019-19 | Comparison questions get an answer about the wrong spec, or only half of the two products | deferred | parked |
 | D-20261019-22 | Follow-up questions lose the thread: the bot declines, or answers the first turn again | deferred | parked |
 | D-20261020-03 | On a product with two devices, the answer gives the other device's steps or only one side | deferred | parked |
-| D-20261020-06 | Security item D-20261020-06, details in the office | deferred | parked |
 | D-20261020-08 | A yes/no question with figures opens "No" when the figures say yes | deferred | parked |
 | D-20261020-09 | A two-product question borrows one product's table for the other, or drops the second product's fact | deferred | parked |
 | D-20261021-02 | Run the two answer checks at the same time, and switch the faster checker engine on (part B) | deferred | parked |
@@ -242,6 +241,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261021-07 | The first screen blocks typing until the visitor picks a button | deferred | parked |
 | D-20261021-09 | The website screenshots show a dummy phone number, a doubled greeting and an old refusal layout | deferred | parked |
 | D-20261021-10 | Security item D-20261021-10, details in the office | deferred | parked |
+| D-20261021-11 | Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts | deferred | parked |
 | D-20261021-12 | Cost and time per answer rose on the first run after the several-asks fix went live | deferred | parked |
 | D-20261021-14 | Thin messages and short follow-ups get a canned refusal plus a list of unrelated questions | deferred | parked |
 | D-20261021-15 | A two-part ask or a multi-step procedure comes back with one part missing or called "not found" | deferred | parked |
