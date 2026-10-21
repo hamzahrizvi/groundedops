@@ -274,7 +274,7 @@ def _selftest():
     assert r["boards"]["dev"]["doing"] == ["Fix comparisons"] and r["boards"]["po"]["queue"] == ["Cache repeated questions"]
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
     assert pts["customer"] == 4 and pts["dev"] == 0, pts            # two approved, none merged yet
-    w("decisions/20261013d.md", "## D-20261013-05 | Header-less callers get in\n- Source: inbox/dev/D-20261013-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
+    w("decisions/20261013d.md", "## D-20261013-05 | Security fixture title\n- Source: inbox/dev/D-20261013-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
     assert {c["id"]: c["security"] for c in ledger(ops, today=day)["cards"]}["D-20261013-05"], "assigned to Security = Security's, whoever raised it"
     os.remove(os.path.join(ops, "decisions/20261013d.md"))
     w("decisions/20261013b.md", "## D-20261013-04 | Audit\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
