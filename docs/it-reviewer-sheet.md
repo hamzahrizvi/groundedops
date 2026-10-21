@@ -1,6 +1,6 @@
 # GroundedOps: sheet for the IT reviewer
 
-Written 2026-10-21 against product commit `f7c727b`. If logging, providers or sign-in change, this sheet is out of date until redated.
+Written 2026-10-21 against product commit `2491a01`. If logging, providers or sign-in change, this sheet is out of date until redated.
 
 GroundedOps answers support questions from your own manuals. This sheet says where your data lives, what leaves the machine, what is logged, and what we do not have. It claims nothing that is not in the product.
 
@@ -34,7 +34,7 @@ Other outside connections, each only if you set it up:
 - Mail server you configure (SMTP): sign-in links, credit alerts, and enquiry forms visitors send from the widget.
 - Microsoft (Entra ID) or Google Workspace: only when you set up work-account sign-in.
 - Cloudflare tunnel: the Windows launcher (`run.cmd`) opens one by default to publish the widget; `run.cmd -NoTunnel` does not.
-- The first run downloads the local search models once; set `HF_HUB_OFFLINE=1` afterwards to stop re-checking. A source or Docker install also fetches the OCR model the first time a scanned page is read.
+- A Windows or source install downloads the local search models once, on its first run, each at a pinned version; set `HF_HUB_OFFLINE=1` afterwards to stop re-checking. The Docker image carries these models inside and does not download them. A source or Docker install still fetches the OCR model the first time a scanned page is read.
 
 The widget tells visitors which providers may process their question, and how long questions are kept; the operator cannot edit that line.
 
@@ -84,7 +84,7 @@ Who can read it: Admin and Owner accounts. Every console screen that shows visit
 | SMTP: sign-in links, credit alerts, enquiries | `mailer.py`; callers `routes_admin_auth.py`, `credit_watch.py`, `routes_widget.py` (enquiry email) |
 | SSO, tenant and domain binding, no account created by sign-in | `sso.py` module docstring; `routes_admin_auth.py` `/admin/auth/sso/*` |
 | Cloudflare tunnel on by default in the launcher | `README.md` "Native install" (`run.cmd`, `-NoTunnel`) |
-| First-run model download, `HF_HUB_OFFLINE`, OCR model | `README.md` installer paragraph and config table; `ocr.py` docstring |
+| First-run model download, `HF_HUB_OFFLINE`, OCR model | `model_pins.py` `REVISIONS`; `docker/Dockerfile.backend` (models baked in, `HF_HUB_OFFLINE=1`); `README.md` installer paragraph and config table; `ocr.py` docstring |
 | Widget notice not operator-editable | `widget_config.py` `ai_notice` docstring |
 | Originals and figures token-gated for proxied callers; direct callers not; exclusions | `main.py` `_TOKEN_GATED_PREFIXES`, `_restrict_private_surface`; `routes_documents.py` `source_file`, `EXCLUDED_SOURCES`; open gap D-20261010-32 |
 | Admin LAN-only, allowlist | `README.md` `ADMIN_ALLOWED_IPS`; `main.py` `_restrict_private_surface`, `_admin_ip_allowed` |
