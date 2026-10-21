@@ -198,7 +198,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | approved, queued | Dev builds it |
 | D-20261020-06 | Security item D-20261020-06, details in the office | ready to merge | merges once Security clears it |
 | D-20261021-01 | Figure answers, part B: wire the checked sheet into the answer path | approved, queued | Dev builds it |
-| D-20261021-11 | Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts | ready to merge | merges once Security clears it |
+| D-20261021-11 | Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts | blocked | the product owner decides |
 | D-20261021-18 | Security item D-20261021-18, details in the office | waiting for CEO | your yes |
 | D-20261021-21 | The gate's "ask again only what was missed" path does not work from the office's own shell, so every gate asks everything three times | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
