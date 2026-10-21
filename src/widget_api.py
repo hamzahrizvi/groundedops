@@ -48,6 +48,12 @@ router = APIRouter(prefix="/widget", tags=["widget"])
 # legitimately pastes 4,000 characters into a support widget.
 MAX_QUESTION_CHARS = int(os.getenv("WIDGET_MAX_QUESTION_CHARS", "500"))
 
+# D-20261020-06: caps for the id-like fields the widget sends. Its ids are
+# 36-char UUIDs and catalogue keys are under 20, so 128 is headroom, not a
+# limit a real embed meets; 35 is the BCP 47 tag length for the word fields.
+MAX_ID_CHARS = 128
+MAX_WORD_CHARS = 35
+
 
 # D-20261008-12: one bound for a chat transcript the widget sends (lead form
 # and enquiry draft). The widget sends 12 turns; 50 turns and 100 000
@@ -59,16 +65,16 @@ Transcript = Annotated[list[dict[str, _TurnValue]], Field(max_length=50)]
 
 class AskRequest(BaseModel):
     q: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
-    session_id: str | None = None
-    visitor_id: str | None = None
-    product: str | None = None
-    category: str | None = None
+    session_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    product: str | None = Field(None, max_length=MAX_ID_CHARS)
+    category: str | None = Field(None, max_length=MAX_ID_CHARS)
     # "standard" or "deep". The MODEL is chosen server-side from this
     # name - see quota.EFFORT. The client never names a model, or anyone
     # could select the most expensive one available.
-    effort: str = "standard"
+    effort: str = Field("standard", max_length=MAX_WORD_CHARS)
     # FAQ disambiguation passthrough.
-    faq_id: str | None = None
+    faq_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     skip_faq: bool = False
     # The visitor's language, as the widget itself determined it (an
     # explicit embed override, the host page's own declared locale, or the
@@ -77,13 +83,13 @@ class AskRequest(BaseModel):
     # own, LLM-based language handling (language.py's looks_foreign/
     # to_english). Any shape survives here -- normalized once, in
     # _resolve_anon_language.
-    language: str | None = None
+    language: str | None = Field(None, max_length=MAX_WORD_CHARS)
 
 
 class FeedbackRequest(BaseModel):
     request_id: str = Field(..., min_length=1, max_length=64)
-    session_id: str | None = None
-    visitor_id: str | None = None
+    session_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     vote: Literal["up", "down"]
     note: str = Field("", max_length=280)
 
@@ -386,14 +392,14 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
 
 
 class DraftRequest(BaseModel):
-    kind: str                                   # "sales" | "support"
-    visitor_id: str | None = None
-    product: str | None = None
+    kind: str = Field(..., max_length=MAX_WORD_CHARS)  # "sales" | "support"
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    product: str | None = Field(None, max_length=MAX_ID_CHARS)
     # What the visitor typed themselves, when they chose to write their own
     # description rather than have the chat summarised.
     notes: str | None = Field(default=None, max_length=2000)
     # Whether to draft from the conversation or from `notes`.
-    source: str = "chat"                        # "chat" | "written"
+    source: str = Field("chat", max_length=MAX_WORD_CHARS)  # "chat" | "written"
     # The conversation so far, sent by the widget — the same shape and the
     # same trust level as the transcript /widget/lead already accepts.
     # Bounded here because prompt cost scales with it, and because there is
