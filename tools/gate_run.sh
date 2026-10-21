@@ -55,8 +55,7 @@ log() { local f="$1"; shift; "$@" >> "$f" 2>&1 && return
 rp() { if [ "$2" = 1 ]; then echo "$1/cases_state.json"; else echo "$1/cases_state.r$2.json"; fi; }
 # ADAPTIVE_FROM is "<path>:<arm>"; Git Bash converts /c/... in an env value only when the whole value is a path,
 # so the path part goes in as C:/... (cygpath -m) or Windows python cannot open it (D-20261021-21)
-wp() { if command -v cygpath > /dev/null; then cygpath -m "$1"; else printf '%s
-' "$1"; fi; }
+wp() { if command -v cygpath > /dev/null; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
 ride() { "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8")); s["sys_before"]=json.load(open(sys.argv[1],encoding="utf-8"))["sys_normal"]; json.dump(s,open(sys.argv[2],"w",encoding="utf-8"),indent=1,ensure_ascii=False)' "$1" "$2"; }
 # D-20261010-07: the branch's own commits (in neither the office nor the product checkout) touch nothing
 # under src/, so the bot cannot answer differently: PASS without asking it. Any git error runs the full gate.
