@@ -27,6 +27,10 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
   `REPO/.venv/Scripts/python.exe OFFICE/tools/agent_wiring.py --office OFFICE`.
   Every MISMATCH line is a finding in the weekly note, at the top: a
   department on the wrong model or effort costs money or quality on every run.
+- Known holes in the packages:
+  `REPO/.venv/Scripts/python.exe OFFICE/tools/dep_audit.py`. MISMATCH lines go
+  at the top of the weekly note; a new one has already been filed to
+  `OPS/inbox/security/` by the tool, so name that file rather than re-filing.
 - Junior vs senior Dev builds (since 2026-10-10 the senior Dev hands routine
   builds to `dev-junior`, a cheaper model, to save cost; you watch that quality
   holds). Per work order: `grep -H "^Builder:\|^Senior fixes:" OPS/inbox/dev/D-*.md`,
