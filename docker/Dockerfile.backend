@@ -23,6 +23,14 @@ SentenceTransformer('all-MiniLM-L6-v2'); \
 CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
 CrossEncoder('cross-encoder/nli-deberta-v3-small')"
 
+# Faster CPU checker (NLI_BACKEND=onnx at run time): build with
+# --build-arg NLI_BACKEND=onnx to bake its 0.57 GB file in; otherwise it is
+# fetched at first use, and only when the flag is on.
+ARG NLI_BACKEND=
+RUN if [ "$NLI_BACKEND" = "onnx" ]; then python -c "\
+from huggingface_hub import hf_hub_download; \
+hf_hub_download('cross-encoder/nli-deberta-v3-small', 'onnx/model.onnx')"; fi
+
 COPY . .
 
 # chroma_db and uploads live on mounted volumes (see compose)
