@@ -571,7 +571,10 @@ const hired = id => !D[id].planned || !!live.workers[id];
 function worker(id){
   const d = D[id];
   if(!hired(id)) return {state:"planned", task:d.planned};
-  const w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
+  let w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
+  // a lane running this department is in the brief every tick; lanes skip the workers row, so the brief wins over a stale idle row
+  const run = mode === "live" && w.state !== "working" && w.state !== "blocked" && ((live.brief && live.brief.running) || []).find(m => m.key === DEPT_KEY[id]);
+  if(run) w = {...w, state: "working", task: run.why.replace(/ \(\+\d+ queued\)$/, ""), updated: run.since || w.updated};
   const fallback = d.planned ? "Off duty until switched on" : mode === "live" ? "No run yet" : "Off shift";
   // the schedules write some idle rows with only `last`; a row's own `next` is a parked cron time, so it is not read
   return {state: w.state || (d.planned ? "off" : "idle"), task: w.task || (w.last ? "Finished its last run" : fallback), last: w.last || "", updated: w.updated || "",
