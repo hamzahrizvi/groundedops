@@ -60,7 +60,7 @@ def main():
     print(f"units: {len(units)}  pairs: {pairs}")
 
     from sentence_transformers import CrossEncoder
-    pt = CrossEncoder(grounding.NLI_MODEL_NAME)
+    pt = CrossEncoder(grounding.NLI_MODEL_NAME, revision=grounding.revision(grounding.NLI_MODEL_NAME))
     ox = grounding._OnnxNLI(grounding.NLI_MODEL_NAME)
     col = next(int(i) for i, l in ox.config.id2label.items()
                if str(l).lower().startswith("entail"))

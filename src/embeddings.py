@@ -2,6 +2,7 @@ import functools
 import os
 
 import numpy as np
+from model_pins import revision
 
 # v15: was all-MiniLM-L6-v2, whose 256-token limit was the binding constraint
 # on chunk size. Measured, not assumed: when chunks grew 500 -> 1200 chars,
@@ -16,10 +17,11 @@ import numpy as np
 # on the query that exposed the RRF bug ("how much does the NV9S validator
 # weigh"), gte scores the correct spec table at 0.867 cosine.
 #
-# Needs transformers >= 4.48 for ModernBERT (5.14 installed) and
-# trust_remote_code, which is why that flag is set below rather than left
-# to chance -- without it SentenceTransformer silently falls back and the
-# load fails at a confusing place.
+# Needs transformers >= 4.48, where ModernBERT is built in (5.14 installed).
+# The model is loaded WITHOUT trust_remote_code (D-20261021-06): its config has
+# no auto_map, so the flag never ran any code, and it would have let any model
+# named in EMBED_MODEL run Python shipped with it. Pinned to a commit in
+# model_pins.py.
 #
 # CHANGING THIS REQUIRES A FULL RE-EMBED, and the dimension change means the
 # old collection cannot be reused at all:  python reindex.py --from-store
@@ -43,9 +45,7 @@ def _get_model():
         # and transformers with it (~8s), which nothing needs until the
         # first encode -- and every CLI tool and test imports this module.
         from sentence_transformers import SentenceTransformer
-        # trust_remote_code is required by gte-modernbert and harmless for
-        # models that ship no custom code.
-        _model = SentenceTransformer(EMBED_MODEL, trust_remote_code=True)
+        _model = SentenceTransformer(EMBED_MODEL, revision=revision(EMBED_MODEL))
     return _model
 
 
