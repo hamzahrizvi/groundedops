@@ -196,7 +196,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | approved, queued | Dev builds it |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | approved, queued | Dev builds it |
-| D-20261020-06 | Security item D-20261020-06, details in the office | built, waiting for the check | the pre-ship check |
+| D-20261020-06 | Security item D-20261020-06, details in the office | ready to merge | merges once Security clears it |
 | D-20261021-01 | Figure answers, part B: wire the checked sheet into the answer path | approved, queued | Dev builds it |
 | D-20261021-11 | Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts | sent back, rebuilding | Dev rebuilds it |
 | D-20261021-18 | Security item D-20261021-18, details in the office | waiting for CEO | your yes |
