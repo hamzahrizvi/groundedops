@@ -1,8 +1,9 @@
 # Decision-model trial 2: does `choice` beat `clarify.classify_unscoped`?
 
 Measured 2026-10-20. This was measurement only, and nothing in the live app
-changed. To reproduce it, run `tools/decision_model_unscoped_trial.py` in
-three phases, `current`, `decide` and `report` (its docstring explains each).
+changed. The trial script, `tools/decision_model_unscoped_trial.py`, was
+deleted after the trial. It is still in commit 3172542: it runs in three
+phases, `current`, `decide` and `report`, and its docstring explains each.
 This follows the first trial, `docs/decision-model-trial.md`, which said this
 gate was the one worth trying next.
 
