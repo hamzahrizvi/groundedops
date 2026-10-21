@@ -195,11 +195,11 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
-| D-20261019-13 | The office page's whole-manual baseline still reads the first answer while every other reader reads the mean | approved, queued | Dev builds it |
+| D-20261019-13 | The office page's whole-manual baseline still reads the first answer while every other reader reads the mean | ready to merge | merges once Security clears it |
 | D-20261020-04 | The marker gives a half answer full marks once and scores one clarifying answer three ways | ready to merge | merges once Security clears it |
 | D-20261020-05 | Security item D-20261020-05, details in the office | waiting for CEO | your yes |
 | D-20261020-06 | Security item D-20261020-06, details in the office | waiting for CEO | your yes |
-| D-20261020-07 | Security item D-20261020-07, details in the office | built, waiting for the check | the pre-ship check |
+| D-20261020-07 | Security item D-20261020-07, details in the office | ready to merge | merges once Security clears it |
 | D-20261020-10 | Figure answers: the model fills a checked sheet of quoted figures, and code works out the Yes/No, the winner and the "within rating" | ready to merge | merges once Security clears it |
 | D-20261020-12 | Measure the 49-rule answer prompt against a short one before any more rules are added | approved, queued | Dev builds it |
 | D-20261021-01 | Figure answers, part B: wire the checked sheet into the answer path | waiting for CEO | your yes |
