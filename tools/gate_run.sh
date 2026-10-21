@@ -53,6 +53,10 @@ log() { local f="$1"; shift; "$@" >> "$f" 2>&1 && return
 # one state's sys_normal answers ride along in another state as sys_before, so both are marked in one pass (D-20261010-05)
 # repeat k of a state: cases_state.json for k=1, cases_state.r<k>.json after (blind_eval.py REPEAT)
 rp() { if [ "$2" = 1 ]; then echo "$1/cases_state.json"; else echo "$1/cases_state.r$2.json"; fi; }
+# ADAPTIVE_FROM is "<path>:<arm>"; Git Bash converts /c/... in an env value only when the whole value is a path,
+# so the path part goes in as C:/... (cygpath -m) or Windows python cannot open it (D-20261021-21)
+wp() { if command -v cygpath > /dev/null; then cygpath -m "$1"; else printf '%s
+' "$1"; fi; }
 ride() { "$PY" -c 'import json,sys; s=json.load(open(sys.argv[2],encoding="utf-8")); s["sys_before"]=json.load(open(sys.argv[1],encoding="utf-8"))["sys_normal"]; json.dump(s,open(sys.argv[2],"w",encoding="utf-8"),indent=1,ensure_ascii=False)' "$1" "$2"; }
 # D-20261010-07: the branch's own commits (in neither the office nor the product checkout) touch nothing
 # under src/, so the bot cannot answer differently: PASS without asking it. Any git error runs the full gate.
@@ -102,7 +106,7 @@ log "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal
 log "$OUT/gate.log" ride "$(rp "$(dirname "$BEFORE")" 1)" "$(rp "$OUT/after" 1)"
 log "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade
 if [ "$REPEATS" -gt 1 ]; then   # ADAPTIVE: each side asks again only what it missed in repeat 1 (its mark in after/)
-  more "$OUT/gate.log" env GO_CODE="$BASE/src" ADAPTIVE_FROM="$OUT/after/cases_state.json:sys_before" "$PY" -X faulthandler "$BE" "$OUT/before" system normal
+  more "$OUT/gate.log" env GO_CODE="$BASE/src" ADAPTIVE_FROM="$(wp "$OUT/after/cases_state.json"):sys_before" "$PY" -X faulthandler "$BE" "$OUT/before" system normal
   more "$OUT/gate.log" "$PY" -X faulthandler "$BE" "$OUT/after" system normal
   for k in $(seq 2 "$REPEATS"); do log "$OUT/gate.log" ride "$(rp "$(dirname "$BEFORE")" "$k")" "$(rp "$OUT/after" "$k")"; done
   more "$OUT/gate.log" env SYSTEMS=sys_normal,baseline,sys_before "$PY" "$BE" "$OUT/after" grade
@@ -121,7 +125,7 @@ for s in "$@"; do
   log "$HELD/gate.log" ride "$(rp "$d/base" 1)" "$(rp "$d" 1)"
   log "$HELD/gate.log" env SYSTEMS=sys_normal,sys_before "$PY" "$BE" "$d" grade
   if [ "$REPEATS" -gt 1 ]; then   # ADAPTIVE, as for the open set: each side asks again only what it missed
-    more "$HELD/gate.log" env GO_CODE="$BASE/src" SYSTEMS=sys_normal ADAPTIVE_FROM="$d/cases_state.json:sys_before" "$PY" -X faulthandler "$BE" "$d/base" system normal
+    more "$HELD/gate.log" env GO_CODE="$BASE/src" SYSTEMS=sys_normal ADAPTIVE_FROM="$(wp "$d/cases_state.json"):sys_before" "$PY" -X faulthandler "$BE" "$d/base" system normal
     more "$HELD/gate.log" env SYSTEMS=sys_normal "$PY" -X faulthandler "$BE" "$d" system normal
     for k in $(seq 2 "$REPEATS"); do log "$HELD/gate.log" ride "$(rp "$d/base" "$k")" "$(rp "$d" "$k")"; done
     more "$HELD/gate.log" env SYSTEMS=sys_normal,sys_before "$PY" "$BE" "$d" grade
