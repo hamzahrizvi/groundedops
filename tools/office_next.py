@@ -294,6 +294,14 @@ def take(ops, repo, five, week, resets, now, lane):
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
 
 
+def blocking(i, repo):
+    """(checkout, [files]) for a ready Dev branch: the uncommitted edits in the checkout it merges into that the
+    merge would go over (tools/office_merge.py in_the_way; a stray copy of the branch's own file is not one)."""
+    target = next((c for c in dict.fromkeys((repo, OFFICE)) if _git(c, "rev-parse", "--verify", "-q", f"agents/dev-{i}")[0] == 0
+                   and _git(c, "merge-base", "--is-ancestor", "HEAD", f"agents/dev-{i}")[0] in (0, 1)), repo)
+    return target, in_the_way(f"agents/dev-{i}", target)
+
+
 def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     """[(department, why, claim key)] for every office task with work waiting, most urgent first.
     Dev builds skip work orders another lane already holds, so a second lane gets the next one."""
@@ -317,9 +325,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     for i in sorted(i for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"):   # tools/office_merge.py
         # someone's uncommitted edit in the way waits, and the lanes take the next work (2026-10-16: one such merge
         # came first in every lane's plan, so nothing else ran for hours)
-        target = next((c for c in dict.fromkeys((repo, OFFICE)) if _git(c, "rev-parse", "--verify", "-q", f"agents/dev-{i}")[0] == 0
-                       and _git(c, "merge-base", "--is-ancestor", "HEAD", f"agents/dev-{i}")[0] in (0, 1)), repo)
-        busy = in_the_way(f"agents/dev-{i}", target)
+        target, busy = blocking(i, repo)
         out.append(("merge", f"{i} waits: uncommitted changes in {target} touch {', '.join(busy)}; commit or undo them", None)
                    if busy else ("merge", i, "merge"))
     blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
