@@ -156,7 +156,7 @@ def selftest():
           "## D-20261010-04 | Uploads stored before sign-in\n- Source: inbox/security/20261010-upload.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Uploads stored before sign-in: accepted risk.\n"
           "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/dev/D-20261010-01.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Test lines in the live log: later.\n"
           "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/security/20261010-log.md\n- From: audit\n- Verdict: REJECT\n"
-          "\n## D-20261010-06 | Header-less callers skip the gate\n- Source: inbox/dev/D-20261010-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
+          "\n## D-20261010-06 | Security fixture title\n- Source: inbox/dev/D-20261010-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
         w(os.path.join(ops, "inbox", "audit", "20261010-cache.md"), "# Cache repeated answers\n")
         w(os.path.join(ops, "inbox", "security", "20261010-chunked-cap.md"), "# The size cap misses chunked uploads\n")
         w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n## The plan\r\n\r\n"
@@ -175,7 +175,7 @@ def selftest():
         assert "D-20261010-04 Security item D-20261010-04, details in the office (rejected)" in t, t
         assert "D-20261010-05 Security item D-20261010-05, details in the office (rejected)" in t, t
         assert "| D-20261010-06 | Security item D-20261010-06, details in the office |" in t, t
-        for leak in ("Header-less", "forged", "chunked", "Uploads stored", "sign-in", "live log"):
+        for leak in ("Security fixture", "forged", "chunked", "Uploads stored", "sign-in", "live log"):
             assert leak not in t, (leak, t)
         assert "- Old idea.\r\n- A bigger reranker: no gain on 40 blind questions. (D-20261010-02, product owner)\r\n\r\n### Waiting" in t, t
         assert run(ops, repo, today) == "UNCHANGED", "a second run changes nothing"
