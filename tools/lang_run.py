@@ -112,7 +112,7 @@ def report(src, out_root, langs):
         out[lang] = {"n": a["n"], "pct_of_max": a["pct_of_max"], "verdicts": a["verdicts"], "by_type": a["by_type"],
                      "bot_usd": round(sum(r.get("usd", 0) for r in rows.values()), 4),
                      "grader_usd": s["summary"]["grader"]["usd"],
-                     "translate_usd": json.load(open(tj))["usd"] if os.path.exists(tj) else 0,
+                     "translate_usd": round(json.load(open(tj))["usd"], 4) if os.path.exists(tj) else 0,
                      "answers_in_lang": f"{k}/{len(rows)}",
                      "citations_intact": f"{sum(intact(en_rows[c]['sources'], rows[c].get('sources') or {}) for c in m)}/{len(m)}",
                      "citations_dropped": sum(not rows[c].get("sources") for c in m),
