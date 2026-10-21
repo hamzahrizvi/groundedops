@@ -22,6 +22,7 @@ import os
 import re
 
 from text_utils import split_units
+from model_pins import revision
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,10 @@ class _OnnxNLI:
         import onnxruntime as ort
         from huggingface_hub import hf_hub_download
         from transformers import AutoConfig, AutoTokenizer
-        path = hf_hub_download(name, "onnx/model.onnx")
-        self.config = AutoConfig.from_pretrained(name)
-        self.tokenizer = AutoTokenizer.from_pretrained(name)
+        rev = revision(name)
+        path = hf_hub_download(name, "onnx/model.onnx", revision=rev)
+        self.config = AutoConfig.from_pretrained(name, revision=rev)
+        self.tokenizer = AutoTokenizer.from_pretrained(name, revision=rev)
         self.session = ort.InferenceSession(
             path, providers=["CPUExecutionProvider"])
         self._inputs = [i.name for i in self.session.get_inputs()]
@@ -120,7 +122,7 @@ def _get_nli_model():
         if _nli_model is None:
             from sentence_transformers import CrossEncoder   # see embeddings.py
             logger.info(f"Loading NLI model: {NLI_MODEL_NAME}")
-            _nli_model = CrossEncoder(NLI_MODEL_NAME)
+            _nli_model = CrossEncoder(NLI_MODEL_NAME, revision=revision(NLI_MODEL_NAME))
     return _nli_model
 
 

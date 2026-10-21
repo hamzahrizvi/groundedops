@@ -12,8 +12,9 @@ _LABELS = {0: "contradiction", 1: "entailment", 2: "neutral"}
 
 
 class FakeCE:
-    def __init__(self, name):
+    def __init__(self, name, **kw):
         self.name = name
+        self.kw = kw
         self.config = types.SimpleNamespace(id2label=_LABELS)
 
 
