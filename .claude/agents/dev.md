@@ -93,8 +93,9 @@ Read: `OPS/inbox/dev/<id>.plan.md` and `<id>.build.md` only. In the worktree:
   Larger trouble is yours to finish too, but say so. Count what you fixed.
 - full suite once, under the lab lock: `cd src && REPO/.venv/Scripts/python.exe OFFICE/tools/lab_lock.py REPO/.venv/Scripts/python.exe run_tests.py`;
 - re-run the finding's cases with `OFFICE/tools/blind_eval.py`
-  (`GO_CODE=<worktree>/src GO_DATA=REPO/src`, on a COPY of the run folder,
-  `reset` first, `SYSTEMS=sys_normal,baseline`) and report them case by case,
+  (`GO_CODE=<worktree>/src GO_DATA=REPO/src`, on a COPY of the run folder
+  that includes its `cases_state.json`, so `reset` keeps the baseline answers and
+  only the bot and grader spend; `reset` first, `SYSTEMS=sys_normal,baseline`) and report them case by case,
   never as a total.
 
 Write `OPS/inbox/dev/<id>.md` starting with these lines exactly:
