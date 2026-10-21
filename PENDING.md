@@ -194,13 +194,14 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
+| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | sent back, rebuilding | Dev rebuilds it |
 | D-20261010-08 | A saved settings file can fail with "access denied" when something else has it open on Windows | waiting for CEO | your yes |
 | D-20261017-08 | The bot says "I don't have that" when the passages in hand state the limit, code or default that answers | waiting for CEO | your yes |
 | D-20261020-05 | Security item D-20261020-05, details in the office | waiting for CEO | your yes |
 | D-20261020-06 | Security item D-20261020-06, details in the office | waiting for CEO | your yes |
-| D-20261020-11 | Run the two answer checks at the same time, and the CPU checker on a faster engine: every answer about 1.4 s quicker, no answer changes | approved, queued | Dev builds it |
+| D-20261020-11 | Run the two answer checks at the same time, and the CPU checker on a faster engine: every answer about 1.4 s quicker, no answer changes | built, waiting for the check | the pre-ship check |
 | D-20261021-01 | Figure answers, part B: wire the checked sheet into the answer path | waiting for CEO | your yes |
-| D-20261021-03 | Security item D-20261021-03, details in the office | approved, queued | Dev builds it |
+| D-20261021-03 | Security item D-20261021-03, details in the office | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
@@ -214,7 +215,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-12 | Security item D-20261008-12, details in the office | deferred | parked |
 | D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
 | D-20261009-07 | Security item D-20261009-07, details in the office | deferred | parked |
-| D-20261009-09 | A message with several asks is declined whole or answers one part wrongly from silence | deferred | parked |
 | D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | deferred | parked |
 | D-20261010-21 | Security item D-20261010-21, details in the office | deferred | parked |
 | D-20261010-32 | Security item D-20261010-32, details in the office | deferred | parked |
