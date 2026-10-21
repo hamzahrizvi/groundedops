@@ -102,9 +102,6 @@ if (-not (Test-Path $envFile)) {
     $mode = Read-Host "Use a cloud provider? [Y/n]"
 
     $lines = @()
-    $admin = Read-Host "Choose an admin password (for uploading documents)"
-    if (-not $admin) { $admin = "admin" }
-    $lines += "ADMIN_PASSWORD=$admin"
 
     if ($mode -ne "n") {
         Say ""
@@ -135,7 +132,40 @@ if (-not (Test-Path $envFile)) {
     Say "Existing .env kept - delete it and re-run to reconfigure." Green
 }
 
-# --- 5. Pre-download models ------------------------------------------
+# --- 5. Owner account ------------------------------------------------
+# Admin access is real accounts (the old admin password is gone). Until the first
+# (root) account exists, anyone who can open the admin console from this
+# network can create it - so offer to create it here, on the box.
+# No 2>&1 on these calls: under ErrorActionPreference Stop, Windows
+# PowerShell 5.1 turns a native command's stderr into a terminating error.
+$manage = Join-Path $app "manage_accounts.py"
+Push-Location $app
+try {
+    $existing = & $venvPy $manage list | Out-String
+    if ($existing -notmatch "(?m)^EMAIL\s+LEVEL") {
+        Say ""
+        Say "  Owner account" Cyan
+        Say "  -------------" Cyan
+        Say "Nobody owns this install yet. Until someone does, the first person"
+        Say "to open the admin console from this network becomes the Owner."
+        $owner = Read-Host "Your email, to create the Owner account now (Enter to skip)"
+        $made = $false
+        if ($owner) {
+            & $venvPy $manage create $owner --level root --no-change-required
+            $made = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $made) {
+            Say ""
+            Say "No Owner account yet. Open the admin console on this PC as soon as" Yellow
+            Say "GroundedOps starts and create it there, or run this in $app :" Yellow
+            Say "  & '$venvPy' manage_accounts.py create you@company.com --level root" Yellow
+        }
+    }
+} finally {
+    Pop-Location
+}
+
+# --- 6. Pre-download models ------------------------------------------
 # Otherwise the tester's FIRST question stalls for minutes with no
 # explanation while the models download in the background.
 Say ""
