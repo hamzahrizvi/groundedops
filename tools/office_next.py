@@ -71,6 +71,7 @@ RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that pic
 IDLE_EVERY = 3        # ponytail: days between discovery runs (security, audit, rnd, marketing) while nothing else waits
 PARKED = ("state", "parked_review")   # the parked ids last handed to the product owner (take() writes it)
 LANE_ONE_LATE = 30 * 60   # lanes 2 and 3 also work when lane 1 has not looked for work for this long (it stopped)
+REFRESH = 3600   # an idle lane 1 refreshes the office page and the cost charts this often
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 
 
@@ -197,21 +198,36 @@ def lane_cron(lane, minutes):
     """The lane's cron: every N minutes, the three lanes a third of N apart. Back to back is every 10 minutes:
     runs of one task never overlap, so the next starts within 10 minutes of the last one ending.
     Lane 1 always checks every 10 minutes, so the CEO's page decisions (a faster "Next run" too) never wait for a
-    slow schedule; "Next run" spaces only the work it starts (take(), the CEO 2026-10-19)."""
-    step = 10 if lane == 1 else minutes or 10
+    slow schedule; "Next run" spaces only the work it starts (take(), the CEO 2026-10-19).
+    Lanes 2 and 3 check at most every 30 minutes: they only add a second job beside a long one, and at every 10
+    minutes their wake-ups were a large share of the office's cost (2026-10-21)."""
+    step = 10 if lane == 1 else max(minutes, 30)
     off = (lane - 1) * step // 3
     if step < 60:
         return ",".join(str(m) for m in range(off, 60, step)) + " * * * *"
     return f"{off % 60} " + ("*" if step == 60 else f"{off // 60}-23/{step // 60}") + " * * *"
 
 
-def needed(ops, lane):
-    """Lane 1 always runs. Lanes 2 and 3 exist for when a long job (a build, a check) holds a lane, so the
+def needed(ops, lane, free=()):
+    """Lane 1 runs a full tick when it holds a leftover claim or `free` (startable() lines) is not empty; otherwise
+    it stops after reading the page's decisions, and once an hour also refreshes the page and the cost charts
+    ("refresh due"). 84% of its October wake-ups found nothing and still cost a full tick (2026-10-21).
+    Lanes 2 and 3 exist for when a long job (a build, a check) holds a lane, so the
     rest of the work is not stuck behind it: they run only while another lane holds work, or when lane 1
     has not looked for work in LANE_ONE_LATE (the CEO, 2026-10-19: most of their wake-ups found nothing)."""
-    if lane == 1:
-        return True, "lane 1 always runs"
     held = claims(ops).values()
+    if lane == 1:
+        os.makedirs(os.path.join(ops, "state"), exist_ok=True)
+        open(os.path.join(ops, "state", "lane-1-seen"), "w").close()   # lane 1 is alive: lanes 2 and 3 stay asleep
+        if any(c.get("lane") == 1 for c in held):
+            return True, "lane 1 holds a leftover claim"
+        if free:
+            return True, f"work is free: {free[0]}"
+        stamp = os.path.join(ops, "state", "lane-1-refreshed")
+        if time.time() - _mtime(stamp) < REFRESH:
+            return False, "nothing to do"
+        open(stamp, "w").close()
+        return False, "nothing to do; refresh due"
     if any(c.get("lane") == lane for c in held):   # a leftover claim of this lane's last run: run, so take() drops it (else it blocks every lane until STALE)
         return True, f"lane {lane} holds a leftover claim"
     busy = sorted({c.get("lane") for c in held if c.get("lane") not in (lane, None, "hand")})
@@ -221,6 +237,24 @@ def needed(ops, lane):
     if time.time() - seen > LANE_ONE_LATE:
         return True, "lane 1 has not looked for work in 30 minutes"
     return False, "no other lane is busy"
+
+
+def _spaced(ops, lane):
+    """"Next run": lane 1 starts new work only every N minutes."""
+    gap = every(ops)
+    return lane == 1 and gap > 10 and time.time() - _mtime(os.path.join(ops, "state", "lane-1-worked")) < gap * 60
+
+
+def startable(ops, rows, lane):
+    """[(line, key)] of the entries() rows this lane may start now: runnable, and not held back by "Next run"
+    spacing (merges and Run now presses go at once)."""
+    spaced, pressed = _spaced(ops, lane), run_now(ops)
+    out = []
+    for line, key, ok in rows:
+        dept = line.split()[1].removeprefix(TASK) if line.startswith("RUN") else "merge"
+        if ok and not (spaced and dept != "merge" and "all" not in pressed and dept not in pressed):
+            out.append((line, key))
+    return out
 
 
 def take(ops, repo, five, week, resets, now, lane):
@@ -236,15 +270,8 @@ def take(ops, repo, five, week, resets, now, lane):
     with open(os.path.join(ops, "state", "mode.json"), "w", encoding="utf-8") as f:
         json.dump({"mode": mode, "why": why, "approved": MODES[mode][0], "builds": MODES[mode][1], "per_department": MODES[mode][2]}, f)
     rows = entries(ops, repo, five, week, resets, now, claims(ops))
-    worked = os.path.join(ops, "state", "lane-1-worked")
-    gap, pressed = every(ops), run_now(ops)
-    spaced = lane == 1 and gap > 10 and time.time() - _mtime(worked) < gap * 60
-    for line, key, ok in rows:
-        if not ok:
-            continue
-        dept = line.split()[1].removeprefix(TASK) if line.startswith("RUN") else "merge"
-        if spaced and dept != "merge" and "all" not in pressed and ("dev" if dept == "dev" else dept) not in pressed:
-            continue   # "Next run": lane 1 starts new work only every N minutes; merges and Run now presses go at once
+    worked, gap = os.path.join(ops, "state", "lane-1-worked"), every(ops)
+    for line, key in startable(ops, rows, lane):
         try:
             fd = os.open(os.path.join(d, key + ".json"), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:   # another lane won the race: try the next line
@@ -261,7 +288,7 @@ def take(ops, repo, five, week, resets, now, lane):
         except OSError:
             pass
         return [r[0] for r in rows] + [f"TOOK {key} | {line}"]
-    if spaced and any(ok and not r.startswith("MERGE") for r, _, ok in rows):
+    if _spaced(ops, lane) and any(ok and not r.startswith("MERGE") for r, _, ok in rows):
         due = datetime.datetime.fromtimestamp(_mtime(worked) + gap * 60).strftime("%H:%M")
         rows = rows + [(f"SPACED lane 1 starts new work at {due} (Next run: every {gap} min); your decisions were read now", None, False)]
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
@@ -500,7 +527,7 @@ def selftest():
         w("state/every", "0")   # back to back: "Next run" spacing is tested on its own below
         assert work_mode(ops, 40, resets, now) == ("high", "set by you")
         assert lane_cron(1, 120) == "0,10,20,30,40,50 * * * *", "lane 1 always checks every 10 minutes"
-        assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "6,16,26,36,46,56 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *"
+        assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "20,50 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *", "lanes 2 and 3: 30 minutes at most"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
                                    "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n\n"
                                    "## D-20261008-07 | Manuals\n- Assigned: ceo\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
@@ -612,12 +639,14 @@ def selftest():
         assert not any("parked to check" in x for x in plan(ops, ops, 11, 38, resets, now)), "same set: not again"
         os.remove(os.path.join(ops, "decisions", "20261008p.md")); os.remove(os.path.join(ops, "state", "parked_review"))
         w("state/lane-1-seen"); t = time.time() - 3600; os.utime(os.path.join(ops, "state", "lane-1-seen"), (t, t))
-        assert needed(ops, 1)[0] and needed(ops, 2) == (True, "lane 1 has not looked for work in 30 minutes"), "lane 1 silent"
-        w("state/lane-1-seen")
-        assert needed(ops, 2) == (False, "no other lane is busy")
+        assert needed(ops, 2) == (True, "lane 1 has not looked for work in 30 minutes"), "lane 1 silent"
+        assert needed(ops, 1, ["RUN  x"]) == (True, "work is free: RUN  x")
+        assert needed(ops, 1) == (False, "nothing to do; refresh due") and needed(ops, 1) == (False, "nothing to do"), "idle: page refresh hourly"
+        assert needed(ops, 2) == (False, "no other lane is busy"), "a gated lane 1 still counts as alive"
         os.makedirs(os.path.join(ops, *CLAIMS), exist_ok=True)
         w("state/claims/dev-D-1.json", json.dumps({"lane": 1, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 1 is busy") and needed(ops, 3)[0]
+        assert needed(ops, 1) == (True, "lane 1 holds a leftover claim"), "lane 1 must run to drop its leftover claim"
         w("state/claims/dev-D-2.json", json.dumps({"lane": 2, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 2 holds a leftover claim"), "own leftover claim: lane must run to drop it"
         os.remove(os.path.join(ops, "state", "claims", "dev-D-2.json"))
@@ -707,7 +736,13 @@ def main():
     if (a.take or a.release or a.cron_set or a.needed) and not a.lane:
         ap.error("--take, --release, --cron-set and --needed need --lane")
     if a.needed:
-        ok, why = needed(a.ops, a.lane)
+        free = ()
+        if a.lane == 1:   # stale usage figures count as room: the full tick refreshes them and checks the budget itself
+            now = datetime.datetime.now(datetime.timezone.utc)
+            five, week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
+            five, week = (0, 0) if old > 60 else (five, week)
+            free = [line for line, _ in startable(a.ops, entries(a.ops, a.repo, five, week, next_reset(now), now, claims(a.ops)), 1)]
+        ok, why = needed(a.ops, a.lane, free)
         return print(("NEEDED " if ok else "NOT NEEDED ") + why)
     if a.release:   # and the lane's schedule, when the CEO changed "Next run" on the page
         end_tick(a.ops, a.lane)
