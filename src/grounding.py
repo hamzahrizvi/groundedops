@@ -26,7 +26,7 @@ from text_utils import split_units
 logger = logging.getLogger(__name__)
 
 NLI_MODEL_NAME = "cross-encoder/nli-deberta-v3-small"
-_nli_model = None   # a sentence_transformers CrossEncoder, loaded on first use
+_nli_model = None   # a CrossEncoder, or _OnnxNLI when NLI_BACKEND=onnx; loaded on first use
 
 # This model's head is {0: contradiction, 1: entailment, 2: neutral}.
 #
@@ -69,12 +69,58 @@ def _entailment_index() -> int:
     return _ENTAIL_IDX
 
 
+class _OnnxNLI:
+    """CrossEncoder stand-in on onnxruntime (NLI_BACKEND=onnx).
+
+    Same contract the callers use: predict(pairs, apply_softmax=True) -> numpy
+    (n, 3), and .config for the label lookup. The file is the publisher's
+    fp32 export, fetched once into the same HF cache as every other model
+    (0.57 GB); int8 was rejected by R&D (3 of 20 verdicts changed).
+    """
+
+    def __init__(self, name: str):
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+        from transformers import AutoConfig, AutoTokenizer
+        path = hf_hub_download(name, "onnx/model.onnx")
+        self.config = AutoConfig.from_pretrained(name)
+        self.tokenizer = AutoTokenizer.from_pretrained(name)
+        self.session = ort.InferenceSession(
+            path, providers=["CPUExecutionProvider"])
+        self._inputs = [i.name for i in self.session.get_inputs()]
+
+    def predict(self, pairs, apply_softmax=False, batch_size=32, **_):
+        import numpy as np
+        pairs = list(pairs)
+        out = []
+        for i in range(0, len(pairs), batch_size):
+            chunk = pairs[i:i + batch_size]
+            enc = self.tokenizer([a for a, _ in chunk], [b for _, b in chunk],
+                                 padding=True, truncation=True, max_length=512,
+                                 return_tensors="np")
+            feed = {n: enc[n].astype(np.int64) for n in self._inputs}
+            out.append(self.session.run(None, feed)[0])
+        logits = np.concatenate(out)   # empty pairs raise, as CrossEncoder does
+        if apply_softmax:
+            e = np.exp(logits - logits.max(axis=1, keepdims=True))
+            logits = e / e.sum(axis=1, keepdims=True)
+        return logits
+
+
 def _get_nli_model():
     global _nli_model
     if _nli_model is None:
-        from sentence_transformers import CrossEncoder   # see embeddings.py
-        logger.info(f"Loading NLI model: {NLI_MODEL_NAME}")
-        _nli_model = CrossEncoder(NLI_MODEL_NAME)
+        if os.getenv("NLI_BACKEND", "").strip().lower() == "onnx":
+            try:
+                logger.info(f"Loading NLI model on ONNX: {NLI_MODEL_NAME}")
+                _nli_model = _OnnxNLI(NLI_MODEL_NAME)
+            except Exception as exc:   # offline, failed fetch, bad file
+                logger.warning("ONNX NLI backend unavailable (%s); "
+                               "using PyTorch", exc)
+        if _nli_model is None:
+            from sentence_transformers import CrossEncoder   # see embeddings.py
+            logger.info(f"Loading NLI model: {NLI_MODEL_NAME}")
+            _nli_model = CrossEncoder(NLI_MODEL_NAME)
     return _nli_model
 
 
