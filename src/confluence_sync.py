@@ -784,6 +784,17 @@ def _apply(api: _Api) -> dict:
                         cat, prod = _filed(u)
                 if not prod:
                     cat, prod, _ = _effective(it, _name_index())
+                # A product deleted from the catalogue since the document was
+                # filed (ICU, 2026-10-23) failed every document filed under it
+                # with "unknown product". It is dropped instead, and said so.
+                known = {p["key"] for c in catalog.load_catalog()["categories"]
+                         for p in c.get("products", [])}
+                gone_keys = [k for k in (prod or "").split(",") if k and k not in known]
+                if gone_keys:
+                    prod = ",".join(k for k in prod.split(",") if k in known)
+                    cat = category_of(prod) if prod else None
+                    res["errors"].append(f"{src}: product {', '.join(gone_keys)} no longer exists; "
+                                         "indexed without it")
                 _ingest(content, src, cat, prod or None)
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)
