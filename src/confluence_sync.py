@@ -39,8 +39,10 @@ _FILE_TYPES = (".pdf", ".docx", ".txt")
 # A page with less text than this is a wrapper round its attachment, not a
 # manual, and indexing it would only add a near-empty source.
 _MIN_PAGE_TEXT = 200
+# A folder, or a page whose child pages hold the manuals: both are a
+# "Website" container in Confluence, depending on how the space was built.
 _FOLDER_URL = re.compile(
-    r"^https://([a-z0-9-]+\.atlassian\.net)/wiki/spaces/[^/]+/folder/(\d+)", re.I)
+    r"^https://([a-z0-9-]+\.atlassian\.net)/wiki/spaces/[^/]+/(folder|pages)/(\d+)", re.I)
 
 _lock = threading.Lock()
 
@@ -48,20 +50,22 @@ _lock = threading.Lock()
 def _match_folder_url(url: str) -> re.Match:
     m = _FOLDER_URL.match((url or "").strip())
     if not m:
-        raise ValueError("Paste the folder's link from Confluence, like "
-                         "https://yoursite.atlassian.net/wiki/spaces/KEY/folder/123456")
+        raise ValueError("Paste the link of the Confluence folder or page that holds "
+                         "the manuals, like https://yoursite.atlassian.net/wiki/spaces/KEY/"
+                         "folder/123456 or .../KEY/pages/123456/Website")
     return m
 
 
-def parse_folder_url(url: str) -> tuple[str, str]:
-    """(site, folder id) from the folder's link. The site is checked against
-    *.atlassian.net because the sync fetches from it."""
+def parse_folder_url(url: str) -> tuple[str, str, str]:
+    """(site, "folders" or "pages", id) from the link. The site is checked
+    against *.atlassian.net because the sync fetches from it."""
     m = _match_folder_url(url)
-    return m.group(1).lower(), m.group(2)
+    return m.group(1).lower(), "folders" if m.group(2).lower() == "folder" else "pages", m.group(3)
 
 
 def normalise_folder_url(url: str) -> str:
-    """The link without whatever the browser added after the folder id."""
+    """The link without whatever the browser added after the id (a page's
+    title slug, tracking parameters)."""
     return _match_folder_url(url).group(0)
 
 
@@ -105,10 +109,13 @@ class _Api:
             path, params = (j.get("_links") or {}).get("next"), {}
 
 
-def _walk(api: _Api, folder_id: str):
+def _walk(api: _Api, root_kind: str, root_id: str):
     """(page, titles of the folders and pages above it) for every page under
-    the folder."""
-    todo = [("folders", folder_id, [])]
+    the root, and the root itself when it is a page (its title is read with
+    its body)."""
+    if root_kind == "pages":
+        yield {"id": root_id, "title": ""}, []
+    todo = [(root_kind, root_id, [])]
     while todo:
         kind, node, trail = todo.pop()
         for c in api.each(f"/wiki/api/v2/{kind}/{node}/direct-children", limit=250):
@@ -215,7 +222,7 @@ def _remove(source: str) -> None:
 
 def _sync() -> dict:
     s = keystore.get_confluence_settings()
-    site, folder_id = parse_folder_url(s["folder_url"])
+    site, root_kind, root_id = parse_folder_url(s["folder_url"])
     api = _Api(site, s["email"], keystore.get_confluence_token())
 
     state = jsonstore.load(_STATE, {}, label="Confluence sync")
@@ -248,12 +255,15 @@ def _sync() -> dict:
             logger.warning("Confluence sync: %s failed: %s", source, exc)
             res["errors"].append(f"{source}: {exc}")
 
-    for page, trail in _walk(api, folder_id):
-        pid, title = page["id"], page["title"]
+    for page, trail in _walk(api, root_kind, root_id):
+        pid = page["id"]
         full = api.get(f"/wiki/api/v2/pages/{pid}", **{"body-format": "storage"}).json()
+        title = full.get("title") or page["title"]
         ver = (full.get("version") or {}).get("number")
         text = page_text(title, ((full.get("body") or {}).get("storage") or {}).get("value"))
-        if len(text) >= _MIN_PAGE_TEXT:
+        # The Website page's own text is the container's intro, not a manual;
+        # files attached to it still count.
+        if len(text) >= _MIN_PAGE_TEXT and pid != root_id:
             take(_safe_name(title) + ".txt", f"page:{pid}:{ver}", trail,
                  lambda t=text: t.encode("utf-8"))
         for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):

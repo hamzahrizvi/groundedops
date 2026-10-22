@@ -3685,17 +3685,17 @@ function confluenceCard() {
     const c = confluenceCache;
     card.append(el("b", {}, "Confluence manuals"),
       el("p", { style: "margin:4px 0 10px;font-size:13px" },
-        "Indexes every page and every PDF, Word or text attachment in one Confluence folder, "
+        "Indexes every page and every PDF, Word or text attachment under one Confluence folder or page, "
         + "once a day and when you press Sync now. A document goes under a product when a folder "
         + "or page above it has that product's name; otherwise file it on the Documents page. "
-        + "Documents removed from the folder are removed here too."));
+        + "Documents removed there are removed here too."));
     if (!c) { card.append(el("div", {}, "Loading")); return; }
     if (c.error) { card.append(el("div", { class: "empty" }, c.error)); return; }
 
     const s = c.settings || {};
     const f = {
       folder_url: el("input", { class: "input", value: s.folder_url || "",
-        placeholder: "Folder link: https://yoursite.atlassian.net/wiki/spaces/KEY/folder/123456" }),
+        placeholder: "Link of the folder or page that holds the manuals" }),
       email: el("input", { class: "input", value: s.email || "", autocomplete: "off",
         placeholder: "Email of the Atlassian account the token belongs to" }),
       token: el("input", { class: "input", type: "password", autocomplete: "new-password",
