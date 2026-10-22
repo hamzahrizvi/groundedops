@@ -1140,6 +1140,8 @@ def startup_event():
     credit_watch.start()
     import retention   # D-15: visitor text deleted after RETENTION_DAYS
     retention.start()
+    import confluence_sync
+    confluence_sync.start()
 
 
 @app.get("/status")

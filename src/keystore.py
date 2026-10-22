@@ -489,6 +489,46 @@ def set_sso_settings(provider: str, changes: dict) -> None:
     logger.info(f"SSO settings for {provider} updated (via console)")
 
 
+# ── Confluence manuals sync (confluence_sync.py) ────────────────────────
+# The folder link and account email are configuration; the API token is a
+# secret, write-only from the console like the SMTP password.
+_CONFLUENCE_ENV = {"folder_url": "CONFLUENCE_FOLDER_URL",
+                   "email": "CONFLUENCE_EMAIL"}
+_CONFLUENCE_LEGACY_ENV = "CONFLUENCE_API_TOKEN"
+
+
+def get_confluence_settings() -> dict:
+    out = {k: (os.getenv(env) or "").strip() for k, env in _CONFLUENCE_ENV.items()}
+    out["token_set"] = bool(get_confluence_token())
+    return out
+
+
+def get_confluence_token() -> str:
+    return _vault_secret("confluence_token", _CONFLUENCE_LEGACY_ENV)
+
+
+def set_confluence_settings(changes: dict) -> None:
+    """Apply only the fields present. The caller validates the folder link
+    (confluence_sync.parse_folder_url)."""
+    for field, env in _CONFLUENCE_ENV.items():
+        if field not in changes:
+            continue
+        val = str(changes[field] or "").strip()
+        if field == "email" and val and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", val):
+            raise ValueError("that is not an email address")
+        _rewrite_env_line(env, val or None)
+        if val:
+            os.environ[env] = val
+        else:
+            os.environ.pop(env, None)
+    if changes.get("token") and str(changes["token"]).strip():
+        _set_vault_secret("confluence_token", _CONFLUENCE_LEGACY_ENV,
+                          str(changes["token"]).strip())
+    elif changes.get("clear_token"):
+        _set_vault_secret("confluence_token", _CONFLUENCE_LEGACY_ENV, None)
+    logger.info("Confluence sync settings updated (via console)")
+
+
 # ── low-credit alerts ───────────────────────────────────────────────────
 _CREDIT_THRESHOLD_ENV = "CREDIT_ALERT_THRESHOLD"
 CREDIT_THRESHOLD_DEFAULT = 5.0

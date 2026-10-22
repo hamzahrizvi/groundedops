@@ -3665,7 +3665,86 @@ function viewKeys() {
     el("div", { "data-sec": "Providers", "data-tour": "keys-list" }, rows),
     keyRolesCard(),
     creditsCard(),
+    confluenceCard(),
   ];
+}
+
+// Confluence manuals sync: the folder, the account and its token, and what
+// the last sync did. The token box is write-only like the mail password.
+let confluenceCache = null;
+
+function confluenceCard() {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Confluence sync",
+    style: "padding:14px 18px;margin-top:18px" });
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  let poll = null;
+  const load = () => api("/admin/confluence").then(d => { confluenceCache = d; draw(); })
+    .catch(e => { confluenceCache = { error: e.message }; draw(); });
+  const draw = () => {
+    card.textContent = "";
+    const c = confluenceCache;
+    card.append(el("b", {}, "Confluence manuals"),
+      el("p", { style: "margin:4px 0 10px;font-size:13px" },
+        "Indexes every page and every PDF, Word or text attachment in one Confluence folder, "
+        + "once a day and when you press Sync now. A document goes under a product when a folder "
+        + "or page above it has that product's name; otherwise file it on the Documents page. "
+        + "Documents removed from the folder are removed here too."));
+    if (!c) { card.append(el("div", {}, "Loading")); return; }
+    if (c.error) { card.append(el("div", { class: "empty" }, c.error)); return; }
+
+    const s = c.settings || {};
+    const f = {
+      folder_url: el("input", { class: "input", value: s.folder_url || "",
+        placeholder: "Folder link: https://yoursite.atlassian.net/wiki/spaces/KEY/folder/123456" }),
+      email: el("input", { class: "input", value: s.email || "", autocomplete: "off",
+        placeholder: "Email of the Atlassian account the token belongs to" }),
+      token: el("input", { class: "input", type: "password", autocomplete: "new-password",
+        placeholder: s.token_set ? "Token saved (leave blank to keep)" : "API token" }),
+    };
+    const save = el("button", { class: "btn btn-primary", onclick: async () => {
+      const body = { folder_url: f.folder_url.value, email: f.email.value };
+      if (f.token.value) body.token = f.token.value;
+      try {
+        confluenceCache = await api("/admin/confluence", { method: "POST", body: JSON.stringify(body) });
+        toast("Confluence settings saved"); draw();
+      } catch (e) { toast(e.message, true); }
+    } }, "Save");
+    const syncBtn = el("button", { class: "btn btn-ghost", onclick: async () => {
+      try {
+        confluenceCache = await api("/admin/confluence/sync", { method: "POST" });
+        toast("Sync started"); draw();
+      } catch (e) { toast(e.message, true); }
+    } }, c.running ? "Syncing" : "Sync now");
+    syncBtn.disabled = !c.configured || c.running;
+
+    card.append(
+      el("div", { style: "display:flex;flex-direction:column;gap:6px" }, f.folder_url,
+        el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
+          el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token))),
+      el("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save, syncBtn,
+        el("span", { class: "tag " + (c.configured ? "tag-accent" : "tag-neutral") },
+          c.configured ? "configured" : "not set")));
+
+    const l = c.last;
+    if (l) {
+      const n = k => (l[k] || []).length;
+      card.append(el("div", { style: "margin-top:12px;font-size:13px" },
+        el("div", { style: muted }, "Last sync " + new Date(l.at).toLocaleString()),
+        l.failed
+          ? el("div", { class: "empty" }, "Failed: " + l.failed)
+          : el("div", {}, n("added") + " added, " + n("updated") + " updated, "
+              + (l.unchanged || 0) + " unchanged, " + n("removed") + " removed"),
+        n("unfiled") ? el("div", { style: muted }, "Not filed under a product yet: "
+          + l.unfiled.join(", ")) : null,
+        (l.errors || []).map(e => el("div", { style: muted }, e))));
+    }
+    clearTimeout(poll);
+    if (c.running) poll = setTimeout(() => { if (card.isConnected) load(); }, 3000);
+  };
+  if (!confluenceCache) load();
+  else if (confluenceCache.running) load();
+  draw();
+  return card;
 }
 
 // Low-credit alerts: balances, the threshold, and the mail settings the
