@@ -52,6 +52,7 @@ Env:
            A clean refusal on an expected-"rejected" case scores 3 whatever the other arm says (D-20261010-28).
            A correct_refusal on a case not expected 'rejected' is stored as safe_decline, score <= 1 (D-20261016-14).
            A missing must_include fact caps an "answered" case at 2 (partial); a clarifying question scores 3 on any product (D-20261020-04).
+           A case with "figure" (a crop name, or a list) and "source" (its document) also gets "figure_found": the crop is among the answer's shown figures for that document; summary.<sys_*>.images = {n, figure_found, explanation_right (score 3), found, right} (D-20261022-14, tools/image_set.py).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -241,6 +242,8 @@ if phase == "system":
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
                          "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
                          "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
+                         "figures": {s["source"]: [f.get("name") for f in s.get("figures") or []] for s in d.get("sources") or []
+                                     if isinstance(s, dict) and s.get("figures")},   # pictures shown beside the answer (D-20261022-14)
                          "at": time.strftime("%Y-%m-%d")}   # the day it was spent (tools/ops_costs.py)
         spent += rows[c["id"]]["usd"]
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
@@ -423,6 +426,16 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
                                   for t in sorted({c['type'] for c in ok})}}
+    fig = [c for c in ok if c.get("figure")]   # D-20261022-14: picture cases get two marks, kept apart and never added up
+    for s in [s for s in SYSTEMS if s.startswith("sys_")] if fig else []:
+        for c in fig:
+            want = c["figure"] if isinstance(c["figure"], list) else [c["figure"]]
+            shown = state[s][c["id"]].get("figures") or {}
+            names = shown.get(c["source"], []) if c.get("source") else [n for v in shown.values() for n in v]
+            grades[c["id"]][s] = {**grades[c["id"]][s], "figure_found": any(n in names for n in want)}
+        found = [c["id"] for c in fig if grades[c["id"]][s]["figure_found"]]
+        ok3 = [c["id"] for c in fig if grades[c["id"]][s]["score"] == 3]
+        summary[s]["images"] = {"n": len(fig), "figure_found": len(found), "explanation_right": len(ok3), "found": found, "right": ok3}
     used = [g["usage"] for g in grades.values() if "usage" in g and not g.get("copied_from_r1")]   # grades from before 2026-10-10 logged none
     summary["grader"] = {"model": used[-1]["model"] if used else "gpt-5", "calls": len(used),
                          "usd": round(sum(x["usd"] for x in used), 4)}
