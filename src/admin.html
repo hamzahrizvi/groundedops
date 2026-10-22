@@ -4335,7 +4335,8 @@ const cfAgo = at => {
 function cfUploadLine(it) {
   const set = keep => cfPost("/admin/confluence/items", { keys: [it.key], keep_upload: keep },
     keep ? "The uploaded copy stays alongside" : "The uploaded copy will be replaced");
-  const name = "“" + it.uploaded_as + "”";
+  // A combined manual can stand in for several uploads (its sections').
+  const name = [it.uploaded_as, ...(it.also_uploaded || [])].map(u => "“" + u + "”").join(" and ");
   const [text, cls, btn] = it.keep_upload
     ? ["Kept alongside your upload " + name + ": the bot reads both", "keep",
        el("button", { class: "cf-up-btn", onclick: () => set(false) }, "Replace it")]

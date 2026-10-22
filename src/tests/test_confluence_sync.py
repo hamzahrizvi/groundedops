@@ -296,11 +296,16 @@ def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
         w.run(api)
         assert w.removed == [], w.removed
 
+        # Cmd A is too short to be a document of its own: only a section
+        w.uploads.append("Cmd A-v2.pdf")
         w._with(lambda: cs.set_bundle(["Manual"], True))
         w.run(api)
         items = w.items()
         assert items["Manual"]["kind"] == "bundle"
-        assert "Manual-v1.pdf" in w.removed and "Cmd B.pdf" not in w.removed, w.removed
+        # the combined manual replaces its own upload and its section's,
+        # but not the one marked Keep both before it was combined
+        assert "Manual-v1.pdf" in w.removed and "Cmd A-v2.pdf" in w.removed, w.removed
+        assert "Cmd B.pdf" not in w.removed, w.removed
 
 
 if __name__ == "__main__":
