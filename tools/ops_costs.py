@@ -74,6 +74,7 @@ NOT_MODEL = {None, "none", "structured", "faq-curated", "stub"}   # answers the 
 # baseline is counted under runs/ only. sys_before is the run's own answers copied in, never counted.
 LAB_FILES = (("run", ("runs", "*", "cases_state.json")),
             ("run", ("heldout", "market", "*", "cases_state.json")),
+            ("run", ("heldout", "lang", "*", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "after", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "before", "cases_state.json")),
              ("gate", ("inbox", "dev", "*.gate*", "rerun", "*", "cases_state.run*.json")),
