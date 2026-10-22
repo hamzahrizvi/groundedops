@@ -8,6 +8,10 @@ Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
   python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
   ... --repeats N   (anywhere: runs the phase N times, repeat k in its own process with REPEAT=k;
            stops at the first non-zero exit and returns it. `reset --repeats N` resets every repeat)
+  ... --no-product   (system phase: every turn goes in with no product picked, as a visitor typing before the picker;
+           the state records "no_product", and grade then shows the grader an unscoped chat, D-20261022-10)
+  python tools/blind_eval.py <run_dir> wrongproduct [<other_run_dir> ...]   (per question type: sys_normal answers
+           citing a manual outside the case's product(s), and answers graded 0; prints ids and counts, never questions)
   python tools/blind_eval.py <run_dir> vendor kapa|fin    (a market leader answers the cases; then
            SYSTEMS=sys_normal,baseline,kapa,fin ... remark grades all of them blind together)
 
@@ -66,6 +70,8 @@ if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own pr
         # repeats (back to back, 6 gate passes held the weekly run off the lab for over an hour, 2026-10-19)
         if sys.argv[2:3] == ["system"] and _k < _n: time.sleep(25)
     sys.exit(0)
+NO_PRODUCT = "--no-product" in sys.argv   # D-20261022-10: typed first, no product picked (the picker path sends the case's)
+if NO_PRODUCT: sys.argv.remove("--no-product")
 REPEAT = int(os.environ.get("REPEAT", "1"))
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
@@ -146,7 +152,7 @@ if phase == "models":   # D-20261010-09: the bot model on this run's stored answ
     run = sorted({r.get("model") for r in state.get("sys_normal", {}).values()} - {None, "none", "structured", "faq-curated", "stub"})
     print(json.dumps({"run": run, "lab": MODELS["bot"], "same": run == [MODELS["bot"]]})); sys.exit(0)
 if phase == "reset":
-    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s")]:
+    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s", "no_product")]:
         del state[k]
     if "copied_from_r1" in state: state["copied_from_r1"] = [s for s in state["copied_from_r1"] if s in state]
     save(); print("reset", OUT, "kept:", list(state)); sys.exit(0)
@@ -214,6 +220,9 @@ if phase == "system":
         return r
     llm._post = spy
     rows = state.setdefault(f"sys_{mode}", {})
+    if NO_PRODUCT and rows and not state.get("no_product"): sys.exit("these answers were asked with the product picked; reset first")
+    if state.get("no_product") and not NO_PRODUCT: sys.exit("this run is asked with --no-product; pass it again, or reset")
+    if NO_PRODUCT: state["no_product"] = True
     r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
     src, arm = os.environ["ADAPTIVE_FROM"].rsplit(":", 1) if os.environ.get("ADAPTIVE_FROM") else (R1, "sys_normal")
     done = (right(json.load(open(src, encoding="utf-8")), arm) if r1 else set()) & set(r1.get(f"sys_{mode}", {}))
@@ -224,9 +233,9 @@ if phase == "system":
         if capped(): stop()
         sid = f"{SET}-{uuid.uuid4()}"
         if c.get("turn1"):
-            main._traced_query(main.QueryRequest(q=c["turn1"], product=c.get("product"), session_id=sid), None, attach=True)
+            main._traced_query(main.QueryRequest(q=c["turn1"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
         usage.clear(); t = time.time()
-        d = main._traced_query(main.QueryRequest(q=c["q"], product=c.get("product"), session_id=sid), None, attach=True)
+        d = main._traced_query(main.QueryRequest(q=c["q"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
@@ -347,7 +356,7 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
     order = {c["id"]: rng.sample(asked(c), len(asked(c))) for c in cases}
     def prompt(c):
         L = "ABCDEFG"[:len(order[c["id"]])]
-        return G.format(n=len(L), product=c.get("product") or "none (unscoped chat)",
+        return G.format(n=len(L), product=(not state.get("no_product") and c.get("product")) or "none (unscoped chat)",
                         turn1=f"EARLIER MESSAGE IN THIS CHAT: {c['turn1']}\n" if c.get("turn1") else "",
                         q=c["q"], type=c["type"], expected=c["expected"], pages=", ".join(c.get("pages") or []) or "n/a",
                         reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a", cited=cited(c), quoted=quoted(c),
@@ -480,3 +489,33 @@ elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its 
         for cid, out, err in ex.map(run, [c for c in cases if c["id"] not in rows]):
             if err: print(vendor, cid, "ERROR", err, flush=True); continue   # not saved: a rerun retries it
             rows[cid] = out; save(); print(vendor, cid, out["wall"], repr(out["answer"][:60]), flush=True)
+elif phase == "wrongproduct":   # D-20261022-10: sys_normal answers given for a product other than the case's, per type
+    def tally(run):
+        """({type: [asked, cites another product, graded 0]}, {"cites": ids, "zero": ids}, no_product) for one run's repeat 1."""
+        cs = json.load(open(os.path.join(run, f"{SET}.json"), encoding="utf-8"))["cases"]
+        stt = json.load(open(os.path.join(run, f"{SET}_state.json"), encoding="utf-8"))
+        docs = {}   # manual stem -> the documents its export holds (chunk keys "[<doc>.pdf pN]")
+        for f in os.listdir(os.path.join(run, "manuals")):
+            for chunk in open(os.path.join(run, "manuals", f), encoding="utf-8").read().split("\n\n["):
+                docs.setdefault(f[:-4], set()).add(chunk.lstrip("[").split("]", 1)[0].rsplit(" p", 1)[0])
+        out, ids = {}, {"cites": [], "zero": []}
+        for c in cs:
+            row = stt.get("sys_normal", {}).get(c["id"])
+            t = out.setdefault(c["type"], [0, 0, 0])
+            if row is None: continue
+            t[0] += 1
+            own = set().union(*(docs.get(p, set()) for p in (c.get("product"), *(c.get("compare_with") or ())) if p))
+            if c.get("product") and any(s not in own and any(s in d for d in docs.values()) for s in row.get("sources") or {}):
+                t[1] += 1; ids["cites"].append(c["id"])
+            if ((stt.get("grades", {}).get(c["id"]) or {}).get("sys_normal") or {}).get("score") == 0:
+                t[2] += 1; ids["zero"].append(c["id"])
+        return out, ids, bool(stt.get("no_product"))
+    runs = [RUN] + [os.path.abspath(a) for a in sys.argv[3:]]
+    res = [tally(r) for r in runs]
+    name = [f"{os.path.basename(r)} ({'typed first' if np_ else 'picker'})" for r, (_, _, np_) in zip(runs, res)]
+    print("type | " + " | ".join(f"{n}: cites other product / graded 0 / asked" for n in name))
+    for t in sorted({t for o, _, _ in res for t in o}) + ["all"]:
+        cells = [[sum(v[i] for v in o.values()) for i in range(3)] if t == "all" else o.get(t, [0, 0, 0]) for o, _, _ in res]
+        print(f"{t} | " + " | ".join(f"{x[1]} / {x[2]} / {x[0]}" for x in cells))
+    for n, (_, ids, _) in zip(name, res):
+        print(f"{n}: cites another product {ids['cites']}; graded 0 {ids['zero']}")
