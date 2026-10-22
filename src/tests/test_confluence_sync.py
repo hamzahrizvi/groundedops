@@ -361,6 +361,17 @@ def test_sync_now_after_a_recent_check_does_not_read_confluence_again():
         assert reads and res["checked"], res
 
 
+def test_a_deleted_product_does_not_fail_the_sync():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved", product="gone_product")
+        res = w.run(api)
+        assert ("Installation.txt", None) in w.ingested, w.ingested
+        assert w.items()["Installation"]["status"] == "synced"
+        assert any("gone_product no longer exists" in e for e in res["errors"]), res
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
