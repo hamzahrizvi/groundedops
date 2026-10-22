@@ -224,6 +224,23 @@ def test_verifier_thinks_on_a_comparison_verdict_or_absence_only():
     assert not main._needs_judgement("what is the nv9 minimum temperature?", "It is lower than 5C: +3C.")
 
 
+def test_a_stated_limit_code_or_small_step_is_not_silence():
+    """D-20261017-08: a stated range, code table or default settles the
+    question, and a one-step reading marked as the bot's own is judged on
+    its figures, not refused. The stand-in rule of D-20261016-08 stays."""
+    p = main.build_answer_prompt("", "ctx", "q")
+    assert "If the context is silent on the topic of the question" in p
+    assert "If the context does not contain enough information" not in p
+    assert "a table of codes or messages" in p
+    assert "my reading between the two rows" in p
+    v = main._VERIFY_PROMPT
+    assert "marks as its own reading" in v
+    assert "Leaving out something the SOURCE says is not a reason" in v
+    assert "even when the passage text uses another product's name" in v
+    assert "gives as a product's own value is not supported" in v
+    assert "agrees with the values the SOURCE gives each product" in v
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
