@@ -86,7 +86,7 @@ button{font:inherit;color:inherit}
 .zl.soon{background:rgba(233,169,43,.92);color:#2A1E02}
 .tag{position:absolute;transform:translate(-50%,-100%);font-family:var(--display);font-size:max(9px,calc(var(--s,2)*3.5px));letter-spacing:.04em;color:#fff;background:rgba(18,24,30,.78);padding:.15em .4em;border-radius:2px;white-space:nowrap}
 .tag.sel{background:#E9A92B;color:#2A1E02}
-.bub{position:absolute;transform:translate(var(--tx,-50%),var(--ty,calc(-100% - max(14px,calc(var(--s,2)*6px)))));max-width:max(130px,calc(var(--s,2)*66px));width:max-content;background:#FFFFFF;color:#17212B;border:2px solid #17212B;border-radius:3px;padding:2px 6px 3px;font:max(15px,calc(var(--s,2)*6.4px))/1 var(--data);box-shadow:2px 2px 0 #17212B;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.bub{position:absolute;transform:translate(var(--tx,-50%),var(--ty,calc(-100% - max(14px,calc(var(--s,2)*6px)))));max-width:max(130px,calc(var(--s,2)*66px));width:max-content;background:#FFFFFF;color:#17212B;border:2px solid #17212B;border-radius:3px;padding:2px 6px 3px;font:max(15px,calc(var(--s,2)*6.4px))/1 var(--data);box-shadow:2px 2px 0 #17212B;display:block}
 .bub.l{--tx:-12px}
 .bub.r{--tx:calc(-100% + 12px)}
 .bub.below{--ty:max(12px,calc(var(--s,2)*16px))}
@@ -117,10 +117,10 @@ button{font:inherit;color:inherit}
 .card.ping{animation:ping .9s ease-out}
 @keyframes ping{0%{box-shadow:0 0 0 0 var(--accent)}100%{box-shadow:0 0 0 10px transparent}}
 .card .row{display:flex;gap:6px;align-items:center;justify-content:space-between;min-width:0}
-.card .name{font:13px/1.1 var(--display);letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .name{font:13px/1.1 var(--display);letter-spacing:.03em;overflow-wrap:anywhere}
 .card .model{font:16px/1 var(--data);color:var(--muted)}
-.card .task{font-size:13.5px;line-height:1.35;min-height:2.7em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card .now{font:16px/1 var(--data);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .task{font-size:13.5px;line-height:1.35;min-height:2.7em}
+.card .now{font:16px/1 var(--data);color:var(--muted);overflow-wrap:anywhere}
 .state{font:10.5px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:4px 6px;border-radius:2px;white-space:nowrap;border:1px solid transparent}
 .state.working{background:var(--ok);color:#fff}
 .state.waiting{background:var(--accent);color:var(--accent-ink)}
@@ -1034,7 +1034,7 @@ function openReview(g, run, pick, title){
       go.type = "button";
       go.addEventListener("click", async () => {
         const t = ta.value.trim(); if(!t) return;
-        go.disabled = true; msg.textContent = "Sending…";
+        go.disabled = true; msg.textContent = "Sending";
         try { await decide(c.id, "note", `On blind question ${c.id} (${runLabel(run)}, ${c.product}): "${c.q}". Bot scored ${c.bot}/3 (${lab}). My comment: ${t}`, c.q.slice(0, 80));
           msg.className = "sent"; msg.textContent = "Sent. It reaches the product owner at the next hourly check."; ta.disabled = true; }
         catch(e){ go.disabled = false; msg.className = "oops"; msg.textContent = writeError(e); }
@@ -1337,7 +1337,7 @@ function renderMode(){
   chip.className = "chip " + mode; chip.textContent = mode === "live" ? "Live" : "Sample week";
   btn.hidden = !live.available; btn.textContent = mode === "live" ? "Watch a sample week" : "Show live office";
   updateZones();
-  if(!live.loaded) banner.textContent = "Connecting to the office…";
+  if(!live.loaded) banner.textContent = "Connecting to the office";
   else if(!live.available) banner.textContent = "Live status is not available in this view, so this is a sample week: made-up work showing how a week runs.";
   else if(mode === "sample") banner.textContent = "Nobody is on shift right now, so this is a sample week: made-up work showing how a week runs. The live office takes over as soon as a run starts.";
   else banner.textContent = "Live: everyone's status is real, written by their last scheduled run. Off-shift, they take their breaks around the building.";
@@ -1424,7 +1424,7 @@ function renderRunAll(){
   b.title = "Start everything waiting at the next lane check, past the budget pace and holds, for that one tick. The lab cap and the 5-hour limit still apply.";
 }
 $("runAllBtn").addEventListener("click", async () => {
-  const b = $("runAllBtn"); b.disabled = true; b.textContent = "Sending…";
+  const b = $("runAllBtn"); b.disabled = true; b.textContent = "Sending";
   try { await decide("office", "run_all", "Run all now", "Office"); b.classList.add("sent"); b.textContent = "Sent: next check"; }
   catch(e){ b.disabled = false; b.textContent = "Run all now"; b.title = writeError(e); }
 });
@@ -1435,7 +1435,7 @@ function runNowBtn(m, label = "Run now"){
   go.type = "button"; go.disabled = !!sent;
   go.title = "Start this at the next hourly check, past the budget pace or a hold. The lab spending cap and the 5-hour limit still apply.";
   go.addEventListener("click", async () => {
-    go.disabled = true; go.textContent = "Sending…";
+    go.disabled = true; go.textContent = "Sending";
     try { await decide(m.key, "run_now", `Run now: ${m.dept} (${m.why})`, m.dept, m.item ? {item: m.item} : {}); go.textContent = "Sent: starts at the next check"; }
     catch(e){ go.disabled = false; go.textContent = label; go.title = writeError(e); }
   });
@@ -1514,7 +1514,7 @@ function alertAction(a, act){
   const b = el("button", "btn", sent ? "Sent: applied at the next hourly check" : act.label); b.type = "button"; b.disabled = !!sent;
   b.addEventListener("click", async () => {
     if(act.tab){ pop.close(); showTab(act.tab, true); return; }
-    b.disabled = true; b.textContent = "Sending…";
+    b.disabled = true; b.textContent = "Sending";
     try { await decide(act.id, act.choice, act.note || `${act.label}: ${a.title}`, a.title); b.textContent = "Sent: applied at the next hourly check"; }
     catch(e){ b.disabled = false; b.textContent = act.label; b.title = writeError(e); }
   });
@@ -1561,7 +1561,7 @@ function openItem(id){
     const acts = el("div", "actions"), msg = el("p", "small", "");
     for(const [choice, label, cls] of choices){ const b = el("button", cls, label); b.type = "button";
       b.addEventListener("click", async () => {
-        acts.querySelectorAll("button").forEach(x => x.disabled = true); msg.className = "small"; msg.textContent = "Sending…";
+        acts.querySelectorAll("button").forEach(x => x.disabled = true); msg.className = "small"; msg.textContent = "Sending";
         try { await decide(id, choice, ta.value, title); msg.className = "sent"; msg.textContent = `Sent. The office applies it at its next hourly check, and the product owner reports back.`; ta.disabled = true; }
         catch(e){ msg.className = "oops"; msg.textContent = writeError(e); acts.querySelectorAll("button").forEach(x => x.disabled = false); }
       }); acts.append(b); }
@@ -1812,7 +1812,7 @@ function proposeCard(id, choice, note, title){
   box.append(el("b", null, "Ready to confirm"), el("span", null, choice === "note" ? `Send the product owner this note${title ? ` about "${title}"` : ""}.` : `${CHOICE[choice]}: "${title}".`));
   if(note) box.append(el("span", "small", "Note: " + note));
   acts.append(ok, no); box.append(acts, msg);
-  ok.addEventListener("click", async () => { ok.disabled = no.disabled = true; msg.textContent = "Sending…";
+  ok.addEventListener("click", async () => { ok.disabled = no.disabled = true; msg.textContent = "Sending";
     try { await decide(id, choice, note, title); acts.remove(); msg.className = "sent"; msg.textContent = "Sent. The office applies it at its next hourly check."; }
     catch(e){ msg.className = "oops"; msg.textContent = writeError(e); ok.disabled = no.disabled = false; } });
   no.addEventListener("click", () => { acts.remove(); msg.textContent = "Cancelled. Nothing was sent."; });
@@ -1829,7 +1829,7 @@ $("compose").addEventListener("submit", async e => {
   const sample = await getSample();
   if(!sample){ bubble("sys", "The product owner chat isn't available in this view of the page."); return; }
   askBox.value = ""; chat.turns.push({role: "user", content: q}); saveChat(); bubble("me", q);
-  const out = bubble("po thinking", "Thinking…");
+  const out = bubble("po thinking", "Thinking");
   const ctl = chat.ctl = new AbortController(); $("send").disabled = true; $("stop").hidden = false;
   const lim = await sample.limits().catch(() => null), tools = !!(lim && lim.tools);
   const opts = {cache: false, signal: ctl.signal, onText: ({text}) => { out.textContent = text; out.className = "msg po"; msgs.scrollTop = msgs.scrollHeight; }};
@@ -1841,7 +1841,7 @@ $("compose").addEventListener("submit", async e => {
     if($("speak").checked) try { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(r.text.slice(0, 2000))); } catch(x) {}
   } catch(err) {
     const code = err && err.code;
-    if(code === "cancelled"){ out.textContent = (err.text || "") + (err.text ? " …" : "Stopped."); out.className = "msg po"; }
+    if(code === "cancelled"){ out.textContent = (err.text || "") + (err.text ? " (stopped)" : "Stopped."); out.className = "msg po"; }
     else if(["not_declared", "capability_disabled", "capability_removed"].includes(code)){ out.remove(); bubble("sys", "The product owner chat isn't available in this view of the page."); }
     else { if(err && err.text && code !== "refused"){ out.textContent = err.text; out.className = "msg po"; } else out.remove(); bubble("sys", SAMPLE_ERR[code] || "Something went wrong reaching Claude. Try again."); }
   } finally { chat.ctl = null; $("send").disabled = false; $("stop").hidden = true; }
@@ -2247,8 +2247,9 @@ function placeOverlay(){
     else if(a.gotUntil > now){ txt = "Got it: " + a.got; cls += " paper"; }
     else if(a.errand && a.errand.kind === "meet" && a.arrived && a.id === "po"){ txt = meeting.text || "The weekly report"; }
     else if(a.arrived && a.spot === a.desk && (w.state === "working" || w.state === "waiting" || w.state === "blocked")){
-      txt = (w.state === "waiting" ? "… " : w.state === "blocked" ? "! " : "") + w.task; if(w.state === "waiting") cls += " wait"; if(w.state === "blocked") cls += " block"; }
+      txt = (w.state === "waiting" ? "" : w.state === "blocked" ? "! " : "") + w.task; if(w.state === "waiting") cls += " wait"; if(w.state === "blocked") cls += " block"; }
     else if(a.robot && w.state === "working"){ txt = w.task; }
+    if(txt.length > 48) txt = txt.slice(0, 48).replace(/\s+\S*$/, "");   // a bubble holds a phrase; whole words, no trail-off
     cls += hx < 14 ? " l" : hx > 86 ? " r" : "";
     if(hy < (zoomed === a.id ? 30 : 16)) cls += " below";
     if(txt){ if(b.textContent !== txt) b.textContent = txt; if(b.className !== cls) b.className = cls; b.hidden = false; b.style.left = hx + "%"; b.style.top = hy + "%"; }
@@ -2395,7 +2396,7 @@ function screenFor(id){
   const L = live.ledger || SAMPLE_LEDGER, b = live.brief || {}, out = [], foot = [];
   const line = (t, cls, acts) => out.push([cls || "", t, acts]), head = t => line(t, "h");
   // a decision sent from this screen: the buttons say so, and the item leaves the list once the inbox shows it
-  const send = (id, choice, title) => async b => { b.disabled = true; b.textContent = "Sending…";
+  const send = (id, choice, title) => async b => { b.disabled = true; b.textContent = "Sending";
     try { await decide(id, choice, "", title); b.textContent = "Sent"; } catch(e){ b.disabled = false; b.textContent = "Couldn't send"; b.title = writeError(e); } };
   const runs = (list, label) => (list || []).forEach(m => line(`${label} ${m.dept}: ${m.why}` + (m.since ? ` (since ${hhmm(m.since)})` : ""), m.state === "wait" ? "dim" : ""));
   // what the run itself wrote with its status updates: a few lines per run, not a live stream
