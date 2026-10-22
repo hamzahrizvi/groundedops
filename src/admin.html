@@ -210,9 +210,27 @@
         font:inherit;font-size:12px;padding:4px 11px;border-radius:999px;cursor:pointer;max-width:240px;
         overflow-wrap:anywhere;text-align:left;transition:border-color .15s,background .15s}
   .cf-prod:hover{border-color:color-mix(in srgb,var(--color-accent) 55%,transparent)}
-  .cf-prod.sug{border-style:dashed}
-  .cf-prod.sug::before{content:"Suggested: ";opacity:.6}
-  .cf-prod.none{opacity:.6}
+  .cf-prod.filed{border-color:color-mix(in srgb,#3fb97a 55%,transparent);
+        background:color-mix(in srgb,#3fb97a 14%,transparent)}
+  .cf-prod.filed::before{content:"✓ ";color:#3fb97a;font-weight:700}
+  .cf-prod.sug{border-style:dashed;color:color-mix(in srgb,var(--color-text) 70%,transparent)}
+  .cf-prod.sug::before{content:"Suggested: ";opacity:.65}
+  .cf-prod.none{border-style:dashed;border-color:color-mix(in srgb,#e0a030 60%,transparent);color:#e0a030}
+  .cf-folder-filed{font-size:11.5px;padding:1px 8px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-text) 8%,transparent)}
+  .cf-folder-filed.all{background:color-mix(in srgb,#3fb97a 18%,transparent);color:#3fb97a}
+  .cf-ap-row{display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:6px;border-radius:10px;
+        border:1px solid color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .cf-ap-row.filed{border-left:3px solid #3fb97a}
+  .cf-ap-row.suggested{border-left:3px dashed color-mix(in srgb,var(--color-text) 40%,transparent)}
+  .cf-ap-row.none{border-left:3px solid #e0a030;background:color-mix(in srgb,#e0a030 7%,transparent)}
+  .cf-ap-n{font-size:18px;font-weight:600;min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
+  .cf-ap-main{flex:1;min-width:0}
+  .cf-ap-main b{display:block;font-size:13.5px;font-weight:600;overflow-wrap:anywhere}
+  .cf-ap-main span{font-size:12px;overflow-wrap:anywhere;color:color-mix(in srgb,var(--color-text) 58%,transparent)}
+  .cf-ap-warn{margin:6px 20px 0;padding:10px 14px !important;border-radius:10px;font-size:12.5px;
+        background:color-mix(in srgb,#e0a030 10%,transparent);border:1px solid color-mix(in srgb,#e0a030 35%,transparent)}
+  .cf-ap-warn p{margin:3px 0}
   .cf-dlg{border:0;padding:0;border-radius:16px;width:min(680px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 40px));
         background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);
         display:flex;flex-direction:column}
@@ -3829,6 +3847,7 @@ const CF_FILTERS = [
   ["new", "New", i => i.is_new],
   ["updated", "Updated", i => i.is_updated],
   ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
+  ["unfiled", "Not filed", i => !cfFiled(i)],
   ["error", "Failed", i => i.status === "error"],
 ];
 
@@ -3914,7 +3933,7 @@ async function cfPost(path, body, msg) {
 const cfClean = s => (s || "").replace(/\s+(Range|Documentation|Repair Information)\b.*$/i, "")
   .replace(/^[A-Z0-9-]+\s+-\s+/, "").trim();
 
-function cfFileDialog(keys) {
+function cfFileDialog(keys, after) {
   const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
   const prods = products();
   const nameOf = k => { const p = prods.find(p => p.key === k); return p ? p.name : k; };
@@ -4009,11 +4028,12 @@ function cfFileDialog(keys) {
     } catch (e) { toast(e.message, true); }
   } }, "Create");
 
-  go.addEventListener("click", () => {
+  go.addEventListener("click", async () => {
     close();
-    cfSelected.clear();
-    cfPost("/admin/confluence/items", { keys, product: [...chosen].join(",") },
+    if (!after) cfSelected.clear();
+    await cfPost("/admin/confluence/items", { keys, product: [...chosen].join(",") },
       chosen.size ? "Filed " + items.length + " document" + (items.length === 1 ? "" : "s") : "Unfiled");
+    if (after) after();
   });
 
   const why = rec.length
@@ -4046,10 +4066,105 @@ function cfProductButton(it) {
   const prods = products();
   const keys = (it.product || "").split(",").filter(Boolean);
   const names = keys.map(k => (prods.find(p => p.key === k) || { name: k }).name);
-  return el("button", { class: "cf-prod" + (it.suggested ? " sug" : "") + (keys.length ? "" : " none"),
-    title: it.suggested ? "Suggested by its folder. Click to change" : "Click to change",
+  const state = !keys.length ? "none" : it.suggested ? "sug" : "filed";
+  return el("button", { class: "cf-prod " + state,
+    title: { none: "Not filed under any product. Click to file it",
+             sug: "Only suggested by its folder, not filed yet. Click to change or confirm",
+             filed: "Filed. Click to change" }[state],
     onclick: () => cfFileDialog([it.key]) },
-    keys.length ? names.join(", ") : "No product");
+    keys.length ? names.join(", ") : "Not filed");
+}
+
+// Filed means someone chose the product (or the document is synced under
+// one); a folder's suggestion is not filing until it is accepted.
+const cfFiled = it => !!it.product && !it.suggested;
+// Paths that read like they were never meant for customers.
+const CF_INTERNAL = /\b(internal|confidential|draft|due release|obsolete|do not publish)\b/i;
+
+// Approving many at once: first say where each will be filed, so nothing is
+// approved into the wrong product, or none, without being seen.
+function cfApproveDialog(keys) {
+  const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
+  const prods = products();
+  const label = p => p.split(",").map(k => {
+    const x = prods.find(q => q.key === k); return x ? x.categoryName + " › " + x.name : k; }).join(", ");
+  const groups = new Map();       // "<product>|<filed|suggested|none>" -> items
+  items.forEach(i => {
+    const g = (i.product || "") + "|" + (!i.product ? "none" : cfFiled(i) ? "filed" : "suggested");
+    groups.has(g) ? groups.get(g).push(i) : groups.set(g, [i]);
+  });
+  const order = { filed: 0, suggested: 1, none: 2 };
+  const rows = [...groups.entries()].sort((a, b) =>
+    order[a[0].split("|")[1]] - order[b[0].split("|")[1]] || b[1].length - a[1].length);
+  const unfiled = items.filter(i => !i.product);
+  const internal = items.filter(i => CF_INTERNAL.test((i.path || []).join(" ") + " " + i.title));
+  const sug = items.filter(i => i.product && i.suggested);
+
+  const dlg = el("dialog", { class: "cf-dlg", "aria-label": "Approve documents" });
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
+  dlg.addEventListener("close", () => dlg.remove());
+  const n = k => k + " document" + (k === 1 ? "" : "s");
+
+  // Suggestions become the filing when approved this way: the product
+  // shown is the product it gets.
+  const approve = async list => {
+    close();
+    try {
+      const byProduct = new Map();
+      list.filter(i => i.product && i.suggested).forEach(i =>
+        byProduct.has(i.product) ? byProduct.get(i.product).push(i.key) : byProduct.set(i.product, [i.key]));
+      for (const [product, ks] of byProduct)
+        await api("/admin/confluence/items", { method: "POST",
+          body: JSON.stringify({ keys: ks, decision: "approved", product }) });
+      confluenceCache = await api("/admin/confluence/items", { method: "POST",
+        body: JSON.stringify({ keys: list.map(i => i.key), decision: "approved" }) });
+      list.forEach(i => cfSelected.delete(i.key));
+      toast("Approved " + n(list.length) + ". They reach the bot at the next sync");
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const groupRow = ([g, list]) => {
+    const [product, kind] = g.split("|");
+    return el("div", { class: "cf-ap-row " + kind },
+      el("span", { class: "cf-ap-n" }, String(list.length)),
+      el("div", { class: "cf-ap-main" },
+        el("b", {}, kind === "none" ? "No product" : label(product)),
+        el("span", {}, kind === "filed" ? "Filed" : kind === "suggested"
+          ? "Suggested by their folder: approving files them here" : "Not offered in the widget for any product",
+          " · ", list.slice(0, 3).map(i => i.title).join(", ") + (list.length > 3 ? " and " + (list.length - 3) + " more" : ""))),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+        onclick: () => { close(); cfFileDialog(list.map(i => i.key), () => cfApproveDialog(keys)); } },
+        kind === "none" ? "File…" : "Change…"));
+  };
+
+  const warn = [];
+  if (unfiled.length) warn.push(n(unfiled.length) + " have no product. Customers can still be answered "
+    + "from them, but the widget never offers them under a product.");
+  if (internal.length) warn.push(n(internal.length) + " sit under folders or titles that look internal ("
+    + [...new Set(internal.map(i => ((i.path || []).join(" ") + " " + i.title).match(CF_INTERNAL)[0]))].join(", ")
+    + "). Customers will be answered from them.");
+
+  const filedOnly = items.filter(i => i.product);
+  dlg.append(
+    el("div", { class: "cf-dlg-head" },
+      el("b", {}, "Approve " + n(items.length)),
+      el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+    el("p", { class: "cf-dlg-why" }, "Where each will be filed. Change any group before approving."
+      + (sug.length ? " " + n(sug.length) + " only have a suggestion; approving here files them as shown." : "")),
+    el("div", { class: "cf-dlg-list" }, rows.map(groupRow)),
+    warn.length ? el("div", { class: "cf-ap-warn" }, warn.map(w => el("p", {}, w))) : null,
+    el("div", { class: "cf-dlg-foot" },
+      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"),
+      unfiled.length && filedOnly.length
+        ? el("button", { class: "btn btn-secondary", onclick: () => approve(filedOnly) },
+            "Approve the " + filedOnly.length + " with a product")
+        : null,
+      el("button", { class: "btn btn-primary", onclick: () => approve(items) },
+        warn.length ? "Approve all " + items.length + " anyway" : "Approve " + n(items.length))));
+  document.body.append(dlg);
+  dlg.showModal();
 }
 
 function cfConnectionCard(c) {
@@ -4218,7 +4333,7 @@ function cfDocumentsCard(c) {
       keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
     bulk.append(
       el("b", {}, keys.length + " selected"),
-      el("button", { class: "btn btn-primary", onclick: () => set({ decision: "approved" }) }, "Approve"),
+      el("button", { class: "btn btn-primary", onclick: () => cfApproveDialog(keys) }, "Approve…"),
       el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
       el("button", { class: "btn btn-secondary", onclick: () => cfFileDialog(keys) }, "File under…"),
       el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
@@ -4261,6 +4376,10 @@ function cfDocumentsCard(c) {
         el("span", { class: "cf-meter", title: appr + " of " + node.all.length + " approved" },
           el("i", { style: "width:" + Math.round(appr / node.all.length * 100) + "%" })),
         appr + " approved"),
+      (() => { const f = node.all.filter(cfFiled).length;
+        return el("span", { class: "cf-folder-filed" + (f === node.all.length ? " all" : ""),
+          title: f + " of " + node.all.length + " filed under a product" },
+          f === node.all.length ? "all filed" : f + " filed"); })(),
       nNew ? el("span", { class: "cf-badge new" }, nNew + " new") : null,
       nUpd ? el("span", { class: "cf-badge upd" }, nUpd + " updated") : null,
       (() => {
