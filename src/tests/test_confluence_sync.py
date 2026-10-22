@@ -63,13 +63,16 @@ class FakeCatalog:
 class World:
     """Swaps the fakes in for a call, records what reached the index."""
     def __init__(self, state_path):
-        self.state, self.ingested, self.removed = state_path, [], []
+        self.state, self.ingested, self.removed, self.texts = state_path, [], [], {}
         self.catalog = FakeCatalog()
 
     def _with(self, fn, api=None):
         saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE)
         cs._connect = lambda: (api, "pages", "1")
-        cs._ingest = lambda content, source, cat, prod: self.ingested.append((source, prod))
+        def ingest(content, source, cat, prod):
+            self.ingested.append((source, prod))
+            self.texts[source] = content.decode("utf-8", "replace")
+        cs._ingest = ingest
         cs._remove = self.removed.append
         cs.catalog = self.catalog
         cs._STATE = self.state
@@ -201,6 +204,52 @@ def test_old_state_file_is_upgraded():
         st["items"]["page:20"]["decision"] = "pending"
         json.dump(st, open(path, "w"))
         assert w.items()["Installation"]["decision"] == "excluded"
+
+
+class ManualApi(FakeApi):
+    """Website / Manual (page) / Cmd A (a short page) and Cmd B; Manual also
+    holds a file, which stays a document of its own when Manual is combined."""
+    tree = {("pages", "1"): [{"type": "page", "id": "40", "title": "Manual"}],
+            ("pages", "40"): [{"type": "page", "id": "41", "title": "Cmd A"},
+                              {"type": "page", "id": "42", "title": "Cmd B"}]}
+    attachments = {"40": [{"id": "att9", "title": "Wiring.pdf", "version": {"number": 1}}]}
+
+    def page(self, pid):
+        body = {"41": "<p>Send 0x07.</p>"}.get(pid, BODY)
+        return {"title": {"1": "Website", "40": "Manual", "41": "Cmd A", "42": "Cmd B"}[pid],
+                "version": {"number": 1}, "body": {"storage": {"value": body}}}
+
+
+def test_combining_a_folder_into_one_document():
+    from chunking import SECTION_CLOSE, SECTION_OPEN
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), ManualApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        assert sorted(w.ingested) == [("Cmd B.txt", None), ("Manual.txt", None), ("Wiring.pdf", None)]
+
+        # combine Manual: one document, every page a section in Confluence's
+        # order (the short page too), the file left alone
+        w._with(lambda: cs.set_bundle(["Manual"], True))
+        res = w.run(api)
+        items = w.items()
+        assert sorted(items) == ["Manual", "Wiring.pdf"], sorted(items)
+        assert items["Manual"]["kind"] == "bundle" and items["Manual"]["pages"] == 3
+        text = w.texts["Manual.txt"]
+        heads = [part.split(SECTION_CLOSE, 1)[0] for part in text.split(SECTION_OPEN)[1:]]
+        assert heads == ["Manual", "Cmd A", "Cmd B"], heads
+        assert "Send 0x07." in text
+        # the pages synced on their own are taken out, before the combined copy goes in
+        assert sorted(w.removed) == ["Cmd B.txt", "Manual.txt"], w.removed
+        assert res["added"] == ["Manual.txt"], res
+
+        # split again: the pages come back approved, the combined copy goes
+        w._with(lambda: cs.set_bundle(["Manual"], False))
+        w.run(api)
+        items = w.items()
+        assert sorted(items) == ["Cmd B", "Manual", "Wiring.pdf"], sorted(items)
+        assert all(i["decision"] == "approved" and i["status"] == "synced" for i in items.values())
+        assert w.removed[-1] == "Manual.txt"
 
 
 if __name__ == "__main__":

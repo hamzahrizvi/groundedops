@@ -293,6 +293,11 @@
   .cf-open{text-decoration:none;font-size:15px;padding:2px 6px;border-radius:6px;color:inherit;opacity:.6}
   .cf-open:hover{opacity:1;background:color-mix(in srgb,var(--color-text) 8%,transparent)}
   .cf-more{display:block;margin:8px auto}
+  .cf-combine{border:1px dashed color-mix(in srgb,var(--color-text) 22%,transparent);background:none;color:inherit;
+        font:inherit;font-size:11.5px;padding:3px 10px;border-radius:999px;cursor:pointer;opacity:.75;
+        transition:opacity .15s,border-color .15s}
+  .cf-combine:hover{opacity:1;border-color:var(--color-accent)}
+  .cf-combine:disabled{cursor:default;opacity:.55;border-style:solid}
   .cf-recent-path{font-size:11.5px;margin:10px 0 0 8px;color:color-mix(in srgb,var(--color-text) 45%,transparent)}
   /* the selection bar sits at the bottom of the screen while there is one */
   .cf-bulk{position:sticky;bottom:14px;z-index:6;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
@@ -3810,12 +3815,13 @@ const CF_STATUS = {
   new: ["Will be added", "tag-accent"],
   changed: ["Will update", "tag-accent"],
   remove: ["Will be removed", "tag-accent"],
+  combined: ["Now part of a combined document", "tag-accent"],
   gone: ["Deleted in Confluence", "tag-accent"],
   error: ["Failed", "tag-accent"],
   excluded: ["Excluded", "tag-neutral"],
   missing: ["Not in Confluence", "tag-neutral"],
 };
-const CF_PENDING = ["new", "changed", "remove", "gone"];
+const CF_PENDING = ["new", "changed", "remove", "gone", "combined"];
 const CF_FILTERS = [
   ["all", "All", () => true],
   ["approved", "Approved", i => i.decision === "approved"],
@@ -3883,6 +3889,13 @@ async function cfTick() {
   cfStatusEl.update(r);
   cfFeedCount = r.log_total || cfFeedCount;
   cfPoll = setTimeout(cfTick, 1500);
+}
+
+function cfBundle(path, on) {
+  cfOpen.delete(path.join(""));
+  cfPost("/admin/confluence/bundle", { path, on }, on
+    ? "“" + path[path.length - 1] + "” will be one document. Checking Confluence to combine it"
+    : "“" + path[path.length - 1] + "” will be split into its pages. Checking Confluence");
 }
 
 async function cfPost(path, body, msg) {
@@ -4134,7 +4147,8 @@ function cfRow(it, onTick) {
   const set = body => cfPost("/admin/confluence/items", { keys: [it.key], ...body });
   const size = it.size ? (it.size > 1048576 ? (it.size / 1048576).toFixed(1) + " MB"
                                             : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
-  const ext = it.kind === "page" ? "Page" : ((it.title || "").split(".").pop() || "file").toUpperCase();
+  const ext = it.kind === "bundle" ? "Combined · " + it.pages + " pages"
+    : it.kind === "page" ? "Page" : ((it.title || "").split(".").pop() || "file").toUpperCase();
   const on = it.decision === "approved";
   const sw = el("button", { class: "cf-switch", role: "switch", "aria-checked": on ? "true" : "false",
     "aria-label": (on ? "Approved: " : "Excluded: ") + it.title,
@@ -4153,11 +4167,14 @@ function cfRow(it, onTick) {
           "Updated") : null),
       el("div", { class: "cf-doc-meta" }, [ext, size,
         it.modified_at ? "edited " + cfAgo(it.modified_at) : "",
-        it.version ? "v" + it.version : ""].filter(Boolean).join(" · "),
+        it.version && it.kind !== "bundle" ? "v" + it.version : ""].filter(Boolean).join(" · "),
         it.error ? el("div", { class: "cf-doc-err" }, it.error) : null)),
     el("span", { class: "tag " + cls }, label),
     cfProductButton(it),
     sw,
+    it.kind === "bundle" ? el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+      title: "Index its pages as separate documents again",
+      onclick: () => cfBundle([...(it.path || []), it.title], false) }, "Split") : null,
     it.url ? el("a", { class: "cf-open", href: it.url, target: "_blank", rel: "noopener",
       title: "Open in Confluence", "aria-label": "Open " + it.title + " in Confluence" }, "↗") : null);
 }
@@ -4245,7 +4262,15 @@ function cfDocumentsCard(c) {
           el("i", { style: "width:" + Math.round(appr / node.all.length * 100) + "%" })),
         appr + " approved"),
       nNew ? el("span", { class: "cf-badge new" }, nNew + " new") : null,
-      nUpd ? el("span", { class: "cf-badge upd" }, nUpd + " updated") : null);
+      nUpd ? el("span", { class: "cf-badge upd" }, nUpd + " updated") : null,
+      (() => {
+        const path = node.key.split("");
+        const pending = (c.bundles || []).some(b => b.join("") === node.key);
+        const b = el("button", { class: "cf-combine", disabled: pending ? "true" : null,
+          title: "Index everything in this folder as one document, each page a section",
+          onclick: () => cfBundle(path, true) }, pending ? "Combining at the next check" : "Combine");
+        return node.all.some(r => r.kind === "page") || pending ? b : null;
+      })());
     into.append(head);
     if (!open) return;
     const inner = el("div", { class: "cf-folder-body" + (cfJustOpened === node.key ? " anim" : ""),

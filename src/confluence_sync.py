@@ -16,6 +16,12 @@ approved at once (sync everything); in "review" mode it starts excluded and
 marked new until someone approves it on the console's Confluence page. A
 document that was approved stays approved when it changes in Confluence.
 
+A folder can be combined into one document: a manual Confluence keeps as
+a page per command (the SSP Manual: 396 of them) is indexed as one source,
+each page a section under its own heading, rather than 396 sources nobody
+can file. The innermost combined folder wins, so "SDK" can be combined while
+each device's endpoint pages inside it are their own document.
+
 Each item also records when Confluence last saw it edited, when this sync
 first found it and when its version last changed between two checks, so the
 console can show what is new and what has been updated.
@@ -28,6 +34,7 @@ Access is a scoped Atlassian API token (read-only granular scopes) for an
 account that can see only what customers may see. Scoped tokens work only
 through api.atlassian.com, addressed by the site's cloud id.
 """
+import hashlib
 import logging
 import os
 import re
@@ -132,6 +139,7 @@ def _load() -> dict:
     st.setdefault("mode", "review")
     st.setdefault("items", {})
     st.setdefault("history", [])
+    st.setdefault("bundles", [])
     for it in st["items"].values():  # "pending" was a third decision; not approved is excluded
         if it.get("decision") not in DECISIONS:
             it["decision"] = "excluded"
@@ -161,6 +169,8 @@ def status_of(it: dict) -> str:
     if it.get("error"):
         return "error"
     if not it.get("present", True):
+        if it.get("combined"):
+            return "combined" if synced else "missing"
         return "gone" if synced else "missing"
     if it.get("decision") == "excluded":
         return "remove" if synced else "excluded"
@@ -248,7 +258,8 @@ def overview() -> dict:
     for key, it in st["items"].items():
         row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
                                       "decision", "source", "synced_at", "error", "present",
-                                      "modified_at", "first_seen_at", "updated_at", "prev_version")}
+                                      "modified_at", "first_seen_at", "updated_at", "prev_version",
+                                      "pages")}
         row["is_new"] = _recent(it.get("first_seen_at"))
         row["is_updated"] = _recent(it.get("updated_at"))
         row["key"] = key
@@ -259,7 +270,7 @@ def overview() -> dict:
             _, row["product"], row["suggested"] = _effective(it, idx)
         items.append(row)
     items.sort(key=lambda r: ([p.lower() for p in r["path"] or []], (r["title"] or "").lower()))
-    return {"mode": st["mode"], "checked_at": st.get("checked_at"),
+    return {"mode": st["mode"], "checked_at": st.get("checked_at"), "bundles": st["bundles"],
             "items": items, "history": st["history"][::-1],
             "running": running(), "configured": configured()}
 
@@ -270,6 +281,30 @@ def set_mode(mode: str) -> None:
     if mode not in MODES:
         raise ValueError("mode must be review or auto")
     _update(lambda st: st.__setitem__("mode", mode))
+
+
+def bundle_key(path: list[str]) -> str:
+    return "bundle:" + "\u0001".join(path)
+
+
+def set_bundle(path: list[str], on: bool) -> None:
+    """Combine the folder at `path` (titles from the root down) into one
+    document, or split it again. Takes effect at the next check. Splitting
+    hands the combined document's decision and product to its pages."""
+    path = [str(t) for t in path if str(t).strip()]
+    if not path:
+        raise ValueError("choose a folder")
+
+    def change(st):
+        st["bundles"] = [b for b in st["bundles"] if b != path]
+        if on:
+            st["bundles"].append(path)
+        else:
+            it = st["items"].get(bundle_key(path)) or {}
+            st.setdefault("unbundled", {})["\u0001".join(path)] = {
+                "decision": it.get("decision"), "product": it.get("product"),
+                "category": it.get("category"), "chosen": it.get("product_chosen")}
+    _update(change)
 
 
 def set_items(keys: list[str], decision: str | None = None,
@@ -344,19 +379,22 @@ def _connect() -> tuple["_Api", str, str]:
 
 def _walk(api: _Api, root_kind: str, root_id: str):
     """(page, titles of the folders and pages above it) for every page under
-    the root, and the root itself when it is a page (its title is read with
-    its body)."""
+    the root, depth first in Confluence's own order, and the root itself
+    when it is a page (its title is read with its body)."""
     if root_kind == "pages":
         yield {"id": root_id, "title": ""}, []
-    todo = [(root_kind, root_id, [])]
-    while todo:
-        kind, node, trail = todo.pop()
-        for c in api.each(f"/wiki/api/v2/{kind}/{node}/direct-children", limit=250):
+    stack = [(root_kind, root_id, [], None)]
+    while stack:
+        kind, node, trail, me = stack.pop()
+        if me is not None:
+            yield me, trail
+        below = trail + [me["title"]] if me is not None else trail
+        kids = list(api.each(f"/wiki/api/v2/{kind}/{node}/direct-children", limit=250))
+        for c in reversed(kids):          # pushed backwards, so they come off in order
             if c.get("type") == "page":
-                yield c, trail
-                todo.append(("pages", c["id"], trail + [c["title"]]))
+                stack.append(("pages", c["id"], below, c))
             elif c.get("type") == "folder":
-                todo.append(("folders", c["id"], trail + [c["title"]]))
+                stack.append(("folders", c["id"], below + [c["title"]], None))
 
 
 class _Text(HTMLParser):
@@ -417,14 +455,39 @@ def _link(api: _Api, webui: str | None) -> str | None:
 def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     """List the root into the state's items. Indexes nothing."""
     found: dict[str, dict] = {}
+    bundles = sorted(_load()["bundles"], key=len, reverse=True)   # innermost first
+    combined: dict[str, dict] = {}       # bundle key -> the item being built
+    members_of: set[str] = set()         # page items now inside a combined one
     for page, trail in _walk(api, root_kind, root_id):
         pid = page["id"]
         _progress.update(phase="checking", done=len(found))
         full = api.page(pid)
         title = full.get("title") or page["title"]
+        here = trail + [title]
+        inside = next((b for b in bundles if here[:len(b)] == b), None) if pid != root_id else None
+        if inside is not None:
+            text = page_text(title, _body(full))
+            key = bundle_key(inside)
+            b = combined.get(key)
+            if b is None:
+                b = combined[key] = {
+                    "kind": "bundle", "id": key, "title": inside[-1], "path": inside[:-1],
+                    "name": _safe_name(inside[-1]) + ".txt", "members": [], "stamp": [],
+                    "modified_at": None, "url": None}
+                _note(inside[-1], "bundle", inside[:-1], "found")
+            if here == inside:           # the folder is itself a page: link to it
+                b["url"] = _link(api, (full.get("_links") or {}).get("webui"))
+            ver = (full.get("version") or {}).get("number")
+            members_of.add(f"page:{pid}")
+            if text:
+                b["members"].append([pid, " › ".join(here[len(inside):]) or title])
+                b["stamp"].append(f"{pid}:{ver}")
+                at = (full.get("version") or {}).get("createdAt")
+                if at and (not b["modified_at"] or at > b["modified_at"]):
+                    b["modified_at"] = at
         # The root page's own text is the container's intro, not a manual;
         # files attached to it still count.
-        if pid != root_id and len(page_text(title, _body(full))) >= _MIN_PAGE_TEXT:
+        elif pid != root_id and len(page_text(title, _body(full))) >= _MIN_PAGE_TEXT:
             found[f"page:{pid}"] = {
                 "kind": "page", "id": pid, "title": title, "path": trail,
                 "name": _safe_name(title) + ".txt",
@@ -445,6 +508,13 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 "url": _link(api, att.get("webuiLink"))}
             _note(att.get("title") or name, "file", trail + ([title] if title else []), "found")
 
+    for key, b in combined.items():
+        if b["members"]:
+            # Its version is its pages': any page added, removed or edited changes it.
+            b["version"] = hashlib.sha1("|".join(b.pop("stamp")).encode()).hexdigest()[:10]
+            b["pages"] = len(b["members"])
+            found[key] = b
+
     res = {"at": _now(), "kind": "check", "found": len(found), "new": [], "changed": [], "gone": []}
 
     def merge(st):
@@ -455,9 +525,24 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
         for key, f in found.items():
             it = items.get(key)
             if it is None:
-                cat, prod = _suggest(f["path"])
-                it = items[key] = {"decision": "approved" if st["mode"] == "auto" else "excluded",
-                                   "category": cat, "product": prod, "synced_version": None,
+                cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
+                decision = "approved" if st["mode"] == "auto" else "excluded"
+                chosen = False
+                if f["kind"] == "bundle":
+                    # Combining approved pages keeps them approved.
+                    if any(items.get(f"page:{m[0]}", {}).get("decision") == "approved"
+                           for m in f["members"]):
+                        decision = "approved"
+                else:
+                    # Split from a combined document: its decision and product carry over.
+                    for prefix, was in (st.get("unbundled") or {}).items():
+                        b = prefix.split("\u0001")
+                        if (f["path"] + [f["title"]])[:len(b)] == b and was.get("decision"):
+                            decision = was["decision"]
+                            if was.get("product") or was.get("chosen"):
+                                cat, prod, chosen = was.get("category"), was.get("product") or "", True
+                it = items[key] = {"decision": decision, "category": cat, "product": prod,
+                                   "product_chosen": chosen, "synced_version": None,
                                    "first_seen_at": None if first_check else res["at"]}
                 res["new"].append(f["title"])
             elif it.get("version") is not None and it["version"] != f["version"]:
@@ -472,6 +557,17 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 it["source"] = name
                 taken.add(name)
             it.update(f, present=True)
+            it.pop("combined", None)
+        # Pages now inside a combined document: removed at the next sync if
+        # they were synced on their own, dropped from the list if not.
+        for key in members_of:
+            it = items.get(key)
+            if it is None:
+                continue
+            if it.get("synced_version") is None:
+                del items[key]
+            else:
+                it.update(present=False, combined=True)
         for key, it in items.items():
             if key not in found and it.get("present", True):
                 it["present"] = False
@@ -482,6 +578,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             del items[key]
         st["checked_at"] = res["at"]
         st["found_nothing"] = not found
+        st.pop("unbundled", None)
     _update(merge)
     return res
 
@@ -501,12 +598,33 @@ def _remove(source: str) -> None:
     catalog.refile_source(source, [])
 
 
+def _bundle_text(api: _Api, it: dict) -> str:
+    """A combined folder as one text: its title, then each page under its
+    own section heading (the path below the folder), which the chunker keeps
+    as a hard boundary and stores as the chunk's section."""
+    from chunking import SECTION_CLOSE, SECTION_OPEN
+    parts = [it["title"]]
+    for n, (pid, heading) in enumerate(it.get("members") or []):
+        _progress.update(page=n + 1, pages=len(it["members"]))
+        full = api.page(pid)
+        text = page_text(full.get("title") or "", _body(full))
+        if text:
+            parts.append(f"{SECTION_OPEN}{heading}{SECTION_CLOSE}\n{text}")
+    _progress.pop("page", None)
+    _progress.pop("pages", None)
+    return "\n\n".join(parts)
+
+
 def _apply(api: _Api) -> dict:
     st = _load()
     res = {"at": _now(), "kind": "sync", "added": [], "updated": [], "removed": [],
            "errors": []}
     todo = [(k, dict(it)) for k, it in st["items"].items()
-            if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove")]
+            if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove", "combined")]
+    # Removals first: a combined document takes its container page's name,
+    # so the page's own copy must be gone before the combined one goes in.
+    _removing = ("gone", "remove", "combined")
+    todo.sort(key=lambda kv: status_of({**kv[1], "error": None}) not in _removing)
     if st.get("found_nothing") and st["items"]:
         # Nothing listed at all is a permissions change or an emptied folder
         # far more often than a real removal of every manual.
@@ -518,13 +636,16 @@ def _apply(api: _Api) -> dict:
         _progress.update(phase="syncing", done=n, total=len(todo))
         src, what = it["source"], status_of({**it, "error": None})
         try:
-            if what in ("gone", "remove"):
+            if what in ("gone", "remove", "combined"):
                 _remove(src)
                 res["removed"].append(src)
                 _note(it.get("title") or src, it["kind"], it.get("path") or [], "removed")
                 change = {"synced_version": None, "synced_at": None}
             else:
-                if it["kind"] == "page":
+                if it["kind"] == "bundle":
+                    content = _bundle_text(api, it).encode("utf-8")
+                    version = it.get("version")
+                elif it["kind"] == "page":
                     full = api.page(it["id"])
                     content = page_text(full.get("title") or it["title"], _body(full)).encode("utf-8")
                     version = (full.get("version") or {}).get("number")
