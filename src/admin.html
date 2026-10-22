@@ -204,6 +204,71 @@
   @keyframes cfTint{from{background:color-mix(in srgb,var(--color-accent) 13%,transparent)}
                     to{background:transparent}}
   @media (prefers-reduced-motion: reduce){.cf-feed-row{animation:none}}
+  /* Confluence documents: a folder tree, closed to start */
+  .cf-tick{accent-color:var(--color-accent);width:15px;height:15px;margin:0;flex:0 0 auto;cursor:pointer}
+  .tagpick.cf-ticks .tagpick-row input{appearance:auto;-webkit-appearance:auto;width:15px;height:15px;
+        flex:0 0 15px;accent-color:var(--color-accent)}
+  .tagpick.cf-ticks .tagpick-row input::before{content:none}
+  .cf-seg{display:inline-flex;padding:3px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+  .cf-seg button{border:0;background:none;font:inherit;font-size:12.5px;padding:5px 12px;border-radius:999px;
+        cursor:pointer;color:color-mix(in srgb,var(--color-text) 65%,transparent);transition:background .2s,color .2s}
+  .cf-seg button[aria-selected=true]{background:var(--color-surface);color:var(--color-text);
+        box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .cf-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;font-size:12.5px;
+        color:color-mix(in srgb,var(--color-text) 60%,transparent)}
+  .cf-tools span{margin-right:auto}
+  .cf-folder{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px 8px calc(10px + var(--d) * 22px);
+        margin-top:4px;border-radius:var(--radius-md);transition:background .15s;
+        background:color-mix(in srgb,var(--color-text) 3.5%,transparent)}
+  .cf-folder:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+  .cf-chev{border:0;background:none;cursor:pointer;width:22px;height:22px;border-radius:6px;flex:0 0 auto;
+        display:grid;place-content:center;color:inherit}
+  .cf-chev::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+        transform:rotate(-45deg);transition:transform .22s cubic-bezier(.2,.75,.25,1)}
+  .cf-folder.open .cf-chev::before{transform:rotate(45deg) translate(-2px,-2px)}
+  .cf-chev:hover{background:color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .cf-folder-name{display:flex;align-items:center;gap:9px;font-weight:600;font-size:13.5px;cursor:pointer;
+        flex:1 1 200px;min-width:0;overflow-wrap:anywhere}
+  .cf-folder-meta{display:flex;align-items:center;gap:8px;font-size:12px;
+        color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+  .cf-meter{width:54px;height:4px;border-radius:99px;overflow:hidden;
+        background:color-mix(in srgb,var(--color-text) 12%,transparent)}
+  .cf-meter>i{display:block;height:100%;background:var(--color-accent);transition:width .4s ease}
+  .cf-folder-body{animation:cfRise .3s cubic-bezier(.2,.75,.25,1) both;
+        margin-left:calc(20px + var(--d) * 22px);padding-left:10px;
+        border-left:1px solid color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .cf-doc{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 8px;border-radius:var(--radius-md);
+        border-top:1px solid color-mix(in srgb,var(--color-text) 7%,transparent);transition:background .15s}
+  .cf-doc:hover{background:color-mix(in srgb,var(--color-text) 4%,transparent)}
+  .cf-doc.on{box-shadow:inset 3px 0 0 var(--color-accent)}
+  .cf-doc-main{flex:1 1 240px;min-width:0}
+  .cf-doc-title{font-size:13.5px;overflow-wrap:anywhere;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .cf-doc-meta{font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+  .cf-doc-err{color:var(--color-accent-ink);margin-top:2px}
+  .cf-badge{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:999px;letter-spacing:.02em}
+  .cf-badge.new{background:color-mix(in srgb,#3fb97a 20%,transparent);color:#3fb97a}
+  .cf-badge.upd{background:color-mix(in srgb,#5b9cf0 20%,transparent);color:#6aa7f5}
+  .cf-switch{position:relative;width:36px;height:20px;border-radius:99px;border:0;cursor:pointer;flex:0 0 auto;
+        background:color-mix(in srgb,var(--color-text) 22%,transparent);transition:background .2s}
+  .cf-switch::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;
+        background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .22s cubic-bezier(.2,.75,.25,1)}
+  .cf-switch[aria-checked=true]{background:var(--color-accent)}
+  .cf-switch[aria-checked=true]::after{transform:translateX(16px)}
+  .cf-switch:disabled{opacity:.4;cursor:default}
+  .cf-switch:focus-visible,.cf-chev:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+  .cf-open{text-decoration:none;font-size:15px;padding:2px 6px;border-radius:6px;color:inherit;opacity:.6}
+  .cf-open:hover{opacity:1;background:color-mix(in srgb,var(--color-text) 8%,transparent)}
+  .cf-more{display:block;margin:8px auto}
+  .cf-recent-path{font-size:11.5px;margin:10px 0 0 8px;color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+  /* the selection bar sits at the bottom of the screen while there is one */
+  .cf-bulk{position:sticky;bottom:14px;z-index:6;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+        padding:0 14px;max-height:0;overflow:hidden;opacity:0;border-radius:14px;
+        background:var(--color-surface);box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);
+        transition:max-height .25s ease,opacity .2s ease,padding .25s ease,margin .25s ease}
+  .cf-bulk.on{max-height:200px;opacity:1;padding:10px 14px;margin-top:12px;overflow:visible}
+  .cf-bulk b{font-weight:600;margin-right:6px}
+  @media (prefers-reduced-motion: reduce){.cf-folder-body{animation:none}}
   @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
 
   /* background jobs, bottom left, over whatever page you moved to */
@@ -1348,7 +1413,8 @@ function render() {
         nav("catalog", "Products"),
         nav("documents", "Documents", unassigned().length),
         nav("confluence", "Confluence", confluenceCache && confluenceCache.items
-          ? confluenceCache.items.filter(i => i.status === "waiting" || i.status === "error").length : 0),
+          ? confluenceCache.items.filter(i => i.status === "error"
+              || (i.is_new && i.decision !== "approved")).length : 0),
         nav("faq", "Generate/Edit FAQs"),
         nav("gaps", "FAQs from customers", cache.gaps.length),
         nav("widget", "Widget design"),
@@ -3703,26 +3769,28 @@ function viewKeys() {
 // and a sync indexes only what is approved. The connection holds an API
 // token, so only root sees that card; the rest is for anyone at support.
 let confluenceCache = null;
-let cfFilter = "attention", cfSearch = "", cfSelected = new Set(), cfPoll = null, cfShown = 100;
+let cfFilter = "all", cfSearch = "", cfSelected = new Set(), cfPoll = null, cfShown = 100;
+let cfMode = "tree", cfOpen = new Set(), cfDocLimit = new Map();
 
 const CF_STATUS = {
-  waiting: ["Waiting for approval", "tag-accent"],
-  new: ["Approved, not synced yet", "tag-accent"],
-  changed: ["Changed in Confluence", "tag-accent"],
-  remove: ["Excluded, removed at next sync", "tag-accent"],
-  gone: ["Deleted in Confluence, removed at next sync", "tag-accent"],
-  error: ["Failed", "tag-accent"],
   synced: ["Synced", "tag-neutral"],
+  new: ["Will be added", "tag-accent"],
+  changed: ["Will update", "tag-accent"],
+  remove: ["Will be removed", "tag-accent"],
+  gone: ["Deleted in Confluence", "tag-accent"],
+  error: ["Failed", "tag-accent"],
   excluded: ["Excluded", "tag-neutral"],
   missing: ["Not in Confluence", "tag-neutral"],
 };
 const CF_PENDING = ["new", "changed", "remove", "gone"];
 const CF_FILTERS = [
-  ["attention", "Needs attention", s => ["waiting", "error"].includes(s) || CF_PENDING.includes(s)],
-  ["waiting", "Waiting", s => s === "waiting"],
-  ["synced", "Synced", s => s === "synced"],
-  ["excluded", "Excluded", s => s === "excluded" || s === "remove"],
   ["all", "All", () => true],
+  ["approved", "Approved", i => i.decision === "approved"],
+  ["excluded", "Excluded", i => i.decision !== "approved"],
+  ["new", "New", i => i.is_new],
+  ["updated", "Updated", i => i.is_updated],
+  ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
+  ["error", "Failed", i => i.status === "error"],
 ];
 
 // While a run is going only the run box changes: the bar, its line, and a
@@ -3794,7 +3862,7 @@ async function cfPost(path, body, msg) {
 
 function cfProductPicker(cur, onSave, label) {
   const prods = products();
-  const box = el("details", { class: "tagpick" },
+  const box = el("details", { class: "tagpick cf-ticks" },
     el("summary", {}, label || (cur.length
       ? cur.map(k => (prods.find(p => p.key === k) || { name: k }).name).join(", ")
       : "No product")),
@@ -3868,12 +3936,13 @@ function cfSyncCard(c) {
   card.append(el("b", {}, "Sync"),
     el("div", { class: "chips", style: "margin:8px 0 6px" },
       mode("review", "Approve new documents first",
-        "New documents wait under Needs attention until someone approves them"),
+        "New documents start excluded, marked New, until someone approves them"),
       mode("auto", "Sync everything",
         "Every new document is approved as soon as it is found")),
     el("p", { style: muted + ";margin:0 0 10px" }, c.mode === "auto"
       ? "Every document found is synced. Exclude one to take it out of the bot."
-      : "New documents wait for approval. Approved documents stay approved and update when they change."),
+      : "New documents start excluded and are marked New until someone approves them. "
+        + "Approved documents stay approved and update when they change."),
     el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn,
       busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
               cfFeedCount = busy.log_total || 0, cfStatusEl)
@@ -3882,116 +3951,190 @@ function cfSyncCard(c) {
   return card;
 }
 
+// The documents, as the folder tree they live in. Two thousand rows cannot be
+// read; folders can. Every folder starts closed and says what is inside
+// (how many, how many approved, what is new or updated); its tick box selects
+// everything under it, subfolders included, and its arrow opens it.
+// "Recently edited" drops the tree and lists by Confluence's own edit date,
+// for checking what changed.
+function cfBox(checked, onchange, label) {
+  return el("input", { type: "checkbox", class: "cf-tick", "aria-label": label,
+    checked: checked ? "true" : null, onchange });
+}
+
+const cfAgo = at => {
+  if (!at) return "";
+  const d = (Date.now() - new Date(at)) / 864e5;
+  return d < 1 ? "today" : d < 2 ? "yesterday" : d < 31 ? Math.floor(d) + " days ago"
+    : new Date(at).toLocaleDateString();
+};
+
 function cfRow(it, onTick) {
-  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
   const [label, cls] = CF_STATUS[it.status] || [it.status, "tag-neutral"];
   const set = body => cfPost("/admin/confluence/items", { keys: [it.key], ...body });
-  const tick = el("input", { type: "checkbox", checked: cfSelected.has(it.key) ? "true" : null,
-    "aria-label": "Select " + it.title,
-    onchange: e => { e.target.checked ? cfSelected.add(it.key) : cfSelected.delete(it.key); onTick(); } });
-  const size = it.size ? " · " + (it.size > 1048576 ? (it.size / 1048576).toFixed(1) + " MB"
-                                                      : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
-  const acts = [];
-  if (it.present !== false && it.decision !== "approved")
-    acts.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-      onclick: () => set({ decision: "approved" }) }, "Approve"));
-  if (it.present !== false && it.decision !== "excluded")
-    acts.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-      onclick: () => set({ decision: "excluded" }) }, "Exclude"));
-  return el("div", { class: "item" }, tick,
-    el("div", { class: "grow" },
-      el("b", {}, it.title),
-      el("span", {}, (it.kind === "page" ? "Confluence page" : "Attached file") + size
-        + (it.version ? " · version " + it.version : "")),
-      it.error ? el("div", { style: muted }, it.error) : null),
+  const size = it.size ? (it.size > 1048576 ? (it.size / 1048576).toFixed(1) + " MB"
+                                            : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
+  const ext = it.kind === "page" ? "Page" : ((it.title || "").split(".").pop() || "file").toUpperCase();
+  const on = it.decision === "approved";
+  const sw = el("button", { class: "cf-switch", role: "switch", "aria-checked": on ? "true" : "false",
+    "aria-label": (on ? "Approved: " : "Excluded: ") + it.title,
+    title: on ? "Approved. Click to exclude" : "Excluded. Click to approve",
+    onclick: () => set({ decision: on ? "excluded" : "approved" }) });
+  if (it.present === false) sw.disabled = true;
+  return el("div", { class: "cf-doc" + (on ? " on" : "") },
+    cfBox(cfSelected.has(it.key), e => {
+      e.target.checked ? cfSelected.add(it.key) : cfSelected.delete(it.key); onTick(); },
+      "Select " + it.title),
+    el("div", { class: "cf-doc-main" },
+      el("div", { class: "cf-doc-title" }, it.title,
+        it.is_new ? el("span", { class: "cf-badge new" }, "New") : null,
+        it.is_updated ? el("span", { class: "cf-badge upd",
+          title: "Version " + it.prev_version + " to " + it.version + ", found " + cfAgo(it.updated_at) },
+          "Updated") : null),
+      el("div", { class: "cf-doc-meta" }, [ext, size,
+        it.modified_at ? "edited " + cfAgo(it.modified_at) : "",
+        it.version ? "v" + it.version : ""].filter(Boolean).join(" · "),
+        it.error ? el("div", { class: "cf-doc-err" }, it.error) : null)),
     el("span", { class: "tag " + cls }, label),
     cfProductPicker((it.product || "").split(",").filter(Boolean),
       keys => set({ product: keys.join(",") })),
-    acts,
-    it.url ? el("a", { class: "btn btn-ghost", style: "font-size:12.5px", href: it.url,
-      target: "_blank", rel: "noopener" }, "Open") : null);
+    sw,
+    it.url ? el("a", { class: "cf-open", href: it.url, target: "_blank", rel: "noopener",
+      title: "Open in Confluence", "aria-label": "Open " + it.title + " in Confluence" }, "↗") : null);
 }
 
 function cfDocumentsCard(c) {
   const card = el("div", { class: "card elev-sm", "data-sec": "Documents",
     style: "padding:14px 18px;margin-bottom:18px" });
-  const filt = CF_FILTERS.find(f => f[0] === cfFilter) || CF_FILTERS[0];
   const known = new Set(c.items.map(i => i.key));
   cfSelected.forEach(k => known.has(k) || cfSelected.delete(k));
+  const filt = CF_FILTERS.find(f => f[0] === cfFilter) || CF_FILTERS[0];
 
-  const chips = el("div", { class: "chips", style: "margin:8px 0 10px" },
+  const viewSw = el("div", { class: "cf-seg", role: "tablist" },
+    [["tree", "By folder"], ["recent", "Recently edited"]].map(([k, l]) => el("button", {
+      role: "tab", "aria-selected": cfMode === k ? "true" : "false",
+      onclick: () => { cfMode = k; cfShown = 100; render(); } }, l)));
+  const chips = el("div", { class: "chips", style: "margin:10px 0" },
     CF_FILTERS.map(([key, label, test]) => el("button", {
       class: "chip" + (cfFilter === key ? " chip-on" : ""),
       onclick: () => { cfFilter = key; cfShown = 100; render(); } },
-      label, el("span", { class: "chip-n" }, String(c.items.filter(i => test(i.status)).length)))));
-  const search = el("input", { class: "input", placeholder: "Find a document or folder",
-    value: cfSearch, style: "margin-bottom:8px" });
-  search.addEventListener("input", () => { cfSearch = search.value; cfShown = 100; drawList(); });
+      label, el("span", { class: "chip-n" }, String(c.items.filter(test).length)))));
+  const search = el("input", { class: "input", type: "search", value: cfSearch,
+    placeholder: "Find a document or folder" });
+  search.addEventListener("input", () => { cfSearch = search.value; cfShown = 100; draw(); });
 
-  // Acting on several at once: everything ticked, or a whole folder.
-  const bulk = el("div", {});
+  const bulk = el("div", { class: "cf-bulk" });
+  const body = el("div", {});
+  const tools = el("div", { class: "cf-tools" });
+
+  const matching = () => {
+    const q = cfSearch.trim().toLowerCase();
+    return c.items.filter(i => filt[2](i)
+      && (!q || (i.title + " " + (i.path || []).join(" ")).toLowerCase().includes(q)));
+  };
+
   const drawBulk = () => {
     bulk.textContent = "";
     const keys = [...cfSelected];
+    bulk.classList.toggle("on", keys.length > 0);
     if (!keys.length) return;
     const set = body => { cfPost("/admin/confluence/items", { keys, ...body },
       keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
-    bulk.append(el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap;"
-        + "padding:8px 10px;margin-bottom:8px;border-radius:var(--radius-md);"
-        + "background:color-mix(in srgb,var(--color-text) 6%,transparent)" },
-      el("b", { style: "font-weight:600" }, keys.length + " selected"),
+    bulk.append(
+      el("b", {}, keys.length + " selected"),
       el("button", { class: "btn btn-primary", onclick: () => set({ decision: "approved" }) }, "Approve"),
       el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
       cfProductPicker([], ks => set({ product: ks.join(",") }), "File under"),
-      el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); drawList(); } }, "Clear")));
+      el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
   };
 
-  const list = el("div", {});
-  const drawList = () => {
-    list.textContent = "";
-    const qq = cfSearch.trim().toLowerCase();
-    const rows = c.items.filter(i => filt[2](i.status)
-      && (!qq || (i.title + " " + (i.path || []).join(" ")).toLowerCase().includes(qq)));
-    if (!rows.length) {
-      list.append(el("div", { class: "empty" }, el("b", {}, c.items.length
-        ? "Nothing here" : "No documents yet"),
-        c.items.length ? "Try another filter." : "Press Check for changes to read the folder."));
-    } else {
-      list.append(el("div", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;"
-          + "color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
-        rows.length + " document" + (rows.length === 1 ? "" : "s"),
-        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => {
-          rows.forEach(r => cfSelected.add(r.key)); drawList(); } },
-          "Select all " + rows.length)));
-    }
-    const pathOf = r => (r.path || []).join(" › ") || "Top level";
-    const byFolder = new Map();
-    rows.forEach(r => { const k = pathOf(r); byFolder.has(k) ? byFolder.get(k).push(r) : byFolder.set(k, [r]); });
-    let lastPath = null;
-    rows.slice(0, cfShown).forEach(it => {
-      const path = pathOf(it);
-      if (path !== lastPath) {
-        lastPath = path;
-        const inFolder = byFolder.get(path);
-        list.append(el("div", { style: "display:flex;align-items:center;gap:8px;margin:14px 0 2px;"
-            + "font-size:12px;font-weight:600;color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
-          el("input", { type: "checkbox", "aria-label": "Select everything in " + path,
-            checked: inFolder.every(r => cfSelected.has(r.key)) ? "true" : null,
-            onchange: e => { inFolder.forEach(r => e.target.checked
-              ? cfSelected.add(r.key) : cfSelected.delete(r.key)); drawList(); } }),
-          path + " (" + inFolder.length + ")"));
-      }
-      list.append(cfRow(it, drawBulk));
+  // path -> node, with every document under it (not just its own) for counts
+  const buildTree = rows => {
+    const root = { name: "", key: "", kids: new Map(), docs: [], all: [] };
+    rows.forEach(r => {
+      let node = root;
+      root.all.push(r);
+      (r.path || []).forEach((name, i) => {
+        if (!node.kids.has(name)) node.kids.set(name, { name, key: (r.path || []).slice(0, i + 1).join("\u0001"),
+          kids: new Map(), docs: [], all: [] });
+        node = node.kids.get(name);
+        node.all.push(r);
+      });
+      node.docs.push(r);
     });
-    if (rows.length > cfShown) {
-      list.append(el("div", { style: "text-align:center;margin-top:12px" },
-        el("button", { class: "btn btn-ghost", onclick: () => { cfShown += 100; drawList(); } },
-          "Show " + Math.min(100, rows.length - cfShown) + " more of " + (rows.length - cfShown))));
+    return root;
+  };
+
+  const drawFolder = (node, depth, into) => {
+    const open = cfOpen.has(node.key) || !!cfSearch.trim();
+    const sel = node.all.filter(r => cfSelected.has(r.key)).length;
+    const appr = node.all.filter(r => r.decision === "approved").length;
+    const nNew = node.all.filter(r => r.is_new).length, nUpd = node.all.filter(r => r.is_updated).length;
+    const tick = cfBox(sel === node.all.length, e => {
+      node.all.forEach(r => e.target.checked ? cfSelected.add(r.key) : cfSelected.delete(r.key));
+      draw(); }, "Select everything in " + node.name);
+    tick.indeterminate = sel > 0 && sel < node.all.length;
+    const head = el("div", { class: "cf-folder" + (open ? " open" : ""), style: "--d:" + depth },
+      el("button", { class: "cf-chev", "aria-expanded": open ? "true" : "false",
+        "aria-label": (open ? "Close " : "Open ") + node.name,
+        onclick: () => { open ? cfOpen.delete(node.key) : cfOpen.add(node.key); draw(); } }),
+      el("label", { class: "cf-folder-name" }, tick, el("span", {}, node.name)),
+      el("span", { class: "cf-folder-meta" },
+        node.all.length + " doc" + (node.all.length === 1 ? "" : "s"),
+        el("span", { class: "cf-meter", title: appr + " of " + node.all.length + " approved" },
+          el("i", { style: "width:" + Math.round(appr / node.all.length * 100) + "%" })),
+        appr + " approved"),
+      nNew ? el("span", { class: "cf-badge new" }, nNew + " new") : null,
+      nUpd ? el("span", { class: "cf-badge upd" }, nUpd + " updated") : null);
+    into.append(head);
+    if (!open) return;
+    const inner = el("div", { class: "cf-folder-body", style: "--d:" + depth });
+    [...node.kids.values()].sort((a, b) => a.name.localeCompare(b.name))
+      .forEach(k => drawFolder(k, depth + 1, inner));
+    const limit = cfDocLimit.get(node.key) || 50;
+    node.docs.slice(0, limit).forEach(r => inner.append(cfRow(r, drawBulk)));
+    if (node.docs.length > limit) inner.append(el("button", { class: "btn btn-ghost cf-more",
+      onclick: () => { cfDocLimit.set(node.key, limit + 50); draw(); } },
+      "Show " + Math.min(50, node.docs.length - limit) + " more of " + (node.docs.length - limit)));
+    into.append(inner);
+  };
+
+  const draw = () => {
+    body.textContent = "";
+    tools.textContent = "";
+    const rows = matching();
+    tools.append(
+      el("span", {}, rows.length + " of " + c.items.length + " documents"),
+      el("button", { class: "btn btn-ghost", onclick: () => {
+        rows.forEach(r => cfSelected.add(r.key)); draw(); } }, "Select all " + rows.length),
+      cfMode === "tree" ? el("button", { class: "btn btn-ghost", onclick: () => {
+        const all = new Set(); const walk = n => n.kids.forEach(k => { all.add(k.key); walk(k); });
+        walk(buildTree(rows)); cfOpen = cfOpen.size ? new Set() : all; draw(); } },
+        cfOpen.size ? "Close all folders" : "Open all folders") : null);
+    if (!rows.length) {
+      body.append(el("div", { class: "empty" }, el("b", {}, c.items.length ? "Nothing here" : "No documents yet"),
+        c.items.length ? "Try another filter." : "Press Check for changes to read the folder."));
+    } else if (cfMode === "recent") {
+      const sorted = rows.slice().sort((a, b) =>
+        String(b.updated_at || b.modified_at || "").localeCompare(String(a.updated_at || a.modified_at || "")));
+      sorted.slice(0, cfShown).forEach(r => body.append(el("div", { class: "cf-recent" },
+        el("div", { class: "cf-recent-path" }, (r.path || []).join(" › ") || "Top level"), cfRow(r, drawBulk))));
+      if (rows.length > cfShown) body.append(el("button", { class: "btn btn-ghost cf-more",
+        onclick: () => { cfShown += 100; draw(); } }, "Show " + Math.min(100, rows.length - cfShown) + " more"));
+    } else {
+      const root = buildTree(rows);
+      [...root.kids.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(k => drawFolder(k, 0, body));
+      root.docs.forEach(r => body.append(cfRow(r, drawBulk)));
     }
     drawBulk();
   };
-  drawList();
-  card.append(el("b", {}, "Documents"), chips, search, bulk, list);
+  draw();
+  card.append(
+    el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+      el("b", { style: "flex:1" }, "Documents"), viewSw),
+    el("p", { style: "margin:4px 0 0;font-size:12.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
+      "Only approved documents reach the bot; everything else is excluded. Tick a folder to select everything in it."),
+    chips, search, tools, body, bulk);
   return card;
 }
 
@@ -4002,7 +4145,7 @@ function cfHistoryCard(c) {
     : r.kind === "check"
       ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
       : n(r, "added") + " added, " + n(r, "updated") + " updated, " + n(r, "removed") + " removed"
-        + (r.waiting ? ", " + r.waiting + " waiting for approval" : "");
+        ;
   return el("div", { class: "card elev-sm", "data-sec": "History", style: "padding:14px 18px" },
     el("b", {}, "History"),
     c.history.length

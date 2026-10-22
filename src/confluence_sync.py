@@ -10,11 +10,15 @@ Two steps, kept apart so a person can stand between them:
             re-index changed ones, remove ones excluded or gone from
             Confluence. Only documents this sync added are ever removed.
 
-"Sync now" and the daily run do both. Each item carries a decision:
-approved, excluded, or pending. In "auto" mode a newly found document is
-approved at once (sync everything); in "review" mode it waits as pending
-until someone approves it on the console's Confluence page. A document that
-was approved stays approved when it changes in Confluence.
+"Sync now" and the daily run do both. Each item is approved or excluded;
+anything not approved is excluded. In "auto" mode a newly found document is
+approved at once (sync everything); in "review" mode it starts excluded and
+marked new until someone approves it on the console's Confluence page. A
+document that was approved stays approved when it changes in Confluence.
+
+Each item also records when Confluence last saw it edited, when this sync
+first found it and when its version last changed between two checks, so the
+console can show what is new and what has been updated.
 
 Filing: a document already filed in the catalogue keeps that filing. A new
 one is suggested the product its nearest folder or page is named after,
@@ -47,7 +51,8 @@ _FILE_TYPES = (".pdf", ".docx", ".txt")
 _MIN_PAGE_TEXT = 200
 _HISTORY = 20
 MODES = ("review", "auto")
-DECISIONS = ("approved", "excluded", "pending")
+DECISIONS = ("approved", "excluded")
+_RECENT_DAYS = 14                  # how long "new" and "updated" flags last
 
 # A folder, or a page whose child pages hold the manuals: both are a
 # "Website" container in Confluence, depending on how the space was built.
@@ -127,6 +132,9 @@ def _load() -> dict:
     st.setdefault("mode", "review")
     st.setdefault("items", {})
     st.setdefault("history", [])
+    for it in st["items"].values():  # "pending" was a third decision; not approved is excluded
+        if it.get("decision") not in DECISIONS:
+            it["decision"] = "excluded"
     for h in st["history"]:          # entries written before history kept counts
         for k, v in list(h.items()):
             if isinstance(v, list) and k != "errors":
@@ -156,8 +164,6 @@ def status_of(it: dict) -> str:
         return "gone" if synced else "missing"
     if it.get("decision") == "excluded":
         return "remove" if synced else "excluded"
-    if it.get("decision") == "pending":
-        return "waiting"
     if not synced:
         return "new"
     return "synced" if it.get("synced_version") == it.get("version") else "changed"
@@ -192,6 +198,14 @@ def category_of(product_keys: str) -> str | None:
     return None
 
 
+def _recent(at: str | None) -> bool:
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(at)
+    except (TypeError, ValueError):
+        return False
+    return age.days < _RECENT_DAYS
+
+
 def overview() -> dict:
     """Everything the console's Confluence page shows."""
     st = _load()
@@ -203,7 +217,10 @@ def overview() -> dict:
     items = []
     for key, it in st["items"].items():
         row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
-                                      "decision", "source", "synced_at", "error", "present")}
+                                      "decision", "source", "synced_at", "error", "present",
+                                      "modified_at", "first_seen_at", "updated_at", "prev_version")}
+        row["is_new"] = _recent(it.get("first_seen_at"))
+        row["is_updated"] = _recent(it.get("updated_at"))
         row["key"] = key
         row["status"] = status_of(it)
         if it.get("synced_version") is not None:
@@ -230,7 +247,7 @@ def set_items(keys: list[str], decision: str | None = None,
     """Approve, exclude or re-file items. Decisions take effect at the next
     sync; a new product for a document already synced takes effect now."""
     if decision is not None and decision not in DECISIONS:
-        raise ValueError("decision must be approved, excluded or pending")
+        raise ValueError("decision must be approved or excluded")
     retag = []
 
     def change(st):
@@ -381,6 +398,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 "kind": "page", "id": pid, "title": title, "path": trail,
                 "name": _safe_name(title) + ".txt",
                 "version": (full.get("version") or {}).get("number"),
+                "modified_at": (full.get("version") or {}).get("createdAt"),
                 "url": _link(api, (full.get("_links") or {}).get("webui"))}
             _note(title, "page", trail, "found")
         for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
@@ -391,6 +409,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 "kind": "file", "id": att["id"], "page_id": pid, "title": att.get("title"),
                 "path": trail + ([title] if title else []), "name": name,
                 "version": (att.get("version") or {}).get("number"),
+                "modified_at": (att.get("version") or {}).get("createdAt"),
                 "size": att.get("fileSize"),
                 "url": _link(api, att.get("webuiLink"))}
             _note(att.get("title") or name, "file", trail + ([title] if title else []), "found")
@@ -399,15 +418,19 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
 
     def merge(st):
         items = st["items"]
+        # The first check finds everything; calling all of it "new" says nothing.
+        first_check = not st.get("checked_at")
         taken = {it["source"] for k, it in items.items() if it.get("source") and k in found}
         for key, f in found.items():
             it = items.get(key)
             if it is None:
                 cat, prod = _suggest(f["path"])
-                it = items[key] = {"decision": "approved" if st["mode"] == "auto" else "pending",
-                                   "category": cat, "product": prod, "synced_version": None}
+                it = items[key] = {"decision": "approved" if st["mode"] == "auto" else "excluded",
+                                   "category": cat, "product": prod, "synced_version": None,
+                                   "first_seen_at": None if first_check else res["at"]}
                 res["new"].append(f["title"])
-            elif it.get("synced_version") is not None and it["synced_version"] != f["version"]:
+            elif it.get("version") is not None and it["version"] != f["version"]:
+                it["updated_at"], it["prev_version"] = res["at"], it["version"]
                 res["changed"].append(f["title"])
             name = f.pop("name")
             if not it.get("source"):
@@ -450,10 +473,9 @@ def _remove(source: str) -> None:
 def _apply(api: _Api) -> dict:
     st = _load()
     res = {"at": _now(), "kind": "sync", "added": [], "updated": [], "removed": [],
-           "waiting": 0, "errors": []}
+           "errors": []}
     todo = [(k, dict(it)) for k, it in st["items"].items()
             if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove")]
-    res["waiting"] = sum(1 for it in st["items"].values() if status_of(it) == "waiting")
     if st.get("found_nothing") and st["items"]:
         # Nothing listed at all is a permissions change or an emptied folder
         # far more often than a real removal of every manual.

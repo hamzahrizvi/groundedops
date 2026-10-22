@@ -114,14 +114,16 @@ def test_page_text():
     assert "Note" in t and "| A | B" in t
 
 
-def test_review_mode_waits_for_approval():
+def test_review_mode_excludes_until_approved():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()
         w.run(api)
         items = w.items()
         # the Website page itself, the short Overview page and the PNG are not offered
         assert sorted(items) == ["Installation", "SH3 manual.pdf"], sorted(items)
-        assert {i["status"] for i in items.values()} == {"waiting"}
+        # not approved is excluded; the first check calls nothing "new"
+        assert {i["status"] for i in items.values()} == {"excluded"}
+        assert not any(i["is_new"] or i["is_updated"] for i in items.values())
         assert items["Installation"]["product"] == "sh3"      # suggested by its folder
         assert w.ingested == []
 
@@ -134,6 +136,17 @@ def test_review_mode_waits_for_approval():
 
         # nothing changed: nothing re-indexed
         w.run(api)
+        assert len(w.ingested) == 1
+
+        # a page edited in Confluence and a file added later are flagged,
+        # and the new file stays excluded until approved
+        api.page_version = 2
+        api.attachments = {"20": FakeApi.attachments["20"]
+                           + [{"id": "att7", "title": "SH3 spares.pdf", "version": {"number": 1}}]}
+        w.run(api)
+        items = w.items()
+        assert items["Installation"]["is_updated"] and items["Installation"]["prev_version"] == 1
+        assert items["SH3 spares.pdf"]["is_new"] and items["SH3 spares.pdf"]["status"] == "excluded"
         assert len(w.ingested) == 1
 
         # excluded after syncing: removed from the index at the next sync
@@ -181,7 +194,13 @@ def test_old_state_file_is_upgraded():
         items = w.items()
         # already synced at version 2: stays approved, not re-downloaded
         assert items["SH3 manual.pdf"]["status"] == "synced" and w.ingested == [], (items, w.ingested)
-        assert items["Installation"]["status"] == "waiting"
+        assert items["Installation"]["status"] == "excluded"
+
+        # a decision left "pending" by the old page reads as excluded
+        st = json.load(open(path))
+        st["items"]["page:20"]["decision"] = "pending"
+        json.dump(st, open(path, "w"))
+        assert w.items()["Installation"]["decision"] == "excluded"
 
 
 if __name__ == "__main__":
