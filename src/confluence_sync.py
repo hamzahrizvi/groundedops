@@ -292,10 +292,12 @@ def _uploads(items: dict) -> dict[str, str]:
     return out
 
 
-def _matches(items: dict, uploads: dict | None = None) -> dict[str, tuple[str, bool]]:
-    """item key -> (the upload it is a copy of, whether it is the whole
-    manual and so can replace it). One item per upload: a combined
-    document before a file before a page."""
+def _matches(items: dict, uploads: dict | None = None) -> dict[str, list[tuple[str, bool]]]:
+    """item key -> [(an upload it is a copy of, whether it is the whole
+    manual and so can replace it)]. One item per upload: a combined
+    document before a file before a page. A combined document is also the
+    copy of an upload named after one of its sections ("MyConnect Quick
+    Start Guide" inside "MyConnect Environment")."""
     uploads = _uploads(items) if uploads is None else uploads
     if not uploads:
         return {}
@@ -308,15 +310,22 @@ def _matches(items: dict, uploads: dict | None = None) -> dict[str, tuple[str, b
     for key, it in items.items():
         if not it.get("present", True):
             continue
-        src = uploads.get(_title_key(it.get("title") or ""))
-        if not src:
-            continue
         # A page with chapters under it is only the cover of the manual.
         whole = it.get("kind") != "page" or tuple((it.get("path") or []) + [it.get("title")]) not in folders
-        cand = (not whole, rank.get(it.get("kind"), 3), key)
-        if src not in best or cand < best[src][0]:
-            best[src] = (cand, key, whole)
-    return {key: (src, whole) for src, (_, key, whole) in best.items()}
+        titles = [(it.get("title") or "", 0)]
+        if it.get("kind") == "bundle":
+            titles += [(m[1].split(" › ")[-1], 1) for m in it.get("members") or []]
+        for title, section in titles:
+            src = uploads.get(_title_key(title))
+            if not src:
+                continue
+            cand = (not whole, section, rank.get(it.get("kind"), 3), key)
+            if src not in best or cand < best[src][0]:
+                best[src] = (cand, key, whole)
+    out: dict[str, list] = {}
+    for src, (_, key, whole) in sorted(best.items(), key=lambda kv: kv[1][0]):
+        out.setdefault(key, []).append((src, whole))
+    return out
 
 
 def overview() -> dict:
@@ -329,6 +338,7 @@ def overview() -> dict:
                 filed[src] = (filed[src] + "," if src in filed else "") + p["key"]
     idx = _name_index()
     matches = _matches(st["items"])
+    keep = set(st.get("keep_uploads") or [])
     items = []
     for key, it in st["items"].items():
         row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
@@ -344,8 +354,9 @@ def overview() -> dict:
         else:
             _, row["product"], row["suggested"] = _effective(it, idx)
         if key in matches:
-            row["uploaded_as"], whole = matches[key]
-            row["keep_upload"] = bool(it.get("keep_upload"))
+            (row["uploaded_as"], whole), more = matches[key][0], matches[key][1:]
+            row["also_uploaded"] = [u for u, _ in more]
+            row["keep_upload"] = row["uploaded_as"] in keep
             row["replaces"] = whole and not row["keep_upload"]
             # Filed as the upload was, unless someone chose otherwise.
             if row["replaces"] and row.get("suggested") is not False and it.get("synced_version") is None \
@@ -397,6 +408,7 @@ def set_items(keys: list[str], decision: str | None = None,
     if decision is not None and decision not in DECISIONS:
         raise ValueError("decision must be approved or excluded")
     retag = []
+    matches = _matches(_load()["items"]) if keep_upload is not None else {}
 
     def change(st):
         for k in keys:
@@ -407,7 +419,10 @@ def set_items(keys: list[str], decision: str | None = None,
                 it["decision"] = decision
                 it.pop("error", None)
             if keep_upload is not None:
-                it["keep_upload"] = keep_upload
+                kept = set(st.get("keep_uploads") or [])
+                for upload, _ in matches.get(k, []):
+                    (kept.add if keep_upload else kept.discard)(upload)
+                st["keep_uploads"] = sorted(kept)
             if product is not None:
                 if it.get("synced_version") is not None:
                     retag.append(it["source"])
@@ -629,10 +644,15 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 decision = "approved" if st["mode"] == "auto" else "excluded"
                 chosen = False
                 if f["kind"] == "bundle":
+                    pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]
                     # Combining approved pages keeps them approved.
-                    if any(items.get(f"page:{m[0]}", {}).get("decision") == "approved"
-                           for m in f["members"]):
+                    if any(pg.get("decision") == "approved" for pg in pages):
                         decision = "approved"
+                    # ...and pages filed alike keep that filing.
+                    filed = {pg.get("product") for pg in pages if pg.get("product_chosen")}
+                    if len(filed) == 1 and next(iter(filed)):
+                        prod = next(iter(filed))
+                        cat, chosen = category_of(prod), True
                 else:
                     # Split from a combined document: its decision and product carry over.
                     for prefix, was in (st.get("unbundled") or {}).items():
@@ -733,6 +753,7 @@ def _apply(api: _Api) -> dict:
         todo = [(k, it) for k, it in todo if it.get("present", True)]
 
     matches = _matches(st["items"])
+    keep = set(st.get("keep_uploads") or [])
     res["replaced"] = []
     for n, (key, it) in enumerate(todo):
         _progress.update(phase="syncing", done=n, total=len(todo))
@@ -754,17 +775,17 @@ def _apply(api: _Api) -> dict:
                 else:
                     content = api.download(it["page_id"], it["id"])
                     version = it.get("version")
-                upload, whole = matches.get(key, (None, False))
-                upload = upload if whole and not it.get("keep_upload") else None
+                uploads = [u for u, whole in matches.get(key, []) if whole and u not in keep]
                 cat, prod = _filed(src)
-                if not prod and upload and not it.get("product_chosen"):
-                    cat, prod = _filed(upload)
+                for u in uploads:
+                    if not prod and not it.get("product_chosen"):
+                        cat, prod = _filed(u)
                 if not prod:
                     cat, prod, _ = _effective(it, _name_index())
                 _ingest(content, src, cat, prod or None)
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)
-                if upload:
+                for upload in uploads:
                     # Only once the Confluence copy is in, so a failed
                     # download never leaves the manual missing altogether.
                     _remove(upload)
@@ -792,9 +813,11 @@ def _apply(api: _Api) -> dict:
     # upload goes, so the bot never reads two copies of it.
     done = {k for k, _ in todo}
     for key, it in st["items"].items():
-        upload, whole = matches.get(key, (None, False))
-        if (upload and whole and key not in done and not it.get("keep_upload")
-                and status_of(it) == "synced"):
+        if key in done or status_of(it) != "synced":
+            continue
+        for upload, whole in matches.get(key, []):
+            if not whole or upload in keep:
+                continue
             try:
                 _remove(upload)
                 res["replaced"].append(f"{upload} -> {it.get('source')}")
