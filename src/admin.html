@@ -235,8 +235,8 @@
   .cf-meter{width:54px;height:4px;border-radius:99px;overflow:hidden;
         background:color-mix(in srgb,var(--color-text) 12%,transparent)}
   .cf-meter>i{display:block;height:100%;background:var(--color-accent);transition:width .4s ease}
-  .cf-folder-body{animation:cfRise .3s cubic-bezier(.2,.75,.25,1) both;
-        margin-left:calc(20px + var(--d) * 22px);padding-left:10px;
+  .cf-folder-body.anim{animation:cfRise .3s cubic-bezier(.2,.75,.25,1) both}
+  .cf-folder-body{margin-left:calc(20px + var(--d) * 22px);padding-left:10px;
         border-left:1px solid color-mix(in srgb,var(--color-text) 10%,transparent)}
   .cf-doc{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 8px;border-radius:var(--radius-md);
         border-top:1px solid color-mix(in srgb,var(--color-text) 7%,transparent);transition:background .15s}
@@ -3770,7 +3770,7 @@ function viewKeys() {
 // token, so only root sees that card; the rest is for anyone at support.
 let confluenceCache = null;
 let cfFilter = "all", cfSearch = "", cfSelected = new Set(), cfPoll = null, cfShown = 100;
-let cfMode = "tree", cfOpen = new Set(), cfDocLimit = new Map();
+let cfMode = "tree", cfOpen = new Set(), cfDocLimit = new Map(), cfJustOpened = null;
 
 const CF_STATUS = {
   synced: ["Synced", "tag-neutral"],
@@ -4077,7 +4077,8 @@ function cfDocumentsCard(c) {
     const head = el("div", { class: "cf-folder" + (open ? " open" : ""), style: "--d:" + depth },
       el("button", { class: "cf-chev", "aria-expanded": open ? "true" : "false",
         "aria-label": (open ? "Close " : "Open ") + node.name,
-        onclick: () => { open ? cfOpen.delete(node.key) : cfOpen.add(node.key); draw(); } }),
+        onclick: () => { open ? cfOpen.delete(node.key) : (cfOpen.add(node.key), cfJustOpened = node.key);
+                         draw(); } }),
       el("label", { class: "cf-folder-name" }, tick, el("span", {}, node.name)),
       el("span", { class: "cf-folder-meta" },
         node.all.length + " doc" + (node.all.length === 1 ? "" : "s"),
@@ -4088,7 +4089,8 @@ function cfDocumentsCard(c) {
       nUpd ? el("span", { class: "cf-badge upd" }, nUpd + " updated") : null);
     into.append(head);
     if (!open) return;
-    const inner = el("div", { class: "cf-folder-body", style: "--d:" + depth });
+    const inner = el("div", { class: "cf-folder-body" + (cfJustOpened === node.key ? " anim" : ""),
+      style: "--d:" + depth });
     [...node.kids.values()].sort((a, b) => a.name.localeCompare(b.name))
       .forEach(k => drawFolder(k, depth + 1, inner));
     const limit = cfDocLimit.get(node.key) || 50;
@@ -4127,6 +4129,7 @@ function cfDocumentsCard(c) {
       root.docs.forEach(r => body.append(cfRow(r, drawBulk)));
     }
     drawBulk();
+    cfJustOpened = null;
   };
   draw();
   card.append(
