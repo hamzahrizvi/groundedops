@@ -1,9 +1,10 @@
-"""D-20261020-06: the id-like fields of the public widget models are capped."""
+"""D-20261020-06: the id-like fields of the public widget models are capped (and /widget/lead, D-20261021-20)."""
 import uuid
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
 import main
 import widget_api
+import widget_config
 from fastapi.testclient import TestClient
 
 client = TestClient(main.app)
@@ -33,6 +34,13 @@ def test_over_long_ids_get_422_at_the_edge():
         assert r.status_code == 422, f"/widget/feedback {field}: {r.status_code}"
     r = client.post("/widget/draft_enquiry", json={"kind": "sales", "product": LONG})
     assert r.status_code == 422, f"/widget/draft_enquiry product: {r.status_code}"
+    lead = {"kind": "sales", "values": {"f_name": "Ann", "f_email": "ann@example.com"}}
+    for field in ("kind", "product", "summary_source", "visitor_id"):
+        r = client.post("/widget/lead", json={**lead, field: LONG})
+        assert r.status_code == 422, f"/widget/lead {field}: {r.status_code}"
+    many = {f"k{i}": "v" for i in range(widget_config.MAX_FORM_FIELDS + 1)}
+    r = client.post("/widget/lead", json={**lead, "values": many})
+    assert r.status_code == 422, f"/widget/lead values: {r.status_code}"
 
 
 def test_a_widget_shaped_vote_still_works():
@@ -41,4 +49,12 @@ def test_a_widget_shaped_vote_still_works():
     r = client.post("/widget/feedback", json={
         "request_id": "rid-cap-ok", "vote": "up", "session_id": sid,
         "visitor_id": str(uuid.uuid4())})
+    assert r.status_code == 200, r.text
+
+
+def test_a_widget_shaped_lead_still_works():
+    r = client.post("/widget/lead", json={
+        "kind": "sales", "values": {"f_name": "Ann", "f_email": "ann@example.com", "f_msg": "NV9 price"},
+        "product": "biometrics_general", "transcript": [], "enquiry": "",
+        "summary_source": "none", "visitor_id": str(uuid.uuid4())})
     assert r.status_code == 200, r.text
