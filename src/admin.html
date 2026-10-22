@@ -430,7 +430,9 @@
      size the cap is trying to counteract. Prose is still measured: these
      pages are as wide as the window, and a 1900px line of 12.5px text is
      not readable however tidy it looks. */
-  .wrap{width:100%;animation:rise .18s ease both;--measure:780px}
+  /* backwards, not both: a kept final transform would make .wrap the box
+     every position:fixed child pins to (the Confluence selection bar). */
+  .wrap{width:100%;animation:rise .18s ease backwards;--measure:780px}
   h1{font-size:26px;letter-spacing:-.025em;margin:0 0 4px;font-family:var(--font-heading);font-weight:500}
   .lede{margin:0 0 22px;max-width:var(--measure,780px);font-size:14px;
         color:color-mix(in srgb, var(--color-text) 60%, transparent)}
