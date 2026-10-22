@@ -509,16 +509,30 @@ table lookup, fixed with a narrow lexical-containment rescue.
 
 ## Known limitations
 
-- **No authentication.** Admin endpoints are gated only by a shared
-  password header. Not suitable for untrusted public traffic as-is.
-- **`/source_file` is unauthenticated** so the public widget can offer
-  downloads, which means any ingested document is retrievable by
-  filename. `EXCLUDED_SOURCES` keeps internal documents out; gate it per
-  product before exposing this publicly.
-- **No rate limiting** on `/query`. A public endpoint backed by a metered
-  API key needs it.
-- **No data-retention or PII policy** around `logs.json`, which is also
-  append-only and unbounded — add rotation.
+- **Admin sign-in is per account, over the LAN.** The console uses staff
+  accounts with levels (Viewer, Admin, Owner; `accounts.py`, `guards.py`);
+  the old shared admin password is gone (the `x-admin-password` header now
+  carries a session token). The admin surface answers only callers on the
+  machine or LAN unless `ADMIN_ALLOWED_IPS` opens it, and sign-in is still
+  required then.
+- **`/source_file` and `/figure` trust direct callers.** A caller that
+  comes through a proxy or tunnel needs a widget member token
+  (`_TOKEN_GATED_PREFIXES` in `main.py`); a caller that reaches the server
+  directly is not asked for one, so a server listening on a public address
+  serves any retained document by filename. `EXCLUDED_SOURCES` keeps
+  internal documents out.
+- **`/query` has no per-caller limit.** It is not public: callers from
+  outside the LAN get 404 unless `ADMIN_ALLOWED_IPS` lets them in (only
+  `/widget` and `/health` are public). The public widget counts every
+  answer against daily credits (`quota.py`: member 25, staff 500, settable
+  in the console; anonymous visitors get FAQ lookups only, 60 per visitor
+  and 200 per address a day).
+- **Retention covers visitor text only.** `retention.py` deletes visitor
+  text after `RETENTION_DAYS` (default 90; 0 turns it off): the question
+  log (`logs.jsonl`, rotated at 10 MB, and its rotated files),
+  conversations, feedback votes, unsent enquiries and the
+  unanswered-question list. Documents, the FAQ, the index, staff accounts
+  and quota counts are not touched.
 - **Single tenant.** One collection, one FAQ, one configuration per
   instance, and `runtime_config` is process-wide. Two products can be
   scoped within an instance; two customers cannot share one.
