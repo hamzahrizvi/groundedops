@@ -38,14 +38,20 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest,
                   x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    removed = delete_source(payload.source)
+    return {"removed_chunks": remove_source_now(payload.source), "source": payload.source}
+
+
+def remove_source_now(source: str) -> int:
+    """What Remove does, for callers inside the server (the Confluence sync)
+    that have no sign-in to show; the route above checks the caller's."""
+    removed = delete_source(source)
     clear_memory()
     try:
         import figures as _figures
-        _figures.remove_figures(payload.source)
+        _figures.remove_figures(source)
     except Exception as exc:
-        logger.warning("figures for %r not removed: %s", payload.source, exc)
-    return {"removed_chunks": removed, "source": payload.source}
+        logger.warning("figures for %r not removed: %s", source, exc)
+    return removed
 
 
 @router.post("/source_chunks")

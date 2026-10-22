@@ -728,8 +728,11 @@ def _mark_internal(sources: list[str], on: bool) -> None:
 
 def _remove(source: str) -> None:
     """What the console's Remove button does, plus the catalogue entry."""
-    from routes_documents import DeleteSourceRequest, remove_source
-    remove_source(DeleteSourceRequest(source=source))
+    # Not the /delete_source route: it asks for a sign-in a background sync
+    # does not have, which failed every replacement with "401: Sign-in
+    # required" after the Confluence copy was already in.
+    from routes_documents import remove_source_now
+    remove_source_now(source)
     _mark_internal([source], False)
     catalog.refile_source(source, [])
 
