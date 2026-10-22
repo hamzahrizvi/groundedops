@@ -35,6 +35,7 @@ class ItemsReq(BaseModel):
 
 class RunReq(BaseModel):
     apply: bool = True              # false: check what changed, index nothing
+    check: bool | None = None       # None: read Confluence first only if the last check is old
 
 
 def _status() -> dict:
@@ -103,7 +104,7 @@ def admin_confluence_run(payload: RunReq,
                             detail="The search model is still loading - try again in a few seconds")
     if confluence_sync.running():
         raise HTTPException(status_code=409, detail="A check or sync is already running")
-    confluence_sync.run_in_background(apply=payload.apply)
+    confluence_sync.run_in_background(apply=payload.apply, check=payload.check)
     logger.info(f"Confluence {'sync' if payload.apply else 'check'} started by {me['email']}")
     return {**_status(), "running": {"phase": "starting"}}
 

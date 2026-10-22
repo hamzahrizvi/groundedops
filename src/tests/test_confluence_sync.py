@@ -94,8 +94,8 @@ class World:
             (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
              cs._mark_internal) = saved
 
-    def run(self, api, apply=True):
-        return self._with(lambda: cs.run(apply), api)
+    def run(self, api, apply=True, check=True):
+        return self._with(lambda: cs.run(apply, check), api)
 
     def items(self):
         return self._with(lambda: {i["title"]: i for i in cs.overview()["items"]})
@@ -337,6 +337,28 @@ def test_internal_documents_sync_but_never_reach_customers():
         w.decide(["SH3 manual.pdf"], decision="excluded")
         w.run(api)
         assert "SH3 manual.pdf" in w.removed and w.internal == {"Installation.txt"}
+
+
+def test_sync_now_after_a_recent_check_does_not_read_confluence_again():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+
+        reads = []
+        class Counting(FakeApi):
+            def each(self, path, **params):
+                reads.append(path)
+                return FakeApi.each(self, path, **params)
+        res = w.run(Counting(), check=None)          # what Sync now sends
+        assert reads == [] and res["added"] == ["Installation.txt"] and not res["checked"], res
+
+        # an old check: Sync now reads Confluence first
+        st = json.load(open(w.state))
+        st["checked_at"] = "2026-01-01T00:00:00+00:00"
+        json.dump(st, open(w.state, "w"))
+        res = w.run(Counting(), check=None)
+        assert reads and res["checked"], res
 
 
 if __name__ == "__main__":

@@ -4366,7 +4366,8 @@ function cfSyncCard(c) {
       busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
               cfFeedCount = busy.log_total || 0, cfStatusEl)
            : el("span", { style: muted }, (c.checked_at ? "Last checked " + new Date(c.checked_at).toLocaleString() + ". " : "")
-               + "Checks and syncs on its own once a day.")));
+               + "Sync now indexes what is approved, reading Confluence first only if the last check "
+               + "is over 6 hours old. Checks and syncs on its own once a day.")));
   return card;
 }
 

@@ -852,8 +852,19 @@ class Busy(RuntimeError):
     pass
 
 
-def run(apply: bool = True) -> dict:
-    """Check, then (unless apply=False) sync. Returns and records the result."""
+# "Sync now" indexes what is approved without reading Confluence again when
+# a check is this recent: reading means a request per page (about 1,500 of
+# them, 13 minutes or more), which held 24 approved documents back for 50.
+RECHECK_AFTER = float(os.getenv("CONFLUENCE_RECHECK_HOURS", "6")) * 3600
+
+
+def run(apply: bool = True, check: bool | None = None) -> dict:
+    """Check, then (unless apply=False) sync. check=None reads Confluence
+    first only when the last check is older than RECHECK_AFTER; a sync
+    always checks when check=True (the daily run). Returns and records the
+    result."""
+    if check is None:
+        check = not apply or _since_last_check() > RECHECK_AFTER
     if not _run_lock.acquire(blocking=False):
         raise Busy("A Confluence check or sync is already running")
     try:
@@ -861,10 +872,10 @@ def run(apply: bool = True) -> dict:
         _progress.update(phase="connecting")
         try:
             api, root_kind, root_id = _connect()
-            res = _check(api, root_kind, root_id)
+            res = _check(api, root_kind, root_id) if check else {}
             if apply:
-                res = {**_apply(api), "found": res["found"], "new": res["new"],
-                       "changed": res["changed"], "gone": res["gone"]}
+                res = {**_apply(api), **{k: res[k] for k in ("found", "new", "changed", "gone") if k in res},
+                       "checked": check}
         except Exception as exc:
             logger.warning("Confluence %s failed: %s", "sync" if apply else "check", exc)
             res = {"at": _now(), "kind": "sync" if apply else "check", "failed": str(exc)}
@@ -885,10 +896,10 @@ def run(apply: bool = True) -> dict:
         _run_lock.release()
 
 
-def run_in_background(apply: bool = True) -> None:
+def run_in_background(apply: bool = True, check: bool | None = None) -> None:
     def go():
         try:
-            run(apply)
+            run(apply, check)
         except Busy:
             pass                     # a second click while one runs
     threading.Thread(target=go, name="confluence-sync", daemon=True).start()
@@ -917,7 +928,7 @@ def _loop() -> None:
             time.sleep(wait)
             continue
         if configured() and capability("search") and not running():
-            run_in_background(apply=True)
+            run_in_background(apply=True, check=True)
         time.sleep(interval)
 
 
