@@ -10,14 +10,14 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import accounts
 import quota
 import widget_config
 import widget_export
 from guards import _require_admin
-from widget_api import Transcript
+from widget_api import MAX_ID_CHARS, MAX_WORD_CHARS, Transcript
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -201,15 +201,16 @@ def widget_detect_url(x_admin_password: str | None = Header(default=None)):
 
 
 class LeadReq(BaseModel):
-    kind: str                      # "sales" | "support"
-    values: dict = {}
-    product: str | None = None
+    kind: str = Field(..., max_length=MAX_WORD_CHARS)  # "sales" | "support"
+    # A form has at most MAX_FORM_FIELDS fields and the widget sends only those.
+    values: dict = Field({}, max_length=widget_config.MAX_FORM_FIELDS)
+    product: str | None = Field(None, max_length=MAX_ID_CHARS)
     transcript: Transcript | None = None
     # The written-up enquiry (from /widget/draft_enquiry, or typed by the
     # visitor) and which of those it was.
     enquiry: str | None = None
-    summary_source: str = "none"   # "chat" | "written" | "none"
-    visitor_id: str | None = None  # the widget's own id, for the daily cap
+    summary_source: str = Field("none", max_length=MAX_WORD_CHARS)  # "chat" | "written" | "none"
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)  # the widget's own id, for the daily cap
 
 
 _proxy_warned = False
