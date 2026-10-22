@@ -37,7 +37,7 @@ def ready(ops):
 
 def focus(ops, run):
     """-> (product, pair, note) from OPS/state/blind_focus.json. Both names go into file paths and
-    subagent prompts, so each must be a manual stem (^[a-z0-9_]+$) with a RUN/manuals/<stem>.txt;
+    subagent prompts, so each must be a manual stem (^[a-z0-9_]+$) with a real file RUN/manuals/<stem>.txt (not a device name such as con);
     "pair" may be absent or null. Anything else gives (None, None, "FOCUS IGNORED <reason>")."""
     p = os.path.join(ops, "state", "blind_focus.json")
     if not os.path.exists(p):
@@ -55,7 +55,7 @@ def focus(ops, run):
             continue
         if not isinstance(v, str) or not re.fullmatch(r"[a-z0-9_]+", v):
             return None, None, f"FOCUS IGNORED {k}: not a manual name"   # never echo an unchecked value
-        if not os.path.exists(os.path.join(run, "manuals", v + ".txt")):
+        if not os.path.isfile(os.path.join(run, "manuals", v + ".txt")):
             return None, None, f"FOCUS IGNORED {v}: no manual"
     return d["product"], d.get("pair"), None
 
@@ -109,10 +109,14 @@ def selftest():
     assert not os.path.exists(os.path.join(run, "cases.json")) and need(ops) == "FULL 20261005"
     w("ops/state/blind_focus.json", '{"product": "zz", "why": "typo"}')
     assert take(ops, run) == ["FOCUS IGNORED zz: no manual", "TOOK 20261005"], "unknown product: normal take"
-    # every value from the focus file is checked before it reaches a path or a prompt (D-20261022-12)
+    # every value from the focus file is checked before it reaches a path or a prompt (D-20261022-12, D-20261022-13)
     w("run/x.txt", "not a manual: one folder above manuals/")
     for body, line in [('{"product": "../x"}', "FOCUS IGNORED product: not a manual name"),
                        ('{"product": "a", "pair": "zz"}', "FOCUS IGNORED zz: no manual"),
+                       ('{"product": "con"}', "FOCUS IGNORED con: no manual"),
+                       ('{"product": "nul"}', "FOCUS IGNORED nul: no manual"),
+                       ('{"product": "a", "pair": "con"}', "FOCUS IGNORED con: no manual"),
+                       ('{"product": "a", "pair": "nul"}', "FOCUS IGNORED nul: no manual"),
                        ('{"product": "a", "pair": "../x"}', "FOCUS IGNORED pair: not a manual name"),
                        ('{"product": "A"}', "FOCUS IGNORED product: not a manual name"),
                        ('{"product": 3}', "FOCUS IGNORED product: not a manual name"),
