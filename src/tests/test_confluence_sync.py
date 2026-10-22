@@ -87,8 +87,8 @@ class World:
         finally:
             (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads) = saved
 
-    def run(self, api, apply=True):
-        return self._with(lambda: cs.run(apply), api)
+    def run(self, api, apply=True, check=True):
+        return self._with(lambda: cs.run(apply, check), api)
 
     def items(self):
         return self._with(lambda: {i["title"]: i for i in cs.overview()["items"]})
@@ -306,6 +306,28 @@ def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
         # but not the one marked Keep both before it was combined
         assert "Manual-v1.pdf" in w.removed and "Cmd A-v2.pdf" in w.removed, w.removed
         assert "Cmd B.pdf" not in w.removed, w.removed
+
+
+def test_sync_now_after_a_recent_check_does_not_read_confluence_again():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+
+        reads = []
+        class Counting(FakeApi):
+            def each(self, path, **params):
+                reads.append(path)
+                return FakeApi.each(self, path, **params)
+        res = w.run(Counting(), check=None)          # what Sync now sends
+        assert reads == [] and res["added"] == ["Installation.txt"] and not res["checked"], res
+
+        # an old check: Sync now reads Confluence first
+        st = json.load(open(w.state))
+        st["checked_at"] = "2026-01-01T00:00:00+00:00"
+        json.dump(st, open(w.state, "w"))
+        res = w.run(Counting(), check=None)
+        assert reads and res["checked"], res
 
 
 if __name__ == "__main__":
