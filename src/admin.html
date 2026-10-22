@@ -4203,7 +4203,7 @@ function cfReviewDialog(keys, mode) {
     + "). The upload is removed once the Confluence copy is in, and its product filing carries over.");
   if (mode === "approve" && part.length) warn.push(n(part.length) + (part.length === 1 ? " is" : " are")
     + " only the cover page of a manual you uploaded (" + part.slice(0, 3).map(i => i.uploaded_as).join(", ")
-    + "). Both copies stay until their folder is combined.");
+    + "). Both copies stay unless you press Replace it on them, which combines each with its chapters.");
   if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
     + "from them, but the widget never offers them under a product.");
   if (mode === "approve" && internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
@@ -4343,8 +4343,12 @@ function cfUploadLine(it) {
       ? [(it.status === "synced" ? "Replaced your upload " : "Replaces your upload ") + name
            + (it.status === "synced" ? "" : " when synced, keeping its product"), "rep",
          el("button", { class: "cf-up-btn", onclick: () => set(true) }, "Keep both")]
-      : ["Same manual as your upload " + name + ", but only its cover page. Combine this folder to replace it",
-         "part", null];
+      // The cover page of a manual kept as a page per chapter: replacing it
+      // means combining the cover and its chapters into the one document.
+      : ["Same manual as your upload " + name + ", kept in Confluence as a page per chapter", "part",
+         el("button", { class: "cf-up-btn", title: "Combine this page and its chapters into one document, "
+             + "which replaces the upload when synced",
+           onclick: () => cfBundle([...(it.path || []), it.title], true) }, "Replace it")];
   return el("div", { class: "cf-up " + cls }, text, btn);
 }
 
