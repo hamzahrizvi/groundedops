@@ -224,6 +224,8 @@
   .cf-ap-row.filed{border-left:3px solid #3fb97a}
   .cf-ap-row.suggested{border-left:3px dashed color-mix(in srgb,var(--color-text) 40%,transparent)}
   .cf-ap-row.none{border-left:3px solid #e0a030;background:color-mix(in srgb,#e0a030 7%,transparent)}
+  .cf-ap-row.off{opacity:.5}
+  .cf-ap-row .cf-tick{flex:0 0 auto}
   .cf-ap-n{font-size:18px;font-weight:600;min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
   .cf-ap-main{flex:1;min-width:0}
   .cf-ap-main b{display:block;font-size:13.5px;font-weight:600;overflow-wrap:anywhere}
@@ -4133,16 +4135,20 @@ function cfGroups(items) {
 // mode "approve": approve, filing the suggested ones as shown.
 // mode "file": confirm each group's suggestion, or put all under one product.
 function cfReviewDialog(keys, mode) {
-  const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
+  const wanted = new Set(keys);
+  const items = (confluenceCache.items || []).filter(i => wanted.has(i.key));
   const prods = products();
   const label = p => p.split(",").map(k => {
     const x = prods.find(q => q.key === k); return x ? x.categoryName + " › " + x.name : k; }).join(", ");
   const groups = cfGroups(items);
-  const unfiled = items.filter(i => !i.product);
-  const internal = items.filter(i => CF_INTERNAL.test((i.path || []).join(" ") + " " + i.title));
-  const sug = items.filter(i => i.product && i.suggested);
+  const isInternal = i => CF_INTERNAL.test((i.path || []).join(" ") + " " + i.title);
   const n = k => k + " document" + (k === 1 ? "" : "s");
   const again = () => cfReviewDialog(keys, mode);
+
+  // Which groups the main button acts on. Groups with a product start
+  // ticked; groups with none, and groups that are all internal-looking,
+  // start unticked, so leaving them out takes no effort.
+  const ticked = new Set(groups.filter(g => g.kind !== "none" && !g.items.every(isInternal)));
 
   const dlg = el("dialog", { class: "cf-dlg", "aria-label": mode === "approve" ? "Approve documents" : "File documents" });
   const close = () => { dlg.close(); dlg.remove(); };
@@ -4158,85 +4164,95 @@ function cfReviewDialog(keys, mode) {
       confluenceCache = await api("/admin/confluence/items", { method: "POST",
         body: JSON.stringify({ keys: ks, product, ...extra }) });
   };
-  const approve = async list => {
+  const chosen = () => groups.filter(g => ticked.has(g)).flatMap(g => g.items);
+  const act = async () => {
+    const list = chosen();
     close();
     try {
-      await confirmSuggestions(list, { decision: "approved" });
-      confluenceCache = await api("/admin/confluence/items", { method: "POST",
-        body: JSON.stringify({ keys: list.map(i => i.key), decision: "approved" }) });
+      if (mode === "approve") {
+        await confirmSuggestions(list, { decision: "approved" });
+        confluenceCache = await api("/admin/confluence/items", { method: "POST",
+          body: JSON.stringify({ keys: list.map(i => i.key), decision: "approved" }) });
+        toast("Approved " + n(list.length) + ". They reach the bot at the next sync");
+      } else {
+        await confirmSuggestions(list, {});
+        toast("Filed " + n(list.length) + (list.length < items.length
+          ? ". " + n(items.length - list.length) + " left as they were" : ""));
+      }
       list.forEach(i => cfSelected.delete(i.key));
-      toast("Approved " + n(list.length) + ". They reach the bot at the next sync");
-      render();
-    } catch (e) { toast(e.message, true); }
-  };
-  const fileAsShown = async () => {
-    close();
-    try {
-      await confirmSuggestions(items, {});
-      items.forEach(i => i.product && cfSelected.delete(i.key));
-      toast("Filed " + n(sug.length) + " as suggested"
-        + (unfiled.length ? ". " + n(unfiled.length) + " still have no product" : ""));
       render();
     } catch (e) { toast(e.message, true); }
   };
 
+  const go = el("button", { class: "btn btn-primary", onclick: act });
+  const warnBox = el("div", { class: "cf-ap-warn" });
+  // The button and the warnings follow the ticks: only what is ticked is acted on.
+  const sync = () => {
+    const list = chosen();
+    const unfiled = list.filter(i => !i.product), internal = list.filter(isInternal);
+    const rep = list.filter(i => i.replaces && i.status !== "synced");
+    const part = list.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload);
+    const warn = [];
+    if (mode === "approve" && rep.length) warn.push(n(rep.length) + (rep.length === 1 ? " replaces a PDF" : " replace PDFs")
+      + " you uploaded (" + rep.slice(0, 3).map(i => i.uploaded_as).join(", ") + (rep.length > 3 ? " and " + (rep.length - 3) + " more" : "")
+      + "). The upload is removed once the Confluence copy is in, and its product filing carries over.");
+    if (mode === "approve" && part.length) warn.push(n(part.length) + (part.length === 1 ? " is" : " are")
+      + " only the cover page of a manual you uploaded (" + part.slice(0, 3).map(i => i.uploaded_as).join(", ")
+      + "). Both copies stay unless you press Replace it on them, which combines each with its chapters.");
+    if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
+      + "from them, but the widget never offers them under a product.");
+    if (mode === "approve" && internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
+      + " under folders or titles that look internal ("
+      + [...new Set(internal.map(i => ((i.path || []).join(" ") + " " + i.title).match(CF_INTERNAL)[0]))].join(", ")
+      + "). Customers will be answered from them.");
+    warnBox.replaceChildren(...warn.map(w => el("p", {}, w)));
+    warnBox.hidden = !warn.length;
+    go.disabled = !list.length;
+    go.textContent = (mode === "approve" ? "Approve " : "File ")
+      + (list.length === items.length ? (list.length === 1 ? "it" : "all " + list.length) : "the " + list.length + " ticked")
+      + (warn.length && mode === "approve" ? " anyway" : "");
+  };
+
   const groupRow = g => {
     const list = g.items;
-    return el("div", { class: "cf-ap-row " + g.kind },
+    const tick = el("input", { type: "checkbox", class: "cf-tick", "aria-label": "Include this group",
+      checked: ticked.has(g) ? "true" : null,
+      onchange: e => { e.target.checked ? ticked.add(g) : ticked.delete(g);
+                       row.classList.toggle("off", !e.target.checked); sync(); } });
+    const row = el("div", { class: "cf-ap-row " + g.kind + (ticked.has(g) ? "" : " off") },
+      tick,
       el("span", { class: "cf-ap-n" }, String(list.length)),
       el("div", { class: "cf-ap-main" },
         el("b", {}, g.kind === "none" ? (g.folder ? "“" + g.folder + "”: no product matches" : "No product")
                                       : label(g.product)),
         el("span", {}, g.kind === "filed" ? "Filed" : g.kind === "suggested"
-          ? "Suggested by their folder" + (mode === "approve" ? ": approving files them here" : "")
+          ? "Suggested by their folder: " + (mode === "approve" ? "approving" : "filing") + " files them here"
           : "Not offered in the widget for any product",
+          list.every(isInternal) ? " · looks internal" : "",
           " · ", list.slice(0, 3).map(i => i.title).join(", ") + (list.length > 3 ? " and " + (list.length - 3) + " more" : ""))),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
         onclick: () => { close(); cfFileDialog(list.map(i => i.key), again); } },
         g.kind === "none" ? (g.folder ? "Create or choose" : "File") : "Change"));
+    return row;
   };
-
-  const warn = [];
-  const rep = items.filter(i => i.replaces && i.status !== "synced"), part = items.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload);
-  if (mode === "approve" && rep.length) warn.push(n(rep.length) + (rep.length === 1 ? " replaces a PDF" : " replace PDFs")
-    + " you uploaded (" + rep.slice(0, 3).map(i => i.uploaded_as).join(", ") + (rep.length > 3 ? " and " + (rep.length - 3) + " more" : "")
-    + "). The upload is removed once the Confluence copy is in, and its product filing carries over.");
-  if (mode === "approve" && part.length) warn.push(n(part.length) + (part.length === 1 ? " is" : " are")
-    + " only the cover page of a manual you uploaded (" + part.slice(0, 3).map(i => i.uploaded_as).join(", ")
-    + "). Both copies stay unless you press Replace it on them, which combines each with its chapters.");
-  if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
-    + "from them, but the widget never offers them under a product.");
-  if (mode === "approve" && internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
-    + " under folders or titles that look internal ("
-    + [...new Set(internal.map(i => ((i.path || []).join(" ") + " " + i.title).match(CF_INTERNAL)[0]))].join(", ")
-    + "). Customers will be answered from them.");
-
-  const filedOnly = items.filter(i => i.product);
-  const foot = mode === "approve"
-    ? [unfiled.length && filedOnly.length
-        ? el("button", { class: "btn btn-secondary", onclick: () => approve(filedOnly) },
-            "Approve the " + filedOnly.length + " with a product") : null,
-       el("button", { class: "btn btn-primary", onclick: () => approve(items) },
-         warn.length ? "Approve all " + items.length + " anyway" : "Approve " + n(items.length))]
-    : [el("button", { class: "btn btn-secondary",
-         onclick: () => { close(); cfFileDialog(keys, again, { pick: true }); } },
-         "Put all " + items.length + " under one product"),
-       sug.length ? el("button", { class: "btn btn-primary", onclick: fileAsShown },
-         "File the " + n(sug.length) + " as suggested") : null];
 
   dlg.append(
     el("div", { class: "cf-dlg-head" },
       el("b", {}, (mode === "approve" ? "Approve " : "File ") + n(items.length)),
       el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
-    el("p", { class: "cf-dlg-why" }, mode === "approve"
-      ? "Where each will be filed. Change any group before approving."
-        + (sug.length ? " " + n(sug.length) + " only have a suggestion; approving here files them as shown." : "")
+    el("p", { class: "cf-dlg-why" }, (mode === "approve"
+      ? "Where each will be filed. Change any group, and untick any you are not approving."
       : "These belong to " + groups.length + " different places. Each group goes where its folder points; "
-        + "change any group, or put them all under one product."),
+        + "change any group, or untick it to leave it as it is.")),
     el("div", { class: "cf-dlg-list" }, groups.map(groupRow)),
-    warn.length ? el("div", { class: "cf-ap-warn" }, warn.map(w => el("p", {}, w))) : null,
+    warnBox,
     el("div", { class: "cf-dlg-foot" },
-      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"), foot));
+      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"),
+      mode === "file" ? el("button", { class: "btn btn-secondary",
+        onclick: () => { close(); cfFileDialog(keys, again, { pick: true }); } },
+        "Put all " + items.length + " under one product") : null,
+      go));
+  sync();
   document.body.append(dlg);
   dlg.showModal();
 }
