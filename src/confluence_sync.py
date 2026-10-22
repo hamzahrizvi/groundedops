@@ -226,7 +226,10 @@ def _effective(it: dict, idx: dict) -> tuple[str | None, str, bool]:
     product added to the catalogue later is picked up)."""
     if it.get("product") or it.get("product_chosen"):
         return it.get("category") or category_of(it.get("product")), it.get("product") or "", False
-    cat, prod = _suggest(it.get("path") or [], idx)
+    # A combined document is named after its folder, which is where the
+    # product usually is ("NV4000 Endpoints").
+    own = [it["title"]] if it.get("kind") == "bundle" and it.get("title") else []
+    cat, prod = _suggest((it.get("path") or []) + own, idx)
     return cat, prod, bool(prod)
 
 
