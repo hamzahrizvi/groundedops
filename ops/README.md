@@ -225,6 +225,7 @@ OPS/runs/<YYYYMMDD>/       manuals/, cases.json, cases_state.json, run.log, DONE
                            is deleted after RETENTION_DAYS (90) by the weekly run's first step, and votes older than that by created_at from newer runs
                            (ops_pivot.py --prune); real_counts.json keeps the counts
 OPS/bank/<YYYYMMDD>/       manuals/, cases.json, READY: the next 40 questions, written after a run (tools/question_bank.py)
+OPS/state/blind_focus.json  {"product", "pair", "why"}: the next written set is about that product only; moved to runs/<stamp>/focus.json once used
 OPS/heldout/<YYYYMMDD>/    siblings_<type>.json   (Dev must never read)
 OPS/heldout/gates/<id>.gate-<ts>/  the gate's hidden pass: gate.log, sib_*/ states (Dev never reads)
 OPS/inbox/<department>/    findings and proposals; inbox/dev/ holds hand-backs and gates
