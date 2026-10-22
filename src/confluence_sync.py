@@ -92,9 +92,20 @@ def configured() -> bool:
     return bool(s["folder_url"] and s["email"] and s["token_set"])
 
 
-def running() -> dict | None:
-    """What a run in progress is doing, or None."""
-    return dict(_progress) if _run_lock.locked() else None
+def running(since: int = 0) -> dict | None:
+    """What a run in progress is doing, or None. `log` is what it has found
+    or indexed so far, from entry `since` on, so a console polling every
+    second or two is sent only what is new."""
+    if not _run_lock.locked():
+        return None
+    log = list(_progress.get("log", []))
+    return {**{k: v for k, v in _progress.items() if k != "log"},
+            "log": log[since:], "log_total": len(log)}
+
+
+def _note(title: str, kind: str, path: list[str], action: str) -> None:
+    _progress.setdefault("log", []).append(
+        {"title": title, "kind": kind, "path": " › ".join(path), "action": action})
 
 
 # ── state ───────────────────────────────────────────────────────────────
@@ -116,6 +127,10 @@ def _load() -> dict:
     st.setdefault("mode", "review")
     st.setdefault("items", {})
     st.setdefault("history", [])
+    for h in st["history"]:          # entries written before history kept counts
+        for k, v in list(h.items()):
+            if isinstance(v, list) and k != "errors":
+                h[k] = len(v)
     return st
 
 
@@ -180,6 +195,11 @@ def category_of(product_keys: str) -> str | None:
 def overview() -> dict:
     """Everything the console's Confluence page shows."""
     st = _load()
+    filed: dict[str, str] = {}             # source -> "k1,k2", one catalogue read
+    for c in catalog.load_catalog()["categories"]:
+        for p in c.get("products", []):
+            for src in p.get("sources", []):
+                filed[src] = (filed[src] + "," if src in filed else "") + p["key"]
     items = []
     for key, it in st["items"].items():
         row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
@@ -187,7 +207,7 @@ def overview() -> dict:
         row["key"] = key
         row["status"] = status_of(it)
         if it.get("synced_version") is not None:
-            row["product"] = _filed(it["source"])[1]   # the catalogue is the truth once synced
+            row["product"] = filed.get(it["source"], "")   # the catalogue is the truth once synced
         else:
             row["product"] = it.get("product") or ""
         items.append(row)
@@ -362,6 +382,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 "name": _safe_name(title) + ".txt",
                 "version": (full.get("version") or {}).get("number"),
                 "url": _link(api, (full.get("_links") or {}).get("webui"))}
+            _note(title, "page", trail, "found")
         for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
             name = _safe_name(att.get("title") or "")
             if not name.lower().endswith(_FILE_TYPES):
@@ -372,6 +393,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 "version": (att.get("version") or {}).get("number"),
                 "size": att.get("fileSize"),
                 "url": _link(api, att.get("webuiLink"))}
+            _note(att.get("title") or name, "file", trail + ([title] if title else []), "found")
 
     res = {"at": _now(), "kind": "check", "found": len(found), "new": [], "changed": [], "gone": []}
 
@@ -446,6 +468,7 @@ def _apply(api: _Api) -> dict:
             if what in ("gone", "remove"):
                 _remove(src)
                 res["removed"].append(src)
+                _note(it.get("title") or src, it["kind"], it.get("path") or [], "removed")
                 change = {"synced_version": None, "synced_at": None}
             else:
                 if it["kind"] == "page":
@@ -463,6 +486,8 @@ def _apply(api: _Api) -> dict:
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)
                 res["added" if what == "new" else "updated"].append(src)
+                _note(it.get("title") or src, it["kind"], it.get("path") or [],
+                      "added" if what == "new" else "updated")
                 change = {"synced_version": version, "synced_at": _now(), "version": version}
             change["error"] = None
         except Exception as exc:
@@ -503,8 +528,13 @@ def run(apply: bool = True) -> dict:
             logger.warning("Confluence %s failed: %s", "sync" if apply else "check", exc)
             res = {"at": _now(), "kind": "sync" if apply else "check", "failed": str(exc)}
 
+        # History keeps counts: a first check of 2,000 documents made every
+        # entry carry 2,000 titles.
+        kept = {k: (len(v) if isinstance(v, list) and k != "errors" else v) for k, v in res.items()}
+        kept["errors"] = (res.get("errors") or [])[:50]
+
         def record(st):
-            st["history"] = (st["history"] + [res])[-_HISTORY:]
+            st["history"] = (st["history"] + [kept])[-_HISTORY:]
         _update(record)
         logger.info("Confluence %s: %s", res["kind"],
                     {k: (len(v) if isinstance(v, list) else v) for k, v in res.items() if k != "at"})

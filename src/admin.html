@@ -179,6 +179,31 @@
   /* Indeterminate while the server has not reported a figure yet: a bar
      sitting at 0% says "stuck", and a made-up percentage is a lie. */
   .bar.indet>i{width:34%;animation:indet 1.15s ease-in-out infinite}
+  /* Confluence run feed: ten rows tall, scrolls for the rest. A new row
+     rises out of a slight blur and its tint fades, so the eye catches the
+     arrivals without anything flashing. */
+  .cf-feed{--cf-row:27px;margin-top:10px;max-height:calc(var(--cf-row) * 10);overflow-y:auto;
+        padding:4px 0;border-radius:var(--radius-md);scrollbar-width:thin;
+        scrollbar-color:color-mix(in srgb,var(--color-text) 25%,transparent) transparent;
+        background:color-mix(in srgb,var(--color-text) 4%,transparent);
+        -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%);
+        mask-image:linear-gradient(to bottom,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%)}
+  .cf-feed::-webkit-scrollbar{width:6px}
+  .cf-feed::-webkit-scrollbar-thumb{border-radius:99px;
+        background:color-mix(in srgb,var(--color-text) 25%,transparent)}
+  .cf-feed-row{display:flex;align-items:baseline;gap:8px;min-height:var(--cf-row);
+        padding:4px 12px;box-sizing:border-box;font-size:12.5px;line-height:1.4;
+        animation:cfRise .5s cubic-bezier(.2,.75,.25,1) both, cfTint 1.8s ease-out both}
+  .cf-feed-k{flex:0 0 auto;font-size:10.5px;padding:1px 7px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-accent-ink) 14%,transparent);color:var(--color-accent-ink)}
+  .cf-feed-t{overflow-wrap:anywhere}
+  .cf-feed-p{margin-left:auto;padding-left:10px;font-size:11.5px;text-align:right;overflow-wrap:anywhere;
+        color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+  @keyframes cfRise{from{opacity:0;transform:translateY(9px);filter:blur(3px)}
+                    to{opacity:1;transform:none;filter:none}}
+  @keyframes cfTint{from{background:color-mix(in srgb,var(--color-accent) 13%,transparent)}
+                    to{background:transparent}}
+  @media (prefers-reduced-motion: reduce){.cf-feed-row{animation:none}}
   @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
 
   /* background jobs, bottom left, over whatever page you moved to */
@@ -3678,7 +3703,7 @@ function viewKeys() {
 // and a sync indexes only what is approved. The connection holds an API
 // token, so only root sees that card; the rest is for anyone at support.
 let confluenceCache = null;
-let cfFilter = "attention", cfSearch = "", cfSelected = new Set(), cfPoll = null;
+let cfFilter = "attention", cfSearch = "", cfSelected = new Set(), cfPoll = null, cfShown = 100;
 
 const CF_STATUS = {
   waiting: ["Waiting for approval", "tag-accent"],
@@ -3700,41 +3725,63 @@ const CF_FILTERS = [
   ["all", "All", () => true],
 ];
 
-// While a run is going only its progress line changes. Redrawing the whole
-// page every poll made it blink and threw away scroll and open pickers.
+// While a run is going only the run box changes: the bar, its line, and a
+// feed of each document as the server reaches it. Redrawing the whole page
+// every poll made it blink and threw away scroll and open pickers. Polls ask
+// only for feed entries after the ones already shown; the full page is
+// fetched once, when the run ends.
 // Reading Confluence has no known end, so its bar runs without one; a sync
 // knows how many documents it has to index and fills as it goes.
-let cfStatusEl = null;
+let cfStatusEl = null, cfFeedCount = 0;
+const CF_ACTION = { found: null, added: "Added", updated: "Updated", removed: "Removed" };
 const cfRunText = r => r.phase === "syncing" ? "Indexing " + (r.done + 1) + " of " + r.total
-  : r.phase === "checking" ? "Reading Confluence: " + (r.done || 0) + " documents found so far"
+  : r.phase === "checking" ? "Reading Confluence: " + (r.log_total || r.done || 0) + " documents found so far"
   : "Connecting to Confluence";
 function cfRunBar() {
   const fill = el("i", {}), bar = el("div", { class: "bar indet" }, fill);
   const label = el("div", { style: "font-size:12px;margin-top:5px;"
     + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" });
-  const box = el("div", { style: "flex:1 1 220px;min-width:180px" }, bar, label);
+  const feed = el("div", { class: "cf-feed", role: "log", "aria-live": "polite",
+    "aria-label": "Documents reached so far" });
+  const box = el("div", { style: "flex:1 1 100%;min-width:0" }, bar, label, feed);
   box.update = r => {
     const known = r.phase === "syncing" && r.total;
     bar.className = "bar" + (known ? "" : " indet");
     fill.style.width = known ? Math.round((r.done + 1) / r.total * 100) + "%" : "";
     label.textContent = cfRunText(r);
+    const entries = r.log || [];
+    if (!entries.length) return;
+    // Follow the newest only if the reader is already at the bottom; someone
+    // scrolled up to read keeps their place.
+    const follow = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    entries.forEach((e, i) => feed.append(el("div", {
+        class: "cf-feed-row", style: "animation-delay:" + Math.min(i, 9) * 55 + "ms" },
+      el("span", { class: "cf-feed-k" }, CF_ACTION[e.action] || (e.kind === "page" ? "Page" : "File")),
+      el("span", { class: "cf-feed-t" }, e.title),
+      e.path ? el("span", { class: "cf-feed-p" }, e.path) : null)));
+    feed.hidden = false;
+    if (follow) feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
   };
+  feed.hidden = true;
   return box;
 }
 
 async function cfLoad() {
-  const wasRunning = confluenceCache && confluenceCache.running;
   try { confluenceCache = await api("/admin/confluence"); }
   catch (e) { confluenceCache = { error: e.message }; }
+  if (view === "confluence") render();
+}
+
+async function cfTick() {
+  clearTimeout(cfPoll);
   if (view !== "confluence") return;
-  const r = confluenceCache.running;
-  if (wasRunning && r && cfStatusEl && cfStatusEl.isConnected) {
-    cfStatusEl.update(r);
-    clearTimeout(cfPoll);
-    cfPoll = setTimeout(cfLoad, 3000);
-    return;
-  }
-  render();
+  let r;
+  try { r = (await api("/admin/confluence/progress?since=" + cfFeedCount)).running; }
+  catch (e) { cfPoll = setTimeout(cfTick, 4000); return; }
+  if (!r || !cfStatusEl || !cfStatusEl.isConnected) { cfFeedCount = 0; return cfLoad(); }
+  cfStatusEl.update(r);
+  cfFeedCount = r.log_total || cfFeedCount;
+  cfPoll = setTimeout(cfTick, 1500);
 }
 
 async function cfPost(path, body, msg) {
@@ -3747,16 +3794,21 @@ async function cfPost(path, body, msg) {
 
 function cfProductPicker(cur, onSave, label) {
   const prods = products();
-  return el("details", { class: "tagpick" },
+  const box = el("details", { class: "tagpick" },
     el("summary", {}, label || (cur.length
       ? cur.map(k => (prods.find(p => p.key === k) || { name: k }).name).join(", ")
       : "No product")),
-    el("div", { class: "tagpick-list" },
-      prods.map(p => el("label", { class: "tagpick-row" },
-        el("input", { type: "checkbox", checked: cur.includes(p.key) ? "true" : null,
-          onchange: e => onSave(e.target.checked
-            ? cur.concat([p.key]) : cur.filter(k => k !== p.key)) }),
-        el("span", {}, p.categoryName + " › " + p.name)))));
+    el("div", { class: "tagpick-list" }));
+  box.addEventListener("toggle", () => {
+    const list = box.querySelector(".tagpick-list");
+    if (!box.open || list.childElementCount) return;
+    list.append(...prods.map(p => el("label", { class: "tagpick-row" },
+      el("input", { type: "checkbox", checked: cur.includes(p.key) ? "true" : null,
+        onchange: e => onSave(e.target.checked
+          ? cur.concat([p.key]) : cur.filter(k => k !== p.key)) }),
+      el("span", {}, p.categoryName + " › " + p.name))));
+  });
+  return box;
 }
 
 function cfConnectionCard(c) {
@@ -3823,7 +3875,8 @@ function cfSyncCard(c) {
       ? "Every document found is synced. Exclude one to take it out of the bot."
       : "New documents wait for approval. Approved documents stay approved and update when they change."),
     el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn,
-      busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy), cfStatusEl)
+      busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
+              cfFeedCount = busy.log_total || 0, cfStatusEl)
            : el("span", { style: muted }, (c.checked_at ? "Last checked " + new Date(c.checked_at).toLocaleString() + ". " : "")
                + "Checks and syncs on its own once a day.")));
   return card;
@@ -3869,11 +3922,11 @@ function cfDocumentsCard(c) {
   const chips = el("div", { class: "chips", style: "margin:8px 0 10px" },
     CF_FILTERS.map(([key, label, test]) => el("button", {
       class: "chip" + (cfFilter === key ? " chip-on" : ""),
-      onclick: () => { cfFilter = key; render(); } },
+      onclick: () => { cfFilter = key; cfShown = 100; render(); } },
       label, el("span", { class: "chip-n" }, String(c.items.filter(i => test(i.status)).length)))));
   const search = el("input", { class: "input", placeholder: "Find a document or folder",
     value: cfSearch, style: "margin-bottom:8px" });
-  search.addEventListener("input", () => { cfSearch = search.value; drawList(); });
+  search.addEventListener("input", () => { cfSearch = search.value; cfShown = 100; drawList(); });
 
   // Acting on several at once: everything ticked, or a whole folder.
   const bulk = el("div", {});
@@ -3903,23 +3956,38 @@ function cfDocumentsCard(c) {
       list.append(el("div", { class: "empty" }, el("b", {}, c.items.length
         ? "Nothing here" : "No documents yet"),
         c.items.length ? "Try another filter." : "Press Check for changes to read the folder."));
+    } else {
+      list.append(el("div", { style: "display:flex;align-items:center;gap:8px;font-size:12.5px;"
+          + "color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
+        rows.length + " document" + (rows.length === 1 ? "" : "s"),
+        el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: () => {
+          rows.forEach(r => cfSelected.add(r.key)); drawList(); } },
+          "Select all " + rows.length)));
     }
+    const pathOf = r => (r.path || []).join(" › ") || "Top level";
+    const byFolder = new Map();
+    rows.forEach(r => { const k = pathOf(r); byFolder.has(k) ? byFolder.get(k).push(r) : byFolder.set(k, [r]); });
     let lastPath = null;
-    rows.forEach(it => {
-      const path = (it.path || []).join(" › ") || "Top level";
+    rows.slice(0, cfShown).forEach(it => {
+      const path = pathOf(it);
       if (path !== lastPath) {
         lastPath = path;
-        const inFolder = rows.filter(r => ((r.path || []).join(" › ") || "Top level") === path);
+        const inFolder = byFolder.get(path);
         list.append(el("div", { style: "display:flex;align-items:center;gap:8px;margin:14px 0 2px;"
             + "font-size:12px;font-weight:600;color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
           el("input", { type: "checkbox", "aria-label": "Select everything in " + path,
             checked: inFolder.every(r => cfSelected.has(r.key)) ? "true" : null,
             onchange: e => { inFolder.forEach(r => e.target.checked
               ? cfSelected.add(r.key) : cfSelected.delete(r.key)); drawList(); } }),
-          path));
+          path + " (" + inFolder.length + ")"));
       }
       list.append(cfRow(it, drawBulk));
     });
+    if (rows.length > cfShown) {
+      list.append(el("div", { style: "text-align:center;margin-top:12px" },
+        el("button", { class: "btn btn-ghost", onclick: () => { cfShown += 100; drawList(); } },
+          "Show " + Math.min(100, rows.length - cfShown) + " more of " + (rows.length - cfShown))));
+    }
     drawBulk();
   };
   drawList();
@@ -3929,7 +3997,7 @@ function cfDocumentsCard(c) {
 
 function cfHistoryCard(c) {
   const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
-  const n = (r, k) => (r[k] || []).length;
+  const n = (r, k) => Array.isArray(r[k]) ? r[k].length : (r[k] || 0);
   const line = r => r.failed ? "Failed: " + r.failed
     : r.kind === "check"
       ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
@@ -3954,7 +4022,7 @@ function viewConfluence() {
   clearTimeout(cfPoll);
   if (!c) { cfLoad(); return [...head, el("p", { class: "lede" }, "Loading")]; }
   if (c.error) return [...head, el("div", { class: "empty" }, c.error)];
-  if (c.running) cfPoll = setTimeout(() => { if (view === "confluence") cfLoad(); }, 3000);
+  if (c.running) cfPoll = setTimeout(cfTick, 1500);
   return [...head, cfConnectionCard(c), cfSyncCard(c), cfDocumentsCard(c), cfHistoryCard(c)];
 }
 

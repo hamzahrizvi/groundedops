@@ -104,3 +104,12 @@ def admin_confluence_run(payload: RunReq,
     confluence_sync.run_in_background(apply=payload.apply)
     logger.info(f"Confluence {'sync' if payload.apply else 'check'} started by {me['email']}")
     return {**_status(), "running": {"phase": "starting"}}
+
+
+@router.get("/admin/confluence/progress")
+def admin_confluence_progress(since: int = 0,
+                              x_admin_password: str | None = Header(default=None)):
+    """What a run is doing, and the documents it has reached since entry
+    `since`. Polled while a run goes; the full page is fetched once at the end."""
+    _require_admin(x_admin_password)
+    return {"running": confluence_sync.running(max(0, since))}
