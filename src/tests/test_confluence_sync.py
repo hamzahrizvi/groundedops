@@ -43,7 +43,7 @@ class FakeApi:
             r.content = b"%PDF fake"
         else:
             pid = path.rsplit("/", 1)[-1]
-            r.json = lambda: {"version": {"number": 1},
+            r.json = lambda: {"version": {"number": 1}, "title": {"20": "Installation", "30": "Overview"}.get(pid, "Website"),
                               "body": {"storage": {"value": BODY if pid != "30" else "<p>Hi</p>"}}}
         return r
 
@@ -60,7 +60,7 @@ class FakeCatalog:
         self.data["categories"][0]["products"][0]["sources"].append(source)
 
 
-def _run(api_cls, state_path):
+def _run(api_cls, state_path, url="https://itl.atlassian.net/wiki/spaces/WEB/folder/1"):
     ingested, removed = [], []
     saved = (cs._Api, cs._ingest, cs._remove, cs.catalog, cs._STATE,
              cs.keystore.get_confluence_settings, cs.keystore.get_confluence_token)
@@ -70,7 +70,7 @@ def _run(api_cls, state_path):
     cs.catalog = FakeCatalog()
     cs._STATE = state_path
     cs.keystore.get_confluence_settings = lambda: {
-        "folder_url": "https://itl.atlassian.net/wiki/spaces/WEB/folder/1",
+        "folder_url": url,
         "email": "sync@example.com", "token_set": True}
     cs.keystore.get_confluence_token = lambda: "t"
     try:
@@ -82,7 +82,11 @@ def _run(api_cls, state_path):
 
 def test_folder_url():
     assert cs.parse_folder_url(
-        "https://itl.atlassian.net/wiki/spaces/WEB/folder/123?atlOrigin=x") == ("itl.atlassian.net", "123")
+        "https://itl.atlassian.net/wiki/spaces/WEB/folder/123?atlOrigin=x") == ("itl.atlassian.net", "folders", "123")
+    assert cs.parse_folder_url(
+        "https://itl.atlassian.net/wiki/spaces/CS/pages/1069318147/Website") == ("itl.atlassian.net", "pages", "1069318147")
+    assert cs.normalise_folder_url(
+        "https://itl.atlassian.net/wiki/spaces/CS/pages/1069318147/Website").endswith("/pages/1069318147")
     assert cs.normalise_folder_url(
         "https://itl.atlassian.net/wiki/spaces/WEB/folder/123?atlOrigin=x").endswith("/folder/123")
     for bad in ("https://evil.example/wiki/spaces/WEB/folder/1",
@@ -127,6 +131,18 @@ def test_sync_files_and_removes_only_its_own():
             tree = {}
         res, ingested, removed = _run(Empty, state)
         assert removed == [] and res["errors"], res
+
+
+def test_sync_from_a_page():
+    """The manuals under a Website PAGE rather than a folder."""
+    class PageRoot(FakeApi):
+        tree = {("pages", "1"): FakeApi.tree[("folders", "1")],
+                ("folders", "10"): FakeApi.tree[("folders", "10")]}
+    with tempfile.TemporaryDirectory() as d:
+        res, ingested, removed = _run(PageRoot, os.path.join(d, "s.json"),
+                                      "https://itl.atlassian.net/wiki/spaces/CS/pages/1")
+        # the Website page itself is a short index page and is skipped
+        assert sorted(ingested) == [("Installation.txt", "sh3"), ("SH3 manual.pdf", "sh3")], ingested
 
 
 if __name__ == "__main__":
