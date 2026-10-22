@@ -569,9 +569,23 @@ def _loop() -> None:
         interval = _interval_seconds()
         if interval <= 0:
             return
+        # Counted from the last check, not from startup: restarting the
+        # server must not re-read the whole folder every time.
+        wait = interval - _since_last_check()
+        if wait > 60:
+            time.sleep(wait)
+            continue
         if configured() and capability("search") and not running():
             run_in_background(apply=True)
         time.sleep(interval)
+
+
+def _since_last_check() -> float:
+    at = _load().get("checked_at")
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(at)).total_seconds()
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def start() -> None:
