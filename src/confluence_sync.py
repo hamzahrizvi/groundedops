@@ -177,17 +177,46 @@ def _filed(source: str) -> tuple[str | None, str]:
     return (held[0][0] if held else None), ",".join(k for _, k in held)
 
 
-def _suggest(path: list[str]) -> tuple[str | None, str]:
-    """The product the nearest folder or page above is named after."""
-    by_name: dict[str, list] = {}
+def _norm(name: str) -> str:
+    """A product or folder name reduced to what identifies it: Confluence
+    calls the folder "NV9 Spectral Range" or "SMART Coin System Range
+    Documentation" where the catalogue says "NV9 Spectral"."""
+    n = re.sub(r"\(.*?\)", " ", (name or "").lower())
+    n = re.sub(r"\b(range|documentation|docs)\b", " ", n)
+    return re.sub(r"[^a-z0-9+]+", "", n)
+
+
+def _name_index() -> dict[str, list]:
+    """norm(name or alias) -> [(category key, product key)]."""
+    idx: dict[str, list] = {}
     for c in catalog.load_catalog()["categories"]:
         for p in c.get("products", []):
-            by_name.setdefault(p["name"].strip().lower(), []).append((c["key"], p["key"]))
-    for title in reversed(path):
-        hit = by_name.get(title.strip().lower())
-        if hit and len(hit) == 1:           # a name two categories share files nothing
-            return hit[0]
+            for n in [p["name"], *p.get("aliases", [])]:
+                if _norm(n):
+                    idx.setdefault(_norm(n), []).append((c["key"], p["key"]))
+    return idx
+
+
+def _suggest(path: list[str], idx: dict | None = None) -> tuple[str | None, str]:
+    """The product the nearest folder or page above is named after. A folder
+    "C-SCS - Compact SMART Coin System" is tried whole and by each half."""
+    idx = _name_index() if idx is None else idx
+    for title in reversed(path or []):
+        for part in [title, *title.split(" - ")]:
+            hit = idx.get(_norm(part))
+            if hit and len(set(hit)) == 1:  # a name two categories share files nothing
+                return hit[0]
     return None, ""
+
+
+def _effective(it: dict, idx: dict) -> tuple[str | None, str, bool]:
+    """(category, products, suggested) an unsynced item would be filed
+    under: what someone chose, else what its folders suggest now (so a
+    product added to the catalogue later is picked up)."""
+    if it.get("product") or it.get("product_chosen"):
+        return it.get("category") or category_of(it.get("product")), it.get("product") or "", False
+    cat, prod = _suggest(it.get("path") or [], idx)
+    return cat, prod, bool(prod)
 
 
 def category_of(product_keys: str) -> str | None:
@@ -214,6 +243,7 @@ def overview() -> dict:
         for p in c.get("products", []):
             for src in p.get("sources", []):
                 filed[src] = (filed[src] + "," if src in filed else "") + p["key"]
+    idx = _name_index()
     items = []
     for key, it in st["items"].items():
         row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
@@ -226,7 +256,7 @@ def overview() -> dict:
         if it.get("synced_version") is not None:
             row["product"] = filed.get(it["source"], "")   # the catalogue is the truth once synced
         else:
-            row["product"] = it.get("product") or ""
+            _, row["product"], row["suggested"] = _effective(it, idx)
         items.append(row)
     items.sort(key=lambda r: ([p.lower() for p in r["path"] or []], (r["title"] or "").lower()))
     return {"mode": st["mode"], "checked_at": st.get("checked_at"),
@@ -263,6 +293,7 @@ def set_items(keys: list[str], decision: str | None = None,
                     retag.append(it["source"])
                 else:
                     it["product"], it["category"] = product, category_of(product)
+                    it["product_chosen"] = True
     _update(change)
     if retag:
         from routes_documents import retag_source
@@ -502,8 +533,7 @@ def _apply(api: _Api) -> dict:
                     version = it.get("version")
                 cat, prod = _filed(src)
                 if not prod:
-                    prod = it.get("product") or ""
-                    cat = it.get("category") or category_of(prod)
+                    cat, prod, _ = _effective(it, _name_index())
                 _ingest(content, src, cat, prod or None)
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)
