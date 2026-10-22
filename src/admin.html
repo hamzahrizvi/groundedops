@@ -4140,9 +4140,10 @@ function cfApproveDialog(keys) {
   };
 
   const warn = [];
-  if (unfiled.length) warn.push(n(unfiled.length) + " have no product. Customers can still be answered "
+  if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
     + "from them, but the widget never offers them under a product.");
-  if (internal.length) warn.push(n(internal.length) + " sit under folders or titles that look internal ("
+  if (internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
+    + " under folders or titles that look internal ("
     + [...new Set(internal.map(i => ((i.path || []).join(" ") + " " + i.title).match(CF_INTERNAL)[0]))].join(", ")
     + "). Customers will be answered from them.");
 
