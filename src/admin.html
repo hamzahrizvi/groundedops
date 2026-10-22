@@ -3933,7 +3933,7 @@ async function cfPost(path, body, msg) {
 const cfClean = s => (s || "").replace(/\s+(Range|Documentation|Repair Information)\b.*$/i, "")
   .replace(/^[A-Z0-9-]+\s+-\s+/, "").trim();
 
-function cfFileDialog(keys, after) {
+function cfFileDialog(keys, after, opts = {}) {
   const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
   const prods = products();
   const nameOf = k => { const p = prods.find(p => p.key === k); return p ? p.name : k; };
@@ -3943,14 +3943,14 @@ function cfFileDialog(keys, after) {
   items.forEach(i => (i.product || "").split(",").filter(Boolean)
     .forEach(k => votes.set(k, (votes.get(k) || 0) + 1)));
   const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
-  const rec = ranked.length ? [ranked[0][0]] : [];
+  const rec = !opts.pick && ranked.length === 1 ? [ranked[0][0]] : [];
   const chosen = new Set(rec);
 
   // Nothing matched: the folder they share, named like a product.
   const common = items.length ? items.map(i => i.path || []).reduce((a, p) => {
     let n = 0; while (n < a.length && a[n] === p[n]) n++; return a.slice(0, n); }) : [];
   const folder = common.length > 1 ? common[1] : common[0] || "";
-  const newName = rec.length ? "" : cfClean(folder);
+  const newName = rec.length || opts.pick ? "" : cfClean(folder);
   const guessRange = () => {
     const n = newName.toLowerCase().replace(/[^a-z0-9]/g, "");
     let best = null, len = 1;
@@ -4036,7 +4036,8 @@ function cfFileDialog(keys, after) {
     if (after) after();
   });
 
-  const why = rec.length
+  const why = opts.pick ? "Every one of them goes under the products you tick here."
+    : rec.length
     ? (ranked[0][1] === items.length ? "All " : ranked[0][1] + " of ") + items.length
       + " point to " + nameOf(rec[0]) + " by their folder or earlier filing."
     : newName ? "Nothing in the catalogue matches “" + folder + "”. Create it below, or pick a product."
@@ -4081,42 +4082,58 @@ const cfFiled = it => !!it.product && !it.suggested;
 // Paths that read like they were never meant for customers.
 const CF_INTERNAL = /\b(internal|confidential|draft|due release|obsolete|do not publish)\b/i;
 
-// Approving many at once: first say where each will be filed, so nothing is
-// approved into the wrong product, or none, without being seen.
-function cfApproveDialog(keys) {
+// A selection grouped by where it will be filed: each product it is filed
+// or suggested under, and, for documents nothing matched, each product
+// folder they sit in (BV50, NV10USB+), so each can be given its product.
+function cfGroups(items) {
+  const common = items.length ? items.map(i => i.path || []).reduce((a, p) => {
+    let n = 0; while (n < a.length && a[n] === p[n]) n++; return a.slice(0, n); }) : [];
+  const groups = new Map();
+  items.forEach(i => {
+    const kind = !i.product ? "none" : cfFiled(i) ? "filed" : "suggested";
+    const folder = kind === "none" ? ((i.path || [])[common.length] || "") : "";
+    const g = kind + "|" + (i.product || "") + "|" + folder;
+    if (!groups.has(g)) groups.set(g, { kind, product: i.product || "", folder, items: [] });
+    groups.get(g).items.push(i);
+  });
+  const order = { filed: 0, suggested: 1, none: 2 };
+  return [...groups.values()].sort((a, b) => order[a.kind] - order[b.kind] || b.items.length - a.items.length);
+}
+
+// Approving or filing many at once: first say where each will be filed,
+// group by group, so nothing goes into the wrong product, or none, unseen.
+// mode "approve": approve, filing the suggested ones as shown.
+// mode "file": confirm each group's suggestion, or put all under one product.
+function cfReviewDialog(keys, mode) {
   const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
   const prods = products();
   const label = p => p.split(",").map(k => {
     const x = prods.find(q => q.key === k); return x ? x.categoryName + " › " + x.name : k; }).join(", ");
-  const groups = new Map();       // "<product>|<filed|suggested|none>" -> items
-  items.forEach(i => {
-    const g = (i.product || "") + "|" + (!i.product ? "none" : cfFiled(i) ? "filed" : "suggested");
-    groups.has(g) ? groups.get(g).push(i) : groups.set(g, [i]);
-  });
-  const order = { filed: 0, suggested: 1, none: 2 };
-  const rows = [...groups.entries()].sort((a, b) =>
-    order[a[0].split("|")[1]] - order[b[0].split("|")[1]] || b[1].length - a[1].length);
+  const groups = cfGroups(items);
   const unfiled = items.filter(i => !i.product);
   const internal = items.filter(i => CF_INTERNAL.test((i.path || []).join(" ") + " " + i.title));
   const sug = items.filter(i => i.product && i.suggested);
+  const n = k => k + " document" + (k === 1 ? "" : "s");
+  const again = () => cfReviewDialog(keys, mode);
 
-  const dlg = el("dialog", { class: "cf-dlg", "aria-label": "Approve documents" });
+  const dlg = el("dialog", { class: "cf-dlg", "aria-label": mode === "approve" ? "Approve documents" : "File documents" });
   const close = () => { dlg.close(); dlg.remove(); };
   dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
   dlg.addEventListener("close", () => dlg.remove());
-  const n = k => k + " document" + (k === 1 ? "" : "s");
 
-  // Suggestions become the filing when approved this way: the product
-  // shown is the product it gets.
+  // Suggestions become the filing: the product shown is the product it gets.
+  const confirmSuggestions = async (list, extra) => {
+    const byProduct = new Map();
+    list.filter(i => i.product && i.suggested).forEach(i =>
+      byProduct.has(i.product) ? byProduct.get(i.product).push(i.key) : byProduct.set(i.product, [i.key]));
+    for (const [product, ks] of byProduct)
+      confluenceCache = await api("/admin/confluence/items", { method: "POST",
+        body: JSON.stringify({ keys: ks, product, ...extra }) });
+  };
   const approve = async list => {
     close();
     try {
-      const byProduct = new Map();
-      list.filter(i => i.product && i.suggested).forEach(i =>
-        byProduct.has(i.product) ? byProduct.get(i.product).push(i.key) : byProduct.set(i.product, [i.key]));
-      for (const [product, ks] of byProduct)
-        await api("/admin/confluence/items", { method: "POST",
-          body: JSON.stringify({ keys: ks, decision: "approved", product }) });
+      await confirmSuggestions(list, { decision: "approved" });
       confluenceCache = await api("/admin/confluence/items", { method: "POST",
         body: JSON.stringify({ keys: list.map(i => i.key), decision: "approved" }) });
       list.forEach(i => cfSelected.delete(i.key));
@@ -4124,46 +4141,67 @@ function cfApproveDialog(keys) {
       render();
     } catch (e) { toast(e.message, true); }
   };
+  const fileAsShown = async () => {
+    close();
+    try {
+      await confirmSuggestions(items, {});
+      items.forEach(i => i.product && cfSelected.delete(i.key));
+      toast("Filed " + n(sug.length) + " as suggested"
+        + (unfiled.length ? ". " + n(unfiled.length) + " still have no product" : ""));
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
 
-  const groupRow = ([g, list]) => {
-    const [product, kind] = g.split("|");
-    return el("div", { class: "cf-ap-row " + kind },
+  const groupRow = g => {
+    const list = g.items;
+    return el("div", { class: "cf-ap-row " + g.kind },
       el("span", { class: "cf-ap-n" }, String(list.length)),
       el("div", { class: "cf-ap-main" },
-        el("b", {}, kind === "none" ? "No product" : label(product)),
-        el("span", {}, kind === "filed" ? "Filed" : kind === "suggested"
-          ? "Suggested by their folder: approving files them here" : "Not offered in the widget for any product",
+        el("b", {}, g.kind === "none" ? (g.folder ? "“" + g.folder + "”: no product matches" : "No product")
+                                      : label(g.product)),
+        el("span", {}, g.kind === "filed" ? "Filed" : g.kind === "suggested"
+          ? "Suggested by their folder" + (mode === "approve" ? ": approving files them here" : "")
+          : "Not offered in the widget for any product",
           " · ", list.slice(0, 3).map(i => i.title).join(", ") + (list.length > 3 ? " and " + (list.length - 3) + " more" : ""))),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-        onclick: () => { close(); cfFileDialog(list.map(i => i.key), () => cfApproveDialog(keys)); } },
-        kind === "none" ? "File…" : "Change…"));
+        onclick: () => { close(); cfFileDialog(list.map(i => i.key), again); } },
+        g.kind === "none" ? (g.folder ? "Create or choose…" : "File…") : "Change…"));
   };
 
   const warn = [];
   if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
     + "from them, but the widget never offers them under a product.");
-  if (internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
+  if (mode === "approve" && internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
     + " under folders or titles that look internal ("
     + [...new Set(internal.map(i => ((i.path || []).join(" ") + " " + i.title).match(CF_INTERNAL)[0]))].join(", ")
     + "). Customers will be answered from them.");
 
   const filedOnly = items.filter(i => i.product);
+  const foot = mode === "approve"
+    ? [unfiled.length && filedOnly.length
+        ? el("button", { class: "btn btn-secondary", onclick: () => approve(filedOnly) },
+            "Approve the " + filedOnly.length + " with a product") : null,
+       el("button", { class: "btn btn-primary", onclick: () => approve(items) },
+         warn.length ? "Approve all " + items.length + " anyway" : "Approve " + n(items.length))]
+    : [el("button", { class: "btn btn-secondary",
+         onclick: () => { close(); cfFileDialog(keys, again, { pick: true }); } },
+         "Put all " + items.length + " under one product…"),
+       sug.length ? el("button", { class: "btn btn-primary", onclick: fileAsShown },
+         "File the " + n(sug.length) + " as suggested") : null];
+
   dlg.append(
     el("div", { class: "cf-dlg-head" },
-      el("b", {}, "Approve " + n(items.length)),
+      el("b", {}, (mode === "approve" ? "Approve " : "File ") + n(items.length)),
       el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
-    el("p", { class: "cf-dlg-why" }, "Where each will be filed. Change any group before approving."
-      + (sug.length ? " " + n(sug.length) + " only have a suggestion; approving here files them as shown." : "")),
-    el("div", { class: "cf-dlg-list" }, rows.map(groupRow)),
+    el("p", { class: "cf-dlg-why" }, mode === "approve"
+      ? "Where each will be filed. Change any group before approving."
+        + (sug.length ? " " + n(sug.length) + " only have a suggestion; approving here files them as shown." : "")
+      : "These belong to " + groups.length + " different places. Each group goes where its folder points; "
+        + "change any group, or put them all under one product."),
+    el("div", { class: "cf-dlg-list" }, groups.map(groupRow)),
     warn.length ? el("div", { class: "cf-ap-warn" }, warn.map(w => el("p", {}, w))) : null,
     el("div", { class: "cf-dlg-foot" },
-      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"),
-      unfiled.length && filedOnly.length
-        ? el("button", { class: "btn btn-secondary", onclick: () => approve(filedOnly) },
-            "Approve the " + filedOnly.length + " with a product")
-        : null,
-      el("button", { class: "btn btn-primary", onclick: () => approve(items) },
-        warn.length ? "Approve all " + items.length + " anyway" : "Approve " + n(items.length))));
+      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"), foot));
   document.body.append(dlg);
   dlg.showModal();
 }
@@ -4334,9 +4372,12 @@ function cfDocumentsCard(c) {
       keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
     bulk.append(
       el("b", {}, keys.length + " selected"),
-      el("button", { class: "btn btn-primary", onclick: () => cfApproveDialog(keys) }, "Approve…"),
+      el("button", { class: "btn btn-primary", onclick: () => cfReviewDialog(keys, "approve") }, "Approve…"),
       el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
-      el("button", { class: "btn btn-secondary", onclick: () => cfFileDialog(keys) }, "File under…"),
+      el("button", { class: "btn btn-secondary", onclick: () => {
+        const its = c.items.filter(i => cfSelected.has(i.key));
+        cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys);
+      } }, "File under…"),
       el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
   };
 
