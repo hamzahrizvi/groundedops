@@ -113,3 +113,27 @@ def admin_confluence_progress(since: int = 0,
     `since`. Polled while a run goes; the full page is fetched once at the end."""
     _require_admin(x_admin_password)
     return {"running": confluence_sync.running(max(0, since))}
+
+
+class BundleReq(BaseModel):
+    path: list[str]                 # folder titles from the root down
+    on: bool = True
+
+
+@router.post("/admin/confluence/bundle")
+def admin_confluence_bundle(payload: BundleReq,
+                            x_admin_password: str | None = Header(default=None)):
+    """Combine a folder into one document, or split it again. A check starts
+    straight away (if none is running) so the list shows the result; nothing
+    reaches the bot until the next sync."""
+    me = _require_admin(x_admin_password)
+    try:
+        confluence_sync.set_bundle(payload.path, payload.on)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Confluence: {' / '.join(payload.path)} "
+                f"{'combined' if payload.on else 'split'} by {me['email']}")
+    started = confluence_sync.configured() and not confluence_sync.running()
+    if started:
+        confluence_sync.run_in_background(apply=False)
+    return {**_status(), "running": {"phase": "starting"} if started else confluence_sync.running()}
