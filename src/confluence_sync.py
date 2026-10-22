@@ -22,6 +22,15 @@ each page a section under its own heading, rather than 396 sources nobody
 can file. The innermost combined folder wins, so "SDK" can be combined while
 each device's endpoint pages inside it are their own document.
 
+A manual already uploaded by hand (most were PDFs exported from these
+same pages) is matched to its Confluence copy by title, version and date
+left out. When the Confluence copy is the whole manual -- a combined
+folder, a page with no chapters under it, or a file -- syncing it replaces
+the upload: the upload's product filing carries over, and the upload is
+removed once the Confluence copy is in. A manual Confluence keeps as a
+page per chapter has to be combined first, or the cover page would replace
+the whole PDF. "Keep both" opts a document out.
+
 Each item also records when Confluence last saw it edited, when this sync
 first found it and when its version last changed between two checks, so the
 console can show what is new and what has been updated.
@@ -223,8 +232,10 @@ def _suggest(path: list[str], idx: dict | None = None) -> tuple[str | None, str]
 def _effective(it: dict, idx: dict) -> tuple[str | None, str, bool]:
     """(category, products, suggested) an unsynced item would be filed
     under: what someone chose, else what its folders suggest now (so a
-    product added to the catalogue later is picked up)."""
-    if it.get("product") or it.get("product_chosen"):
+    product added to the catalogue later is picked up). The product a
+    check stored when it first found the item is a suggestion too: only a
+    person's choice is filing."""
+    if it.get("product_chosen"):
         return it.get("category") or category_of(it.get("product")), it.get("product") or "", False
     # A combined document is named after its folder, which is where the
     # product usually is ("NV4000 Endpoints").
@@ -249,6 +260,65 @@ def _recent(at: str | None) -> bool:
     return age.days < _RECENT_DAYS
 
 
+_VERSION = re.compile(r"[-_ ]v\.?\s?\d[\w.]*|[-_ ]\d+(?:\.\d+)+$|[-_ ]\d{6,8}[-_]\d{6}\b", re.I)
+
+
+def _title_key(name: str) -> str:
+    """A document title without what changes between copies of it: the
+    extension, version ("-v7", "v.1", "_1.0.50"), export dates
+    ("-170925-134345"), a "CS-" prefix and a browser's " 2" or "(1)"."""
+    n = re.sub(r"\.(pdf|docx|txt)$", "", (name or "").strip(), flags=re.I).lower()
+    n = re.sub(r"^cs[-_ ]", "", n)
+    for _ in range(3):                      # "-v2-20250224_144232" is two in a row
+        n = _VERSION.sub(" ", n).strip()
+    n = re.sub(r"\s*\(?\d\)?$", "", n)
+    return re.sub(r"[^a-z0-9+]", "", n)
+
+
+def _uploads(items: dict) -> dict[str, str]:
+    """title key -> the indexed document of that title that this sync did
+    not put there (an upload)."""
+    try:
+        import docstore
+        names = [e.get("source") or "" for e in docstore.inventory()]
+    except Exception as exc:
+        logger.warning("Confluence sync: uploads not read (%s)", exc)
+        return {}
+    ours = {it.get("source") for it in items.values() if it.get("synced_version") is not None}
+    out: dict[str, str] = {}
+    for src in names:
+        if src and src not in ours and _title_key(src):
+            out.setdefault(_title_key(src), src)
+    return out
+
+
+def _matches(items: dict, uploads: dict | None = None) -> dict[str, tuple[str, bool]]:
+    """item key -> (the upload it is a copy of, whether it is the whole
+    manual and so can replace it). One item per upload: a combined
+    document before a file before a page."""
+    uploads = _uploads(items) if uploads is None else uploads
+    if not uploads:
+        return {}
+    # Pages that have pages under them. A file's path ends with the page it
+    # is attached to, which a file does not make a chapter of anything.
+    folders = {tuple((it.get("path") or [])[:k]) for it in items.values()
+               for k in range(1, len(it.get("path") or []) + (0 if it.get("kind") == "file" else 1))}
+    best: dict[str, tuple] = {}
+    rank = {"bundle": 0, "file": 1, "page": 2}
+    for key, it in items.items():
+        if not it.get("present", True):
+            continue
+        src = uploads.get(_title_key(it.get("title") or ""))
+        if not src:
+            continue
+        # A page with chapters under it is only the cover of the manual.
+        whole = it.get("kind") != "page" or tuple((it.get("path") or []) + [it.get("title")]) not in folders
+        cand = (not whole, rank.get(it.get("kind"), 3), key)
+        if src not in best or cand < best[src][0]:
+            best[src] = (cand, key, whole)
+    return {key: (src, whole) for src, (_, key, whole) in best.items()}
+
+
 def overview() -> dict:
     """Everything the console's Confluence page shows."""
     st = _load()
@@ -258,6 +328,7 @@ def overview() -> dict:
             for src in p.get("sources", []):
                 filed[src] = (filed[src] + "," if src in filed else "") + p["key"]
     idx = _name_index()
+    matches = _matches(st["items"])
     items = []
     for key, it in st["items"].items():
         row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
@@ -272,6 +343,14 @@ def overview() -> dict:
             row["product"] = filed.get(it["source"], "")   # the catalogue is the truth once synced
         else:
             _, row["product"], row["suggested"] = _effective(it, idx)
+        if key in matches:
+            row["uploaded_as"], whole = matches[key]
+            row["keep_upload"] = bool(it.get("keep_upload"))
+            row["replaces"] = whole and not row["keep_upload"]
+            # Filed as the upload was, unless someone chose otherwise.
+            if row["replaces"] and row.get("suggested") is not False and it.get("synced_version") is None \
+                    and filed.get(row["uploaded_as"]) and not it.get("product_chosen"):
+                row["product"], row["suggested"] = filed[row["uploaded_as"]], True
         items.append(row)
     items.sort(key=lambda r: ([p.lower() for p in r["path"] or []], (r["title"] or "").lower()))
     return {"mode": st["mode"], "checked_at": st.get("checked_at"), "bundles": st["bundles"],
@@ -312,7 +391,7 @@ def set_bundle(path: list[str], on: bool) -> None:
 
 
 def set_items(keys: list[str], decision: str | None = None,
-              product: str | None = None) -> None:
+              product: str | None = None, keep_upload: bool | None = None) -> None:
     """Approve, exclude or re-file items. Decisions take effect at the next
     sync; a new product for a document already synced takes effect now."""
     if decision is not None and decision not in DECISIONS:
@@ -327,6 +406,8 @@ def set_items(keys: list[str], decision: str | None = None,
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
+            if keep_upload is not None:
+                it["keep_upload"] = keep_upload
             if product is not None:
                 if it.get("synced_version") is not None:
                     retag.append(it["source"])
@@ -636,6 +717,8 @@ def _apply(api: _Api) -> dict:
                              "Check the account can still see the folder.")
         todo = [(k, it) for k, it in todo if it.get("present", True)]
 
+    matches = _matches(st["items"])
+    res["replaced"] = []
     for n, (key, it) in enumerate(todo):
         _progress.update(phase="syncing", done=n, total=len(todo))
         src, what = it["source"], status_of({**it, "error": None})
@@ -656,12 +739,22 @@ def _apply(api: _Api) -> dict:
                 else:
                     content = api.download(it["page_id"], it["id"])
                     version = it.get("version")
+                upload, whole = matches.get(key, (None, False))
+                upload = upload if whole and not it.get("keep_upload") else None
                 cat, prod = _filed(src)
+                if not prod and upload and not it.get("product_chosen"):
+                    cat, prod = _filed(upload)
                 if not prod:
                     cat, prod, _ = _effective(it, _name_index())
                 _ingest(content, src, cat, prod or None)
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)
+                if upload:
+                    # Only once the Confluence copy is in, so a failed
+                    # download never leaves the manual missing altogether.
+                    _remove(upload)
+                    res["replaced"].append(f"{upload} -> {src}")
+                    _note(it.get("title") or src, it["kind"], it.get("path") or [], "replaced")
                 res["added" if what == "new" else "updated"].append(src)
                 _note(it.get("title") or src, it["kind"], it.get("path") or [],
                       "added" if what == "new" else "updated")

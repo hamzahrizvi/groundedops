@@ -65,21 +65,27 @@ class World:
     def __init__(self, state_path):
         self.state, self.ingested, self.removed, self.texts = state_path, [], [], {}
         self.catalog = FakeCatalog()
+        self.uploads = []                # documents uploaded by hand, by name
 
     def _with(self, fn, api=None):
-        saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE)
+        saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads)
         cs._connect = lambda: (api, "pages", "1")
+        cs._uploads = lambda items: {cs._title_key(u): u for u in self.uploads}
         def ingest(content, source, cat, prod):
             self.ingested.append((source, prod))
             self.texts[source] = content.decode("utf-8", "replace")
         cs._ingest = ingest
-        cs._remove = self.removed.append
+        def remove(source):
+            self.removed.append(source)
+            if source in self.uploads:
+                self.uploads.remove(source)
+        cs._remove = remove
         cs.catalog = self.catalog
         cs._STATE = self.state
         try:
             return fn()
         finally:
-            (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE) = saved
+            (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads) = saved
 
     def run(self, api, apply=True):
         return self._with(lambda: cs.run(apply), api)
@@ -250,6 +256,45 @@ def test_combining_a_folder_into_one_document():
         assert sorted(items) == ["Cmd B", "Manual", "Wiring.pdf"], sorted(items)
         assert all(i["decision"] == "approved" and i["status"] == "synced" for i in items.values())
         assert w.removed[-1] == "Manual.txt"
+
+
+def test_a_whole_manual_replaces_its_upload():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        # uploaded by hand and filed under another product than the folder suggests
+        w.uploads = ["Installation-v3-170925-134345.pdf"]
+        w.catalog.data["categories"][0]["products"].append(
+            {"key": "nv9", "name": "NV9", "sources": ["Installation-v3-170925-134345.pdf"]})
+        w.run(api, apply=False)
+        inst = w.items()["Installation"]
+        assert inst["uploaded_as"] == "Installation-v3-170925-134345.pdf" and inst["replaces"], inst
+        assert inst["product"] == "nv9" and inst["suggested"]       # the upload's filing, not the folder's
+
+        w.decide(["Installation"], decision="approved")
+        res = w.run(api)
+        assert ("Installation.txt", "nv9") in w.ingested, w.ingested
+        assert w.removed == ["Installation-v3-170925-134345.pdf"] and len(res["replaced"]) == 1, res
+
+
+def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), ManualApi()
+        w.uploads = ["Manual-v1.pdf", "Cmd B.pdf"]
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api, apply=False)
+        items = w.items()
+        # the Manual page has chapters under it: it is only the cover
+        assert items["Manual"]["uploaded_as"] == "Manual-v1.pdf" and not items["Manual"]["replaces"]
+        # Keep both: the upload stays even though Cmd B is a whole page
+        w.decide(["Cmd B"], keep_upload=True)
+        w.run(api)
+        assert w.removed == [], w.removed
+
+        w._with(lambda: cs.set_bundle(["Manual"], True))
+        w.run(api)
+        items = w.items()
+        assert items["Manual"]["kind"] == "bundle"
+        assert "Manual-v1.pdf" in w.removed and "Cmd B.pdf" not in w.removed, w.removed
 
 
 if __name__ == "__main__":

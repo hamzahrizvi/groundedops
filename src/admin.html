@@ -297,6 +297,13 @@
   .cf-doc-title{font-size:13.5px;overflow-wrap:anywhere;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .cf-doc-meta{font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
   .cf-doc-err{color:var(--color-accent-ink);margin-top:2px}
+  .cf-up{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;font-size:12px;
+        padding:3px 9px;border-radius:8px;width:fit-content;max-width:100%;overflow-wrap:anywhere}
+  .cf-up.rep{background:color-mix(in srgb,#5b9cf0 14%,transparent);color:#7fb2f5}
+  .cf-up.keep{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+  .cf-up.part{background:color-mix(in srgb,#e0a030 12%,transparent);color:#e0a030}
+  .cf-up-btn{border:0;background:none;color:inherit;font:inherit;font-weight:600;text-decoration:underline;
+        cursor:pointer;padding:0}
   .cf-badge{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:999px;letter-spacing:.02em}
   .cf-badge.new{background:color-mix(in srgb,#3fb97a 20%,transparent);color:#3fb97a}
   .cf-badge.upd{background:color-mix(in srgb,#5b9cf0 20%,transparent);color:#6aa7f5}
@@ -3848,6 +3855,7 @@ const CF_FILTERS = [
   ["updated", "Updated", i => i.is_updated],
   ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
   ["unfiled", "Not filed", i => !cfFiled(i)],
+  ["uploaded", "Uploaded before", i => !!i.uploaded_as],
   ["error", "Failed", i => i.status === "error"],
 ];
 
@@ -4189,6 +4197,13 @@ function cfReviewDialog(keys, mode) {
   };
 
   const warn = [];
+  const rep = items.filter(i => i.replaces && i.status !== "synced"), part = items.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload);
+  if (mode === "approve" && rep.length) warn.push(n(rep.length) + (rep.length === 1 ? " replaces a PDF" : " replace PDFs")
+    + " you uploaded (" + rep.slice(0, 3).map(i => i.uploaded_as).join(", ") + (rep.length > 3 ? " and " + (rep.length - 3) + " more" : "")
+    + "). The upload is removed once the Confluence copy is in, and its product filing carries over.");
+  if (mode === "approve" && part.length) warn.push(n(part.length) + (part.length === 1 ? " is" : " are")
+    + " only the cover page of a manual you uploaded (" + part.slice(0, 3).map(i => i.uploaded_as).join(", ")
+    + "). Both copies stay until their folder is combined.");
   if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
     + "from them, but the widget never offers them under a product.");
   if (mode === "approve" && internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
@@ -4316,6 +4331,23 @@ const cfAgo = at => {
     : new Date(at).toLocaleDateString();
 };
 
+// What happens to the copy of this manual someone uploaded by hand.
+function cfUploadLine(it) {
+  const set = keep => cfPost("/admin/confluence/items", { keys: [it.key], keep_upload: keep },
+    keep ? "The uploaded copy stays alongside" : "The uploaded copy will be replaced");
+  const name = "“" + it.uploaded_as + "”";
+  const [text, cls, btn] = it.keep_upload
+    ? ["Kept alongside your upload " + name + ": the bot reads both", "keep",
+       el("button", { class: "cf-up-btn", onclick: () => set(false) }, "Replace it")]
+    : it.replaces
+      ? [(it.status === "synced" ? "Replaced your upload " : "Replaces your upload ") + name
+           + (it.status === "synced" ? "" : " when synced, keeping its product"), "rep",
+         el("button", { class: "cf-up-btn", onclick: () => set(true) }, "Keep both")]
+      : ["Same manual as your upload " + name + ", but only its cover page. Combine this folder to replace it",
+         "part", null];
+  return el("div", { class: "cf-up " + cls }, text, btn);
+}
+
 function cfRow(it, onTick) {
   const [label, cls] = CF_STATUS[it.status] || [it.status, "tag-neutral"];
   const set = body => cfPost("/admin/confluence/items", { keys: [it.key], ...body });
@@ -4342,7 +4374,8 @@ function cfRow(it, onTick) {
       el("div", { class: "cf-doc-meta" }, [ext, size,
         it.modified_at ? "edited " + cfAgo(it.modified_at) : "",
         it.version && it.kind !== "bundle" ? "v" + it.version : ""].filter(Boolean).join(" · "),
-        it.error ? el("div", { class: "cf-doc-err" }, it.error) : null)),
+        it.error ? el("div", { class: "cf-doc-err" }, it.error) : null,
+        it.uploaded_as ? cfUploadLine(it) : null)),
     el("span", { class: "tag " + cls }, label),
     cfProductButton(it),
     sw,
