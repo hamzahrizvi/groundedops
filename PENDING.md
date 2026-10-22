@@ -200,7 +200,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261022-03 | Security item D-20261022-03, details in the office | ready to merge | merges once Security clears it |
 | D-20261022-07 | Check the shared prompt text is byte-stable so hosted answers can hit the provider cache | check passed | Security's review |
 | D-20261022-08 | Send the fixed answer rules first on every call so a hosted answer costs about 40% less | approved, queued | Dev builds it |
-| D-20261022-10 | Measure wrong-product answers when the first message is typed with no product picked | approved, queued | Dev builds it |
+| D-20261022-10 | Measure wrong-product answers when the first message is typed with no product picked | built, waiting for the check | the pre-ship check |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
