@@ -10,6 +10,8 @@ asks block, and the partial-answer rule.
 """
 import os
 import sys
+import threading
+import time
 from unittest.mock import patch
 
 # The real module, taken before _harness stubs it (its is_refusal is a
@@ -99,6 +101,25 @@ def test_merge_rankings_keeps_each_candidate_once_at_its_best_score():
     out = main._merge_rankings([whole, ask1, [], ask2])
     assert [r["id"] for r in out] == ["b", "c", "a"], out
     assert out[0]["rerank_score"] == 0.99 and out[2]["rerank_score"] == 0.04
+
+
+def test_run_parallel_caps_how_many_run_at_once_and_keeps_order():
+    lock, live, peak = threading.Lock(), [0], [0]
+
+    def job(i):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        time.sleep(0.05)
+        with lock:
+            live[0] -= 1
+        return i * 10
+
+    items = list(range(12))  # e.g. 4 asks x (1 + 2 products)
+    assert main._run_parallel(job, items) == [i * 10 for i in items]
+    assert 1 <= main._PARALLEL_CAP <= 4, main._PARALLEL_CAP
+    assert peak[0] <= main._PARALLEL_CAP, peak[0]
+    assert main._run_parallel(job, []) == []
 
 
 def test_every_ask_gets_its_share_deduplicated_and_capped():

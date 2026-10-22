@@ -849,6 +849,11 @@ def _strip_breadcrumb(result: dict) -> dict:
     return out
 
 
+# D-20261021-10: at most this many searches/reranks run at once, however
+# many asks and products a message names. Same work, same order, just queued.
+_PARALLEL_CAP = min(4, os.cpu_count() or 4)
+
+
 def _run_parallel(fn, items: list) -> list:
     """fn over items in threads, results in input order. Each call runs in a
     copy of the caller's context so pipeline_trace marks still land."""
@@ -856,7 +861,7 @@ def _run_parallel(fn, items: list) -> list:
         return []
     import contextvars
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=len(items)) as ex:
+    with ThreadPoolExecutor(max_workers=min(len(items), _PARALLEL_CAP)) as ex:
         futs = [ex.submit(contextvars.copy_context().run, fn, it) for it in items]
         return [f.result() for f in futs]
 
