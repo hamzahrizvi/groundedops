@@ -65,7 +65,7 @@ Nothing in the office may depend on an interactive session noticing a run end;
 task completion notices to a session did not arrive.
 
 Scheduled tasks are named `groundedops-office-<department>`. Their prompts
-live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
+live in `ops/schedules/` (`customer-weekly.md`, `customer-images.md`, `product-owner.md`,
 `dev-approved.md`, `diary.md`, and `department.md` for the other four), each with
 `model-pick.md` and `office-status.md` appended. Edit them there and copy the change into the task.
 
