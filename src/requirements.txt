@@ -45,9 +45,9 @@ requests
 # runs on every unhinted anonymous question, so it must not cost a request.
 langdetect
 
-# Security floors (D-20261008-17, D-20261020-05). Transitive except pypdf; listed so the
+# Security floors (D-20261008-17, D-20261020-05, D-20261021-23). Transitive except pypdf; listed so the
 # lock cannot fall back below the fixed versions.
-pypdf>=6.19.0
+pypdf>=6.21.1
 urllib3>=2.8.0
 multidict>=6.9.1
 oauthlib>=4.0.0
