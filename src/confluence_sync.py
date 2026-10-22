@@ -434,7 +434,22 @@ class _Api:
         self.http.auth = (email, token)
 
     def get(self, path: str, **params) -> requests.Response:
-        r = self.http.get(self.root + path, params=params, timeout=120)
+        # A check makes over a thousand requests; one slow or busy answer
+        # from Atlassian must not throw the whole run away (it did, at
+        # request ~900 of the first combined check). Four tries, backing off.
+        for attempt in range(4):
+            try:
+                r = self.http.get(self.root + path, params=params, timeout=60)
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt == 3:
+                    raise
+                time.sleep(3 * 2 ** attempt)
+                continue
+            if r.status_code in (429, 502, 503, 504) and attempt < 3:
+                wait = r.headers.get("Retry-After", "")
+                time.sleep(min(60, int(wait)) if wait.isdigit() else 3 * 2 ** attempt)
+                continue
+            break
         if r.status_code in (401, 403):
             raise PermissionError(
                 f"Confluence refused {path.split('?')[0]} ({r.status_code}): check the "
