@@ -30,6 +30,7 @@ class ItemsReq(BaseModel):
     keys: list[str]
     decision: str | None = None
     product: str | None = None      # "k1,k2"; "" files it under nothing
+    keep_upload: bool | None = None # true: keep the uploaded copy alongside
 
 
 class RunReq(BaseModel):
@@ -80,7 +81,8 @@ def admin_confluence_items(payload: ItemsReq,
                            x_admin_password: str | None = Header(default=None)):
     me = _require_admin(x_admin_password)
     try:
-        confluence_sync.set_items(payload.keys, payload.decision, payload.product)
+        confluence_sync.set_items(payload.keys, payload.decision, payload.product,
+                                  payload.keep_upload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     logger.info(f"Confluence: {len(payload.keys)} item(s) set "
