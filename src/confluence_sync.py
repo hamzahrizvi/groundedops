@@ -713,8 +713,10 @@ def _ingest(content: bytes, source: str, cat: str | None, prod: str | None) -> N
 
 def _remove(source: str) -> None:
     """What the console's Remove button does, plus the catalogue entry."""
-    from routes_documents import DeleteSourceRequest, remove_source
-    remove_source(DeleteSourceRequest(source=source))
+    # Not the /delete_source route: where it asks for a sign-in, a background
+    # sync has none, and every replacement failed with "401: Sign-in required".
+    from routes_documents import remove_source_now
+    remove_source_now(source)
     catalog.refile_source(source, [])
 
 
