@@ -197,7 +197,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261010-32 | Security item D-20261010-32, details in the office | approved, queued | Dev builds it |
 | D-20261018-03 | When the checker faults one sentence, cut that sentence and keep the rest; a half answer is not a refusal | approved, queued | Dev builds it |
 | D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | approved, queued | Dev builds it |
-| D-20261022-03 | Security item D-20261022-03, details in the office | sent back, rebuilding | Dev rebuilds it |
+| D-20261022-03 | Security item D-20261022-03, details in the office | ready to merge | merges once Security clears it |
 | D-20261022-07 | Check the shared prompt text is byte-stable so hosted answers can hit the provider cache | check passed | Security's review |
 | D-20261022-08 | Send the fixed answer rules first on every call so a hosted answer costs about 40% less | approved, queued | Dev builds it |
 | D-20261022-10 | Measure wrong-product answers when the first message is typed with no product picked | approved, queued | Dev builds it |
