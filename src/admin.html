@@ -1322,6 +1322,8 @@ function render() {
         // customers asked, then try it as a customer.
         nav("catalog", "Products"),
         nav("documents", "Documents", unassigned().length),
+        nav("confluence", "Confluence", confluenceCache && confluenceCache.items
+          ? confluenceCache.items.filter(i => i.status === "waiting" || i.status === "error").length : 0),
         nav("faq", "Generate/Edit FAQs"),
         nav("gaps", "FAQs from customers", cache.gaps.length),
         nav("widget", "Widget design"),
@@ -1561,6 +1563,7 @@ function body() {
   if (view === "backup") return viewBackup();
   if (view === "overview") return viewOverview();
   if (view === "documents") return viewDocuments();
+  if (view === "confluence") return viewConfluence();
   if (view === "faq") return viewFaq();
   if (view === "gaps") return viewGaps();
   if (view === "catalog") return viewCatalog();
@@ -1600,6 +1603,7 @@ function brandMark(h, cls) {
 const NAV_ICON = {
   overview:  '<path d="M3 13h8V3H3zM13 21h8V11h-8zM13 7h8V3h-8zM3 21h8v-4H3z"/>',
   documents: '<path d="M14 3v5h5"/><path d="M19 8v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7z"/>',
+  confluence:'<path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.4-6.4L21 8"/><path d="M21 3v5h-5"/>',
   faq:       '<path d="M12 3a9 9 0 0 1 0 18H4l2.3-2.3A9 9 0 0 1 12 3z"/><path d="M9 10h6M9 14h4"/>',
   gaps:      '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.5 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.5A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.5z"/>',
   catalog:   '<path d="M21 16V8l-9-5-9 5v8l9 5z"/><path d="m3.3 7.5 8.7 5 8.7-5M12 21.5v-9"/>',
@@ -3665,86 +3669,265 @@ function viewKeys() {
     el("div", { "data-sec": "Providers", "data-tour": "keys-list" }, rows),
     keyRolesCard(),
     creditsCard(),
-    confluenceCard(),
   ];
 }
 
-// Confluence manuals sync: the folder, the account and its token, and what
-// the last sync did. The token box is write-only like the mail password.
+// Confluence: manuals from one Confluence folder or page, with a person
+// between Confluence and the bot. The server checks what is there (indexing
+// nothing), people approve or exclude each document and choose its product,
+// and a sync indexes only what is approved. The connection holds an API
+// token, so only root sees that card; the rest is for anyone at support.
 let confluenceCache = null;
+let cfFilter = "attention", cfSearch = "", cfSelected = new Set(), cfPoll = null;
 
-function confluenceCard() {
-  const card = el("div", { class: "card elev-sm", "data-sec": "Confluence sync",
-    style: "padding:14px 18px;margin-top:18px" });
-  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
-  let poll = null;
-  const load = () => api("/admin/confluence").then(d => { confluenceCache = d; draw(); })
-    .catch(e => { confluenceCache = { error: e.message }; draw(); });
-  const draw = () => {
-    card.textContent = "";
-    const c = confluenceCache;
-    card.append(el("b", {}, "Confluence manuals"),
-      el("p", { style: "margin:4px 0 10px;font-size:13px" },
-        "Indexes every page and every PDF, Word or text attachment under one Confluence folder or page, "
-        + "once a day and when you press Sync now. A document goes under a product when a folder "
-        + "or page above it has that product's name; otherwise file it on the Documents page. "
-        + "Documents removed there are removed here too."));
-    if (!c) { card.append(el("div", {}, "Loading")); return; }
-    if (c.error) { card.append(el("div", { class: "empty" }, c.error)); return; }
+const CF_STATUS = {
+  waiting: ["Waiting for approval", "tag-accent"],
+  new: ["Approved, not synced yet", "tag-accent"],
+  changed: ["Changed in Confluence", "tag-accent"],
+  remove: ["Excluded, removed at next sync", "tag-accent"],
+  gone: ["Deleted in Confluence, removed at next sync", "tag-accent"],
+  error: ["Failed", "tag-accent"],
+  synced: ["Synced", "tag-neutral"],
+  excluded: ["Excluded", "tag-neutral"],
+  missing: ["Not in Confluence", "tag-neutral"],
+};
+const CF_PENDING = ["new", "changed", "remove", "gone"];
+const CF_FILTERS = [
+  ["attention", "Needs attention", s => ["waiting", "error"].includes(s) || CF_PENDING.includes(s)],
+  ["waiting", "Waiting", s => s === "waiting"],
+  ["synced", "Synced", s => s === "synced"],
+  ["excluded", "Excluded", s => s === "excluded" || s === "remove"],
+  ["all", "All", () => true],
+];
 
-    const s = c.settings || {};
-    const f = {
-      folder_url: el("input", { class: "input", value: s.folder_url || "",
-        placeholder: "Link of the folder or page that holds the manuals" }),
-      email: el("input", { class: "input", value: s.email || "", autocomplete: "off",
-        placeholder: "Email of the Atlassian account the token belongs to" }),
-      token: el("input", { class: "input", type: "password", autocomplete: "new-password",
-        placeholder: s.token_set ? "Token saved (leave blank to keep)" : "API token" }),
-    };
-    const save = el("button", { class: "btn btn-primary", onclick: async () => {
-      const body = { folder_url: f.folder_url.value, email: f.email.value };
-      if (f.token.value) body.token = f.token.value;
-      try {
-        confluenceCache = await api("/admin/confluence", { method: "POST", body: JSON.stringify(body) });
-        toast("Confluence settings saved"); draw();
-      } catch (e) { toast(e.message, true); }
-    } }, "Save");
-    const syncBtn = el("button", { class: "btn btn-ghost", onclick: async () => {
-      try {
-        confluenceCache = await api("/admin/confluence/sync", { method: "POST" });
-        toast("Sync started"); draw();
-      } catch (e) { toast(e.message, true); }
-    } }, c.running ? "Syncing" : "Sync now");
-    syncBtn.disabled = !c.configured || c.running;
+async function cfLoad() {
+  try { confluenceCache = await api("/admin/confluence"); }
+  catch (e) { confluenceCache = { error: e.message }; }
+  if (view === "confluence") render();
+}
 
-    card.append(
-      el("div", { style: "display:flex;flex-direction:column;gap:6px" }, f.folder_url,
-        el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
-          el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token))),
-      el("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save, syncBtn,
-        el("span", { class: "tag " + (c.configured ? "tag-accent" : "tag-neutral") },
-          c.configured ? "configured" : "not set")));
+async function cfPost(path, body, msg) {
+  try {
+    confluenceCache = await api(path, { method: "POST", body: JSON.stringify(body || {}) });
+    if (msg) toast(msg);
+    render();
+  } catch (e) { toast(e.message, true); }
+}
 
-    const l = c.last;
-    if (l) {
-      const n = k => (l[k] || []).length;
-      card.append(el("div", { style: "margin-top:12px;font-size:13px" },
-        el("div", { style: muted }, "Last sync " + new Date(l.at).toLocaleString()),
-        l.failed
-          ? el("div", { class: "empty" }, "Failed: " + l.failed)
-          : el("div", {}, n("added") + " added, " + n("updated") + " updated, "
-              + (l.unchanged || 0) + " unchanged, " + n("removed") + " removed"),
-        n("unfiled") ? el("div", { style: muted }, "Not filed under a product yet: "
-          + l.unfiled.join(", ")) : null,
-        (l.errors || []).map(e => el("div", { style: muted }, e))));
-    }
-    clearTimeout(poll);
-    if (c.running) poll = setTimeout(() => { if (card.isConnected) load(); }, 3000);
+function cfProductPicker(cur, onSave, label) {
+  const prods = products();
+  return el("details", { class: "tagpick" },
+    el("summary", {}, label || (cur.length
+      ? cur.map(k => (prods.find(p => p.key === k) || { name: k }).name).join(", ")
+      : "No product")),
+    el("div", { class: "tagpick-list" },
+      prods.map(p => el("label", { class: "tagpick-row" },
+        el("input", { type: "checkbox", checked: cur.includes(p.key) ? "true" : null,
+          onchange: e => onSave(e.target.checked
+            ? cur.concat([p.key]) : cur.filter(k => k !== p.key)) }),
+        el("span", {}, p.categoryName + " › " + p.name)))));
+}
+
+function cfConnectionCard(c) {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Connection",
+    style: "padding:14px 18px;margin-bottom:18px" });
+  const s = c.settings || {};
+  if (!isRoot()) {
+    card.append(el("b", {}, "Connection"), el("p", { style: "margin:4px 0 0;font-size:13px" },
+      c.configured ? "Reading from " + s.folder_url
+                   : "Not connected yet. A root admin connects Confluence on this page."));
+    return card;
+  }
+  const f = {
+    folder_url: el("input", { class: "input", value: s.folder_url || "",
+      placeholder: "Link of the folder or page that holds the manuals" }),
+    email: el("input", { class: "input", value: s.email || "", autocomplete: "off",
+      placeholder: "Email of the Atlassian account the token belongs to" }),
+    token: el("input", { class: "input", type: "password", autocomplete: "new-password",
+      placeholder: s.token_set ? "Token saved (leave blank to keep)" : "API token" }),
   };
-  if (!confluenceCache) load();
-  else if (confluenceCache.running) load();
-  draw();
+  const save = el("button", { class: "btn btn-primary", onclick: () => {
+    const body = { folder_url: f.folder_url.value, email: f.email.value };
+    if (f.token.value) body.token = f.token.value;
+    cfPost("/admin/confluence", body, "Connection saved");
+  } }, "Save");
+  card.append(el("b", {}, "Connection"),
+    el("p", { style: "margin:4px 0 10px;font-size:13px" },
+      "A read-only Atlassian API token for an account that can see only what customers may see. "
+      + "Everything under the folder or page below is offered here; nothing reaches the bot until it is approved."),
+    el("div", { style: "display:flex;flex-direction:column;gap:6px" }, f.folder_url,
+      el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
+        el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token))),
+    el("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save,
+      el("span", { class: "tag " + (c.configured ? "tag-accent" : "tag-neutral") },
+        c.configured ? "connected" : "not connected")));
   return card;
+}
+
+function cfSyncCard(c) {
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const card = el("div", { class: "card elev-sm", "data-sec": "Sync",
+    style: "padding:14px 18px;margin-bottom:18px" });
+  const mode = (m, label, hint) => el("button", {
+    class: "chip" + (c.mode === m ? " chip-on" : ""), title: hint,
+    onclick: () => c.mode !== m && cfPost("/admin/confluence/mode", { mode: m },
+      m === "auto" ? "New documents will sync without approval" : "New documents will wait for approval"),
+  }, label);
+  const busy = c.running;
+  const pending = c.items.filter(i => CF_PENDING.includes(i.status)).length;
+  const run = apply => cfPost("/admin/confluence/run", { apply },
+    apply ? "Sync started" : "Checking Confluence");
+  const checkBtn = el("button", { class: "btn btn-ghost", onclick: () => run(false) }, "Check for changes");
+  const syncBtn = el("button", { class: "btn btn-primary", onclick: () => run(true) },
+    "Sync now" + (pending ? " (" + pending + ")" : ""));
+  checkBtn.disabled = syncBtn.disabled = !c.configured || !!busy;
+
+  card.append(el("b", {}, "Sync"),
+    el("div", { class: "chips", style: "margin:8px 0 6px" },
+      mode("review", "Approve new documents first",
+        "New documents wait under Needs attention until someone approves them"),
+      mode("auto", "Sync everything",
+        "Every new document is approved as soon as it is found")),
+    el("p", { style: muted + ";margin:0 0 10px" }, c.mode === "auto"
+      ? "Every document found is synced. Exclude one to take it out of the bot."
+      : "New documents wait for approval. Approved documents stay approved and update when they change."),
+    el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn,
+      busy ? el("span", { style: muted }, busy.phase === "syncing"
+               ? "Syncing " + (busy.done + 1) + " of " + busy.total
+               : busy.phase === "checking" ? "Reading Confluence, " + (busy.done || 0) + " found"
+               : "Connecting")
+           : el("span", { style: muted }, (c.checked_at ? "Last checked " + new Date(c.checked_at).toLocaleString() + ". " : "")
+               + "Checks and syncs on its own once a day.")));
+  return card;
+}
+
+function cfRow(it, onTick) {
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const [label, cls] = CF_STATUS[it.status] || [it.status, "tag-neutral"];
+  const set = body => cfPost("/admin/confluence/items", { keys: [it.key], ...body });
+  const tick = el("input", { type: "checkbox", checked: cfSelected.has(it.key) ? "true" : null,
+    "aria-label": "Select " + it.title,
+    onchange: e => { e.target.checked ? cfSelected.add(it.key) : cfSelected.delete(it.key); onTick(); } });
+  const size = it.size ? " · " + (it.size > 1048576 ? (it.size / 1048576).toFixed(1) + " MB"
+                                                      : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
+  const acts = [];
+  if (it.present !== false && it.decision !== "approved")
+    acts.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+      onclick: () => set({ decision: "approved" }) }, "Approve"));
+  if (it.present !== false && it.decision !== "excluded")
+    acts.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+      onclick: () => set({ decision: "excluded" }) }, "Exclude"));
+  return el("div", { class: "item" }, tick,
+    el("div", { class: "grow" },
+      el("b", {}, it.title),
+      el("span", {}, (it.kind === "page" ? "Confluence page" : "Attached file") + size
+        + (it.version ? " · version " + it.version : "")),
+      it.error ? el("div", { style: muted }, it.error) : null),
+    el("span", { class: "tag " + cls }, label),
+    cfProductPicker((it.product || "").split(",").filter(Boolean),
+      keys => set({ product: keys.join(",") })),
+    acts,
+    it.url ? el("a", { class: "btn btn-ghost", style: "font-size:12.5px", href: it.url,
+      target: "_blank", rel: "noopener" }, "Open") : null);
+}
+
+function cfDocumentsCard(c) {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Documents",
+    style: "padding:14px 18px;margin-bottom:18px" });
+  const filt = CF_FILTERS.find(f => f[0] === cfFilter) || CF_FILTERS[0];
+  const known = new Set(c.items.map(i => i.key));
+  cfSelected.forEach(k => known.has(k) || cfSelected.delete(k));
+
+  const chips = el("div", { class: "chips", style: "margin:8px 0 10px" },
+    CF_FILTERS.map(([key, label, test]) => el("button", {
+      class: "chip" + (cfFilter === key ? " chip-on" : ""),
+      onclick: () => { cfFilter = key; render(); } },
+      label, el("span", { class: "chip-n" }, String(c.items.filter(i => test(i.status)).length)))));
+  const search = el("input", { class: "input", placeholder: "Find a document or folder",
+    value: cfSearch, style: "margin-bottom:8px" });
+  search.addEventListener("input", () => { cfSearch = search.value; drawList(); });
+
+  // Acting on several at once: everything ticked, or a whole folder.
+  const bulk = el("div", {});
+  const drawBulk = () => {
+    bulk.textContent = "";
+    const keys = [...cfSelected];
+    if (!keys.length) return;
+    const set = body => { cfPost("/admin/confluence/items", { keys, ...body },
+      keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
+    bulk.append(el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap;"
+        + "padding:8px 10px;margin-bottom:8px;border-radius:var(--radius-md);"
+        + "background:color-mix(in srgb,var(--color-text) 6%,transparent)" },
+      el("b", { style: "font-weight:600" }, keys.length + " selected"),
+      el("button", { class: "btn btn-primary", onclick: () => set({ decision: "approved" }) }, "Approve"),
+      el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
+      cfProductPicker([], ks => set({ product: ks.join(",") }), "File under"),
+      el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); drawList(); } }, "Clear")));
+  };
+
+  const list = el("div", {});
+  const drawList = () => {
+    list.textContent = "";
+    const qq = cfSearch.trim().toLowerCase();
+    const rows = c.items.filter(i => filt[2](i.status)
+      && (!qq || (i.title + " " + (i.path || []).join(" ")).toLowerCase().includes(qq)));
+    if (!rows.length) {
+      list.append(el("div", { class: "empty" }, el("b", {}, c.items.length
+        ? "Nothing here" : "No documents yet"),
+        c.items.length ? "Try another filter." : "Press Check for changes to read the folder."));
+    }
+    let lastPath = null;
+    rows.forEach(it => {
+      const path = (it.path || []).join(" › ") || "Top level";
+      if (path !== lastPath) {
+        lastPath = path;
+        const inFolder = rows.filter(r => ((r.path || []).join(" › ") || "Top level") === path);
+        list.append(el("div", { style: "display:flex;align-items:center;gap:8px;margin:14px 0 2px;"
+            + "font-size:12px;font-weight:600;color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
+          el("input", { type: "checkbox", "aria-label": "Select everything in " + path,
+            checked: inFolder.every(r => cfSelected.has(r.key)) ? "true" : null,
+            onchange: e => { inFolder.forEach(r => e.target.checked
+              ? cfSelected.add(r.key) : cfSelected.delete(r.key)); drawList(); } }),
+          path));
+      }
+      list.append(cfRow(it, drawBulk));
+    });
+    drawBulk();
+  };
+  drawList();
+  card.append(el("b", {}, "Documents"), chips, search, bulk, list);
+  return card;
+}
+
+function cfHistoryCard(c) {
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const n = (r, k) => (r[k] || []).length;
+  const line = r => r.failed ? "Failed: " + r.failed
+    : r.kind === "check"
+      ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
+      : n(r, "added") + " added, " + n(r, "updated") + " updated, " + n(r, "removed") + " removed"
+        + (r.waiting ? ", " + r.waiting + " waiting for approval" : "");
+  return el("div", { class: "card elev-sm", "data-sec": "History", style: "padding:14px 18px" },
+    el("b", {}, "History"),
+    c.history.length
+      ? c.history.map(r => el("div", { class: "item" },
+          el("div", { class: "grow" },
+            el("b", {}, (r.kind === "check" ? "Check" : "Sync") + " · " + new Date(r.at).toLocaleString()),
+            el("span", {}, line(r)),
+            (r.errors || []).map(e => el("div", { style: muted }, e)))))
+      : el("div", { style: muted + ";margin-top:6px" }, "Nothing has run yet."));
+}
+
+function viewConfluence() {
+  const head = [el("h1", {}, "Confluence"),
+    el("p", { class: "lede" }, "Manuals kept in Confluence. Check what is there, approve what customers "
+      + "should be answered from, and sync. Documents excluded or deleted in Confluence are taken out of the bot.")];
+  const c = confluenceCache;
+  clearTimeout(cfPoll);
+  if (!c) { cfLoad(); return [...head, el("p", { class: "lede" }, "Loading")]; }
+  if (c.error) return [...head, el("div", { class: "empty" }, c.error)];
+  if (c.running) cfPoll = setTimeout(() => { if (view === "confluence") cfLoad(); }, 3000);
+  return [...head, cfConnectionCard(c), cfSyncCard(c), cfDocumentsCard(c), cfHistoryCard(c)];
 }
 
 // Low-credit alerts: balances, the threshold, and the mail settings the

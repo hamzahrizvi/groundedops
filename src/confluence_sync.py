@@ -1,18 +1,24 @@
-"""Keep the manuals in one Confluence folder (the "Website" folder) indexed.
+"""Manuals from one Confluence folder or page (the "Website" one), with a
+review step between Confluence and the bot.
 
-Every page under the folder, at any depth, is indexed as text, and every PDF,
-Word or text file attached to those pages as the file itself, through the
-same ingest_file an upload goes through.
+Two steps, kept apart so a person can stand between them:
+
+  check  -- list what is under the root: every page with real text and every
+            PDF, Word or text file attached to those pages. Records each as
+            an item with its Confluence version. Indexes nothing.
+  apply  -- bring the index in line with the approved items: add new ones,
+            re-index changed ones, remove ones excluded or gone from
+            Confluence. Only documents this sync added are ever removed.
+
+"Sync now" and the daily run do both. Each item carries a decision:
+approved, excluded, or pending. In "auto" mode a newly found document is
+approved at once (sync everything); in "review" mode it waits as pending
+until someone approves it on the console's Confluence page. A document that
+was approved stays approved when it changes in Confluence.
 
 Filing: a document already filed in the catalogue keeps that filing. A new
-one is filed under a product when a folder or page above it carries that
-product's name ("Website / Smart Hopper 3 / Installation"); otherwise it
-lands unassigned and is filed in the console like any upload.
-
-A document that leaves the folder is removed from the index, but only one
-this sync added: the state file lists them. Uploads made by hand are never
-touched, unless Confluence holds a document of exactly the same name, which
-it then keeps up to date.
+one is suggested the product its nearest folder or page is named after,
+and the suggestion can be changed before or after it is synced.
 
 Access is a scoped Atlassian API token (read-only granular scopes) for an
 account that can see only what customers may see. Scoped tokens work only
@@ -36,16 +42,28 @@ logger = logging.getLogger(__name__)
 
 _STATE = os.getenv("CONFLUENCE_SYNC_STATE", "confluence_sync.json")
 _FILE_TYPES = (".pdf", ".docx", ".txt")
-# A page with less text than this is a wrapper round its attachment, not a
-# manual, and indexing it would only add a near-empty source.
+# A page with less text than this is a wrapper round its attachment or a
+# list of child pages, not a manual, and is not offered.
 _MIN_PAGE_TEXT = 200
+_HISTORY = 20
+MODES = ("review", "auto")
+DECISIONS = ("approved", "excluded", "pending")
+
 # A folder, or a page whose child pages hold the manuals: both are a
 # "Website" container in Confluence, depending on how the space was built.
 _FOLDER_URL = re.compile(
     r"^https://([a-z0-9-]+\.atlassian\.net)/wiki/spaces/[^/]+/(folder|pages)/(\d+)", re.I)
 
-_lock = threading.Lock()
+_run_lock = threading.Lock()      # one check/sync at a time
+_state_lock = threading.Lock()    # read-modify-write of the state file
+_progress: dict = {}
 
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ── settings ────────────────────────────────────────────────────────────
 
 def _match_folder_url(url: str) -> re.Match:
     m = _FOLDER_URL.match((url or "").strip())
@@ -74,12 +92,146 @@ def configured() -> bool:
     return bool(s["folder_url"] and s["email"] and s["token_set"])
 
 
-def running() -> bool:
-    return _lock.locked()
+def running() -> dict | None:
+    """What a run in progress is doing, or None."""
+    return dict(_progress) if _run_lock.locked() else None
 
 
-def last_result() -> dict | None:
-    return jsonstore.load(_STATE, {}, label="Confluence sync").get("last")
+# ── state ───────────────────────────────────────────────────────────────
+
+def _load() -> dict:
+    st = jsonstore.load(_STATE, {}, label="Confluence sync")
+    if "sources" in st and "items" not in st:
+        # The first version kept only {source: "page:<id>:<version>"}.
+        items = {}
+        for src, tag in st.pop("sources").items():
+            kind, cid, ver = (tag.split(":") + ["", ""])[:3]
+            items[f"{kind}:{cid}"] = {
+                "kind": "page" if kind == "page" else "file", "id": cid,
+                "title": os.path.splitext(src)[0], "source": src, "path": [],
+                "version": int(ver) if ver.isdigit() else None, "present": True,
+                "decision": "approved",
+                "synced_version": int(ver) if ver.isdigit() else None}
+        st["items"] = items
+    st.setdefault("mode", "review")
+    st.setdefault("items", {})
+    st.setdefault("history", [])
+    return st
+
+
+def _save(st: dict) -> None:
+    jsonstore.save(_STATE, st, label="Confluence sync")
+
+
+def _update(fn) -> dict:
+    """Load, change with fn(state), save, atomically against other writers."""
+    with _state_lock:
+        st = _load()
+        fn(st)
+        _save(st)
+        return st
+
+
+def status_of(it: dict) -> str:
+    """One word for what the next sync will do with an item, or has done."""
+    synced = it.get("synced_version") is not None
+    if it.get("error"):
+        return "error"
+    if not it.get("present", True):
+        return "gone" if synced else "missing"
+    if it.get("decision") == "excluded":
+        return "remove" if synced else "excluded"
+    if it.get("decision") == "pending":
+        return "waiting"
+    if not synced:
+        return "new"
+    return "synced" if it.get("synced_version") == it.get("version") else "changed"
+
+
+def _filed(source: str) -> tuple[str | None, str]:
+    """(category key, "k1,k2") a source is filed under in the catalogue."""
+    data = catalog.load_catalog()
+    held = [(c["key"], p["key"]) for c in data["categories"]
+            for p in c.get("products", []) if source in p.get("sources", [])]
+    return (held[0][0] if held else None), ",".join(k for _, k in held)
+
+
+def _suggest(path: list[str]) -> tuple[str | None, str]:
+    """The product the nearest folder or page above is named after."""
+    by_name: dict[str, list] = {}
+    for c in catalog.load_catalog()["categories"]:
+        for p in c.get("products", []):
+            by_name.setdefault(p["name"].strip().lower(), []).append((c["key"], p["key"]))
+    for title in reversed(path):
+        hit = by_name.get(title.strip().lower())
+        if hit and len(hit) == 1:           # a name two categories share files nothing
+            return hit[0]
+    return None, ""
+
+
+def category_of(product_keys: str) -> str | None:
+    first = next((k for k in (product_keys or "").split(",") if k.strip()), "").strip()
+    for c in catalog.load_catalog()["categories"]:
+        if any(p["key"] == first for p in c.get("products", [])):
+            return c["key"]
+    return None
+
+
+def overview() -> dict:
+    """Everything the console's Confluence page shows."""
+    st = _load()
+    items = []
+    for key, it in st["items"].items():
+        row = {k: it.get(k) for k in ("kind", "title", "path", "url", "size", "version",
+                                      "decision", "source", "synced_at", "error", "present")}
+        row["key"] = key
+        row["status"] = status_of(it)
+        if it.get("synced_version") is not None:
+            row["product"] = _filed(it["source"])[1]   # the catalogue is the truth once synced
+        else:
+            row["product"] = it.get("product") or ""
+        items.append(row)
+    items.sort(key=lambda r: ([p.lower() for p in r["path"] or []], (r["title"] or "").lower()))
+    return {"mode": st["mode"], "checked_at": st.get("checked_at"),
+            "items": items, "history": st["history"][::-1],
+            "running": running(), "configured": configured()}
+
+
+# ── decisions from the console ──────────────────────────────────────────
+
+def set_mode(mode: str) -> None:
+    if mode not in MODES:
+        raise ValueError("mode must be review or auto")
+    _update(lambda st: st.__setitem__("mode", mode))
+
+
+def set_items(keys: list[str], decision: str | None = None,
+              product: str | None = None) -> None:
+    """Approve, exclude or re-file items. Decisions take effect at the next
+    sync; a new product for a document already synced takes effect now."""
+    if decision is not None and decision not in DECISIONS:
+        raise ValueError("decision must be approved, excluded or pending")
+    retag = []
+
+    def change(st):
+        for k in keys:
+            it = st["items"].get(k)
+            if not it:
+                continue
+            if decision:
+                it["decision"] = decision
+                it.pop("error", None)
+            if product is not None:
+                if it.get("synced_version") is not None:
+                    retag.append(it["source"])
+                else:
+                    it["product"], it["category"] = product, category_of(product)
+    _update(change)
+    if retag:
+        from routes_documents import retag_source
+        cat = category_of(product) or ""      # ingest's own "unassigned"
+        for src in retag:
+            retag_source(src, cat, product)
 
 
 # ── Confluence ──────────────────────────────────────────────────────────
@@ -88,6 +240,7 @@ class _Api:
     def __init__(self, site: str, email: str, token: str):
         r = requests.get(f"https://{site}/_edge/tenant_info", timeout=20)
         r.raise_for_status()
+        self.site = site
         self.root = "https://api.atlassian.com/ex/confluence/" + r.json()["cloudId"]
         self.http = requests.Session()
         self.http.auth = (email, token)
@@ -107,6 +260,18 @@ class _Api:
             j = self.get(path, **params).json()
             yield from j.get("results", [])
             path, params = (j.get("_links") or {}).get("next"), {}
+
+    def page(self, pid: str) -> dict:
+        return self.get(f"/wiki/api/v2/pages/{pid}", **{"body-format": "storage"}).json()
+
+    def download(self, page_id: str, att_id: str) -> bytes:
+        return self.get(f"/wiki/rest/api/content/{page_id}/child/attachment/{att_id}/download").content
+
+
+def _connect() -> tuple["_Api", str, str]:
+    s = keystore.get_confluence_settings()
+    site, root_kind, root_id = parse_folder_url(s["folder_url"])
+    return _Api(site, s["email"], keystore.get_confluence_token()), root_kind, root_id
 
 
 def _walk(api: _Api, root_kind: str, root_id: str):
@@ -167,45 +332,85 @@ def page_text(title: str, storage_html: str) -> str:
     return f"{title}\n\n{body}" if body else ""
 
 
-# ── filing ──────────────────────────────────────────────────────────────
-
-def _filing(source: str, trail: list[str]) -> tuple[str | None, str | None, bool]:
-    """(category key, product keys, already filed) for a document."""
-    data = catalog.load_catalog()
-    held = [(c["key"], p["key"]) for c in data["categories"]
-            for p in c.get("products", []) if source in p.get("sources", [])]
-    if held:
-        return held[0][0], ",".join(k for _, k in held), True
-    by_name: dict[str, list] = {}
-    for c in data["categories"]:
-        for p in c.get("products", []):
-            by_name.setdefault(p["name"].strip().lower(), []).append((c["key"], p["key"]))
-    for title in reversed(trail):           # nearest folder or page wins
-        hit = by_name.get(title.strip().lower())
-        if hit and len(hit) == 1:           # a name two categories share files nothing
-            return hit[0][0], hit[0][1], False
-    return None, None, False
+def _body(full: dict) -> str:
+    return ((full.get("body") or {}).get("storage") or {}).get("value") or ""
 
 
 def _safe_name(title: str) -> str:
     return re.sub(r'[\\/:*?"<>|]+', "-", title).strip(" .") or "untitled"
 
 
-# ── the sync ────────────────────────────────────────────────────────────
-
-class Busy(RuntimeError):
-    pass
+def _link(api: _Api, webui: str | None) -> str | None:
+    return f"https://{api.site}/wiki{webui}" if webui else None
 
 
-def sync() -> dict:
-    """One full pass. Returns (and records) what changed."""
-    if not _lock.acquire(blocking=False):
-        raise Busy("A Confluence sync is already running")
-    try:
-        return _sync()
-    finally:
-        _lock.release()
+# ── check ───────────────────────────────────────────────────────────────
 
+def _check(api: _Api, root_kind: str, root_id: str) -> dict:
+    """List the root into the state's items. Indexes nothing."""
+    found: dict[str, dict] = {}
+    for page, trail in _walk(api, root_kind, root_id):
+        pid = page["id"]
+        _progress.update(phase="checking", done=len(found))
+        full = api.page(pid)
+        title = full.get("title") or page["title"]
+        # The root page's own text is the container's intro, not a manual;
+        # files attached to it still count.
+        if pid != root_id and len(page_text(title, _body(full))) >= _MIN_PAGE_TEXT:
+            found[f"page:{pid}"] = {
+                "kind": "page", "id": pid, "title": title, "path": trail,
+                "name": _safe_name(title) + ".txt",
+                "version": (full.get("version") or {}).get("number"),
+                "url": _link(api, (full.get("_links") or {}).get("webui"))}
+        for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
+            name = _safe_name(att.get("title") or "")
+            if not name.lower().endswith(_FILE_TYPES):
+                continue
+            found[f"att:{att['id']}"] = {
+                "kind": "file", "id": att["id"], "page_id": pid, "title": att.get("title"),
+                "path": trail + ([title] if title else []), "name": name,
+                "version": (att.get("version") or {}).get("number"),
+                "size": att.get("fileSize"),
+                "url": _link(api, att.get("webuiLink"))}
+
+    res = {"at": _now(), "kind": "check", "found": len(found), "new": [], "changed": [], "gone": []}
+
+    def merge(st):
+        items = st["items"]
+        taken = {it["source"] for k, it in items.items() if it.get("source") and k in found}
+        for key, f in found.items():
+            it = items.get(key)
+            if it is None:
+                cat, prod = _suggest(f["path"])
+                it = items[key] = {"decision": "approved" if st["mode"] == "auto" else "pending",
+                                   "category": cat, "product": prod, "synced_version": None}
+                res["new"].append(f["title"])
+            elif it.get("synced_version") is not None and it["synced_version"] != f["version"]:
+                res["changed"].append(f["title"])
+            name = f.pop("name")
+            if not it.get("source"):
+                # Two documents of the same name: the second gets its id.
+                if name in taken:
+                    stem, ext = os.path.splitext(name)
+                    name = f"{stem} ({f['id']}){ext}"
+                it["source"] = name
+                taken.add(name)
+            it.update(f, present=True)
+        for key, it in items.items():
+            if key not in found and it.get("present", True):
+                it["present"] = False
+                res["gone"].append(it.get("title"))
+        # Gone and never synced: nothing to undo, so nothing to show.
+        for key in [k for k, it in items.items()
+                    if not it["present"] and it.get("synced_version") is None]:
+            del items[key]
+        st["checked_at"] = res["at"]
+        st["found_nothing"] = not found
+    _update(merge)
+    return res
+
+
+# ── apply ───────────────────────────────────────────────────────────────
 
 def _ingest(content: bytes, source: str, cat: str | None, prod: str | None) -> None:
     from ingest import ingest_file
@@ -220,98 +425,102 @@ def _remove(source: str) -> None:
     catalog.refile_source(source, [])
 
 
-def _sync() -> dict:
-    s = keystore.get_confluence_settings()
-    site, root_kind, root_id = parse_folder_url(s["folder_url"])
-    api = _Api(site, s["email"], keystore.get_confluence_token())
-
-    state = jsonstore.load(_STATE, {}, label="Confluence sync")
-    held: dict = state.get("sources", {})       # source -> "page:<id>:<version>"
-    seen: dict = {}
-    res = {"added": [], "updated": [], "unchanged": 0, "removed": [],
-           "unfiled": [], "errors": []}
-
-    def take(source: str, tag: str, trail: list[str], fetch) -> None:
-        if source in seen:                      # two pages of the same title
-            source = f"{os.path.splitext(source)[0]} ({tag.split(':')[1]}){os.path.splitext(source)[1]}"
-        if source in held:
-            seen[source] = held[source]         # kept as it was if this one fails
-        if held.get(source) == tag:
-            res["unchanged"] += 1
-            return
-        try:
-            content = fetch()
-            if not content:
-                return
-            cat, prod, filed = _filing(source, trail)
-            _ingest(content, source, cat, prod)
-            if cat and prod and not filed:
-                catalog.attach_source(cat, prod, source)
-            if not prod:
-                res["unfiled"].append(source)
-            res["updated" if source in held else "added"].append(source)
-            seen[source] = tag
-        except Exception as exc:
-            logger.warning("Confluence sync: %s failed: %s", source, exc)
-            res["errors"].append(f"{source}: {exc}")
-
-    for page, trail in _walk(api, root_kind, root_id):
-        pid = page["id"]
-        full = api.get(f"/wiki/api/v2/pages/{pid}", **{"body-format": "storage"}).json()
-        title = full.get("title") or page["title"]
-        ver = (full.get("version") or {}).get("number")
-        text = page_text(title, ((full.get("body") or {}).get("storage") or {}).get("value"))
-        # The Website page's own text is the container's intro, not a manual;
-        # files attached to it still count.
-        if len(text) >= _MIN_PAGE_TEXT and pid != root_id:
-            take(_safe_name(title) + ".txt", f"page:{pid}:{ver}", trail,
-                 lambda t=text: t.encode("utf-8"))
-        for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
-            name = _safe_name(att.get("title") or "")
-            if not name.lower().endswith(_FILE_TYPES):
-                continue
-            aid = att["id"]
-            take(name, f"att:{aid}:{(att.get('version') or {}).get('number')}",
-                 trail + [title],
-                 lambda p=pid, a=aid: api.get(
-                     f"/wiki/rest/api/content/{p}/child/attachment/{a}/download").content)
-
-    gone = [src for src in held if src not in seen]
-    if gone and not seen:
+def _apply(api: _Api) -> dict:
+    st = _load()
+    res = {"at": _now(), "kind": "sync", "added": [], "updated": [], "removed": [],
+           "waiting": 0, "errors": []}
+    todo = [(k, dict(it)) for k, it in st["items"].items()
+            if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove")]
+    res["waiting"] = sum(1 for it in st["items"].values() if status_of(it) == "waiting")
+    if st.get("found_nothing") and st["items"]:
         # Nothing listed at all is a permissions change or an emptied folder
         # far more often than a real removal of every manual.
-        res["errors"].append("The folder listed nothing, so nothing was removed. "
-                             "Check the account can still see it.")
-        seen = dict(held)
-    else:
-        for src in gone:
-            try:
+        res["errors"].append("Confluence listed nothing, so nothing was removed. "
+                             "Check the account can still see the folder.")
+        todo = [(k, it) for k, it in todo if it.get("present", True)]
+
+    for n, (key, it) in enumerate(todo):
+        _progress.update(phase="syncing", done=n, total=len(todo))
+        src, what = it["source"], status_of({**it, "error": None})
+        try:
+            if what in ("gone", "remove"):
                 _remove(src)
                 res["removed"].append(src)
-            except Exception as exc:
-                res["errors"].append(f"{src}: not removed: {exc}")
-                seen[src] = held[src]
+                change = {"synced_version": None, "synced_at": None}
+            else:
+                if it["kind"] == "page":
+                    full = api.page(it["id"])
+                    content = page_text(full.get("title") or it["title"], _body(full)).encode("utf-8")
+                    version = (full.get("version") or {}).get("number")
+                else:
+                    content = api.download(it["page_id"], it["id"])
+                    version = it.get("version")
+                cat, prod = _filed(src)
+                if not prod:
+                    prod = it.get("product") or ""
+                    cat = it.get("category") or category_of(prod)
+                _ingest(content, src, cat, prod or None)
+                if prod and not _filed(src)[1]:
+                    catalog.attach_source(cat, prod, src)
+                res["added" if what == "new" else "updated"].append(src)
+                change = {"synced_version": version, "synced_at": _now(), "version": version}
+            change["error"] = None
+        except Exception as exc:
+            logger.warning("Confluence sync: %s failed: %s", src, exc)
+            res["errors"].append(f"{src}: {exc}")
+            change = {"error": str(exc)}
 
-    res["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    jsonstore.save(_STATE, {"sources": seen, "last": res}, label="Confluence sync")
-    logger.info("Confluence sync: %d added, %d updated, %d unchanged, %d removed, %d errors",
-                len(res["added"]), len(res["updated"]), res["unchanged"],
-                len(res["removed"]), len(res["errors"]))
+        def write(st, key=key, change=change):
+            if key in st["items"]:
+                st["items"][key].update(change)
+                if not st["items"][key].get("present", True) and \
+                        st["items"][key].get("synced_version") is None:
+                    del st["items"][key]
+        _update(write)
     return res
 
 
-def sync_in_background() -> None:
-    def run():
+# ── runs ────────────────────────────────────────────────────────────────
+
+class Busy(RuntimeError):
+    pass
+
+
+def run(apply: bool = True) -> dict:
+    """Check, then (unless apply=False) sync. Returns and records the result."""
+    if not _run_lock.acquire(blocking=False):
+        raise Busy("A Confluence check or sync is already running")
+    try:
+        _progress.clear()
+        _progress.update(phase="connecting")
         try:
-            sync()
+            api, root_kind, root_id = _connect()
+            res = _check(api, root_kind, root_id)
+            if apply:
+                res = {**_apply(api), "found": res["found"], "new": res["new"],
+                       "changed": res["changed"], "gone": res["gone"]}
+        except Exception as exc:
+            logger.warning("Confluence %s failed: %s", "sync" if apply else "check", exc)
+            res = {"at": _now(), "kind": "sync" if apply else "check", "failed": str(exc)}
+
+        def record(st):
+            st["history"] = (st["history"] + [res])[-_HISTORY:]
+        _update(record)
+        logger.info("Confluence %s: %s", res["kind"],
+                    {k: (len(v) if isinstance(v, list) else v) for k, v in res.items() if k != "at"})
+        return res
+    finally:
+        _progress.clear()
+        _run_lock.release()
+
+
+def run_in_background(apply: bool = True) -> None:
+    def go():
+        try:
+            run(apply)
         except Busy:
             pass                     # a second click while one runs
-        except Exception as exc:
-            logger.warning("Confluence sync failed: %s", exc)
-            jsonstore.save(_STATE, {**jsonstore.load(_STATE, {}, label="Confluence sync"),
-                                    "last": {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                             "failed": str(exc)}}, label="Confluence sync")
-    threading.Thread(target=run, name="confluence-sync", daemon=True).start()
+    threading.Thread(target=go, name="confluence-sync", daemon=True).start()
 
 
 # ── periodic sync ───────────────────────────────────────────────────────
@@ -331,7 +540,7 @@ def _loop() -> None:
         if interval <= 0:
             return
         if configured() and capability("search") and not running():
-            sync_in_background()
+            run_in_background(apply=True)
         time.sleep(interval)
 
 

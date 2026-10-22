@@ -526,17 +526,28 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     category/product — for docs ingested before direct tagging, or to move
     a doc. Updates Chroma metadata in place (no re-embed)."""
     _require_admin(x_admin_password)
+    n = retag_source(payload.source, payload.category_key, payload.product_key)
+    if not n:
+        raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
+    return {"reassigned": n, "source": payload.source,
+            "category": payload.category_key, "product": payload.product_key}
+
+
+def retag_source(source: str, category_key: str | None, product_key: str | None) -> int:
+    """File an indexed source under `product_key` ("a,b" for several, "" for
+    none) in the index and the catalogue. Returns the chunks retagged, 0 when
+    the source is not indexed."""
     from db import get_collection
     col = get_collection()
-    got = col.get(where={"source": payload.source}, include=["metadatas"])
+    got = col.get(where={"source": source}, include=["metadatas"])
     ids = got.get("ids", [])
     if not ids:
-        raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
+        return 0
     # Several products, comma-joined: an installation guide covering the
     # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
     # meant the other product's visitors were never offered it.
     keys = list(dict.fromkeys(
-        k.strip() for k in (payload.product_key or "").split(",") if k.strip()))
+        k.strip() for k in (product_key or "").split(",") if k.strip()))
     # Flags from a previous assignment have to go, or a document moved off
     # a product stays findable under it -- the worst kind of stale tag,
     # because nothing on screen says it is still there. with_product_tags
@@ -545,24 +556,23 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     metas = []
     for m in got["metadatas"]:
         m = with_product_tags(m, keys)
-        m["category"] = payload.category_key
+        m["category"] = category_key
         metas.append(m)
     col.update(ids=ids, metadatas=metas)
     # The catalogue is what reindex.py rebuilds from. Until it was written
     # here too, a retag lived only in Chroma and vanished on the next rebuild.
     try:
-        catalog_mod.refile_source(payload.source, keys)
+        catalog_mod.refile_source(source, keys)
     except Exception as exc:
         logger.warning("reassign_source: catalogue not updated for %r: %s",
-                       payload.source, exc)
+                       source, exc)
     # BM25 and the source inventory both carry the old tags until told.
     try:
         from db import invalidate_retrieval_cache
         invalidate_retrieval_cache()
     except Exception:
         pass
-    return {"reassigned": len(ids), "source": payload.source,
-            "category": payload.category_key, "product": payload.product_key}
+    return len(ids)
 
 
 @router.get("/admin/crossrefs")
