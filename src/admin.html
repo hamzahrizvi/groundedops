@@ -206,9 +206,42 @@
   @media (prefers-reduced-motion: reduce){.cf-feed-row{animation:none}}
   /* Confluence documents: a folder tree, closed to start */
   .cf-tick{accent-color:var(--color-accent);width:15px;height:15px;margin:0;flex:0 0 auto;cursor:pointer}
-  .tagpick.cf-ticks .tagpick-row input{appearance:auto;-webkit-appearance:auto;width:15px;height:15px;
-        flex:0 0 15px;accent-color:var(--color-accent)}
-  .tagpick.cf-ticks .tagpick-row input::before{content:none}
+  .cf-prod{border:1px solid color-mix(in srgb,var(--color-text) 14%,transparent);background:none;color:inherit;
+        font:inherit;font-size:12px;padding:4px 11px;border-radius:999px;cursor:pointer;max-width:240px;
+        overflow-wrap:anywhere;text-align:left;transition:border-color .15s,background .15s}
+  .cf-prod:hover{border-color:color-mix(in srgb,var(--color-accent) 55%,transparent)}
+  .cf-prod.sug{border-style:dashed}
+  .cf-prod.sug::before{content:"Suggested: ";opacity:.6}
+  .cf-prod.none{opacity:.6}
+  .cf-dlg{border:0;padding:0;border-radius:16px;width:min(680px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 40px));
+        background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);
+        display:flex;flex-direction:column}
+  .cf-dlg:not([open]){display:none}
+  .cf-dlg[open]{animation:cfRise .28s cubic-bezier(.2,.75,.25,1) both}
+  .cf-dlg::backdrop{background:rgba(6,8,14,.55);backdrop-filter:blur(3px)}
+  .cf-dlg>:not(input){padding-left:20px;padding-right:20px}
+  .cf-dlg>input{margin:0 20px;width:auto}
+  .cf-dlg-head{display:flex;align-items:center;justify-content:space-between;padding-top:16px;font-size:15px}
+  .cf-dlg-x{border:0;background:none;color:inherit;font-size:22px;line-height:1;cursor:pointer;opacity:.6;
+        padding:2px 8px;border-radius:8px}
+  .cf-dlg-x:hover{opacity:1;background:color-mix(in srgb,var(--color-text) 8%,transparent)}
+  .cf-dlg-why{margin:4px 0 12px;font-size:12.5px;color:color-mix(in srgb,var(--color-text) 62%,transparent)}
+  .cf-dlg-list{flex:1 1 auto;overflow-y:auto;margin-top:10px;padding-bottom:6px;scrollbar-width:thin}
+  .cf-dlg-range{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin:12px 0 6px;
+        color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+  .cf-dlg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px}
+  .cf-dlg-opt{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;
+        border:1px solid color-mix(in srgb,var(--color-text) 10%,transparent);transition:background .15s,border-color .15s}
+  .cf-dlg-opt:hover{background:color-mix(in srgb,var(--color-text) 5%,transparent)}
+  .cf-dlg-opt.on{border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 10%,transparent)}
+  .cf-dlg-opt span{flex:1;overflow-wrap:anywhere}
+  .cf-dlg-opt em{font-style:normal;font-size:10.5px;padding:1px 7px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-accent-ink) 16%,transparent);color:var(--color-accent-ink)}
+  .cf-dlg-empty{font-size:12.5px;padding:14px 0;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+  .cf-dlg-new{padding-top:12px;padding-bottom:12px;border-top:1px solid var(--color-divider)}
+  .cf-dlg-new.hint{background:color-mix(in srgb,var(--color-accent) 7%,transparent)}
+  .cf-dlg-foot{display:flex;justify-content:flex-end;gap:8px;padding-top:12px;padding-bottom:16px;
+        border-top:1px solid var(--color-divider)}
   .cf-seg{display:inline-flex;padding:3px;border-radius:999px;
         background:color-mix(in srgb,var(--color-text) 7%,transparent)}
   .cf-seg button{border:0;background:none;font:inherit;font-size:12.5px;padding:5px 12px;border-radius:999px;
@@ -3860,23 +3893,150 @@ async function cfPost(path, body, msg) {
   } catch (e) { toast(e.message, true); }
 }
 
-function cfProductPicker(cur, onSave, label) {
+// "File under": a dialog rather than a dropdown, because filing two thousand
+// documents means choosing among forty products for hundreds at once. It
+// opens with the recommendation ticked -- what the documents' own folders
+// point to -- and when nothing in the catalogue matches, offers to create
+// the product their folder names, in the range its siblings are in.
+const cfClean = s => (s || "").replace(/\s+(Range|Documentation|Repair Information)\b.*$/i, "")
+  .replace(/^[A-Z0-9-]+\s+-\s+/, "").trim();
+
+function cfFileDialog(keys) {
+  const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
   const prods = products();
-  const box = el("details", { class: "tagpick cf-ticks" },
-    el("summary", {}, label || (cur.length
-      ? cur.map(k => (prods.find(p => p.key === k) || { name: k }).name).join(", ")
-      : "No product")),
-    el("div", { class: "tagpick-list" }));
-  box.addEventListener("toggle", () => {
-    const list = box.querySelector(".tagpick-list");
-    if (!box.open || list.childElementCount) return;
-    list.append(...prods.map(p => el("label", { class: "tagpick-row" },
-      el("input", { type: "checkbox", checked: cur.includes(p.key) ? "true" : null,
-        onchange: e => onSave(e.target.checked
-          ? cur.concat([p.key]) : cur.filter(k => k !== p.key)) }),
-      el("span", {}, p.categoryName + " › " + p.name))));
+  const nameOf = k => { const p = prods.find(p => p.key === k); return p ? p.name : k; };
+
+  // What the documents point to, most common first.
+  const votes = new Map();
+  items.forEach(i => (i.product || "").split(",").filter(Boolean)
+    .forEach(k => votes.set(k, (votes.get(k) || 0) + 1)));
+  const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
+  const rec = ranked.length ? [ranked[0][0]] : [];
+  const chosen = new Set(rec);
+
+  // Nothing matched: the folder they share, named like a product.
+  const common = items.length ? items.map(i => i.path || []).reduce((a, p) => {
+    let n = 0; while (n < a.length && a[n] === p[n]) n++; return a.slice(0, n); }) : [];
+  const folder = common.length > 1 ? common[1] : common[0] || "";
+  const newName = rec.length ? "" : cfClean(folder);
+  const guessRange = () => {
+    const n = newName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    let best = null, len = 1;
+    prods.forEach(p => {
+      const m = p.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      let k = 0; while (k < n.length && n[k] === m[k]) k++;
+      if (k > len) { len = k; best = p.category; }
+    });
+    return best || (cache.catalog[0] || {}).key || "";
+  };
+
+  const dlg = el("dialog", { class: "cf-dlg", "aria-label": "File under products" });
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener("click", e => { if (e.target === dlg) close(); });   // the backdrop
+  dlg.addEventListener("close", () => dlg.remove());
+
+  const search = el("input", { class: "input", type: "search", placeholder: "Find a product" });
+  const grid = el("div", {});
+  const go = el("button", { class: "btn btn-primary" });
+  const syncGo = () => {
+    go.textContent = chosen.size
+      ? "File " + items.length + " document" + (items.length === 1 ? "" : "s")
+        + " under " + (chosen.size === 1 ? nameOf([...chosen][0]) : chosen.size + " products")
+      : "Leave " + (items.length === 1 ? "it" : "them") + " unfiled";
+  };
+  const drawGrid = () => {
+    grid.textContent = "";
+    const q = search.value.trim().toLowerCase();
+    (cache.catalog || []).forEach(c => {
+      const ps = (c.products || []).filter(p => !q || (c.name + " " + p.name).toLowerCase().includes(q));
+      if (!ps.length) return;
+      grid.append(el("div", { class: "cf-dlg-range" }, c.name),
+        el("div", { class: "cf-dlg-grid" }, ps.map(p => el("label", {
+            class: "cf-dlg-opt" + (chosen.has(p.key) ? " on" : "") + (rec.includes(p.key) ? " rec" : "") },
+          el("input", { type: "checkbox", class: "cf-tick", checked: chosen.has(p.key) ? "true" : null,
+            onchange: e => { e.target.checked ? chosen.add(p.key) : chosen.delete(p.key); drawGrid(); syncGo(); } }),
+          el("span", {}, /_general$|_shared$/.test(p.key) ? "Shared by all " + c.name : p.name),
+          rec.includes(p.key) ? el("em", {}, "recommended") : null))));
+    });
+    if (!grid.childElementCount) grid.append(el("div", { class: "cf-dlg-empty" }, "No product matches. Create it below."));
+  };
+  search.addEventListener("input", drawGrid);
+
+  // Creating a product (and its range, if that is new too).
+  const NEW = "__new__";
+  const rangeSel = el("select", { class: "input" },
+    (cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
+    el("option", { value: NEW }, "New range…"));
+  rangeSel.value = guessRange();
+  const rangeName = el("input", { class: "input", placeholder: "Range name", hidden: true });
+  rangeSel.addEventListener("change", () => { rangeName.hidden = rangeSel.value !== NEW; });
+  const prodName = el("input", { class: "input", placeholder: "Product name", value: newName });
+  const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const create = el("button", { class: "btn btn-secondary", onclick: async () => {
+    const name = prodName.value.trim();
+    if (!name) return toast("Give the product a name", true);
+    try {
+      let cat = rangeSel.value;
+      if (cat === NEW) {
+        if (!rangeName.value.trim()) return toast("Give the range a name", true);
+        cat = slug(rangeName.value);
+        await api("/admin/category", { method: "POST",
+          body: JSON.stringify({ key: cat, name: rangeName.value.trim() }) });
+      }
+      const key = slug(name);
+      await api("/admin/product", { method: "POST",
+        body: JSON.stringify({ category_key: cat, key, name, sources: [] }) });
+      await refresh();
+      chosen.clear(); chosen.add(key);
+      prodName.value = ""; toast(name + " added to the catalogue");
+      rangeSel.replaceChildren(...(cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
+        el("option", { value: NEW }, "New range…"));
+      rangeSel.value = cat; rangeName.hidden = true;
+      drawGrid(); syncGo();
+    } catch (e) { toast(e.message, true); }
+  } }, "Create");
+
+  go.addEventListener("click", () => {
+    close();
+    cfSelected.clear();
+    cfPost("/admin/confluence/items", { keys, product: [...chosen].join(",") },
+      chosen.size ? "Filed " + items.length + " document" + (items.length === 1 ? "" : "s") : "Unfiled");
   });
-  return box;
+
+  const why = rec.length
+    ? (ranked[0][1] === items.length ? "All " : ranked[0][1] + " of ") + items.length
+      + " point to " + nameOf(rec[0]) + " by their folder or earlier filing."
+    : newName ? "Nothing in the catalogue matches “" + folder + "”. Create it below, or pick a product."
+    : "Pick one or more products.";
+  dlg.append(
+    el("div", { class: "cf-dlg-head" },
+      el("b", {}, "File " + items.length + " document" + (items.length === 1 ? "" : "s") + " under"),
+      el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+    el("p", { class: "cf-dlg-why" }, why),
+    search,
+    el("div", { class: "cf-dlg-list" }, grid),
+    el("div", { class: "cf-dlg-new" + (newName ? " hint" : "") },
+      el("div", { class: "cf-dlg-range", style: "margin-top:0" }, "New product"),
+      el("div", { class: "row", style: "gap:6px;flex-wrap:wrap;align-items:center" },
+        el("div", { style: "flex:1 1 140px" }, rangeSel), rangeName,
+        el("div", { style: "flex:2 1 180px" }, prodName), create)),
+    el("div", { class: "cf-dlg-foot" },
+      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"), go));
+  drawGrid(); syncGo();
+  document.body.append(dlg);
+  dlg.showModal();
+  (newName ? prodName : search).focus();
+}
+
+// A document's product, as a button that opens the dialog for it alone.
+function cfProductButton(it) {
+  const prods = products();
+  const keys = (it.product || "").split(",").filter(Boolean);
+  const names = keys.map(k => (prods.find(p => p.key === k) || { name: k }).name);
+  return el("button", { class: "cf-prod" + (it.suggested ? " sug" : "") + (keys.length ? "" : " none"),
+    title: it.suggested ? "Suggested by its folder. Click to change" : "Click to change",
+    onclick: () => cfFileDialog([it.key]) },
+    keys.length ? names.join(", ") : "No product");
 }
 
 function cfConnectionCard(c) {
@@ -3996,8 +4156,7 @@ function cfRow(it, onTick) {
         it.version ? "v" + it.version : ""].filter(Boolean).join(" · "),
         it.error ? el("div", { class: "cf-doc-err" }, it.error) : null)),
     el("span", { class: "tag " + cls }, label),
-    cfProductPicker((it.product || "").split(",").filter(Boolean),
-      keys => set({ product: keys.join(",") })),
+    cfProductButton(it),
     sw,
     it.url ? el("a", { class: "cf-open", href: it.url, target: "_blank", rel: "noopener",
       title: "Open in Confluence", "aria-label": "Open " + it.title + " in Confluence" }, "↗") : null);
@@ -4044,7 +4203,7 @@ function cfDocumentsCard(c) {
       el("b", {}, keys.length + " selected"),
       el("button", { class: "btn btn-primary", onclick: () => set({ decision: "approved" }) }, "Approve"),
       el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
-      cfProductPicker([], ks => set({ product: ks.join(",") }), "File under"),
+      el("button", { class: "btn btn-secondary", onclick: () => cfFileDialog(keys) }, "File under…"),
       el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
   };
 
