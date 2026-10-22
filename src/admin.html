@@ -135,12 +135,19 @@
   .tagpick[open]>summary{background:var(--color-accent-800);
         color:var(--color-accent-100)}
   .tagpick-list{position:absolute;right:0;top:calc(100% + 4px);z-index:50;
-        width:250px;max-height:232px;overflow-y:auto;padding:6px;
+        width:100%;min-width:180px;box-sizing:border-box;max-height:232px;overflow-y:auto;padding:6px;
         background:var(--color-surface);border-radius:var(--radius-md);
         box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider)}
   .tagpick-row{display:flex;align-items:center;gap:8px;padding:5px 7px;
         border-radius:var(--radius-sm);font-size:12.5px;cursor:pointer}
   .tagpick-row:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent)}
+  .tagpick-row input{appearance:none;-webkit-appearance:none;margin:0;flex:0 0 16px;
+        width:16px;height:16px;display:grid;place-content:center;cursor:pointer;
+        font-size:15px;line-height:1;color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+  .tagpick-row input::before{content:"+"}
+  .tagpick-row input:checked::before{content:"\2713";font-size:13px}
+  .tagpick-row:has(input:checked),.tagpick-row input:checked{color:var(--color-accent-ink)}
+  .tagpick-row input:focus-visible{outline:2px solid var(--color-accent-ink);border-radius:3px}
   .tagbox{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;
           max-width:460px}
   .chip{border:0;cursor:pointer;font:inherit;font-size:11.5px;
@@ -222,7 +229,7 @@
            color:var(--color-accent-ink)}
   .who-mail{font-size:11px;margin-top:2px;
             color:color-mix(in srgb, var(--color-text) 45%, transparent);
-            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+            overflow-wrap:anywhere}
   .who-acts{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
   .who-acts .btn{font-size:11.5px;padding:3px 7px}
   /* a basic account gets no rail, so the main column carries the page */
@@ -358,7 +365,7 @@
         border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
   .item:first-child{border-top:0}
   .item .grow{flex:1;min-width:0}
-  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow-wrap:anywhere}
   .item .grow span{font-size:12px;color:color-mix(in srgb, var(--color-text) 50%, transparent)}
   .item.flagged{box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
                 border-radius:var(--radius-md);padding:10px 12px;border-top:0;margin-bottom:2px}
@@ -893,7 +900,7 @@ function paintBoot() {
          : (waiting.length
             ? "Documents, answers and settings work now. Anything greyed is "
               + "waiting on the models."
-            : "Nearly there\u2026")));
+            : "Nearly there")));
 }
 
 // Sentinel for "answers carrying no product tag at all" in the answers-page
@@ -929,6 +936,13 @@ const el = (t, a = {}, ...kids) => {
   kids.flat(Infinity).forEach(c => c && n.append(c.nodeType ? c : document.createTextNode(c)));
   return n;
 };
+
+// A product picker (<details class="tagpick">) closes on a click anywhere
+// outside it, or on Escape, like any other dropdown.
+const closeTagpicks = keep => document.querySelectorAll("details.tagpick[open]")
+  .forEach(d => { if (!d.contains(keep)) d.open = false; });
+document.addEventListener("click", e => closeTagpicks(e.target));
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeTagpicks(null); });
 
 function toast(msg, bad) {
   document.querySelectorAll(".toast").forEach(t => t.remove());
@@ -1999,7 +2013,7 @@ function draftReviewCard() {
         el("span", { style: "flex:0 0 18px" }, ""),
         el("div", { class: "step-b" },
           el("div", { style: "font-size:13.5px;font-weight:500" },
-            d.partial.question || "writing the next question…"),
+            d.partial.question || "writing the next question"),
           el("p", { style: "white-space:pre-wrap" }, d.partial.answer || "",
             el("span", { class: "caret" }, ""))))
     : null;
@@ -2081,7 +2095,7 @@ function drawJobs() {
                       + " could not be read"),
           el("span", {}, " (page" + (n === 1 ? " " : "s ")
                       + oc.candidates.slice(0, 12).join(", ")
-                      + (n > 12 ? "…" : "") + ") — scanned or image-only, "
+                      + (n > 12 ? " and more" : "") + ") — scanned or image-only, "
                       + "so not searchable."),
           oc.available
             ? el("button", { class: "btn btn-secondary",
@@ -2124,7 +2138,7 @@ function drawJobs() {
 // anybody watching one is actually asking.
 function pctText(pct, status) {
   if (status === "done" || status === "error") return "";
-  return pct ? " — " + Math.round(pct) + "%" : " — starting…";
+  return pct ? " — " + Math.round(pct) + "%" : " — starting";
 }
 
 // One poller per job, however many things are watching it. The Documents page
@@ -2294,7 +2308,7 @@ function gate() {
                                 placeholder: "you@company.com", autofocus: "true" });
   const pwIn = el("input", { class: "input", type: "password", placeholder: "Password" });
   const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
-                    "Checking this install\u2026");
+                    "Checking this install");
   const btn = el("button", { class: "btn btn-primary gate-primary", disabled: "true" }, "Sign in");
   // Signing in checks a password hash and then loads every cache the console
   // renders from, which is long enough that a button doing nothing reads as a
@@ -2563,7 +2577,7 @@ function gate() {
       // Back from Microsoft/Google: trade the handoff for a session at once.
       const token = pendingLink.token;
       showSignIn();
-      status.textContent = "Finishing sign-in…";
+      status.textContent = "Finishing sign-in";
       busy(true);
       try {
         await enter(await api("/admin/auth/sso/finish", { method: "POST",
@@ -2644,7 +2658,7 @@ async function loadAccounts() {
 
 function viewAccounts() {
   if (!acctCache) { loadAccounts(); return [el("h1", {}, "Accounts"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (acctCache.error) return [el("h1", {}, "Accounts"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load accounts"), acctCache.error))];
@@ -2814,7 +2828,7 @@ function ssoCard() {
         + "sign-in page. It only proves who someone is: their address must already "
         + "have an account above, at the level you gave it."));
     const c = ssoCache;
-    if (!c) return card.append(el("div", {}, "Loading…"));
+    if (!c) return card.append(el("div", {}, "Loading"));
     if (c.error) return card.append(el("div", { class: "empty" }, c.error));
     if (!c.console_url) card.append(el("div", { class: "empty", style: "margin-bottom:10px" },
       "Set ADMIN_PUBLIC_URL to this console's address (e.g. https://support.company.com) "
@@ -2882,7 +2896,7 @@ function viewBackup() {
       + "backup is unreadable \u2014 there is no way back in, by design. Store it "
       + "with your other secrets, NOT next to the backup file.\n\nContinue?"))
       return;
-    exportBtn.disabled = true; exportBtn.textContent = "Preparing\u2026";
+    exportBtn.disabled = true; exportBtn.textContent = "Preparing";
     try {
       // POST, not GET: a passphrase in a query string ends up in proxy and
       // server access logs.
@@ -3025,7 +3039,7 @@ function viewBackup() {
       + "that backup you will be signed out and unable to sign back in, and "
       + "would have to use manage_accounts.py on the server. Continue?"))
       return;
-    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring\u2026";
+    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring";
     const fd = new FormData(); fd.append("file", picked);
     if (rPw.value) fd.append("passphrase", rPw.value);
     const qs = "?restore_accounts=" + rAccounts.checked
@@ -3089,7 +3103,7 @@ async function loadPolicy() {
 
 function viewPolicy() {
   if (!polCache) { loadPolicy(); return [el("h1", {}, "Access & limits"),
-    el("p", { class: "lede" }, "Loading\u2026")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (polCache.error) return [el("h1", {}, "Access & limits"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load settings"), polCache.error))];
@@ -3209,7 +3223,7 @@ function viewPolicy() {
     mk.splice(0, 2));
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       await api("/admin/policy", { method: "PUT",
         body: JSON.stringify({ changes: p }) });
@@ -3318,7 +3332,7 @@ function viewPolicy() {
 // and what it costs -- not what the code does.
 function viewAdvanced() {
   if (!polCache) { loadPolicy(); return [el("h1", {}, "Advanced"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (polCache.error) return [el("h1", {}, "Advanced"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load settings"), polCache.error))];
@@ -3534,7 +3548,7 @@ function viewAdvanced() {
       + "guessing mode that has been lucky."));
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       await api("/admin/policy", { method: "PUT",
         body: JSON.stringify({ changes: p }) });
@@ -3566,7 +3580,7 @@ async function loadKeys() {
 
 function viewKeys() {
   if (!keysCache) { loadKeys(); return [el("h1", {}, "API keys"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (keysCache.error) return [el("h1", {}, "API keys"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load key status"), keysCache.error))];
@@ -3670,7 +3684,7 @@ function creditsCard() {
         "Balances are checked every few hours. When one drops below the "
         + "threshold, or a provider refuses a request for lack of credit, "
         + "the root admins are emailed (once a day while it stays low)."));
-    if (!c) { card.append(el("div", {}, "Loading…")); return; }
+    if (!c) { card.append(el("div", {}, "Loading")); return; }
     if (c.error) { card.append(el("div", { class: "empty" }, c.error)); return; }
 
     const statusTag = r => {
@@ -3704,7 +3718,7 @@ function creditsCard() {
       } catch (e) { toast(e.message, true); }
     });
     const checkBtn = el("button", { class: "btn btn-ghost", onclick: async () => {
-      checkBtn.disabled = true; checkBtn.textContent = "Checking…";
+      checkBtn.disabled = true; checkBtn.textContent = "Checking";
       try {
         creditsCache = await api("/admin/credits/check", { method: "POST" });
         toast(creditsCache.alerted && creditsCache.alerted.length
@@ -4124,7 +4138,7 @@ function viewDocuments() {
   // instead of one long "Category > Product" dropdown.
   const catSel = el("select", { class: "input", onchange: e => {
     chosenCat = e.target.value; chosen = ""; syncProductOptions(); sync();
-  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category\u2026" : "No categories yet"),
+  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category" : "No categories yet"),
      cache.catalog.map(c => el("option", { value: c.key }, c.name)));
   if (chosenCat) catSel.value = chosenCat;
 
@@ -4134,7 +4148,7 @@ function viewDocuments() {
     const inCat = prods.filter(p => p.category === chosenCat);
     prodSel.disabled = !chosenCat;
     prodSel.append(el("option", { value: "" },
-      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product\u2026" : "No products in this category"));
+      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product" : "No products in this category"));
     inCat.forEach(p => prodSel.append(el("option", { value: p.key }, p.name)));
     if (chosen) prodSel.value = chosen;
   }
@@ -4146,13 +4160,13 @@ function viewDocuments() {
   // files the source under each in the catalogue.
   const also = new Set();
   const alsoPick = el("details", { class: "tagpick" },
-    el("summary", {}, "Also file under…"),
+    el("summary", {}, "Also file under"),
     el("div", { class: "tagpick-list", style: "right:auto;left:0" },
       prods.map(p => el("label", { class: "tagpick-row" },
         el("input", { type: "checkbox", onchange: e => {
           e.target.checked ? also.add(p.key) : also.delete(p.key);
           alsoPick.querySelector("summary").textContent = also.size
-            ? "Also under " + also.size + " more" : "Also file under…";
+            ? "Also under " + also.size + " more" : "Also file under";
         } }),
         el("span", {}, p.categoryName + " › " + p.name)))));
   const productKeys = p => [...new Set([p.key, ...also])].join(",");
@@ -4196,7 +4210,7 @@ function viewDocuments() {
     const p = prods.find(x => x.key === chosen);
     for (const f of files) {
       const line = el("div", { class: "item" },
-        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading...")));
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading")));
       progress.append(line);
       try {
         let res = await postUpload(f, p, null);
@@ -4220,7 +4234,7 @@ function viewDocuments() {
                   onclick: () => resolve("skip") }, "Skip")));
           });
           if (choice === "skip") { line.querySelector("span").textContent = "Skipped"; continue; }
-          line.querySelector("span").textContent = "Replacing...";
+          line.querySelector("span").textContent = "Replacing";
           res = await postUpload(f, p, d.existing);
           if (res.duplicate) throw new Error("Still refused as a duplicate");
           track(res.job_id, line, f.name, { product: p.key, category: p.category });
@@ -4260,7 +4274,7 @@ function viewDocuments() {
           "Answers written from the old version may no longer match it.")),
       el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
         el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
-          const b = e.target; b.disabled = true; b.textContent = "Generating…";
+          const b = e.target; b.disabled = true; b.textContent = "Generating";
           try {
             await api("/admin/faq/autogenerate", { method: "POST", body: JSON.stringify({
               source: r.newName, product: p.key, category: p.category }) });
@@ -4385,7 +4399,7 @@ function viewDocuments() {
              + "(scanned or image-only) and are not searchable" },
         pending.length + " page" + (pending.length === 1 ? "" : "s") + " unreadable"));
       ocrBits.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-        onclick: () => offerOcr(s.source, pending) }, "OCR…"));
+        onclick: () => offerOcr(s.source, pending) }, "OCR"));
     } else if (ocrDone.length) {
       ocrBits.push(el("span", { class: "tag tag-neutral",
         title: "Pages " + ocrDone.join(", ") + " were read by OCR — text "
@@ -4561,7 +4575,7 @@ function viewFaq() {
 
   const scopeSel = el("select", { class: "input", style: "width:auto",
                                   onchange: e => { faqScope = e.target.value; render2(); } },
-    el("option", { value: "" }, "Choose a product\u2026"),
+    el("option", { value: "" }, "Choose a product"),
     prods.map(p => el("option", { value: p.key },
       p.categoryName + " \u203a " + p.name + " (" + countFor(p.key) + ")")),
     orphanScopes.map(k => el("option", { value: k },
@@ -4666,7 +4680,7 @@ function viewFaq() {
         row.addEventListener("click", () => { faqExpandedId = f.id; render2(); });
         row.append(
           el("div", { class: "grow" }, el("b", {}, f.question),
-            el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
+            el("span", {}, ((f.answer || "").length > 90 ? (f.answer || "").slice(0, 90).replace(/\s+\S*$/, "") : (f.answer || "")))),
           el("span", { class: "tag" }, faqScopeText(f)),
           f.language && f.language !== "en"
             ? el("span", { class: "tag" }, FAQ_LANGUAGES[f.language] || f.language)
@@ -4730,7 +4744,7 @@ function viewFaq() {
   });
 
   const srcSel = el("select", { class: "input" },
-    el("option", { value: "" }, "Choose a document\u2026"),
+    el("option", { value: "" }, "Choose a document"),
     el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"));
 
   // Eleven documents in one flat list is already a hunt, and the list only
@@ -5135,7 +5149,7 @@ function viewGaps() {
             draftBox),
           el("div", { class: "gap-actions" },
             el("button", { class: "btn btn-secondary", onclick: async e => {
-              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
+              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting";
               try {
                 const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
                   gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
@@ -5526,7 +5540,7 @@ function viewWidget() {
           el("div", { style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" },
             d.intro_options.map(o => el("span", {
               style: "font-size:12px;padding:6px 12px;border-radius:99px;color:#fff;white-space:nowrap;background:" + d.color
-            }, o.label || "\u2026")))),
+            }, o.label || "")))),
         el("div", { style: "padding:10px 12px;border-top:1px solid var(--color-divider);display:flex;gap:8px" },
           el("div", { style: "flex:1;height:30px;border-radius:8px;background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" }),
           el("div", { style: "width:30px;height:30px;border-radius:8px;background:" + d.color }))));
@@ -5729,7 +5743,7 @@ function viewWidget() {
         + "spend your API budget. Send it only to the person installing it, "
         + "over something private \u2014 not a shared drive, not a mailing list.\n\n"
         + "Continue?")) return;
-      dlBtn.disabled = true; dlBtn.textContent = "Building\u2026";
+      dlBtn.disabled = true; dlBtn.textContent = "Building";
       try {
         // fetch, not a plain link: the endpoint needs an auth header, and an
         // <a href> cannot carry one. Same reason as the backup download.
@@ -5788,7 +5802,7 @@ function viewWidget() {
   };
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       const saved = await api("/admin/widget/config", { method: "PUT", body: JSON.stringify(d) });
       cache.widget = saved;
