@@ -1,9 +1,10 @@
 """Confluence manuals sync against a fake Confluence.
 
-Nothing reaches Atlassian, the index or the real catalogue: the API client,
+Nothing reaches Atlassian, the index or the real catalogue: the connection,
 ingest, removal and the catalogue are swapped for fakes, and the state file
 is a temp file.
 """
+import json
 import os
 import sys
 import tempfile
@@ -16,18 +17,17 @@ BODY = "<p>" + "Fit the hopper to the rail and tighten both screws. " * 6 + "</p
 
 
 class FakeApi:
-    """Website / Smart Hopper 3 / Installation (page, with a PDF)
-       Website / Overview (page)"""
+    """Website (page) / Smart Hopper 3 (folder) / Installation (page, with a PDF)
+       Website / Overview (a short page, not offered)"""
+    site = "itl.atlassian.net"
     tree = {
-        ("folders", "1"): [{"type": "folder", "id": "10", "title": "Smart Hopper 3"},
-                           {"type": "page", "id": "30", "title": "Overview"}],
+        ("pages", "1"): [{"type": "folder", "id": "10", "title": "Smart Hopper 3"},
+                         {"type": "page", "id": "30", "title": "Overview"}],
         ("folders", "10"): [{"type": "page", "id": "20", "title": "Installation"}],
     }
     attachments = {"20": [{"id": "att5", "title": "SH3 manual.pdf", "version": {"number": 2}},
                           {"id": "att6", "title": "photo.png", "version": {"number": 1}}]}
-
-    def __init__(self, *a):
-        pass
+    page_version = 1
 
     def each(self, path, **params):
         parts = path.split("/")
@@ -35,17 +35,13 @@ class FakeApi:
             return iter(self.tree.get((parts[-3], parts[-2]), []))
         return iter(self.attachments.get(parts[-2], []))
 
-    def get(self, path, **params):
-        class R:
-            pass
-        r = R()
-        if "/download" in path:
-            r.content = b"%PDF fake"
-        else:
-            pid = path.rsplit("/", 1)[-1]
-            r.json = lambda: {"version": {"number": 1}, "title": {"20": "Installation", "30": "Overview"}.get(pid, "Website"),
-                              "body": {"storage": {"value": BODY if pid != "30" else "<p>Hi</p>"}}}
-        return r
+    def page(self, pid):
+        return {"title": {"1": "Website", "20": "Installation", "30": "Overview"}[pid],
+                "version": {"number": self.page_version},
+                "body": {"storage": {"value": "<p>Hi</p>" if pid == "30" else BODY}}}
+
+    def download(self, page_id, att_id):
+        return b"%PDF fake"
 
 
 class FakeCatalog:
@@ -59,25 +55,38 @@ class FakeCatalog:
     def attach_source(self, cat, prod, source):
         self.data["categories"][0]["products"][0]["sources"].append(source)
 
+    def refile_source(self, source, keys):
+        for p in self.data["categories"][0]["products"]:
+            p["sources"] = [s for s in p["sources"] if s != source]
 
-def _run(api_cls, state_path, url="https://itl.atlassian.net/wiki/spaces/WEB/folder/1"):
-    ingested, removed = [], []
-    saved = (cs._Api, cs._ingest, cs._remove, cs.catalog, cs._STATE,
-             cs.keystore.get_confluence_settings, cs.keystore.get_confluence_token)
-    cs._Api = api_cls
-    cs._ingest = lambda content, source, cat, prod: ingested.append((source, prod))
-    cs._remove = removed.append
-    cs.catalog = FakeCatalog()
-    cs._STATE = state_path
-    cs.keystore.get_confluence_settings = lambda: {
-        "folder_url": url,
-        "email": "sync@example.com", "token_set": True}
-    cs.keystore.get_confluence_token = lambda: "t"
-    try:
-        return cs.sync(), ingested, removed
-    finally:
-        (cs._Api, cs._ingest, cs._remove, cs.catalog, cs._STATE,
-         cs.keystore.get_confluence_settings, cs.keystore.get_confluence_token) = saved
+
+class World:
+    """Swaps the fakes in for a call, records what reached the index."""
+    def __init__(self, state_path):
+        self.state, self.ingested, self.removed = state_path, [], []
+        self.catalog = FakeCatalog()
+
+    def _with(self, fn, api=None):
+        saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE)
+        cs._connect = lambda: (api, "pages", "1")
+        cs._ingest = lambda content, source, cat, prod: self.ingested.append((source, prod))
+        cs._remove = self.removed.append
+        cs.catalog = self.catalog
+        cs._STATE = self.state
+        try:
+            return fn()
+        finally:
+            (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE) = saved
+
+    def run(self, api, apply=True):
+        return self._with(lambda: cs.run(apply), api)
+
+    def items(self):
+        return self._with(lambda: {i["title"]: i for i in cs.overview()["items"]})
+
+    def decide(self, titles, **kw):
+        keys = [self.items()[t]["key"] for t in titles]
+        self._with(lambda: cs.set_items(keys, **kw))
 
 
 def test_folder_url():
@@ -87,8 +96,6 @@ def test_folder_url():
         "https://itl.atlassian.net/wiki/spaces/CS/pages/1069318147/Website") == ("itl.atlassian.net", "pages", "1069318147")
     assert cs.normalise_folder_url(
         "https://itl.atlassian.net/wiki/spaces/CS/pages/1069318147/Website").endswith("/pages/1069318147")
-    assert cs.normalise_folder_url(
-        "https://itl.atlassian.net/wiki/spaces/WEB/folder/123?atlOrigin=x").endswith("/folder/123")
     for bad in ("https://evil.example/wiki/spaces/WEB/folder/1",
                 "http://itl.atlassian.net/wiki/spaces/WEB/folder/1", ""):
         try:
@@ -107,42 +114,74 @@ def test_page_text():
     assert "Note" in t and "| A | B" in t
 
 
-def test_sync_files_and_removes_only_its_own():
+def test_review_mode_waits_for_approval():
     with tempfile.TemporaryDirectory() as d:
-        state = os.path.join(d, "s.json")
-        res, ingested, removed = _run(FakeApi, state)
-        # the page body and its PDF, both under the product its folder names;
-        # the near-empty Overview page and the PNG are skipped
-        assert sorted(ingested) == [("Installation.txt", "sh3"), ("SH3 manual.pdf", "sh3")], ingested
-        assert sorted(res["added"]) == ["Installation.txt", "SH3 manual.pdf"] and not res["errors"]
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api)
+        items = w.items()
+        # the Website page itself, the short Overview page and the PNG are not offered
+        assert sorted(items) == ["Installation", "SH3 manual.pdf"], sorted(items)
+        assert {i["status"] for i in items.values()} == {"waiting"}
+        assert items["Installation"]["product"] == "sh3"      # suggested by its folder
+        assert w.ingested == []
 
-        # second run: nothing changed, nothing fetched again
-        res, ingested, removed = _run(FakeApi, state)
-        assert ingested == [] and res["unchanged"] == 2 and removed == []
+        w.decide(["SH3 manual.pdf"], decision="approved")
+        w.decide(["Installation"], decision="excluded")
+        res = w.run(api)
+        assert w.ingested == [("SH3 manual.pdf", "sh3")] and res["added"] == ["SH3 manual.pdf"], res
+        items = w.items()
+        assert items["SH3 manual.pdf"]["status"] == "synced" and items["Installation"]["status"] == "excluded"
 
-        # the PDF leaves the folder: only it is removed
+        # nothing changed: nothing re-indexed
+        w.run(api)
+        assert len(w.ingested) == 1
+
+        # excluded after syncing: removed from the index at the next sync
+        w.decide(["SH3 manual.pdf"], decision="excluded")
+        assert w.items()["SH3 manual.pdf"]["status"] == "remove"
+        w.run(api)
+        assert w.removed == ["SH3 manual.pdf"]
+
+
+def test_auto_mode_syncs_everything_and_follows_confluence():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        assert sorted(w.ingested) == [("Installation.txt", "sh3"), ("SH3 manual.pdf", "sh3")], w.ingested
+
+        # a check alone indexes nothing, even when a page changed
+        api.page_version = 2
+        res = w.run(api, apply=False)
+        assert res["changed"] == ["Installation"] and len(w.ingested) == 2, res
+        assert w.items()["Installation"]["status"] == "changed"
+        w.run(api)
+        assert w.ingested[-1] == ("Installation.txt", "sh3")
+
+        # deleted in Confluence: removed, and dropped from the list
         class Gone(FakeApi):
             attachments = {}
-        res, ingested, removed = _run(Gone, state)
-        assert removed == ["SH3 manual.pdf"], removed
+        w.run(Gone())
+        assert w.removed == ["SH3 manual.pdf"] and "SH3 manual.pdf" not in w.items()
 
-        # the folder lists nothing (lost access): nothing is removed
+        # Confluence lists nothing (lost access): nothing is removed
         class Empty(FakeApi):
             tree = {}
-        res, ingested, removed = _run(Empty, state)
-        assert removed == [] and res["errors"], res
+        res = w.run(Empty())
+        assert w.removed == ["SH3 manual.pdf"] and res["errors"], res
 
 
-def test_sync_from_a_page():
-    """The manuals under a Website PAGE rather than a folder."""
-    class PageRoot(FakeApi):
-        tree = {("pages", "1"): FakeApi.tree[("folders", "1")],
-                ("folders", "10"): FakeApi.tree[("folders", "10")]}
+def test_old_state_file_is_upgraded():
     with tempfile.TemporaryDirectory() as d:
-        res, ingested, removed = _run(PageRoot, os.path.join(d, "s.json"),
-                                      "https://itl.atlassian.net/wiki/spaces/CS/pages/1")
-        # the Website page itself is a short index page and is skipped
-        assert sorted(ingested) == [("Installation.txt", "sh3"), ("SH3 manual.pdf", "sh3")], ingested
+        path = os.path.join(d, "s.json")
+        with open(path, "w") as f:
+            json.dump({"sources": {"SH3 manual.pdf": "att:att5:2"}}, f)
+        w = World(path)
+        w.run(FakeApi())
+        items = w.items()
+        # already synced at version 2: stays approved, not re-downloaded
+        assert items["SH3 manual.pdf"]["status"] == "synced" and w.ingested == [], (items, w.ingested)
+        assert items["Installation"]["status"] == "waiting"
 
 
 if __name__ == "__main__":
