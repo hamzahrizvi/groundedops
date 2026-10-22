@@ -189,10 +189,11 @@ def _filed(source: str) -> tuple[str | None, str]:
 
 def _norm(name: str) -> str:
     """A product or folder name reduced to what identifies it: Confluence
-    calls the folder "NV9 Spectral Range" or "SMART Coin System Range
-    Documentation" where the catalogue says "NV9 Spectral"."""
+    calls the folder "NV9 Spectral Range", "SMART Coin System Range
+    Documentation" or "NV4000 Endpoints" where the catalogue says "NV9
+    Spectral"."""
     n = re.sub(r"\(.*?\)", " ", (name or "").lower())
-    n = re.sub(r"\b(range|documentation|docs)\b", " ", n)
+    n = re.sub(r"\b(range|documentation|docs|endpoints)\b", " ", n)
     return re.sub(r"[^a-z0-9+]+", "", n)
 
 
