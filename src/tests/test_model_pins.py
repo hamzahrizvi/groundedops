@@ -47,9 +47,13 @@ def test_loaders_use_the_pin():
     embeddings._model = reranker._model = grounding._nli_model = None
     reranker._loaded = None
     try:
+        # The embedder's default ONNX load fails here, so this also checks
+        # that it falls back to the pinned PyTorch load.
         with mock.patch.dict(sys.modules, {"sentence_transformers": fake_st}), \
-                mock.patch.dict(os.environ):
+                mock.patch.dict(os.environ), \
+                mock.patch.object(embeddings, "_OnnxEmbedder", side_effect=OSError("offline")):
             os.environ.pop("NLI_BACKEND", None)
+            os.environ.pop("EMBED_BACKEND", None)
             embeddings._get_model()
             reranker._get("BAAI/bge-reranker-base")
             grounding._get_nli_model()
