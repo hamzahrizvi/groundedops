@@ -979,6 +979,8 @@ def startup_event():
     thread.start()
     import credit_watch
     credit_watch.start()
+    import confluence_sync
+    confluence_sync.start()
 
 
 @app.get("/status")

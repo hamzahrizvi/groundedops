@@ -344,3 +344,62 @@ def admin_keys_clear(provider: str,
         raise HTTPException(status_code=404, detail=f"unknown provider '{provider}'")
     logger.info(f"provider key for '{provider}' cleared by {me['email']}")
     return {"ok": True}
+
+
+# ── Confluence manuals sync (root only) ─────────────────────────────────
+# Same page as the keys because it holds one: the Atlassian API token, which
+# is write-only like the mail password.
+
+class ConfluenceReq(BaseModel):
+    folder_url: str | None = None
+    email: str | None = None
+    token: str | None = None
+    clear_token: bool | None = None
+
+
+def _confluence_status() -> dict:
+    import confluence_sync
+    return {"settings": keystore.get_confluence_settings(),
+            "configured": confluence_sync.configured(),
+            "running": confluence_sync.running(),
+            "last": confluence_sync.last_result()}
+
+
+@router.get("/admin/confluence")
+def admin_confluence(x_admin_password: str | None = Header(default=None)):
+    _require_root(x_admin_password)
+    return _confluence_status()
+
+
+@router.post("/admin/confluence")
+def admin_confluence_save(payload: ConfluenceReq,
+                          x_admin_password: str | None = Header(default=None)):
+    me = _require_root(x_admin_password)
+    import confluence_sync
+    changes = payload.model_dump(exclude_unset=True)
+    try:
+        if changes.get("folder_url"):
+            changes["folder_url"] = confluence_sync.normalise_folder_url(changes["folder_url"])
+        keystore.set_confluence_settings(changes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Confluence sync settings saved by {me['email']}")
+    return _confluence_status()
+
+
+@router.post("/admin/confluence/sync")
+def admin_confluence_sync(x_admin_password: str | None = Header(default=None)):
+    me = _require_root(x_admin_password)
+    import confluence_sync
+    from app_state import capability
+    if not confluence_sync.configured():
+        raise HTTPException(status_code=400,
+                            detail="Save the folder link, account email and token first")
+    if not capability("search"):
+        raise HTTPException(status_code=503,
+                            detail="The search model is still loading - try again in a few seconds")
+    if confluence_sync.running():
+        raise HTTPException(status_code=409, detail="A sync is already running")
+    confluence_sync.sync_in_background()
+    logger.info(f"Confluence sync started by {me['email']}")
+    return {**_confluence_status(), "running": True}
