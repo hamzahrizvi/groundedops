@@ -275,6 +275,12 @@ def test_a_whole_manual_replaces_its_upload():
         assert ("Installation.txt", "nv9") in w.ingested, w.ingested
         assert w.removed == ["Installation-v3-170925-134345.pdf"] and len(res["replaced"]) == 1, res
 
+        # uploaded again by hand after the first sync: the next sync removes it again
+        w.uploads = ["Installation-v4.pdf"]
+        res = w.run(api)
+        assert w.removed[-1] == "Installation-v4.pdf" and len(res["replaced"]) == 1, res
+        assert w.ingested.count(("Installation.txt", "nv9")) == 1       # not re-indexed
+
 
 def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
     with tempfile.TemporaryDirectory() as d:

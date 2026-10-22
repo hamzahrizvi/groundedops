@@ -772,6 +772,20 @@ def _apply(api: _Api) -> dict:
                         st["items"][key].get("synced_version") is None:
                     del st["items"][key]
         _update(write)
+
+    # A manual this sync already keeps, uploaded again by hand since: the
+    # upload goes, so the bot never reads two copies of it.
+    done = {k for k, _ in todo}
+    for key, it in st["items"].items():
+        upload, whole = matches.get(key, (None, False))
+        if (upload and whole and key not in done and not it.get("keep_upload")
+                and status_of(it) == "synced"):
+            try:
+                _remove(upload)
+                res["replaced"].append(f"{upload} -> {it.get('source')}")
+                _note(it.get("title") or upload, it["kind"], it.get("path") or [], "replaced")
+            except Exception as exc:
+                res["errors"].append(f"{upload}: not removed: {exc}")
     return res
 
 
