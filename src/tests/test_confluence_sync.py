@@ -66,9 +66,14 @@ class World:
         self.state, self.ingested, self.removed, self.texts = state_path, [], [], {}
         self.catalog = FakeCatalog()
         self.uploads = []                # documents uploaded by hand, by name
+        self.internal = set()            # documents marked internal
 
     def _with(self, fn, api=None):
-        saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads)
+        saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
+                 cs._mark_internal)
+        def mark(sources, on):
+            (self.internal.update if on else self.internal.difference_update)(sources)
+        cs._mark_internal = mark
         cs._connect = lambda: (api, "pages", "1")
         cs._uploads = lambda items: {cs._title_key(u): u for u in self.uploads}
         def ingest(content, source, cat, prod):
@@ -77,6 +82,7 @@ class World:
         cs._ingest = ingest
         def remove(source):
             self.removed.append(source)
+            self.internal.discard(source)
             if source in self.uploads:
                 self.uploads.remove(source)
         cs._remove = remove
@@ -85,7 +91,8 @@ class World:
         try:
             return fn()
         finally:
-            (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads) = saved
+            (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
+             cs._mark_internal) = saved
 
     def run(self, api, apply=True):
         return self._with(lambda: cs.run(apply), api)
@@ -306,6 +313,30 @@ def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
         # but not the one marked Keep both before it was combined
         assert "Manual-v1.pdf" in w.removed and "Cmd A-v2.pdf" in w.removed, w.removed
         assert "Cmd B.pdf" not in w.removed, w.removed
+
+
+def test_internal_documents_sync_but_never_reach_customers():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="internal")
+        w.decide(["SH3 manual.pdf"], decision="approved")
+        w.run(api)
+        assert sorted(s for s, _ in w.ingested) == ["Installation.txt", "SH3 manual.pdf"]
+        assert w.internal == {"Installation.txt"}
+        items = w.items()
+        assert items["Installation"]["decision"] == "internal" and items["Installation"]["status"] == "synced"
+
+        # internal <-> approved on a synced document: a flag, no re-index
+        w.decide(["Installation"], decision="approved")
+        assert w.internal == set() and len(w.ingested) == 2
+        w.decide(["Installation", "SH3 manual.pdf"], decision="internal")
+        assert w.internal == {"Installation.txt", "SH3 manual.pdf"}
+
+        # excluded: removed at the next sync, and the mark goes with it
+        w.decide(["SH3 manual.pdf"], decision="excluded")
+        w.run(api)
+        assert "SH3 manual.pdf" in w.removed and w.internal == {"Installation.txt"}
 
 
 if __name__ == "__main__":

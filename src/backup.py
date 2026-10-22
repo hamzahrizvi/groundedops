@@ -255,6 +255,7 @@ def _stores(include_accounts: bool) -> dict:
         "faq_gaps.json": os.getenv("FAQ_GAP_PATH", "faq_gaps.json"),
         "catalog_config.json": os.getenv("CATALOG_CONFIG", "catalog_config.json"),
         "confluence_sync.json": os.getenv("CONFLUENCE_SYNC_STATE", "confluence_sync.json"),
+        "internal_sources.json": os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json"),
         "widget_config.json": os.getenv("WIDGET_CONFIG_PATH", "widget_config.json"),
         "widget_leads.json": os.getenv("WIDGET_LEADS_PATH", "widget_leads.json"),
     }

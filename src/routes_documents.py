@@ -474,11 +474,9 @@ def source_file(filename: str):
     safe = docstore._safe_basename(filename)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    _lower = safe.lower()
-    from main import EXCLUDED_SOURCES     # the corpus policy main.query applies
-    for _ex in EXCLUDED_SOURCES:
-        if _ex and _ex in _lower:
-            raise HTTPException(status_code=404, detail="Not found")
+    from retrieval_db import is_excluded  # the corpus policy main.query applies
+    if is_excluded(safe):
+        raise HTTPException(status_code=404, detail="Not found")
     # v15: resolved via docstore, which checks <repo>/documents AND the legacy
     # /data/source_files. SOURCE_FILE_DIR alone 404'd any document retained in
     # the newer location -- the answer cited a page, then the link was dead.
@@ -509,11 +507,9 @@ def figure(source: str, name: str):
     safe = docstore._safe_basename(source)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    _lower = safe.lower()
-    from main import EXCLUDED_SOURCES
-    for _ex in EXCLUDED_SOURCES:
-        if _ex and _ex in _lower:
-            raise HTTPException(status_code=404, detail="Not found")
+    from retrieval_db import is_excluded
+    if is_excluded(safe):
+        raise HTTPException(status_code=404, detail="Not found")
     path = _figures.figure_path(safe, docstore._safe_basename(name))
     if not path:
         raise HTTPException(status_code=404, detail="Not found")

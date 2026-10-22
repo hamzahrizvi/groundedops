@@ -41,6 +41,47 @@ EXCLUDED_SOURCES = [
     if s.strip()
 ]
 
+# Documents marked Internal on the console's Confluence page, by EXACT name.
+# Not added to EXCLUDED_SOURCES: those are substrings, and "manual.txt" is a
+# substring of "ssp manual.txt", so marking one document would have hidden
+# another. Kept in a file of their own so marking takes effect at once, with
+# no restart; is_excluded() is the one check every reader uses.
+_INTERNAL_PATH = os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json")
+_internal: frozenset | None = None
+_internal_lock = threading.Lock()
+
+
+def internal_sources() -> frozenset:
+    global _internal
+    if _internal is None:
+        import jsonstore
+        _internal = frozenset(jsonstore.load(_INTERNAL_PATH, [], label="internal documents") or [])
+    return _internal
+
+
+def set_internal(sources, on: bool) -> None:
+    """Mark documents internal (on) or customer-facing (off)."""
+    global _internal
+    import jsonstore
+    with _internal_lock:
+        cur = set(internal_sources())
+        cur = cur | set(sources) if on else cur - set(sources)
+        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")
+        _internal = frozenset(cur)
+    try:                                   # inventories and the BM25 index cache by source
+        from db import invalidate_retrieval_cache
+        invalidate_retrieval_cache()
+    except Exception as exc:
+        logger.warning(f"retrieval cache not invalidated after marking internal: {exc}")
+
+
+def is_excluded(source: str | None) -> bool:
+    """True for a document customers must never be answered from: one the
+    EXCLUDED_SOURCES substrings match, or one marked internal."""
+    s = source or ""
+    low = s.lower()
+    return any(ex in low for ex in EXCLUDED_SOURCES) or s in internal_sources()
+
 # How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
 # pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
 # margin retrieve_from_db already computes. See the note at the cut itself.
@@ -318,8 +359,7 @@ def _matches_scope(meta: dict, source_filter: str | None,
         return False
     # An explicit single-document request (source_filter) still reaches an
     # internal document, as before; nothing else does.
-    if not source_filter and any(ex in (meta.get("source") or "").lower()
-                                 for ex in EXCLUDED_SOURCES):
+    if not source_filter and is_excluded(meta.get("source")):
         return False
     if scope:
         if "product" in scope:
@@ -918,7 +958,8 @@ def product_bundle(product: str, ranked: list[dict],
         return []
     mine = sorted((c for c in all_chunks
                    if _matches_scope(c, None, {"product": product})
-                   and not any(ex in (c.get("source") or "").lower() for ex in excluded)),
+                   and not any(ex in (c.get("source") or "").lower() for ex in excluded)
+                   and not is_excluded(c.get("source"))),
                   key=lambda c: (c.get("source") or "", _order_key(c["id"])))
     if sum(len(c.get("text") or "") for c in mine) <= budget:
         return mine

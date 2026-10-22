@@ -106,6 +106,7 @@ os.environ["WIDGET_LEADS_PATH"] = _scratch("widget_leads.json")
 os.environ["WIDGET_FEEDBACK_PATH"] = _scratch("widget_feedback.json")
 os.environ["CATALOG_CONFIG"] = _scratch("catalog.json")
 os.environ["CONFLUENCE_SYNC_STATE"] = _scratch("confluence_sync.json")
+os.environ["INTERNAL_SOURCES_PATH"] = _scratch("internal_sources.json")
 os.environ["ACCOUNTS_PATH"] = _scratch("accounts.json")
 os.environ["ACCOUNT_REQUESTS_PATH"] = _scratch("account_requests.json")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
@@ -294,7 +295,13 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
      complete_procedures=lambda chunks, *a, **k: chunks,
      cited_pages=lambda chunks, *a, **k: [],
      _invalidate_bm25_cache=lambda: None,
-     EXCLUDED_SOURCES=["icu_network_api", "icu_age_result_quick_guide"])
+     EXCLUDED_SOURCES=["icu_network_api", "icu_age_result_quick_guide"],
+     # The real rule's substring half: no document is marked internal here.
+     is_excluded=lambda source: any(
+         ex in (source or "").lower()
+         for ex in ("icu_network_api", "icu_age_result_quick_guide")),
+     internal_sources=lambda: frozenset(),
+     set_internal=lambda sources, on: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
 # faked: more_context.py depends on it to tell new material from a reworded

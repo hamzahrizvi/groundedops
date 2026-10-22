@@ -306,6 +306,11 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
         key, name, cat = source_to_product.get(fname, ("", "", ""))
         if not key:
             continue
+        # Spec answers go to customers: an internal document's tables must
+        # not reach them by this route either (the ICU Network API PDF did,
+        # being filed under a product while excluded everywhere else).
+        if _excluded(fname):
+            continue
         path = os.path.join(doc_dir, fname)
         # Opened ONCE for the whole document and handed to tables_on_page,
         # which would otherwise reopen it for every page -- this used to be
@@ -350,9 +355,20 @@ def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
     except OSError:
         files = []
     mapping = sorted((k, list(v)) for k, v in (source_to_product or {}).items())
-    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping},
+    # Which documents are internal is part of what the index was built from:
+    # marking one must rebuild it without that document's rows.
+    internal = sorted(f for f, _ in files if _excluded(f))
+    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping, "internal": internal},
                        sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _excluded(fname: str) -> bool:
+    try:
+        from retrieval_db import is_excluded
+    except Exception:                      # no index stack (unit tests): nothing is internal
+        return False
+    return is_excluded(fname)
 
 
 def _load_index_from_disk(key: str) -> list[dict] | None:

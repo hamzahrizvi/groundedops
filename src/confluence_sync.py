@@ -11,7 +11,8 @@ Two steps, kept apart so a person can stand between them:
             Confluence. Only documents this sync added are ever removed.
 
 "Sync now" and the daily run do both. Each item is approved or excluded;
-anything not approved is excluded. In "auto" mode a newly found document is
+anything not approved is excluded. "Internal" syncs a document but keeps it
+from customers' answers. In "auto" mode a newly found document is
 approved at once (sync everything); in "review" mode it starts excluded and
 marked new until someone approves it on the console's Confluence page. A
 document that was approved stays approved when it changes in Confluence.
@@ -67,7 +68,10 @@ _FILE_TYPES = (".pdf", ".docx", ".txt")
 _MIN_PAGE_TEXT = 200
 _HISTORY = 20
 MODES = ("review", "auto")
-DECISIONS = ("approved", "excluded")
+# "internal" syncs like "approved" but the document is marked internal
+# (retrieval_db.is_excluded): kept in the index, never used to answer a
+# customer, ready for a staff mode.
+DECISIONS = ("approved", "internal", "excluded")
 _RECENT_DAYS = 14                  # how long "new" and "updated" flags last
 
 # A folder, or a page whose child pages hold the manuals: both are a
@@ -403,11 +407,13 @@ def set_bundle(path: list[str], on: bool) -> None:
 
 def set_items(keys: list[str], decision: str | None = None,
               product: str | None = None, keep_upload: bool | None = None) -> None:
-    """Approve, exclude or re-file items. Decisions take effect at the next
-    sync; a new product for a document already synced takes effect now."""
+    """Approve, mark internal, exclude or re-file items. Decisions take
+    effect at the next sync, except between approved and internal for a
+    document already synced, which is a flag and takes effect now; so does a
+    new product for a synced document."""
     if decision is not None and decision not in DECISIONS:
-        raise ValueError("decision must be approved or excluded")
-    retag = []
+        raise ValueError("decision must be approved, internal or excluded")
+    retag, flag = [], []
     matches = _matches(_load()["items"]) if keep_upload is not None else {}
 
     def change(st):
@@ -418,6 +424,8 @@ def set_items(keys: list[str], decision: str | None = None,
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
+                if it.get("synced_version") is not None and decision != "excluded":
+                    flag.append(it["source"])
             if keep_upload is not None:
                 kept = set(st.get("keep_uploads") or [])
                 for upload, _ in matches.get(k, []):
@@ -430,6 +438,8 @@ def set_items(keys: list[str], decision: str | None = None,
                     it["product"], it["category"] = product, category_of(product)
                     it["product_chosen"] = True
     _update(change)
+    if flag:
+        _mark_internal(flag, decision == "internal")
     if retag:
         from routes_documents import retag_source
         cat = category_of(product) or ""      # ingest's own "unassigned"
@@ -711,10 +721,16 @@ def _ingest(content: bytes, source: str, cat: str | None, prod: str | None) -> N
                 replace_existing=True)
 
 
+def _mark_internal(sources: list[str], on: bool) -> None:
+    from retrieval_db import set_internal
+    set_internal(sources, on)
+
+
 def _remove(source: str) -> None:
     """What the console's Remove button does, plus the catalogue entry."""
     from routes_documents import DeleteSourceRequest, remove_source
     remove_source(DeleteSourceRequest(source=source))
+    _mark_internal([source], False)
     catalog.refile_source(source, [])
 
 
@@ -782,6 +798,9 @@ def _apply(api: _Api) -> dict:
                         cat, prod = _filed(u)
                 if not prod:
                     cat, prod, _ = _effective(it, _name_index())
+                # Marked before it goes in, so not even a moment passes where
+                # an internal document can answer a customer.
+                _mark_internal([src], it.get("decision") == "internal")
                 _ingest(content, src, cat, prod or None)
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)

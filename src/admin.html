@@ -226,6 +226,7 @@
   .cf-ap-row.none{border-left:3px solid #e0a030;background:color-mix(in srgb,#e0a030 7%,transparent)}
   .cf-ap-row.off{opacity:.5}
   .cf-ap-row .cf-tick{flex:0 0 auto}
+  .cf-ap-for{width:auto;flex:0 0 auto;font-size:12.5px;padding:4px 8px}
   .cf-ap-n{font-size:18px;font-weight:600;min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
   .cf-ap-main{flex:1;min-width:0}
   .cf-ap-main b{display:block;font-size:13.5px;font-weight:600;overflow-wrap:anywhere}
@@ -295,6 +296,14 @@
         border-top:1px solid color-mix(in srgb,var(--color-text) 7%,transparent);transition:background .15s}
   .cf-doc:hover{background:color-mix(in srgb,var(--color-text) 4%,transparent)}
   .cf-doc.on{box-shadow:inset 3px 0 0 var(--color-accent)}
+  .cf-doc.int{box-shadow:inset 3px 0 0 #9b7be0}
+  .cf-seg-sm{padding:2px;flex:0 0 auto}
+  .cf-seg-sm button{font-size:11.5px;padding:3px 9px}
+  .cf-seg-sm button[aria-checked=true]{background:var(--color-surface);color:var(--color-text);
+        box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .cf-seg-sm button.d-approved[aria-checked=true]{background:var(--color-accent);color:var(--color-accent-100)}
+  .cf-seg-sm button.d-internal[aria-checked=true]{background:#9b7be0;color:#fff}
+  .cf-seg-sm button:disabled{opacity:.45;cursor:default}
   .cf-doc-main{flex:1 1 240px;min-width:0}
   .cf-doc-title{font-size:13.5px;overflow-wrap:anywhere;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .cf-doc-meta{font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
@@ -3851,8 +3860,9 @@ const CF_STATUS = {
 const CF_PENDING = ["new", "changed", "remove", "gone", "combined"];
 const CF_FILTERS = [
   ["all", "All", () => true],
-  ["approved", "Approved", i => i.decision === "approved"],
-  ["excluded", "Excluded", i => i.decision !== "approved"],
+  ["approved", "For customers", i => i.decision === "approved"],
+  ["internal", "Internal", i => i.decision === "internal"],
+  ["excluded", "Excluded", i => i.decision !== "approved" && i.decision !== "internal"],
   ["new", "New", i => i.is_new],
   ["updated", "Updated", i => i.is_updated],
   ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
@@ -4147,8 +4157,11 @@ function cfReviewDialog(keys, mode) {
 
   // Which groups the main button acts on. Groups with a product start
   // ticked; groups with none, and groups that are all internal-looking,
-  // start unticked, so leaving them out takes no effort.
+  // start unticked, so leaving them out takes no effort. When approving,
+  // an internal-looking group starts as Internal instead: synced, and kept
+  // from customers.
   const ticked = new Set(groups.filter(g => g.kind !== "none" && !g.items.every(isInternal)));
+  const asInternal = new Set(mode === "approve" ? groups.filter(g => g.items.every(isInternal)) : []);
 
   const dlg = el("dialog", { class: "cf-dlg", "aria-label": mode === "approve" ? "Approve documents" : "File documents" });
   const close = () => { dlg.close(); dlg.remove(); };
@@ -4165,15 +4178,22 @@ function cfReviewDialog(keys, mode) {
         body: JSON.stringify({ keys: ks, product, ...extra }) });
   };
   const chosen = () => groups.filter(g => ticked.has(g)).flatMap(g => g.items);
+  const internals = () => groups.filter(g => asInternal.has(g)).flatMap(g => g.items);
   const act = async () => {
     const list = chosen();
     close();
     try {
       if (mode === "approve") {
+        const ints = internals();
         await confirmSuggestions(list, { decision: "approved" });
-        confluenceCache = await api("/admin/confluence/items", { method: "POST",
+        if (list.length) confluenceCache = await api("/admin/confluence/items", { method: "POST",
           body: JSON.stringify({ keys: list.map(i => i.key), decision: "approved" }) });
-        toast("Approved " + n(list.length) + ". They reach the bot at the next sync");
+        if (ints.length) confluenceCache = await api("/admin/confluence/items", { method: "POST",
+          body: JSON.stringify({ keys: ints.map(i => i.key), decision: "internal" }) });
+        ints.forEach(i => cfSelected.delete(i.key));
+        toast([list.length ? "Approved " + n(list.length) + " for customers" : "",
+               ints.length ? n(ints.length) + " marked internal" : ""].filter(Boolean).join(", ")
+              + ". They sync at the next sync");
       } else {
         await confirmSuggestions(list, {});
         toast("Filed " + n(list.length) + (list.length < items.length
@@ -4207,19 +4227,33 @@ function cfReviewDialog(keys, mode) {
       + "). Customers will be answered from them.");
     warnBox.replaceChildren(...warn.map(w => el("p", {}, w)));
     warnBox.hidden = !warn.length;
-    go.disabled = !list.length;
-    go.textContent = (mode === "approve" ? "Approve " : "File ")
-      + (list.length === items.length ? (list.length === 1 ? "it" : "all " + list.length) : "the " + list.length + " ticked")
-      + (warn.length && mode === "approve" ? " anyway" : "");
+    const ints = mode === "approve" ? internals().length : 0;
+    go.disabled = !list.length && !ints;
+    go.textContent = mode === "approve"
+      ? [list.length ? "Approve " + list.length + " for customers" + (warn.length ? " anyway" : "") : "",
+         ints ? "mark " + ints + " internal" : ""].filter(Boolean).join(", ").replace(/^m/, "M")
+      : "File " + (list.length === items.length ? (list.length === 1 ? "it" : "all " + list.length)
+                                                : "the " + list.length + " ticked");
   };
 
   const groupRow = g => {
     const list = g.items;
-    const tick = el("input", { type: "checkbox", class: "cf-tick", "aria-label": "Include this group",
-      checked: ticked.has(g) ? "true" : null,
-      onchange: e => { e.target.checked ? ticked.add(g) : ticked.delete(g);
-                       row.classList.toggle("off", !e.target.checked); sync(); } });
-    const row = el("div", { class: "cf-ap-row " + g.kind + (ticked.has(g) ? "" : " off") },
+    // Filing: a tick. Approving: who the group is for.
+    const tick = mode === "approve"
+      ? el("select", { class: "input cf-ap-for", "aria-label": "Who this group is for",
+          onchange: e => {
+            ticked.delete(g); asInternal.delete(g);
+            if (e.target.value === "approved") ticked.add(g);
+            if (e.target.value === "internal") asInternal.add(g);
+            row.classList.toggle("off", e.target.value === "leave"); sync(); } },
+          [["approved", "Customers"], ["internal", "Internal"], ["leave", "Leave out"]].map(([v, l]) =>
+            el("option", { value: v, selected: (ticked.has(g) ? "approved" : asInternal.has(g) ? "internal" : "leave") === v
+                                                ? "true" : null }, l)))
+      : el("input", { type: "checkbox", class: "cf-tick", "aria-label": "Include this group",
+          checked: ticked.has(g) ? "true" : null,
+          onchange: e => { e.target.checked ? ticked.add(g) : ticked.delete(g);
+                           row.classList.toggle("off", !e.target.checked); sync(); } });
+    const row = el("div", { class: "cf-ap-row " + g.kind + (ticked.has(g) || asInternal.has(g) ? "" : " off") },
       tick,
       el("span", { class: "cf-ap-n" }, String(list.length)),
       el("div", { class: "cf-ap-main" },
@@ -4241,7 +4275,8 @@ function cfReviewDialog(keys, mode) {
       el("b", {}, (mode === "approve" ? "Approve " : "File ") + n(items.length)),
       el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
     el("p", { class: "cf-dlg-why" }, (mode === "approve"
-      ? "Where each will be filed. Change any group, and untick any you are not approving."
+      ? "Where each will be filed, and who it is for: Customers, Internal (synced, never used to answer "
+        + "customers) or Leave out. Groups that look internal start as Internal."
       : "These belong to " + groups.length + " different places. Each group goes where its folder points; "
         + "change any group, or untick it to leave it as it is.")),
     el("div", { class: "cf-dlg-list" }, groups.map(groupRow)),
@@ -4376,13 +4411,17 @@ function cfRow(it, onTick) {
                                             : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
   const ext = it.kind === "bundle" ? "Combined · " + it.pages + " pages"
     : it.kind === "page" ? "Page" : ((it.title || "").split(".").pop() || "file").toUpperCase();
-  const on = it.decision === "approved";
-  const sw = el("button", { class: "cf-switch", role: "switch", "aria-checked": on ? "true" : "false",
-    "aria-label": (on ? "Approved: " : "Excluded: ") + it.title,
-    title: on ? "Approved. Click to exclude" : "Excluded. Click to approve",
-    onclick: () => set({ decision: on ? "excluded" : "approved" }) });
-  if (it.present === false) sw.disabled = true;
-  return el("div", { class: "cf-doc" + (on ? " on" : "") },
+  const on = it.decision === "approved", internal = it.decision === "internal";
+  // Excluded: not synced. Internal: synced, never used to answer a customer.
+  // Customers: synced and answered from.
+  const sw = el("div", { class: "cf-seg cf-seg-sm", role: "radiogroup", "aria-label": "Who " + it.title + " is for" },
+    [["excluded", "Excluded", "Not synced"],
+     ["internal", "Internal", "Synced, but never used to answer customers"],
+     ["approved", "Customers", "Synced and used to answer customers"]].map(([d, l, hint]) =>
+      el("button", { role: "radio", "aria-checked": (it.decision || "excluded") === d ? "true" : "false",
+        class: "d-" + d, title: hint, disabled: it.present === false ? "true" : null,
+        onclick: () => (it.decision || "excluded") !== d && set({ decision: d }) }, l)));
+  return el("div", { class: "cf-doc" + (on ? " on" : internal ? " int" : "") },
     cfBox(cfSelected.has(it.key), e => {
       e.target.checked ? cfSelected.add(it.key) : cfSelected.delete(it.key); onTick(); },
       "Select " + it.title),
@@ -4447,6 +4486,8 @@ function cfDocumentsCard(c) {
     bulk.append(
       el("b", {}, keys.length + " selected"),
       el("button", { class: "btn btn-primary", onclick: () => cfReviewDialog(keys, "approve") }, "Approve"),
+      el("button", { class: "btn btn-ghost", title: "Synced, but never used to answer customers",
+        onclick: () => set({ decision: "internal" }) }, "Internal"),
       el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
       el("button", { class: "btn btn-secondary", onclick: () => {
         const its = c.items.filter(i => cfSelected.has(i.key));
@@ -4476,6 +4517,7 @@ function cfDocumentsCard(c) {
     const open = cfOpen.has(node.key) || !!cfSearch.trim();
     const sel = node.all.filter(r => cfSelected.has(r.key)).length;
     const appr = node.all.filter(r => r.decision === "approved").length;
+    const nInt = node.all.filter(r => r.decision === "internal").length;
     const nNew = node.all.filter(r => r.is_new).length, nUpd = node.all.filter(r => r.is_updated).length;
     const tick = cfBox(sel === node.all.length, e => {
       node.all.forEach(r => e.target.checked ? cfSelected.add(r.key) : cfSelected.delete(r.key));
@@ -4491,7 +4533,7 @@ function cfDocumentsCard(c) {
         node.all.length + " doc" + (node.all.length === 1 ? "" : "s"),
         el("span", { class: "cf-meter", title: appr + " of " + node.all.length + " approved" },
           el("i", { style: "width:" + Math.round(appr / node.all.length * 100) + "%" })),
-        appr + " approved"),
+        appr + " approved" + (nInt ? ", " + nInt + " internal" : "")),
       (() => { const f = node.all.filter(cfFiled).length;
         return el("span", { class: "cf-folder-filed" + (f === node.all.length ? " all" : ""),
           title: f + " of " + node.all.length + " filed under a product" },

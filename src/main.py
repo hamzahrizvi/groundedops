@@ -448,7 +448,7 @@ CONTEXT_FLOOR_RATIO = float(os.getenv("CONTEXT_FLOOR_RATIO", "0.5"))
 # Internal-only documents: the list and its default live in retrieval_db,
 # which applies them to every read of the index. Kept as main.EXCLUDED_SOURCES
 # for the per-route checks (source_file, figure) and the call sites below.
-from retrieval_db import EXCLUDED_SOURCES  # noqa: E402
+from retrieval_db import EXCLUDED_SOURCES, is_excluded  # noqa: E402
 
 SNIPPET_LEN = 160
 
@@ -3542,11 +3542,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # substrings, matched case-insensitively against chunk source names).
     # Set EXCLUDED_SOURCES="" to disable, e.g. for internal deployments
     # or when running eval_cases_api.json.
-    if EXCLUDED_SOURCES and not payload.source_filter:
-        results = [
-            r for r in results
-            if not any(ex in (r.get("source") or "").lower() for ex in EXCLUDED_SOURCES)
-        ]
+    if not payload.source_filter:
+        results = [r for r in results if not is_excluded(r.get("source"))]
     # Rerank the FULL set and truncate here, rather than letting rerank do
     # it. `results` ends up identical -- same model, same ordering, same
     # slice -- but the chunks ranked below CONTEXT_K keep their
@@ -5253,10 +5250,7 @@ def _expand_previous(prev_q: str, prev_a: str, scope: dict | None) -> dict | Non
         return None
 
     results = retrieve_from_db(prev_q, top_k=RETRIEVE_K, scope=scope)
-    if EXCLUDED_SOURCES:
-        results = [r for r in results
-                   if not any(ex in (r.get("source") or "").lower()
-                              for ex in EXCLUDED_SOURCES)]
+    results = [r for r in results if not is_excluded(r.get("source"))]
     ranked = [_strip_breadcrumb(r) for r in
               rerank(prev_q, results, top_k=len(results))] if results else []
     used = ranked[:CONTEXT_K]
@@ -5476,10 +5470,7 @@ def query_stream(payload: StreamQueryRequest,
                 scope = {"category": payload.category}
 
             results = retrieve_from_db(payload.q, top_k=RETRIEVE_K, scope=scope)
-            if EXCLUDED_SOURCES:
-                results = [r for r in results
-                           if not any(ex in (r.get("source") or "").lower()
-                                      for ex in EXCLUDED_SOURCES)]
+            results = [r for r in results if not is_excluded(r.get("source"))]
             results = rerank(payload.q, results, top_k=CONTEXT_K)
 
             if not passes_retrieval_gate(results, RETRIEVAL_GATE_THRESHOLD):
