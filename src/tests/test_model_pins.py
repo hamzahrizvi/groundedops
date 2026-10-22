@@ -73,6 +73,16 @@ def test_dockerfile_bakes_what_the_code_loads():
     assert "revision=R[" in d
 
 
+def test_installers_prefetch_what_the_code_loads():
+    for f in ("install.sh", "install.ps1"):
+        s = (REPO / f).read_text(encoding="utf-8")
+        assert "all-MiniLM-L6-v2" not in s, f
+        for call in ("embeddings._get_model()",
+                     "reranker._get(reranker.RERANKER_MODEL)",
+                     "grounding._get_nli_model()"):
+            assert call in s, (f, call)
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

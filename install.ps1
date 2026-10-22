@@ -168,9 +168,16 @@ try {
 # --- 6. Pre-download models ------------------------------------------
 # Otherwise the tester's FIRST question stalls for minutes with no
 # explanation while the models download in the background.
+# Calls the backend's own loaders, so this fetches exactly the models it
+# runs, at the commits pinned in model_pins.py (D-20261021-19).
 Say ""
-Say "Downloading language models (~500MB, one time)..." Cyan
-& $venvPy -c "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('all-MiniLM-L6-v2'); CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('models ready')"
+Say "Downloading language models (~1.3GB, one time)..." Cyan
+Push-Location $app
+try {
+    & $venvPy -c "import embeddings, reranker, grounding; embeddings._get_model(); reranker._get(reranker.RERANKER_MODEL); grounding._get_nli_model(); print('models ready')"
+} finally {
+    Pop-Location
+}
 
 Say ""
 Say "  Install complete" Green

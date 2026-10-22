@@ -127,14 +127,11 @@ fi
 
 # ── 6. Pre-download models ───────────────────────────────────────────
 # Otherwise the first question stalls for minutes with no explanation.
+# Calls the backend's own loaders, so this fetches exactly the models it
+# runs, at the commits pinned in model_pins.py (D-20261021-19).
 echo
-echo "Downloading language models (~500MB, one time)..."
-"$VENV_PY" - <<'PYEOF'
-from sentence_transformers import SentenceTransformer, CrossEncoder
-SentenceTransformer('all-MiniLM-L6-v2')
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-print('models ready')
-PYEOF
+echo "Downloading language models (~1.3GB, one time)..."
+(cd "$APP_DIR" && "$VENV_PY" -c "import embeddings, reranker, grounding; embeddings._get_model(); reranker._get(reranker.RERANKER_MODEL); grounding._get_nli_model(); print('models ready')")
 
 echo
 echo "  Install complete"
