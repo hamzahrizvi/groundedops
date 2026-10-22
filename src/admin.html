@@ -3700,10 +3700,41 @@ const CF_FILTERS = [
   ["all", "All", () => true],
 ];
 
+// While a run is going only its progress line changes. Redrawing the whole
+// page every poll made it blink and threw away scroll and open pickers.
+// Reading Confluence has no known end, so its bar runs without one; a sync
+// knows how many documents it has to index and fills as it goes.
+let cfStatusEl = null;
+const cfRunText = r => r.phase === "syncing" ? "Indexing " + (r.done + 1) + " of " + r.total
+  : r.phase === "checking" ? "Reading Confluence: " + (r.done || 0) + " documents found so far"
+  : "Connecting to Confluence";
+function cfRunBar() {
+  const fill = el("i", {}), bar = el("div", { class: "bar indet" }, fill);
+  const label = el("div", { style: "font-size:12px;margin-top:5px;"
+    + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" });
+  const box = el("div", { style: "flex:1 1 220px;min-width:180px" }, bar, label);
+  box.update = r => {
+    const known = r.phase === "syncing" && r.total;
+    bar.className = "bar" + (known ? "" : " indet");
+    fill.style.width = known ? Math.round((r.done + 1) / r.total * 100) + "%" : "";
+    label.textContent = cfRunText(r);
+  };
+  return box;
+}
+
 async function cfLoad() {
+  const wasRunning = confluenceCache && confluenceCache.running;
   try { confluenceCache = await api("/admin/confluence"); }
   catch (e) { confluenceCache = { error: e.message }; }
-  if (view === "confluence") render();
+  if (view !== "confluence") return;
+  const r = confluenceCache.running;
+  if (wasRunning && r && cfStatusEl && cfStatusEl.isConnected) {
+    cfStatusEl.update(r);
+    clearTimeout(cfPoll);
+    cfPoll = setTimeout(cfLoad, 3000);
+    return;
+  }
+  render();
 }
 
 async function cfPost(path, body, msg) {
@@ -3792,10 +3823,7 @@ function cfSyncCard(c) {
       ? "Every document found is synced. Exclude one to take it out of the bot."
       : "New documents wait for approval. Approved documents stay approved and update when they change."),
     el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn,
-      busy ? el("span", { style: muted }, busy.phase === "syncing"
-               ? "Syncing " + (busy.done + 1) + " of " + busy.total
-               : busy.phase === "checking" ? "Reading Confluence, " + (busy.done || 0) + " found"
-               : "Connecting")
+      busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy), cfStatusEl)
            : el("span", { style: muted }, (c.checked_at ? "Last checked " + new Date(c.checked_at).toLocaleString() + ". " : "")
                + "Checks and syncs on its own once a day.")));
   return card;
