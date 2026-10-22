@@ -3932,6 +3932,20 @@ async function cfPost(path, body, msg) {
 // the product their folder names, in the range its siblings are in.
 const cfClean = s => (s || "").replace(/\s+(Range|Documentation|Repair Information)\b.*$/i, "")
   .replace(/^[A-Z0-9-]+\s+-\s+/, "").trim();
+const cfFlat = s => (s || "").toLowerCase().replace(/[^a-z0-9+]/g, "");
+// Folders that hold products rather than being one.
+const CF_CONTAINER = /^(obsolete|archived?|legacy|discontinued|internal|other|misc)\b/i;
+
+// The folder in `path`, from `start` down, that names a product. A product
+// folder's own subfolders repeat its name ("BV50" > "BV50 Documentation"),
+// so it stops there; a folder whose child does not ("Obsolete" > "BV100",
+// "Biometrics" > "ICU Range Documentation") holds products and is passed.
+function cfProductFolder(path, start) {
+  let k = start;
+  if (k >= path.length) return "";
+  while (k + 1 < path.length && !cfFlat(path[k + 1]).startsWith(cfFlat(cfClean(path[k])))) k++;
+  return CF_CONTAINER.test(path[k]) ? "" : path[k];
+}
 
 function cfFileDialog(keys, after, opts = {}) {
   const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
@@ -3949,7 +3963,8 @@ function cfFileDialog(keys, after, opts = {}) {
   // Nothing matched: the folder they share, named like a product.
   const common = items.length ? items.map(i => i.path || []).reduce((a, p) => {
     let n = 0; while (n < a.length && a[n] === p[n]) n++; return a.slice(0, n); }) : [];
-  const folder = common.length > 1 ? common[1] : common[0] || "";
+  // Below the top folder ("Products"), which is never itself a product.
+  const folder = cfProductFolder(common, 1);
   const newName = rec.length || opts.pick ? "" : cfClean(folder);
   const guessRange = () => {
     const n = newName.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -3959,7 +3974,7 @@ function cfFileDialog(keys, after, opts = {}) {
       let k = 0; while (k < n.length && n[k] === m[k]) k++;
       if (k > len) { len = k; best = p.category; }
     });
-    return best || (cache.catalog[0] || {}).key || "";
+    return best || "";
   };
 
   const dlg = el("dialog", { class: "cf-dlg", "aria-label": "File under products" });
@@ -3996,9 +4011,12 @@ function cfFileDialog(keys, after, opts = {}) {
 
   // Creating a product (and its range, if that is new too).
   const NEW = "__new__";
+  // No range pre-chosen unless a product's name resembles this one: a wrong
+  // default ("Obsolete" in Coin Hoppers) is easier to miss than an empty one.
   const rangeSel = el("select", { class: "input" },
+    el("option", { value: "" }, "Choose a range"),
     (cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
-    el("option", { value: NEW }, "New range…"));
+    el("option", { value: NEW }, "New range"));
   rangeSel.value = guessRange();
   const rangeName = el("input", { class: "input", placeholder: "Range name", hidden: true });
   rangeSel.addEventListener("change", () => { rangeName.hidden = rangeSel.value !== NEW; });
@@ -4009,6 +4027,7 @@ function cfFileDialog(keys, after, opts = {}) {
     if (!name) return toast("Give the product a name", true);
     try {
       let cat = rangeSel.value;
+      if (!cat) return toast("Choose the range the product belongs to", true);
       if (cat === NEW) {
         if (!rangeName.value.trim()) return toast("Give the range a name", true);
         cat = slug(rangeName.value);
@@ -4022,7 +4041,7 @@ function cfFileDialog(keys, after, opts = {}) {
       chosen.clear(); chosen.add(key);
       prodName.value = ""; toast(name + " added to the catalogue");
       rangeSel.replaceChildren(...(cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
-        el("option", { value: NEW }, "New range…"));
+        el("option", { value: NEW }, "New range"));
       rangeSel.value = cat; rangeName.hidden = true;
       drawGrid(); syncGo();
     } catch (e) { toast(e.message, true); }
@@ -4080,7 +4099,7 @@ function cfProductButton(it) {
 // one); a folder's suggestion is not filing until it is accepted.
 const cfFiled = it => !!it.product && !it.suggested;
 // Paths that read like they were never meant for customers.
-const CF_INTERNAL = /\b(internal|confidential|draft|due release|obsolete|do not publish)\b/i;
+const CF_INTERNAL = /\b(internal|confidential|draft|due release|obsolete|do not publish|do not use|work in progress|wip)\b/i;
 
 // A selection grouped by where it will be filed: each product it is filed
 // or suggested under, and, for documents nothing matched, each product
@@ -4091,7 +4110,8 @@ function cfGroups(items) {
   const groups = new Map();
   items.forEach(i => {
     const kind = !i.product ? "none" : cfFiled(i) ? "filed" : "suggested";
-    const folder = kind === "none" ? ((i.path || [])[common.length] || "") : "";
+    const folder = kind === "none"
+      ? cfProductFolder(i.path || [], Math.max(common.length, 1)) || (i.path || [])[common.length] || "" : "";
     const g = kind + "|" + (i.product || "") + "|" + folder;
     if (!groups.has(g)) groups.set(g, { kind, product: i.product || "", folder, items: [] });
     groups.get(g).items.push(i);
@@ -4165,7 +4185,7 @@ function cfReviewDialog(keys, mode) {
           " · ", list.slice(0, 3).map(i => i.title).join(", ") + (list.length > 3 ? " and " + (list.length - 3) + " more" : ""))),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
         onclick: () => { close(); cfFileDialog(list.map(i => i.key), again); } },
-        g.kind === "none" ? (g.folder ? "Create or choose…" : "File…") : "Change…"));
+        g.kind === "none" ? (g.folder ? "Create or choose" : "File") : "Change"));
   };
 
   const warn = [];
@@ -4185,7 +4205,7 @@ function cfReviewDialog(keys, mode) {
          warn.length ? "Approve all " + items.length + " anyway" : "Approve " + n(items.length))]
     : [el("button", { class: "btn btn-secondary",
          onclick: () => { close(); cfFileDialog(keys, again, { pick: true }); } },
-         "Put all " + items.length + " under one product…"),
+         "Put all " + items.length + " under one product"),
        sug.length ? el("button", { class: "btn btn-primary", onclick: fileAsShown },
          "File the " + n(sug.length) + " as suggested") : null];
 
@@ -4372,12 +4392,12 @@ function cfDocumentsCard(c) {
       keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
     bulk.append(
       el("b", {}, keys.length + " selected"),
-      el("button", { class: "btn btn-primary", onclick: () => cfReviewDialog(keys, "approve") }, "Approve…"),
+      el("button", { class: "btn btn-primary", onclick: () => cfReviewDialog(keys, "approve") }, "Approve"),
       el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
       el("button", { class: "btn btn-secondary", onclick: () => {
         const its = c.items.filter(i => cfSelected.has(i.key));
         cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys);
-      } }, "File under…"),
+      } }, "File under"),
       el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
   };
 
