@@ -79,7 +79,7 @@
            color:var(--color-accent-ink)}
   .who-mail{font-size:11px;margin-top:2px;
             color:color-mix(in srgb, var(--color-text) 45%, transparent);
-            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+            overflow-wrap:anywhere}
   .who-acts{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
   .who-acts .btn{font-size:11.5px;padding:3px 7px}
   /* a basic account gets no rail, so the main column carries the page */
@@ -186,7 +186,7 @@
         border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
   .item:first-child{border-top:0}
   .item .grow{flex:1;min-width:0}
-  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow-wrap:anywhere}
   .item .grow span{font-size:12px;color:color-mix(in srgb, var(--color-text) 50%, transparent)}
   .item.flagged{box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
                 border-radius:var(--radius-md);padding:10px 12px;border-top:0;margin-bottom:2px}
@@ -944,7 +944,7 @@ function gate() {
                                 placeholder: "you@company.com", autofocus: "true" });
   const pwIn = el("input", { class: "input", type: "password", placeholder: "Password" });
   const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
-                    "Checking this install\u2026");
+                    "Checking this install");
   const btn = el("button", { class: "btn btn-primary", disabled: "true" }, "Sign in");
   const nameIn = el("input", { class: "input", placeholder: "Your name (optional)" });
   const nameField = el("div", { class: "field", style: "display:none" }, nameIn);
@@ -1073,7 +1073,7 @@ async function loadAccounts() {
 
 function viewAccounts() {
   if (!acctCache) { loadAccounts(); return [el("h1", {}, "Accounts"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (acctCache.error) return [el("h1", {}, "Accounts"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load accounts"), acctCache.error))];
@@ -1202,7 +1202,7 @@ function viewBackup() {
       + "backup is unreadable \u2014 there is no way back in, by design. Store it "
       + "with your other secrets, NOT next to the backup file.\n\nContinue?"))
       return;
-    exportBtn.disabled = true; exportBtn.textContent = "Preparing\u2026";
+    exportBtn.disabled = true; exportBtn.textContent = "Preparing";
     try {
       // POST, not GET: a passphrase in a query string ends up in proxy and
       // server access logs.
@@ -1345,7 +1345,7 @@ function viewBackup() {
       + "that backup you will be signed out and unable to sign back in, and "
       + "would have to use manage_accounts.py on the server. Continue?"))
       return;
-    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring\u2026";
+    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring";
     const fd = new FormData(); fd.append("file", picked);
     if (rPw.value) fd.append("passphrase", rPw.value);
     const qs = "?restore_accounts=" + rAccounts.checked
@@ -1409,7 +1409,7 @@ async function loadPolicy() {
 
 function viewPolicy() {
   if (!polCache) { loadPolicy(); return [el("h1", {}, "Access & limits"),
-    el("p", { class: "lede" }, "Loading\u2026")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (polCache.error) return [el("h1", {}, "Access & limits"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load settings"), polCache.error))];
@@ -1503,7 +1503,7 @@ function viewPolicy() {
     mk.splice(0, 2));
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       await api("/admin/policy", { method: "PUT",
         body: JSON.stringify({ changes: p }) });
@@ -1612,7 +1612,7 @@ function viewPolicy() {
 // and what it costs -- not what the code does.
 function viewAdvanced() {
   if (!polCache) { loadPolicy(); return [el("h1", {}, "Advanced"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (polCache.error) return [el("h1", {}, "Advanced"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load settings"), polCache.error))];
@@ -1723,7 +1723,7 @@ function viewAdvanced() {
       + "copy that kept the table."));
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       await api("/admin/policy", { method: "PUT",
         body: JSON.stringify({ changes: p }) });
@@ -1755,7 +1755,7 @@ async function loadKeys() {
 
 function viewKeys() {
   if (!keysCache) { loadKeys(); return [el("h1", {}, "API keys"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (keysCache.error) return [el("h1", {}, "API keys"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load key status"), keysCache.error))];
@@ -1909,7 +1909,7 @@ function viewDocuments() {
   // instead of one long "Category > Product" dropdown.
   const catSel = el("select", { class: "input", onchange: e => {
     chosenCat = e.target.value; chosen = ""; syncProductOptions(); sync();
-  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category\u2026" : "No categories yet"),
+  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category" : "No categories yet"),
      cache.catalog.map(c => el("option", { value: c.key }, c.name)));
   if (chosenCat) catSel.value = chosenCat;
 
@@ -1919,7 +1919,7 @@ function viewDocuments() {
     const inCat = prods.filter(p => p.category === chosenCat);
     prodSel.disabled = !chosenCat;
     prodSel.append(el("option", { value: "" },
-      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product\u2026" : "No products in this category"));
+      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product" : "No products in this category"));
     inCat.forEach(p => prodSel.append(el("option", { value: p.key }, p.name)));
     if (chosen) prodSel.value = chosen;
   }
@@ -1964,7 +1964,7 @@ function viewDocuments() {
     const p = prods.find(x => x.key === chosen);
     for (const f of files) {
       const line = el("div", { class: "item" },
-        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading...")));
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading")));
       progress.append(line);
       try {
         let res = await postUpload(f, p, null);
@@ -1988,7 +1988,7 @@ function viewDocuments() {
                   onclick: () => resolve("skip") }, "Skip")));
           });
           if (choice === "skip") { line.querySelector("span").textContent = "Skipped"; continue; }
-          line.querySelector("span").textContent = "Replacing...";
+          line.querySelector("span").textContent = "Replacing";
           res = await postUpload(f, p, d.existing);
           if (res.duplicate) throw new Error("Still refused as a duplicate");
           await track(res.job_id, line, f.name);
@@ -2028,7 +2028,7 @@ function viewDocuments() {
           "Answers written from the old version may no longer match it.")),
       el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
         el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
-          const b = e.target; b.disabled = true; b.textContent = "Generating…";
+          const b = e.target; b.disabled = true; b.textContent = "Generating";
           try {
             await api("/admin/faq/autogenerate", { method: "POST", body: JSON.stringify({
               source: r.newName, product: p.key, category: p.category }) });
@@ -2081,7 +2081,7 @@ function viewDocuments() {
         toast("Filed under " + p.name);
         await refresh(); render();
       } catch (err) { toast(err.message, true); }
-    } }, el("option", { value: "" }, cur ? "Move to\u2026" : "File under\u2026"),
+    } }, el("option", { value: "" }, cur ? "Move to" : "File under"),
        prods.map(p => el("option", { value: p.key }, p.categoryName + " \u203a " + p.name)));
 
     return el("div", { class: "item" + (cur ? "" : " flagged") },
@@ -2185,7 +2185,7 @@ function viewFaq() {
 
   const scopeSel = el("select", { class: "input", style: "width:auto",
                                   onchange: e => { scope = e.target.value; render2(); } },
-    el("option", { value: "" }, "Choose a product\u2026"),
+    el("option", { value: "" }, "Choose a product"),
     prods.map(p => el("option", { value: p.key },
       p.categoryName + " \u203a " + p.name + " (" + countFor(p.key) + ")")),
     orphanScopes.map(k => el("option", { value: k },
@@ -2240,7 +2240,7 @@ function viewFaq() {
         row.addEventListener("click", () => { expandedId = f.id; render2(); });
         row.append(
           el("div", { class: "grow" }, el("b", {}, f.question),
-            el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
+            el("span", {}, ((f.answer || "").length > 90 ? (f.answer || "").slice(0, 90).replace(/\s+\S*$/, "") : (f.answer || "")))),
           dirty.has(f.id) ? el("span", { class: "tag tag-neutral mono" }, "unsaved") : null);
       } else {
         const draft = dirty.get(f.id) || {};
@@ -2288,7 +2288,7 @@ function viewFaq() {
   });
 
   const srcSel = el("select", { class: "input" },
-    el("option", { value: "" }, "Choose a document\u2026"),
+    el("option", { value: "" }, "Choose a document"),
     el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"),
     cache.sources.map(s => el("option", { value: s.source }, s.source)));
   const provSel = providerBox();
@@ -2318,7 +2318,7 @@ function viewFaq() {
     try {
       for (const s of docs) {
         genBtn.textContent = docs.length > 1
-          ? "Generating " + (++done) + "/" + docs.length + "\u2026" : "Generating\u2026";
+          ? "Generating " + (++done) + "/" + docs.length : "Generating";
         try {
           const r = await genOne(s);
           added += r.added || 0; dupes += r.skipped_duplicates || 0;
@@ -2533,7 +2533,7 @@ function viewGaps() {
             draftBox),
           el("div", { class: "gap-actions" },
             el("button", { class: "btn btn-secondary", onclick: async e => {
-              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
+              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting";
               try {
                 const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
                   gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
@@ -2871,7 +2871,7 @@ function viewWidget() {
           el("div", { style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" },
             d.intro_options.map(o => el("span", {
               style: "font-size:12px;padding:6px 12px;border-radius:99px;color:#fff;white-space:nowrap;background:" + d.color
-            }, o.label || "\u2026")))),
+            }, o.label || "")))),
         el("div", { style: "padding:10px 12px;border-top:1px solid var(--color-divider);display:flex;gap:8px" },
           el("div", { style: "flex:1;height:30px;border-radius:8px;background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" }),
           el("div", { style: "width:30px;height:30px;border-radius:8px;background:" + d.color }))));
@@ -3074,7 +3074,7 @@ function viewWidget() {
         + "spend your API budget. Send it only to the person installing it, "
         + "over something private \u2014 not a shared drive, not a mailing list.\n\n"
         + "Continue?")) return;
-      dlBtn.disabled = true; dlBtn.textContent = "Building\u2026";
+      dlBtn.disabled = true; dlBtn.textContent = "Building";
       try {
         // fetch, not a plain link: the endpoint needs an auth header, and an
         // <a href> cannot carry one. Same reason as the backup download.
@@ -3132,7 +3132,7 @@ function viewWidget() {
   };
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       const saved = await api("/admin/widget/config", { method: "PUT", body: JSON.stringify(d) });
       cache.widget = saved;
