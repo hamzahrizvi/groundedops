@@ -265,6 +265,81 @@ def test_combining_a_folder_into_one_document():
         assert w.removed[-1] == "Manual.txt"
 
 
+class MovableApi(ManualApi):
+    """ManualApi whose Manual page can be renamed, or moved into an Archive folder."""
+    def __init__(self, name="Manual", archived=False):
+        self.name = name
+        manual = {"type": "page", "id": "40", "title": name}
+        self.tree = {**ManualApi.tree, ("pages", "1"): [
+            {"type": "folder", "id": "50", "title": "Archive"} if archived else manual]}
+        if archived:
+            self.tree[("folders", "50")] = [manual]
+
+    def page(self, pid):
+        return {**ManualApi.page(self, pid), **({"title": self.name} if pid == "40" else {})}
+
+
+def _combined_and_synced(w):
+    """Review mode: Manual combined, approved, filed under sh3 and synced."""
+    w.run(MovableApi(), apply=False)
+    w._with(lambda: cs.set_bundle(["Manual"], True))
+    w.run(MovableApi(), apply=False)
+    w.decide(["Manual"], decision="approved", product="sh3")
+    w.run(MovableApi())
+    assert ("Manual.txt", "sh3") in w.ingested, w.ingested
+
+
+def _still_the_same_document(w, title, path):
+    items = w.items()
+    assert sorted(items) == [title, "Wiring.pdf"], sorted(items)
+    m = items[title]
+    assert m["key"] == "bundle:id:40" and m["source"] == "Manual.txt" and m["path"] == path, m
+    assert (m["decision"], m["product"], m["status"]) == ("approved", "sh3", "synced"), m
+    assert w.removed == [] and w.ingested.count(("Manual.txt", "sh3")) == 1, (w.removed, w.ingested)
+    assert path + [title] in w._with(lambda: cs.overview()["bundles"])
+
+
+def test_a_combined_folder_survives_a_rename():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        _combined_and_synced(w)
+        w.run(MovableApi("SSP Manual"))
+        _still_the_same_document(w, "SSP Manual", [])
+
+
+def test_a_combined_folder_survives_a_move():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        _combined_and_synced(w)
+        w.run(MovableApi(archived=True))
+        _still_the_same_document(w, "Manual", ["Archive"])
+        # split again from where it is now: its pages take its decision
+        w._with(lambda: cs.set_bundle(["Archive", "Manual"], False))
+        w.run(MovableApi(archived=True), apply=False)
+        items = w.items()
+        assert sorted(items) == ["Cmd B", "Manual", "Wiring.pdf"], sorted(items)
+        assert items["Cmd B"]["decision"] == items["Manual"]["decision"] == "approved", items
+
+
+def test_a_title_path_bundle_is_pinned_to_its_id():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        _combined_and_synced(w)
+        # as a state file written before bundles had ids, plus one whose
+        # folder is no longer there
+        st = json.load(open(w.state))
+        st["bundles"] = [["Manual"], ["Gone folder"]]
+        st["items"]["bundle:Manual"] = {**st["items"].pop("bundle:id:40"), "id": "bundle:Manual"}
+        json.dump(st, open(w.state, "w"))
+        w.run(MovableApi())
+        _still_the_same_document(w, "Manual", [])
+        assert json.load(open(w.state))["bundles"] == [{"id": "40", "path": ["Manual"]},
+                                                       {"path": ["Gone folder"]}]
+        # and from now on a rename keeps it
+        w.run(MovableApi("SSP Manual"))
+        assert w.items()["SSP Manual"]["key"] == "bundle:id:40" and w.removed == []
+
+
 def test_a_whole_manual_replaces_its_upload():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()

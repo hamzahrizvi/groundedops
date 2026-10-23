@@ -152,7 +152,10 @@ def _load() -> dict:
     st.setdefault("mode", "review")
     st.setdefault("items", {})
     st.setdefault("history", [])
-    st.setdefault("bundles", [])
+    # A combined folder is {"id": its Confluence id, "path": its titles as last
+    # seen}. Entries written before ids were plain title lists; a check pins
+    # each to its id.
+    st["bundles"] = [b if isinstance(b, dict) else {"path": b} for b in st.get("bundles", [])]
     for it in st["items"].values():  # "pending" was a third decision; not approved is excluded
         if it.get("decision") not in DECISIONS:
             it["decision"] = "excluded"
@@ -368,7 +371,8 @@ def overview() -> dict:
                 row["product"], row["suggested"] = filed[row["uploaded_as"]], True
         items.append(row)
     items.sort(key=lambda r: ([p.lower() for p in r["path"] or []], (r["title"] or "").lower()))
-    return {"mode": st["mode"], "checked_at": st.get("checked_at"), "bundles": st["bundles"],
+    return {"mode": st["mode"], "checked_at": st.get("checked_at"),
+            "bundles": [b["path"] for b in st["bundles"]],
             "items": items, "history": st["history"][::-1],
             "running": running(), "configured": configured()}
 
@@ -381,8 +385,11 @@ def set_mode(mode: str) -> None:
     _update(lambda st: st.__setitem__("mode", mode))
 
 
-def bundle_key(path: list[str]) -> str:
-    return "bundle:" + "\u0001".join(path)
+def bundle_key(b: dict) -> str:
+    """The item a combined folder is listed as: by its Confluence id, so a
+    rename or move in Confluence keeps the same item (and source); by its
+    titles only until a check has found the id."""
+    return "bundle:id:" + b["id"] if b.get("id") else "bundle:" + "\u0001".join(b["path"])
 
 
 def set_bundle(path: list[str], on: bool) -> None:
@@ -394,11 +401,13 @@ def set_bundle(path: list[str], on: bool) -> None:
         raise ValueError("choose a folder")
 
     def change(st):
-        st["bundles"] = [b for b in st["bundles"] if b != path]
+        mine = [b for b in st["bundles"] if b["path"] == path]
+        st["bundles"] = [b for b in st["bundles"] if b["path"] != path]
         if on:
-            st["bundles"].append(path)
+            st["bundles"] += mine or [{"path": path}]
         else:
-            it = st["items"].get(bundle_key(path)) or {}
+            its = [st["items"][bundle_key(b)] for b in mine if bundle_key(b) in st["items"]]
+            it = its[0] if its else {}
             st.setdefault("unbundled", {})["\u0001".join(path)] = {
                 "decision": it.get("decision"), "product": it.get("product"),
                 "category": it.get("category"), "chosen": it.get("product_chosen")}
@@ -503,23 +512,23 @@ def _connect() -> tuple["_Api", str, str]:
 
 
 def _walk(api: _Api, root_kind: str, root_id: str):
-    """(page, titles of the folders and pages above it) for every page under
-    the root, depth first in Confluence's own order, and the root itself
-    when it is a page (its title is read with its body)."""
+    """(page, titles of the folders and pages above it, their ids) for every
+    page under the root, depth first in Confluence's own order, and the root
+    itself when it is a page (its title is read with its body)."""
     if root_kind == "pages":
-        yield {"id": root_id, "title": ""}, []
-    stack = [(root_kind, root_id, [], None)]
+        yield {"id": root_id, "title": ""}, [], []
+    stack = [(root_kind, root_id, [], [], None)]
     while stack:
-        kind, node, trail, me = stack.pop()
+        kind, node, trail, ids, me = stack.pop()
         if me is not None:
-            yield me, trail
-        below = trail + [me["title"]] if me is not None else trail
+            yield me, trail, ids
+        below, below_ids = (trail + [me["title"]], ids + [me["id"]]) if me is not None else (trail, ids)
         kids = list(api.each(f"/wiki/api/v2/{kind}/{node}/direct-children", limit=250))
         for c in reversed(kids):          # pushed backwards, so they come off in order
             if c.get("type") == "page":
-                stack.append(("pages", c["id"], below, c))
+                stack.append(("pages", c["id"], below, below_ids, c))
             elif c.get("type") == "folder":
-                stack.append(("folders", c["id"], below + [c["title"]], None))
+                stack.append(("folders", c["id"], below + [c["title"]], below_ids + [c["id"]], None))
 
 
 class _Text(HTMLParser):
@@ -580,19 +589,32 @@ def _link(api: _Api, webui: str | None) -> str | None:
 def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     """List the root into the state's items. Indexes nothing."""
     found: dict[str, dict] = {}
-    bundles = sorted(_load()["bundles"], key=len, reverse=True)   # innermost first
+    bundles = _load()["bundles"]
+    ids_in = {b["id"] for b in bundles if b.get("id")}     # combined folders by Confluence id
+    by_path = [b for b in bundles if not b.get("id")]      # still known only by titles
+    pinned: dict[str, str] = {}          # title-path bundle key -> the id found there
+    paths: dict[str, list] = {}          # id -> its titles now, for the console
     combined: dict[str, dict] = {}       # bundle key -> the item being built
     members_of: set[str] = set()         # page items now inside a combined one
-    for page, trail in _walk(api, root_kind, root_id):
+    for page, trail, ids in _walk(api, root_kind, root_id):
         pid = page["id"]
         _progress.update(phase="checking", done=len(found))
         full = api.page(pid)
         title = full.get("title") or page["title"]
-        here = trail + [title]
-        inside = next((b for b in bundles if here[:len(b)] == b), None) if pid != root_id else None
+        here, here_ids = trail + [title], ids + [pid]
+        if pid != root_id:
+            for b in [b for b in by_path if here[:len(b["path"])] == b["path"]]:
+                by_path.remove(b)
+                pinned[bundle_key(b)] = here_ids[len(b["path"]) - 1]
+                ids_in.add(pinned[bundle_key(b)])
+        # The innermost combined folder above the page (or the page itself).
+        deep = max((i for i, c in enumerate(here_ids) if c in ids_in), default=None) \
+            if pid != root_id else None
+        inside = here[:deep + 1] if deep is not None else None
         if inside is not None:
             text = page_text(title, _body(full))
-            key = bundle_key(inside)
+            key = bundle_key({"id": here_ids[deep]})
+            paths.setdefault(here_ids[deep], inside)
             b = combined.get(key)
             if b is None:
                 b = combined[key] = {
@@ -644,6 +666,24 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
 
     def merge(st):
         items = st["items"]
+        # Combined folders pinned to their ids, with their titles as found now,
+        # so a rename or move of the folder (or one above it) keeps them.
+        kept, seen = [], set()
+        for b in st["bundles"]:
+            old = bundle_key(b)
+            cid = b.get("id") or pinned.get(old)
+            if cid in seen:              # combined twice, by id and by titles
+                continue
+            if cid:
+                seen.add(cid)
+                b = {"id": cid, "path": paths.get(cid, b["path"])}
+                if old != bundle_key(b) and old in items and bundle_key(b) not in items:
+                    items[bundle_key(b)] = items.pop(old)
+            elif b in by_path:           # not one combined while this check ran
+                logger.warning("Confluence sync: combined folder %s not found by its titles; kept",
+                               " / ".join(b["path"]))
+            kept.append(b)
+        st["bundles"] = kept
         # The first check finds everything; calling all of it "new" says nothing.
         first_check = not st.get("checked_at")
         taken = {it["source"] for k, it in items.items() if it.get("source") and k in found}
