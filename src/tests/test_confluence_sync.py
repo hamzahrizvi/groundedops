@@ -565,3 +565,19 @@ def test_schedule():
         assert cs._due(st, fri) and not cs._due(st, fri - timedelta(days=1))
         w._with(lambda: cs.set_schedule("off"))
         assert not cs._due(w._with(cs._load), fri) and w._with(cs._next_run) is None
+
+
+def test_a_folder_named_after_a_product_and_more_suggests_it():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        w.catalog.data["categories"][0]["products"] += [
+            {"key": "mc", "name": "MyCheckr", "sources": []},
+            {"key": "mcm", "name": "MyCheckr mini", "aliases": ["MyCheckr Mini"], "sources": []},
+            {"key": "sh", "name": "SMART Coin System", "aliases": ["SMART Hopper"], "sources": []}]
+        sug = lambda path: w._with(lambda: cs._suggest(path))[1]
+        assert sug(["MyCheckr Range Documentation", "MyCheckr Mini User Manual",
+                    "MyCheckr Mini Product Compliance & Approvals"]) == "mcm"
+        assert sug(["MyCheckr Range Documentation", "MyCheckr User Manual"]) == "mc"
+        assert sug(["SMART Hopper 3 Documentation", "SMART Hopper 3 User Manual"]) == "sh3"
+        assert sug(["Smart Hopper 3"]) == "sh3"
+        assert sug(["Products", "Other things"]) == ""

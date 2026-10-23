@@ -262,7 +262,14 @@ def _suggest(path: list[str], idx: dict | None = None) -> tuple[str | None, str]
     idx = _name_index() if idx is None else idx
     for title in reversed(path or []):
         for part in [title, *title.split(" - ")]:
-            hit = idx.get(_norm(part))
+            n = _norm(part)
+            # The longest product name the folder's name starts with, not only
+            # an exact one: "MyCheckr Mini User Manual" is the Mini's, and
+            # matching exactly skipped it for "MyCheckr Range Documentation"
+            # above, filing every Mini declaration under the MyCheckr.
+            best = n if n in idx else max((k for k in idx if len(k) >= 3 and n.startswith(k)),
+                                          key=len, default="")
+            hit = idx.get(best)
             if hit and len(set(hit)) == 1:  # a name two categories share files nothing
                 return hit[0]
     return None, ""
