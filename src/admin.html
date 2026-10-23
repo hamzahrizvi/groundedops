@@ -261,6 +261,10 @@
   .cf-dlg-empty{font-size:12.5px;padding:14px 0;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
   .cf-dlg-new{padding-top:12px;padding-bottom:12px;border-top:1px solid var(--color-divider)}
   .cf-dlg-new.hint{background:color-mix(in srgb,var(--color-accent) 7%,transparent)}
+  .busy-dlg{width:min(420px,calc(100vw - 32px));padding-bottom:20px}
+  .busy-dlg .bar{height:6px;margin-top:12px}
+  .busy-line{font-size:12.5px;margin-top:4px;min-height:1.4em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+        color:color-mix(in srgb,var(--color-text) 65%,transparent)}
   .ask-dlg{width:min(460px,calc(100vw - 32px))}
   .ask-body{margin:6px 0 14px;font-size:13.5px;line-height:1.5;color:color-mix(in srgb,var(--color-text) 80%,transparent)}
   .ask-snooze{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;cursor:pointer;
@@ -3951,7 +3955,8 @@ function cfBundle(path, on) {
 
 async function cfPost(path, body, msg) {
   try {
-    confluenceCache = await api(path, { method: "POST", body: JSON.stringify(body || {}) });
+    confluenceCache = await withBusy("Updating documents",
+      () => api(path, { method: "POST", body: JSON.stringify(body || {}) }));
     if (msg) toast(msg);
     render();
   } catch (e) { toast(e.message, true); }
@@ -4392,6 +4397,35 @@ function snoozed(key) {
   try { return Number(localStorage.getItem("go.snooze." + key) || 0) > Date.now(); }
   catch (e) { return false; }
 }
+// Work on documents can take a while and showed nothing, so people clicked
+// again. busy() blurs the page behind a progress bar until done() -- the
+// page cannot be clicked meanwhile, so the same action cannot be sent twice.
+// step(i, n, line) moves the bar; without it the bar just runs.
+function busy(title) {
+  const dlg = el("dialog", { class: "cf-dlg busy-dlg", "aria-label": title, "aria-busy": "true" });
+  const line = el("div", { class: "busy-line" }, "Working\u2026");
+  const bar = el("div", { class: "bar indet" }, el("i", {}));
+  dlg.addEventListener("cancel", e => e.preventDefault());   // Escape does not hide it
+  dlg.append(el("div", { class: "cf-dlg-head" }, el("b", {}, title)), line, bar);
+  document.body.append(dlg);
+  dlg.showModal();
+  return {
+    step(i, n, text) {
+      bar.className = "bar";
+      bar.firstChild.style.width = Math.max(2, Math.round(100 * i / n)) + "%";
+      line.textContent = (i + 1 > n ? n : i + 1) + " of " + n + (text ? ": " + text : "");
+    },
+    say(text) { line.textContent = text; },
+    done() { dlg.close(); dlg.remove(); },
+  };
+}
+
+// Run fn behind busy(); always clears, even when fn throws.
+async function withBusy(title, fn) {
+  const b = busy(title);
+  try { return await fn(b); } finally { b.done(); }
+}
+
 function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
   if (snooze && snoozed(snooze)) return Promise.resolve(true);
   return new Promise(resolve => {
@@ -5415,46 +5449,52 @@ function viewDocuments() {
           + (docs.length === 1 ? "it" : "them") + " from the next question. Staff still see "
           + (docs.length === 1 ? "it" : "them") + " here, and Make public undoes it.",
         ok: "Make internal", snooze: "make-internal" })) return;
-    const id = "internal:" + Date.now();
-    const j = { name, stage: on ? "Making internal" : "Making public", pct: 0, status: "working" };
-    jobs.set(id, j); drawJobs();
     let res;
     try {
-      res = await api("/admin/source_internal", { method: "POST",
-        body: JSON.stringify({ sources: docs.map(d => d.source), internal: on }) });
-    } catch (e) {
-      j.status = "error"; j.stage = "Failed: " + e.message; drawJobs(); return;
-    }
+      res = await withBusy((on ? "Making " : "Making public: ") + name + (on ? " internal" : ""), b => {
+        b.say(on ? "Taking it out of public answers and finding related FAQs" : "Letting public answers use it");
+        return api("/admin/source_internal", { method: "POST",
+          body: JSON.stringify({ sources: docs.map(d => d.source), internal: on }) });
+      });
+    } catch (e) { return toast(e.message, true); }
     docs.forEach(d => { d.internal = on; redrawRow(d); });
+    docSelected.clear(); drawDocBulk();
     const faqs = (on && res.faqs) || [];
-    finish(j, on
-      ? "Internal: kept out of public answers"
-        + (faqs.length ? ". " + faqs.length + " FAQ" + (faqs.length === 1 ? "" : "s") + " to review" : "")
-      : "Public again",
-      faqs.length ? [el("button", { class: "btn btn-secondary",
-        onclick: () => internalFaqDialog(name, faqs) }, "Review FAQs")] : []);
-    if (faqs.length) internalFaqDialog(name, faqs);
+    toast(on ? name + " is internal" : name + " is public again");
+    if (faqs.length) {
+      // Kept in the panel too, so closing the review does not lose it.
+      const j = { name, stage: "", pct: 0, status: "working" };
+      const id = "internal:" + Date.now();
+      jobs.set(id, j);
+      finish(j, faqs.length + " FAQ" + (faqs.length === 1 ? "" : "s") + " may still answer from it",
+        [el("button", { class: "btn btn-secondary",
+          onclick: () => internalFaqDialog(name, faqs) }, "Review FAQs")]);
+      internalFaqDialog(name, faqs);
+    }
   };
 
   // One request per document, so the panel can say how far along it is.
   // The page is redrawn once at the end: rows move between ranges or go.
   const runBulk = async (title, docs, step) => {
-    const id = "bulk:" + Date.now();
-    const j = { name: title, stage: "Starting", pct: 0, status: "working" };
-    jobs.set(id, j); drawJobs();
     let ok = 0;
     const failed = [];
-    for (let i = 0; i < docs.length; i++) {
-      j.stage = (i + 1) + " of " + docs.length + ": " + docs[i].source;
-      j.pct = Math.max(1, 100 * i / docs.length); drawJobs();
-      try { await step(docs[i]); ok++; }
-      catch (e) { failed.push(docs[i].source + " (" + e.message + ")"); }
+    await withBusy(title, async b => {
+      for (let i = 0; i < docs.length; i++) {
+        b.step(i, docs.length, docs[i].source);
+        try { await step(docs[i]); ok++; }
+        catch (e) { failed.push(docs[i].source + " (" + e.message + ")"); }
+      }
+      b.step(docs.length, docs.length, "refreshing the list");
+      try { await refresh(); } catch (e) {}
+    });
+    toast(ok + " of " + docs.length + " done", failed.length > 0);
+    if (failed.length) {
+      const j = { name: title, stage: "", pct: 0, status: "working" };
+      jobs.set("bulk:" + Date.now(), j);
+      finish(j, failed.length + " failed: " + failed.slice(0, 3).join("; ")
+        + (failed.length > 3 ? " and " + (failed.length - 3) + " more" : ""));
     }
-    finish(j, ok + " of " + docs.length + " done" + (failed.length
-      ? ". Failed: " + failed.slice(0, 3).join("; ")
-        + (failed.length > 3 ? " and " + (failed.length - 3) + " more" : "") : ""));
     docSelected.clear();
-    try { await refresh(); } catch (e) {}
     render();
   };
 
@@ -5560,11 +5600,15 @@ function viewDocuments() {
       if (!await askConfirm({ title: "Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s") + "?",
           body: "This cannot be undone.", ok: "Remove" })) return;
       let done = 0;
-      for (const id of picked) {
-        try { await api("/faq/" + encodeURIComponent(id), { method: "DELETE" }); done++; }
-        catch (e) { toast(e.message, true); }
-      }
       close();
+      const ids = [...picked];
+      await withBusy("Removing FAQs", async b => {
+        for (let i = 0; i < ids.length; i++) {
+          b.step(i, ids.length);
+          try { await api("/faq/" + encodeURIComponent(ids[i]), { method: "DELETE" }); done++; }
+          catch (e) { toast(e.message, true); }
+        }
+      });
       toast("Removed " + done + " FAQ" + (done === 1 ? "" : "s"));
       refresh().catch(() => {});
     });
@@ -5619,10 +5663,10 @@ function viewDocuments() {
       keys = [...new Set(keys)];
       const first = prods.find(x => x.key === keys[0]);
       try {
-        await api("/admin/reassign_source", { method: "POST",
+        await withBusy("Filing " + s.source, () => api("/admin/reassign_source", { method: "POST",
           body: JSON.stringify({ source: s.source,
                                  category_key: first ? first.category : "",
-                                 product_key: keys.join(",") }) });
+                                 product_key: keys.join(",") }) }));
         toast(keys.length
           ? "Filed under " + keys.length + " product" + (keys.length === 1 ? "" : "s")
           : "Unfiled — searchable, but never offered in the widget");
