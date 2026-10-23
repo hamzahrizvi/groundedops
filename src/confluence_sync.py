@@ -619,27 +619,41 @@ def _walk(api: _Api, root_kind: str, root_id: str):
 
 class _Text(HTMLParser):
     """Confluence storage format to plain text: blocks on their own lines,
-    table cells split by " | ", macro parameters dropped."""
+    a table row on one line with its cells split by " | " (tables.cells),
+    macro parameters dropped."""
     _BLOCK = {"p", "div", "br", "li", "tr", "table", "pre", "blockquote",
               "h1", "h2", "h3", "h4", "h5", "h6"}
+    # Parameters and ADF attributes are settings, not text: they put
+    # "Scroll Pagebreak...ari:cloud:ecosystem::extension/..." and a note
+    # panel's id into the manuals. An ADF fallback repeats its node's content.
+    _SKIP = {"ac:parameter", "ac:adf-parameter", "ac:adf-attribute", "ac:adf-fallback"}
 
     def __init__(self):
         super().__init__()
-        self.out, self.skip = [], 0
+        self.out, self.skip, self.cell, self.first = [], 0, 0, True
 
     def handle_starttag(self, tag, attrs):
-        if tag == "ac:parameter":
+        if tag in self._SKIP:
             self.skip += 1
-        elif tag in self._BLOCK:
-            self.out.append("\n")
         elif tag in ("td", "th"):
-            self.out.append(" | ")
+            # Each cell's <p> used to break the line, so a row came out one
+            # cell per line under a lone "|" -- 572 of 619 pages (2026-10-23).
+            self.out.append("" if self.first else " | ")
+            self.first, self.cell = False, self.cell + 1
+        elif tag in self._BLOCK:
+            self.out.append(" " if self.cell and tag != "tr" else "\n")
+            if tag == "tr":
+                self.first = True
 
     def handle_endtag(self, tag):
-        if tag == "ac:parameter":
+        if tag in self._SKIP:
             self.skip = max(0, self.skip - 1)
+        elif tag in ("td", "th"):
+            self.cell = max(0, self.cell - 1)
+        elif tag == "tr":
+            pass                        # the next row's <tr> breaks the line
         elif tag in self._BLOCK:
-            self.out.append("\n")
+            self.out.append(" " if self.cell else "\n")
 
     def handle_data(self, data):
         if not self.skip:
@@ -654,6 +668,8 @@ def page_text(title: str, storage_html: str) -> str:
     p = _Text()
     p.feed(storage_html or "")
     body = re.sub(r"[ \t]+\n", "\n", "".join(p.out))
+    body = "\n".join(re.sub(r"\s{2,}", " ", l).strip() if " | " in l else l
+                     for l in body.split("\n"))    # a cell's <p> leaves spaces
     body = re.sub(r"\n{3,}", "\n\n", body).strip()
     return f"{title}\n\n{body}" if body else ""
 

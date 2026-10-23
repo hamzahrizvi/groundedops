@@ -2348,8 +2348,8 @@ def _merge_rankings(rankings: list[list[dict]]) -> list[dict]:
             if key not in best or (r.get("rerank_score", 0.0)
                                    > best[key].get("rerank_score", 0.0)):
                 best[key] = r
-    return sorted(best.values(), key=lambda r: r.get("rerank_score", 0.0),
-                  reverse=True)
+    from retrieval_db import rank_key
+    return sorted(best.values(), key=rank_key, reverse=True)
 
 
 def _ask_picks(ask_rankings: list[list[dict]], named: list[str],
@@ -3603,7 +3603,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     results = _retrieved[:_ctx_k]
     retrieval_time = time.time() - t1
 
-    top_score = results[0].get("rerank_score", 0.0) if results else 0.0
+    top_score = max((r.get("rerank_score", 0.0) for r in results), default=0.0)
     confidence = retrieval_confidence_band(results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
     ptrace.mark("band", f"{confidence} (best {top_score:.3f}, gate "
             f"{RETRIEVAL_GATE_THRESHOLD}, clear at {AMBIGUOUS_CEILING})")

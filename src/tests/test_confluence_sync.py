@@ -127,7 +127,20 @@ def test_page_text():
                      '<ac:rich-text-body><p>Note</p></ac:rich-text-body></ac:structured-macro>'
                      '<table><tr><td>A</td><td>B</td></tr></table>')
     assert t.startswith("Install\n\nSteps") and "One & two" in t and "info" not in t
-    assert "Note" in t and "| A | B" in t
+    assert "Note" in t and "\nA | B" in t
+
+
+def test_page_text_keeps_a_table_row_on_one_line():
+    # Confluence wraps every cell in <p>: rows came out one cell per line.
+    t = cs.page_text("T", '<table><tbody><tr><th><p>Supply Current</p></th><th><p>Maximum</p></th></tr>'
+                     '<tr><td><p>Peak</p></td><td><p>1.50A</p><p>at 12V</p></td></tr></tbody></table>'
+                     '<ac:adf-extension><ac:adf-node type="panel">'
+                     '<ac:adf-attribute key="panel-type">note</ac:adf-attribute>'
+                     '<ac:adf-attribute key="local-id">baad7fce-8302</ac:adf-attribute>'
+                     '<ac:adf-content><p>Check the PSU.</p></ac:adf-content></ac:adf-node>'
+                     '<ac:adf-fallback><p>Check the PSU.</p></ac:adf-fallback></ac:adf-extension>')
+    assert "Supply Current | Maximum\nPeak | 1.50A at 12V\n" in t
+    assert t.count("Check the PSU.") == 1 and "baad7fce" not in t and "note" not in t
 
 
 def test_review_mode_excludes_until_approved():

@@ -294,6 +294,7 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
          ranked_ids[:keep_n]),
      complete_procedures=lambda chunks, *a, **k: chunks,
      cited_pages=lambda chunks, *a, **k: [],
+     rank_key=lambda c: c.get("rerank_score", 0.0),
      _invalidate_bm25_cache=lambda: None,
      EXCLUDED_SOURCES=["icu_network_api", "icu_age_result_quick_guide"],
      # The real rule's substring half: no document is marked internal here.

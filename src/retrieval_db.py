@@ -82,6 +82,36 @@ def is_excluded(source: str | None) -> bool:
     low = s.lower()
     return any(ex in low for ex in EXCLUDED_SOURCES) or s in internal_sources()
 
+
+# Documents that stand behind the manuals rather than answer customers: test
+# scripts and reports, certificates and declarations, change notices, release
+# notes, and numbered drawings (CN00392, WR02040_4, PA01083, ...). The
+# Confluence import of 2026-10-22 added ~3,600 such chunks to ~5,000, and on
+# the unchanged blind set they outranked the manuals: an NV4000 cassette-width
+# question was answered from a test-script checklist (C20261022c-28). They are
+# still answers when nothing else is ("which firmware added Dutch?"), so they
+# are ranked below the manuals, not removed: a chunk's ORDER is its rerank
+# score times SECONDARY_SOURCE_WEIGHT; rerank_score itself stays the model's,
+# so the gate and the confidence band read what they always read.
+# 1.0 turns it off.
+SECONDARY_SOURCE_WEIGHT = float(os.getenv("SECONDARY_SOURCE_WEIGHT", "0.5"))
+_SECONDARY = re.compile(
+    r"test\s*script|testing\s*procedure|test\s*report|intertek"
+    r"|certificat|declaration|conformity|compliance|-dec\b|-(?:ul|cb)\b"
+    r"|change\s*noti|release\s*(?:notes|documentation)"
+    r"|^(?:cn|wr|pa|ga)[\s_-]?\d{3}|^[a-z]{2}\d{5}", re.I)
+
+
+def is_secondary(source: str | None) -> bool:
+    return bool(_SECONDARY.search(source or ""))
+
+
+def rank_key(chunk: dict) -> float:
+    """The order a reranked chunk takes: its score, less for a secondary
+    document. Every sort of reranked chunks uses this."""
+    s = chunk.get("rerank_score", 0.0)
+    return s * SECONDARY_SOURCE_WEIGHT if is_secondary(chunk.get("source")) else s
+
 # How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
 # pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
 # margin retrieve_from_db already computes. See the note at the cut itself.
@@ -1023,8 +1053,13 @@ def cited_pages(chunks: list[dict], budget: int) -> list[dict]:
         logger.warning(f"cited pages skipped: {exc}")
         return []
     have = {c.get("id") for c in chunks}
+    # Only a PDF has pages. A .txt or .docx is all "page 1" (parsing.py), so
+    # its "rest of the page" was the whole document up to the budget: ~3k
+    # tokens on every verifier call once the Confluence pages replaced the
+    # PDF manuals (median prompt 4.8k -> 8.2k, 2026-10-23).
     keys = list(dict.fromkeys((c.get("source"), c.get("page")) for c in chunks
-                              if c.get("source") and isinstance(c.get("page"), int)))
+                              if (c.get("source") or "").lower().endswith(".pdf")
+                              and isinstance(c.get("page"), int)))
     found = {k: [] for k in keys}
     for a in all_chunks:
         k = (a.get("source"), a.get("page"))
