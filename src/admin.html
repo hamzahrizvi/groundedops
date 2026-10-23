@@ -2255,7 +2255,9 @@ function drawJobs() {
     bar.firstChild.style.width = j.pct ? Math.min(100, j.pct) + "%" : "";
 
     const acts = card.querySelector(".bgtask-acts");
-    if (done && !acts.childElementCount && j.kind === "ocr") {
+    if (done && !acts.childElementCount && j.acts) {
+      acts.append(...j.acts(id));
+    } else if (done && !acts.childElementCount && j.kind === "ocr") {
       acts.append(el("button", { class: "btn btn-ghost",
         onclick: () => { jobs.delete(id); drawJobs(); } }, "Done"));
     } else if (done && !acts.childElementCount) {
@@ -5343,17 +5345,39 @@ function viewDocuments() {
   // Internal: the document stays indexed but no public path reads it. FAQs
   // are hand-curated and stay until removed, so the ones made from it (ticked)
   // and the ones worded like it (unticked) are offered for removal here.
-  const setInternal = async (source, on) => {
+  // Progress goes to the bottom-right task panel and only this row is
+  // redrawn: refresh() + render() rebuilt the whole page, which blinked.
+  const setInternal = async (s, on, row) => {
+    const source = s.source;
     if (on && !confirm("Make " + source + " internal? Public answers, downloads and "
         + "pictures stop using it from the next question.")) return;
+    const id = "internal:" + source;
+    const j = { name: source, stage: on ? "Making internal" : "Making public",
+                pct: 0, status: "working" };
+    jobs.delete(id); jobs.set(id, j); drawJobs();
     let res;
     try {
       res = await api("/admin/source_internal", { method: "POST",
         body: JSON.stringify({ source, internal: on }) });
-    } catch (e) { return toast(e.message, true); }
-    toast(on ? "Internal: no longer used in public answers" : "Public again");
-    await refresh(); render();
-    if (on && res.faqs && res.faqs.length) internalFaqDialog(source, res.faqs);
+    } catch (e) {
+      j.status = "error"; j.stage = "Failed: " + e.message; drawJobs(); return;
+    }
+    s.internal = on;
+    if (row && row.isConnected) row.replaceWith(docRow(s));
+    const faqs = (on && res.faqs) || [];
+    const close = id => el("button", { class: "btn btn-ghost",
+      onclick: () => { jobs.delete(id); drawJobs(); } }, "Done");
+    j.status = "done"; j.pct = 100;
+    j.stage = on
+      ? "Internal: kept out of public answers"
+        + (faqs.length ? ". " + faqs.length + " FAQ" + (faqs.length === 1 ? "" : "s") + " to review" : "")
+      : "Public again";
+    j.acts = id => faqs.length
+      ? [el("button", { class: "btn btn-secondary",
+           onclick: () => internalFaqDialog(source, faqs) }, "Review FAQs"), close(id)]
+      : [close(id)];
+    drawJobs();
+    if (faqs.length) internalFaqDialog(source, faqs);
   };
 
   const internalFaqDialog = (source, faqs) => {
@@ -5377,7 +5401,7 @@ function viewDocuments() {
       }
       close();
       toast("Removed " + done + " FAQ" + (done === 1 ? "" : "s"));
-      await refresh(); render();
+      refresh().catch(() => {});
     });
     dlg.append(
       el("div", { class: "cf-dlg-head" },
@@ -5495,7 +5519,8 @@ function viewDocuments() {
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
         title: s.internal ? "Let public answers use this document again"
                           : "Keep this document out of every public answer, download and picture",
-        onclick: () => setInternal(s.source, !s.internal) }, s.internal ? "Make public" : "Make internal"),
+        onclick: e => setInternal(s, !s.internal, e.target.closest(".item")) },
+        s.internal ? "Make public" : "Make internal"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
         if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
         try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });
