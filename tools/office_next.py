@@ -73,6 +73,14 @@ PARKED = ("state", "parked_review")   # the parked ids last handed to the produc
 LANE_ONE_LATE = 30 * 60   # lanes 2 and 3 also work when lane 1 has not looked for work for this long (it stopped)
 REFRESH = 3600   # an idle lane 1 refreshes the office page and the cost charts this often
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
+# Minutes a claim may be held before its lane counts as stuck, likely on a permission prompt nobody sees (2026-10-23: the
+# auto-mode check gave no verdict on a Security Bash call, which then waited from 12:32 until someone stopped it at 14:26).
+# The longest normal piece in the lanes' transcripts 10-09..10-23 (a --take to the lane's next --take or --release):
+# security 9, merge 2, diary 3, marketing 2, audit 5, rnd 20, customer 39, product-owner 160, dev 313. Shown and told
+# once, never dropped: other lanes take other work meanwhile, and dropping a live claim caused double work (D-20261020-05).
+STUCK = {"security": 45, "merge": 30, "diary": 30, "marketing": 30, "audit": 30, "rnd": 60, "customer": 120,
+         "product-owner": 240, "dev": 420}
+TOLD = ("state", "stuck_told")   # the stuck claims already told to the CEO, {key: its "at"}
 
 
 def latest_usage(path=HISTORY, fallback=None):
@@ -135,6 +143,41 @@ def _alive(pid):
     k.GetExitCodeProcess(h, ctypes.byref(code))
     k.CloseHandle(h)
     return code.value == 259   # STILL_ACTIVE
+
+
+def stuck(held, now):
+    """{key: since} for the claims held past their department's STUCK limit. A blind test started by hand has its pid
+    checked instead (claims())."""
+    out = {}
+    for k, c in held.items():
+        try:
+            at = datetime.datetime.fromisoformat(c["at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if c.get("lane") != "hand" and now - at > datetime.timedelta(minutes=STUCK.get(k.split("-D-")[0], 120)):
+            out[k] = at
+    return out
+
+
+def stuck_why(since):
+    return f"stuck since {since.astimezone():%H:%M}, likely waiting on a prompt"
+
+
+def tell_stuck(ops, now):
+    """STUCK lines for claims newly past their limit, each printed once (OPS/state/stuck_told) for the lane to push to the CEO."""
+    held = claims(ops)
+    found = {k: at.isoformat() for k, at in stuck(held, now).items()}
+    p = os.path.join(ops, *TOLD)
+    try:
+        told = json.load(open(p, encoding="utf-8"))
+    except (OSError, ValueError):
+        told = {}
+    if found != told:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(found, f)
+    what = lambda k: " ".join(held[k].get("line", k).replace(TASK, "").split()[1:])
+    return [f"STUCK lane {held[k].get('lane')} on {what(k)}: {stuck_why(datetime.datetime.fromisoformat(at))}."
+            " Open its run in the Claude app and answer or stop it." for k, at in found.items() if told.get(k) != at]
 
 
 def release(ops, lane):
@@ -667,6 +710,12 @@ def selftest():
         assert needed(ops, 2) == (True, "lane 2 holds a leftover claim"), "own leftover claim: lane must run to drop it"
         os.remove(os.path.join(ops, "state", "claims", "dev-D-2.json"))
         os.remove(os.path.join(ops, "state", "claims", "dev-D-1.json"))
+        ago = lambda m: (now - datetime.timedelta(minutes=m)).isoformat()   # 2026-10-23: a Security run waited on a prompt for 2 hours
+        w("state/claims/security.json", json.dumps({"lane": 1, "at": ago(118), "line": "RUN  groundedops-office-security  review D-1"}))
+        w("state/claims/dev-D-3.json", json.dumps({"lane": 2, "at": ago(118), "line": "RUN  groundedops-office-dev  build D-3"}))
+        assert (tell_stuck(ops, now)[0].startswith("STUCK lane 1 on security review D-1: stuck since") and len(tell_stuck(ops, now) + tell_stuck(ops, now)) == 0
+                and set(claims(ops)) == {"security", "dev-D-3"}), "a claim past its limit is told once and never dropped; a long build is not stuck"
+        release(ops, 1); release(ops, 2)
         w("state/every", "120"); w("state/lane-1-worked")
         got = take(ops, ops, 11, 38, resets, now, 1)
         assert got[-1] == "TOOK nothing" and any(x.startswith("SPACED lane 1") for x in got), got
@@ -759,7 +808,8 @@ def main():
             five, week = (0, 0) if old > 60 else (five, week)
             free = [line for line, _ in startable(a.ops, entries(a.ops, a.repo, five, week, next_reset(now), now, claims(a.ops)), 1)]
         ok, why = needed(a.ops, a.lane, free)
-        return print(("NEEDED " if ok else "NOT NEEDED ") + why)
+        # a lane past its department's limit is told here: every lane's every wake-up runs this check first
+        return print("\n".join([("NEEDED " if ok else "NOT NEEDED ") + why] + tell_stuck(a.ops, datetime.datetime.now(datetime.timezone.utc))))
     if a.release:   # and the lane's schedule, when the CEO changed "Next run" on the page
         end_tick(a.ops, a.lane)
         want, path = lane_cron(a.lane, every(a.ops)), os.path.join(a.ops, "state", f"cron-{a.lane}")
