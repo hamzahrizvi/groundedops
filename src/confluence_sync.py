@@ -50,7 +50,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 import requests
@@ -82,6 +82,28 @@ _FOLDER_URL = re.compile(
 _run_lock = threading.Lock()      # one check/sync at a time
 _state_lock = threading.Lock()    # read-modify-write of the state file
 _progress: dict = {}
+# Set by cancel(); checked between pages (check) and between documents (sync).
+_cancel = threading.Event()
+
+
+class Cancelled(RuntimeError):
+    pass
+
+
+def cancel() -> bool:
+    """Ask the run in progress to stop at its next page or document. A check
+    stopped part way is thrown away (it writes only at the end); a sync keeps
+    the documents it finished, and the rest wait for the next one."""
+    if not _run_lock.locked():
+        return False
+    _cancel.set()
+    _progress["cancelling"] = True
+    return True
+
+
+def _stop_point() -> None:
+    if _cancel.is_set():
+        raise Cancelled("Stopped by request")
 
 
 def _now() -> str:
@@ -380,7 +402,8 @@ def overview() -> dict:
     return {"mode": st["mode"], "checked_at": st.get("checked_at"),
             "bundles": [b["path"] for b in st["bundles"]],
             "items": items, "history": st["history"][::-1],
-            "running": running(), "configured": configured()}
+            "running": running(), "configured": configured(),
+            "schedule": schedule(st), "next_run": _next_run(st)}
 
 
 # ── decisions from the console ──────────────────────────────────────────
@@ -660,6 +683,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     combined: dict[str, dict] = {}       # bundle key -> the item being built
     members_of: set[str] = set()         # page items now inside a combined one
     for page, trail, ids in _walk(api, root_kind, root_id):
+        _stop_point()
         pid = page["id"]
         _progress.update(phase="checking", done=len(found))
         full = api.page(pid)
@@ -853,6 +877,7 @@ def _bundle_text(api: _Api, it: dict) -> str:
     from chunking import SECTION_CLOSE, SECTION_OPEN
     parts = [it["title"]]
     for n, (pid, heading) in enumerate(it.get("members") or []):
+        _stop_point()
         _progress.update(page=n + 1, pages=len(it["members"]))
         full = api.page(pid)
         text = page_text(full.get("title") or "", _body(full))
@@ -884,6 +909,9 @@ def _apply(api: _Api) -> dict:
     keep = set(st.get("keep_uploads") or [])
     res["replaced"] = []
     for n, (key, it) in enumerate(todo):
+        if _cancel.is_set():
+            res["cancelled"], res["left"] = True, len(todo) - n
+            break
         _progress.update(phase="syncing", done=n, total=len(todo))
         src, what = it["source"], status_of({**it, "error": None})
         try:
@@ -938,6 +966,11 @@ def _apply(api: _Api) -> dict:
                       "added" if what == "new" else "updated")
                 change = {"synced_version": version, "synced_at": _now(), "version": version}
             change["error"] = None
+        except Cancelled:
+            # Stopped while building a combined document: nothing of it
+            # was written, so it simply stays pending.
+            res["cancelled"], res["left"] = True, len(todo) - n
+            break
         except Exception as exc:
             logger.warning("Confluence sync: %s failed: %s", src, exc)
             res["errors"].append(f"{src}: {exc}")
@@ -953,6 +986,8 @@ def _apply(api: _Api) -> dict:
 
     # A manual this sync already keeps, uploaded again by hand since: the
     # upload goes, so the bot never reads two copies of it.
+    if res.get("cancelled"):
+        return res
     done = {k for k, _ in todo}
     for key, it in st["items"].items():
         if key in done or status_of(it) != "synced":
@@ -992,6 +1027,7 @@ def run(apply: bool = True, check: bool | None = None) -> dict:
         raise Busy("A Confluence check or sync is already running")
     try:
         _progress.clear()
+        _cancel.clear()
         _progress.update(phase="connecting")
         try:
             api, root_kind, root_id = _connect()
@@ -999,6 +1035,10 @@ def run(apply: bool = True, check: bool | None = None) -> dict:
             if apply:
                 res = {**_apply(api), **{k: res[k] for k in ("found", "new", "changed", "gone") if k in res},
                        "checked": check}
+        except Cancelled:
+            # Stopped during the check: it writes nothing until it finishes,
+            # so nothing changed, and the sync after it never started.
+            res = {"at": _now(), "kind": "sync" if apply else "check", "cancelled": True}
         except Exception as exc:
             logger.warning("Confluence %s failed: %s", "sync" if apply else "check", exc)
             res = {"at": _now(), "kind": "sync" if apply else "check", "failed": str(exc)}
@@ -1016,6 +1056,7 @@ def run(apply: bool = True, check: bool | None = None) -> dict:
         return res
     finally:
         _progress.clear()
+        _cancel.clear()
         _run_lock.release()
 
 
@@ -1037,22 +1078,91 @@ def _interval_seconds() -> float:
         return 24 * 3600
 
 
+# The automatic sync, set on the Confluence page. "hours": every N hours
+# counted from the last check (restarting the server does not re-read the
+# folder); "daily"/"weekly": at a time of day, server local time, weekly on
+# `day` (0 = Monday). Until someone sets one, CONFLUENCE_SYNC_HOURS (24)
+# every-N-hours, which is what it always did.
+EVERY = ("off", "hours", "daily", "weekly")
+
+
+def schedule(st: dict | None = None) -> dict:
+    sched = (st or _load()).get("schedule")
+    if sched:
+        return sched
+    hours = _interval_seconds() / 3600
+    return {"every": "hours" if hours > 0 else "off", "hours": hours or 24,
+            "time": "02:00", "day": 0}
+
+
+def set_schedule(every: str, hours: float = 24, at: str = "02:00", day: int = 0) -> dict:
+    if every not in EVERY:
+        raise ValueError("every must be off, hours, daily or weekly")
+    if every == "hours" and not 1 <= float(hours) <= 24 * 7:
+        raise ValueError("every so many hours: between 1 and 168")
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at or ""):
+        raise ValueError("time must be HH:MM")
+    if not 0 <= int(day) <= 6:
+        raise ValueError("day must be 0 (Monday) to 6 (Sunday)")
+    sched = {"every": every, "hours": float(hours), "time": at, "day": int(day)}
+    _update(lambda st: st.__setitem__("schedule", sched))
+    return sched
+
+
+def _slot(sched: dict, now: datetime) -> datetime:
+    """The most recent daily/weekly time at or before `now` (local)."""
+    hh, mm = (int(x) for x in sched["time"].split(":"))
+    at = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if sched["every"] == "weekly":
+        at -= timedelta(days=(at.weekday() - sched["day"]) % 7)
+    if at > now:
+        at -= timedelta(days=7 if sched["every"] == "weekly" else 1)
+    return at
+
+
+def _next_run(st: dict | None = None) -> str | None:
+    st = st or _load()
+    sched = schedule(st)
+    now = datetime.now().astimezone()
+    if sched["every"] == "off":
+        return None
+    if sched["every"] == "hours":
+        wait = max(0.0, sched["hours"] * 3600 - _since_last_check())
+        return (now + timedelta(seconds=wait)).isoformat(timespec="minutes")
+    nxt = _slot(sched, now) + timedelta(days=7 if sched["every"] == "weekly" else 1)
+    last = st.get("auto_run_at")
+    if not last or datetime.fromisoformat(last) < _slot(sched, now):
+        nxt = _slot(sched, now)          # this slot has not run yet: due now
+    return nxt.isoformat(timespec="minutes")
+
+
+def _due(st: dict, now: datetime) -> bool:
+    sched = schedule(st)
+    if sched["every"] == "hours":
+        return _since_last_check() >= sched["hours"] * 3600
+    if sched["every"] in ("daily", "weekly"):
+        slot = _slot(sched, now)
+        last = st.get("auto_run_at")
+        # A slot missed while the server was down runs when it comes back,
+        # but only that day's: an old one is not worth a surprise sync.
+        return (not last or datetime.fromisoformat(last) < slot) \
+            and now - slot < timedelta(hours=12)
+    return False
+
+
 def _loop() -> None:
     from app_state import capability
     time.sleep(300)   # after startup and the model warmup
     while True:
-        interval = _interval_seconds()
-        if interval <= 0:
-            return
-        # Counted from the last check, not from startup: restarting the
-        # server must not re-read the whole folder every time.
-        wait = interval - _since_last_check()
-        if wait > 60:
-            time.sleep(wait)
-            continue
-        if configured() and capability("search") and not running():
-            run_in_background(apply=True, check=True)
-        time.sleep(interval)
+        try:
+            st = _load()
+            now = datetime.now().astimezone()
+            if _due(st, now) and configured() and capability("search") and not running():
+                _update(lambda s: s.__setitem__("auto_run_at", now.isoformat(timespec="seconds")))
+                run_in_background(apply=True, check=True)
+        except Exception as exc:
+            logger.warning("scheduled Confluence sync skipped: %s", exc)
+        time.sleep(60)
 
 
 def _since_last_check() -> float:
@@ -1064,7 +1174,4 @@ def _since_last_check() -> float:
 
 
 def start() -> None:
-    if _interval_seconds() <= 0:
-        logger.info("periodic Confluence sync disabled (CONFLUENCE_SYNC_HOURS=0)")
-        return
     threading.Thread(target=_loop, name="confluence-sync-timer", daemon=True).start()

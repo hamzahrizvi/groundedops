@@ -4368,6 +4368,50 @@ function cfSyncCard(c) {
     "Sync now" + (pending ? " (" + pending + ")" : ""));
   checkBtn.disabled = syncBtn.disabled = !c.configured || !!busy;
 
+  // Stop, with what stopping means said first.
+  const stopBtn = busy ? el("button", { class: "btn btn-ghost", disabled: busy.cancelling ? "true" : null,
+    onclick: async () => {
+      const syncing = busy.phase === "syncing";
+      if (!await askConfirm({ title: "Stop the " + (syncing ? "sync" : "check") + "?",
+          body: syncing
+            ? "Documents already synced in this run stay in the bot. The rest are left as they "
+              + "are and wait for the next sync. A combined document being built is not added."
+            : "Nothing found so far is kept: a check only saves when it finishes, so the "
+              + "document list stays as it was. If a sync was to follow, it will not start.",
+          ok: "Stop" })) return;
+      try { await api("/admin/confluence/cancel", { method: "POST" }); toast("Stopping after the current document"); }
+      catch (e) { toast(e.message, true); }
+      cfLoad();
+    } }, busy.cancelling ? "Stopping\u2026" : "Stop") : null;
+
+  // When it syncs on its own.
+  const sch = Object.assign({ every: "off", hours: 24, time: "02:00", day: 0 }, c.schedule || {});
+  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const every = el("select", { class: "input", style: "width:auto" },
+    [["off", "Off"], ["hours", "Every"], ["daily", "Daily at"], ["weekly", "Weekly on"]].map(([v, l]) =>
+      el("option", { value: v, selected: sch.every === v ? "true" : null }, l)));
+  const hours = el("input", { class: "input", type: "number", min: "1", max: "168", value: String(sch.hours),
+    style: "width:80px", "aria-label": "Hours between syncs" });
+  const day = el("select", { class: "input", style: "width:auto", "aria-label": "Day of the week" },
+    DAYS.map((d, i) => el("option", { value: String(i), selected: sch.day === i ? "true" : null }, d)));
+  const at = el("input", { class: "input", type: "time", value: sch.time, style: "width:auto",
+    "aria-label": "Time of day" });
+  const hoursLbl = el("span", { style: muted }, "hours");
+  const atLbl = el("span", { style: muted }, "at");
+  const shape = () => {
+    const v = every.value;
+    hours.hidden = hoursLbl.hidden = v !== "hours";
+    day.hidden = atLbl.hidden = v !== "weekly";
+    at.hidden = v !== "daily" && v !== "weekly";
+  };
+  every.addEventListener("change", shape);
+  const saveSch = el("button", { class: "btn btn-secondary", onclick: () =>
+    cfPost("/admin/confluence/schedule", { every: every.value, hours: Number(hours.value) || 24,
+      time: at.value || "02:00", day: Number(day.value) }, "Schedule saved") }, "Save");
+  shape();
+  const nextRun = c.next_run ? "Next automatic sync: " + new Date(c.next_run).toLocaleString() + "."
+    : "Automatic sync is off.";
+
   card.append(el("b", {}, "Sync"),
     el("div", { class: "chips", style: "margin:8px 0 6px" },
       mode("review", "Approve new documents first",
@@ -4378,21 +4422,20 @@ function cfSyncCard(c) {
       ? "Every document found is synced. Exclude one to take it out of the bot."
       : "New documents start excluded and are marked New until someone approves them. "
         + "Approved documents stay approved and update when they change."),
-    el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn,
+    el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn, stopBtn,
       busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
               cfFeedCount = busy.log_total || 0, cfStatusEl)
            : el("span", { style: muted }, (c.checked_at ? "Last checked " + new Date(c.checked_at).toLocaleString() + ". " : "")
                + "Sync now indexes what is approved, reading Confluence first only if the last check "
-               + "is over 6 hours old. Checks and syncs on its own once a day.")));
+               + "is over 6 hours old.")),
+    el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px" },
+      el("span", { style: "font-size:13px;font-weight:600;margin-right:4px" }, "Automatic sync"),
+      every, hours, hoursLbl, day, atLbl, at, saveSch),
+    el("div", { style: muted + ";margin-top:6px" }, nextRun
+      + " An automatic sync checks Confluence first, then syncs. Times are the server's."));
   return card;
 }
 
-// The documents, as the folder tree they live in. Two thousand rows cannot be
-// read; folders can. Every folder starts closed and says what is inside
-// (how many, how many approved, what is new or updated); its tick box selects
-// everything under it, subfolders included, and its arrow opens it.
-// "Recently edited" drops the tree and lists by Confluence's own edit date,
-// for checking what changed.
 // The browser's confirm() ignores the theme and sits at the top of the
 // page. This is the console's own: centred, page blurred behind it. With
 // `snooze`, a "don't warn me for a week" tick remembers the answer per
@@ -4462,6 +4505,12 @@ function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
   });
 }
 
+// The documents, as the folder tree they live in. Two thousand rows cannot be
+// read; folders can. Every folder starts closed and says what is inside
+// (how many, how many approved, what is new or updated); its tick box selects
+// everything under it, subfolders included, and its arrow opens it.
+// "Recently edited" drops the tree and lists by Confluence's own edit date,
+// for checking what changed.
 function cfBox(checked, onchange, label) {
   return el("input", { type: "checkbox", class: "cf-tick", "aria-label": label,
     checked: checked ? "true" : null, onchange });
@@ -4720,6 +4769,11 @@ function cfHistoryCard(c) {
   const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
   const n = (r, k) => Array.isArray(r[k]) ? r[k].length : (r[k] || 0);
   const line = r => r.failed ? "Failed: " + r.failed
+    : r.cancelled && r.kind === "check" ? "Stopped before it finished; nothing changed"
+    : r.cancelled && !n(r, "added") && !n(r, "updated") && !n(r, "removed") && !r.left
+      ? "Stopped during the check; nothing changed"
+    : r.cancelled ? "Stopped: " + n(r, "added") + " added, " + n(r, "updated") + " updated, "
+      + n(r, "removed") + " removed; " + (r.left || 0) + " left for the next sync"
     : r.kind === "check"
       ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
       : n(r, "added") + " added, " + n(r, "updated") + " updated, " + n(r, "removed") + " removed"

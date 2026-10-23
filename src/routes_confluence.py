@@ -109,6 +109,35 @@ def admin_confluence_run(payload: RunReq,
     return {**_status(), "running": {"phase": "starting"}}
 
 
+@router.post("/admin/confluence/cancel")
+def admin_confluence_cancel(x_admin_password: str | None = Header(default=None)):
+    """Stop the run in progress at its next page or document."""
+    me = _require_admin(x_admin_password)
+    if not confluence_sync.cancel():
+        raise HTTPException(status_code=409, detail="Nothing is running")
+    logger.info(f"Confluence run stop requested by {me['email']}")
+    return {"running": confluence_sync.running()}
+
+
+class ScheduleReq(BaseModel):
+    every: str
+    hours: float = 24
+    time: str = "02:00"
+    day: int = 0
+
+
+@router.post("/admin/confluence/schedule")
+def admin_confluence_schedule(payload: ScheduleReq,
+                              x_admin_password: str | None = Header(default=None)):
+    me = _require_admin(x_admin_password)
+    try:
+        confluence_sync.set_schedule(payload.every, payload.hours, payload.time, payload.day)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Confluence schedule {payload.every} {payload.hours}h {payload.time} day {payload.day} set by {me['email']}")
+    return _status()
+
+
 @router.get("/admin/confluence/progress")
 def admin_confluence_progress(since: int = 0,
                               x_admin_password: str | None = Header(default=None)):

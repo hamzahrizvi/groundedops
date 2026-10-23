@@ -491,3 +491,77 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("PASS", name)
+
+
+class StoppingApi(FakeApi):
+    """Asks the run to stop the first time a document is fetched."""
+    stop = False
+
+    def page(self, pid):
+        if self.stop:
+            cs.cancel()
+        return super().page(pid)
+
+    def download(self, page_id, att_id):
+        if self.stop:
+            cs.cancel()
+        return super().download(page_id, att_id)
+
+
+def test_stopping_a_sync_keeps_what_was_done():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), StoppingApi()
+        w.run(api, apply=False)
+        w.decide(["Installation", "SH3 manual.pdf"], decision="approved")
+        api.stop = True
+        res = w.run(api, check=False)
+        # the document being fetched finishes; the other waits
+        assert res.get("cancelled") and res["left"] == 1, res
+        assert len(w.ingested) == 1, w.ingested
+        statuses = sorted(i["status"] for i in w.items().values())
+        assert statuses == ["new", "synced"], statuses
+        hist = w._with(lambda: cs._load()["history"][-1])
+        assert hist["cancelled"] and hist["left"] == 1, hist
+        # the next sync picks up the rest
+        api.stop = False
+        w.run(api, check=False)
+        assert len(w.ingested) == 2
+
+
+def test_stopping_a_check_changes_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), StoppingApi()
+        api.stop = True
+        res = w.run(api, apply=True)
+        assert res.get("cancelled") and res["kind"] == "sync", res
+        assert w.items() == {} and w.ingested == []
+        assert not cs.cancel()                      # nothing running now
+
+
+def test_schedule():
+    from datetime import datetime, timedelta
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        for bad in [("sometimes",), ("hours", 0), ("daily", 24, "25:00"), ("weekly", 24, "02:00", 9)]:
+            try:
+                w._with(lambda: cs.set_schedule(*bad))
+            except ValueError:
+                continue
+            raise AssertionError(f"accepted {bad}")
+        w._with(lambda: cs.set_schedule("daily", at="02:00"))
+        st = w._with(cs._load)
+        assert st["schedule"]["every"] == "daily"
+        now = datetime(2026, 10, 23, 2, 30).astimezone()
+        assert cs._due(st, now)                                     # today's 02:00 not run yet
+        st["auto_run_at"] = now.isoformat()
+        assert not cs._due(st, now)                                 # ran
+        assert not cs._due(st, now + timedelta(hours=20))           # tomorrow 02:00 not reached
+        assert cs._due(st, now + timedelta(hours=24))               # tomorrow's slot
+        st["auto_run_at"] = (now - timedelta(days=3)).isoformat()
+        assert not cs._due(st, now + timedelta(hours=13))           # a missed slot only runs the same day
+        w._with(lambda: cs.set_schedule("weekly", at="02:00", day=4))  # Friday
+        st = w._with(cs._load)
+        fri = datetime(2026, 10, 23, 3, 0).astimezone()             # a Friday
+        assert cs._due(st, fri) and not cs._due(st, fri - timedelta(days=1))
+        w._with(lambda: cs.set_schedule("off"))
+        assert not cs._due(w._with(cs._load), fri) and w._with(cs._next_run) is None
