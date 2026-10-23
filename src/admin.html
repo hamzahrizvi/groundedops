@@ -5355,6 +5355,12 @@ function viewDocuments() {
         } }),
         el("span", {}, p.categoryName + " › " + p.name)))));
   const productKeys = p => [...new Set([p.key, ...also])].join(",");
+  // Internal = never used to answer a customer, never downloadable. Sent only
+  // when ticked: a new version of an internal document keeps its mark
+  // server-side unless someone changes it on its row.
+  const internalBox = el("input", { type: "checkbox" });
+  const internalPick = el("label", { class: "tagpick-row" }, internalBox,
+    el("span", {}, "Internal — never shown to customers"));
 
   const drop = el("div", { class: "drop off" },
     el("b", {}, "Choose a product first"),
@@ -5379,6 +5385,7 @@ function viewDocuments() {
     const headers = { "x-admin-password": tok,
                       "category-key": p.category, "product-key": productKeys(p) };
     if (replaceSource) headers["replace-source"] = replaceSource;
+    if (internalBox.checked) headers["internal"] = "1";
     const r = await fetch(API + "/upload", { method: "POST", body: fd, headers });
     if (r.status === 409) {
       const body = await r.json().catch(() => null);
@@ -5915,11 +5922,12 @@ function viewDocuments() {
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "doc-add", "data-sec": "Add documents" },
       el("div", { class: "sec-title" }, "Add documents"),
-      el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in."),
+      el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in. Documents indexed here can be quoted to anonymous widget visitors: tick Internal for service notes, customer-specific documents or anything holding a password."),
       el("div", { class: "row" },
         el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
         el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel),
-        el("div", {}, el("label", { class: "flabel" }, "Optional"), alsoPick)),
+        el("div", {}, el("label", { class: "flabel" }, "Optional"), alsoPick),
+        el("div", {}, el("label", { class: "flabel" }, "Who may see it"), internalPick)),
       // Indexing a document needs the embedding model, so this is the one
       // control on the page that has to wait for it. POST /upload refuses
       // on the same capability, so the grey is never a lie.

@@ -48,26 +48,50 @@ EXCLUDED_SOURCES = [
 # no restart; is_excluded() is the one check every reader uses.
 _INTERNAL_PATH = os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json")
 _internal: frozenset | None = None
+_internal_good: frozenset | None = None   # last set read from a readable file
 _internal_lock = threading.Lock()
 
 
+class _Everything(frozenset):
+    """What an unreadable internal_sources.json means on a cold start: every
+    document counts as internal (`in` is always true), so nothing is answered
+    from the documents until the file is repaired. Fail closed."""
+    def __contains__(self, item):
+        return True
+
+
 def internal_sources() -> frozenset:
-    global _internal
+    """Names marked internal. An absent file means none. An unreadable one
+    keeps the last good set read in this process, or (cold start) holds every
+    document back; logged at error, cached so it is logged once."""
+    global _internal, _internal_good
     if _internal is None:
         import jsonstore
-        _internal = frozenset(jsonstore.load(_INTERNAL_PATH, [], label="internal documents") or [])
+        try:
+            data = jsonstore._parse(_INTERNAL_PATH) if os.path.exists(_INTERNAL_PATH) else []
+            if not isinstance(data, list):
+                raise ValueError(f"expected a list of names, got {type(data).__name__}")
+            _internal = _internal_good = frozenset(data)
+        except Exception as exc:
+            _internal = _internal_good if _internal_good is not None else _Everything()
+            logger.error(
+                "internal documents file %s is unreadable (%s); %s until it is "
+                "repaired and the backend restarted", _INTERNAL_PATH, exc,
+                "keeping the last good marks" if _internal_good is not None
+                else "every document is held back from answers")
     return _internal
 
 
 def set_internal(sources, on: bool) -> None:
     """Mark documents internal (on) or customer-facing (off)."""
-    global _internal
+    global _internal, _internal_good
     import jsonstore
     with _internal_lock:
+        _internal = None                    # re-read: never write back a stale or fail-closed set
         cur = set(internal_sources())
         cur = cur | set(sources) if on else cur - set(sources)
-        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")
-        _internal = frozenset(cur)
+        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")  # refuses an unreadable file
+        _internal = _internal_good = frozenset(cur)
     try:                                   # inventories and the BM25 index cache by source
         from db import invalidate_retrieval_cache
         invalidate_retrieval_cache()
