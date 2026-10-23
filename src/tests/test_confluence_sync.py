@@ -340,6 +340,45 @@ def test_a_title_path_bundle_is_pinned_to_its_id():
         assert w.items()["SSP Manual"]["key"] == "bundle:id:40" and w.removed == []
 
 
+class ChapterApi(FakeApi):
+    """Website / Smart Hopper 3 (folder) / SH3 User Manual (page) / three chapters."""
+    tree = {("pages", "1"): [{"type": "folder", "id": "10", "title": "Smart Hopper 3"}],
+            ("folders", "10"): [{"type": "page", "id": "60", "title": "SH3 User Manual"}],
+            ("pages", "60"): [{"type": "page", "id": str(n), "title": f"Chapter {n}"}
+                              for n in (61, 62, 63)]}
+    attachments = {}
+
+    def page(self, pid):
+        title = {"1": "Website", "60": "SH3 User Manual"}.get(pid, f"Chapter {pid}")
+        return {"title": title, "version": {"number": 1}, "body": {"storage": {"value": BODY}}}
+
+
+def test_a_manual_kept_in_chapters_is_combined_on_its_own():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), ChapterApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        assert len(w.ingested) == 4 and "SH3 User Manual" in w.items()
+
+        # chapters that disagree (one internal) are left as they are
+        w.decide(["Chapter 62"], decision="internal")
+        w.run(api)
+        assert w.items()["SH3 User Manual"]["kind"] == "page" and w.removed == []
+
+        # agreeing again: the next check combines them, keeping decision and product
+        w.decide(["Chapter 62"], decision="approved")
+        w.run(api)
+        m = w.items()["SH3 User Manual"]
+        assert m["kind"] == "bundle" and m["pages"] == 4 and m["decision"] == "approved", m
+        assert w.ingested[-1] == ("SH3 User Manual.txt", "sh3") and len(w.removed) == 4, w.ingested
+
+        # split by someone: stays split
+        w._with(lambda: cs.set_bundle(["Smart Hopper 3", "SH3 User Manual"], False))
+        w.run(api)
+        w.run(api)
+        assert w.items()["SH3 User Manual"]["kind"] == "page" and len(w.items()) == 4
+
+
 def test_a_whole_manual_replaces_its_upload():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()

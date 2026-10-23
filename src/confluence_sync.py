@@ -203,6 +203,16 @@ def _filed(source: str) -> tuple[str | None, str]:
     return (held[0][0] if held else None), ",".join(k for _, k in held)
 
 
+def _filed_all() -> dict[str, str]:
+    """source -> "k1,k2" for every filed source, in one catalogue read."""
+    filed: dict[str, str] = {}
+    for c in catalog.load_catalog()["categories"]:
+        for p in c.get("products", []):
+            for src in p.get("sources", []):
+                filed[src] = (filed[src] + "," if src in filed else "") + p["key"]
+    return filed
+
+
 def _norm(name: str) -> str:
     """A product or folder name reduced to what identifies it: Confluence
     calls the folder "NV9 Spectral Range", "SMART Coin System Range
@@ -338,11 +348,7 @@ def _matches(items: dict, uploads: dict | None = None) -> dict[str, list[tuple[s
 def overview() -> dict:
     """Everything the console's Confluence page shows."""
     st = _load()
-    filed: dict[str, str] = {}             # source -> "k1,k2", one catalogue read
-    for c in catalog.load_catalog()["categories"]:
-        for p in c.get("products", []):
-            for src in p.get("sources", []):
-                filed[src] = (filed[src] + "," if src in filed else "") + p["key"]
+    filed = _filed_all()
     idx = _name_index()
     matches = _matches(st["items"])
     keep = set(st.get("keep_uploads") or [])
@@ -403,6 +409,10 @@ def set_bundle(path: list[str], on: bool) -> None:
     def change(st):
         mine = [b for b in st["bundles"] if b["path"] == path]
         st["bundles"] = [b for b in st["bundles"] if b["path"] != path]
+        # A folder someone split is never combined again on its own.
+        # ponytail: remembered by titles, so a split folder renamed later
+        # can be recommended again; key by id if that turns up.
+        st["split"] = [p for p in st.get("split", []) if p != path] + ([] if on else [path])
         if on:
             st["bundles"] += mine or [{"path": path}]
         else:
@@ -412,6 +422,35 @@ def set_bundle(path: list[str], on: bool) -> None:
                 "decision": it.get("decision"), "product": it.get("product"),
                 "category": it.get("category"), "chosen": it.get("product_chosen")}
     _update(change)
+
+
+_ONE_MANUAL = re.compile(r"(manual|manual de usuario|guide|specification|handbook)$", re.I)
+
+
+def _recommend(st: dict) -> list[list[str]]:
+    """Folders (or pages with chapters) to combine without being asked: one
+    manual kept as a page per chapter, which answers worse in pieces. Its
+    title names a single manual ("NV200 Range User Manual", not "Software
+    Manuals"), it holds at least 3 pages, and they all have one decision and
+    one product, so combining changes no one's choice ("Software Manual"
+    holds tools for two products and stays as it is)."""
+    filed = _filed_all()
+    split = st.get("split", [])
+    taken = [b["path"] for b in st["bundles"]] + split
+    under: dict[tuple, list] = {}
+    for it in st["items"].values():
+        if it.get("kind") != "page" or not it.get("present", True):
+            continue
+        full = tuple(it.get("path") or []) + (it.get("title"),)
+        prod = filed.get(it.get("source"), "") if it.get("synced_version") is not None \
+            else it.get("product") or ""
+        for k in range(1, len(full) + 1):
+            under.setdefault(full[:k], []).append((it.get("decision"), prod))
+    picks = [list(n) for n, pages in under.items()
+             if len(pages) >= 3 and len(set(pages)) == 1 and _ONE_MANUAL.search(n[-1].strip())
+             and not any(list(n[:len(t)]) == t for t in taken)
+             and not any(s[:len(n)] == list(n) for s in split)]
+    return [p for p in picks if not any(q != p and p[:len(q)] == q for q in picks)]   # outermost
 
 
 def set_items(keys: list[str], decision: str | None = None,
@@ -589,7 +628,14 @@ def _link(api: _Api, webui: str | None) -> str | None:
 def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     """List the root into the state's items. Indexes nothing."""
     found: dict[str, dict] = {}
-    bundles = _load()["bundles"]
+
+    def recommend(st):
+        # Read from the last check's list, so a manual found for the first
+        # time is combined at the check after.
+        for path in _recommend(st):
+            st["bundles"].append({"path": path})
+            logger.info("Confluence sync: combining %s, one manual in pages", " / ".join(path))
+    bundles = _update(recommend)["bundles"]
     ids_in = {b["id"] for b in bundles if b.get("id")}     # combined folders by Confluence id
     by_path = [b for b in bundles if not b.get("id")]      # still known only by titles
     pinned: dict[str, str] = {}          # title-path bundle key -> the id found there
@@ -687,6 +733,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
         # The first check finds everything; calling all of it "new" says nothing.
         first_check = not st.get("checked_at")
         taken = {it["source"] for k, it in items.items() if it.get("source") and k in found}
+        held = None                      # the catalogue's filing, read once if needed
         for key, f in found.items():
             it = items.get(key)
             if it is None:
@@ -698,8 +745,13 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                     # Combining approved pages keeps them approved.
                     if any(pg.get("decision") == "approved" for pg in pages):
                         decision = "approved"
-                    # ...and pages filed alike keep that filing.
-                    filed = {pg.get("product") for pg in pages if pg.get("product_chosen")}
+                    elif pages and len({pg.get("decision") for pg in pages}) == 1:
+                        decision = pages[0].get("decision")      # all internal stay internal
+                    # ...and pages filed alike keep that filing, chosen or in the catalogue.
+                    held = held if held is not None else _filed_all()
+                    filed = {held.get(pg.get("source"), "") if pg.get("synced_version") is not None
+                             else pg.get("product") for pg in pages
+                             if pg.get("product_chosen") or pg.get("synced_version") is not None}
                     if len(filed) == 1 and next(iter(filed)):
                         prod = next(iter(filed))
                         cat, chosen = category_of(prod), True
