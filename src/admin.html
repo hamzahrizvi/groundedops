@@ -354,6 +354,7 @@
   .cf-bulk.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
   .card.cf-has-bulk{padding-bottom:84px !important}
   .cf-bulk b{font-weight:600;margin-right:6px}
+  .cf-bulk-sel{width:auto;max-width:260px;padding-top:6px;padding-bottom:6px}
   @media (prefers-reduced-motion: reduce){.cf-folder-body{animation:none}}
   @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
 
@@ -4571,16 +4572,37 @@ function cfDocumentsCard(c) {
     if (!keys.length) return;
     const set = body => { cfPost("/admin/confluence/items", { keys, ...body },
       keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
+    const its = c.items.filter(i => cfSelected.has(i.key));
+    // Who the documents are for: the same three choices, and the same words,
+    // as each row's switch. Customers on an unfiled document goes through
+    // the review, which asks for its product first: approved unfiled, it
+    // would be searchable but never offered in the widget.
+    const who = el("select", { class: "input cf-bulk-sel", "aria-label": "Who the selected documents are for",
+      onchange: e => {
+        const v = e.target.value; e.target.value = "";
+        if (v === "approved" && !its.every(cfFiled)) return cfReviewDialog(keys, "approve");
+        if (v) set({ decision: v });
+      } },
+      el("option", { value: "" }, "Set to\u2026"),
+      el("option", { value: "approved" }, "Customers \u2014 synced and used to answer"),
+      el("option", { value: "internal" }, "Internal \u2014 synced, never answers customers"),
+      el("option", { value: "excluded" }, "Exclude \u2014 not synced"));
+    // One product straight from the list; several, or a new one, through
+    // the dialog as before.
+    const MORE = "__more__";
+    const where = el("select", { class: "input cf-bulk-sel", "aria-label": "File the selected documents under",
+      onchange: e => {
+        const v = e.target.value; e.target.value = "";
+        if (v === MORE) return cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys);
+        if (v) set({ product: v });
+      } },
+      el("option", { value: "" }, "File under\u2026"),
+      (cache.catalog || []).map(cat => el("optgroup", { label: cat.name },
+        (cat.products || []).map(p => el("option", { value: p.key },
+          /_general$|_shared$/.test(p.key) ? "Shared by all " + cat.name : p.name)))),
+      el("option", { value: MORE }, "Several products, or a new one\u2026"));
     bulk.append(
-      el("b", {}, keys.length + " selected"),
-      el("button", { class: "btn btn-primary", onclick: () => cfReviewDialog(keys, "approve") }, "Approve"),
-      el("button", { class: "btn btn-ghost", title: "Synced, but never used to answer customers",
-        onclick: () => set({ decision: "internal" }) }, "Internal"),
-      el("button", { class: "btn btn-ghost", onclick: () => set({ decision: "excluded" }) }, "Exclude"),
-      el("button", { class: "btn btn-secondary", onclick: () => {
-        const its = c.items.filter(i => cfSelected.has(i.key));
-        cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys);
-      } }, "File under"),
+      el("b", {}, keys.length + " selected"), who, where,
       el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
   };
 
