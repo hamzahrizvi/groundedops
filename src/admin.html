@@ -5264,70 +5264,6 @@ function viewDocuments() {
   // it under one meant the other product's visitors were never offered it.
   // A chip per product, because a multi-select is a control nobody can use
   // without being told to hold ctrl.
-  // Internal: the document stays indexed but no public path reads it. FAQs
-  // are hand-curated and stay until removed, so the ones made from it (ticked)
-  // and the ones worded like it (unticked) are offered for removal here.
-  const setInternal = async (source, on) => {
-    if (on && !confirm("Make " + source + " internal? Public answers, downloads and "
-        + "pictures stop using it from the next question.")) return;
-    let res;
-    try {
-      res = await api("/admin/source_internal", { method: "POST",
-        body: JSON.stringify({ source, internal: on }) });
-    } catch (e) { return toast(e.message, true); }
-    toast(on ? "Internal: no longer used in public answers" : "Public again");
-    await refresh(); render();
-    if (on && res.faqs && res.faqs.length) internalFaqDialog(source, res.faqs);
-  };
-
-  const internalFaqDialog = (source, faqs) => {
-    const picked = new Set(faqs.filter(f => f.why === "made from this document").map(f => f.id));
-    const dlg = el("dialog", { class: "cf-dlg", "aria-label": "Remove FAQs from this document" });
-    const close = () => { dlg.close(); dlg.remove(); };
-    dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
-    dlg.addEventListener("close", () => dlg.remove());
-    const go = el("button", { class: "btn btn-primary" });
-    const sync = () => {
-      go.textContent = "Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s");
-      go.disabled = !picked.size;
-    };
-    go.addEventListener("click", async () => {
-      if (!confirm("Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s")
-          + "? This cannot be undone.")) return;
-      let done = 0;
-      for (const id of picked) {
-        try { await api("/faq/" + encodeURIComponent(id), { method: "DELETE" }); done++; }
-        catch (e) { toast(e.message, true); }
-      }
-      close();
-      toast("Removed " + done + " FAQ" + (done === 1 ? "" : "s"));
-      await refresh(); render();
-    });
-    dlg.append(
-      el("div", { class: "cf-dlg-head" },
-        el("b", {}, "FAQs that can still answer from " + source),
-        el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
-      el("p", { class: "cf-dlg-why" }, "The document is internal now, but these FAQs keep "
-        + "serving their answers until removed. Ones made from it are ticked; ones "
-        + "worded like it are not."),
-      el("div", { class: "cf-dlg-list" }, faqs.map(f => el("label", {
-          class: "cf-dlg-opt", style: "align-items:flex-start;margin-bottom:6px" },
-        el("input", { type: "checkbox", class: "cf-tick",
-          checked: picked.has(f.id) ? "true" : null,
-          onchange: e => { e.target.checked ? picked.add(f.id) : picked.delete(f.id); sync(); } }),
-        el("span", {},
-          el("b", {}, f.question),
-          el("div", { style: "font-size:12px;opacity:.7;margin-top:2px" },
-            (f.answer || "").slice(0, 220) + ((f.answer || "").length > 220 ? "…" : "")),
-          el("em", { style: "display:inline-block;margin-top:4px" },
-            f.why + (f.language ? " · " + f.language : "")))))),
-      el("div", { class: "cf-dlg-foot" },
-        el("button", { class: "btn btn-ghost", onclick: close }, "Keep all"), go));
-    sync();
-    document.body.append(dlg);
-    dlg.showModal();
-  };
-
   const docRow = s => {
     const cur = (s.product || s.products || "")
       .split(",").map(x => x.trim()).filter(Boolean);
@@ -5412,14 +5348,8 @@ function viewDocuments() {
         : el("span", { class: "tag tag-neutral",
                        title: freshness.version
                          ? "Version " + freshness.version.slice(0, 12) : "" }, "Current"),
-      cur.length ? el("span", { class: "tag tag-neutral" }, cur.join(", ")) : el("span", { class: "tag tag-accent" }, "no product"),
-      s.internal ? el("span", { class: "tag tag-accent",
-        title: "Never used in public answers, downloads or pictures" }, "Internal") : null,
+      cur ? el("span", { class: "tag tag-neutral" }, cur) : el("span", { class: "tag tag-accent" }, "no product"),
       move,
-      el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-        title: s.internal ? "Let public answers use this document again"
-                          : "Keep this document out of every public answer, download and picture",
-        onclick: () => setInternal(s.source, !s.internal) }, s.internal ? "Make public" : "Make internal"),
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
         if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
         try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });

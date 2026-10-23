@@ -56,9 +56,7 @@ def remove_source_now(source: str) -> int:
 def source_chunks(payload: SourceChunksRequest):
     """Fetch full chunk text for the given chunk ids — backs the
     clickable "view source" feature in the UI."""
-    from main import is_internal_source
-    return {"chunks": [c for c in get_chunks_by_ids(payload.chunk_ids)
-                       if not is_internal_source(c.get("source"))]}
+    return {"chunks": get_chunks_by_ids(payload.chunk_ids)}
 
 
 _INGEST_JOBS: dict = {}
@@ -476,9 +474,11 @@ def source_file(filename: str):
     safe = docstore._safe_basename(filename)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    from main import is_internal_source   # the corpus policy main.query applies
-    if is_internal_source(safe):
-        raise HTTPException(status_code=404, detail="Not found")
+    _lower = safe.lower()
+    from main import EXCLUDED_SOURCES     # the corpus policy main.query applies
+    for _ex in EXCLUDED_SOURCES:
+        if _ex and _ex in _lower:
+            raise HTTPException(status_code=404, detail="Not found")
     # v15: resolved via docstore, which checks <repo>/documents AND the legacy
     # /data/source_files. SOURCE_FILE_DIR alone 404'd any document retained in
     # the newer location -- the answer cited a page, then the link was dead.
@@ -509,9 +509,11 @@ def figure(source: str, name: str):
     safe = docstore._safe_basename(source)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    from main import is_internal_source
-    if is_internal_source(safe):
-        raise HTTPException(status_code=404, detail="Not found")
+    _lower = safe.lower()
+    from main import EXCLUDED_SOURCES
+    for _ex in EXCLUDED_SOURCES:
+        if _ex and _ex in _lower:
+            raise HTTPException(status_code=404, detail="Not found")
     path = _figures.figure_path(safe, docstore._safe_basename(name))
     if not path:
         raise HTTPException(status_code=404, detail="Not found")
@@ -615,10 +617,8 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
     from docindex import source_index
     rows = source_index()
-    from main import is_internal_source
     out = [{"source": r["source"], "category": r["category"],
-            "product": r["product"], "chunks": r["chunks"],
-            "internal": is_internal_source(r["source"])} for r in rows]
+            "product": r["product"], "chunks": r["chunks"]} for r in rows]
     try:
         import docstore as _ds
         for item, r in zip(out, rows):
@@ -630,61 +630,3 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     except Exception as exc:
         logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
     return {"sources": out}
-
-
-class InternalReq(BaseModel):
-    source: str
-    internal: bool
-
-
-@router.post("/admin/source_internal")
-def admin_source_internal(payload: InternalReq,
-                          x_admin_password: str | None = Header(default=None)):
-    """Mark a document internal (or public again). Internal documents stay
-    indexed but every public path -- answers, downloads, figures, the spec
-    index -- skips them from the next request on. FAQs are separate,
-    hand-curated content, so they are not touched here: the reply lists the
-    ones made from this document, or close to its wording, for the console
-    to offer for removal."""
-    _require_admin(x_admin_password)
-    import docstore
-    docstore.set_internal(payload.source, payload.internal)
-    clear_memory()   # a follow-up could otherwise lean on an earlier answer
-    return {"source": payload.source, "internal": payload.internal,
-            "faqs": related_faqs(payload.source) if payload.internal else []}
-
-
-# Share of an answer's content words that must appear in ONE passage of the
-# document for the FAQ to be offered as "close wording". Offered unticked, so
-# a loose match costs a glance, not a deletion.
-_RELATED_OVERLAP = 0.7
-
-
-def related_faqs(source: str) -> list[dict]:
-    """FAQs to offer for removal when `source` goes internal: those made from
-    it (and their translations), then others whose answer reads like one of
-    its passages."""
-    import faq_store
-    from db import get_collection
-    items = faq_store._load()
-    want = source.lower()
-    derived = {it["id"] for it in items if (it.get("source") or "").lower() == want}
-    derived |= {it["id"] for it in items if it.get("translation_of") in derived}
-    texts = get_collection().get(where={"source": source},
-                                 include=["documents"]).get("documents") or []
-    passages = [faq_store._tokens(t) for t in texts]
-    out = []
-    for it in items:
-        row = {"id": it["id"], "question": it.get("question", ""),
-               "answer": it.get("answer", ""), "products": it.get("products", ""),
-               "language": it.get("language", "")}
-        if it["id"] in derived:
-            out.append(dict(row, why="made from this document"))
-            continue
-        words = faq_store._tokens(it.get("answer"))
-        if len(words) < 4 or not passages:
-            continue
-        best = max(len(words & p) for p in passages) / len(words)
-        if best >= _RELATED_OVERLAP:
-            out.append(dict(row, why=f"{round(best * 100)}% of its answer is in this document"))
-    return out

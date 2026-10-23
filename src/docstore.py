@@ -236,43 +236,6 @@ def record(filename: str, *, content: bytes | None = None,
     return entry
 
 
-# Documents marked internal in the console: kept in the index (staff can
-# still search them by name in the console) but never reach a public answer,
-# download or figure. A top-level list rather than a per-document flag, so a
-# document with no ingest record does not appear in stale_documents().
-# Kept in the manifest, not policy.json, so "Reset to defaults" on Access &
-# limits cannot quietly publish them again.
-_INTERNAL_CACHE: list = [None, frozenset()]
-
-
-def internal_sources() -> frozenset:
-    """Lower-cased names of documents marked internal. Read per request, so
-    cached against the manifest's mtime."""
-    try:
-        m = os.path.getmtime(_manifest_path())
-    except OSError:
-        return frozenset()
-    if _INTERNAL_CACHE[0] != m:
-        names = load_manifest().get("internal") or []
-        _INTERNAL_CACHE[:] = [m, frozenset(n.lower() for n in names)]
-    return _INTERNAL_CACHE[1]
-
-
-def set_internal(filename: str, on: bool) -> None:
-    """Mark or unmark a document internal. Raises if the manifest cannot be
-    written: a failed "make internal" must not look like it worked."""
-    data = load_manifest()
-    name = _safe_basename(filename)
-    names = [n for n in (data.get("internal") or []) if n.lower() != name.lower()]
-    if on:
-        names.append(name)
-    data["internal"] = sorted(names)
-    os.makedirs(store_dir(), exist_ok=True)
-    jsonstore.save(_manifest_path(), data, label="document manifest",
-                   sort_keys=True)
-    _INTERNAL_CACHE[0] = None
-
-
 def ocr_state(filename: str) -> dict:
     """What OCR has been offered and done for a document.
 
