@@ -257,9 +257,11 @@ nobody runs is not a backup.
 
 Known and deliberate, so nobody discovers them as surprises:
 
-- **Nothing is emailed.** Enquiries land in the console's Enquiries page.
-  Every lead records its destination address and `notified: false`, pending
-  SMTP credentials.
+- **Enquiries are emailed only once SMTP is set** (console, API keys ->
+  Mail server). Until then, or when a send fails, they sit in the
+  Enquiries page marked "not emailed". The contact form is capped per
+  visitor and per IP; set `TRUST_PROXY=1` behind a proxy without
+  CF-Connecting-IP, or every visitor shares the per-IP cap.
 - **`/widget/lead` is unauthenticated and not rate limited** — it has to be
   public, and bots will find it. Put it behind the proxy's rate limiting or a
   WAF before this is anything other than internal staging.
@@ -276,5 +278,7 @@ Known and deliberate, so nobody discovers them as surprises:
   spending API calls. One case is a real outlier at 0.0051 — "Does MyCheckr
   require integration with other systems?" — and is a retrieval problem, not
   a threshold problem.
-- **Nothing schedules a backup yet.** Step 6 is a manual command. Put it on
-  cron on the host before this carries anything you would miss.
+- **Backups are scheduled on the dev box only** (`backup_daily.ps1 -Install`,
+  nightly 02:30 to `D:\GroundedOpsBackups`, encrypted). Step 6 is still a
+  manual command here: put it on cron on the host before this carries
+  anything you would miss.

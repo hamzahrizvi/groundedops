@@ -45,12 +45,11 @@ one feature. If lead volume becomes meaningful, move THIS module to
 SQLite (conversations.py already carries a sqlite dependency and its
 pattern can be copied directly) before moving anything else.
 
-Notification is deliberately not implemented. A form that promises "we'll
-get back to you" and silently files the response is worse than one that
-does not — but wiring SMTP means credentials, retries, and a bounce path,
-which is a feature in its own right, not a line in this module. The
-notify_email field is stored and surfaced to the admin so the console can
-say plainly that leads are collected in the console and not emailed yet.
+Notification: routes_widget emails each new lead to the form's notify_email
+once the console's mail settings are filled in, and marks it notified. Until
+then, or when a send fails, the lead sits in the console marked unsent. The
+visitor's own address is never mailed from here: it is typed by a public
+caller, and sending to it would make the form an open relay.
 """
 import json
 import os
@@ -60,7 +59,7 @@ import uuid
 import logging
 
 import jsonstore
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +89,7 @@ _DEFAULT = {
                "What are you looking for?",
     "color": "#9184d9",
     "icon_url": "",
+    "privacy_url": "",
     "intro_options": [
         {"id": "opt_product", "label": "Ask about a product", "action": "product"},
         {"id": "opt_general", "label": "Ask a general question", "action": "general"},
@@ -227,11 +227,16 @@ def validate(payload: dict) -> dict:
     if not name:
         raise ValueError("assistant name is required")
 
+    privacy_url = (str(payload.get("privacy_url") or "")).strip()[:500]
+    if privacy_url and not re.match(r"^https?://", privacy_url, re.I):
+        raise ValueError("privacy notice link must start with https:// or http://")
+
     return {
         "name": name,
         "welcome": (str(payload.get("welcome") or _DEFAULT["welcome"])).strip()[:MAX_WELCOME],
         "color": color,
         "icon_url": (str(payload.get("icon_url") or "")).strip()[:500],
+        "privacy_url": privacy_url,
         "intro_options": opts,
         "sales_form": _clean_form(payload.get("sales_form"), _DEFAULT["sales_form"], "f"),
         "support_form": _clean_form(payload.get("support_form"), _DEFAULT["support_form"], "s"),
@@ -257,6 +262,27 @@ def reset() -> dict:
         data = json.loads(json.dumps(_DEFAULT))
         _save_raw(data)
     return data
+
+
+def ai_notice() -> str:
+    """D-20261015-10: the fixed line under the welcome line. Built from the
+    live retention setting and the live provider roles on every request, so
+    it stays true when either changes; the operator cannot edit or remove it."""
+    import keystore
+    import retention
+    try:
+        import llm
+        providers = llm.outside_providers()
+    except Exception as e:
+        # Overstate rather than understate: name every provider with a key.
+        logger.warning(f"ai_notice: provider roles unavailable ({e})")
+        providers = [p for p in keystore.providers() if keystore.has_key(p)]
+    names = [keystore.processor_label(p) for p in providers]
+    who = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 else "".join(names)
+    days = retention.days()
+    kept = "Questions are kept" + (f" for {days} day{'s' if days != 1 else ''}" if days else "")
+    return ("AI assistant: answers come from our manuals and can be wrong. "
+            + kept + (f" and may be processed by {who}." if who else "."))
 
 
 def public_config() -> dict:
@@ -289,6 +315,8 @@ def public_config() -> dict:
         "welcome": c.get("welcome", _DEFAULT["welcome"]),
         "color": c.get("color", _DEFAULT["color"]),
         "icon_url": c.get("icon_url", ""),
+        "ai_notice": ai_notice(),
+        "privacy_url": c.get("privacy_url", ""),
         "intro_options": c.get("intro_options", []),
         "sales_form": _pub_form(c.get("sales_form", _DEFAULT["sales_form"])),
         "support_form": _pub_form(c.get("support_form", _DEFAULT["support_form"])),
@@ -374,6 +402,15 @@ def add_lead(kind: str, values: dict, product: str | None = None,
                 cc_email = clean_values[fid]["value"]
                 break
 
+    # Each entry capped like the enquiry, so a pasted essay cannot bloat the
+    # store. Truncated rather than refused: a genuine visitor should not
+    # lose the whole form over one long message.
+    kept = []
+    for t in (transcript or [])[-20:]:
+        if isinstance(t, dict):
+            kept.append({k: (v[:MAX_ENQUIRY_CHARS] if isinstance(v, str) else v)
+                         for k, v in t.items()})
+
     lead = {
         "id": str(uuid.uuid4()),
         "kind": kind,
@@ -382,25 +419,79 @@ def add_lead(kind: str, values: dict, product: str | None = None,
         "cc_email": cc_email,
         "enquiry": enquiry_text,
         "summary_source": summary_source,
-        "transcript": (transcript or [])[-20:] if form.get("allow_summary") else [],
+        "transcript": kept if form.get("allow_summary") else [],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "handled": False,
-        # Recorded so the console can be honest that nothing was emailed.
+        # Where it is emailed, and whether that has happened yet.
         "notify_email": form.get("notify_email", ""),
         "notified": False,
     }
     with _leads_lock:
         items = _load_leads()
+        # Full: refuse rather than drop the oldest. Trimming used to delete
+        # real enquiries silently, so a bot flood could wipe the store.
+        if sum(1 for l in items if not l.get("notified")) >= MAX_LEADS:
+            logger.warning(f"widget leads store is full ({MAX_LEADS}); "
+                           "refusing a new enquiry. Delete handled ones in the console.")
+            raise LeadStoreFull(f"the enquiry store is full ({MAX_LEADS})")
         items.append(lead)
-        if len(items) > MAX_LEADS:
-            items = items[len(items) - MAX_LEADS:]
         _save_leads(items)
     return lead
 
 
+class LeadStoreFull(Exception):
+    """add_lead refused because MAX_LEADS enquiries are already stored."""
+
+
+def lead_ref(lead_id: str) -> str:
+    """The short reference a visitor is shown and staff search by."""
+    return "GO-" + (lead_id or "")[:8].upper()
+
+
+# What survives of an emailed enquiry: enough for the weekly report to count
+# it, nothing that identifies the visitor. Sales and support own it from the
+# email on (it opens a Jira ticket), so the console keeps no second copy.
+_SENT_KEEP = ("id", "kind", "created_at")
+_SENT_KEEP_DAYS = 400
+
+
+def mark_notified(lead_id: str) -> bool:
+    """The enquiry reached its team: cut it to a contact-free stub."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=_SENT_KEEP_DAYS)).isoformat()
+    with _leads_lock:
+        items = _load_leads()
+        for i, l in enumerate(items):
+            if l.get("id") == lead_id:
+                items[i] = {**{k: l.get(k) for k in _SENT_KEEP},
+                            "notified": True, "handled": True}
+                items = [x for x in items if not x.get("notified")
+                         or (x.get("created_at") or "") >= cutoff]
+                _save_leads(items)
+                return True
+    return False
+
+
+def prune_before(cutoff) -> int:
+    """D-15: delete enquiries never emailed that are older than `cutoff`, an
+    aware datetime. Emailed stubs hold no visitor text and keep their own
+    400-day rule above. Returns how many went."""
+    key = cutoff.astimezone(timezone.utc).isoformat()
+    with _leads_lock:
+        items = _load_leads()
+        kept = [l for l in items if l.get("notified")
+                or (l.get("created_at") or "") >= key]
+        if len(kept) < len(items):
+            _save_leads(kept)
+        return len(items) - len(kept)
+
+
 def list_leads(kind: str | None = None, include_handled: bool = True,
-               limit: int = 200) -> list[dict]:
+               limit: int = 200, include_sent: bool = False) -> list[dict]:
+    """The console's list: enquiries not yet emailed. `include_sent` adds the
+    stubs of emailed ones, for counting (log_report)."""
     items = _load_leads()
+    if not include_sent:
+        items = [l for l in items if not l.get("notified")]
     if kind:
         items = [l for l in items if l.get("kind") == kind]
     if not include_handled:
@@ -430,10 +521,12 @@ def delete_lead(lead_id: str) -> bool:
 
 
 def lead_stats() -> dict:
-    items = _load_leads()
+    items = [l for l in _load_leads() if not l.get("notified")]
     return {
         "total": len(items),
         "unhandled": len([l for l in items if not l.get("handled")]),
         "sales": len([l for l in items if l.get("kind") == "sales"]),
         "support": len([l for l in items if l.get("kind") == "support"]),
+        "unsent": len([l for l in items if not l.get("notified")]),
+        "full": len(items) >= MAX_LEADS,
     }

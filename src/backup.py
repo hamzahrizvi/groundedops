@@ -4,6 +4,7 @@ WHY
 ---
 Several pieces of state here are not regenerable and not in git:
 `accounts.json` (scrypt password hashes — losing it loses every account),
+pending account requests,
 `documents/` (the only copy of some source PDFs), the curated FAQ, the
 catalogue, the widget config and the customer enquiries. `PENDING.md` has
 carried "decide how to back this up" as a blocking item for a while; this
@@ -253,12 +254,16 @@ def _stores(include_accounts: bool) -> dict:
         "faq_store.json": os.getenv("FAQ_STORE_PATH", "faq_store.json"),
         "faq_gaps.json": os.getenv("FAQ_GAP_PATH", "faq_gaps.json"),
         "catalog_config.json": os.getenv("CATALOG_CONFIG", "catalog_config.json"),
+        "confluence_sync.json": os.getenv("CONFLUENCE_SYNC_STATE", "confluence_sync.json"),
+        "internal_sources.json": os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json"),
         "widget_config.json": os.getenv("WIDGET_CONFIG_PATH", "widget_config.json"),
         "widget_leads.json": os.getenv("WIDGET_LEADS_PATH", "widget_leads.json"),
     }
     if include_accounts:
         # Root only. Password hashes and staff addresses.
         out["accounts.json"] = os.getenv("ACCOUNTS_PATH", "accounts.json")
+        out["account_requests.json"] = os.getenv(
+            "ACCOUNT_REQUESTS_PATH", "account_requests.json")
         out["policy.json"] = os.getenv("POLICY_PATH", "policy.json")
     return out
 
@@ -496,7 +501,8 @@ def restore_archive(data: bytes, restore_accounts: bool = False,
 
             if name.startswith("stores/"):
                 base = name[len("stores/"):]
-                if base in ("accounts.json", "policy.json") and not restore_accounts:
+                if base in ("accounts.json", "account_requests.json",
+                            "policy.json") and not restore_accounts:
                     skipped.append(base)
                     continue
                 target = store_targets.get(base)

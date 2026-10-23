@@ -89,3 +89,42 @@ def test_legacy_plaintext_migration():
         assert not os.path.exists(legacy_path)
         # ...and the key is now retrievable from the encrypted vault.
         assert keyvault.load_key() == "sk-legacy-plaintext"
+
+
+def test_console_secrets_are_encrypted_at_rest_and_never_in_env(tmp_path=None):
+    """The SMTP password and an SSO client secret saved from the console
+    land in the Fernet vault, not in the .env file, and read back."""
+    import os, tempfile
+    import keyvault, keystore
+    d = tempfile.mkdtemp(prefix="vault-")
+    saved = {k: os.environ.get(k) for k in ("SECRETS_VAULT_PATH", "ENV_FILE_PATH",
+                                            "SMTP_PASSWORD", "SSO_GOOGLE_CLIENT_SECRET")}
+    os.environ["SECRETS_VAULT_PATH"] = os.path.join(d, "s.enc")
+    os.environ["ENV_FILE_PATH"] = os.path.join(d, "t.env")
+    os.environ.pop("SMTP_PASSWORD", None)
+    try:
+        keystore.set_smtp_settings({"password": "hunter2"})
+        keystore.set_sso_settings("google", {"secret": "gsec-123"})
+        assert keystore.get_smtp_password() == "hunter2"
+        assert keystore.get_sso_secret("google") == "gsec-123"
+        env_text = open(os.path.join(d, "t.env"), encoding="utf-8").read() \
+            if os.path.exists(os.path.join(d, "t.env")) else ""
+        assert "hunter2" not in env_text and "gsec-123" not in env_text
+        raw = open(os.path.join(d, "s.enc"), "rb").read()
+        assert b"hunter2" not in raw and b"gsec-123" not in raw
+        assert "SMTP_PASSWORD" not in os.environ
+        # A legacy env value still works for reading, and is dropped on set.
+        os.environ["SSO_GOOGLE_CLIENT_SECRET"] = "legacy"
+        keyvault.clear_secret("sso_google_client_secret")
+        assert keystore.get_sso_secret("google") == "legacy"
+        keystore.set_sso_settings("google", {"secret": "fresh"})
+        assert keystore.get_sso_secret("google") == "fresh"
+        assert "SSO_GOOGLE_CLIENT_SECRET" not in os.environ
+        keystore.set_smtp_settings({"clear_password": True})
+        assert keystore.get_smtp_password() == ""
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v

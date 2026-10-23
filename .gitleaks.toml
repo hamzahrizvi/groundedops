@@ -1,0 +1,14 @@
+# Secret scan config for CI job `secret-scan` (.github/workflows/ci.yml).
+# Keeps gitleaks' default rules and adds DeepSeek keys, which the defaults
+# do not cover (two of them reached the public repo; D-20261008-08).
+# Allowlist only a verified placeholder, and say which and why.
+title = "groundedops gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "deepseek-api-key"
+description = "DeepSeek API key (sk- followed by 32 hex characters)"
+regex = '''\bsk-[0-9a-f]{32}\b'''
+keywords = ["sk-"]

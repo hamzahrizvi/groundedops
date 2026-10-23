@@ -1,0 +1,90 @@
+{
+  "id": "12_nv200s_vague_then_corrected",
+  "product": "NV200S",
+  "product_key": "nv200s",
+  "source": "NV200S Range User Manual-v1.pdf",
+  "persona": "Operator with a fault, vague at first, then corrects the symptom.",
+  "scoped": true,
+  "expect_labels": [
+    "NV200S"
+  ],
+  "turns": [
+    {
+      "q": "my note validator isn't taking notes any more",
+      "needs_history": false,
+      "commercial": false,
+      "note": "vague symptom; scoped to NV200S so it should answer or ask a narrowing question",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "note",
+          "clean",
+          "LED",
+          "flash",
+          "reject",
+          "check",
+          "power",
+          "jam"
+        ]
+      }
+    },
+    {
+      "q": "the light on the front is flashing",
+      "needs_history": true,
+      "commercial": false,
+      "note": "'the light' refers to the unit; still vague",
+      "live": {
+        "expect": "any",
+        "mention": [
+          "flash",
+          "LED",
+          "bezel",
+          "error",
+          "code"
+        ]
+      }
+    },
+    {
+      "q": "sorry, I mean the bezel LED flashes red 3 times then pauses",
+      "needs_history": true,
+      "commercial": false,
+      "note": "red 3 is always paired with blue flashes (p.84): name the red-3 codes and ask how many blue, or ask",
+      "live": {
+        "expect": [
+          "answer",
+          "clarify"
+        ],
+        "cite": [
+          "NV200S"
+        ],
+        "answer_mention": [
+          "blue"
+        ]
+      }
+    },
+    {
+      "q": "how do I clear that",
+      "needs_history": true,
+      "commercial": false,
+      "note": "'that' = the fault identified in turn 3; if turn 3 rightly asked, nothing is identified yet",
+      "live": {
+        "expect": [
+          "answer",
+          "clarify"
+        ],
+        "cite": [
+          "NV200S"
+        ]
+      }
+    },
+    {
+      "q": "and if it keeps happening?",
+      "needs_history": true,
+      "commercial": false,
+      "note": "'and' opener; escalation advice or further steps",
+      "live": {
+        "expect": "any"
+      }
+    }
+  ]
+}

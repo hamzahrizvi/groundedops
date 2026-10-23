@@ -130,3 +130,32 @@ def delete_conversation(user_id: str, convo_id: str) -> bool:
                         (convo_id, user_id))
         c.execute("DELETE FROM messages WHERE conversation_id = ?", (convo_id,))
         return cur.rowcount > 0
+
+
+def prune_before(cutoff) -> int:
+    """D-15: delete messages written before `cutoff` (an aware datetime) and
+    conversations idle since then. Foreign keys are off in SQLite by
+    default, so messages are deleted explicitly. A conversation that
+    survives but started before the cutoff is retitled from its oldest
+    remaining question, since the title is the visitor's first message.
+    Returns how many messages and conversations went."""
+    if not os.path.exists(DB_PATH):
+        return 0
+    ts = cutoff.timestamp()
+    c = _connect()
+    try:
+        with c:
+            n = c.execute("DELETE FROM messages WHERE created < ? OR conversation_id IN "
+                          "(SELECT id FROM conversations WHERE updated < ?)",
+                          (ts, ts)).rowcount
+            n += c.execute("DELETE FROM conversations WHERE updated < ?", (ts,)).rowcount
+            for (cid,) in c.execute("SELECT id FROM conversations WHERE created < ?",
+                                    (ts,)).fetchall():
+                first = c.execute("SELECT content FROM messages WHERE conversation_id = ? "
+                                  "AND role = 'user' ORDER BY created LIMIT 1",
+                                  (cid,)).fetchone()
+                c.execute("UPDATE conversations SET title = ? WHERE id = ?",
+                          (((first[0] if first else "") or "Chat")[:60], cid))
+    finally:
+        c.close()
+    return n

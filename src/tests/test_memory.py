@@ -97,12 +97,41 @@ def test_max_memory_truncation_is_per_session():
     assert len(history_b) == 1
 
 
-# ── Refusals are not stored ──────────────────────────────────────────────
+# ── A refused turn keeps the question, not the refusal (8.5) ─────────────
 
-def test_refusal_answers_are_not_added_to_memory():
-    memory.add_to_memory("session-a", "what is the capital of france",
+def test_a_refused_turn_keeps_the_question_but_not_the_refusal():
+    memory.add_to_memory("session-a", "does the Mini have Bluetooth",
                          "I could not find that in the knowledge base.")
+    assert memory.get_history("session-a") == [
+        {"q": "does the Mini have Bluetooth", "a": "", "refused": True}]
+    # The customer-facing rewording is a refusal too.
+    memory.add_to_memory("session-a", "and wifi?",
+                         "I don't have that in the product documentation about the Mini.")
+    assert memory.get_history("session-a")[-1] == {"q": "and wifi?", "a": "",
+                                                   "refused": True}
+    # A caller that knows better can say so.
+    memory.add_to_memory("session-a", "does it have a battery",
+                         "The Mini documentation doesn't mention a battery.",
+                         refused=True)
+    assert memory.get_history("session-a")[-1]["a"] == ""
+    assert memory.get_last_query("session-a") == "does it have a battery"
+
+
+def test_a_generation_failure_is_not_a_turn():
+    memory.add_to_memory("session-a", "what voltage", "I could not generate a response.")
+    memory.add_to_memory("session-a", "what voltage", "I was unable to generate a response.")
     assert memory.get_history("session-a") == []
+
+
+def test_the_rewriter_sees_a_refused_turn_as_unanswered():
+    from text_utils import build_condense_prompt, REFUSED_TURN_NOTE
+    memory.add_to_memory("session-a", "does the Mini have Bluetooth",
+                         "I could not find that in the knowledge base.")
+    prompt = build_condense_prompt("and the full-size one?",
+                                   memory.get_history("session-a"))
+    assert "User: does the Mini have Bluetooth" in prompt
+    assert f"Assistant: {REFUSED_TURN_NOTE}" in prompt
+    assert "could not find" not in prompt
 
 
 # ── TTL reaping ───────────────────────────────────────────────────────────

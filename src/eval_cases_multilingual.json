@@ -1,0 +1,222 @@
+{
+ "_README": "9.9 multilingual parity gate: the ten questions here are es/de/fr renderings of ten cases in eval_cases_retrieval.json (`english` holds the original, ignored by eval.py). Each expects the SAME document and the same cited pages as the English original's three no-grade runs on 2026-10-01 (`expected_page` = union of the English top source's pages). Run: python eval.py --cases eval_cases_multilingual.json --repeats 3 --no-grade. Measure-only: no baseline, no grading (keywords are digits and codes only, since the answer comes back translated).",
+ "cases": [
+  {
+   "layer": "multilingual",
+   "language": "es",
+   "q": "¿Qué tamaño de tornillos necesito para montar el MyCheckr y cuántos orificios de montaje tiene?",
+   "english": "What size screws do I need to mount the MyCheckr, and how many mounting holes are there?",
+   "new_session": true,
+   "product": "mycheckr",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [
+    "4"
+   ],
+   "sources_any": [
+    "MyCheckr"
+   ],
+   "expected_page": [
+    6
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "de",
+   "q": "Ich muss den Münzweg im Feeder reinigen - wie mache ich das und wie oft?",
+   "english": "I need to clean the coin path in the feeder - how do I do that and how often?",
+   "new_session": true,
+   "product": "sku_scs",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [],
+   "sources_any": [
+    "SMART Coin"
+   ],
+   "expected_page": [
+    76,
+    77,
+    78,
+    81,
+    97,
+    98,
+    100
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "fr",
+   "q": "Avec quels paramètres faut-il formater la carte SD ?",
+   "english": "Which settings does the SD card need to be formatted with?",
+   "new_session": true,
+   "product": "sku_scs",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [
+    "FAT32"
+   ],
+   "sources_any": [
+    "SMART Coin"
+   ],
+   "expected_page": [
+    15,
+    16,
+    56,
+    62,
+    86
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "es",
+   "q": "¿Qué tamaño de monedas acepta la unidad? ¿Hay un diámetro mínimo y máximo?",
+   "english": "What size coins will the unit take - is there a minimum and maximum diameter?",
+   "new_session": true,
+   "product": "sku_scs",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [
+    "18",
+    "28.5"
+   ],
+   "sources_any": [
+    "SMART Coin"
+   ],
+   "expected_page": [
+    23,
+    55,
+    64,
+    65
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "de",
+   "q": "Die Status-LED blinkt viermal rot - was bedeutet das?",
+   "english": "The status LED is flashing red four times - what does that mean?",
+   "new_session": true,
+   "product": "sku_scs",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [],
+   "sources_any": [
+    "SMART Coin"
+   ],
+   "expected_page": [
+    83,
+    84,
+    85,
+    112
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "fr",
+   "q": "Quelle est la consommation de courant de crête du NV9 Spectral ?",
+   "english": "What is the peak current draw of the NV9 Spectral?",
+   "new_session": true,
+   "product": "nv9_spectral",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [
+    "2"
+   ],
+   "sources_any": [
+    "NV9 Spectral"
+   ],
+   "expected_page": [
+    4,
+    9,
+    26,
+    49
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "es",
+   "q": "¿Con qué frecuencia hay que cambiar las correas y limpiar las lentes?",
+   "english": "How often should the belts be changed and the lenses cleaned?",
+   "new_session": true,
+   "product": "nv9_spectral",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [
+    "6"
+   ],
+   "sources_any": [
+    "NV9 Spectral"
+   ],
+   "expected_page": [
+    56,
+    57,
+    58
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "de",
+   "q": "Welche Banknotengrößen akzeptiert der NV9 Spectral?",
+   "english": "What note sizes will the NV9 Spectral take?",
+   "new_session": true,
+   "product": "nv9_spectral",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [
+    "115",
+    "167"
+   ],
+   "sources_any": [
+    "NV9 Spectral"
+   ],
+   "expected_page": [
+    4,
+    27,
+    28,
+    47,
+    56,
+    61,
+    68
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "fr",
+   "q": "Quel produit de nettoyage peut-on utiliser sans risque sur le NV9USB+ ?",
+   "english": "What cleaner is safe to use on the NV9USB+?",
+   "new_session": true,
+   "product": "nv9usb",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [],
+   "sources_any": [
+    "NV9USB"
+   ],
+   "expected_page": [
+    52,
+    53,
+    72
+   ]
+  },
+  {
+   "layer": "multilingual",
+   "language": "es",
+   "q": "El bisel muestra 4 parpadeos rojos y luego 1 azul, ¿qué significa?",
+   "english": "the bezel is showing 4 red flashes then 1 blue flash, what does that mean",
+   "new_session": true,
+   "product": "bv30",
+   "skip_faq": true,
+   "outcome": "answered",
+   "keywords_all": [],
+   "sources_any": [
+    "BV30"
+   ],
+   "expected_page": [
+    15,
+    31,
+    32,
+    38
+   ],
+   "_note": "keywords dropped: the Spanish answer spells '4 ... 1' as 'cuatro ... un' (2 of 3 runs, 2026-10-01); the page check carries this case"
+  }
+ ]
+}

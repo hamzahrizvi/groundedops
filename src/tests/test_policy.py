@@ -148,6 +148,60 @@ check(client.post("/admin/widget/preview_token", headers=BASIC).status_code == 4
 tok = r.json()["token"]
 check(quota.verify_token(tok) is not None, "the minted token actually verifies")
 
+print("\n== site-wide daily cap (9.4) ==")
+import os
+os.environ.pop("WIDGET_AI_DRAFT_ANONYMOUS", None)
+policy.update({"anon_llm_enabled": True, "anon_llm_credits": 3,
+               "global_llm_daily": 2})
+quota.consume(quota.identify(None, "g1", "203.0.113.1"), 1)
+quota.consume(quota.identify(None, "g2", "203.0.113.2"), 1)
+res = quota.check(quota.identify(None, "g3", "203.0.113.3"), 1)
+check(res["reason"] == "global_quota",
+      f"a fresh guest on a fresh IP hits the site-wide cap ({res['reason']})")
+member = quota.identify(quota.issue_token("m1", "member"), None, "x")
+check(quota.check(member, 1)["reason"] == "global_quota", "so does a member")
+staff = quota.identify(quota.issue_token("s1", "staff"), None, "x")
+check(quota.check(staff, 1)["allowed"], "staff are exempt")
+quota.consume(staff, 5)
+with quota._conn() as c:
+    spent = quota._used(c, quota.GLOBAL_IDENTITY, quota._window_start())
+check(spent == 2, f"and do not spend the site's budget ({spent})")
+
+import logger as _logger
+import pipeline_trace
+from unittest.mock import patch
+rows = []
+with patch.object(_logger, "log_interaction", side_effect=lambda *a, **k:
+                  rows.append(pipeline_trace.snapshot())):
+    r = client.post("/widget/ask", json={"q": "How do I clear a coin jam?",
+                                         "visitor_id": "g4",
+                                         "session_id": "s-guest"})
+check(r.status_code == 200 and r.json().get("effort") == "faq_only",
+      f"a capped guest gets the FAQ path, not a 429 ({r.status_code})")
+check(len(rows) == 1 and rows[0]["meta"]["origin"] == "widget"
+      and rows[0]["meta"]["session_id"] == "s-guest"
+      and rows[0]["exit"]["id"] in pipeline_trace.OUTCOMES,
+      f"and the guest turn is logged with M2's fields ({rows})")
+r = client.post("/widget/ask", json={"q": "How do I clear a coin jam?"},
+                headers={"authorization": "Bearer "
+                         + quota.issue_token("m2", "member")})
+check(r.status_code == 429
+      and r.json()["detail"]["reason"] == "global_quota",
+      f"a capped member gets the 429 with its own reason ({r.status_code})")
+
+policy.update({"global_llm_daily": 0})
+from unittest.mock import patch
+import main
+with patch.object(main, "generate_with_fallback",
+                  return_value={"text": "Enquiry: NV9 has no power."}):
+    r = client.post("/widget/draft_enquiry", json={
+        "kind": "support", "source": "written",
+        "notes": "NV9 will not power on."})
+check(r.status_code == 200 and r.json()["written_by"] != "assembled",
+      "the console switch alone opens drafting to guests "
+      f"(got {r.json().get('written_by')!r})")
+policy.update({"anon_llm_enabled": False})
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")

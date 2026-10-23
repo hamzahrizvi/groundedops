@@ -124,7 +124,7 @@ check(latest.get("summary_source") == "chat",
 check(latest.get("notify_email") == "support@example.com",
       "the destination is recorded on the lead")
 check(latest.get("notified") is False,
-      "and it is honestly marked as not emailed — there is no mail server yet")
+      "and it is marked not emailed, since no mail server is set here")
 
 r = client.post("/widget/lead", json={"kind": "support", "values": {}})
 check(r.status_code == 400, f"a submission missing required fields is refused ({r.status_code})")
@@ -149,6 +149,51 @@ check(r.status_code == 200, f"/widget/preview is served ({r.status_code})")
 check("groundedops-widget.js" in r.text,
       "it embeds the real widget script rather than reimplementing a chat")
 check("noindex" in r.text, "and asks not to be indexed")
+
+print("\n== the fixed AI notice (D-20261015-10) ==")
+# _harness stubs llm, so which providers are named is set here; the real
+# llm.outside_providers is pinned in tests/test_llm.py.
+import os, sys
+_llm = sys.modules["llm"]
+_env = {k: os.environ.get(k) for k in ("RETENTION_DAYS", "OPENAI_BASE_URL")}
+try:
+    os.environ.update(RETENTION_DAYS="90", OPENAI_BASE_URL="")
+    _llm.outside_providers = lambda: ["openai", "deepseek"]
+    n = client.get("/widget/config").json()["ai_notice"]
+    check(n.startswith("AI assistant: answers come from our manuals and can be wrong."), n)
+    check("kept for 90 days and may be processed by OpenAI (USA) and DeepSeek (China)." in n, n)
+    _llm.outside_providers = lambda: ["openai"]
+    os.environ["RETENTION_DAYS"] = "30"
+    n = client.get("/widget/config").json()["ai_notice"]
+    check("kept for 30 days and may be processed by OpenAI (USA)." in n and "DeepSeek" not in n,
+          "the line follows the live providers and retention: " + n)
+    os.environ["OPENAI_BASE_URL"] = "http://gateway.local/v1"
+    n = client.get("/widget/config").json()["ai_notice"]
+    check("processed by an OpenAI-compatible service." in n and "USA" not in n,
+          "an openai slot on another base URL is not called OpenAI: " + n)
+    # the operator cannot blank or replace it
+    cfg_now = widget_config.get()
+    r = client.put("/admin/widget/config", headers=ADMIN, json={**cfg_now, "welcome": "",
+                   "ai_notice": "nothing to see"})
+    pub = client.get("/widget/config").json()
+    check(r.status_code == 200 and pub["ai_notice"].startswith("AI assistant:"),
+          "an emptied welcome line and a sent ai_notice leave the notice intact")
+    check(pub["privacy_url"] == "", "no privacy link until one is set")
+    r = client.put("/admin/widget/config", headers=ADMIN,
+                   json={**widget_config.get(), "privacy_url": "javascript:alert(1)"})
+    check(r.status_code == 400, f"a non-http privacy link is refused ({r.status_code})")
+    r = client.put("/admin/widget/config", headers=ADMIN,
+                   json={**widget_config.get(), "privacy_url": "https://example.com/privacy"})
+    check(client.get("/widget/config").json()["privacy_url"] == "https://example.com/privacy",
+          "a set privacy link is served")
+finally:
+    for k, v in _env.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    if hasattr(_llm, "outside_providers"):
+        del _llm.outside_providers
 
 print("\n" + "=" * 52)
 if fails:

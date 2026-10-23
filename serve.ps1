@@ -202,7 +202,33 @@ try {
         Log "backend started (pid $($be.Id)) on ${bind}:$Port"
 
         $started = Get-Date
-        $be.WaitForExit()
+        # Hang watchdog: a process that is alive but not answering never
+        # exits, so WaitForExit alone would wait forever. LIVENESS only --
+        # plain /health, never ?deep=1: deep folds in provider reachability,
+        # and restarting on a provider outage would turn "FAQ and doc
+        # requests still work" into "nothing works". 120s grace for the
+        # model load, then 3 failed probes 30s apart = restart.
+        # No test covers this; accept by suspending the pid (restart logged
+        # within 2 min) and by black-holing the provider (no restart).
+        $fails = 0
+        while (-not $be.WaitForExit(30000)) {
+            if (((Get-Date) - $started).TotalSeconds -lt 120) { continue }
+            try {
+                Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing `
+                    -TimeoutSec 10 | Out-Null
+                $fails = 0
+            } catch {
+                $fails++
+                Log "health probe failed ($fails/3): $($_.Exception.Message)"
+                if ($fails -ge 3) {
+                    Log "backend pid $($be.Id) is hung - killing it"
+                    # /T: the venv python.exe is a launcher; the real server
+                    # is its child and would keep holding the port.
+                    & taskkill /PID $be.Id /T /F | Out-Null
+                    $be.WaitForExit()
+                }
+            }
+        }
         $ran = (Get-Date) - $started
 
         # A process that stayed up is a fresh incident, not a crash loop, so

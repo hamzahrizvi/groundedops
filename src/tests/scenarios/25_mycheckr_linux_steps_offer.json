@@ -1,0 +1,40 @@
+{
+  "id": "25_mycheckr_linux_steps_offer",
+  "product": "MyCheckr (Linux guide)",
+  "product_key": "biometrics_general",
+  "source": "Accessing my device in Linux Environment-v2-20250224_144232 2.pdf",
+  "persona": "Installer on a Linux box; takes the offered steps (8.8).",
+  "scoped": false,
+  "expect_labels": [],
+  "turns": [
+    {
+      "q": "Can I connect to MyCheckr using Linux?",
+      "needs_history": false,
+      "commercial": false,
+      "note": "capability question (classified capability 7/7 in logs); the reply offers the steps with a button",
+      "live": {
+        "expect": "answer",
+        "mention": [
+          "steps"
+        ],
+        "reply": "Yes, show me the steps"
+      }
+    },
+    {
+      "q": "Yes, show me the steps",
+      "needs_history": null,
+      "commercial": false,
+      "note": "the offer's own button: served verbatim from the Linux guide before routing runs, so no follow-up decision is made",
+      "live": {
+        "expect": "answer",
+        "cite": [
+          "Linux Environment"
+        ],
+        "mention": [
+          "udev",
+          "sudo"
+        ]
+      }
+    }
+  ]
+}

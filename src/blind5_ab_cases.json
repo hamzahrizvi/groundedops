@@ -1,0 +1,748 @@
+{
+ "cases": [
+  {
+   "id": "B5-01",
+   "product": "bv30",
+   "q": "old pinball host only has the 4 parallel credit lines and no serial, but we want the bv30 to take 6 different notes. any way to do that?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Yes, set the BV30 to Binary: it outputs the channel number as a binary pattern on the four parallel vend lines (pulled low for 100 ± 3 ms), so up to 15 different notes can be accepted and 4 individually inhibited (e.g. channel 3 = Vend 1 + Vend 2 low). Binary is an unsecure interface and shouldn't be used for new developments.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p24",
+    "BV30 User Manual-v1.pdf p25"
+   ],
+   "must_include": [
+    "Binary",
+    "15",
+    "100 ± 3 ms"
+   ]
+  },
+  {
+   "id": "B5-02",
+   "product": "nv9usb",
+   "q": "want to hook an nv9usb+ straight to the pc over usb, no IF17 in between. which cable do i order?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Use the CN00392 Validator to USB cable. The host should have an opto-isolated USB port/hub, and the +12V DC and 0V supply pins must still be connected even when using the USB connection.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p31",
+    "NV9USB+ Range User Manual-v1.pdf p38",
+    "NV9USB+ Range User Manual-v1.pdf p39"
+   ],
+   "must_include": [
+    "CN00392",
+    "12V"
+   ]
+  },
+  {
+   "id": "B5-03",
+   "product": "nv9_spectral",
+   "q": "ordered the 82mm horizontal illuminated bezel (PA04280) for an nv9 spectral. does it come with the cable or is that extra?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "The cable is sold separately: the PA04280 82mm illuminated bezel needs the WR02128 NV9 Spectral to rainbow bezel cable, which plugs into the NV9 Spectral's 8-way bezel connector.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p13",
+    "NV9 Spectral Range User Manual-v1.pdf p9"
+   ],
+   "must_include": [
+    "WR02128",
+    "sold separately"
+   ]
+  },
+  {
+   "id": "B5-04",
+   "product": "nv200s",
+   "q": "fitting a bunch note feeder to an nv200 spectral for canadian dollars. which path insert goes in it?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Use the 74mm path insert (CAD is in the 74mm list). The inserts are not required on BNF build revision 2.0 or later.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p112",
+    "NV200S Range User Manual-v1.pdf p17"
+   ],
+   "must_include": [
+    "74mm",
+    "2.0"
+   ]
+  },
+  {
+   "id": "B5-05",
+   "product": "nv200s",
+   "q": "mounting screws for the nv200 spectral weren't in the box. what do i need to buy for the bezel and for the cashbox?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Screws aren't included. Bezel: M3 thread, 12mm long. Cashbox: M4 thread, 6mm long.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p55"
+   ],
+   "must_include": [
+    "M3",
+    "12mm",
+    "M4 6mm"
+   ]
+  },
+  {
+   "id": "B5-06",
+   "product": "sku_scs",
+   "q": "need to order coin path inserts for our smart coin systems, label says hardware type H. whats the part no. and how often do they get swapped?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Hardware type H uses path insert PM03386 (same for the SMART Coin System and Twin coin feeders). It should be exchanged every 250,000 coins; following the documented procedure means no re-initialisation of the coin feeder is needed.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p102",
+    "SMART Coin System Range User Manual-v1.pdf p98",
+    "SMART Coin System Range User Manual-v1.pdf p77"
+   ],
+   "must_include": [
+    "PM03386",
+    "250,000"
+   ]
+  },
+  {
+   "id": "B5-07",
+   "product": "mycheckr",
+   "q": "our kiosk polls the mycheckr status endpoint to get the age back. how often should we poll it and when do we give up?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Poll GET /status every 200–500 ms until the device is ready and a single valid face is seen, with a reasonable timeout (e.g. 5–10 s) after which you fail gracefully. Treat each response as a fresh snapshot.",
+   "pages": [
+    "ICU_Age_Result_Quick_Guide_v1_1.pdf p1"
+   ],
+   "must_include": [
+    "200–500 ms",
+    "5–10 s"
+   ]
+  },
+  {
+   "id": "B5-08",
+   "product": "mycheckr",
+   "q": "back office pc still runs IMS local 1.4 for the mycheckrs. how long will that keep working and what do i log into IMS 2.0 with?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "IMS Local 1.4 and its web service are discontinued from 01 Jan 2027. IMS 2.0 logs in with the device API credentials (default apiuser / apipassword, or the changed ones if they were updated via the API).",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p7",
+    "MyCheckr User Manual-v7.pdf p10"
+   ],
+   "must_include": [
+    "01 Jan 2027",
+    "apiuser"
+   ]
+  },
+  {
+   "id": "B5-09",
+   "product": "myconnect",
+   "q": "making some adverts for the mycheckrs through the connect app. what size do the pictures need to be, and can i put a video on from there?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Advert images should be 480 wide x 800 high. Video adverts can't be set from the app for now; they can only be set via the browser on IMS Local for each device.",
+   "pages": [
+    "MyConnect Environment-v4.pdf p35"
+   ],
+   "must_include": [
+    "480",
+    "800",
+    "IMS Local"
+   ]
+  },
+  {
+   "id": "B5-10",
+   "product": "mycheckr_mini",
+   "q": "what groups can i put people in when enrolling faces on the mini?",
+   "type": "lookup",
+   "expected": "answered",
+   "reference": "Enrolled, Employee, Premium, Temporary and Excluded. The assigned group determines how the device responds when that person is recognised.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p19"
+   ],
+   "must_include": [
+    "Employee",
+    "Premium",
+    "Excluded"
+   ]
+  },
+  {
+   "id": "B5-11",
+   "product": "bv30",
+   "q": "metered the psu feeding our bv30 at 13.6v with about 0.3v of ripple on it. is that ok?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "No. The BV30 supply must be 10.8–13.2 V DC (12 V nominal) with ripple no more than 0.25 V at 100 Hz, so 13.6 V and 0.3 V ripple are both out of spec.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p8"
+   ],
+   "must_include": [
+    "13.2V",
+    "0.25V"
+   ]
+  },
+  {
+   "id": "B5-12",
+   "product": "nv9usb",
+   "q": "how heavy is an nv9usb+ with the 600 note slide-in cashbox and bezel? is the 600 clip-on lighter?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "With the 600 slide cashbox and bezel it weighs 2.14kg; the 600 clip cashbox with bezel is lighter at 1.72kg.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p13"
+   ],
+   "must_include": [
+    "2.14kg",
+    "1.72kg"
+   ]
+  },
+  {
+   "id": "B5-13",
+   "product": "nv9_spectral",
+   "q": "sizing a 24v supply for an nv22. what does it draw at worst?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "At 24 V the NV22 draws up to 2.5 A peak (1.5 A running, 0.21 A standby). At 12 V the figures are higher: 4 A peak, 2.5 A running.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p26"
+   ],
+   "must_include": [
+    "2.5 A",
+    "1.5 A"
+   ]
+  },
+  {
+   "id": "B5-14",
+   "product": "sku_scs",
+   "q": "our local 10 coin is about 30mm across and 2.2mm thick. will the smart coin system handle it?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "No. Coin diameter must be 18–28.5mm, so a 30mm coin is too big even though 2.2mm is within the 1.65–3.2mm thickness range. The required hardware type also depends on the currency, so check with ITL support.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p23"
+   ],
+   "must_include": [
+    "28.5mm",
+    "1.65",
+    "3.2mm"
+   ]
+  },
+  {
+   "id": "B5-15",
+   "product": "sku_scs",
+   "q": "budgeting power supplies for a twin smart coin system. what rating do i need?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "24 V DC (21.6–26.4 V) at 11.2 A, stated as required for every device, Primary and Secondary (running/peak max 11.2 A, nominal 4 A). The suggested PSU is a TDK Lambda RWS300B-24 (24V/12.5A), and the unit must be properly earth bonded.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p21"
+   ],
+   "must_include": [
+    "11.2A",
+    "24V",
+    "Primary and Secondary"
+   ]
+  },
+  {
+   "id": "B5-16",
+   "product": "mycheckr_mini",
+   "q": "running the mini off a 5v usb charger in a kiosk, metered it at 5.4v. ok?",
+   "type": "table_condition",
+   "expected": "answered",
+   "reference": "No. The Mini's input range is 4.75–5.25 V DC (5 V ±5%), with ripple no more than 0.25 V at 100 Hz, so 5.4 V is too high.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p30"
+   ],
+   "must_include": [
+    "5.25V",
+    "4.75V"
+   ]
+  },
+  {
+   "id": "B5-17",
+   "product": "nv9_spectral",
+   "q": "support want logs off an nv9 spectral. put a micro sd in but no folders appeared on it. firmware is 1.18 i think",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "Automatic folder creation only happens from firmware 1.20. On earlier firmware create the folders hsdata, nv9sl and valaudit in the card's root yourself (order doesn't matter) before inserting it, and the device must be powered on with the card inserted to start logging.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p44"
+   ],
+   "must_include": [
+    "1.20",
+    "hsdata, nv9sl, valaudit",
+    "powered on with the card inserted"
+   ]
+  },
+  {
+   "id": "B5-18",
+   "product": "nv9usb",
+   "q": "updating an nv9usb+ with the DA3, play button went red and the led is doing 1 long then 3 short",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "1 long + 3 short means no valid download files were found on the DA3. Load the DA3 with the correct dataset/firmware files using the Device Programming System (DPS) software, make sure the validator is in SSP, and retry. Note that ITL no longer manufactures the DA3.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p33",
+    "NV9USB+ Range User Manual-v1.pdf p34"
+   ],
+   "must_include": [
+    "No valid download files",
+    "DPS"
+   ]
+  },
+  {
+   "id": "B5-19",
+   "product": "nv200s",
+   "q": "fitted a lock to the front of the nv200 spectral head and the key only turns about 45 degrees. have i put it in wrong?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "No, that's normal: with the lock fitted correctly the key only turns about 45 degrees and that unlocks the unit. Don't force it past 45 degrees or you'll damage the unit.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p33"
+   ],
+   "must_include": [
+    "45 degrees",
+    "normal",
+    "don't force"
+   ]
+  },
+  {
+   "id": "B5-20",
+   "product": "sku_scs",
+   "q": "first fill on a new smart coin system. got a bag of mixed coins and a few euro rolls, can i just tip it all in the feeder?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "No. Put in one roll at a time and wait for it to be fully processed (mix the roll denominations rather than all of one value), and add mixed coins no more than 150 at a time. Re-enter any rejected coins after the batch is processed. After filling, send the Coin Stir command (0x5D) for at least 30 seconds.",
+   "pages": [
+    "SMART Coin System Range User Manual-v1.pdf p65",
+    "SMART Coin System Range User Manual-v1.pdf p66"
+   ],
+   "must_include": [
+    "150",
+    "one roll",
+    "30 seconds"
+   ]
+  },
+  {
+   "id": "B5-21",
+   "product": "mycheckr",
+   "q": "mycheckr by the front window keeps showing spoof 6 in IMS in the evenings and wont give an age",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "Spoof 6 means passing traffic or decorative lights are interfering. Relocate the device or adjust the lighting/environment.",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p19"
+   ],
+   "must_include": [
+    "passing traffic",
+    "lights",
+    "relocate"
+   ]
+  },
+  {
+   "id": "B5-22",
+   "product": "myconnect",
+   "q": "connect app only chimes for underage alerts while its open on the screen. once the tablet locks we get nothing. tablet has no internet, just the local network",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "Internet isn't needed for core functions, but it is used for Google push notifications when the app is in the background or the tablet is locked, and those notifications trigger the sound/chime alerts. Give the tablet internet access while keeping it on the same local network as the hub.",
+   "pages": [
+    "MyConnect Environment-v4.pdf p18"
+   ],
+   "must_include": [
+    "internet",
+    "push notifications"
+   ]
+  },
+  {
+   "id": "B5-23",
+   "product": "mycheckr_mini",
+   "q": "itl support want diagnostic logs from our mini, where do i get them?",
+   "type": "procedure_or_troubleshoot",
+   "expected": "answered",
+   "reference": "In IMS 2.0 open the Device Information page and use Export Diagnostic Files, which exports device logs and diagnostics for ITL Support. Collect them before reporting the issue; syncing the device clock to the PC (Timezone & Clock > Sync) is recommended so logs have accurate timestamps.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p21",
+    "MyCheckr Mini User Manual-v5.pdf p22"
+   ],
+   "must_include": [
+    "Device Information",
+    "Export Diagnostic Files"
+   ]
+  },
+  {
+   "id": "B5-24",
+   "product": "nv200s",
+   "q": "host logged an unsafe jam on the nv200 spectral. how do i pull the detailed reason over ssp, and what does unique error 0x68 mean?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Send the expansion command 30 00 60 (Get Status Error). The reply is OK (0xF0) followed by the main error code and the unique error code. 0x68 (104 decimal) is a stacker jam. The command reports the last recorded global error even if it has cleared, and the information is cleared after a device reset.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p85",
+    "NV200 Spectral SSP Manual v.1.pdf p66",
+    "NV200 Spectral SSP Manual v.1.pdf p68"
+   ],
+   "must_include": [
+    "30 00 60",
+    "stacker jam",
+    "reset"
+   ]
+  },
+  {
+   "id": "B5-25",
+   "product": "nv200s",
+   "q": "our new host set the nv200 spectral (with spectral payout) to 115200 baud with persist on. the old host only does 9600 and now cant talk to it. how do i get it back to 9600 without the new host?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "The 0x4D Set Baud Rate command's persist byte 0x01 keeps the rate over resets, so a power cycle won't undo it (0x00 would revert after reset). To reset by hand, press and hold the Payout 3 button while powering up the validator; release when the button shines solid red, then the bezel and button shine blue for 10–12 s and the baud rate is 9600. The Payout 3 button functions need firmware 4.31 or later.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p63",
+    "NV200 Spectral SSP Manual v.1.pdf p88"
+   ],
+   "must_include": [
+    "Payout 3 button",
+    "9600",
+    "persist"
+   ]
+  },
+  {
+   "id": "B5-26",
+   "product": "mycheckr",
+   "q": "no network point near the till for the mycheckr. can it go on wifi, and where do i set that? will the connect hub work on wifi too?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "Yes, the MyCheckr can work over Wi-Fi, though Ethernet is preferred. In IMS 2.0 go to Network & Device Management, scan for networks and set WiFi Config to Dynamic (DHCP) or Static (IP, net mask, gateway, DNS). The MyConnect Hub is Ethernet-only and doesn't support Wi-Fi.",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p24",
+    "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf p4",
+    "CS-MyCheckr Installation & MyConnect App Pre-Requisites Checklist-170925-134345.pdf p1"
+   ],
+   "must_include": [
+    "Network & Device Management",
+    "Ethernet only"
+   ]
+  },
+  {
+   "id": "B5-27",
+   "product": "mycheckr_mini",
+   "q": "integrator set our mini up doing face recognition, we only want age. we drive it from the checkout over the api mostly, not IMS. how do we switch it back?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "In IMS 2.0 Device Configuration, set Running Mode to Age Only (the factory default) and Save. Over the local API, POST to {BASE_URL}/api/v1_0/settings with Cameras [{Id_Index: 0, Face_mode: \"age_only\", Status_face_data: false}]. Settings are per camera; age_only disables recognition and Status_face_data false removes the face-template fields from status responses.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p11",
+    "MyCheckr Mini User Manual-v5.pdf p22",
+    "ICU_Age_Result_Quick_Guide_v1_1.pdf p1"
+   ],
+   "must_include": [
+    "Age Only",
+    "age_only",
+    "settings"
+   ]
+  },
+  {
+   "id": "B5-28",
+   "product": "myconnect",
+   "q": "fitting the connect hub tomorrow. where does the network cable go in, does it matter what order i power things on, and should it be dhcp or a fixed ip?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "The Ethernet socket is under the hub lid; take the lid off with a TR8 screwdriver (the hub is Ethernet-only). Power the hub on only after the MyCheckr and the router are already on. Give all devices static IPs; in segmented or enterprise networks put them in a dedicated VLAN with DHCP disabled.",
+   "pages": [
+    "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf p4",
+    "MyConnect Environment-v4.pdf p5",
+    "MyConnect Environment-v4.pdf p6"
+   ],
+   "must_include": [
+    "TR8",
+    "after the MyCheckr and router",
+    "static IP"
+   ]
+  },
+  {
+   "id": "B5-29",
+   "product": "myconnect",
+   "q": "quoting a mycheckr + connect hub job for a pub. whats actually in the box, do i have to buy a tablet and a mount on top? any requirement for the tablet?",
+   "type": "multi_document",
+   "expected": "answered",
+   "reference": "The standard kits include the MyCheckr and its PSU, the hub and its PSU, two 10 m Ethernet cables, a relay cable and a router. Not included: the MyCheckr mount (required), the Android tablet and charger (required), an optional tablet case/stand and power extension cords. The tablet must run the Android MyConnect App and be on the same local network/VLAN as the hub and MyCheckr.",
+   "pages": [
+    "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf p2",
+    "MyConnect Environment-v4.pdf p5",
+    "MyConnect Environment-v4.pdf p18"
+   ],
+   "must_include": [
+    "mount",
+    "Android tablet",
+    "same network"
+   ]
+  },
+  {
+   "id": "B5-30",
+   "product": "nv9usb",
+   "q": "our nv9usb+ units run the UK1 firmware. can i just use a paper config card to change the settings?",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. UK1 firmware doesn't support the configuration card option.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p36",
+    "NV9USB+ Range User Manual-v1.pdf p71"
+   ],
+   "must_include": [
+    "No",
+    "UK1"
+   ]
+  },
+  {
+   "id": "B5-31",
+   "product": "nv9_spectral",
+   "q": "can i pull the multi note float off the nv9 spectral with the power still on? dont want to reboot mid shift",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. Don't add or remove modules while the NV9 Spectral is powered; switch it off first.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p36",
+    "NV9 Spectral Range User Manual-v1.pdf p37"
+   ],
+   "must_include": [
+    "No",
+    "powered"
+   ]
+  },
+  {
+   "id": "B5-32",
+   "product": "nv200s",
+   "q": "can we add a bunch note feeder to our existing standard nv200 spectral heads?",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. The BNF only works with the NV200 Spectral with UAP (PA03269); it can't be fitted or retrofitted to a standard NV200 Spectral head. It also needs a 24 V supply.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p16",
+    "NV200S Range User Manual-v1.pdf p20"
+   ],
+   "must_include": [
+    "No",
+    "PA03269"
+   ]
+  },
+  {
+   "id": "B5-33",
+   "product": "bv30",
+   "q": "swapping old bv20s for bv30s. do i need to rewire the harness?",
+   "type": "yes_no_documented",
+   "expected": "answered",
+   "reference": "No. The BV30 is pin-to-pin compatible with the BV20, so no harness changes are needed. Check that the machine's power supply suits the BV30, and that host timeouts are OK because credits may come faster.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p10"
+   ],
+   "must_include": [
+    "pin to pin",
+    "power supply"
+   ]
+  },
+  {
+   "id": "B5-34",
+   "product": "bv30",
+   "q": "do the bv30s have any anti-stringing protection? lost a few £10s to people fishing notes back out",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "The BV30 manual doesn't mention any anti-stringing/anti-fishing feature (it only recommends an encrypted protocol such as eSSP for security), so this can't be confirmed from the documentation.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B5-35",
+   "product": "mycheckr",
+   "q": "can the mycheckr be powered over PoE from our switch so i only run one cable to it?",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "PoE isn't mentioned. The manual only documents a 12–24 V DC power input (10.8–26.4 V) and a 10/100Base-T Ethernet port, so PoE power can't be confirmed.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B5-36",
+   "product": "myconnect",
+   "q": "can the connect app be switched into polish for our staff?",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "The MyConnect documentation doesn't mention any language settings or translations for the app, so this isn't documented.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B5-37",
+   "product": "nv200s",
+   "q": "is there a heater kit for the nv200 spectral? its going in an outdoor parking pay station that freezes in winter",
+   "type": "absent_feature",
+   "expected": "rejected",
+   "reference": "No heater or heater kit is mentioned anywhere. The manual only gives an operating range of +3°C to +50°C at 5–95% non-condensing humidity.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B5-38",
+   "product": null,
+   "q": "putting validators in an unheated kiosk. what's the lowest operating temp for the nv9 spectral vs the nv9usb+?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "NV9 Spectral: +5°C (37.4°F) minimum. NV9USB+: +3°C minimum. Both have a +50°C maximum and 5–95% non-condensing humidity.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p25",
+    "NV9USB+ Range User Manual-v1.pdf p14"
+   ],
+   "must_include": [
+    "+5°C",
+    "+3°C"
+   ]
+  },
+  {
+   "id": "B5-39",
+   "product": "nv9_spectral",
+   "q": "replacing bv30s that run pulse with nv9 spectrals. will the nv9 spectral do pulse to our host?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "Not according to the manuals. The NV9 Spectral supports SSP, CCT, MDB and IF3; pulse isn't one of them. The BV30 does support Pulse (up to 16 channels on Vend 1). The NV9 Spectral is also only listed as a fitting replacement for the NV9USB, not the BV30.",
+   "pages": [
+    "NV9 Spectral Range User Manual-v1.pdf p4",
+    "NV9 Spectral Range User Manual-v1.pdf p47",
+    "NV9 Spectral Range User Manual-v1.pdf p29",
+    "BV30 User Manual-v1.pdf p26"
+   ],
+   "must_include": [
+    "SSP, CCT, MDB",
+    "pulse"
+   ]
+  },
+  {
+   "id": "B5-40",
+   "product": null,
+   "q": "want to show age-targeted adverts at the till. will the mycheckr mini do that or does it need the full mycheckr?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "Use the full MyCheckr: its Ads screen mode shows adverts by estimated age and gender, but only when the device is in Age Only mode. The Mini has no physical screen (its camera can only be streamed via a URL), so it can't display adverts.",
+   "pages": [
+    "MyCheckr User Manual-v7.pdf p15",
+    "MyCheckr User Manual-v7.pdf p5",
+    "MyCheckr Mini User Manual-v5.pdf p4",
+    "MyCheckr Mini User Manual-v5.pdf p5"
+   ],
+   "must_include": [
+    "Age Only",
+    "no physical screen"
+   ]
+  },
+  {
+   "id": "B5-41",
+   "product": "bv30",
+   "q": "swapping an nv9usb+ with the 300 clip-on cashbox for a bv30 on a kiddie ride door to save weight. how much lighter, and what about the cashbox?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "The BV30 weighs 300g; the NV9USB+ with 300 clip cashbox and bezel weighs 1.14kg. The BV30 has no built-in cashbox: notes fall out of the back (free fall), so put a cashbox or bag underneath with enough space for notes to fall completely clear.",
+   "pages": [
+    "BV30 User Manual-v1.pdf p8",
+    "BV30 User Manual-v1.pdf p6",
+    "BV30 User Manual-v1.pdf p38",
+    "NV9USB+ Range User Manual-v1.pdf p13"
+   ],
+   "must_include": [
+    "300g",
+    "1.14kg",
+    "free fall"
+   ]
+  },
+  {
+   "id": "B5-42",
+   "product": "nv200s",
+   "q": "we already stock PA00650 locks for our nv9usb+ cashboxes. will they fit the nv200 spectral too, and do i have to buy cams separately like on the nv9usb+?",
+   "type": "comparison",
+   "expected": "answered",
+   "reference": "Yes, PA00650 is the listed lock for the NV200 Spectral (a keyless lock PA02713 comes as standard on the 1000 note cashbox). The NV200 Spectral's lock cams come with the product (PM00614 for the head, MC00247 for the cashbox). On the NV9USB+ the lock cam MC00186 has to be ordered separately.",
+   "pages": [
+    "NV200S Range User Manual-v1.pdf p38",
+    "NV9USB+ Range User Manual-v1.pdf p24"
+   ],
+   "must_include": [
+    "PA00650",
+    "PM00614",
+    "MC00186"
+   ]
+  },
+  {
+   "id": "B5-43",
+   "product": "nv9usb",
+   "q": "ok how do i get it out",
+   "turn1": "nv9usb+ bezel is doing 1 long flash then 2 short, what is that?",
+   "type": "followup",
+   "expected": "answered",
+   "reference": "Switch off (unplug the interface cable or power), slide the red catch to the left and lift the top half of the unit. If the note is in the upper path, remove it; if it's in the lower path, push the grey release tab and lift the lozenge. Close the unit and re-apply power; it resets and should stop flashing the jam code.",
+   "pages": [
+    "NV9USB+ Range User Manual-v1.pdf p58",
+    "NV9USB+ Range User Manual-v1.pdf p56"
+   ],
+   "must_include": [
+    "red catch",
+    "grey release tab",
+    "re-apply power"
+   ]
+  },
+  {
+   "id": "B5-44",
+   "product": "bv30",
+   "q": "it flashed 6 times. what's that one?",
+   "turn1": "how do i check what protocol my bv30 is set to?",
+   "type": "followup",
+   "expected": "answered",
+   "reference": "6 flashes means the BV30 is set to ccTalk (1 = SSP, 2 = Pulse, 3 = MDB, 8 = Parallel).",
+   "pages": [
+    "BV30 User Manual-v1.pdf p32",
+    "BV30 User Manual-v1.pdf p33"
+   ],
+   "must_include": [
+    "ccTalk"
+   ]
+  },
+  {
+   "id": "B5-45",
+   "product": "mycheckr_mini",
+   "q": "do i unzip the file first?",
+   "turn1": "how do i update the firmware on the mycheckr mini?",
+   "type": "followup",
+   "expected": "answered",
+   "reference": "No. Save the .zip firmware package without extracting it and select the compressed file in Device Information > Update Device, then upload it. Don't disconnect power or USB during the update; the device restarts when it finishes.",
+   "pages": [
+    "MyCheckr Mini User Manual-v5.pdf p22",
+    "MyCheckr Mini User Manual-v5.pdf p23"
+   ],
+   "must_include": [
+    "zip",
+    "don't disconnect"
+   ]
+  },
+  {
+   "id": "B5-46",
+   "product": "mycheckr_mini",
+   "q": "whats the max face detection distance on the MyCheckr Max? thinking of upgrading from the mini",
+   "type": "phantom_or_offtopic",
+   "expected": "rejected",
+   "reference": "There's no MyCheckr Max in the documentation; the manuals only cover the MyCheckr and the MyCheckr Mini, so this can't be answered.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B5-47",
+   "product": "nv9_spectral",
+   "q": "whats the vat rate on amusement machine takings in the uk at the moment?",
+   "type": "phantom_or_offtopic",
+   "expected": "rejected",
+   "reference": "Off-topic tax question that the product manuals don't cover.",
+   "pages": [],
+   "must_include": []
+  },
+  {
+   "id": "B5-48",
+   "product": null,
+   "q": "how often am i meant to clean it?",
+   "type": "vague",
+   "expected": "clarify",
+   "reference": "Ambiguous: the interval depends on the device (e.g. monthly lens cleaning for the BV30, NV9USB+, NV200 Spectral and SMART Coin System, every 6 months for the NV9 Spectral). Ask which product.",
+   "pages": [],
+   "must_include": []
+  }
+ ]
+}

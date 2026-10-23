@@ -19,7 +19,9 @@ with sync_playwright() as pw:
         pg.fill("input[type=password]","design-audit-password-123")
         n=pg.locator("input[placeholder*='Your name']")
         if n.count() and n.first.is_visible(): n.first.fill("Design Audit")
-        pg.locator(".gate button").first.click(); pg.wait_for_timeout(2500)
+        # .btn-primary, not the first button in the card: the sign-in page
+        # now carries a theme toggle, which comes first in the DOM.
+        pg.locator(".gate .btn-primary").first.click(); pg.wait_for_timeout(2500)
         applied=pg.evaluate("()=>document.documentElement.dataset.theme")
         bg=pg.evaluate("()=>getComputedStyle(document.body).backgroundColor")
         print("%-6s applied=%-6s body bg=%s  jsErr=%d" % (theme, applied, bg, len(errs)))

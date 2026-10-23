@@ -163,3 +163,27 @@ def test_caption_pattern_is_not_exponential():
     t0 = time.perf_counter()
     faq_store.is_question_shaped(hostile)
     assert (time.perf_counter() - t0) < 0.05
+
+
+def test_reviewed_badge_only_for_entries_a_person_read():
+    """9.6: "Reviewed answer" was shown for all 406 entries, ~350 of which
+    nobody provably read. An approved draft is flagged at save time; an
+    unread /autogenerate draft is not, until the audit verifies it."""
+    old = faq_store._PATH
+    try:
+        _with_store([])
+        faq_store.merge_questions("m.pdf", "mycheckr", [
+            {"question": "Approved?", "answer": "a", "reviewed": True},
+            {"question": "Unread?", "answer": "b"},
+        ])
+        by_q = {e["question"]: e for e in faq_store.list_for_product("mycheckr")}
+        assert faq_store.is_reviewed(by_q["Approved?"])
+        assert not faq_store.is_reviewed(by_q["Unread?"])
+    finally:
+        faq_store._PATH = old
+        faq_store._invalidate_cache()
+    assert faq_store.is_reviewed({"origin": "generated", "verified": True})
+    assert not faq_store.is_reviewed({"origin": "generated", "verified": "unstable"})
+    assert not faq_store.is_reviewed({"origin": "harvested"})
+    assert faq_store.is_reviewed({"origin": "generated", "edited": True})
+    assert faq_store.is_reviewed({"question": "pre-origin curated entry"})

@@ -9,6 +9,8 @@ import logging
 import chromadb
 from typing import Optional
 
+from docindex import product_keys
+
 logger = logging.getLogger(__name__)
 
 CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
@@ -29,6 +31,19 @@ def get_client() -> chromadb.PersistentClient:
 
 _CHECK_SECS = float(os.getenv("CHROMA_HANDLE_CHECK_SECS", "5"))
 _checked_at = 0.0
+
+
+def invalidate_retrieval_cache() -> None:
+    """Invalidate derived in-process search state after any index mutation."""
+    import docindex
+    docindex.invalidate()
+    try:
+        from retrieval_db import _invalidate_bm25_cache
+        _invalidate_bm25_cache()
+    except Exception as exc:
+        # During startup retrieval_db may still be importing db. Count-based
+        # invalidation remains the fallback for inserts/deletes in that case.
+        logger.debug("retrieval cache invalidation deferred: %s", exc)
 
 
 def get_collection() -> chromadb.Collection:
@@ -86,20 +101,16 @@ def reset_collection() -> chromadb.Collection:
     except Exception:
         pass
     _collection = client.create_collection(COLLECTION_NAME)
+    invalidate_retrieval_cache()
     logger.info("Collection recreated")
     return _collection
 
 
 def get_stats() -> dict:
-    col = get_collection()
-    count = col.count()
+    from docindex import source_index
+    count = get_collection().count()
     try:
-        result = col.get(include=["metadatas"])
-        sources = sorted({
-            m.get("source", "unknown")
-            for m in result["metadatas"]
-            if m.get("source")
-        })
+        sources = sorted(row["source"] for row in source_index())
     except Exception:
         sources = []
     return {"total_chunks": count, "sources": sources}
@@ -111,20 +122,40 @@ def delete_source(source: str) -> int:
     ids = result.get("ids", []) if result else []
     if ids:
         col.delete(ids=ids)
+        invalidate_retrieval_cache()
         logger.info(f"Deleted source '{source}' ({len(ids)} chunks)")
     return len(ids)
 
 
-def _product_keys(meta: dict) -> list[str]:
-    """The product tags on a chunk.
+def stale_product_flags(meta: dict, keys: list[str] | None = None) -> list[str]:
+    """The prod_* flags on a chunk that its product tags no longer name.
 
-    Reads BOTH "products" and "product": ingest.py writes the plural and
-    older paths wrote the singular, so anything that only checks one key
-    silently misses half the corpus. That mismatch has bitten this project
-    before (see PROJECT_MAP's note on the product-metadata key).
+    `keys` defaults to the chunk's own product tags."""
+    keep = set(product_keys(meta) if keys is None else keys)
+    return [k for k in meta if k.startswith("prod_") and k[5:] not in keep]
+
+
+def with_product_tags(meta: dict, keys: list[str]) -> dict:
+    """A copy of `meta` for col.update() that tags the chunk to exactly `keys`.
+
+    Chroma's update MERGES metadata: a key missing from the dict is KEPT, and
+    only a key set to None is deleted. Popping a stale prod_* flag before
+    update() therefore left it in the index, which is how 440 chunks moved
+    off biometrics_general still carried prod_biometrics_general=True -- and
+    the dense arm's shared-documents clause matches on that flag, so NV9
+    Spectral rows reached MyCheckr-scoped answers. So stale flags are written
+    as None. The singular "product" is rewritten rather than dropped: the
+    dense arm matches on it and reindex.py/clarify.py still read it, and a
+    pop() here never reached the index either, so it kept the OLD key.
     """
-    raw = meta.get("products") or meta.get("product") or ""
-    return [k.strip() for k in str(raw).split(",") if k.strip()]
+    out = dict(meta)
+    for k in stale_product_flags(meta, keys):
+        out[k] = None
+    out["products"] = ",".join(keys)
+    out["product"] = ",".join(keys)
+    for k in keys:
+        out["prod_" + k] = True
+    return out
 
 
 def count_by_product(product_key: str) -> int:
@@ -133,16 +164,16 @@ def count_by_product(product_key: str) -> int:
     col = get_collection()
     got = col.get(include=["metadatas"])
     return sum(1 for m in (got.get("metadatas") or [])
-               if product_key in _product_keys(m))
+               if product_key in product_keys(m))
 
 
 def retag_product(old_key: str, new_key: str | None) -> int:
     """Move every chunk tagged `old_key` to `new_key`, or drop the tag when
     `new_key` is None.
 
-    Returns the number of chunks changed. Writes both metadata keys back in
-    the plural form so the corpus converges on one spelling as things are
-    retagged, rather than accumulating more of the split above.
+    Returns the number of chunks changed. Writes both spellings and the
+    prod_* flags through with_product_tags, so the dropped key's flag is
+    really deleted from the index.
 
     A chunk tagged to several products keeps its other tags — retagging one
     product must not strip a document's membership of another.
@@ -156,20 +187,18 @@ def retag_product(old_key: str, new_key: str | None) -> int:
 
     change_ids, change_metas = [], []
     for cid, meta in zip(ids, metas):
-        keys = _product_keys(meta)
+        keys = product_keys(meta)
         if old_key not in keys:
             continue
         keys = [k for k in keys if k != old_key]
         if new_key and new_key not in keys:
             keys.append(new_key)
-        updated = dict(meta)
-        updated["products"] = ",".join(keys)
-        updated.pop("product", None)      # collapse onto the plural spelling
         change_ids.append(cid)
-        change_metas.append(updated)
+        change_metas.append(with_product_tags(meta, keys))
 
     if change_ids:
         col.update(ids=change_ids, metadatas=change_metas)
+        invalidate_retrieval_cache()
         logger.info(f"Retagged {len(change_ids)} chunk(s): "
                     f"{old_key!r} -> {new_key!r}")
     return len(change_ids)
@@ -191,16 +220,13 @@ def delete_by_product(product_key: str) -> int:
 
     doomed, shared_ids, shared_metas = [], [], []
     for cid, meta in zip(ids, metas):
-        keys = _product_keys(meta)
+        keys = product_keys(meta)
         if product_key not in keys:
             continue
         remaining = [k for k in keys if k != product_key]
         if remaining:
-            updated = dict(meta)
-            updated["products"] = ",".join(remaining)
-            updated.pop("product", None)
             shared_ids.append(cid)
-            shared_metas.append(updated)
+            shared_metas.append(with_product_tags(meta, remaining))
         else:
             doomed.append(cid)
 
@@ -208,6 +234,8 @@ def delete_by_product(product_key: str) -> int:
         col.update(ids=shared_ids, metadatas=shared_metas)
     if doomed:
         col.delete(ids=doomed)
+    if shared_ids or doomed:
+        invalidate_retrieval_cache()
     logger.info(f"delete_by_product {product_key!r}: removed {len(doomed)} "
                 f"chunk(s), kept {len(shared_ids)} shared with other products")
     return len(doomed)

@@ -1,0 +1,47 @@
+{
+  "id": "09_biometrics_api_developer",
+  "product": "Biometrics / ICU",
+  "product_key": "biometrics_general",
+  "source": "ICU_Network_API-v1.0.50.pdf",
+  "persona": "Developer integrating the ICU network API.",
+  "expect_labels": [],
+  "expect_labels_note": "the ICU docs sit under 'General (shared docs)', which is a bucket rather than a product, so there is deliberately no button to offer",
+  "turns": [
+    {
+      "q": "what authentication does the ICU network API use",
+      "followup": false,
+      "commercial": false,
+      "note": "opening"
+    },
+    {
+      "q": "what does the age result payload actually contain",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone"
+    },
+    {
+      "q": "is that the same in the Linux environment guide",
+      "followup": true,
+      "commercial": false,
+      "note": "'that' refers back"
+    },
+    {
+      "q": "how do I reach the device from a Linux box on the same subnet",
+      "followup": false,
+      "commercial": false,
+      "note": "long, standalone"
+    },
+    {
+      "q": "what about rate limits",
+      "followup": true,
+      "commercial": false,
+      "note": "'what about' opener"
+    },
+    {
+      "q": "can I get a quote for a hundred licences",
+      "followup": false,
+      "commercial": true,
+      "note": "quote -> commercial deflect"
+    }
+  ]
+}

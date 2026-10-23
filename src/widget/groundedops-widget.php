@@ -91,6 +91,61 @@ if (!defined('GROUNDEDOPS_LOGIN_URL')) {
 }
 
 /**
+ * Whether the visitor's browser is on HTTPS.
+ *
+ * is_ssl() alone is wrong behind a TLS-terminating proxy (staging's setup):
+ * PHP sees plain http, so every URL WordPress builds comes out http://. On
+ * an HTTPS page that breaks things in ways that look unrelated:
+ *
+ *   - an http:// data-api is mixed content; the browser blocks the widget's
+ *     script and every call, with nothing on screen to say why;
+ *   - an http:// redirect_to returns the visitor from sign-in to a different
+ *     ORIGIN than the one they left. localStorage is per-origin, so the
+ *     conversation and the question waiting to be answered are both gone,
+ *     and a Secure auth cookie is not sent to http so they look signed out.
+ *
+ * The forwarded headers are client-supplied, but all they can do here is
+ * make URLs https, which is harmless to spoof.
+ */
+function groundedops_is_https() {
+    if (is_ssl()) { return true; }
+    $proto = isset($_SERVER['HTTP_X_FORWARDED_PROTO'])
+        ? strtolower(trim(explode(',', $_SERVER['HTTP_X_FORWARDED_PROTO'])[0])) : '';
+    if ($proto === 'https') { return true; }
+    // Cloudflare: {"scheme":"https"}
+    if (isset($_SERVER['HTTP_CF_VISITOR'])
+        && strpos($_SERVER['HTTP_CF_VISITOR'], '"https"') !== false) {
+        return true;
+    }
+    return strpos(home_url('/'), 'https://') === 0;
+}
+
+/** Loopback hosts, where plain http is normal and browsers allow it. */
+function groundedops_is_local_url($url) {
+    $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+    return in_array($host, array('localhost', '127.0.0.1', '[::1]', '::1'), true);
+}
+
+/**
+ * The backend URL as the browser should use it. On an HTTPS page an http://
+ * backend is blocked outright as mixed content, so upgrading cannot make it
+ * worse and works whenever the backend has TLS - which it must for tokens.
+ */
+function groundedops_api_url() {
+    $api = rtrim(GROUNDEDOPS_API, '/');
+    if (groundedops_is_https() && !groundedops_is_local_url($api)) {
+        $api = set_url_scheme($api, 'https');
+    }
+    return $api;
+}
+
+/** A token must not cross the network in clear text. */
+function groundedops_api_is_secure() {
+    $api = groundedops_api_url();
+    return strpos($api, 'https://') === 0 || groundedops_is_local_url($api);
+}
+
+/**
  * Base64url without padding - matches Python's
  * base64.urlsafe_b64encode(...).rstrip(b'=')
  */
@@ -111,6 +166,12 @@ function groundedops_b64url($data) {
  */
 function groundedops_make_token() {
     if (!is_user_logged_in() || GROUNDEDOPS_SECRET === '') {
+        return '';
+    }
+    // Withheld rather than sent over plain http: a sniffed token is a
+    // signed-in customer's AI allowance for its whole TTL. The admin notice
+    // below says why signed-in users are getting guest answers.
+    if (!groundedops_api_is_secure()) {
         return '';
     }
     $user = wp_get_current_user();
@@ -147,8 +208,19 @@ function groundedops_embed_widget() {
     // widget is noise.
     if (is_admin()) { return; }
 
-    $api   = esc_url(GROUNDEDOPS_API);
+    $api   = esc_url(groundedops_api_url());
     $token = groundedops_make_token();
+
+    // Where sign-in returns to, on the scheme the visitor is actually on, so
+    // they come back to the same origin (and the same localStorage) they
+    // left - see groundedops_is_https(). Only ever upgraded: on an http page
+    // an https login URL (e.g. an external IdP) must stay https.
+    $return_to = get_permalink() ?: home_url('/');
+    $login     = GROUNDEDOPS_LOGIN_URL;
+    if (groundedops_is_https()) {
+        $return_to = set_url_scheme($return_to, 'https');
+        $login     = set_url_scheme($login, 'https');
+    }
 
     // Only what WordPress is the authority on.
     //
@@ -170,8 +242,7 @@ function groundedops_embed_widget() {
         // Return the visitor to the page they were reading, if the SP
         // plugin honours redirect_to (WooCommerce and most SAML plugins do).
         'data-sign-in-url' => esc_url(add_query_arg(
-            'redirect_to', urlencode(get_permalink() ?: home_url('/')),
-            GROUNDEDOPS_LOGIN_URL
+            'redirect_to', urlencode($return_to), $login
         )),
     );
     if ($token !== '') {
@@ -231,8 +302,14 @@ add_action('admin_notices', function () {
         $problems[] = 'Verify GROUNDEDOPS_LOGIN_URL starts the SSO flow correctly (currently ' . esc_html(GROUNDEDOPS_LOGIN_URL) . ').';
     }
     if (defined('GROUNDEDOPS_API') && strpos(GROUNDEDOPS_API, 'https://') !== 0
-        && strpos(GROUNDEDOPS_API, 'http://localhost') !== 0) {
-        $problems[] = 'GROUNDEDOPS_API is not HTTPS - tokens would be sent in clear text.';
+        && !groundedops_is_local_url(GROUNDEDOPS_API)) {
+        $problems[] = groundedops_api_is_secure()
+            ? 'GROUNDEDOPS_API is not HTTPS. HTTPS pages upgrade it automatically, but plain-http pages still withhold sign-in tokens, so signed-in users there get guest answers. Set it to https://.'
+            : 'GROUNDEDOPS_API is not HTTPS, so sign-in tokens are withheld and signed-in users get guest answers. Set it to https://.';
+    }
+    if (!groundedops_is_https() && strpos(home_url('/'), 'http://') === 0
+        && !groundedops_is_local_url(home_url('/'))) {
+        $problems[] = 'This site is being served over plain http. Visitors who start on http and return from sign-in on https lose their widget conversation (browser storage is per-origin). Redirect all http traffic to https.';
     }
     if (!$problems) { return; }
     echo '<div class="notice notice-warning"><p><strong>GroundedOps Support Widget</strong></p><ul style="list-style:disc;margin-left:20px">';

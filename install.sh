@@ -50,7 +50,7 @@ VENV_PY="$ROOT/.venv/bin/python"
 echo
 echo "Installing dependencies (~2GB, several minutes on first run)..."
 "$VENV_PY" -m pip install --upgrade pip --quiet
-"$VENV_PY" -m pip install -r "$APP_DIR/requirements.txt"
+"$VENV_PY" -m pip install --require-hashes -r "$APP_DIR/requirements.lock"
 
 # ── 3. Frontend ──────────────────────────────────────────────────────
 # The release ships a pre-built frontend/dist, so Node is NOT required.
@@ -75,9 +75,7 @@ if [ ! -f "$APP_DIR/.env" ]; then
   echo "Ollama and about 8GB of free memory)."
   echo
   read -r -p "Use a cloud provider? [Y/n] " MODE
-  read -r -p "Choose an admin password (for uploading documents): " ADMINPW
-  ADMINPW="${ADMINPW:-admin}"
-  { echo "ADMIN_PASSWORD=$ADMINPW"; } > "$APP_DIR/.env"
+  : > "$APP_DIR/.env"
 
   if [[ "${MODE:-y}" != "n" ]]; then
     echo
@@ -106,16 +104,34 @@ else
   echo "Existing .env kept - delete it and re-run to reconfigure."
 fi
 
-# ── 5. Pre-download models ───────────────────────────────────────────
+# ── 5. Owner account ──────────────────────────────────────────────────────
+# Admin access is real accounts (the old admin password is gone). Until the first
+# (root) account exists, anyone who can open the admin console from this
+# network can create it - so offer to create it here, on the box.
+# manage_accounts.py reads accounts.json from the current folder, the same
+# folder the server runs in, hence the cd.
+if ! (cd "$APP_DIR" && "$VENV_PY" manage_accounts.py list 2>/dev/null) | grep -Eq '^EMAIL +LEVEL'; then
+  echo
+  echo "  Owner account"
+  echo "  -------------"
+  echo "Nobody owns this install yet. Until someone does, the first person"
+  echo "to open the admin console from this network becomes the Owner."
+  read -r -p "Your email, to create the Owner account now (Enter to skip): " OWNER
+  if [ -z "$OWNER" ] || ! (cd "$APP_DIR" && "$VENV_PY" manage_accounts.py create "$OWNER" --level root --no-change-required); then
+    echo
+    echo "No Owner account yet. Open the admin console on this machine as soon"
+    echo "as GroundedOps starts and create it there, or run this in $APP_DIR:"
+    echo "  \"$VENV_PY\" manage_accounts.py create you@company.com --level root"
+  fi
+fi
+
+# ── 6. Pre-download models ───────────────────────────────────────────
 # Otherwise the first question stalls for minutes with no explanation.
+# Calls the backend's own loaders, so this fetches exactly the models it
+# runs, at the commits pinned in model_pins.py (D-20261021-19).
 echo
-echo "Downloading language models (~500MB, one time)..."
-"$VENV_PY" - <<'PYEOF'
-from sentence_transformers import SentenceTransformer, CrossEncoder
-SentenceTransformer('all-MiniLM-L6-v2')
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-print('models ready')
-PYEOF
+echo "Downloading language models (~1.3GB, one time)..."
+(cd "$APP_DIR" && "$VENV_PY" -c "import embeddings, reranker, grounding; embeddings._get_model(); reranker._get(reranker.RERANKER_MODEL); grounding._get_nli_model(); print('models ready')")
 
 echo
 echo "  Install complete"

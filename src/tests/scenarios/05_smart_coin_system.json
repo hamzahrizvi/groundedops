@@ -1,0 +1,48 @@
+{
+  "id": "05_smart_coin_system",
+  "product": "SMART Coin System",
+  "product_key": "sku_scs",
+  "source": "SMART Coin System Range User Manual-v1.pdf",
+  "persona": "Arcade operator. The RMS conversation, extended.",
+  "expect_labels": [
+    "SMART Coin System"
+  ],
+  "turns": [
+    {
+      "q": "what is the power draw just for RMS?",
+      "followup": false,
+      "commercial": false,
+      "note": "[logged 1970] answered in production"
+    },
+    {
+      "q": "how about RMS",
+      "followup": true,
+      "commercial": false,
+      "note": "[logged 1968] genuine follow-up, refused in production"
+    },
+    {
+      "q": "what chute option is available for debris collection",
+      "followup": false,
+      "commercial": false,
+      "note": "standalone"
+    },
+    {
+      "q": "how many coins a second can it pay out",
+      "followup": true,
+      "commercial": false,
+      "note": "short, pronoun"
+    },
+    {
+      "q": "does the hopper need emptying manually or does it self-level",
+      "followup": false,
+      "commercial": false,
+      "note": "long, 'it' about the machine"
+    },
+    {
+      "q": "from step 2 onward is the wiring the same",
+      "followup": true,
+      "commercial": false,
+      "note": "'from step' reference marker"
+    }
+  ]
+}

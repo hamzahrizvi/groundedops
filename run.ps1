@@ -208,7 +208,17 @@ if ($fwState -eq 'no' -or $fwState -eq 'blocked') {
 }
 switch ($fwState) {
     'yes'     { Say "  firewall rule in place" Green }
-    'unknown' { Say "  could not read firewall rules - assuming port $PORT is open" DarkGray }
+    'unknown' {
+        # NOT "assuming it is open". Reading firewall rules needs elevation,
+        # and on a domain-joined machine without it this branch is the ONLY
+        # one that ever runs -- so the one setup most likely to be blocked
+        # got a grey line saying everything was probably fine. Say what is
+        # actually known, and hand over the command that fixes it.
+        Say "  could not read firewall rules (needs elevation on a domain PC)" Yellow
+        Say "  the server is listening on every interface either way; if a" DarkGray
+        Say "  colleague cannot reach it, run this in an ELEVATED PowerShell:" DarkGray
+        Say "    $FW_CMD" Cyan
+    }
     'skip'    { }
     default   { Say "  no firewall rule for port $PORT (see summary)" Yellow }
 }

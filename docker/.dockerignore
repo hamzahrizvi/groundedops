@@ -1,14 +1,2 @@
-**/__pycache__
-**/*.pyc
-**/node_modules
-**/dist
-chroma_db/
-logs.jsonl
-logs.json
-eval_results.json
-*.enc
-deepseek_key
-deepseek_env_*
-.env
-legacy/
-uploads/
+# NOT READ BY DOCKER. The backend's build context is src/, so the ignore
+# file that applies is src/.dockerignore -- edit that one.

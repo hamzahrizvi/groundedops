@@ -13,7 +13,7 @@ Checks, in order:
   4. A live retrieval for a query, showing scores + which sources came
      back (proves retrieval + scoping are functional).
 """
-import sys, os, json
+import sys
 
 def main():
     from db import get_collection

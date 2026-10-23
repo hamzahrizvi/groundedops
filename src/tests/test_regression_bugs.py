@@ -265,7 +265,19 @@ def test_parse_condense_output_passthrough_when_clean():
 # Production transcript: "post installation verification installer sign
 # off" was rewritten to "How to connect tablet to hub" because phi was
 # called even though the query had no reference markers at all.
-# has_reference_markers now guards the model call.
+#
+# has_reference_markers used to guard the model call. It no longer does
+# (2026-09-22): gating the rewrite on a regex was a second, brittle
+# classifier doing a job CONDENSE_PROMPT_TEMPLATE already asks the model to
+# do, and it skipped the rewrite on real follow-ups whose wording it did not
+# list. What protects against THIS bug now is that retrieval searches the
+# raw phrasing alongside the rewritten one and fuses the two
+# (retrieval_db.retrieve_fused), so a bad rewrite costs candidates rather
+# than the original's hits.
+#
+# The rules are still tested here, and still used -- for the deterministic
+# combined-query fallback and for is_followup_turn -- so the cases below
+# stand. They are no longer a claim about whether the model gets called.
 
 def test_reference_markers_fires_on_genuine_followups():
     from text_utils import has_reference_markers
