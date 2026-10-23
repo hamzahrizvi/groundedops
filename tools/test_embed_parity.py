@@ -6,7 +6,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from embed_parity import overlap, verdict  # noqa: E402
+from embed_parity import cosines, overlap, verdict  # noqa: E402
 
 
 def row(**kw):
@@ -23,6 +23,8 @@ def main():
     assert verdict(0.995, [row(top10=8)]) == "FINDING"
     assert verdict(0.995, [row(top10_scoped=3, n_scoped=3)]) == "CLEARED"
     assert verdict(0.995, [row(top10_scoped=2, n_scoped=3)]) == "FINDING"
+    assert verdict(0.995, [row(top10=None, n=None)]) == "CLEARED"  # a missing list is skipped
+    assert abs(cosines([[2.0, 0.0]], [[1.0, 0.0]])[0] - 1.0) < 1e-12  # unnormalised input still reads 1
     print("ok")
 
 

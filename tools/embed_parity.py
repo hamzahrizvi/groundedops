@@ -10,7 +10,7 @@ Questions are embedded as typed; follow-ups are NOT condensed here.
 
 GO_CODE must be a src with the onnx backend (commit 7ecdaaf). Never run against the live chroma_db.
 VERDICT FINDING when: min chunk cosine onnx-vs-torch < 0.99, any question's query cosine < 0.99, or any
-question's top-10 overlap < min(9, n) (n = ids the onnx side returned, so a scope with 3 hits needs all 3).
+question's top-10 overlap < min(9, n) (n = ids the longer side returned, so a scope with 3 hits needs all 3).
 """
 import argparse
 import json
@@ -29,6 +29,13 @@ os.chdir(DATA)
 
 def overlap(a, b):
     return len(set(a) & set(b))
+
+
+def cosines(a, b):
+    """Row-wise cosine; divides by the norms so a backend that rounds its normalisation can't read above 1."""
+    import numpy as np
+    a, b = np.atleast_2d(a).astype(np.float64), np.atleast_2d(b).astype(np.float64)
+    return (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1))
 
 
 def verdict(min_chunk_cos, rows):
@@ -68,7 +75,6 @@ def main():
     got = col.get(ids=sample, include=["documents", "embeddings"])
     ids, docs = got["ids"], got["documents"]
     stored = np.asarray(got["embeddings"], dtype=np.float32)
-    stored = stored / np.linalg.norm(stored, axis=1, keepdims=True)
 
     vecs, cps = {}, {}
     for name, m in backends:
@@ -79,9 +85,9 @@ def main():
             print(f"{name} {min(i + 16, len(docs))}/{len(docs)}", flush=True)
         vecs[name] = np.concatenate(parts)
         cps[name] = len(docs) / (time.perf_counter() - t0)
-    cos = {"onnx_vs_torch": (vecs["onnx"] * vecs["torch"]).sum(1),
-           "onnx_vs_stored": (vecs["onnx"] * stored).sum(1),
-           "torch_vs_stored": (vecs["torch"] * stored).sum(1)}
+    cos = {"onnx_vs_torch": cosines(vecs["onnx"], vecs["torch"]),
+           "onnx_vs_stored": cosines(vecs["onnx"], stored),
+           "torch_vs_stored": cosines(vecs["torch"], stored)}
     summary = {k: {"min": float(v.min()), "p1": float(np.percentile(v, 1)), "median": float(np.median(v))}
                for k, v in cos.items()}
     worst = [{"id": ids[i], "cos": float(cos["onnx_vs_torch"][i]), "len": len(docs[i])}
@@ -102,11 +108,11 @@ def main():
                               retrieval_db._dense_ranking(q, col, 10, None, {"product": p}) if p else None))
     rows = []
     for c, (vo, uo, so), (vt, ut, st) in zip(cases, res["onnx"], res["torch"]):
-        r = {"id": c["id"], "product": c.get("product"), "type": c.get("type"), "query_cos": float(vo @ vt),
-             "top10": overlap(uo, ut), "n": min(10, len(uo)), "top1_same": uo[:1] == ut[:1],
+        r = {"id": c["id"], "product": c.get("product"), "type": c.get("type"), "query_cos": float(cosines(vo, vt)[0]),
+             "top10": overlap(uo, ut), "n": min(10, max(len(uo), len(ut))), "top1_same": uo[:1] == ut[:1],
              "top10_scoped": None, "n_scoped": None, "top1_scoped_same": None}
         if so is not None and (so or st):
-            r.update(top10_scoped=overlap(so, st), n_scoped=min(10, len(so)), top1_scoped_same=so[:1] == st[:1])
+            r.update(top10_scoped=overlap(so, st), n_scoped=min(10, max(len(so), len(st))), top1_scoped_same=so[:1] == st[:1])
         rows.append(r)
 
     v = verdict(summary["onnx_vs_torch"]["min"], rows)
