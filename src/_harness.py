@@ -276,7 +276,7 @@ stub("llm", generate=lambda *a, **k: dict(GEN_RESPONSE),
 stub("runtime_config", get_settings=lambda: {"mode": "free"},
      set_generation_mode=lambda m: None, set_local_models_loaded=lambda v: None,
      set_online_provider=lambda p: None)
-stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s: None,
+stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s=None: None,
      get_history=lambda s: [], get_last_query=lambda s: None)
 stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0})
 # complete_procedures is a PASS-THROUGH, not a no-op returning []. It is
