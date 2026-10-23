@@ -5493,7 +5493,7 @@ function viewDocuments() {
               class: "cf-dlg-opt" + (chosen.has(p.key) ? " on" : "") },
             el("input", { type: "checkbox", class: "cf-tick", checked: chosen.has(p.key) ? "true" : null,
               onchange: e => { e.target.checked ? chosen.add(p.key) : chosen.delete(p.key); draw(); sync(); } }),
-            el("span", {}, p.name)))));
+            el("span", {}, /_general$|_shared$/.test(p.key) ? "Shared by all " + c.name : p.name)))));
       });
       if (!grid.childElementCount) grid.append(el("div", { class: "cf-dlg-empty" }, "No product matches."));
     };
