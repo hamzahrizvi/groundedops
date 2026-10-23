@@ -354,6 +354,7 @@
   .cf-bulk.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
   .card.cf-has-bulk{padding-bottom:84px !important}
   .cf-bulk b{font-weight:600;margin-right:6px}
+  .tagpick summary.unfiled{color:var(--color-accent-ink)}
   .cf-bulk-sel{width:auto;max-width:260px;padding-top:6px;padding-bottom:6px}
   @media (prefers-reduced-motion: reduce){.cf-folder-body{animation:none}}
   @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
@@ -4511,6 +4512,36 @@ function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
 // everything under it, subfolders included, and its arrow opens it.
 // "Recently edited" drops the tree and lists by Confluence's own edit date,
 // for checking what changed.
+// The bar for ticked documents, the same wherever documents are ticked
+// (Documents page, Confluence page): who they are for, and what they are
+// filed under. Each page says what each choice does to its own documents.
+//   on.who(v)    v = "approved" | "internal" | "excluded"
+//   on.file(key) one product;  on.more()  several products, or a new one
+//   on.clear()
+function docSelectionBar(bar, n, on) {
+  bar.textContent = "";
+  bar.classList.toggle("on", n > 0);
+  if (!n) return;
+  const pick = (label, opts, fn) => el("select", { class: "input cf-bulk-sel", "aria-label": label,
+    onchange: e => { const v = e.target.value; e.target.value = ""; if (v) fn(v); } }, opts);
+  const MORE = "__more__";
+  bar.append(
+    el("b", {}, n + " selected"),
+    pick("Who the selected documents are for", [
+      el("option", { value: "" }, "Set to\u2026"),
+      el("option", { value: "approved" }, "Customers \u2014 used to answer customers"),
+      el("option", { value: "internal" }, "Internal \u2014 kept, never answers customers"),
+      el("option", { value: "excluded" }, "Exclude \u2014 taken out of the bot")], on.who),
+    pick("File the selected documents under", [
+      el("option", { value: "" }, "File under\u2026"),
+      (cache.catalog || []).map(cat => el("optgroup", { label: cat.name },
+        (cat.products || []).map(p => el("option", { value: p.key },
+          /_general$|_shared$/.test(p.key) ? "Shared by all " + cat.name : p.name)))),
+      el("option", { value: MORE }, "Several products, or a new one\u2026")],
+      v => v === MORE ? on.more() : on.file(v)),
+    el("button", { class: "btn btn-ghost", onclick: on.clear }, "Clear"));
+}
+
 function cfBox(checked, onchange, label) {
   return el("input", { type: "checkbox", class: "cf-tick", "aria-label": label,
     checked: checked ? "true" : null, onchange });
@@ -4626,37 +4657,15 @@ function cfDocumentsCard(c) {
     const set = body => { cfPost("/admin/confluence/items", { keys, ...body },
       keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
     const its = c.items.filter(i => cfSelected.has(i.key));
-    // Who the documents are for: the same three choices, and the same words,
-    // as each row's switch. Customers on an unfiled document goes through
-    // the review, which asks for its product first: approved unfiled, it
-    // would be searchable but never offered in the widget.
-    const who = el("select", { class: "input cf-bulk-sel", "aria-label": "Who the selected documents are for",
-      onchange: e => {
-        const v = e.target.value; e.target.value = "";
-        if (v === "approved" && !its.every(cfFiled)) return cfReviewDialog(keys, "approve");
-        if (v) set({ decision: v });
-      } },
-      el("option", { value: "" }, "Set to\u2026"),
-      el("option", { value: "approved" }, "Customers \u2014 synced and used to answer"),
-      el("option", { value: "internal" }, "Internal \u2014 synced, never answers customers"),
-      el("option", { value: "excluded" }, "Exclude \u2014 not synced"));
-    // One product straight from the list; several, or a new one, through
-    // the dialog as before.
-    const MORE = "__more__";
-    const where = el("select", { class: "input cf-bulk-sel", "aria-label": "File the selected documents under",
-      onchange: e => {
-        const v = e.target.value; e.target.value = "";
-        if (v === MORE) return cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys);
-        if (v) set({ product: v });
-      } },
-      el("option", { value: "" }, "File under\u2026"),
-      (cache.catalog || []).map(cat => el("optgroup", { label: cat.name },
-        (cat.products || []).map(p => el("option", { value: p.key },
-          /_general$|_shared$/.test(p.key) ? "Shared by all " + cat.name : p.name)))),
-      el("option", { value: MORE }, "Several products, or a new one\u2026"));
-    bulk.append(
-      el("b", {}, keys.length + " selected"), who, where,
-      el("button", { class: "btn btn-ghost", onclick: () => { cfSelected.clear(); draw(); } }, "Clear"));
+    docSelectionBar(bulk, keys.length, {
+      // Customers on a document not yet filed goes through the review, which
+      // asks for its product first: approved unfiled, it would be searchable
+      // but never offered in the widget.
+      who: v => v === "approved" && !its.every(cfFiled) ? cfReviewDialog(keys, "approve")
+                                                        : set({ decision: v }),
+      file: key => set({ product: key }),
+      more: () => cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys),
+      clear: () => { cfSelected.clear(); draw(); } });
   };
 
   // path -> node, with every document under it (not just its own) for counts
@@ -5649,8 +5658,6 @@ function viewDocuments() {
   const docBulk = el("div", { class: "cf-bulk" });
   const drawDocBulk = () => {
     const docs = cache.sources.filter(d => docSelected.has(d.source));
-    docBulk.textContent = "";
-    docBulk.classList.toggle("on", docs.length > 0);
     document.querySelectorAll(".main input[data-doc]").forEach(b => {
       b.checked = docSelected.has(b.getAttribute("data-doc")); });
     document.querySelectorAll(".main input[data-range]").forEach(b => {
@@ -5658,16 +5665,15 @@ function viewDocuments() {
       const n = mine.filter(d => docSelected.has(d.source)).length;
       b.checked = n > 0 && n === mine.length; b.indeterminate = n > 0 && n < mine.length;
     });
-    if (!docs.length) return;
-    docBulk.append(
-      el("b", {}, docs.length + " selected"),
-      el("button", { class: "btn btn-secondary", title: "Kept out of every public answer, download and picture",
-        onclick: () => setInternal(docs, true) }, "Make internal"),
-      el("button", { class: "btn btn-ghost", onclick: () => setInternal(docs, false) }, "Make public"),
-      el("button", { class: "btn btn-secondary", onclick: () => fileDocsDialog(docs) }, "File under…"),
-      el("button", { class: "btn btn-ghost",
-        onclick: () => removeDocs(docs) }, "Remove"),
-      el("button", { class: "btn btn-ghost", onclick: () => { docSelected.clear(); drawDocBulk(); } }, "Clear"));
+    docSelectionBar(docBulk, docs.length, {
+      who: v => v === "excluded" ? removeDocs(docs) : setInternal(docs, v === "internal"),
+      file: key => {
+        const p = prods.find(x => x.key === key);
+        runBulk("Filing " + label(docs), docs, d => api("/admin/reassign_source", { method: "POST",
+          body: JSON.stringify({ source: d.source, category_key: p ? p.category : "", product_key: key }) }));
+      },
+      more: () => fileDocsDialog(docs),
+      clear: () => { docSelected.clear(); drawDocBulk(); } });
   };
 
   const internalFaqDialog = (source, faqs) => {
@@ -5722,6 +5728,10 @@ function viewDocuments() {
     dlg.showModal();
   };
 
+  const nameOfKey = k => {
+    const p = prods.find(x => x.key === k);
+    return !p ? k : /_general$|_shared$/.test(k) ? "Shared by all " + p.categoryName : p.name;
+  };
   const docRow = s => {
     const cur = (s.product || s.products || "")
       .split(",").map(x => x.trim()).filter(Boolean);
@@ -5763,9 +5773,8 @@ function viewDocuments() {
     // is a wide row that pushes the filename off the line, and a chip that
     // toggles on click gives no sign it is a multiple choice until you try.
     const box = el("details", { class: "tagpick" },
-      el("summary", {}, cur.length
-        ? cur.length + " product" + (cur.length === 1 ? "" : "s")
-        : "Not filed"),
+      el("summary", { class: cur.length ? "" : "unfiled", title: cur.map(nameOfKey).join(", ") },
+        cur.length ? nameOfKey(cur[0]) + (cur.length > 1 ? " +" + (cur.length - 1) : "") : "Not filed"),
       el("div", { class: "tagpick-list" },
         prods.map(p => {
           const cb = el("input", { type: "checkbox",
@@ -5803,14 +5812,13 @@ function viewDocuments() {
                          drawDocBulk(); } }),
       el("div", { class: "grow" },
         el("b", {}, s.source),
-        el("span", {}, (s.chunks || 0) + " sections" + indexedWhen)),
+        el("span", {}, (s.chunks || 0) + (s.chunks === 1 ? " section" : " sections") + indexedWhen)),
       ...ocrBits,
       freshness.status === "stale"
         ? el("span", { class: "tag tag-accent", title: staleWhy }, "Needs re-index")
         : el("span", { class: "tag tag-neutral",
                        title: freshness.version
                          ? "Version " + freshness.version.slice(0, 12) : "" }, "Current"),
-      cur.length ? el("span", { class: "tag tag-neutral" }, cur.join(", ")) : el("span", { class: "tag tag-accent" }, "no product"),
       s.internal ? el("span", { class: "tag tag-accent",
         title: "Never used in public answers, downloads or pictures" }, "Internal") : null,
       move,
