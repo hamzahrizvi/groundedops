@@ -213,7 +213,11 @@ def widget_catalog():
         prods = [{"key": p["key"], "name": p["name"],
                   "doc_count": prod_counts.get(p["key"], 0)}
                  for p in (c.get("products") or [])]
-        prods = [p for p in prods if p["doc_count"] > 0]
+        # A range's shared-documents entry is a bucket, not something a
+        # visitor owns (catalog.is_shared_product); its documents already
+        # answer for every product in the range.
+        prods = [p for p in prods if p["doc_count"] > 0
+                 and not catalog_mod.is_shared_product(p["key"])]
         ccount = cat_counts.get(c["key"], 0)
         # Keep a range if either it or any of its products has documents -
         # a document tagged only at category level still makes the range
