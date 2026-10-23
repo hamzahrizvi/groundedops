@@ -412,6 +412,22 @@ EXCLUDED_SOURCES = [
     if s.strip()
 ]
 
+
+def is_internal_source(source: str | None) -> bool:
+    """Kept out of every public answer, download and figure: the
+    EXCLUDED_SOURCES substrings above, plus documents an admin marked
+    internal on the Documents page (docstore.internal_sources, exact name)."""
+    s = (source or "").lower()
+    if any(ex in s for ex in EXCLUDED_SOURCES):
+        return True
+    import docstore
+    return s in docstore.internal_sources()
+
+
+def _public_only(results: list[dict]) -> list[dict]:
+    return [r for r in results if not is_internal_source(r.get("source"))]
+
+
 SNIPPET_LEN = 160
 
 
@@ -1656,7 +1672,7 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
                 return None
             return {"answer": reply, "kind": "deflected"}
 
-        idx = sales.get_index(docstore.store_dir(), _source_to_product())
+        idx = _public_only(sales.get_index(docstore.store_dir(), _source_to_product()))
         # The products the WORDING names, resolved here because this is
         # where that resolver lives -- aliases, longest-form-wins and all.
         _names = _product_names()
@@ -2198,7 +2214,8 @@ def _document_answer(q: str, scope: dict | None,
         ask = doc_request.document_request(q, known_names=_catalogue_terms())
         if not ask or not scope:
             return None
-        held = [s for s in _documents_in_scope(scope) if docstore.find(s)]
+        held = [s for s in _documents_in_scope(scope)
+                if docstore.find(s) and not is_internal_source(s)]
         docs, matched = doc_request.pick_documents(ask["kind"], held)
         if not docs:
             return None
@@ -3121,12 +3138,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # password"). Configure via EXCLUDED_SOURCES (comma-separated
     # substrings, matched case-insensitively against chunk source names).
     # Set EXCLUDED_SOURCES="" to disable, e.g. for internal deployments
-    # or when running eval_cases_api.json.
-    if EXCLUDED_SOURCES and not payload.source_filter:
-        results = [
-            r for r in results
-            if not any(ex in (r.get("source") or "").lower() for ex in EXCLUDED_SOURCES)
-        ]
+    # or when running eval_cases_api.json. Applied even with source_filter:
+    # /query is public, and naming an internal document must not open it.
+    results = _public_only(results)
     # Rerank the FULL set and truncate here, rather than letting rerank do
     # it. `results` ends up identical -- same model, same ordering, same
     # slice -- but the chunks ranked below CONTEXT_K keep their
@@ -3354,10 +3368,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # Fused here too: narrowing the scope must not quietly revert
             # this turn to the rewritten phrasing alone.
             results = rerank(resolved_query,
-                             retrieve_fused(_retrieval_queries,
-                                            top_k=RETRIEVE_K,
-                                            source_filter=payload.source_filter,
-                                            scope=_scope),
+                             _public_only(retrieve_fused(
+                                 _retrieval_queries, top_k=RETRIEVE_K,
+                                 source_filter=payload.source_filter,
+                                 scope=_scope)),
                              top_k=CONTEXT_K)
             _span = _product_keys_in(results, CONTEXT_K)
             # Scoping pulls in the product's shared documents, so the top
@@ -3678,7 +3692,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             for c in product_bundle(_k, _retrieved,
                                     budget=PERFORMANCE_BUDGET_CHARS // len(_perf),
                                     excluded=EXCLUDED_SOURCES):
-                if c.get("id") not in _ids:
+                if c.get("id") not in _ids and not is_internal_source(c.get("source")):
                     _ids.add(c.get("id"))
                     _bundle.append(c)
         # Flash-code tables read out row by row here too: the bundle reached
@@ -4619,11 +4633,7 @@ def _expand_previous(prev_q: str, prev_a: str, scope: dict | None) -> dict | Non
     if not (prev_q or "").strip():
         return None
 
-    results = retrieve_from_db(prev_q, top_k=RETRIEVE_K, scope=scope)
-    if EXCLUDED_SOURCES:
-        results = [r for r in results
-                   if not any(ex in (r.get("source") or "").lower()
-                              for ex in EXCLUDED_SOURCES)]
+    results = _public_only(retrieve_from_db(prev_q, top_k=RETRIEVE_K, scope=scope))
     ranked = [_strip_breadcrumb(r) for r in
               rerank(prev_q, results, top_k=len(results))] if results else []
     used = ranked[:CONTEXT_K]
@@ -4840,11 +4850,8 @@ def query_stream(payload: StreamQueryRequest,
             elif payload.category:
                 scope = {"category": payload.category}
 
-            results = retrieve_from_db(payload.q, top_k=RETRIEVE_K, scope=scope)
-            if EXCLUDED_SOURCES:
-                results = [r for r in results
-                           if not any(ex in (r.get("source") or "").lower()
-                                      for ex in EXCLUDED_SOURCES)]
+            results = _public_only(
+                retrieve_from_db(payload.q, top_k=RETRIEVE_K, scope=scope))
             results = rerank(payload.q, results, top_k=CONTEXT_K)
 
             if not passes_retrieval_gate(results, RETRIEVAL_GATE_THRESHOLD):
