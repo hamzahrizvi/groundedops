@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -286,23 +287,62 @@ def _rows_from_markdown(md: str) -> list[tuple[str, list[str]]]:
     return out
 
 
-def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
+def _extract(path: str) -> list[dict]:
+    """The table rows of one PDF, before any product is attached.
+
+    The only expensive step of the index (618.7s for 543 PDFs on
+    2026-10-23), so its result is cached per file and nothing but the file
+    itself changing makes it run again.
+    """
+    import structures
+    # Opened ONCE for the whole document and handed to tables_on_page,
+    # which would otherwise reopen it for every page -- this used to be
+    # one open to count the pages plus one per page after it.
+    try:
+        import pdfplumber
+        pdf = pdfplumber.open(path)
+    except Exception:
+        return []
+    out = []
+    try:
+        for pno in range(1, len(pdf.pages) + 1):
+            for b in structures.tables_on_page(path, pno, pdf=pdf):
+                title = b.get("title") or ""
+                for label, cells in _rows_from_markdown(b.get("markdown", "")):
+                    out.append({"table": title, "attribute": label,
+                                "values": cells, "page": pno})
+    finally:
+        pdf.close()
+    return out
+
+
+def build_index(doc_dir: str, source_to_product: dict,
+                files: dict | None = None) -> list[dict]:
     """Flatten every extracted table into product/attribute/value rows.
 
     source_to_product maps a filename to (product_key, product_name). A
     document with no mapping is skipped rather than filed under a guess --
     an unattributed spec is worse than a missing one in a sales answer.
-    """
-    import structures
 
+    files is the per-file cache, {filename: {"mtime", "rows"}}, updated in
+    place: a document is re-read only when its mtime differs from the one
+    cached. Filing and the internal mark are applied over the cached rows, so
+    changing either costs no extraction. Entries for documents now unfiled
+    or internal are kept (changing that back is free again); entries for
+    documents no longer on disk are dropped.
+    """
+    files = {} if files is None else files
     rows: list[dict] = []
     # A fresh deploy has no documents folder until the first upload; that is
     # an empty index, not a failed warm-up (tools/docker_startup_check.sh).
     if not os.path.isdir(doc_dir):
+        files.clear()
         return rows
-    for fname in sorted(os.listdir(doc_dir)):
-        if not fname.lower().endswith(".pdf"):
-            continue
+    present = sorted(f for f in os.listdir(doc_dir) if f.lower().endswith(".pdf"))
+    for gone in set(files) - set(present):
+        del files[gone]
+    extracted = 0
+    for fname in present:
         key, name, cat = source_to_product.get(fname, ("", "", ""))
         if not key:
             continue
@@ -312,40 +352,31 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
         if _excluded(fname):
             continue
         path = os.path.join(doc_dir, fname)
-        # Opened ONCE for the whole document and handed to tables_on_page,
-        # which would otherwise reopen it for every page -- this used to be
-        # one open to count the pages plus one per page after it.
         try:
-            import pdfplumber
-            pdf = pdfplumber.open(path)
-        except Exception:
+            mtime = os.path.getmtime(path)
+        except OSError:
             continue
-        try:
-            for pno in range(1, len(pdf.pages) + 1):
-                for b in structures.tables_on_page(path, pno, pdf=pdf):
-                    title = b.get("title") or ""
-                    for label, cells in _rows_from_markdown(b.get("markdown", "")):
-                        rows.append({
-                            "product": key, "product_name": name,
-                            "category": cat,
-                            "table": title, "attribute": label,
-                            "values": cells, "source": fname, "page": pno,
-                        })
-        finally:
-            pdf.close()
-    logger.info("spec index: %d rows across %d products",
-                len(rows), len({r["product"] for r in rows}))
+        entry = files.get(fname)
+        if not entry or entry.get("mtime") != mtime:
+            entry = files[fname] = {"mtime": mtime, "rows": _extract(path)}
+            extracted += 1
+        for r in entry["rows"]:
+            rows.append({
+                "product": key, "product_name": name, "category": cat,
+                "table": r["table"], "attribute": r["attribute"],
+                "values": r["values"], "source": fname, "page": r["page"],
+            })
+    logger.info("spec index: %d rows across %d products (%d PDFs read)",
+                len(rows), len({r["product"] for r in rows}), extracted)
     return rows
 
 
 def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
     """What the index was built FROM, as one comparable string.
 
-    The document set, and also the filename -> product mapping: filing a
-    manual under a different product rewrites every row it contributed. The
-    in-process cache could ignore that and usually get away with it, since a
-    reassignment in the console was followed by a restart soon enough. A
-    cache that SURVIVES the restart cannot, so the mapping is in the key.
+    The document set, the filename -> product mapping and the internal
+    marks: any of them changing means the rows must be recomposed. It decides
+    only that; which PDFs are read again is per file (build_index).
     """
     import hashlib
     import json as _json
@@ -371,45 +402,72 @@ def _excluded(fname: str) -> bool:
     return is_excluded(fname)
 
 
-def _load_index_from_disk(key: str) -> list[dict] | None:
-    """The cached index if it was built from exactly this input, else None.
+def _load_files_from_disk(doc_dir: str, source_to_product: dict) -> dict:
+    """The per-file cache, {filename: {"mtime", "rows"}}.
 
-    A missing, stale or unreadable cache is a miss, never an error: the
-    worst case is paying the build once, which is what happened every time
-    before this existed.
+    A missing or unreadable cache is empty, never an error: the worst case is
+    paying the build once, which is what happened every time before this
+    existed. The old format (v1: one key over everything, all rows) is
+    converted when its key still matches the documents on disk, so the
+    upgrade itself does not cost a full rebuild.
     """
     import jsonstore
     data = jsonstore.load(_INDEX_CACHE, None, label="spec index cache")
-    if not isinstance(data, dict) or data.get("key") != key:
-        return None
-    rows = data.get("rows")
-    return rows if isinstance(rows, list) else None
+    if not isinstance(data, dict):
+        return {}
+    if data.get("v") == 2 and isinstance(data.get("files"), dict):
+        return data["files"]
+    if data.get("key") != _fingerprint(doc_dir, source_to_product) \
+            or not isinstance(data.get("rows"), list):
+        return {}
+    # Every filed, customer-facing PDF went into those rows at its current
+    # mtime -- including the ones with no tables, which get an empty entry.
+    files = {}
+    for fname, (key, _, _) in (source_to_product or {}).items():
+        path = os.path.join(doc_dir, fname)
+        if key and fname.lower().endswith(".pdf") and os.path.isfile(path) \
+                and not _excluded(fname):
+            files[fname] = {"mtime": os.path.getmtime(path), "rows": []}
+    for r in data["rows"]:
+        if r.get("source") in files:
+            files[r["source"]]["rows"].append(
+                {k: r[k] for k in ("table", "attribute", "values", "page")})
+    return files
 
 
-def _save_index_to_disk(key: str, rows: list[dict]) -> None:
+def _save_files_to_disk(files: dict) -> None:
     import jsonstore
     try:
-        jsonstore.save(_INDEX_CACHE, {"key": key, "rows": rows},
+        jsonstore.save(_INDEX_CACHE, {"v": 2, "files": files},
                        label="spec index cache", indent=None)
     except Exception as exc:
         # Non-fatal by design: without it the next start pays the build.
         logger.warning("could not write the spec index cache: %s", exc)
 
 
+_FILES: dict | None = None
+_INDEX_LOCK = threading.Lock()
+
+
 def get_index(doc_dir: str, source_to_product: dict) -> list[dict]:
-    """Cached index, rebuilt when the documents or their filing change."""
-    global _INDEX, _INDEX_KEY
+    """Cached index, recomposed when the documents or their filing change;
+    only a new or changed PDF is read again."""
+    global _INDEX, _INDEX_KEY, _FILES
     key = _fingerprint(doc_dir, source_to_product)
     if _INDEX is not None and key == _INDEX_KEY:
         return _INDEX
-
-    rows = _load_index_from_disk(key)
-    if rows is None:
-        rows = build_index(doc_dir, source_to_product)
-        _save_index_to_disk(key, rows)
-    else:
-        logger.info("spec index loaded from disk: %d rows", len(rows))
-    _INDEX, _INDEX_KEY = rows, key
+    # One rebuild at a time: the warm-up and a visitor's question can both
+    # get here, and two of them would read the same new PDF twice.
+    with _INDEX_LOCK:
+        if _INDEX is not None and key == _INDEX_KEY:
+            return _INDEX
+        if _FILES is None:
+            _FILES = _load_files_from_disk(doc_dir, source_to_product)
+        before = {f: e.get("mtime") for f, e in _FILES.items()}
+        rows = build_index(doc_dir, source_to_product, _FILES)
+        if {f: e.get("mtime") for f, e in _FILES.items()} != before:
+            _save_files_to_disk(_FILES)
+        _INDEX, _INDEX_KEY = rows, key
     return _INDEX
 
 
