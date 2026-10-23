@@ -79,7 +79,10 @@ class _OnnxEmbedder:
         self._inputs = [i.name for i in self.session.get_inputs()]
 
     def encode(self, texts, convert_to_numpy=True, normalize_embeddings=True,
-               batch_size=32):
+               batch_size=int(os.getenv("EMBED_BATCH", "32"))):
+        # EMBED_BATCH: ONNX memory grows with batch x tokens^2. At 4000-char
+        # chunks (~1350 tokens) a batch of 16 committed 20 GB and paged on a
+        # 16 GB laptop (2026-10-23 chunk trial); 2 fits in ~3 GB.
         # Longest first, as SentenceTransformer does, so each batch pads to
         # a similar length; results go back in the caller's order.
         order = sorted(range(len(texts)), key=lambda i: -len(texts[i]))
