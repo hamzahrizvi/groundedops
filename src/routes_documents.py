@@ -38,7 +38,13 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest,
                   x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    return {"removed_chunks": remove_source_now(payload.source), "source": payload.source}
+    removed = remove_source_now(payload.source)
+    try:
+        import confluence_sync
+        confluence_sync.exclude_removed(payload.source)
+    except Exception as exc:
+        logger.warning("Confluence item for %r not excluded: %s", payload.source, exc)
+    return {"removed_chunks": removed, "source": payload.source}
 
 
 def remove_source_now(source: str) -> int:

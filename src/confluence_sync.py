@@ -453,6 +453,23 @@ def _recommend(st: dict) -> list[list[str]]:
     return [p for p in picks if not any(q != p and p[:len(q)] == q for q in picks)]   # outermost
 
 
+def exclude_removed(source: str) -> int:
+    """A synced document removed on the Documents page: mark it Excluded and
+    not synced, so the Confluence page says what the bot holds and the next
+    edit in Confluence does not quietly add it back. Returns items changed."""
+    n = 0
+
+    def change(st):
+        nonlocal n
+        for it in st["items"].values():
+            if it.get("source") == source and it.get("synced_version") is not None:
+                it.update(decision="excluded", synced_version=None, synced_at=None)
+                it.pop("error", None)
+                n += 1
+    _update(change)
+    return n
+
+
 def set_items(keys: list[str], decision: str | None = None,
               product: str | None = None, keep_upload: bool | None = None) -> None:
     """Approve, mark internal, exclude or re-file items. Decisions take

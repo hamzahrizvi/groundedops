@@ -3859,7 +3859,7 @@ function viewKeys() {
 // nothing), people approve or exclude each document and choose its product,
 // and a sync indexes only what is approved. The connection holds an API
 // token, so only root sees that card; the rest is for anyone at support.
-let confluenceCache = null;
+let confluenceCache = null, cfLoadedAt = 0, cfSeen = null;
 let cfFilter = "all", cfSearch = "", cfSelected = new Set(), cfPoll = null, cfShown = 100;
 let cfMode = "tree", cfOpen = new Set(), cfDocLimit = new Map(), cfJustOpened = null;
 
@@ -3930,8 +3930,12 @@ function cfRunBar() {
 }
 
 async function cfLoad() {
+  cfLoadedAt = Date.now();
+  const before = confluenceCache && !confluenceCache.error ? JSON.stringify(confluenceCache) : null;
   try { confluenceCache = await api("/admin/confluence"); }
   catch (e) { confluenceCache = { error: e.message }; }
+  // A background re-read that found nothing new does not redraw (no blink).
+  if (before && JSON.stringify(confluenceCache) === before) return;
   if (view === "confluence") render();
 }
 
@@ -4738,6 +4742,11 @@ function viewConfluence() {
   const c = confluenceCache;
   clearTimeout(cfPoll);
   if (!c) { cfLoad(); return [...head, el("p", { class: "lede" }, "Loading")]; }
+  // The cached copy is shown at once and re-read in the background on each
+  // visit: the Documents page changes the same documents (internal, filing,
+  // remove), and the counts here went stale until something here was done.
+  if (c !== cfSeen) { cfSeen = c; cfLoadedAt = Date.now(); }   // fresh from an action here
+  else if (!c.running && Date.now() - cfLoadedAt > 5000) cfLoad();
   if (c.error) return [...head, el("div", { class: "empty" }, c.error)];
   if (c.running) cfPoll = setTimeout(cfTick, 1500);
   return [...head, cfConnectionCard(c), cfSyncCard(c), cfDocumentsCard(c), cfHistoryCard(c)];
