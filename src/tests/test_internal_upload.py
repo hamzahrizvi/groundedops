@@ -51,6 +51,18 @@ check(r.status_code == 200 and "New Note.txt" in marks, "a replacement inherits 
 marks.add("Stale.txt")
 r = up("Stale.txt")
 check(r.status_code == 200 and "Stale.txt" not in marks, "a lingering mark is cleared")
+
+
+def _unwritable(sources, on):
+    raise RuntimeError("internal_sources.json unreadable")
+
+
+_ok_set = retrieval_db.set_internal
+retrieval_db.set_internal = _unwritable
+marks.add("Held.txt")          # what a fail-closed set says of every name
+r = up("Held.txt", internal="1")
+check(r.status_code == 500, "internal upload refused when its mark cannot be written")
+retrieval_db.set_internal = _ok_set
 check(client.get("/source_file/Upload Internal.txt").status_code == 404,
       "internal document: source_file 404")
 

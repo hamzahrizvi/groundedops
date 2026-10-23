@@ -283,7 +283,9 @@ async def upload(request: Request,
             "The 'internal' header must be 1 (internal) or 0 (public)."))
     else:
         internal = bool(replace) and is_excluded(replace)
-    if internal != (file.filename in internal_sources()):
+    # An internal upload always writes its mark: "already in the set" may be
+    # the fail-closed or last-good set of an unreadable file, not the file.
+    if internal or file.filename in internal_sources():
         try:
             set_internal([file.filename], internal)
         except Exception as exc:
