@@ -268,6 +268,31 @@ async def upload(request: Request,
                        f"is genuinely a different document.",
         })
 
+    # D-20261022-03: Internal = never used to answer a customer, never
+    # downloadable. Marked BEFORE indexing so the document is never public
+    # for a moment. No header: a new version keeps the mark of the document
+    # it replaces; anything else is public (the upload card says so).
+    from retrieval_db import internal_sources, is_excluded, set_internal
+    raw = (_h.get("internal") or "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        internal = True
+    elif raw in ("0", "false", "no"):
+        internal = False
+    elif raw:
+        raise HTTPException(status_code=400, detail=(
+            "The 'internal' header must be 1 (internal) or 0 (public)."))
+    else:
+        internal = bool(replace) and is_excluded(replace)
+    if internal != (file.filename in internal_sources()):
+        try:
+            set_internal([file.filename], internal)
+        except Exception as exc:
+            logger.error("upload refused, internal mark not saved for %r: %s",
+                         file.filename, exc)
+            raise HTTPException(status_code=500, detail=(
+                "Could not record whether this document is internal, so it "
+                "was not indexed. Try again."))
+
     content = await file.read()
     filename = file.filename
     job_id = str(uuid.uuid4())
@@ -278,7 +303,7 @@ async def upload(request: Request,
                      args=(job_id, content, filename, {}, category_key, product_key,
                            ingest_provider, replace or None),
                      daemon=True).start()
-    return {"job_id": job_id, "file": filename, "status": "started"}
+    return {"job_id": job_id, "file": filename, "status": "started", "internal": internal}
 
 
 @router.get("/upload/status/{job_id}")
