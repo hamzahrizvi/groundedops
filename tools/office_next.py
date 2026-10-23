@@ -316,8 +316,11 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     recheck = [i for i in build if items[i].get("checked", -1) < items[i].get("approved", 0)]
     build = [i for i in build if i not in recheck]
     review = lambda i: os.path.join(ops, "inbox", "security", f"review-{i}.md")
+    # a review older than Dev's latest hand-back judged an earlier round: it counts as none, so Security reviews again
+    # (2026-10-23: round 1's BLOCK outlived round 2's fix, and D-20261022-03 plus three builds behind it sat for a day)
+    reviewed = lambda i: os.path.exists(review(i)) and _mtime(review(i)) >= _mtime(os.path.join(ops, "inbox", "dev", i + ".md"))
     def verdict(i):   # Security's review of the branch: CLEAR, BLOCK or ""
-        if not os.path.exists(review(i)):
+        if not reviewed(i):
             return ""
         m = re.search(r"(?mi)^Verdict:\s*(CLEAR|BLOCK)", open(review(i), encoding="utf-8").read())
         return m.group(1).upper() if m else ""
@@ -412,8 +415,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         else: out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
                     "the gate tests each fix on its own questions" if busy else
                     "the customer fixes are all through: a new blind bank to find more issues", "customer" if not busy else None))
-    unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge")
-                  and not os.path.exists(os.path.join(ops, "inbox", "security", f"review-{i}.md"))]
+    unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge") and not reviewed(i)]
     if unreviewed or age(_mtime(os.path.join(ops, "state", "security_last_run.txt"))) >= 13:
         out.append(("security", "review " + ", ".join(unreviewed) if unreviewed else "fortnightly review due", "security"))
     if age(_mtime(os.path.join(ops, "inbox", "audit", "*-weekly.md"))) >= 7:
@@ -618,6 +620,14 @@ def selftest():
         w("inbox/security/review-D-20261008-01.md", "Verdict: BLOCK\n")
         p = plan(ops, ops, 11, 38, resets, now)
         assert not any(x.startswith("MERGE") for x in p) and "new findings" in p[0], p   # a BLOCK wakes the product owner
+        hb = os.path.join(ops, "inbox/dev/D-20261008-01.md")
+        gj = os.path.join(ops, "inbox/dev/D-20261008-01.gate/gate.json")
+        os.utime(hb, (time.time() + 10, time.time() + 10))   # Dev hands back a round that answers the BLOCK, and it passes the gate
+        os.utime(gj, (time.time() + 11, time.time() + 11))
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert any("security" in x and "review D-20261008-01" in x for x in p) and not any(x.startswith("MERGE") for x in p), p
+        os.utime(hb, (time.time() - 100, time.time() - 100))
+        os.utime(gj, (time.time() - 100, time.time() - 100))
         w("state/refresh_request", "2026-10-08 07:00 x\n")
         os.utime(os.path.join(ops, "state/refresh_request"), (time.time() + 5, time.time() + 5))
         p = plan(ops, ops, 11, 38, resets, now)
