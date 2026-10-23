@@ -261,6 +261,10 @@
   .cf-dlg-empty{font-size:12.5px;padding:14px 0;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
   .cf-dlg-new{padding-top:12px;padding-bottom:12px;border-top:1px solid var(--color-divider)}
   .cf-dlg-new.hint{background:color-mix(in srgb,var(--color-accent) 7%,transparent)}
+  .ask-dlg{width:min(460px,calc(100vw - 32px))}
+  .ask-body{margin:6px 0 14px;font-size:13.5px;line-height:1.5;color:color-mix(in srgb,var(--color-text) 80%,transparent)}
+  .ask-snooze{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;cursor:pointer;
+        color:color-mix(in srgb,var(--color-text) 70%,transparent)}
   .cf-dlg-foot{display:flex;justify-content:flex-end;gap:8px;padding-top:12px;padding-bottom:16px;
         border-top:1px solid var(--color-divider)}
   .cf-seg{display:inline-flex;padding:3px;border-radius:999px;
@@ -4379,6 +4383,46 @@ function cfSyncCard(c) {
 // everything under it, subfolders included, and its arrow opens it.
 // "Recently edited" drops the tree and lists by Confluence's own edit date,
 // for checking what changed.
+// The browser's confirm() ignores the theme and sits at the top of the
+// page. This is the console's own: centred, page blurred behind it. With
+// `snooze`, a "don't warn me for a week" tick remembers the answer per
+// browser (only for actions that can be undone).
+const SNOOZE_DAYS = 7;
+function snoozed(key) {
+  try { return Number(localStorage.getItem("go.snooze." + key) || 0) > Date.now(); }
+  catch (e) { return false; }
+}
+function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
+  if (snooze && snoozed(snooze)) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const dlg = el("dialog", { class: "cf-dlg ask-dlg", "aria-label": title });
+    let answer = false;
+    const tick = snooze ? el("input", { type: "checkbox", class: "cf-tick" }) : null;
+    const done = yes => {
+      answer = yes;
+      if (yes && tick && tick.checked) {
+        try { localStorage.setItem("go.snooze." + snooze, String(Date.now() + SNOOZE_DAYS * 864e5)); }
+        catch (e) {}
+      }
+      dlg.close();
+    };
+    dlg.addEventListener("click", e => { if (e.target === dlg) done(false); });
+    dlg.addEventListener("close", () => { dlg.remove(); resolve(answer); });
+    const go = el("button", { class: "btn btn-primary",
+                              onclick: () => done(true) }, ok);
+    dlg.append(
+      el("div", { class: "cf-dlg-head" }, el("b", {}, title),
+        el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: () => done(false) }, "\u00d7")),
+      el("p", { class: "ask-body" }, body),
+      tick ? el("label", { class: "ask-snooze" }, tick, "Don't warn me about this for a week") : null,
+      el("div", { class: "cf-dlg-foot" },
+        el("button", { class: "btn btn-ghost", onclick: () => done(false) }, "Cancel"), go));
+    document.body.append(dlg);
+    dlg.showModal();
+    go.focus();
+  });
+}
+
 function cfBox(checked, onchange, label) {
   return el("input", { type: "checkbox", class: "cf-tick", "aria-label": label,
     checked: checked ? "true" : null, onchange });
@@ -5137,6 +5181,10 @@ let pendingReplace = null;
 
 // Survives render(), which rebuilds the page on every change.
 let docFilter = { cat: "", prod: "" };
+// Ticked rows on the Documents page, by source name. Module-level so a
+// re-render keeps them; pruned to the rows on screen, so a filter change can
+// never leave a hidden document in a bulk Remove.
+let docSelected = new Set();
 
 function viewDocuments() {
   const prods = products();
@@ -5345,43 +5393,160 @@ function viewDocuments() {
   // Internal: the document stays indexed but no public path reads it. FAQs
   // are hand-curated and stay until removed, so the ones made from it (ticked)
   // and the ones worded like it (unticked) are offered for removal here.
-  // Progress goes to the bottom-right task panel and only this row is
-  // redrawn: refresh() + render() rebuilt the whole page, which blinked.
-  const setInternal = async (s, on, row) => {
-    const source = s.source;
-    if (on && !confirm("Make " + source + " internal? Public answers, downloads and "
-        + "pictures stop using it from the next question.")) return;
-    const id = "internal:" + source;
-    const j = { name: source, stage: on ? "Making internal" : "Making public",
-                pct: 0, status: "working" };
-    jobs.delete(id); jobs.set(id, j); drawJobs();
+  // Progress goes to the bottom-right task panel and only the changed rows
+  // are redrawn: refresh() + render() rebuilt the whole page, which blinked.
+  const label = docs => docs.length === 1 ? docs[0].source : docs.length + " documents";
+  const redrawRow = d => {
+    const row = [...document.querySelectorAll(".main .item[data-src]")]
+      .find(r => r.getAttribute("data-src") === d.source);
+    if (row) row.replaceWith(docRow(d));
+  };
+  const finish = (j, stage, acts) => {
+    j.status = "done"; j.pct = 100; j.stage = stage;
+    j.acts = id => (acts || []).concat(el("button", { class: "btn btn-ghost",
+      onclick: () => { jobs.delete(id); drawJobs(); } }, "Done"));
+    drawJobs();
+  };
+
+  const setInternal = async (docs, on) => {
+    const name = label(docs);
+    if (on && !await askConfirm({ title: "Make " + name + " internal?",
+        body: "Public answers, downloads and pictures stop using "
+          + (docs.length === 1 ? "it" : "them") + " from the next question. Staff still see "
+          + (docs.length === 1 ? "it" : "them") + " here, and Make public undoes it.",
+        ok: "Make internal", snooze: "make-internal" })) return;
+    const id = "internal:" + Date.now();
+    const j = { name, stage: on ? "Making internal" : "Making public", pct: 0, status: "working" };
+    jobs.set(id, j); drawJobs();
     let res;
     try {
       res = await api("/admin/source_internal", { method: "POST",
-        body: JSON.stringify({ source, internal: on }) });
+        body: JSON.stringify({ sources: docs.map(d => d.source), internal: on }) });
     } catch (e) {
       j.status = "error"; j.stage = "Failed: " + e.message; drawJobs(); return;
     }
-    s.internal = on;
-    if (row && row.isConnected) row.replaceWith(docRow(s));
+    docs.forEach(d => { d.internal = on; redrawRow(d); });
     const faqs = (on && res.faqs) || [];
-    const close = id => el("button", { class: "btn btn-ghost",
-      onclick: () => { jobs.delete(id); drawJobs(); } }, "Done");
-    j.status = "done"; j.pct = 100;
-    j.stage = on
+    finish(j, on
       ? "Internal: kept out of public answers"
         + (faqs.length ? ". " + faqs.length + " FAQ" + (faqs.length === 1 ? "" : "s") + " to review" : "")
-      : "Public again";
-    j.acts = id => faqs.length
-      ? [el("button", { class: "btn btn-secondary",
-           onclick: () => internalFaqDialog(source, faqs) }, "Review FAQs"), close(id)]
-      : [close(id)];
-    drawJobs();
-    if (faqs.length) internalFaqDialog(source, faqs);
+      : "Public again",
+      faqs.length ? [el("button", { class: "btn btn-secondary",
+        onclick: () => internalFaqDialog(name, faqs) }, "Review FAQs")] : []);
+    if (faqs.length) internalFaqDialog(name, faqs);
+  };
+
+  // One request per document, so the panel can say how far along it is.
+  // The page is redrawn once at the end: rows move between ranges or go.
+  const runBulk = async (title, docs, step) => {
+    const id = "bulk:" + Date.now();
+    const j = { name: title, stage: "Starting", pct: 0, status: "working" };
+    jobs.set(id, j); drawJobs();
+    let ok = 0;
+    const failed = [];
+    for (let i = 0; i < docs.length; i++) {
+      j.stage = (i + 1) + " of " + docs.length + ": " + docs[i].source;
+      j.pct = Math.max(1, 100 * i / docs.length); drawJobs();
+      try { await step(docs[i]); ok++; }
+      catch (e) { failed.push(docs[i].source + " (" + e.message + ")"); }
+    }
+    finish(j, ok + " of " + docs.length + " done" + (failed.length
+      ? ". Failed: " + failed.slice(0, 3).join("; ")
+        + (failed.length > 3 ? " and " + (failed.length - 3) + " more" : "") : ""));
+    docSelected.clear();
+    try { await refresh(); } catch (e) {}
+    render();
+  };
+
+  const removeDocs = async docs => {
+    if (!await askConfirm({ title: "Remove " + label(docs) + "?", ok: "Remove",
+        body: "Answers already given stay, but " + (docs.length === 1 ? "it" : "they")
+          + " can no longer be searched. This cannot be undone." })) return;
+    runBulk("Removing " + label(docs), docs, d =>
+      api("/delete_source", { method: "POST", body: JSON.stringify({ source: d.source }) }));
+  };
+
+  // File the ticked documents under the products picked here, replacing what
+  // they were filed under. No products ticked = unfiled.
+  const fileDocsDialog = docs => {
+    const chosen = new Set();
+    const dlg = el("dialog", { class: "cf-dlg", "aria-label": "File documents under" });
+    const close = () => { dlg.close(); dlg.remove(); };
+    dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
+    dlg.addEventListener("close", () => dlg.remove());
+    const search = el("input", { class: "input", type: "search", placeholder: "Find a product" });
+    const grid = el("div", {});
+    const go = el("button", { class: "btn btn-primary" });
+    const sync = () => {
+      go.textContent = chosen.size
+        ? "File under " + chosen.size + " product" + (chosen.size === 1 ? "" : "s")
+        : "Leave unfiled";
+    };
+    const draw = () => {
+      grid.textContent = "";
+      const q = search.value.trim().toLowerCase();
+      (cache.catalog || []).forEach(c => {
+        const ps = (c.products || []).filter(p => !q || (c.name + " " + p.name).toLowerCase().includes(q));
+        if (!ps.length) return;
+        grid.append(el("div", { class: "cf-dlg-range" }, c.name),
+          el("div", { class: "cf-dlg-grid" }, ps.map(p => el("label", {
+              class: "cf-dlg-opt" + (chosen.has(p.key) ? " on" : "") },
+            el("input", { type: "checkbox", class: "cf-tick", checked: chosen.has(p.key) ? "true" : null,
+              onchange: e => { e.target.checked ? chosen.add(p.key) : chosen.delete(p.key); draw(); sync(); } }),
+            el("span", {}, p.name)))));
+      });
+      if (!grid.childElementCount) grid.append(el("div", { class: "cf-dlg-empty" }, "No product matches."));
+    };
+    search.addEventListener("input", draw);
+    go.addEventListener("click", () => {
+      close();
+      const keys = [...chosen];
+      const first = prods.find(x => x.key === keys[0]);
+      runBulk("Filing " + label(docs), docs, d => api("/admin/reassign_source", { method: "POST",
+        body: JSON.stringify({ source: d.source, category_key: first ? first.category : "",
+                               product_key: keys.join(",") }) }));
+    });
+    dlg.append(
+      el("div", { class: "cf-dlg-head" },
+        el("b", {}, "File " + label(docs) + " under"),
+        el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+      el("p", { class: "cf-dlg-why" }, "Replaces the products they are filed under now. "
+        + "Tick several for a document shared by several products."),
+      search, el("div", { class: "cf-dlg-list" }, grid),
+      el("div", { class: "cf-dlg-foot" },
+        el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"), go));
+    draw(); sync();
+    document.body.append(dlg);
+    dlg.showModal();
+    search.focus();
+  };
+
+  const docBulk = el("div", { class: "cf-bulk" });
+  const drawDocBulk = () => {
+    const docs = cache.sources.filter(d => docSelected.has(d.source));
+    docBulk.textContent = "";
+    docBulk.classList.toggle("on", docs.length > 0);
+    document.querySelectorAll(".main input[data-doc]").forEach(b => {
+      b.checked = docSelected.has(b.getAttribute("data-doc")); });
+    document.querySelectorAll(".main input[data-range]").forEach(b => {
+      const mine = cache.sources.filter(d => d._range === b.getAttribute("data-range") && shownNames.has(d.source));
+      const n = mine.filter(d => docSelected.has(d.source)).length;
+      b.checked = n > 0 && n === mine.length; b.indeterminate = n > 0 && n < mine.length;
+    });
+    if (!docs.length) return;
+    docBulk.append(
+      el("b", {}, docs.length + " selected"),
+      el("button", { class: "btn btn-secondary", title: "Kept out of every public answer, download and picture",
+        onclick: () => setInternal(docs, true) }, "Make internal"),
+      el("button", { class: "btn btn-ghost", onclick: () => setInternal(docs, false) }, "Make public"),
+      el("button", { class: "btn btn-secondary", onclick: () => fileDocsDialog(docs) }, "File under…"),
+      el("button", { class: "btn btn-ghost",
+        onclick: () => removeDocs(docs) }, "Remove"),
+      el("button", { class: "btn btn-ghost", onclick: () => { docSelected.clear(); drawDocBulk(); } }, "Clear"));
   };
 
   const internalFaqDialog = (source, faqs) => {
-    const picked = new Set(faqs.filter(f => f.why === "made from this document").map(f => f.id));
+    const picked = new Set(faqs.filter(f => f.derived).map(f => f.id));
     const dlg = el("dialog", { class: "cf-dlg", "aria-label": "Remove FAQs from this document" });
     const close = () => { dlg.close(); dlg.remove(); };
     dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
@@ -5392,8 +5557,8 @@ function viewDocuments() {
       go.disabled = !picked.size;
     };
     go.addEventListener("click", async () => {
-      if (!confirm("Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s")
-          + "? This cannot be undone.")) return;
+      if (!await askConfirm({ title: "Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s") + "?",
+          body: "This cannot be undone.", ok: "Remove" })) return;
       let done = 0;
       for (const id of picked) {
         try { await api("/faq/" + encodeURIComponent(id), { method: "DELETE" }); done++; }
@@ -5502,7 +5667,11 @@ function viewDocuments() {
         "OCR: " + ocrDone.length + " page" + (ocrDone.length === 1 ? "" : "s")));
     }
 
-    return el("div", { class: "item" + (cur.length ? "" : " flagged") },
+    return el("div", { class: "item" + (cur.length ? "" : " flagged"), "data-src": s.source },
+      el("input", { type: "checkbox", class: "cf-tick", "data-doc": s.source,
+        "aria-label": "Select " + s.source, checked: docSelected.has(s.source) ? "true" : null,
+        onchange: e => { e.target.checked ? docSelected.add(s.source) : docSelected.delete(s.source);
+                         drawDocBulk(); } }),
       el("div", { class: "grow" },
         el("b", {}, s.source),
         el("span", {}, (s.chunks || 0) + " sections" + indexedWhen)),
@@ -5519,14 +5688,10 @@ function viewDocuments() {
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
         title: s.internal ? "Let public answers use this document again"
                           : "Keep this document out of every public answer, download and picture",
-        onclick: e => setInternal(s, !s.internal, e.target.closest(".item")) },
+        onclick: () => setInternal([s], !s.internal) },
         s.internal ? "Make public" : "Make internal"),
-      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
-        if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
-        try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });
-              toast("Removed"); await refresh(); render(); }
-        catch (e) { toast(e.message, true); }
-      } }, "Remove"));
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+        onclick: () => removeDocs([s]) }, "Remove"));
   };
 
   // Grouped by CATEGORY, filtered by product. Grouping by product put a
@@ -5550,8 +5715,11 @@ function viewDocuments() {
 
   const catName = k => (cache.catalog.find(c => c.key === k) || {}).name || k;
   const groups = new Map();
+  const shownNames = new Set(cache.sources.filter(matches).map(s => s.source));
+  docSelected.forEach(n => shownNames.has(n) || docSelected.delete(n));
   cache.sources.filter(matches).forEach(s => {
     const key = catOfDoc(s);
+    s._range = key;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   });
@@ -5584,7 +5752,12 @@ function viewDocuments() {
 
   const list = ordered.length ? ordered.map(([key, docs]) =>
     el("div", { style: "margin-bottom:16px" },
-      el("div", { class: "sec-title", style: key ? "" : "color:var(--color-accent-ink)" },
+      el("div", { class: "sec-title", style: "display:flex;align-items:center;gap:8px" + (key ? "" : ";color:var(--color-accent-ink)") },
+        el("input", { type: "checkbox", class: "cf-tick", "data-range": key,
+          "aria-label": "Select every document in " + (key ? catName(key) : "this group"),
+          onchange: e => { docs.forEach(d => e.target.checked ? docSelected.add(d.source)
+                                                             : docSelected.delete(d.source));
+                           drawDocBulk(); } }),
         (key ? catName(key) : "Not filed against a range")
         + " · " + docs.length + (docs.length === 1 ? " document" : " documents")),
       docs.map(docRow)))
@@ -5594,6 +5767,8 @@ function viewDocuments() {
         cache.sources.length ? "Clear the filters to see the rest."
           : "Add a manual or datasheet above and the widget can start answering from it.")];
 
+  // After mount: range ticks and the bar follow a selection kept across a re-render.
+  setTimeout(drawDocBulk);
   return [
     el("h1", {}, "Documents"),
     el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
@@ -5617,8 +5792,9 @@ function viewDocuments() {
                 "data-tour": "doc-list", "data-sec": "All documents" },
       el("div", { class: "sec-title" }, "All documents"),
       filters,
-      el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget."),
-      list),
+      el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget. "
+        + "Tick documents, or a range, to act on several at once."),
+      list, docBulk),
   ];
 }
 

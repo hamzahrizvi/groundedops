@@ -16,13 +16,13 @@ retrieval_db.set_internal = lambda sources, on: marked.append((list(sources), on
 faq_store.merge_questions(DOC, "biometrics_general",
                           [{"question": "How is pulse configured?", "answer": "Set it."}])
 
-r = client.post("/admin/source_internal", json={"source": DOC, "internal": True}, headers=ROOT)
+r = client.post("/admin/source_internal", json={"sources": [DOC], "internal": True}, headers=ROOT)
 assert r.status_code == 200, r.text
 assert marked == [([DOC], True)], marked
 assert [f["question"] for f in r.json()["faqs"]
-        if f["why"] == "made from this document"] == ["How is pulse configured?"], r.json()
+        if f["derived"]] == ["How is pulse configured?"], r.json()
 
-r = client.post("/admin/source_internal", json={"source": DOC, "internal": False}, headers=ROOT)
+r = client.post("/admin/source_internal", json={"sources": [DOC], "internal": False}, headers=ROOT)
 assert r.status_code == 200 and marked[-1] == ([DOC], False) and r.json()["faqs"] == []
-assert client.post("/admin/source_internal", json={"source": DOC, "internal": True}).status_code in (401, 403)
+assert client.post("/admin/source_internal", json={"sources": [DOC], "internal": True}).status_code in (401, 403)
 print("PASS internal toggle")

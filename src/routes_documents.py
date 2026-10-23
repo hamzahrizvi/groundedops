@@ -638,48 +638,56 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
 
 
 class InternalReq(BaseModel):
-    source: str
+    sources: list[str]
     internal: bool
 
 
 @router.post("/admin/source_internal")
 def admin_source_internal(payload: InternalReq,
                           x_admin_password: str | None = Header(default=None)):
-    """Mark one document internal, or customer-facing again, from the
+    """Mark documents internal, or customer-facing again, from the
     Documents page (the Confluence page could already). A synced Confluence
     document changes its decision there too, or the next sync of a changed
     page would put the old mark back. FAQs are hand-curated and stay until
     removed, so the reply lists the ones to offer for removal."""
     _require_admin(x_admin_password)
     import confluence_sync
-    keys = [k for k, it in confluence_sync._load()["items"].items()
-            if it.get("source") == payload.source and it.get("synced_version") is not None]
-    if keys:
-        confluence_sync.set_items(keys, decision="internal" if payload.internal else "approved")
-    else:
+    sources = list(dict.fromkeys(s for s in payload.sources if s))
+    if not sources:
+        raise HTTPException(status_code=400, detail="No documents given")
+    synced = {}
+    for k, it in confluence_sync._load()["items"].items():
+        if it.get("source") in sources and it.get("synced_version") is not None:
+            synced.setdefault(it["source"], []).append(k)
+    if synced:
+        confluence_sync.set_items([k for ks in synced.values() for k in ks],
+                                  decision="internal" if payload.internal else "approved")
+    rest = [s for s in sources if s not in synced]
+    if rest:
         from retrieval_db import set_internal
-        set_internal([payload.source], payload.internal)
+        set_internal(rest, payload.internal)
     clear_memory()   # a follow-up could otherwise lean on an earlier answer
-    return {"source": payload.source, "internal": payload.internal,
-            "faqs": related_faqs(payload.source) if payload.internal else []}
+    return {"sources": sources, "internal": payload.internal,
+            "faqs": related_faqs(sources) if payload.internal else []}
 
 
 # Share of an answer's content words that must appear in ONE passage of the
-# document for the FAQ to be offered as "close wording". Offered unticked, so
+# documents for the FAQ to be offered as "close wording". Offered unticked, so
 # a loose match costs a glance, not a deletion.
 _RELATED_OVERLAP = 0.7
 
 
-def related_faqs(source: str) -> list[dict]:
-    """FAQs to offer for removal when `source` goes internal: those made from
-    it (and their translations), then others whose answer reads like one of
-    its passages."""
+def related_faqs(sources: list[str]) -> list[dict]:
+    """FAQs to offer for removal when `sources` go internal: those made from
+    them (and their translations), marked derived, then others whose answer
+    reads like one of their passages."""
     import faq_store
     from db import get_collection
     items = faq_store._load()
-    derived = {it["id"] for it in items if it.get("source") == source}
+    wanted = set(sources)
+    derived = {it["id"] for it in items if it.get("source") in wanted}
     derived |= {it["id"] for it in items if it.get("translation_of") in derived}
-    texts = get_collection().get(where={"source": source},
+    texts = get_collection().get(where={"source": {"$in": sources}},
                                  include=["documents"]).get("documents") or []
     passages = [faq_store._tokens(t) for t in texts]
     out = []
@@ -687,12 +695,14 @@ def related_faqs(source: str) -> list[dict]:
         row = {"id": it["id"], "question": it.get("question", ""),
                "answer": it.get("answer", ""), "language": it.get("language", "")}
         if it["id"] in derived:
-            out.append(dict(row, why="made from this document"))
+            src = it.get("source") if it.get("source") in wanted else "a document you chose"
+            out.append(dict(row, derived=True, why="made from " + src))
             continue
         words = faq_store._tokens(it.get("answer"))
         if len(words) < 4 or not passages:
             continue
         best = max(len(words & p) for p in passages) / len(words)
         if best >= _RELATED_OVERLAP:
-            out.append(dict(row, why=f"{round(best * 100)}% of its answer is in this document"))
+            out.append(dict(row, derived=False,
+                            why=f"{round(best * 100)}% of its answer is in these documents"))
     return out
