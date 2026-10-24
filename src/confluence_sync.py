@@ -1005,7 +1005,9 @@ def _apply(api: _Api) -> dict:
                     version = (full.get("version") or {}).get("number")
                 else:
                     # ponytail: version read just before the download; an edit in that second slips through. Pin the download to the version if it ever matters.
-                    version = (api.attachment(it["id"]).get("version") or {}).get("number")
+                    # Auto mode needs no fresh version: one request fewer, nothing new to fail.
+                    version = (api.attachment(it["id"]).get("version") or {}).get("number") \
+                        if st["mode"] == "review" else it.get("version")
                     if int(it.get("size") or 0) > MAX_FILE_BYTES:
                         raise ValueError(f"{int(it['size']) // 1048576} MB, over the "
                                          f"{MAX_FILE_BYTES // 1048576} MB limit; not downloaded")
