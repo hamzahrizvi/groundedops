@@ -1189,7 +1189,7 @@ def _apply(api: _Api) -> dict:
                     # Uploaded again by hand (or restored): the PDF answers and
                     # the copy goes. A PDF only on disk is an old file: left alone.
                     if _indexed(upload) and _indexed(it.get("source") or "") and _keep_pdf(it, upload):
-                        kept[key] = upload
+                        kept.setdefault(key, upload)
                         res["kept_pdf"].append(f"{upload} kept over {it.get('source')}")
                         _note(it.get("title") or upload, it["kind"], it.get("path") or [], "PDF kept")
                     continue
@@ -1229,7 +1229,7 @@ def restore_pdfs(apply: bool = False, products: dict | None = None) -> list[str]
                 continue
             out.append(f"{upload} <- {it['source']}")
             if apply and _keep_pdf(it, upload, (products or {}).get(upload), restore=True):
-                kept[key] = upload
+                kept.setdefault(key, upload)
     if kept:
         def mark(s):
             for k, u in kept.items():
