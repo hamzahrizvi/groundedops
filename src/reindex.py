@@ -237,9 +237,15 @@ def rebuild(targets: list[dict], dry_run: bool) -> int:
             ocr_done = docstore.ocr_state(e["source"])["done"]
             with open(e["path"], "rb") as fh:
                 content = fh.read()
+            report: dict = {}
             n = ingest_file(content, e["source"],
                             category_key=e.get("category") or None,
-                            product_key=e.get("product") or None)
+                            product_key=e.get("product") or None,
+                            report=report)
+            if report.get("internal"):
+                # Marked internal: the original is kept, never indexed.
+                print(f"  {e['source']}: internal, kept out of the index")
+                continue
             if n <= 0 and not ocr_done:
                 raise RuntimeError(
                     f"{e['source']} produced no chunks; rebuild aborted")

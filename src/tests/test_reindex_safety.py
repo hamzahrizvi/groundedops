@@ -82,3 +82,29 @@ def test_from_store_without_only_still_rebuilds():
          patch.object(reindex, "rebuild") as rebuild:
         assert reindex.main() == 0
     rebuild.assert_called_once_with([target], False)
+
+
+def test_an_internal_document_does_not_abort_a_rebuild():
+    # A marked document is stored, never indexed (D-20261024-06): 0 chunks
+    # with report["internal"] is expected, not a broken parse.
+    def fake_ingest_file(content, source, report=None, **kw):
+        if source == "internal.txt":
+            report["internal"] = True
+            return 0
+        return 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        targets = []
+        for name in ("internal.txt", "public.txt"):
+            Path(tmp, name).write_text(name, encoding="utf-8")
+            targets.append({"source": name, "path": str(Path(tmp, name)), "chunks": 1})
+        fake_db = types.ModuleType("db")
+        fake_db.reset_collection = lambda: None
+        fake_ingest = types.ModuleType("ingest")
+        fake_ingest.ingest_file = fake_ingest_file
+        with patch.dict(sys.modules, {"db": fake_db, "ingest": fake_ingest}), \
+             patch.object(reindex, "snapshot_collection", return_value={"ids": []}), \
+             patch.object(reindex, "restore_collection") as restore, \
+             patch.object(reindex.docstore, "ocr_state", return_value={"done": []}):
+            assert reindex.rebuild(targets, dry_run=False) == 1
+        restore.assert_not_called()

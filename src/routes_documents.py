@@ -38,7 +38,7 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest,
                   x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    removed = remove_source_now(payload.source)
+    removed = _remove_source(payload.source)   # keeps an internal mark: the original stays undownloadable
     try:
         import confluence_sync
         confluence_sync.exclude_removed(payload.source)
@@ -49,7 +49,19 @@ def remove_source(payload: DeleteSourceRequest,
 
 def remove_source_now(source: str) -> int:
     """What Remove does, for callers inside the server (the Confluence sync)
-    that have no sign-in to show; the route above checks the caller's."""
+    that have no sign-in to show; the route above checks the caller's.
+
+    Also drops an internal mark, without re-indexing: the sync un-marks every
+    source it removes, and an un-mark that re-indexed from the original would
+    bring the removed document straight back (D-20261024-06)."""
+    removed = _remove_source(source)
+    from retrieval_db import is_marked_internal, set_internal
+    if is_marked_internal(source):
+        set_internal([source], False, reindex=False)
+    return removed
+
+
+def _remove_source(source: str) -> int:
     removed = delete_source(source)
     clear_memory()
     try:
@@ -125,7 +137,10 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
             _INGEST_JOBS[job_id] = {
                 "status": "done", "file": filename, "chunks_added": count,
                 "chunks": count,
-                "warning": None if count else "File already exists or no usable text found",
+                "warning": None if count else (
+                    "Kept as internal: stored, not used for answers, so nothing was indexed."
+                    if report.get("internal") else
+                    "File already exists or no usable text found"),
                 "pages": report.get("pages"),
                 "ocr_candidates": candidates,
                 "ocr_available": ocr_ok,
@@ -287,7 +302,9 @@ async def upload(request: Request,
     # the fail-closed or last-good set of an unreadable file, not the file.
     if internal or file.filename in internal_sources():
         try:
-            set_internal([file.filename], internal)
+            # reindex=False: the worker below indexes this upload. Re-indexing
+            # the old original first would make it skip the upload as a duplicate.
+            set_internal([file.filename], internal, reindex=False)
         except Exception as exc:
             logger.error("upload refused, internal mark not saved for %r: %s",
                          file.filename, exc)
@@ -572,7 +589,8 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     a doc. Updates Chroma metadata in place (no re-embed)."""
     _require_admin(x_admin_password)
     n = retag_source(payload.source, payload.category_key, payload.product_key)
-    if not n:
+    from retrieval_db import is_marked_internal
+    if not n and not is_marked_internal(payload.source):   # internal: re-filed, no chunks
         raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
     return {"reassigned": n, "source": payload.source,
             "category": payload.category_key, "product": payload.product_key}
@@ -586,13 +604,18 @@ def retag_source(source: str, category_key: str | None, product_key: str | None)
     col = get_collection()
     got = col.get(where={"source": source}, include=["metadatas"])
     ids = got.get("ids", [])
-    if not ids:
-        return 0
     # Several products, comma-joined: an installation guide covering the
     # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
     # meant the other product's visitors were never offered it.
     keys = list(dict.fromkeys(
         k.strip() for k in (product_key or "").split(",") if k.strip()))
+    if not ids:
+        # A document marked internal has no chunks, but its filing still
+        # counts: un-marking indexes it again from the catalogue.
+        from retrieval_db import is_marked_internal
+        if is_marked_internal(source):
+            catalog_mod.refile_source(source, keys)
+        return 0
     # Flags from a previous assignment have to go, or a document moved off
     # a product stays findable under it -- the worst kind of stale tag,
     # because nothing on screen says it is still there. with_product_tags
@@ -671,6 +694,23 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
             item["ocr"] = _ds.ocr_state(r["source"])
     except Exception as exc:
         logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
+    # Marked documents are kept out of the index (D-20261024-06), so list
+    # them from the store, or the page could never make them public again.
+    try:
+        import docstore as _ds
+        from reindex import catalog_assignment
+        from retrieval_db import _name_key
+        listed = {_name_key(r["source"]) for r in rows}
+        assign = catalog_assignment()
+        for name in sorted(internal):
+            if _name_key(name) in listed or not _ds.find(name):
+                continue
+            listed.add(_name_key(name))
+            cat, prod = assign.get(_ds._safe_basename(name), ("", ""))
+            out.append({"source": name, "category": cat, "product": prod,
+                        "chunks": 0, "internal": True})
+    except Exception as exc:
+        logger.warning("internal documents not listed (non-fatal): %s", exc)
     return {"sources": out}
 
 
@@ -696,6 +736,9 @@ def admin_source_internal(payload: InternalReq,
     for k, it in confluence_sync._load()["items"].items():
         if it.get("source") in sources and it.get("synced_version") is not None:
             synced.setdefault(it["source"], []).append(k)
+    # Before marking: marking takes the documents' chunks out of the index,
+    # and related_faqs reads their text.
+    faqs = related_faqs(sources) if payload.internal else []
     if synced:
         confluence_sync.set_items([k for ks in synced.values() for k in ks],
                                   decision="internal" if payload.internal else "approved")
@@ -704,8 +747,7 @@ def admin_source_internal(payload: InternalReq,
         from retrieval_db import set_internal
         set_internal(rest, payload.internal)
     clear_memory()   # a follow-up could otherwise lean on an earlier answer
-    return {"sources": sources, "internal": payload.internal,
-            "faqs": related_faqs(sources) if payload.internal else []}
+    return {"sources": sources, "internal": payload.internal, "faqs": faqs}
 
 
 # Share of an answer's content words that must appear in ONE passage of the

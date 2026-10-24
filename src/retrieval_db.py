@@ -85,21 +85,64 @@ def internal_sources() -> frozenset:
     return _internal
 
 
-def set_internal(sources, on: bool) -> None:
-    """Mark documents internal (on) or customer-facing (off)."""
+def set_internal(sources, on: bool, reindex: bool = True) -> None:
+    """Mark documents internal (on) or customer-facing (off).
+
+    Marking takes a document's chunks out of the index; its original stays in
+    the document store (downloads stay refused by the mark). A document with
+    no retained original keeps its chunks, hidden at read time by
+    is_excluded(), since deleting them would lose it for good. Un-marking
+    indexes it again from the original, unless the caller indexes it itself
+    (reindex=False: an upload about to ingest, or Remove). Only names whose
+    mark really changed are touched, so un-marking a public document costs
+    nothing."""
     global _internal, _internal_good
     import jsonstore
     with _internal_lock:
         _internal = None                    # re-read: never write back a stale or fail-closed set
         cur = set(internal_sources())
+        was = {_name_key(n) for n in cur}
         cur = cur | set(sources) if on else cur - set(sources)
         jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")  # refuses an unreadable file
         _internal = _internal_good = frozenset(cur)
+        now = {_name_key(n) for n in cur}
     try:                                   # inventories and the BM25 index cache by source
         from db import invalidate_retrieval_cache
         invalidate_retrieval_cache()
     except Exception as exc:
         logger.warning(f"retrieval cache not invalidated after marking internal: {exc}")
+    if on:
+        _drop_marked_chunks({_name_key(s) for s in sources})
+    elif reindex:
+        for s in sources:
+            if _name_key(s) in was and _name_key(s) not in now:
+                try:
+                    import ingest
+                    ingest.reindex_source(s)
+                except Exception as exc:
+                    logger.error("%r is public again but was not re-indexed: %s", s, exc)
+
+
+def _drop_marked_chunks(keys: set) -> None:
+    """Delete the indexed chunks of every source whose _name_key is in `keys`
+    and whose original is retained. Never raises: the mark is saved, and
+    readers still hide whatever stays."""
+    try:
+        import docindex
+        import docstore
+        from db import delete_source
+        for row in list(docindex.source_index()):
+            src = row["source"]
+            if _name_key(src) not in keys:
+                continue
+            if docstore.find(src):
+                delete_source(src)
+            else:
+                logger.warning("%r marked internal with no retained original: its "
+                               "chunks are kept (still hidden at read time)", src)
+    except Exception as exc:
+        logger.error("marked internal, but its chunks were not taken out of the "
+                     "index (still hidden at read time): %s", exc)
 
 
 @functools.lru_cache(maxsize=4096)
@@ -133,7 +176,14 @@ def is_excluded(source: str | None) -> bool:
     EXCLUDED_SOURCES substrings match, or one marked internal, in any spelling that names the same file on Windows (_name_key)."""
     s = source or ""
     low = s.lower()
-    return any(ex in low for ex in EXCLUDED_SOURCES) or _name_key(s) in _internal_keys()
+    return any(ex in low for ex in EXCLUDED_SOURCES) or is_marked_internal(s)
+
+
+def is_marked_internal(source: str | None) -> bool:
+    """True for a document marked internal (not the EXCLUDED_SOURCES
+    substrings, a read-time policy). Ingest checks this: a marked document is
+    stored, never indexed."""
+    return _name_key(source or "") in _internal_keys()
 
 
 # Documents that stand behind the manuals rather than answer customers: test
