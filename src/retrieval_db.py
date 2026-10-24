@@ -15,6 +15,7 @@ For years the window was exactly top_k and this docstring's promise did not
 hold in practice.
 """
 
+import functools
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from rank_bm25 import BM25Okapi
 from embeddings import embed_query
 from db import get_collection
 from text_utils import rrf_merge
+from docstore import _safe_basename
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,8 @@ EXCLUDED_SOURCES = [
     if s.strip()
 ]
 
-# Documents marked Internal on the console's Confluence page, by EXACT name.
+# Documents marked Internal on the console's Confluence page, by name, compared case-folded on the
+# bare file name (see _name_key), still never as a substring.
 # Not added to EXCLUDED_SOURCES: those are substrings, and "manual.txt" is a
 # substring of "ssp manual.txt", so marking one document would have hidden
 # another. Kept in a file of their own so marking takes effect at once, with
@@ -99,12 +102,38 @@ def set_internal(sources, on: bool) -> None:
         logger.warning(f"retrieval cache not invalidated after marking internal: {exc}")
 
 
+@functools.lru_cache(maxsize=4096)
+def _name_key(name: str) -> str:
+    """What a document name is compared on for the internal mark: the bare
+    file name (docstore's sanitiser), cut at the first ':' (an NTFS stream
+    suffix such as "::$INDEX_ALLOCATION" opens the plain folder), trailing
+    dots and spaces dropped, case folded. That is how Windows resolves the
+    documents and figures folders, so every spelling that opens a marked
+    document's folder meets its mark. Marks go through it too, so one kept
+    with a path ("x/Secret.pdf") still matches the name it is served under."""
+    return _safe_basename(name).split(":", 1)[0].rstrip(". ").casefold()
+
+
+_keys_of: tuple = (None, frozenset())   # (the internal_sources() set, its keys)
+
+
+def _internal_keys() -> frozenset:
+    """internal_sources() as _name_key keys, rebuilt when that set changes.
+    The fail-closed _Everything set passes through unchanged (holds all)."""
+    global _keys_of
+    cur = internal_sources()
+    if _keys_of[0] is not cur:
+        _keys_of = (cur, cur if isinstance(cur, _Everything)
+                    else frozenset(_name_key(n) for n in cur))
+    return _keys_of[1]
+
+
 def is_excluded(source: str | None) -> bool:
     """True for a document customers must never be answered from: one the
-    EXCLUDED_SOURCES substrings match, or one marked internal."""
+    EXCLUDED_SOURCES substrings match, or one marked internal, in any spelling that names the same file on Windows (_name_key)."""
     s = source or ""
     low = s.lower()
-    return any(ex in low for ex in EXCLUDED_SOURCES) or s in internal_sources()
+    return any(ex in low for ex in EXCLUDED_SOURCES) or _name_key(s) in _internal_keys()
 
 
 # Documents that stand behind the manuals rather than answer customers: test

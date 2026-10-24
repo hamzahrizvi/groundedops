@@ -29,6 +29,28 @@ def test_marked_by_exact_name_only():
     assert not rdb.is_excluded("Manual.txt")
 
 
+def test_every_spelling_of_a_marked_name_is_internal():
+    rdb.set_internal(["Pricing.pdf"], True)
+    try:
+        for v in ("Pricing.pdf", "PRICING.PDF", "Pricing.pdf.", "Pricing.pdf ",
+                  "Pricing.pdf. . ", "x/Pricing.pdf", "x\\Pricing.pdf",
+                  "Pricing.pdf::$INDEX_ALLOCATION"):
+            assert rdb.is_excluded(v), v
+        for v in ("Pricing2.pdf", "Pricing.pdfx", "SSP Pricing.pdf"):
+            assert not rdb.is_excluded(v), v
+    finally:
+        rdb.set_internal(["Pricing.pdf"], False)
+    assert not rdb.is_excluded("PRICING.PDF")
+
+
+def test_a_mark_kept_with_a_path_hides_the_served_name():
+    rdb.set_internal(["x/Secret.pdf"], True)
+    try:
+        assert rdb.is_excluded("Secret.pdf") and rdb.is_excluded("secret.PDF")
+    finally:
+        rdb.set_internal(["x/Secret.pdf"], False)
+
+
 def test_customers_never_reach_an_internal_document():
     rdb.set_internal(["Field Trials.txt"], True)
     meta = {"source": "Field Trials.txt", "prod_mycheckr": True, "product": "mycheckr"}
