@@ -4,9 +4,8 @@
  * v2 adds:
  *   1. Guided onboarding — visitors pick an intent from suggested
  *      pointers before free text is available.
- *   2. Mandatory scope — a category AND product must be chosen before a
- *      question can be asked, so retrieval is always scoped and the
- *      backend never answers from the whole corpus by accident.
+ *   2. Optional scope: buttons set a product; a typed first message goes
+ *      unscoped and the backend asks which product if it needs to.
  *   3. Suggested questions — pulled live from the curated FAQ for the
  *      chosen product, so the first answer costs no LLM call.
  *   4. Session persistence — the conversation survives a page refresh,
@@ -1307,13 +1306,12 @@
       state.category = null;
       state.stage = "category";
       renderScopeBar();
-      lockComposer();
+      unlockComposer();
       askCategory("No problem — which product range would you like to ask about?");
     });
   }
 
-  // The composer is the gate: free text is impossible until a product is
-  // chosen, which guarantees every /query call carries a scope.
+  // The composer locks only while a form or continue-prompt is open.
   function lockComposer(reason) {
     $in.disabled = true;
     $send.disabled = true;
@@ -1322,7 +1320,7 @@
 
   function unlockComposer() {
     $in.disabled = false;
-    $in.placeholder = "Ask about " + (state.product ? state.product.name : "this product") + "…";
+    $in.placeholder = state.product ? "Ask about " + state.product.name + "…" : "Type your question, or pick an option above…";
     $send.disabled = !$in.value.trim();
   }
 
@@ -1340,7 +1338,7 @@
     };
     $log.innerHTML = "";
     renderScopeBar();
-    lockComposer();
+    unlockComposer();
     say(cfg.welcome);
     showNotice();
     // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
@@ -1831,7 +1829,7 @@
   // already does the same for a range with one product).
   function askCategory(prompt) {
     state.stage = "category";
-    lockComposer();
+    unlockComposer();
     save();
     var s = status("Loading product ranges");
     fetchCatalog()
@@ -1889,7 +1887,7 @@
 
   function askProduct(cat) {
     state.stage = "product";
-    lockComposer();
+    unlockComposer();
     save();
     var prods = (cat.products || []).filter(function (p) {
       return (p.doc_count || 0) > 0;
@@ -2099,7 +2097,7 @@
       style: "alt",
       onClick: function () {
         say("No problem — what would you like to know?");
-        if (state.product) unlockComposer();
+        unlockComposer();
       },
     });
     chips(items, "Contact us");
@@ -2121,12 +2119,6 @@
       }
     }
 
-    // Belt-and-braces: the composer is disabled without a scope, but a
-    // chip callback or a future code path could still get here.
-    if (!state.product) {
-      askCategory("Let me get the right documentation first — which product range?");
-      return;
-    }
     busy = true;
     $send.disabled = true;
     clearChips();
@@ -2144,7 +2136,7 @@
         session_id: state.sessionId,
         visitor_id: visitorId(),
         effort: opts.effort || (quotaState && quotaState.ai_available ? "standard" : "faq_only"),
-        product: state.product.key,
+        product: state.product ? state.product.key : null,
         category: state.category ? state.category.key : null,
         skip_faq: !!opts.skipFaq,
         faq_id: opts.faqId || null,
@@ -2385,7 +2377,7 @@
       })
       .then(function () {
         busy = false;
-        if (state.product) unlockComposer();
+        unlockComposer();
         $in.focus();
       });
   }
@@ -2639,5 +2631,5 @@
     ask(q);
   });
 
-  lockComposer();
+  unlockComposer();
 })();
