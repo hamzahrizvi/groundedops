@@ -100,6 +100,10 @@ class Cancelled(RuntimeError):
     pass
 
 
+class _Moved(Exception):
+    """Edited in Confluence after a person approved it."""
+
+
 def cancel() -> bool:
     """Ask the run in progress to stop at its next page or document. A check
     stopped part way is thrown away (it writes only at the end); a sync keeps
@@ -443,6 +447,10 @@ def set_mode(mode: str) -> None:
         if mode == "auto":
             for it in st["items"].values():
                 it.pop("held", None)
+        else:   # edits found while in auto and not yet synced must not go out unseen
+            for it in st["items"].values():
+                if status_of({**it, "error": None}) == "changed":
+                    it["held"] = True
     _update(change)
 
 
@@ -545,6 +553,8 @@ def set_items(keys: list[str], decision: str | None = None,
                 it["decision"] = decision
                 it.pop("error", None)
                 it.pop("held", None)        # a person has now seen this version
+                if decision != "excluded":
+                    it["approved_version"] = it.get("version")    # the version the person saw
                 if it.get("synced_version") is not None and decision != "excluded":
                     flag.append(it["source"])
             if keep_upload is not None:
@@ -612,6 +622,9 @@ class _Api:
 
     def page(self, pid: str) -> dict:
         return self.get(f"/wiki/api/v2/pages/{pid}", **{"body-format": "storage"}).json()
+
+    def attachment(self, att_id: str) -> dict:
+        return self.get(f"/wiki/api/v2/attachments/{att_id}").json()
 
     def download(self, page_id: str, att_id: str) -> bytes:
         return self.get(f"/wiki/rest/api/content/{page_id}/child/attachment/{att_id}/download").content
@@ -714,6 +727,11 @@ def _link(api: _Api, webui: str | None) -> str | None:
 
 # ── check ───────────────────────────────────────────────────────────────
 
+def _stamp(parts: list[str]) -> str:
+    """A combined document's version: any page added, removed or edited changes it."""
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:10]
+
+
 def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     """List the root into the state's items. Indexes nothing."""
     found: dict[str, dict] = {}
@@ -794,7 +812,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     for key, b in combined.items():
         if b["members"]:
             # Its version is its pages': any page added, removed or edited changes it.
-            b["version"] = hashlib.sha1("|".join(b.pop("stamp")).encode()).hexdigest()[:10]
+            b["version"] = _stamp(b.pop("stamp"))
             b["pages"] = len(b["members"])
             found[key] = b
 
@@ -923,12 +941,14 @@ def _remove(source: str) -> None:
     catalog.refile_source(source, [])
 
 
-def _bundle_text(api: _Api, it: dict) -> str:
+def _bundle_text(api: _Api, it: dict) -> tuple[str, str]:
     """A combined folder as one text: its title, then each page under its
     own section heading (the path below the folder), which the chunker keeps
-    as a hard boundary and stores as the chunk's section."""
+    as a hard boundary and stores as the chunk's section. Also returns the
+    version stamp of the pages as read now."""
     from chunking import SECTION_CLOSE, SECTION_OPEN
     parts = [it["title"]]
+    stamp: list[str] = []
     for n, (pid, heading) in enumerate(it.get("members") or []):
         _stop_point()
         _progress.update(page=n + 1, pages=len(it["members"]))
@@ -936,9 +956,10 @@ def _bundle_text(api: _Api, it: dict) -> str:
         text = page_text(full.get("title") or "", _body(full))
         if text:
             parts.append(f"{SECTION_OPEN}{heading}{SECTION_CLOSE}\n{text}")
+            stamp.append(f"{pid}:{(full.get('version') or {}).get('number')}")
     _progress.pop("page", None)
     _progress.pop("pages", None)
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), _stamp(stamp)
 
 
 def _apply(api: _Api) -> dict:
@@ -976,20 +997,26 @@ def _apply(api: _Api) -> dict:
                 change = {"synced_version": None, "synced_at": None}
             else:
                 if it["kind"] == "bundle":
-                    content = _bundle_text(api, it).encode("utf-8")
-                    version = it.get("version")
+                    text, version = _bundle_text(api, it)
+                    content = text.encode("utf-8")
                 elif it["kind"] == "page":
                     full = api.page(it["id"])
                     content = page_text(full.get("title") or it["title"], _body(full)).encode("utf-8")
                     version = (full.get("version") or {}).get("number")
                 else:
+                    # ponytail: version read just before the download; an edit in that second slips through. Pin the download to the version if it ever matters.
+                    version = (api.attachment(it["id"]).get("version") or {}).get("number")
                     if int(it.get("size") or 0) > MAX_FILE_BYTES:
                         raise ValueError(f"{int(it['size']) // 1048576} MB, over the "
                                          f"{MAX_FILE_BYTES // 1048576} MB limit; not downloaded")
                     content = api.download(it["page_id"], it["id"])
                     if len(content) > MAX_FILE_BYTES:     # Confluence listed no size
                         raise ValueError(f"over the {MAX_FILE_BYTES // 1048576} MB limit; not indexed")
-                    version = it.get("version")
+                # Only the version a person approved goes out in review mode;
+                # edited again since, it waits for approval again.
+                seen = it.get("approved_version") or it.get("version")
+                if st["mode"] == "review" and None not in (seen, version) and version != seen:
+                    raise _Moved
                 uploads = [u for u, whole in matches.get(key, []) if whole and u not in keep]
                 cat, prod = _filed(src)
                 for u in uploads:
@@ -1023,13 +1050,18 @@ def _apply(api: _Api) -> dict:
                 res["added" if what == "new" else "updated"].append(src)
                 _note(it.get("title") or src, it["kind"], it.get("path") or [],
                       "added" if what == "new" else "updated")
-                change = {"synced_version": version, "synced_at": _now(), "version": version}
+                change = {"synced_version": version, "synced_at": _now(), "version": version,
+                          "approved_version": None}
             change["error"] = None
         except Cancelled:
             # Stopped while building a combined document: nothing of it
             # was written, so it simply stays pending.
             res["cancelled"], res["left"] = True, len(todo) - n
             break
+        except _Moved:
+            res["held"].append(src)
+            change = {"held": True, "prev_version": seen, "version": version,
+                      "updated_at": res["at"], "error": None}
         except Exception as exc:
             logger.warning("Confluence sync: %s failed: %s", src, exc)
             res["errors"].append(f"{src}: {exc}")
