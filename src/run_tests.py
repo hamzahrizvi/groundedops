@@ -137,7 +137,7 @@ def discover_and_run():
                                       timeout=OWN_PROCESS_TIMEOUT)
             except subprocess.TimeoutExpired:
                 failed.append((path.stem, "(own process)",
-                               "(timed out) after 600s"))
+                               f"(timed out) after {OWN_PROCESS_TIMEOUT}s"))
                 print(f"  FAIL  {path.stem}  (own process, timed out)")
                 continue
             out = (proc.stdout or "") + (proc.stderr or "")
