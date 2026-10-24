@@ -215,7 +215,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | waiting for CEO | your yes |
 | D-20261021-07 | The first screen blocks typing until the visitor picks a button | waiting for CEO | your yes |
 | D-20261024-13 | Build a test set of real customer questions from ITL's own support history | approved, queued | Dev builds it |
-| D-20261024-14 | The sync replaced nine products' clean PDF manuals with flattened text copies, and the weekly test fell | built, waiting for the check | the pre-ship check |
+| D-20261024-14 | The sync replaced nine products' clean PDF manuals with flattened text copies, and the weekly test fell | ready to merge | merges once Security clears it |
 | D-20261024-17 | The test suite reads the real secrets file, and a browser test can hang it while it holds the lab | approved, queued | Dev builds it |
 | D-20261024-18 | Security item D-20261024-18, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
