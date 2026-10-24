@@ -6,6 +6,8 @@ from structure import (
     is_meaningful_line,
     simple_similarity,
     reports_failure,
+    asks_for_procedure,
+    lists_on_topic,
 )
 
 
@@ -203,3 +205,60 @@ def test_failure_report_gets_no_verbatim_checklist():
     chunks = [{"text": checklist, "source": "manual.pdf", "rerank_score": 0.8}]
     assert extract_structured_block(chunks, query="how do I connect the tablet to the hub") is not None
     assert extract_structured_block(chunks, query="tablet won't find the hub when I search, what do I try") is None
+
+
+# -- D-20261023-04: when a copied list may be served ---------------------
+
+_LIST = chr(10).join([
+    "Check the power connection is stable",
+    "Verify the network cable is connected",
+    "Confirm the hub IP is reachable",
+    "Test the MyConnect app on tablet",
+    "Ensure device registration completed"])
+
+
+def test_asks_for_procedure():
+    for q in ("how do i swap the drive belts on a cba9?",
+              "how do we bench test an scs after repair? need the steps",
+              "give me the checklist before leaving site",
+              "walk me through configuring device rules",
+              "how to connect tablet to hub"):
+        assert asks_for_procedure(q), q
+    for q in ("how heavy is a bv100 with the 800 note cashbox when its full?",
+              "which wire colour is the RX line?",
+              "is there a cloning cable that works with the NV9?",
+              "ok its flashing red and green, can i pull the card out now?",
+              "g-scs earthing, what resistance should i see between chassis and earth?",
+              None):
+        assert not asks_for_procedure(q), q
+
+
+def test_lists_on_topic_needs_a_relevant_passage():
+    c = {"text": _LIST, "source": "SH3 Manual.pdf", "section": "Cycle test",
+         "rerank_score": 0.010}
+    q = "how do i run the cycle test"
+    assert lists_on_topic([c], q) == []
+    c = dict(c, rerank_score=0.9)
+    assert lists_on_topic([c], q) == [c]
+
+
+def test_lists_on_topic_needs_the_heading_asked_about():
+    q = "how do i swap the drive belts on a cba9?"
+    off = {"text": _LIST, "source": "m.pdf", "section": "Note Float error",
+           "rerank_score": 0.997}
+    on = dict(off, section="Replacing the drive belts")
+    assert lists_on_topic([off], q) == []
+    assert lists_on_topic([on], q) == [on]
+
+
+def test_lists_on_topic_ignores_product_words():
+    c = {"text": _LIST, "source": "m.pdf", "section": "CBA9 Troubleshooting",
+         "rerank_score": 0.9}
+    assert lists_on_topic([c], "how do i swap the drive belts on a cba9?",
+                          ignore={"cba9"}) == []
+
+
+def test_lists_on_topic_uses_the_title_when_there_is_no_section():
+    c = {"text": _LIST, "source": "SCS Bench Test Procedure.txt", "section": "",
+         "rerank_score": 0.9}
+    assert lists_on_topic([c], "how do we bench test an scs after repair?") == [c]
