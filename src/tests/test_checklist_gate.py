@@ -76,6 +76,15 @@ def test_a_weak_match_is_not_called_confident():
     assert band["note"].startswith("weak match"), band["note"]
 
 
+
+def test_two_asks_in_one_message_go_to_the_model():
+    pipe, mock, gen = _ask("how do I connect the tablet to the hub, "
+                           "and how long does the hub battery last?")
+    assert [s for s in pipe["stages"] if s["id"] == "asks"], pipe["stages"]
+    assert pipe["exit"]["id"] != "extract"
+    assert not mock.called
+    assert gen.called
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

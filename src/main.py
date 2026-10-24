@@ -3955,10 +3955,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if role != "rethink":
         t2 = time.time()
         # D-20261023-04: a list is copied only for a first-hand ask for a
-        # procedure or list (not a follow-up or comparison), and only from a
-        # passage the reranker calls relevant whose heading is what was asked.
+        # procedure or list (not a follow-up, a comparison or a message with
+        # several asks: one list answers one ask), and only from a passage
+        # the reranker calls relevant whose heading is what was asked.
         _copyable = []
-        if (not _comparing and asks_for_procedure(q)
+        if (not _comparing and not _asks and asks_for_procedure(q)
                 and not _is_followup(q, history, condensed_query)):
             try:
                 _ignore = _product_words()
