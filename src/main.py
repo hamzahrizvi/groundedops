@@ -319,7 +319,12 @@ async def _restrict_private_surface(request, call_next):
 
     proxied_early = any(h in request.headers for h in _PROXY_HEADERS)
     if path.startswith(_TOKEN_GATED_PREFIXES):
-        if not proxied_early:
+        # D-20261010-32: no proxy header AND a private socket address (the
+        # box, the LAN, the docker bridge), the same rule as the deep probe
+        # above. A server bound straight to a public address must not hand
+        # out documents to a header-less caller.
+        host = request.client.host if request.client else ""
+        if not proxied_early and host and _is_private(host):
             return await call_next(request)          # local/LAN: allowed
         if _bearer_ok(request):
             return await call_next(request)
