@@ -82,17 +82,17 @@
   var cfg = {
     api: secureUrl(attr("data-api", "").replace(/\/+$/, "")),
     title: attr("data-title", "Support"),
-    agent: attr("data-agent-name", "Assistant"),
+    agent: attr("data-agent-name", "Support"),
     avatar: attr("data-avatar-url", ""),
     accent: attr("data-accent", "#E4002B"),
-    launcherLabel: attr("data-launcher-label", "Ask a question"),
+    launcherLabel: attr("data-launcher-label", "Ask about our products"),
     salesEmail: attr("data-sales-email", ""),
     // Signed by the website server-side for logged-in users. Absent for
     // anonymous visitors, who get curated FAQ answers only.
     token: attr("data-token", ""),
     signInUrl: secureUrl(attr("data-sign-in-url", "")),
     supportEmail: attr("data-support-email", ""),
-    welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
+    welcome: attr("data-welcome", "Hi, I answer from our product manuals and show the page I used. If the answer is not there I will say so and get you a person. What are you looking for?"),
     prompt: attr("data-prompt", "How can I help today?"),
     // Explicit override for a single-locale embed (a dedicated /fr page, a
     // French subdomain). Falls back to the page's own declared language,
@@ -148,6 +148,16 @@
       Array.prototype.forEach.call(root.querySelectorAll(".go-mav"), function (n) {
         n.innerHTML = avatarHtml;
       });
+    }
+    if (d.name && !hasAttr("data-agent-name")) {
+      var hn = root.querySelector(".go-hname");
+      if (hn) hn.textContent = cfg.agent;
+      if (!cfg.avatar) {
+        avatarHtml = esc(cfg.agent.charAt(0).toUpperCase());
+        Array.prototype.forEach.call(root.querySelectorAll(".go-av, .go-mav"), function (n) {
+          n.innerHTML = avatarHtml;
+        });
+      }
     }
     if (d.intro_options && d.intro_options.length)
       serverCfg.intro_options = d.intro_options;
@@ -509,7 +519,7 @@
     : esc(cfg.agent.charAt(0).toUpperCase());
   root.innerHTML =
     '<button class="go-launch" type="button" aria-haspopup="dialog" aria-expanded="false">' +
-      I_CHAT + "<span>" + esc(cfg.launcherLabel) + "</span></button>" +
+      I_CHAT + '<span class="go-launch-label">' + esc(cfg.launcherLabel) + "</span></button>" +
     '<section class="go-panel" role="dialog" aria-modal="true" tabindex="-1" ' +
       'aria-label="' + esc(cfg.title) + '">' +
       '<div class="go-head"><div class="go-av">' + avatarHtml + "</div>" +
