@@ -311,6 +311,11 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
         # being filed under a product while excluded everywhere else).
         if _excluded(fname):
             continue
+        # Nor a drawing's title block, a certificate or a test script:
+        # "Model Details" and "Note to Manufacturers" off a cable drawing were
+        # compared as the NV4000's and NV200S's specs (C20261022c-29).
+        if _secondary(fname):
+            continue
         path = os.path.join(doc_dir, fname)
         # Opened ONCE for the whole document and handed to tables_on_page,
         # which would otherwise reopen it for every page -- this used to be
@@ -358,7 +363,7 @@ def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
     # Which documents are internal is part of what the index was built from:
     # marking one must rebuild it without that document's rows.
     internal = sorted(f for f, _ in files if _excluded(f))
-    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping, "internal": internal},
+    blob = _json.dumps({"v": 2, "files": files, "mapping": mapping, "internal": internal},
                        sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -369,6 +374,14 @@ def _excluded(fname: str) -> bool:
     except Exception:                      # no index stack (unit tests): nothing is internal
         return False
     return is_excluded(fname)
+
+
+def _secondary(fname: str) -> bool:
+    try:
+        from retrieval_db import is_secondary
+    except Exception:
+        return False
+    return is_secondary(fname)
 
 
 def _load_index_from_disk(key: str) -> list[dict] | None:
