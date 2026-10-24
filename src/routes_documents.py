@@ -38,7 +38,7 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest,
                   x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    removed = _remove_source(payload.source)   # keeps an internal mark: the original stays undownloadable
+    removed = _remove_source(payload.source)   # deletes the original too; an internal mark stays
     try:
         import confluence_sync
         confluence_sync.exclude_removed(payload.source)
@@ -62,6 +62,13 @@ def remove_source_now(source: str) -> int:
 
 
 def _remove_source(source: str) -> int:
+    """Remove a document for good: its retained original and manifest entry
+    first, then its chunks, memory and figures. The original goes first so a
+    failure stops here, before remove_source_now drops an internal mark: no
+    moment where an unmarked original is downloadable. A rebuild cannot bring
+    it back (D-20261024-18)."""
+    import docstore
+    docstore.delete(source)
     removed = delete_source(source)
     clear_memory()
     try:
@@ -115,7 +122,7 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
         # deleting first and uploading second.
         if replace_source and replace_source != filename:
             try:
-                removed = delete_source(replace_source)
+                removed = _remove_source(replace_source)
                 logger.info("replaced %r with %r (%s old chunk(s) removed)",
                             replace_source, filename, removed)
             except Exception as exc:

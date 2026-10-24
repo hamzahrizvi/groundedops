@@ -133,6 +133,36 @@ def save(filename: str, content: bytes) -> str:
             os.remove(staged)
 
 
+def delete(filename: str) -> bool:
+    """Delete a retained original and its manifest entry: what Remove means
+    (D-20261024-18). Every read directory, the legacy one too, because find()
+    reads them all and /source_file serves what find() resolves. Raises
+    OSError when a file cannot be deleted, so the caller stops before it
+    drops an internal mark. True if a file was deleted."""
+    base = _safe_basename(filename)
+    if not base or base == MANIFEST_NAME:
+        return False
+    gone = False
+    for d in read_dirs():
+        if not os.path.isdir(d):
+            continue
+        for entry in os.listdir(d):
+            p = os.path.join(d, entry)
+            if entry == base and os.path.isfile(p):
+                os.remove(p)
+                _HASH_CACHE.pop(os.path.abspath(p), None)
+                gone = True
+    data = load_manifest()
+    if data["documents"].pop(base, None) is not None:
+        try:
+            jsonstore.save(_manifest_path(), data, label="document manifest",
+                           sort_keys=True)
+        except Exception as exc:
+            # The file is gone, which is what stops the download.
+            logger.error("Manifest entry for %s not removed: %s", base, exc)
+    return gone
+
+
 def sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
