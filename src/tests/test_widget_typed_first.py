@@ -146,5 +146,7 @@ def test_typed_first_message_goes_unscoped():
 
 def test_buttons_still_scope_the_question():
     _page.click("button:has-text('Request technical support')")
+    # The composer is open at once now, so wait for the product to be set.
+    _page.wait_for_selector(".go-scope:has-text('NV9')")
     body = _send("How do I remove the bezel?")
     assert body["product"] == "nv9", body

@@ -2004,8 +2004,8 @@
             state = saved;
             renderLog();
             renderScopeBar();
-            // Only re-open the composer if a scope was actually chosen;
-            // otherwise resume the picker where they left off.
+            // With no scope chosen, resume the picker where they left off
+            // (the composer stays open there too).
             if (state.product) {
               state.stage = "chat";
               unlockComposer();
