@@ -4236,7 +4236,7 @@ function cfReviewDialog(keys, mode) {
     const list = chosen();
     const unfiled = list.filter(i => !i.product), internal = list.filter(isInternal);
     const rep = list.filter(i => i.replaces && i.status !== "synced");
-    const part = list.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload);
+    const part = list.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload && !i.pdf_kept);
     const warn = [];
     if (mode === "approve" && rep.length) warn.push(n(rep.length) + (rep.length === 1 ? " replaces a PDF" : " replace PDFs")
       + " you uploaded (" + rep.slice(0, 3).map(i => i.uploaded_as).join(", ") + (rep.length > 3 ? " and " + (rep.length - 3) + " more" : "")
@@ -4568,6 +4568,9 @@ function cfUploadLine(it) {
   const [text, cls, btn] = it.keep_upload
     ? ["Kept alongside your upload " + name + ": the bot reads both", "keep",
        el("button", { class: "cf-up-btn", onclick: () => set(false) }, "Replace it")]
+    : it.pdf_kept
+      ? ["Your PDF " + name + " answers; this Confluence copy is not indexed", "keep",
+         el("button", { class: "cf-up-btn", onclick: () => set(true) }, "Keep both")]
     : it.replaces
       ? [(it.status === "synced" ? "Replaced your upload " : "Replaces your upload ") + name
            + (it.status === "synced" ? "" : " when synced, keeping its product"), "rep",
