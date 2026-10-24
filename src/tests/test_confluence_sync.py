@@ -499,6 +499,39 @@ def test_a_deleted_product_does_not_fail_the_sync():
         assert any("gone_product no longer exists" in e for e in res["errors"]), res
 
 
+class InternalTitlesApi(FakeApi):
+    attachments = {"20": [{"id": "a1", "title": "X (Internal).pdf", "version": {"number": 1}},
+                          {"id": "a2", "title": "INTERNAL - Y.pdf", "version": {"number": 1}},
+                          {"id": "a3", "title": "Z internals.pdf", "version": {"number": 1}},
+                          {"id": "a4", "title": "W_internal.pdf", "version": {"number": 1}}]}
+
+
+def test_a_title_that_says_internal_is_filed_internal_in_auto_mode():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), InternalTitlesApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        items = w.items()
+        got = {t: items[t]["decision"] for t in ("X (Internal).pdf", "INTERNAL - Y.pdf",
+                                                 "Z internals.pdf", "W_internal.pdf", "Installation")}
+        assert got == {"X (Internal).pdf": "internal", "INTERNAL - Y.pdf": "internal",
+                       "Z internals.pdf": "approved", "W_internal.pdf": "internal",
+                       "Installation": "approved"}, got
+        # synced, but marked before it went in, so customers never get it
+        assert {"X (Internal).pdf", "INTERNAL - Y.pdf", "W_internal.pdf"} <= {s for s, _ in w.ingested}
+        assert w.internal == {"X (Internal).pdf", "INTERNAL - Y.pdf", "W_internal.pdf"}, w.internal
+        # an admin's approval stands at the next check: the rule files a first sighting only
+        w.decide(["X (Internal).pdf"], decision="approved")
+        w.run(api)
+        assert w.items()["X (Internal).pdf"]["decision"] == "approved"
+        assert "X (Internal).pdf" not in w.internal
+
+    with tempfile.TemporaryDirectory() as d:     # review mode: still excluded until approved
+        w = World(os.path.join(d, "s.json"))
+        w.run(InternalTitlesApi(), apply=False)
+        assert w.items()["X (Internal).pdf"]["decision"] == "excluded"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
