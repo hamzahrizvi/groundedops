@@ -261,7 +261,11 @@ stub("db", get_collection=lambda: _Collection(), reset_collection=lambda: None,
      count_by_product=lambda k: 0)
 stub("embeddings", _get_model=lambda: None)
 stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
-stub("structure", extract_structured_block=lambda r, query=None: None)
+import structure as _real_structure  # the gate is pure; only the copier is pinned
+stub("structure", extract_structured_block=lambda r, query=None: None,
+     asks_for_procedure=_real_structure.asks_for_procedure,
+     lists_on_topic=_real_structure.lists_on_topic,
+     MIN_COPY_RERANK=_real_structure.MIN_COPY_RERANK)
 from logger import redact as _real_redact  # the real one: the stub below replaces the module
 stub("logger", log_interaction=lambda *a, **k: None,
      log_feedback=lambda *a, **k: None, redact=_real_redact)
