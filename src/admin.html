@@ -3868,6 +3868,7 @@ const CF_STATUS = {
   synced: ["Synced", "tag-neutral"],
   new: ["Will be added", "tag-accent"],
   changed: ["Will update", "tag-accent"],
+  held: ["Update waiting for approval", "tag-accent"],
   remove: ["Will be removed", "tag-accent"],
   combined: ["Now part of a combined document", "tag-accent"],
   gone: ["Deleted in Confluence", "tag-accent"],
@@ -3884,6 +3885,7 @@ const CF_FILTERS = [
   ["new", "New", i => i.is_new],
   ["updated", "Updated", i => i.is_updated],
   ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
+  ["held", "Updates to approve", i => i.status === "held"],
   ["unfiled", "Not filed", i => !cfFiled(i)],
   ["uploaded", "Uploaded before", i => !!i.uploaded_as],
   ["error", "Failed", i => i.status === "error"],
@@ -4357,6 +4359,7 @@ function cfSyncCard(c) {
     style: "padding:14px 18px;margin-bottom:18px" });
   const mode = (m, label, hint) => el("button", {
     class: "chip" + (c.mode === m ? " chip-on" : ""), title: hint,
+    disabled: m === "auto" && !isRoot() && c.mode !== "auto" ? "true" : null,
     onclick: () => c.mode !== m && cfPost("/admin/confluence/mode", { mode: m },
       m === "auto" ? "New documents will sync without approval" : "New documents will wait for approval"),
   }, label);
@@ -4418,11 +4421,13 @@ function cfSyncCard(c) {
       mode("review", "Approve new documents first",
         "New documents start excluded, marked New, until someone approves them"),
       mode("auto", "Sync everything",
-        "Every new document is approved as soon as it is found")),
-    el("p", { style: muted + ";margin:0 0 10px" }, c.mode === "auto"
-      ? "Every document found is synced. Exclude one to take it out of the bot."
+        "Every new document and every edit is synced without approval" + (isRoot() ? "" : ". Only a root admin can switch this on"))),
+    el("p", { style: muted + ";margin:0 0 10px" }, (c.mode === "auto"
+      ? "Every document found, and every edit to one, is synced. Exclude one to take it out of the bot."
       : "New documents start excluded and are marked New until someone approves them. "
-        + "Approved documents stay approved and update when they change."),
+        + "An approved document edited in Confluence keeps answering from its approved version "
+        + "until someone approves the update.")
+      + " Anyone who can edit these pages in Confluence is writing what the bot tells customers."),
     el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn, stopBtn,
       busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
               cfFeedCount = busy.log_total || 0, cfStatusEl)
@@ -4609,6 +4614,9 @@ function cfRow(it, onTick) {
         it.error ? el("div", { class: "cf-doc-err" }, it.error) : null,
         it.uploaded_as ? cfUploadLine(it) : null)),
     el("span", { class: "tag " + cls }, label),
+    it.status === "held" ? el("button", { class: "btn btn-secondary", style: "font-size:12.5px",
+      title: "Version " + it.prev_version + " to " + it.version + " in Confluence; customers get the last approved version until then",
+      onclick: () => set({ decision: it.decision || "approved" }) }, "Approve update") : null,
     cfProductButton(it),
     sw,
     it.kind === "bundle" ? el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
@@ -4786,7 +4794,7 @@ function cfHistoryCard(c) {
     : r.kind === "check"
       ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
       : n(r, "added") + " added, " + n(r, "updated") + " updated, " + n(r, "removed") + " removed"
-        ;
+        + (n(r, "held") ? "; " + n(r, "held") + " updates waiting for approval" : "");
   return el("div", { class: "card elev-sm", "data-sec": "History", style: "padding:14px 18px" },
     el("b", {}, "History"),
     c.history.length
