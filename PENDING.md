@@ -84,6 +84,23 @@ item, re-measured. While this review ran, the office plan writer
 committed PENDING.md (`97c86c9`, 16:41, its own table only); the edits
 from this review are uncommitted on top of it.
 
+**Friday review 2026-10-23 (automated, not yet reviewed by hand).** About
+75 commits since 10-16, mostly the Confluence page (approval, folder tree,
+combine-a-manual, internal documents), console selection bars, the
+onnxruntime embedder (`7ecdaaf`) and office work orders (D-20261021-*).
+Ticked off: nothing. The office orders carry their own status in the office
+plan, and I did not re-verify them one by one. Obsolete: nothing.
+Corrected: the "real use" item below is still open, and the number is now
+**0**, not 0-2 (see its 10-23 note). Added: the `test_keyvault` failures
+(first item under **In progress**). Checked in this review: `run_tests.py`
+**367/373 passed, 1 skipped, 6 failed** (10-16: 339/339), all six in
+`test_keyvault`, see the new item. Retrieval baseline `--selfcheck` OK (35
+cases, armed). The LiteLLM gateway is **still NXDOMAIN**. `log_report
+--since 7d` (also with `--all`): 0 questions, 0 answered, 0 refused, 0
+handoffs, 0 votes, no latency (10-16: 269 / 164 / 98 / 0 / 0, p50 5.77s /
+p90 14.41s). `src/logs.jsonl` was last written 10-20 16:51. Nothing was
+committed; this file is modified in the tree.
+
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
 independent planners (59 proposals) and an adversarial verdict on each of 37
@@ -2503,6 +2520,38 @@ see *Shipped — the four follow-ups* above; kept for the record.
   worth the one look, but it needs `skip_faq: true` to reproduce.
 
 ## In progress / known gaps
+
+- **Six `test_keyvault` tests fail in the full suite but pass alone
+  (found in the Friday review 2026-10-23).** `cd src &&
+  ../.venv/Scripts/python.exe run_tests.py` gives 367/373, 6 failed:
+  `test_save_load_roundtrip`, `test_clear_removes_key`,
+  `test_key_is_not_plaintext_on_disk`, `test_legacy_plaintext_migration`,
+  `test_corrupt_vault_returns_none_not_crash` and
+  `test_console_secrets_are_encrypted_at_rest_and_never_in_env`, all with
+  `TypeError: Expected instance of hashes.HashAlgorithm`, raised at
+  `keyvault._fernet()` (`src/keyvault.py:71`, `algorithm=hashes.SHA256()`).
+  Run alone (`PYTHONPATH=. ../.venv/Scripts/python.exe
+  tests/test_keyvault.py`) it exits 0, and `hashes.SHA256()` builds fine in
+  a fresh interpreter (cryptography 50.0.0). That error means `cryptography`
+  was imported twice, so an earlier test in the shared process purges or
+  swaps `sys.modules` entries; candidates are the files that touch it
+  (`tests/test_model_pins.py`, `test_self_route.py`, `test_several_asks.py`,
+  `test_reindex_safety.py`, `test_nli_backend.py`,
+  `test_streaming_and_tables.py`, `test_ocr_end_to_end.py`). Not bisected.
+  Why it matters: last week was 339/339, so a suite that fails six on a
+  clean tree trains people to ignore red, and these six cover the code that
+  keeps console-saved secrets encrypted. Done looks like: the full run
+  passes keyvault again, either by restoring `sys.modules` in the offending
+  test or by moving `test_keyvault` to its own process like `test_keystore`.
+  Not checked: whether the onnxruntime embedder merge (`bb90455`) is the
+  trigger; last week's pass predates it.
+
+  **Real-use report, 2026-10-23 note.** Still open (`origin_for` unchanged,
+  `src/pipeline_trace.py:162`), but this week `log_report --since 7d --all`
+  shows 0 rows at all, and `src/logs.jsonl` has not been written since 10-20.
+  So there is no harness noise to measure this week, and also no customer
+  data. Whoever picks this up should not read the zeros as "real use is
+  zero": check that the lab and the backend were simply idle.
 
 - **The weekly "real use" report counts our own test runs as customers.**
   Found in the Friday review 2026-10-09. `python -m log_report --since 7d`
