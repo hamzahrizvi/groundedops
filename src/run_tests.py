@@ -7,14 +7,25 @@ Usage: python3 run_tests.py
 (pytest works too, if installed: pip install pytest && pytest tests/)
 """
 
+import atexit
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
+# Keep in-process test files off the real src/.env and src/.secrets.enc.
+# setdefault: a file or caller that sets its own path still wins.
+_SCRATCH = tempfile.mkdtemp(prefix="go-tests-")
+atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
+os.environ.setdefault("ENV_FILE_PATH", os.path.join(_SCRATCH, "test.env"))
+os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(_SCRATCH, "secrets.enc"))
+
+OWN_PROCESS_TIMEOUT = 600
 TESTS_DIR = Path(__file__).parent / "tests"
 ISOLATED_RUNNER = TESTS_DIR / "_run_isolated.py"
 
@@ -69,6 +80,9 @@ def needs_own_process(source):
         # test_widget_export start failing, all three of which pass alone.
         or "import main" in source
         or "from main import" in source
+        # Playwright can hang the shared interpreter; match real imports
+        # (also indented ones), not the word in a docstring.
+        or re.search(r"^\s*(from|import)\s+playwright\b", source, re.MULTILINE)
     )
 
 
@@ -115,10 +129,17 @@ def discover_and_run():
             _env = dict(os.environ)
             _here = str(Path(__file__).parent)
             _env["PYTHONPATH"] = _here + os.pathsep + _env.get("PYTHONPATH", "")
-            proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
-                                   str(path)],
-                                  cwd=_here, env=_env,
-                                  capture_output=True, text=True)
+            try:
+                proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
+                                       str(path)],
+                                      cwd=_here, env=_env,
+                                      capture_output=True, text=True,
+                                      timeout=OWN_PROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                failed.append((path.stem, "(own process)",
+                               "(timed out) after 600s"))
+                print(f"  FAIL  {path.stem}  (own process, timed out)")
+                continue
             out = (proc.stdout or "") + (proc.stderr or "")
             if proc.returncode == 0:
                 if re.search(r"^SKIP(?::| )", out, re.MULTILINE):
