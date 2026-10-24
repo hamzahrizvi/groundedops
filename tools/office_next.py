@@ -27,7 +27,7 @@ Lanes (2026-10-09): three scheduled runners share the work side by side (ops/sch
 --take claims the first runnable line no other lane holds with an O_EXCL file in OPS/state/claims,
 so two lanes can never start the same work. Dev builds up to MAX_DEV work orders at once, each in
 its own worktree on its own branch; merges, and every other department, run one at a time. Work
-other lanes are running counts against the budget. tools/blind_eval.py makes test runs take turns.
+other lanes are running counts against the 5-hour budget. tools/blind_eval.py makes test runs take turns.
 
 Budget (the CEO's rule, 2026-10-08): the 5-hour window stays at or under 70%,
 and the weekly window keeps pace with the week - x% of the way from the last
@@ -541,7 +541,9 @@ def entries(ops, repo, five, week, resets, now, taken):
     if is_off(ops):
         held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken, mode)}
     cost = lambda k: (0, 0) if taken[k].get("lane") == "hand" else COST.get("dev" if k.startswith("dev-") else k, (0, 0))   # a blind test spends no Claude usage
-    five, week = five + sum(cost(k)[0] for k in taken), week + sum(cost(k)[1] for k in taken)
+    # 5-hour only: the weekly figure already holds what running work has spent, and adding its estimate again held
+    # every department a day after the reset (the CEO, 2026-10-24); a few points over pace is caught next tick
+    five = five + sum(cost(k)[0] for k in taken)
     building = sum(k.startswith("dev-") for k in taken)
     out = []
     for dept, why, key in waiting(ops, repo, now, taken, mode):
@@ -617,6 +619,8 @@ def selftest():
         assert "already running (lane 1)" in p[0] and "2 builds already running" in p[1], p
         release(ops, 3)
         assert "would pass 70%" in plan(ops, ops, 25, 38, resets, now)[1], "other lanes' work counts against the budget"
+        edge = int(100 * (now - (resets - WEEK)) / WEEK) + AHEAD - max(c[1] for c in COST.values())   # the most a start may find
+        assert not any("pace" in x for x in plan(ops, ops, 11, edge, resets, now)), "running work is not counted twice in the weekly figure"
         assert take(ops, ops, 11, 38, resets, now, 1)[-1].startswith("TOOK product-owner"), "a lane's own leftover claim never blocks it"
         for n in (1, 2):
             release(ops, n)
