@@ -72,6 +72,11 @@ MODES = ("review", "auto")
 # (retrieval_db.is_excluded): kept in the index, never used to answer a
 # customer, ready for a staff mode.
 DECISIONS = ("approved", "internal", "excluded")
+# A title that calls itself internal ("X (Internal)", "INTERNAL - Y",
+# "spec_internal.pdf") is filed internal, not approved, when auto mode
+# finds it; not "internals" or "international". An admin can still
+# approve it on the Confluence page; only a first sighting is filed this way.
+_INTERNAL_TITLE = re.compile(r"(?<![a-z])internal(?![a-z])", re.I)
 _RECENT_DAYS = 14                  # how long "new" and "updated" flags last
 
 # A folder, or a page whose child pages hold the manuals: both are a
@@ -802,7 +807,9 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             it = items.get(key)
             if it is None:
                 cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
-                decision = "approved" if st["mode"] == "auto" else "excluded"
+                decision = "excluded"
+                if st["mode"] == "auto":
+                    decision = "internal" if _INTERNAL_TITLE.search(f["title"] or "") else "approved"
                 chosen = False
                 if f["kind"] == "bundle":
                     pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]
