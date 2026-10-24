@@ -181,10 +181,12 @@ def cmd_score(labels, key):
     b = sum(1 for x in lab if (retrieval_db.is_secondary(x["source"]) and not rel.search(x["source"]))
             != (x["true_kind"] in sec2))
     new = sum(1 for x in lab if (key[x["source"]] in sec) != (x["true_kind"] in sec))
+    new2 = sum(1 for x in lab if (key[x["source"]] in sec2) != (x["true_kind"] in sec2))
     print("\nsecondary-or-not errors (binary), same sample:")
     print(f"  today's name rule, HEAD (secondary = scripts, drawings, certificates, notices, release notes): {head}/{len(lab)}")
+    print(f"  the kind rule, same HEAD set:                                                                  {new}/{len(lab)}")
     print(f"  today's name rule, 2e9fbb3 (secondary = scripts, drawings, certificates):                      {b}/{len(lab)}")
-    print(f"  the kind rule (predicted kind in the HEAD set), for comparison:                                {new}/{len(lab)}")
+    print(f"  the kind rule, same 2e9fbb3 set:                                                               {new2}/{len(lab)}")
 
 
 def selftest():
