@@ -194,7 +194,8 @@ button{font:inherit;color:inherit}
 .pivot td.g:hover{text-decoration:underline}
 .pivot td.cell{cursor:pointer}
 .pivot td.cell:hover{outline:2px solid var(--accent);outline-offset:-2px}
-.rq{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:6px}
+.rq{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:6px;min-width:0;overflow-wrap:anywhere}
+.popbody>*,.rqpane{min-width:0}
 .rq .qh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .rq .qq{font-weight:700}
 .rq .ans{white-space:pre-wrap;background:var(--bg);padding:8px 10px;border-radius:3px;font-size:14px;margin:0}
@@ -991,6 +992,7 @@ const TYPE_NAMES = {lookup:"Look up a fact", yes_no_documented:"Yes/no from the 
   comparison:"Two products compared", followup:"Follow-up in a chat", multi_document:"Several asks in one message", absent_feature:"A feature it doesn't have",
   phantom_or_offtopic:"Made-up product or off-topic", vague:"Too vague to answer"};
 const groupName = (dim, g) => dim === "type" ? (TYPE_NAMES[g] || g) : dim === "product" ? (g === "none" ? "No product chosen" : g) : g.charAt(0).toUpperCase() + g.slice(1);
+const d1 = v => v == null ? v : Math.round(v * 10) / 10;   // a mean over repeats shows as 1.7, not 1.6666666666666667
 const mix = (tok, p) => `color-mix(in srgb, var(${tok}) ${Math.round(Math.max(0, Math.min(1, p))*50)}%, var(--surface))`;
 const METRICS = {
   score: {val:a => a.bot_pct, fmt:v => v + "%", worstFirst:"asc", shade:v => mix("--seq", (100-v)/100), legend:"Share of the marks the bot earned (0-3 per question). Darker = more marks lost."},
@@ -1014,12 +1016,12 @@ function openReview(g, run, pick, title){
   if(cases.length) nodes.push(seg, ...TABS.map(([k]) => panes[k]));
   for(const c of cases.sort((x, y) => x.bot - y.bot)){
     const box = el("div", "rq"), head = el("div", "qh"), [lab, cls] = VERDICT[c.verdict] || [c.verdict, ""];
-    head.append(el("span", "vpill " + cls, lab), el("span", "small", `${c.product} · ${groupName("type", c.type)} · bot ${c.bot}/3` + (c.base != null ? `, whole-manual AI ${c.base}/3` : "")));
+    head.append(el("span", "vpill " + cls, lab), el("span", "small", `${c.product} · ${groupName("type", c.type)} · bot ${d1(c.bot)}/3` + (c.base != null ? `, whole-manual AI ${d1(c.base)}/3` : "")));
     box.append(head, el("p", "qq", c.q));
     // the same question in other runs (a re-ask keeps its id): flicker or a real fix
     const hist = Object.entries(P.cases || {}).sort().map(([r, cs]) => [r, cs.find(x => x.id === c.id || x.q === c.q)]).filter(([, x]) => x);
     if(hist.length > 1){ const h = el("p", "qhist", "Every run that asked it: ");
-      for(const [r, x] of hist){ const [l, k] = VERDICT[x.verdict] || [x.verdict, ""], pill = el("span", "vpill " + k, `${runLabel(r)}: ${x.bot}/3`); pill.title = l; h.append(pill); }
+      for(const [r, x] of hist){ const [l, k] = VERDICT[x.verdict] || [x.verdict, ""], pill = el("span", "vpill " + k, `${runLabel(r)}: ${d1(x.bot)}/3`); pill.title = l; h.append(pill); }
       box.append(h); }
     for(const [k, t] of [["answer", "The bot's answer"], ["base_answer", "The whole-manual AI's answer"]])
       if(c[k]){ const d = el("details"); d.append(el("summary", null, t), el("p", "ans", c[k])); box.append(d); }
@@ -1035,7 +1037,7 @@ function openReview(g, run, pick, title){
       go.addEventListener("click", async () => {
         const t = ta.value.trim(); if(!t) return;
         go.disabled = true; msg.textContent = "Sending";
-        try { await decide(c.id, "note", `On blind question ${c.id} (${runLabel(run)}, ${c.product}): "${c.q}". Bot scored ${c.bot}/3 (${lab}). My comment: ${t}`, c.q.slice(0, 80));
+        try { await decide(c.id, "note", `On blind question ${c.id} (${runLabel(run)}, ${c.product}): "${c.q}". Bot scored ${d1(c.bot)}/3 (${lab}). My comment: ${t}`, c.q.slice(0, 80));
           msg.className = "sent"; msg.textContent = "Sent. It reaches the product owner at the next hourly check."; ta.disabled = true; }
         catch(e){ go.disabled = false; msg.className = "oops"; msg.textContent = writeError(e); }
       });
