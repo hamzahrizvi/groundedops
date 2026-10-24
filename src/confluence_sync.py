@@ -14,8 +14,7 @@ Two steps, kept apart so a person can stand between them:
 anything not approved is excluded. "Internal" syncs a document but keeps it
 from customers' answers. In "auto" mode a newly found document is
 approved at once (sync everything); in "review" mode it starts excluded and
-marked new until someone approves it on the console's Confluence page. A
-document that was approved stays approved when it changes in Confluence.
+marked new until someone approves it on the console's Confluence page. A document that was approved stays approved when it changes in Confluence; in review mode its new version waits for approval like a new document (the old one keeps answering), in auto mode it syncs.
 
 A folder can be combined into one document: a manual Confluence keeps as
 a page per command (the SSP Manual: 396 of them) is indexed as one source,
@@ -78,6 +77,9 @@ DECISIONS = ("approved", "internal", "excluded")
 # approve it on the Confluence page; only a first sighting is filed this way.
 _INTERNAL_TITLE = re.compile(r"(?<![a-z])internal(?![a-z])", re.I)
 _RECENT_DAYS = 14                  # how long "new" and "updated" flags last
+# Attachments larger than this are not downloaded; the run names them in its
+# errors. Uploads have no cap of their own (main.py exempts /upload).
+MAX_FILE_BYTES = int(float(os.getenv("CONFLUENCE_MAX_FILE_MB", "100")) * 1024 * 1024)
 
 # A folder, or a page whose child pages hold the manuals: both are a
 # "Website" container in Confluence, depending on how the space was built.
@@ -179,6 +181,12 @@ def _load() -> dict:
     st.setdefault("mode", "review")
     st.setdefault("items", {})
     st.setdefault("history", [])
+    if "holds_since" not in st:     # updates found before holds existed must not go out unseen
+        st["holds_since"] = _now()
+        if st["mode"] == "review":
+            for it in st["items"].values():
+                if it.get("decision") != "excluded" and it.get("present", True)                         and it.get("synced_version") is not None                         and it.get("version") != it["synced_version"]:
+                    it["held"] = True
     # A combined folder is {"id": its Confluence id, "path": its titles as last
     # seen}. Entries written before ids were plain title lists; a check pins
     # each to its id.
@@ -217,6 +225,8 @@ def status_of(it: dict) -> str:
         return "gone" if synced else "missing"
     if it.get("decision") == "excluded":
         return "remove" if synced else "excluded"
+    if it.get("held"):
+        return "held"           # edited in Confluence; waits for approval (review mode)
     if not synced:
         return "new"
     return "synced" if it.get("synced_version") == it.get("version") else "changed"
@@ -423,7 +433,12 @@ def overview() -> dict:
 def set_mode(mode: str) -> None:
     if mode not in MODES:
         raise ValueError("mode must be review or auto")
-    _update(lambda st: st.__setitem__("mode", mode))
+    def change(st):
+        st["mode"] = mode
+        if mode == "auto":
+            for it in st["items"].values():
+                it.pop("held", None)
+    _update(change)
 
 
 def bundle_key(b: dict) -> str:
@@ -524,6 +539,7 @@ def set_items(keys: list[str], decision: str | None = None,
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
+                it.pop("held", None)        # a person has now seen this version
                 if it.get("synced_version") is not None and decision != "excluded":
                     flag.append(it["source"])
             if keep_upload is not None:
@@ -841,6 +857,8 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             elif it.get("version") is not None and it["version"] != f["version"]:
                 it["updated_at"], it["prev_version"] = res["at"], it["version"]
                 res["changed"].append(f["title"])
+                if st["mode"] == "review" and it.get("decision") != "excluded":
+                    it["held"] = True
             name = f.pop("name")
             if not it.get("source"):
                 # Two documents of the same name: the second gets its id.
@@ -938,6 +956,7 @@ def _apply(api: _Api) -> dict:
     matches = _matches(st["items"])
     keep = set(st.get("keep_uploads") or [])
     res["replaced"] = []
+    res["held"] = [it["source"] for it in st["items"].values() if status_of(it) == "held"]
     for n, (key, it) in enumerate(todo):
         if _cancel.is_set():
             res["cancelled"], res["left"] = True, len(todo) - n
@@ -959,7 +978,12 @@ def _apply(api: _Api) -> dict:
                     content = page_text(full.get("title") or it["title"], _body(full)).encode("utf-8")
                     version = (full.get("version") or {}).get("number")
                 else:
+                    if int(it.get("size") or 0) > MAX_FILE_BYTES:
+                        raise ValueError(f"{int(it['size']) // 1048576} MB, over the "
+                                         f"{MAX_FILE_BYTES // 1048576} MB limit; not downloaded")
                     content = api.download(it["page_id"], it["id"])
+                    if len(content) > MAX_FILE_BYTES:     # Confluence listed no size
+                        raise ValueError(f"over the {MAX_FILE_BYTES // 1048576} MB limit; not indexed")
                     version = it.get("version")
                 uploads = [u for u, whole in matches.get(key, []) if whole and u not in keep]
                 cat, prod = _filed(src)

@@ -68,7 +68,8 @@ def admin_confluence_save(payload: SettingsReq,
 @router.post("/admin/confluence/mode")
 def admin_confluence_mode(payload: ModeReq,
                           x_admin_password: str | None = Header(default=None)):
-    me = _require_admin(x_admin_password)
+    # Auto approves every new page for customers: root only, like the connection.
+    me = (_require_root if payload.mode == "auto" else _require_admin)(x_admin_password)
     try:
         confluence_sync.set_mode(payload.mode)
     except ValueError as e:
