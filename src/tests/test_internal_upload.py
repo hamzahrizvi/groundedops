@@ -10,7 +10,7 @@ import routes_documents
 
 marks = set()
 retrieval_db.internal_sources = lambda: frozenset(marks)
-retrieval_db.set_internal = lambda sources, on: (
+retrieval_db.set_internal = lambda sources, on, reindex=True: (
     marks.update(sources) if on else marks.difference_update(sources))
 retrieval_db.is_excluded = lambda s: (s or "") in marks
 
@@ -53,7 +53,7 @@ r = up("Stale.txt")
 check(r.status_code == 200 and "Stale.txt" not in marks, "a lingering mark is cleared")
 
 
-def _unwritable(sources, on):
+def _unwritable(sources, on, reindex=True):
     raise RuntimeError("internal_sources.json unreadable")
 
 

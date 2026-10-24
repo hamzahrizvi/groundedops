@@ -12,7 +12,7 @@ ROOT = {"x-admin-password": _harness.ROOT_TOKEN}
 DOC = "Biometric Pulse Configuration Walkthrough.txt"
 
 marked = []
-retrieval_db.set_internal = lambda sources, on: marked.append((list(sources), on))
+retrieval_db.set_internal = lambda sources, on, reindex=True: marked.append((list(sources), on))
 faq_store.merge_questions(DOC, "biometrics_general",
                           [{"question": "How is pulse configured?", "answer": "Set it."}])
 
