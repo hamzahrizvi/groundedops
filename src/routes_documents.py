@@ -552,6 +552,10 @@ def figure(source: str, name: str):
     path = _figures.figure_path(safe, docstore._safe_basename(name))
     if not path:
         raise HTTPException(status_code=404, detail="Not found")
+    # figure_path realpaths the folder: a short name (INTERN~1.PDF) or alias
+    # resolves to the long folder, so test the mark on the folder really opened.
+    if is_excluded(os.path.basename(os.path.dirname(path))):
+        raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path, media_type="image/png")
 
 
