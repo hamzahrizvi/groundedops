@@ -627,3 +627,81 @@ def test_a_folder_named_after_a_product_and_more_suggests_it():
         assert sug(["SMART Hopper 3 Documentation", "SMART Hopper 3 User Manual"]) == "sh3"
         assert sug(["Smart Hopper 3"]) == "sh3"
         assert sug(["Products", "Other things"]) == ""
+
+
+def test_review_mode_holds_an_edited_document_until_approved():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert w.ingested == [("Installation.txt", "sh3")], w.ingested
+        api.page_version = 2                       # edited in Confluence
+        res = w.run(api)
+        it = w.items()["Installation"]
+        assert it["status"] == "held" and it["is_updated"], it
+        assert len(w.ingested) == 1 and w.removed == [], (w.ingested, w.removed)  # old version answers
+        assert res["held"] == ["Installation.txt"], res
+        w.run(api)
+        assert len(w.ingested) == 1                # still waiting
+        w.decide(["Installation"], decision="approved")
+        assert w.items()["Installation"]["status"] == "changed"
+        w.run(api)
+        assert len(w.ingested) == 2 and w.items()["Installation"]["status"] == "synced"
+        api.page_version = 3                       # auto mode: edits sync without a hold
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        assert len(w.ingested) == 3 and w.items()["Installation"]["status"] == "synced"
+
+
+def test_updates_found_before_holds_existed_wait_too():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.json")
+        json.dump({"mode": "review", "items": {"page:20": {
+            "kind": "page", "id": "20", "title": "Installation", "source": "Installation.txt",
+            "path": [], "present": True, "decision": "approved",
+            "version": 2, "synced_version": 1}}}, open(path, "w"))
+        assert World(path).items()["Installation"]["status"] == "held"
+
+
+class BigFileApi(FakeApi):
+    attachments = {"20": [{"id": "att8", "title": "Huge.pdf", "version": {"number": 1},
+                           "fileSize": 200 * 1024 * 1024}]}
+
+
+def test_an_oversized_attachment_is_skipped_and_named():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), BigFileApi()
+        w._with(lambda: cs.set_mode("auto"))
+        res = w.run(api)
+        assert ("Huge.pdf", "sh3") not in w.ingested, w.ingested
+        assert any(e.startswith("Huge.pdf:") and "limit" in e for e in res["errors"]), res
+        assert w.items()["Huge.pdf"]["status"] == "error"
+        saved, cs.MAX_FILE_BYTES = cs.MAX_FILE_BYTES, 4   # no listed size: checked after download
+        try:
+            res = w.run(FakeApi())
+        finally:
+            cs.MAX_FILE_BYTES = saved
+        assert any(e.startswith("SH3 manual.pdf:") for e in res["errors"]), res
+
+
+def test_only_root_switches_to_auto():
+    import routes_confluence as rc
+    from fastapi import HTTPException
+
+    def refuse(_):
+        raise HTTPException(status_code=403, detail="root only")
+    saved = rc._require_root, rc._require_admin, rc._status, cs.set_mode
+    modes = []
+    rc._require_root, rc._require_admin = refuse, lambda _: {"email": "a@x"}
+    rc._status, cs.set_mode = (lambda: {}), modes.append
+    try:
+        try:
+            rc.admin_confluence_mode(rc.ModeReq(mode="auto"), "pw")
+            assert False, "an admin switched to auto"
+        except HTTPException as e:
+            assert e.status_code == 403
+        rc.admin_confluence_mode(rc.ModeReq(mode="review"), "pw")
+        assert modes == ["review"], modes
+    finally:
+        rc._require_root, rc._require_admin, rc._status, cs.set_mode = saved
