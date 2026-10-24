@@ -27,7 +27,7 @@ Lanes (2026-10-09): three scheduled runners share the work side by side (ops/sch
 --take claims the first runnable line no other lane holds with an O_EXCL file in OPS/state/claims,
 so two lanes can never start the same work. Dev builds up to MAX_DEV work orders at once, each in
 its own worktree on its own branch; merges, and every other department, run one at a time. Work
-other lanes are running counts against the budget. tools/blind_eval.py makes test runs take turns.
+other lanes are running counts against the 5-hour budget. tools/blind_eval.py makes test runs take turns.
 
 Budget (the CEO's rule, 2026-10-08): the 5-hour window stays at or under 70%,
 and the weekly window keeps pace with the week - x% of the way from the last
@@ -73,6 +73,14 @@ PARKED = ("state", "parked_review")   # the parked ids last handed to the produc
 LANE_ONE_LATE = 30 * 60   # lanes 2 and 3 also work when lane 1 has not looked for work for this long (it stopped)
 REFRESH = 3600   # an idle lane 1 refreshes the office page and the cost charts this often
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
+# Minutes a claim may be held before its lane counts as stuck, likely on a permission prompt nobody sees (2026-10-23: the
+# auto-mode check gave no verdict on a Security Bash call, which then waited from 12:32 until someone stopped it at 14:26).
+# The longest normal piece in the lanes' transcripts 10-09..10-23 (a --take to the lane's next --take or --release):
+# security 9, merge 2, diary 3, marketing 2, audit 5, rnd 20, customer 39, product-owner 160, dev 313. Shown and told
+# once, never dropped: other lanes take other work meanwhile, and dropping a live claim caused double work (D-20261020-05).
+STUCK = {"security": 45, "merge": 30, "diary": 30, "marketing": 30, "audit": 30, "rnd": 60, "customer": 120,
+         "product-owner": 240, "dev": 420}
+TOLD = ("state", "stuck_told")   # the stuck claims already told to the CEO, {key: its "at"}
 
 
 def latest_usage(path=HISTORY, fallback=None):
@@ -135,6 +143,41 @@ def _alive(pid):
     k.GetExitCodeProcess(h, ctypes.byref(code))
     k.CloseHandle(h)
     return code.value == 259   # STILL_ACTIVE
+
+
+def stuck(held, now):
+    """{key: since} for the claims held past their department's STUCK limit. A blind test started by hand has its pid
+    checked instead (claims())."""
+    out = {}
+    for k, c in held.items():
+        try:
+            at = datetime.datetime.fromisoformat(c["at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if c.get("lane") != "hand" and now - at > datetime.timedelta(minutes=STUCK.get(k.split("-D-")[0], 120)):
+            out[k] = at
+    return out
+
+
+def stuck_why(since):
+    return f"stuck since {since.astimezone():%H:%M}, likely waiting on a prompt"
+
+
+def tell_stuck(ops, now):
+    """STUCK lines for claims newly past their limit, each printed once (OPS/state/stuck_told) for the lane to push to the CEO."""
+    held = claims(ops)
+    found = {k: at.isoformat() for k, at in stuck(held, now).items()}
+    p = os.path.join(ops, *TOLD)
+    try:
+        told = json.load(open(p, encoding="utf-8"))
+    except (OSError, ValueError):
+        told = {}
+    if found != told:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(found, f)
+    what = lambda k: " ".join(held[k].get("line", k).replace(TASK, "").split()[1:])
+    return [f"STUCK lane {held[k].get('lane')} on {what(k)}: {stuck_why(datetime.datetime.fromisoformat(at))}."
+            " Open its run in the Claude app and answer or stop it." for k, at in found.items() if told.get(k) != at]
 
 
 def release(ops, lane):
@@ -356,7 +399,10 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         for j in sorted(busy - {i}):
             for a in items[i].get("touches", []):
                 for b in items[j].get("touches", []):
-                    if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                    # ponytail: the tests folder alone is no clash (2026-10-24: a quarter of all orders list it, so
+                    # every two that add tests queued); the same test file still clashes, and office_merge.py sends a
+                    # real merge conflict back to Dev
+                    if (a == b or a.startswith(b + "/") or b.startswith(a + "/")) and min(a, b, key=len) != "src/tests":
                         return j, min(a, b, key=len)
         return None
     free = [i for i in build if f"dev-{i}" not in taken and not clash(i)]
@@ -495,7 +541,9 @@ def entries(ops, repo, five, week, resets, now, taken):
     if is_off(ops):
         held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken, mode)}
     cost = lambda k: (0, 0) if taken[k].get("lane") == "hand" else COST.get("dev" if k.startswith("dev-") else k, (0, 0))   # a blind test spends no Claude usage
-    five, week = five + sum(cost(k)[0] for k in taken), week + sum(cost(k)[1] for k in taken)
+    # 5-hour only: the weekly figure already holds what running work has spent, and adding its estimate again held
+    # every department a day after the reset (the CEO, 2026-10-24); a few points over pace is caught next tick
+    five = five + sum(cost(k)[0] for k in taken)
     building = sum(k.startswith("dev-") for k in taken)
     out = []
     for dept, why, key in waiting(ops, repo, now, taken, mode):
@@ -571,6 +619,8 @@ def selftest():
         assert "already running (lane 1)" in p[0] and "2 builds already running" in p[1], p
         release(ops, 3)
         assert "would pass 70%" in plan(ops, ops, 25, 38, resets, now)[1], "other lanes' work counts against the budget"
+        edge = int(100 * (now - (resets - WEEK)) / WEEK) + AHEAD - max(c[1] for c in COST.values())   # the most a start may find
+        assert not any("pace" in x for x in plan(ops, ops, 11, edge, resets, now)), "running work is not counted twice in the weekly figure"
         assert take(ops, ops, 11, 38, resets, now, 1)[-1].startswith("TOOK product-owner"), "a lane's own leftover claim never blocks it"
         for n in (1, 2):
             release(ops, n)
@@ -588,6 +638,13 @@ def selftest():
         p = plan(ops, ops, 11, 38, resets, now)
         assert "WAIT groundedops-office-dev  build D-20261008-05 waits for D-20261008-04: both change src" in p, p
         assert any(l.startswith("RUN  groundedops-office-dev  build D-20261008-02") for l in p), "a build that touches nothing in common still runs"
+        w("decisions/20261008d.md", "## D-20261008-04 | Four\n- Touches: src/main.py (the band label, and more), src/tests/\n\n"
+                                    "## D-20261008-05 | Five\n- Touches: src/figures.py, src/tests/test_x.py\n")
+        assert not any("build D-20261008-05 waits" in l for l in plan(ops, ops, 11, 38, resets, now)), "the tests folder alone is no clash"
+        w("decisions/20261008d.md", "## D-20261008-04 | Four\n- Touches: src/main.py (the band label, and more), src/tests/\n\n"
+                                    "## D-20261008-05 | Five\n- Touches: src/main.py (another note)\n")
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert "WAIT groundedops-office-dev  build D-20261008-05 waits for D-20261008-04: both change src/main.py" in p, p
         release(ops, 1)
         os.remove(os.path.join(ops, "decisions/20261008d.md"))
         os.remove(os.path.join(ops, "decisions/20261008c.md"))
@@ -667,6 +724,12 @@ def selftest():
         assert needed(ops, 2) == (True, "lane 2 holds a leftover claim"), "own leftover claim: lane must run to drop it"
         os.remove(os.path.join(ops, "state", "claims", "dev-D-2.json"))
         os.remove(os.path.join(ops, "state", "claims", "dev-D-1.json"))
+        ago = lambda m: (now - datetime.timedelta(minutes=m)).isoformat()   # 2026-10-23: a Security run waited on a prompt for 2 hours
+        w("state/claims/security.json", json.dumps({"lane": 1, "at": ago(118), "line": "RUN  groundedops-office-security  review D-1"}))
+        w("state/claims/dev-D-3.json", json.dumps({"lane": 2, "at": ago(118), "line": "RUN  groundedops-office-dev  build D-3"}))
+        assert (tell_stuck(ops, now)[0].startswith("STUCK lane 1 on security review D-1: stuck since") and len(tell_stuck(ops, now) + tell_stuck(ops, now)) == 0
+                and set(claims(ops)) == {"security", "dev-D-3"}), "a claim past its limit is told once and never dropped; a long build is not stuck"
+        release(ops, 1); release(ops, 2)
         w("state/every", "120"); w("state/lane-1-worked")
         got = take(ops, ops, 11, 38, resets, now, 1)
         assert got[-1] == "TOOK nothing" and any(x.startswith("SPACED lane 1") for x in got), got
@@ -759,7 +822,8 @@ def main():
             five, week = (0, 0) if old > 60 else (five, week)
             free = [line for line, _ in startable(a.ops, entries(a.ops, a.repo, five, week, next_reset(now), now, claims(a.ops)), 1)]
         ok, why = needed(a.ops, a.lane, free)
-        return print(("NEEDED " if ok else "NOT NEEDED ") + why)
+        # a lane past its department's limit is told here: every lane's every wake-up runs this check first
+        return print("\n".join([("NEEDED " if ok else "NOT NEEDED ") + why] + tell_stuck(a.ops, datetime.datetime.now(datetime.timezone.utc))))
     if a.release:   # and the lane's schedule, when the CEO changed "Next run" on the page
         end_tick(a.ops, a.lane)
         want, path = lane_cron(a.lane, every(a.ops)), os.path.join(a.ops, "state", f"cron-{a.lane}")

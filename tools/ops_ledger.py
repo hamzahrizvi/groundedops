@@ -61,7 +61,9 @@ def decisions(ops):
                     it["assigned"] = v.strip()
                     continue
                 if k == "Touches":   # files or folders the work order changes (office_next.py keeps overlapping ones apart): the latest wins
-                    it["touches"] = [p.strip().lower().replace("\\", "/").removeprefix("./").rstrip("/") for p in v.split(",") if p.strip()]
+                    # notes in brackets dropped first: "src/main.py (the band label)" is src/main.py (2026-10-24)
+                    it["touches"] = [p.split()[0].lower().replace("\\", "/").removeprefix("./").rstrip("/")
+                                     for p in re.sub(r"\([^)]*\)", "", v).split(",") if p.strip()]
                     continue
                 if k == "Priority":   # the product owner's rank of open work, 1 = first (office_next.py builds in this order)
                     it["priority"] = int(re.match(r"\d+", v.strip()).group()) if re.match(r"\d+", v.strip()) else 99

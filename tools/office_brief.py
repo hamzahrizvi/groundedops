@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
-from office_next import blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan, work_mode  # noqa: E402
+from office_next import (STUCK, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
+                         stuck, stuck_why, work_mode)
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
@@ -99,7 +100,7 @@ def ready_for_new_product(ops):
             " never tested and ask the product owner to point Customer's next run at it.")
 
 
-def alerts(ops, cards, stalled, off, repo=None):
+def alerts(ops, cards, stalled, off, repo=None, now=None):
     """What is stopping office work right now, for the page's pop-up: [{id, title, why, suggest, actions}].
     The id is stable while the problem lasts, so the page pops each problem once. Each action is a button:
     {label, choice, id, note} sent to tools/ceo_inbox.py, or {label, tab} to open a tab. A failed gate is not
@@ -128,6 +129,17 @@ def alerts(ops, cards, stalled, off, repo=None):
                            " a person's approval, and nobody is there during a scheduled run.",
                     "suggest": "Ask Claude in any session to set the lanes to the page's \u201cNext run\u201d setting, or give those"
                                " lanes the same permissions as lane 1 in the app's Routines settings.", "actions": []})
+    # a lane past its department's limit is likely waiting on a permission prompt nobody sees (office_next.py STUCK);
+    # the office never stops it or drops its claim, so a person must
+    held = claims(ops)
+    for k, since in stuck(held, now or datetime.datetime.now(datetime.timezone.utc)).items():
+        dept = DEPT.get(k.split("-D-")[0], k)
+        out.append({"id": f"stuck-{k}-{since:%Y%m%d%H%M}", "title": f"Lane {held[k].get('lane')} looks stuck on {dept}",
+                    "why": f"It has held {dept}'s work for more than {STUCK.get(k.split('-D-')[0], 120)} minutes, far longer than"
+                           f" its runs take ({stuck_why(since)}). A scheduled run that hits a permission prompt waits for a"
+                           " person who is not there.",
+                    "suggest": "Open that lane's latest run in the Claude app and answer the prompt or stop the run. The other"
+                               " lanes keep taking other work meanwhile.", "actions": []})
     lab = cap_status(ops)
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",
@@ -226,15 +238,21 @@ def brief(ops, repo, now=None, usage=None):
     if held:
         stalled = (stalled + " " if stalled else "") + "On hold by hand: " + ", ".join(held) + "."
     reports = sorted(glob.glob(os.path.join(ops, "reports", "*.md")))
+    taken = claims(ops)
+    late = stuck(taken, now)
     running = [{**explain(c.get("line", "IDLE"), titles), "state": "now", "lane": c.get("lane"), "since": c.get("at")}
-               for c in claims(ops).values()]
+               for c in taken.values()]
+    for r, k in zip(running, taken):   # shown, never stopped: a person answers the prompt
+        if k in late:
+            r["why"] += "; " + stuck_why(late[k])
+            r["stuck"] = True
     if running and stalled.startswith("Everything with work is waiting"):
         stalled = ""   # waiting behind work that is running is not a stall
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
             "minutes_old": None if old == float("inf") else round(old)}, "running": running,
             "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
             "lanes": [{"lane": n, "cron": lane_cron_now(ops, n)} for n in (1, 2, 3)],   # the page's countdown to each lane's next check
-            "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops), repo),
+            "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops), repo, now),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
 
@@ -268,6 +286,7 @@ def selftest():
                                                               "line": "RUN  groundedops-office-dev  build D-20261008-01"}))
         r = brief(ops, ops, now, (11, 38, 5))["running"]
         assert r == [{"dept": "Dev", "key": "dev", "can_run": False, "state": "now", "why": "build “Two products”", "lane": 2, "since": "2026-10-08T06:30:00+00:00"}], r
+        os.remove(os.path.join(ops, "state", "claims", "dev-D-20261008-01.json"))   # by the clock it is stuck now, and alerts() below would say so
         assert brief(ops, ops, now, (11, 38, 300))["stalled"].startswith("Paused: the office's usage figures are 5 hours old")
         e = explain("WAIT groundedops-office-dev  build D-20261008-01; held (OPS/state/hold)", {"D-20261008-01": "Two products"})
         assert e == {"dept": "Dev", "key": "dev", "can_run": True, "state": "wait", "why": "build \u201cTwo products\u201d; on hold"}, e
