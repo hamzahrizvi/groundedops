@@ -502,7 +502,7 @@ def source_file(filename: str):
     basename — without that, "../../etc/passwd" escapes the directory.
     Excluded (internal) sources are refused so they can't be downloaded.
 
-    Gated in main.py (_TOKEN_GATED_PREFIXES): a proxied caller needs a widget member token; a direct caller does not (D-20261010-32).
+    Gated in main.py (_TOKEN_GATED_PREFIXES): a caller needs a widget member token unless it sends no proxy header from a private address (D-20261010-32).
     """
     import docstore
     # docstore._safe_basename, not os.path.basename: basename() is
