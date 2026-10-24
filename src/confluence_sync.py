@@ -14,7 +14,10 @@ Two steps, kept apart so a person can stand between them:
 anything not approved is excluded. "Internal" syncs a document but keeps it
 from customers' answers. In "auto" mode a newly found document is
 approved at once (sync everything); in "review" mode it starts excluded and
-marked new until someone approves it on the console's Confluence page. A document that was approved stays approved when it changes in Confluence; in review mode its new version waits for approval like a new document (the old one keeps answering), in auto mode it syncs.
+marked new until someone approves it on the console's Confluence page. A
+document that was approved stays approved when it changes in Confluence; in
+review mode its new version waits for approval like a new document (the old
+one keeps answering), in auto mode it syncs.
 
 A folder can be combined into one document: a manual Confluence keeps as
 a page per command (the SSP Manual: 396 of them) is indexed as one source,
@@ -185,7 +188,9 @@ def _load() -> dict:
         st["holds_since"] = _now()
         if st["mode"] == "review":
             for it in st["items"].values():
-                if it.get("decision") != "excluded" and it.get("present", True)                         and it.get("synced_version") is not None                         and it.get("version") != it["synced_version"]:
+                if it.get("decision") != "excluded" and it.get("present", True) \
+                        and it.get("synced_version") is not None \
+                        and it.get("version") != it["synced_version"]:
                     it["held"] = True
     # A combined folder is {"id": its Confluence id, "path": its titles as last
     # seen}. Entries written before ids were plain title lists; a check pins
@@ -956,7 +961,7 @@ def _apply(api: _Api) -> dict:
     matches = _matches(st["items"])
     keep = set(st.get("keep_uploads") or [])
     res["replaced"] = []
-    res["held"] = [it["source"] for it in st["items"].values() if status_of(it) == "held"]
+    res["held"] = [it["source"] for it in st["items"].values() if status_of({**it, "error": None}) == "held"]
     for n, (key, it) in enumerate(todo):
         if _cancel.is_set():
             res["cancelled"], res["left"] = True, len(todo) - n
