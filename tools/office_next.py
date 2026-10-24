@@ -399,7 +399,10 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         for j in sorted(busy - {i}):
             for a in items[i].get("touches", []):
                 for b in items[j].get("touches", []):
-                    if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                    # ponytail: the tests folder alone is no clash (2026-10-24: a quarter of all orders list it, so
+                    # every two that add tests queued); the same test file still clashes, and office_merge.py sends a
+                    # real merge conflict back to Dev
+                    if (a == b or a.startswith(b + "/") or b.startswith(a + "/")) and min(a, b, key=len) != "src/tests":
                         return j, min(a, b, key=len)
         return None
     free = [i for i in build if f"dev-{i}" not in taken and not clash(i)]
@@ -631,6 +634,13 @@ def selftest():
         p = plan(ops, ops, 11, 38, resets, now)
         assert "WAIT groundedops-office-dev  build D-20261008-05 waits for D-20261008-04: both change src" in p, p
         assert any(l.startswith("RUN  groundedops-office-dev  build D-20261008-02") for l in p), "a build that touches nothing in common still runs"
+        w("decisions/20261008d.md", "## D-20261008-04 | Four\n- Touches: src/main.py (the band label, and more), src/tests/\n\n"
+                                    "## D-20261008-05 | Five\n- Touches: src/figures.py, src/tests/test_x.py\n")
+        assert not any("build D-20261008-05 waits" in l for l in plan(ops, ops, 11, 38, resets, now)), "the tests folder alone is no clash"
+        w("decisions/20261008d.md", "## D-20261008-04 | Four\n- Touches: src/main.py (the band label, and more), src/tests/\n\n"
+                                    "## D-20261008-05 | Five\n- Touches: src/main.py (another note)\n")
+        p = plan(ops, ops, 11, 38, resets, now)
+        assert "WAIT groundedops-office-dev  build D-20261008-05 waits for D-20261008-04: both change src/main.py" in p, p
         release(ops, 1)
         os.remove(os.path.join(ops, "decisions/20261008d.md"))
         os.remove(os.path.join(ops, "decisions/20261008c.md"))
