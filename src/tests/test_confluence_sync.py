@@ -40,6 +40,9 @@ class FakeApi:
                 "version": {"number": self.page_version},
                 "body": {"storage": {"value": "<p>Hi</p>" if pid == "30" else BODY}}}
 
+    def attachment(self, att_id):
+        return next(a for atts in self.attachments.values() for a in atts if a["id"] == att_id)
+
     def download(self, page_id, att_id):
         return b"%PDF fake"
 
@@ -705,3 +708,63 @@ def test_only_root_switches_to_auto():
         assert modes == ["review"], modes
     finally:
         rc._require_root, rc._require_admin, rc._status, cs.set_mode = saved
+
+
+def test_an_approval_covers_only_the_version_seen():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api)
+        w.decide(["Installation", "SH3 manual.pdf"], decision="approved")
+        # the file is edited after the approval, and Sync now reads no check
+        api.attachments = {"20": [{"id": "att5", "title": "SH3 manual.pdf", "version": {"number": 3}}]}
+        res = w.run(api, check=False)
+        assert w.ingested == [("Installation.txt", "sh3")], w.ingested
+        assert w.items()["SH3 manual.pdf"]["status"] == "held" and "SH3 manual.pdf" in res["held"], res
+        # a page edited after approval, found by the check
+        api.page_version = 2
+        w.run(api)
+        w.decide(["Installation"], decision="approved")
+        api.page_version = 3                       # edited again before the sync
+        res = w.run(api, check=False)
+        it = w.items()["Installation"]
+        assert len(w.ingested) == 1 and it["status"] == "held", (w.ingested, it)
+        assert it["version"] == 3 and it["prev_version"] == 2 and "Installation.txt" in res["held"], it
+        w.decide(["Installation"], decision="approved")
+        w.run(api, check=False)
+        assert len(w.ingested) == 2 and w.items()["Installation"]["status"] == "synced"
+
+
+def test_switching_to_review_holds_updates_found_in_auto():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        n = len(w.ingested)
+        api.page_version = 2
+        w.run(api, apply=False)
+        assert w.items()["Installation"]["status"] == "changed"
+        w._with(lambda: cs.set_mode("review"))
+        w.run(api, check=False)
+        assert len(w.ingested) == n and w.items()["Installation"]["status"] == "held"
+
+
+class EditableManualApi(ManualApi):
+    v = 1
+
+    def page(self, pid):
+        return {**ManualApi.page(self, pid), "version": {"number": self.v}}
+
+
+def test_a_combined_folder_edited_after_approval_is_held_again():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), EditableManualApi()
+        w.run(api, apply=False)
+        w._with(lambda: cs.set_bundle(["Manual"], True))
+        w.run(api, apply=False)
+        w.decide(["Manual"], decision="approved")
+        api.v = 2
+        w.run(api, check=False)
+        assert "Manual.txt" not in w.texts and w.items()["Manual"]["status"] == "held"
+        w.decide(["Manual"], decision="approved")
+        w.run(api, check=False)
+        assert "Manual.txt" in w.texts and w.items()["Manual"]["status"] == "synced"
