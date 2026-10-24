@@ -9,8 +9,11 @@ import retrieval_db
 import routes_documents
 
 marks = set()
+calls = []     # (sources, on, reindex): who asks set_internal to re-index
 retrieval_db.internal_sources = lambda: frozenset(marks)
+retrieval_db.is_marked_internal = lambda s: (s or "") in marks
 retrieval_db.set_internal = lambda sources, on, reindex=True: (
+    calls.append((list(sources), on, reindex)),
     marks.update(sources) if on else marks.difference_update(sources))
 retrieval_db.is_excluded = lambda s: (s or "") in marks
 
@@ -51,6 +54,9 @@ check(r.status_code == 200 and "New Note.txt" in marks, "a replacement inherits 
 marks.add("Stale.txt")
 r = up("Stale.txt")
 check(r.status_code == 200 and "Stale.txt" not in marks, "a lingering mark is cleared")
+# D-20261024-06: the upload's worker indexes the file; an un-mark that
+# re-indexed the old original first would make it skip the upload.
+check(calls[-1] == (["Stale.txt"], False, False), f"upload un-marks without re-indexing: {calls[-1]}")
 
 
 def _unwritable(sources, on, reindex=True):
@@ -65,6 +71,16 @@ check(r.status_code == 500, "internal upload refused when its mark cannot be wri
 retrieval_db.set_internal = _ok_set
 check(client.get("/source_file/Upload Internal.txt").status_code == 404,
       "internal document: source_file 404")
+# Remove on the Documents page keeps the mark (the original stays
+# undownloadable); the sync's Remove drops it WITHOUT re-indexing, or the
+# sync's own un-mark afterwards would bring the removed document back.
+marks.add("Gone.txt")
+r = client.post("/delete_source", json={"source": "Gone.txt"},
+                headers={"x-admin-password": _harness.ROOT_TOKEN})
+check(r.status_code == 200 and "Gone.txt" in marks, "Remove keeps the internal mark")
+calls.clear()
+routes_documents.remove_source_now("Gone.txt")
+check(calls == [(["Gone.txt"], False, False)], f"sync Remove un-marks without re-indexing: {calls}")
 
 if fails:
     print(f"{len(fails)} FAILURE(S):", *fails, sep="\n  - ")
