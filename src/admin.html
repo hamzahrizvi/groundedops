@@ -5609,8 +5609,11 @@ function viewDocuments() {
 
   const removeDocs = async docs => {
     if (!await askConfirm({ title: "Remove " + label(docs) + "?", ok: "Remove",
-        body: "Answers already given stay, but " + (docs.length === 1 ? "it" : "they")
-          + " can no longer be searched. This cannot be undone." })) return;
+        body: (docs.length === 1 ? "Its original file is" : "Their original files are")
+          + " deleted too, so " + (docs.length === 1 ? "it" : "they")
+          + " can no longer be searched or downloaded, and a rebuild cannot bring "
+          + (docs.length === 1 ? "it" : "them") + " back. Answers already given stay."
+          + " This cannot be undone." })) return;
     runBulk("Removing " + label(docs), docs, d =>
       api("/delete_source", { method: "POST", body: JSON.stringify({ source: d.source }) }));
   };
