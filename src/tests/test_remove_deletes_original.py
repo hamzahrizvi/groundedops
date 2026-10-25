@@ -216,6 +216,21 @@ def test_h_a_new_version_under_another_name_still_removes_the_old():
     assert docstore.find("Manual.txt") is None
 
 
+def test_i_the_store_list_is_never_served_as_a_document():
+    # D-20261025-03: the manifest names every kept document, internal ones too.
+    _reset()
+    ingest.ingest_file(b"manual", "Manual.txt")
+    d = docstore.store_dir()
+    for extra in ("manifest.json.tmp", "manifest.json.corrupt"):
+        with open(os.path.join(d, extra), "wb") as fh:
+            fh.write(b"{}")
+    assert os.path.isfile(os.path.join(d, docstore.MANIFEST_NAME))
+    for name in ("manifest.json", "MANIFEST.JSON", "manifest.json.tmp", "manifest.json.corrupt", "..manifest.json"):
+        assert docstore.find(name) is None, name
+        assert client.get(f"/source_file/{name}").status_code == 404, name
+    assert client.get("/source_file/Manual.txt").status_code == 200
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

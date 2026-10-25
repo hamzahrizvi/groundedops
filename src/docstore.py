@@ -79,6 +79,15 @@ def _safe_basename(filename: str) -> str:
     return os.path.basename(flat).lstrip(".") or ""
 
 
+def _store_file(base: str) -> bool:
+    """The store's own files beside the documents: the manifest and the .tmp
+    and .corrupt copies jsonstore writes next to it. Never a document, so
+    never served or deleted as one: the manifest names every kept document,
+    internal ones included (D-20261025-03)."""
+    b = base.casefold()
+    return b == MANIFEST_NAME or b.startswith(MANIFEST_NAME + ".")
+
+
 def find(filename: str) -> str | None:
     """Absolute path of a retained original, or None if it is genuinely gone.
 
@@ -87,7 +96,7 @@ def find(filename: str) -> str | None:
     directory before being handed back.
     """
     base = _safe_basename(filename)
-    if not base:
+    if not base or _store_file(base):
         return None
     for d in read_dirs():
         if not os.path.isdir(d):
@@ -140,7 +149,7 @@ def delete(filename: str) -> bool:
     OSError when a file cannot be deleted, so the caller stops before it
     drops an internal mark. True if a file was deleted."""
     base = _safe_basename(filename)
-    if not base or base == MANIFEST_NAME:
+    if not base or _store_file(base):
         return False
     gone = False
     for d in read_dirs():
