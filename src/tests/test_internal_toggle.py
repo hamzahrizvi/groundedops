@@ -45,4 +45,13 @@ assert r.status_code == 200, r.text
 it = confluence_sync._load()["items"]["att:1"]
 assert it["decision"] == "excluded" and it["synced_version"] is None, it
 assert confluence_sync.status_of(it) == "excluded"
+confluence_sync._update(lambda st: st["items"].update({"page:9": {
+    "kind": "page", "id": "9", "title": "Kept Guide", "source": "Kept Guide.txt", "pdf_kept": "Kept Guide.pdf",
+    "present": True, "decision": "approved", "version": 1, "synced_version": 1}}))
+faq_store.merge_questions("Kept Guide.pdf", "biometrics_general",
+                          [{"question": "Where is the kept guide?", "answer": "Here."}])
+r = client.post("/admin/source_internal", json={"sources": ["Kept Guide.txt"], "internal": True}, headers=ROOT)
+assert r.status_code == 200, r.text
+assert "Where is the kept guide?" in [f["question"] for f in r.json()["faqs"] if f["derived"]], r.json()
+assert confluence_sync._load()["items"]["page:9"]["decision"] == "internal"
 print("PASS internal toggle")

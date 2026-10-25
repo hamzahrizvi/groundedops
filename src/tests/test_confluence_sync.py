@@ -61,6 +61,8 @@ class FakeCatalog:
     def refile_source(self, source, keys):
         for p in self.data["categories"][0]["products"]:
             p["sources"] = [s for s in p["sources"] if s != source]
+            if p["key"] in keys:
+                p["sources"].append(source)
 
 
 class World:
@@ -70,21 +72,40 @@ class World:
         self.catalog = FakeCatalog()
         self.uploads = []                # documents uploaded by hand, by name
         self.internal = set()            # documents marked internal
+        self.index, self.unindexed, self.retagged = set(), set(), []
 
     def _with(self, fn, api=None):
         saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
-                 cs._mark_internal)
+                 cs._mark_internal, cs._indexed, cs._retag, cs._original, cs._marked, cs._stored)
+        cs._indexed = lambda s: s in self.index or (s in self.uploads and s not in self.unindexed)
+        cs._retag = lambda source, cat, prod: self.retagged.append((source, prod))
+        cs._original = lambda s: b"%PDF stored" if s in self.uploads else None
+        cs._marked = lambda s: s in self.internal
+        cs._stored = lambda s: s in self.uploads or s in self.texts
         def mark(sources, on):
-            (self.internal.update if on else self.internal.difference_update)(sources)
+            # As retrieval_db.set_internal does since D-20261024-06: marking
+            # takes the chunks out; un-marking indexes it again from the original.
+            if on:
+                self.internal.update(sources)
+                self.index.difference_update(sources)
+                self.unindexed.update(s for s in sources if s in self.uploads)
+            else:
+                was = set(sources) & self.internal
+                self.internal.difference_update(sources)
+                self.unindexed.difference_update(was)
+                self.index.update(s for s in was if s in self.texts)
         cs._mark_internal = mark
         cs._connect = lambda: (api, "pages", "1")
         cs._uploads = lambda items: {cs._title_key(u): u for u in self.uploads}
         def ingest(content, source, cat, prod):
             self.ingested.append((source, prod))
+            if source not in self.internal:          # a marked document is stored, never indexed
+                self.index.add(source)
             self.texts[source] = content.decode("utf-8", "replace")
         cs._ingest = ingest
         def remove(source):
             self.removed.append(source)
+            self.index.discard(source)
             self.internal.discard(source)
             if source in self.uploads:
                 self.uploads.remove(source)
@@ -95,7 +116,7 @@ class World:
             return fn()
         finally:
             (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
-             cs._mark_internal) = saved
+             cs._mark_internal, cs._indexed, cs._retag, cs._original, cs._marked, cs._stored) = saved
 
     def run(self, api, apply=True, check=True):
         return self._with(lambda: cs.run(apply, check), api)
@@ -399,50 +420,50 @@ def test_a_whole_manual_replaces_its_upload():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()
         # uploaded by hand and filed under another product than the folder suggests
-        w.uploads = ["Installation-v3-170925-134345.pdf"]
+        w.uploads = ["Installation-v3-170925-134345.docx"]
         w.catalog.data["categories"][0]["products"].append(
-            {"key": "nv9", "name": "NV9", "sources": ["Installation-v3-170925-134345.pdf"]})
+            {"key": "nv9", "name": "NV9", "sources": ["Installation-v3-170925-134345.docx"]})
         w.run(api, apply=False)
         inst = w.items()["Installation"]
-        assert inst["uploaded_as"] == "Installation-v3-170925-134345.pdf" and inst["replaces"], inst
+        assert inst["uploaded_as"] == "Installation-v3-170925-134345.docx" and inst["replaces"], inst
         assert inst["product"] == "nv9" and inst["suggested"]       # the upload's filing, not the folder's
 
         w.decide(["Installation"], decision="approved")
         res = w.run(api)
         assert ("Installation.txt", "nv9") in w.ingested, w.ingested
-        assert w.removed == ["Installation-v3-170925-134345.pdf"] and len(res["replaced"]) == 1, res
+        assert w.removed == ["Installation-v3-170925-134345.docx"] and len(res["replaced"]) == 1, res
 
         # uploaded again by hand after the first sync: the next sync removes it again
-        w.uploads = ["Installation-v4.pdf"]
+        w.uploads = ["Installation-v4.docx"]
         res = w.run(api)
-        assert w.removed[-1] == "Installation-v4.pdf" and len(res["replaced"]) == 1, res
+        assert w.removed[-1] == "Installation-v4.docx" and len(res["replaced"]) == 1, res
         assert w.ingested.count(("Installation.txt", "nv9")) == 1       # not re-indexed
 
 
 def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), ManualApi()
-        w.uploads = ["Manual-v1.pdf", "Cmd B.pdf"]
+        w.uploads = ["Manual-v1.docx", "Cmd B.docx"]
         w._with(lambda: cs.set_mode("auto"))
         w.run(api, apply=False)
         items = w.items()
         # the Manual page has chapters under it: it is only the cover
-        assert items["Manual"]["uploaded_as"] == "Manual-v1.pdf" and not items["Manual"]["replaces"]
+        assert items["Manual"]["uploaded_as"] == "Manual-v1.docx" and not items["Manual"]["replaces"]
         # Keep both: the upload stays even though Cmd B is a whole page
         w.decide(["Cmd B"], keep_upload=True)
         w.run(api)
         assert w.removed == [], w.removed
 
         # Cmd A is too short to be a document of its own: only a section
-        w.uploads.append("Cmd A-v2.pdf")
+        w.uploads.append("Cmd A-v2.docx")
         w._with(lambda: cs.set_bundle(["Manual"], True))
         w.run(api)
         items = w.items()
         assert items["Manual"]["kind"] == "bundle"
         # the combined manual replaces its own upload and its section's,
         # but not the one marked Keep both before it was combined
-        assert "Manual-v1.pdf" in w.removed and "Cmd A-v2.pdf" in w.removed, w.removed
-        assert "Cmd B.pdf" not in w.removed, w.removed
+        assert "Manual-v1.docx" in w.removed and "Cmd A-v2.docx" in w.removed, w.removed
+        assert "Cmd B.docx" not in w.removed, w.removed
 
 
 def test_internal_documents_sync_but_never_reach_customers():
@@ -768,3 +789,198 @@ def test_a_combined_folder_edited_after_approval_is_held_again():
         w.decide(["Manual"], decision="approved")
         w.run(api, check=False)
         assert "Manual.txt" in w.texts and w.items()["Manual"]["status"] == "synced"
+
+
+def test_an_uploaded_pdf_stays_over_its_confluence_text_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = "Installation-v3-170925-134345.pdf"
+        w.uploads = [pdf]
+        w.catalog.data["categories"][0]["products"].append({"key": "nv9", "name": "NV9", "sources": [pdf]})
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved", product="sh3")
+        inst = w.items()["Installation"]
+        assert inst["pdf_kept"] and not inst["replaces"], inst
+        res = w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [], (w.texts, w.removed)
+        assert res["kept_pdf"] == [f"{pdf} kept over Installation.txt"], res
+        assert w.retagged == [(pdf, "nv9,sh3")], w.retagged          # both copies' products
+        assert w.items()["Installation"]["status"] == "synced"
+        res = w.run(api)                                             # nothing more to do
+        assert res["kept_pdf"] == [] and w.removed == [], res
+        w.uploads = []                                               # the PDF removed by hand
+        w.run(api)
+        assert "Installation.txt" in w.texts and not w.items()["Installation"].get("pdf_kept")
+
+
+def test_a_pdf_uploaded_again_by_hand_takes_over_from_the_synced_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert "Installation.txt" in w.index
+        w.uploads = ["Installation-v4.pdf"]
+        res = w.run(api)
+        assert w.removed == ["Installation.txt"] and res["replaced"] == [], (w.removed, res)
+        assert res["kept_pdf"] == ["Installation-v4.pdf kept over Installation.txt"], res
+        assert w.retagged == [("Installation-v4.pdf", "sh3")], w.retagged   # the copy's product carried over
+
+
+def test_restore_pdfs_brings_back_a_replaced_pdf_and_drops_its_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        # what the 22 Oct sync left: the PDF on disk, out of the index
+        w.uploads, w.unindexed = ["Installation-v3.pdf"], {"Installation-v3.pdf"}
+        res = w.run(api)
+        assert w.removed == [] and res["kept_pdf"] == [] and res["replaced"] == [], res
+        assert w._with(lambda: cs.restore_pdfs()) == ["Installation-v3.pdf <- Installation.txt"]
+        assert w.removed == [] and "Installation-v3.pdf" not in w.index          # dry run
+        w._with(lambda: cs.restore_pdfs(apply=True, products={"Installation-v3.pdf": "nv9"}))
+        assert ("Installation-v3.pdf", "sh3,nv9") in w.ingested, w.ingested
+        assert w.removed == ["Installation.txt"], w.removed
+        assert w.items()["Installation"]["pdf_kept"]
+        w.run(api)
+        assert w.removed == ["Installation.txt"]                                 # not again
+
+
+def test_page_text_fences_tables_and_keeps_a_guides_lines():
+    from chunking import TABLE_CLOSE, TABLE_OPEN, chunk_text, strip_table_fences
+    t = cs.page_text("Linux", "<h2>Step 1</h2><p>Open a terminal.</p><p>Run this command:</p>"
+                     "<p>sudo touch /etc/udev/rules.d/80-local.rules</p>"
+                     "<table><tbody><tr><th><p>Supply Current</p></th><th><p>Maximum</p></th></tr>"
+                     "<tr><td><p>Standby</p></td><td><p>0.15A</p></td></tr></tbody></table>")
+    assert t.startswith("Linux\n\nStep 1\n\nOpen a terminal.\nRun this command:\nsudo touch"), t
+    assert f"{TABLE_OPEN}\nSupply Current | Maximum\nStandby | 0.15A\n{TABLE_CLOSE}" in t, t
+    chunks = [strip_table_fences(c) for c in chunk_text(t, size=1200, overlap=200)]
+    assert any("Open a terminal.\nRun this command:\nsudo touch" in c for c in chunks), chunks
+    assert any("Supply Current | Maximum\nStandby | 0.15A" in c for c in chunks), chunks
+
+
+# One manual, one internal mark (D-20261024-14): the copy, the PDF kept over
+# it and the uploads of it are internal together.
+
+def _synced_with_pdf(w, api, pdf="Installation-v3.pdf"):
+    w.uploads = [pdf]
+    w.run(api, apply=False)
+    w.decide(["Installation"], decision="approved")
+    w.run(api)
+    assert w.items()["Installation"]["pdf_kept"] and "Installation.txt" not in w.texts
+    return pdf
+
+
+def test_deciding_internal_marks_the_pdf_kept_over_the_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = _synced_with_pdf(w, api)
+        key = w.items()["Installation"]["key"]
+        held = w._with(lambda: cs.items_holding([pdf]))
+        assert list(held) == [key] and pdf in held[key], held
+        w.decide(["Installation"], decision="internal")
+        assert w.internal == {pdf} and not w._with(lambda: cs._indexed(pdf))
+        w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [], (w.texts, w.removed)
+        w.decide(["Installation"], decision="approved")
+        assert w.internal == set() and w._with(lambda: cs._indexed(pdf))
+
+
+def test_a_pdf_marked_internal_keeps_its_copy_out_and_the_item_internal():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = _synced_with_pdf(w, api)
+        w._with(lambda: cs._mark_internal([pdf], True))
+        w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [], (w.texts, w.removed)
+        assert w.items()["Installation"]["decision"] == "internal"
+        w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [] and w.internal == {pdf}
+
+
+def test_an_upload_marked_internal_makes_its_replacing_copy_internal():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        up = "Installation-v3.docx"
+        w.uploads = [up]
+        w._with(lambda: cs._mark_internal([up], True))
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert "Installation.txt" in w.internal and "Installation.txt" not in w.index, w.internal
+        assert up in w.removed and w.items()["Installation"]["decision"] == "internal"
+
+
+def test_an_item_decided_internal_marks_the_pdf_kept_in_its_place():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = "Installation-v3.pdf"
+        w.uploads = [pdf]
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="internal")
+        res = w.run(api)
+        assert res["kept_pdf"] and pdf in w.internal and not w._with(lambda: cs._indexed(pdf)), res
+        assert "Installation.txt" not in w.texts and w.removed == []
+
+
+def test_keep_both_keeps_each_documents_own_mark():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        up = "Installation-v3.docx"
+        w.uploads = [up]
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.decide(["Installation"], keep_upload=True)
+        w._with(lambda: cs._mark_internal([up], True))
+        w.run(api)
+        assert w.items()["Installation"]["decision"] == "approved"
+        assert "Installation.txt" in w.index and "Installation.txt" not in w.internal, w.internal
+        assert up in w.internal and w.removed == [] and up in w.uploads
+        w.decide(["Installation"], decision="approved")
+        assert up in w.internal and up in w.unindexed
+        held = w._with(lambda: cs.items_holding(["Installation.txt"]))
+        assert up not in [n for ns in held.values() for n in ns]
+        assert w._with(lambda: cs.items_holding([up])) == {}
+        w.decide(["Installation"], decision="internal")
+        assert "Installation.txt" in w.internal and up in w.internal
+
+
+def test_a_new_page_named_like_an_upload_is_not_removed_after_ingest():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.uploads = ["Installation.txt"]
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert w.removed == [] and "Installation.txt" in w.index, w.removed
+
+
+def test_a_pdf_only_on_disk_survives_a_change_to_its_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        w.uploads, w.unindexed = ["Installation-v3.pdf"], {"Installation-v3.pdf"}
+        api.page_version = 2
+        w.run(api)                                   # review mode holds the edit
+        w.decide(["Installation"], decision="approved")
+        res = w.run(api)
+        assert res["updated"] == ["Installation.txt"] and w.removed == [], (res, w.removed)
+        assert w._with(lambda: cs.restore_pdfs()) == ["Installation-v3.pdf <- Installation.txt"]
+
+
+def test_an_unreadable_marks_file_flips_no_decision():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+
+        class Everything(set):                    # retrieval_db's fail-closed set
+            def __contains__(self, item):
+                return True
+        w.internal = Everything()
+        w.run(api)
+        assert w.items()["Installation"]["decision"] == "approved"
