@@ -559,8 +559,8 @@ def set_items(keys: list[str], decision: str | None = None,
                     it["approved_version"] = it.get("version")    # the version the person saw
                 if it.get("synced_version") is not None and decision != "excluded":
                     # Every name the manual is held under: the copy, the PDF
-                    # kept over it, an upload kept beside it (one manual, one mark).
-                    flag.extend(_copies(it, matches.get(k, [])))
+                    # kept over it, uploads waiting to be replaced (one manual, one mark).
+                    flag.extend(_copies(it, matches.get(k, []), set(st.get("keep_uploads") or [])))
             if keep_upload is not None:
                 kept = set(st.get("keep_uploads") or [])
                 for upload, _ in matches.get(k, []):
@@ -980,30 +980,31 @@ def _held(source: str) -> bool:
     return _indexed(source) or (_marked(source) and _stored(source))
 
 
-def _copies(it: dict, pairs: list) -> list[str]:
+def _copies(it: dict, pairs: list, keep: set) -> list[str]:
     """Every name one manual can be held under: the Confluence copy, the PDF
-    kept over it, and each upload it is a whole copy of (Keep both too)."""
+    kept over it, and each upload it is a whole copy of. Not an upload kept
+    beside it ("Keep both" is two documents, each with its own mark)."""
     return list(dict.fromkeys(n for n in [it.get("source"), it.get("pdf_kept"),
-                                          *(u for u, whole in pairs if whole)] if n))
+                                          *(u for u, whole in pairs if whole and u not in keep)] if n))
 
 
 def items_holding(sources: list[str]) -> dict[str, list[str]]:
-    """source -> keys of the synced items holding it under any of its names."""
+    """key -> every name of each synced item holding any of `sources` under one of its names."""
     st = _load()
-    matches = _matches(st["items"])
+    matches, keep = _matches(st["items"]), set(st.get("keep_uploads") or [])
     want, out = set(sources), {}
     for key, it in st["items"].items():
         if it.get("synced_version") is None:
             continue
-        for s in _copies(it, matches.get(key, [])):
-            if s in want:
-                out.setdefault(s, []).append(key)
+        names = _copies(it, matches.get(key, []), keep)
+        if want & set(names):
+            out[key] = names
     return out
 
 
 def _carry_marks(st: dict, matches: dict) -> None:
     """One manual, one mark. A manual held under several names (its copy,
-    the PDF kept over it, uploads of it) is internal under all of them when
+    the PDF kept over it, uploads it replaces) is internal under all of them when
     its item is decided internal or any held name is marked: the mark then
     goes on every held name and the item is decided internal, here and in
     `st`, so nothing this sync does next puts a public copy beside it."""
@@ -1012,10 +1013,11 @@ def _carry_marks(st: dict, matches: dict) -> None:
         # name reads as marked (fail closed). Not written into the decisions.
         return
     marks, flips = [], []
+    keep = set(st.get("keep_uploads") or [])
     for key, it in st["items"].items():
         if not it.get("present", True) or it.get("decision") == "excluded":
             continue
-        names = _copies(it, matches.get(key, []))
+        names = _copies(it, matches.get(key, []), keep)
         internal = it.get("decision") == "internal"
         if not internal and not any(_marked(n) for n in names):
             continue                                    # the common case: no store reads

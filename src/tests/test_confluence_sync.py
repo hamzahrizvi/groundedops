@@ -877,7 +877,8 @@ def test_deciding_internal_marks_the_pdf_kept_over_the_copy():
         w, api = World(os.path.join(d, "s.json")), FakeApi()
         pdf = _synced_with_pdf(w, api)
         key = w.items()["Installation"]["key"]
-        assert w._with(lambda: cs.items_holding([pdf])) == {pdf: [key]}
+        held = w._with(lambda: cs.items_holding([pdf]))
+        assert list(held) == [key] and pdf in held[key], held
         w.decide(["Installation"], decision="internal")
         assert w.internal == {pdf} and not w._with(lambda: cs._indexed(pdf))
         w.run(api)
@@ -923,7 +924,7 @@ def test_an_item_decided_internal_marks_the_pdf_kept_in_its_place():
         assert "Installation.txt" not in w.texts and w.removed == []
 
 
-def test_keep_both_with_an_internal_upload_makes_the_copy_internal():
+def test_keep_both_keeps_each_documents_own_mark():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()
         up = "Installation-v3.docx"
@@ -933,8 +934,16 @@ def test_keep_both_with_an_internal_upload_makes_the_copy_internal():
         w.decide(["Installation"], keep_upload=True)
         w._with(lambda: cs._mark_internal([up], True))
         w.run(api)
-        assert "Installation.txt" in w.internal and "Installation.txt" not in w.index, w.internal
-        assert w.removed == [] and up in w.uploads
+        assert w.items()["Installation"]["decision"] == "approved"
+        assert "Installation.txt" in w.index and "Installation.txt" not in w.internal, w.internal
+        assert up in w.internal and w.removed == [] and up in w.uploads
+        w.decide(["Installation"], decision="approved")
+        assert up in w.internal and up in w.unindexed
+        held = w._with(lambda: cs.items_holding(["Installation.txt"]))
+        assert up not in [n for ns in held.values() for n in ns]
+        assert w._with(lambda: cs.items_holding([up])) == {}
+        w.decide(["Installation"], decision="internal")
+        assert "Installation.txt" in w.internal and up in w.internal
 
 
 def test_a_new_page_named_like_an_upload_is_not_removed_after_ingest():
