@@ -1086,7 +1086,7 @@ def _keep_pdf(it: dict, upload: str, prod: str | None = None, restore: bool = Fa
 def _same_name(a: str, b: str) -> bool:
     """Two spellings of one name, differing only in letter case. On a
     case-insensitive disk (Windows) they are one original and one figures
-    folder, so removing either deletes the other (D-20261025-07)."""
+    folder, so removing one can delete the other's (D-20261025-07)."""
     import docstore
     a, b = docstore._safe_basename(a), docstore._safe_basename(b)
     return bool(a) and a != b and a.casefold() == b.casefold()
@@ -1237,9 +1237,9 @@ def _apply(api: _Api) -> dict:
                     res["errors"].append(f"{src}: product {', '.join(gone_keys)} no longer exists; "
                                          "indexed without it")
                 # D-20261025-07: an upload named like the copy but for letter
-                # case shares its original and figures on Windows; removed
-                # after the ingest, it took the copy's with it. It goes first
-                # (the copy is already downloaded, so nothing fails between).
+                # case shares its figures folder on Windows; removed after the
+                # ingest, it took the copy's figures with it. It goes first
+                # (the copy is already downloaded).
                 twins = [u for u in uploads if _same_name(u, src)]
                 for upload in twins:
                     _remove(upload)
