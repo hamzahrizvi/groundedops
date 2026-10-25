@@ -1083,6 +1083,15 @@ def _keep_pdf(it: dict, upload: str, prod: str | None = None, restore: bool = Fa
     return True
 
 
+def _same_name(a: str, b: str) -> bool:
+    """Two spellings of one name, differing only in letter case. On a
+    case-insensitive disk (Windows) they are one original and one figures
+    folder, so removing either deletes the other (D-20261025-07)."""
+    import docstore
+    a, b = docstore._safe_basename(a), docstore._safe_basename(b)
+    return bool(a) and a != b and a.casefold() == b.casefold()
+
+
 def _ingest(content: bytes, source: str, cat: str | None, prod: str | None) -> None:
     from ingest import ingest_file
     ingest_file(content, source, category_key=cat, product_key=prod,
@@ -1103,6 +1112,28 @@ def _remove(source: str) -> None:
     remove_source_now(source)
     _mark_internal([source], False)
     catalog.refile_source(source, [])
+
+
+def _fetch(api: "_Api", it: dict, review: bool) -> tuple[bytes, object]:
+    """(content, version) of an item, downloaded from Confluence now."""
+    if it["kind"] == "bundle":
+        text, version = _bundle_text(api, it)
+        return text.encode("utf-8"), version
+    if it["kind"] == "page":
+        full = api.page(it["id"])
+        return (page_text(full.get("title") or it["title"], _body(full)).encode("utf-8"),
+                (full.get("version") or {}).get("number"))
+    # ponytail: version read just before the download; an edit in that second slips through. Pin the download to the version if it ever matters.
+    # Auto mode needs no fresh version: one request fewer, nothing new to fail.
+    version = (api.attachment(it["id"]).get("version") or {}).get("number") \
+        if review else it.get("version")
+    if int(it.get("size") or 0) > MAX_FILE_BYTES:
+        raise ValueError(f"{int(it['size']) // 1048576} MB, over the "
+                         f"{MAX_FILE_BYTES // 1048576} MB limit; not downloaded")
+    content = api.download(it["page_id"], it["id"])
+    if len(content) > MAX_FILE_BYTES:     # Confluence listed no size
+        raise ValueError(f"over the {MAX_FILE_BYTES // 1048576} MB limit; not indexed")
+    return content, version
 
 
 def _bundle_text(api: _Api, it: dict) -> tuple[str, str]:
@@ -1176,24 +1207,7 @@ def _apply(api: _Api) -> dict:
                 change = {"synced_version": it.get("version"), "synced_at": _now(),
                           "approved_version": None, "pdf_kept": pdfs[0]}
             else:
-                if it["kind"] == "bundle":
-                    text, version = _bundle_text(api, it)
-                    content = text.encode("utf-8")
-                elif it["kind"] == "page":
-                    full = api.page(it["id"])
-                    content = page_text(full.get("title") or it["title"], _body(full)).encode("utf-8")
-                    version = (full.get("version") or {}).get("number")
-                else:
-                    # ponytail: version read just before the download; an edit in that second slips through. Pin the download to the version if it ever matters.
-                    # Auto mode needs no fresh version: one request fewer, nothing new to fail.
-                    version = (api.attachment(it["id"]).get("version") or {}).get("number") \
-                        if st["mode"] == "review" else it.get("version")
-                    if int(it.get("size") or 0) > MAX_FILE_BYTES:
-                        raise ValueError(f"{int(it['size']) // 1048576} MB, over the "
-                                         f"{MAX_FILE_BYTES // 1048576} MB limit; not downloaded")
-                    content = api.download(it["page_id"], it["id"])
-                    if len(content) > MAX_FILE_BYTES:     # Confluence listed no size
-                        raise ValueError(f"over the {MAX_FILE_BYTES // 1048576} MB limit; not indexed")
+                content, version = _fetch(api, it, st["mode"] == "review")
                 # Only the version a person approved goes out in review mode;
                 # edited again since, it waits for approval again.
                 seen = it.get("approved_version") or it.get("version")
@@ -1222,6 +1236,15 @@ def _apply(api: _Api) -> dict:
                     cat = category_of(prod) if prod else None
                     res["errors"].append(f"{src}: product {', '.join(gone_keys)} no longer exists; "
                                          "indexed without it")
+                # D-20261025-07: an upload named like the copy but for letter
+                # case shares its original and figures on Windows; removed
+                # after the ingest, it took the copy's with it. It goes first
+                # (the copy is already downloaded, so nothing fails between).
+                twins = [u for u in uploads if _same_name(u, src)]
+                for upload in twins:
+                    _remove(upload)
+                    res["replaced"].append(f"{upload} -> {src}")
+                    _note(it.get("title") or src, it["kind"], it.get("path") or [], "replaced")
                 # Marked before it goes in, so not even a moment passes where
                 # an internal document can answer a customer.
                 _mark_internal([src], it.get("decision") == "internal")
@@ -1231,7 +1254,7 @@ def _apply(api: _Api) -> dict:
                     catalog.attach_source(cat, prod, src)
                 elif prod and set(prod.split(",")) != set(filed_now.split(",")):
                     catalog.refile_source(src, prod.split(","))
-                for upload in uploads:
+                for upload in (u for u in uploads if u not in twins):
                     # Only once the Confluence copy is in, so a failed
                     # download never leaves the manual missing altogether.
                     _remove(upload)
@@ -1287,7 +1310,15 @@ def _apply(api: _Api) -> dict:
                         _note(it.get("title") or upload, it["kind"], it.get("path") or [], "PDF kept")
                     continue
                 prod = _union(_filed(it.get("source") or "")[1], _filed(upload)[1])
+                # D-20261025-07: on Windows a case twin is the kept copy's own
+                # file: the upload overwrote its original, and removing the
+                # upload deletes it and its figures. Downloaded again first,
+                # so a failed download removes nothing.
+                twin = _same_name(upload, it.get("source") or "")
+                content = _fetch(api, it, False)[0] if twin else None
                 _remove(upload)
+                if content is not None and not _stored(it["source"]):
+                    _ingest(content, it["source"], category_of(prod) if prod else None, prod or None)
                 if prod and set(prod.split(",")) != set(_filed(it.get("source") or "")[1].split(",")):
                     _retag(it["source"], category_of(prod), prod)
                 res["replaced"].append(f"{upload} -> {it.get('source')}")

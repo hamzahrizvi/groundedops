@@ -231,6 +231,111 @@ def test_i_the_store_list_is_never_served_as_a_document():
     assert client.get("/source_file/Manual.txt").status_code == 200
 
 
+class _Page:
+    """A Confluence root page with one child page "manual" (manual.txt)."""
+    def each(self, path, **params):
+        parts = path.split("/")
+        if parts[-1] == "direct-children" and parts[-2] == "1":
+            return iter([{"type": "page", "id": "20", "title": "manual"}])
+        return iter([])
+
+    def page(self, pid):
+        return {"title": {"1": "Root", "20": "manual"}[pid], "version": {"number": 1},
+                "body": {"storage": {"value": "<p>" + "Fit the hopper to the rail. " * 20 + "</p>"}}}
+
+
+def _case_insensitive_disk():
+    d = tempfile.mkdtemp(dir=_TMP)
+    open(os.path.join(d, "a"), "w").close()
+    return os.path.exists(os.path.join(d, "A"))
+
+
+class _Attached(_Page):
+    """A Confluence root page with "manual.pdf" attached."""
+    def each(self, path, **params):
+        if path.endswith("/pages/1/attachments"):
+            return iter([{"id": "att1", "title": "manual.pdf", "version": {"number": 1}}])
+        return iter([])
+
+    def attachment(self, att_id):
+        return {"id": att_id, "version": {"number": 1}}
+
+    def download(self, page_id, att_id):
+        return b"%PDF from Confluence"
+
+
+def _cut_one(tmp_path, source, progress=None):
+    """figures.extract_figures for a test: one crop in the document's folder."""
+    import figures
+    os.makedirs(figures.figures_dir(source), exist_ok=True)
+    open(os.path.join(figures.figures_dir(source), "p1_1.png"), "wb").close()
+    return {}
+
+
+def _fresh_sync():
+    _reset()
+    if os.path.exists(os.environ["CONFLUENCE_SYNC_STATE"]):
+        os.remove(os.environ["CONFLUENCE_SYNC_STATE"])
+
+
+def _sync(api=None):
+    with patch.object(confluence_sync, "_connect", return_value=(api or _Page(), "pages", "1")):
+        if not confluence_sync.overview()["items"]:
+            confluence_sync.run(apply=False, check=True)
+        keys = [i["key"] for i in confluence_sync.overview()["items"]]
+        confluence_sync.set_items(keys, decision="approved")
+        return confluence_sync.run(apply=True, check=True)
+
+
+def _one_document(name):
+    if not _case_insensitive_disk():
+        print("SKIP case-insensitive checks: this disk tells Manual.txt and manual.txt apart")
+        return
+    assert [o.casefold() for o in originals()] == [name.casefold()], originals()
+    assert {m.get("source") for _, m in COL.rows.values()} == {name}, COL.rows
+    assert list(docstore.load_manifest()["documents"]) == [name]
+    assert client.get("/source_file/" + name).status_code == 200
+
+
+def test_j_a_synced_page_replacing_its_case_twin_upload_keeps_one_document():
+    _fresh_sync()
+    ingest.ingest_file(b"old", "Manual.txt")
+    res = _sync()
+    assert res.get("replaced") == ["Manual.txt -> manual.txt"], res
+    _one_document("manual.txt")
+
+    # Uploaded again by hand as "Manual.txt": the next sync removes the
+    # upload and the synced copy keeps its original.
+    ingest.ingest_file(b"again", "Manual.txt")
+    res = _sync()
+    assert res.get("replaced") == ["Manual.txt -> manual.txt"], res
+    _one_document("manual.txt")
+    # the Confluence text, not the upload that overwrote it on Windows
+    assert b"Fit the hopper" in open(docstore.find("manual.txt"), "rb").read()
+
+
+def test_k_an_upload_under_another_name_is_still_replaced():
+    _fresh_sync()
+    ingest.ingest_file(b"old", "Manual-v2.txt")
+    res = _sync()
+    assert res.get("replaced") == ["Manual-v2.txt -> manual.txt"], res
+    assert docstore.find("Manual-v2.txt") is None
+    assert {m.get("source") for _, m in COL.rows.values()} == {"manual.txt"}
+
+
+def test_l_a_synced_pdf_keeps_its_figures_when_its_case_twin_goes():
+    import figures
+    _fresh_sync()
+    with patch.object(figures, "extract_figures", _cut_one):
+        ingest.ingest_file(b"%PDF uploaded", "Manual.pdf")
+        res = _sync(_Attached())
+    assert res.get("replaced") == ["Manual.pdf -> manual.pdf"], res
+    # Removed after the ingest, the upload took the copy's figures folder
+    # with it on Windows (one folder for both spellings).
+    assert os.listdir(figures.figures_dir("manual.pdf")) == ["p1_1.png"]
+    _one_document("manual.pdf")
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
