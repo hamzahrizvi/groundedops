@@ -136,6 +136,38 @@ def test_g_ocr_and_figure_text_add_nothing_while_marked():
     assert docstore.ocr_state("Pricing.txt")["done"] == [1, 2]   # approval kept for un-mark
 
 
+def test_h_an_unreadable_marks_file_stops_ingest_and_keeps_the_chunks():
+    _reset()
+    assert ingest.ingest_file(b"v1", "Pricing.txt") == 1
+    rdb._internal = rdb._Everything()             # cold start, file unreadable
+    try:
+        try:
+            ingest.ingest_file(b"v2", "Pricing.txt", replace_existing=True)
+            raise AssertionError("ingest went on with the marks unreadable")
+        except RuntimeError as exc:
+            assert "unreadable" in str(exc)
+        assert len(COL.chunks("Pricing.txt")) == 1
+        assert open(docstore.find("Pricing.txt"), "rb").read() == b"v1"
+    finally:
+        rdb._internal = None
+
+
+def test_i_an_unreadable_marks_file_stops_a_rebuild_before_the_reset():
+    rdb._internal = rdb._Everything()
+    try:
+        with patch.object(db, "reset_collection") as reset,              patch.object(reindex, "snapshot_collection") as snap:
+            try:
+                reindex.rebuild([{"source": "Pricing.txt", "path": __file__,
+                                  "chunks": 1}], dry_run=False)
+                raise AssertionError("rebuild ran with the marks unreadable")
+            except RuntimeError as exc:
+                assert "unreadable" in str(exc)
+        reset.assert_not_called()
+        snap.assert_not_called()
+    finally:
+        rdb._internal = None
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
