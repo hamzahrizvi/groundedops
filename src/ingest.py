@@ -321,7 +321,11 @@ def ingest_file(content: bytes, filename: str,
     # the mark, not the EXCLUDED_SOURCES substrings: those are a read-time
     # policy that internal deployments switch off. Un-marking re-indexes it
     # from the original kept here (retrieval_db.set_internal).
-    from retrieval_db import is_marked_internal
+    from retrieval_db import _Everything, internal_sources, is_marked_internal
+    if isinstance(internal_sources(), _Everything):
+        # Unreadable marks file on a cold start: every name reads as marked,
+        # and storing-and-skipping would silently drop the old chunks.
+        raise RuntimeError("internal_sources.json is unreadable; repair it first")
     if is_marked_internal(filename):
         same = (docstore.load_manifest()["documents"].get(
             docstore._safe_basename(filename)) or {}).get("sha256") == content_hash

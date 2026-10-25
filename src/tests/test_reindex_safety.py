@@ -1,11 +1,15 @@
 """A failed rebuild restores the collection that was serving beforehand."""
+import os
 import tempfile
 import sys
 import types
 from pathlib import Path
 from unittest.mock import patch
 
-import reindex
+os.environ.setdefault("INTERNAL_SOURCES_PATH",
+                      os.path.join(tempfile.mkdtemp(), "internal_sources.json"))
+import retrieval_db  # noqa: E402,F401  loaded with the real db before the tests stub it
+import reindex  # noqa: E402
 
 
 def test_snapshot_accepts_numpy_embeddings():
