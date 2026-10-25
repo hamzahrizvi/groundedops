@@ -13,6 +13,9 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _TMP = tempfile.mkdtemp()
 os.environ["INTERNAL_SOURCES_PATH"] = os.path.join(_TMP, "internal_sources.json")
+# set_internal now takes marked documents out of the index: never the live one.
+os.environ["CHROMA_DIR"] = os.path.join(_TMP, "chroma_db")
+os.environ["SOURCE_FILE_DIR"] = os.path.join(_TMP, "documents")
 
 import retrieval_db as rdb  # noqa: E402
 import sales  # noqa: E402

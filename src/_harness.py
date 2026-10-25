@@ -282,7 +282,8 @@ stub("runtime_config", get_settings=lambda: {"mode": "free"},
      set_online_provider=lambda p: None)
 stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s=None: None,
      get_history=lambda s: [], get_last_query=lambda s: None)
-stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0})
+stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0},
+     reindex_source=lambda source: 0)
 # complete_procedures is a PASS-THROUGH, not a no-op returning []. It is
 # additive by contract -- it hands back the chunks it was given plus any
 # steps they point at -- so a stub that dropped them would empty the
@@ -306,7 +307,8 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
          ex in (source or "").lower()
          for ex in ("icu_network_api", "icu_age_result_quick_guide")),
      internal_sources=lambda: frozenset(),
-     set_internal=lambda sources, on: None)
+     is_marked_internal=lambda source: False,
+     set_internal=lambda sources, on, reindex=True: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
 # faked: more_context.py depends on it to tell new material from a reworded

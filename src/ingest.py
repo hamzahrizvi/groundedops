@@ -316,6 +316,26 @@ def ingest_file(content: bytes, filename: str,
         (m or {}).get("document_version") or (m or {}).get("content_sha256")
         for m in ((existing or {}).get("metadatas") or [])
     }
+    # D-20261024-06: a document marked internal is kept, never indexed, so
+    # no reader can answer from it by forgetting the read-time check. Only
+    # the mark, not the EXCLUDED_SOURCES substrings: those are a read-time
+    # policy that internal deployments switch off. Un-marking re-indexes it
+    # from the original kept here (retrieval_db.set_internal).
+    from retrieval_db import is_marked_internal
+    if is_marked_internal(filename):
+        same = (docstore.load_manifest()["documents"].get(
+            docstore._safe_basename(filename)) or {}).get("sha256") == content_hash
+        docstore.save(filename, content)          # the original first, then the chunks go
+        docstore.record(filename, content=content, chunks=0,
+                        # A new version starts with no OCR done, as below.
+                        ocr=None if same else {"candidates": [], "done": []})
+        if old_ids:
+            collection.delete(ids=old_ids)
+            invalidate_retrieval_cache()
+        if report is not None:
+            report["internal"] = True
+        logger.info("%s is marked internal: original kept, not indexed", filename)
+        return 0
     if old_ids and content_hash in old_versions:
         logger.info("Skipping unchanged document: %s (%s)", filename,
                     content_hash[:12])
@@ -636,6 +656,12 @@ def ingest_ocr_pages(filename: str, pages: list[int], progress=None) -> int:
     Returns the number of chunks added. The section metadata is left empty:
     OCR gives no font data, so there is no heading detection to fill it.
     """
+    from retrieval_db import is_marked_internal
+    if is_marked_internal(filename):
+        # Not indexed while marked; the approval is kept, so un-marking
+        # (reindex_source) reads these pages too.
+        _record_ocr_done(filename, sorted({int(p) for p in pages if int(p) >= 1}))
+        return 0
     import ocr as _ocr
 
     path = docstore.find(filename)
@@ -822,6 +848,9 @@ def index_figure_text(filename: str, progress=None) -> int:
     they are, and only the figure-text chunks are added. Replaces any it
     added before. Returns the number of chunks added.
     """
+    from retrieval_db import is_marked_internal
+    if is_marked_internal(filename):
+        return 0                    # marked internal: never indexed
     import figures as _figures
 
     path = docstore.find(filename)
@@ -896,6 +925,28 @@ def index_figure_text(filename: str, progress=None) -> int:
     invalidate_retrieval_cache()
     logger.info("figure text: %d chunk(s) indexed for '%s'", len(chunks), filename)
     return len(chunks)
+
+
+def reindex_source(source: str) -> int:
+    """Index a document again from its retained original, filed per the
+    catalogue, with the OCR pages an admin approved: how a document marked
+    internal comes back when it is made public (retrieval_db.set_internal).
+    The same filing and OCR handling as reindex.rebuild. Returns the chunks
+    added; 0 when there is no original."""
+    path = docstore.find(source)
+    if not path:
+        logger.warning("%r has no retained original; nothing to index", source)
+        return 0
+    from reindex import catalog_assignment
+    cat, prod = catalog_assignment().get(docstore._safe_basename(source), ("", ""))
+    ocr_done = docstore.ocr_state(source)["done"]
+    with open(path, "rb") as fh:
+        content = fh.read()
+    n = ingest_file(content, source, category_key=cat or None,
+                    product_key=prod or None, replace_existing=True)
+    if ocr_done:
+        n += ingest_ocr_pages(source, ocr_done)
+    return n
 
 
 def catalog_scope_for(filename: str) -> dict:
