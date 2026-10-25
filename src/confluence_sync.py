@@ -423,7 +423,7 @@ def overview() -> dict:
             (row["uploaded_as"], whole), more = matches[key][0], matches[key][1:]
             row["also_uploaded"] = [u for u, _ in more]
             row["keep_upload"] = row["uploaded_as"] in keep
-            row["pdf_kept"] = any(w and u not in keep and _pdf_first(it, u) and _indexed(u)
+            row["pdf_kept"] = any(w and u not in keep and _pdf_first(it, u) and _held(u)
                                   for u, w in matches[key])
             row["replaces"] = whole and not row["keep_upload"] and not row["pdf_kept"]
             # Filed as the upload was, unless someone chose otherwise.
@@ -544,7 +544,7 @@ def set_items(keys: list[str], decision: str | None = None,
     if decision is not None and decision not in DECISIONS:
         raise ValueError("decision must be approved, internal or excluded")
     retag, flag = [], []
-    matches = _matches(_load()["items"]) if keep_upload is not None else {}
+    matches = _matches(_load()["items"]) if keep_upload is not None or decision else {}
 
     def change(st):
         for k in keys:
@@ -558,7 +558,9 @@ def set_items(keys: list[str], decision: str | None = None,
                 if decision != "excluded":
                     it["approved_version"] = it.get("version")    # the version the person saw
                 if it.get("synced_version") is not None and decision != "excluded":
-                    flag.append(it["source"])
+                    # Every name the manual is held under: the copy, the PDF
+                    # kept over it, an upload kept beside it (one manual, one mark).
+                    flag.extend(_copies(it, matches.get(k, [])))
             if keep_upload is not None:
                 kept = set(st.get("keep_uploads") or [])
                 for upload, _ in matches.get(k, []):
@@ -575,7 +577,12 @@ def set_items(keys: list[str], decision: str | None = None,
                     it["product_chosen"] = True
     _update(change)
     if flag:
-        _mark_internal(flag, decision == "internal")
+        on = decision == "internal"
+        # A mark goes only on a name the bot holds (a PDF kept over the copy
+        # leaves the copy's name unheld); a sync marks the copy before ingest.
+        flag = [s for s in dict.fromkeys(flag) if not on or _held(s)]
+        if flag:
+            _mark_internal(flag, on)
     if retag:
         from routes_documents import retag_source
         cat = category_of(product) or ""      # ingest's own "unassigned"
@@ -956,6 +963,80 @@ def _indexed(source: str) -> bool:
     return bool(source) and bool(get_collection().get(where={"source": source}, limit=1).get("ids"))
 
 
+def _marked(source: str) -> bool:
+    from retrieval_db import is_marked_internal
+    return is_marked_internal(source)
+
+
+def _stored(source: str) -> bool:
+    import docstore
+    return bool(source) and docstore.find(source) is not None
+
+
+def _held(source: str) -> bool:
+    """The bot holds it: answering from it, or keeping it internal. Since
+    D-20261024-06 a marked document has no chunks, so _indexed alone reads
+    "marked internal" as "gone"."""
+    return _indexed(source) or (_marked(source) and _stored(source))
+
+
+def _copies(it: dict, pairs: list) -> list[str]:
+    """Every name one manual can be held under: the Confluence copy, the PDF
+    kept over it, and each upload it is a whole copy of (Keep both too)."""
+    return list(dict.fromkeys(n for n in [it.get("source"), it.get("pdf_kept"),
+                                          *(u for u, whole in pairs if whole)] if n))
+
+
+def items_holding(sources: list[str]) -> dict[str, list[str]]:
+    """source -> keys of the synced items holding it under any of its names."""
+    st = _load()
+    matches = _matches(st["items"])
+    want, out = set(sources), {}
+    for key, it in st["items"].items():
+        if it.get("synced_version") is None:
+            continue
+        for s in _copies(it, matches.get(key, [])):
+            if s in want:
+                out.setdefault(s, []).append(key)
+    return out
+
+
+def _carry_marks(st: dict, matches: dict) -> None:
+    """One manual, one mark. A manual held under several names (its copy,
+    the PDF kept over it, uploads of it) is internal under all of them when
+    its item is decided internal or any held name is marked: the mark then
+    goes on every held name and the item is decided internal, here and in
+    `st`, so nothing this sync does next puts a public copy beside it."""
+    if _marked("?"):
+        # No file can be named "?": the marks file is unreadable and every
+        # name reads as marked (fail closed). Not written into the decisions.
+        return
+    marks, flips = [], []
+    for key, it in st["items"].items():
+        if not it.get("present", True) or it.get("decision") == "excluded":
+            continue
+        names = _copies(it, matches.get(key, []))
+        internal = it.get("decision") == "internal"
+        if not internal and not any(_marked(n) for n in names):
+            continue                                    # the common case: no store reads
+        held = [n for n in names if _held(n)]
+        if not internal and not any(_marked(n) for n in held):
+            continue                                    # a stale mark on a name not held
+        marks += [n for n in held if not _marked(n)]
+        if not internal:
+            flips.append(key)
+    if marks:
+        _mark_internal(list(dict.fromkeys(marks)), True)
+    if flips:
+        def flip(s):
+            for k in flips:
+                if k in s["items"]:
+                    s["items"][k]["decision"] = "internal"
+        _update(flip)
+        for k in flips:
+            st["items"][k]["decision"] = "internal"
+
+
 def _retag(source: str, cat: str | None, prod: str) -> None:
     from routes_documents import retag_source
     retag_source(source, cat or "", prod)
@@ -984,14 +1065,18 @@ def _keep_pdf(it: dict, upload: str, prod: str | None = None, restore: bool = Fa
     restored from its stored original."""
     copy = it.get("source") or ""
     prod = _union(_filed(upload)[1], _filed(copy)[1], prod or "")
-    if not _indexed(upload):
+    if it.get("decision") == "internal" or _marked(copy):
+        # Before any ingest: restore_pdfs runs outside _apply's _carry_marks,
+        # and a marked PDF is stored, never indexed.
+        _mark_internal([upload], True)
+    if not _held(upload):
         content = _original(upload) if restore else None
         if content is None:
             return False
         _ingest(content, upload, category_of(prod), prod or None)
     if prod and set(prod.split(",")) != set(_filed(upload)[1].split(",")):
         _retag(upload, category_of(prod), prod)
-    if _indexed(copy):
+    if _held(copy):
         _remove(copy)
     return True
 
@@ -1043,10 +1128,14 @@ def _apply(api: _Api) -> dict:
     st = _load()
     res = {"at": _now(), "kind": "sync", "added": [], "updated": [], "removed": [],
            "errors": []}
+    matches = _matches(st["items"])
+    keep = set(st.get("keep_uploads") or [])
+    # Before the todo copies are taken, so they carry the decision.
+    _carry_marks(st, matches)
     todo = [(k, dict(it)) for k, it in st["items"].items()
             if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove", "combined")
             # its PDF was kept and has since been removed: the copy answers again
-            or (it.get("pdf_kept") and status_of(it) == "synced" and not _indexed(it["pdf_kept"]))]
+            or (it.get("pdf_kept") and status_of(it) == "synced" and not _held(it["pdf_kept"]))]
     # Removals first: a combined document takes its container page's name,
     # so the page's own copy must be gone before the combined one goes in.
     _removing = ("gone", "remove", "combined")
@@ -1058,8 +1147,6 @@ def _apply(api: _Api) -> dict:
                              "Check the account can still see the folder.")
         todo = [(k, it) for k, it in todo if it.get("present", True)]
 
-    matches = _matches(st["items"])
-    keep = set(st.get("keep_uploads") or [])
     res["replaced"] = []
     res["kept_pdf"] = []
     res["held"] = [it["source"] for it in st["items"].values() if status_of({**it, "error": None}) == "held"]
@@ -1072,7 +1159,7 @@ def _apply(api: _Api) -> dict:
         try:
             pdfs = [] if what in ("gone", "remove", "combined") else \
                 [u for u, whole in matches.get(key, [])
-                 if whole and u not in keep and _pdf_first(it, u) and _indexed(u)]
+                 if whole and u not in keep and _pdf_first(it, u) and _held(u)]
             if what in ("gone", "remove", "combined"):
                 _remove(src)
                 res["removed"].append(src)
@@ -1110,7 +1197,11 @@ def _apply(api: _Api) -> dict:
                 seen = it.get("approved_version") or it.get("version")
                 if st["mode"] == "review" and None not in (seen, version) and version != seen:
                     raise _Moved
-                uploads = [u for u, whole in matches.get(key, []) if whole and u not in keep]
+                # Not the copy's own name (a new page named like an upload:
+                # removing it would take out what was just ingested), and not
+                # a PDF only on disk (restore_pdfs' to bring back; Remove deletes it).
+                uploads = [u for u, whole in matches.get(key, [])
+                           if whole and u not in keep and u != src and _held(u)]
                 # Both copies' products: the copy kept only its own, and the
                 # Linux guide lost the MyCheckr and MyConnect (2026-10-24).
                 own = _filed(src)[1] or (it.get("product") or "" if it.get("product_chosen") else "")
@@ -1188,7 +1279,7 @@ def _apply(api: _Api) -> dict:
                 if _pdf_first(it, upload):
                     # Uploaded again by hand (or restored): the PDF answers and
                     # the copy goes. A PDF only on disk is an old file: left alone.
-                    if _indexed(upload) and _indexed(it.get("source") or "") and _keep_pdf(it, upload):
+                    if _held(upload) and _held(it.get("source") or "") and _keep_pdf(it, upload):
                         kept.setdefault(key, upload)
                         res["kept_pdf"].append(f"{upload} kept over {it.get('source')}")
                         _note(it.get("title") or upload, it["kind"], it.get("path") or [], "PDF kept")
@@ -1225,7 +1316,7 @@ def restore_pdfs(apply: bool = False, products: dict | None = None) -> list[str]
         if status_of(it) != "synced":
             continue
         for upload, whole in pairs:
-            if not whole or upload in keep or not _pdf_first(it, upload) or _indexed(upload):
+            if not whole or upload in keep or not _pdf_first(it, upload) or _held(upload):
                 continue
             out.append(f"{upload} <- {it['source']}")
             if apply and _keep_pdf(it, upload, (products or {}).get(upload), restore=True):

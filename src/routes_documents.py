@@ -739,10 +739,10 @@ def admin_source_internal(payload: InternalReq,
     sources = list(dict.fromkeys(s for s in payload.sources if s))
     if not sources:
         raise HTTPException(status_code=400, detail="No documents given")
-    synced = {}
-    for k, it in confluence_sync._load()["items"].items():
-        if it.get("source") in sources and it.get("synced_version") is not None:
-            synced.setdefault(it["source"], []).append(k)
+    # By every name the manual is held under (its copy, the PDF kept over it,
+    # an upload kept beside it): set_items then flags every copy, and the
+    # sync's _carry_marks does not put back a mark removed here.
+    synced = confluence_sync.items_holding(sources)
     # Before marking: marking takes the documents' chunks out of the index,
     # and related_faqs reads their text.
     faqs = related_faqs(sources) if payload.internal else []
