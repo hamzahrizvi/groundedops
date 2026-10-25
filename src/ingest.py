@@ -340,7 +340,9 @@ def ingest_file(content: bytes, filename: str,
             report["internal"] = True
         logger.info("%s is marked internal: original kept, not indexed", filename)
         return 0
-    if old_ids and content_hash in old_versions:
+    # Unchanged only while its original is kept: one lost (a case twin removed
+    # on Windows, D-20261025-07) is written again with its figures.
+    if old_ids and content_hash in old_versions and docstore.find(filename):
         logger.info("Skipping unchanged document: %s (%s)", filename,
                     content_hash[:12])
         return 0
@@ -574,20 +576,25 @@ def ingest_file(content: bytes, filename: str,
         # The new version is queryable now. Commit the durable original with
         # an atomic replace, then retire the previous chunks. If retaining the
         # source fails, roll the new IDs back and leave the old index intact.
+        # The same text again (an original written back, D-20261025-07) has
+        # the same ids: those are neither rolled back nor retired.
+        old_set, new_set = set(old_ids), set(ids)
+        fresh = [i for i in ids if i not in old_set]
+        stale = [i for i in old_ids if i not in new_set]
         try:
             docstore.save(filename, content)
         except Exception:
-            collection.delete(ids=ids)
+            collection.delete(ids=fresh)
             raise
 
-        if old_ids:
+        if stale:
             try:
-                collection.delete(ids=old_ids)
+                collection.delete(ids=stale)
             except Exception:
                 # Prefer a duplicate index over data loss, but do not report a
                 # successful replacement: the operator needs to retry/repair.
                 try:
-                    collection.delete(ids=ids)
+                    collection.delete(ids=fresh)
                 finally:
                     if previous_content is not None:
                         try:
