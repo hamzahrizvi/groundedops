@@ -26,17 +26,35 @@ os.environ.setdefault("ENV_FILE_PATH", os.path.join(_SCRATCH, "test.env"))
 os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(_SCRATCH, "secrets.enc"))
 
 OWN_PROCESS_TIMEOUT = 600
-# Names an own-process child must never inherit from the real .env (main.py
-# loads src/.env for any key not already in the environment; "" counts as present).
-LEAKY_ENV = ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ADMIN_PASSWORD")
+# Name endings an own-process child must see blank. main.py loads src/.env for
+# any key not already in the environment ("" counts as present), so blanking
+# every secret-shaped name -- from the parent AND from src/.env -- keeps the
+# real secrets out of the child, including names added to .env later.
+SECRET_SUFFIXES = ("_KEY", "_SECRET", "_PASSWORD", "_PASSPHRASE", "_TOKEN")
+MAIN_ENV_FILE = Path(__file__).parent / ".env"  # the file main.py loads
+
+
+def secret_names():
+    """Secret-shaped names in os.environ or in src/.env (key names only)."""
+    names = set(os.environ)
+    try:
+        for raw in MAIN_ENV_FILE.read_text(encoding="utf-8-sig").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                names.add(line.partition("=")[0].strip())
+    except OSError:
+        pass
+    return {n for n in names if n.upper().endswith(SECRET_SUFFIXES)}
+
+
 TESTS_DIR = Path(__file__).parent / "tests"
 ISOLATED_RUNNER = TESTS_DIR / "_run_isolated.py"
 
 
 def own_process_env():
-    """Environment for an own-process test child: keys blanked, PYTHONPATH set."""
+    """Environment for an own-process test child: secrets blanked, PYTHONPATH set."""
     env = dict(os.environ)
-    env.update({k: "" for k in LEAKY_ENV})
+    env.update({k: "" for k in secret_names()})
     # PYTHONPATH, because a subprocess puts sys.path[0] at the SCRIPT's
     # directory (tests/), not this one -- _harness.py lives beside run_tests.py.
     here = str(Path(__file__).parent)

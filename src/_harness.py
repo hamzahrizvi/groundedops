@@ -109,7 +109,8 @@ os.environ["CONFLUENCE_SYNC_STATE"] = _scratch("confluence_sync.json")
 os.environ["INTERNAL_SOURCES_PATH"] = _scratch("internal_sources.json")
 os.environ["ACCOUNTS_PATH"] = _scratch("accounts.json")
 os.environ["ACCOUNT_REQUESTS_PATH"] = _scratch("account_requests.json")
-os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
+# "or", not setdefault: run_tests.py hands own-process children every secret blanked to "".
+os.environ["SESSION_SECRET"] = os.environ.get("SESSION_SECRET") or "test-session-secret-not-a-real-one"
 # keystore.set_key/clear_key write to a real file — point that at a scratch
 # path so a key-management test can never touch the real src/.env.
 os.environ["ENV_FILE_PATH"] = _scratch("test.env")
@@ -133,7 +134,7 @@ os.environ["QUOTA_DB_PATH"] = _scratch("quota.db")
 # /admin/widget/preview_token answers 503 -- which is how test_policy.py failed
 # in CI while passing locally, where src/.env supplies the real secret. A test
 # secret, deliberately obvious: it signs nothing outside these tests.
-os.environ.setdefault("WIDGET_TOKEN_SECRET", "test-widget-token-secret-not-a-real-one")
+os.environ["WIDGET_TOKEN_SECRET"] = os.environ.get("WIDGET_TOKEN_SECRET") or "test-widget-token-secret-not-a-real-one"
 # backup.py reads the document store, the Chroma directory and the
 # conversation DB. Without these a backup test would archive the REAL
 # documents/ (~100MB of customer PDFs) and the real index -- slow, and it
