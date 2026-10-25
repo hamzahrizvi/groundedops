@@ -4,6 +4,7 @@ delete."""
 import os
 import sys
 import tempfile
+import types
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -99,6 +100,17 @@ def _rows(name):
     return [r for r in client.get("/admin/sources").json()["sources"] if r["source"] == name]
 
 
+# The upload route starts a thread; run its worker inline instead.
+_INLINE = types.SimpleNamespace(
+    Thread=lambda target, args, daemon=True: types.SimpleNamespace(start=lambda: target(*args)))
+
+
+def _upload(name, content, replace):
+    with patch.object(routes_documents, "capability", return_value=True),          patch.object(routes_documents, "threading", _INLINE):
+        return client.post("/upload", files={"file": (name, content)},
+                           headers={"replace-source": replace})
+
+
 def test_a_console_remove_deletes_the_original():
     _reset()
     ingest.ingest_file(b"manual", "Manual.txt")
@@ -180,6 +192,28 @@ def test_f_delete_reaches_the_legacy_folder_and_spares_the_manifest():
     assert docstore.delete("manifest.json") is False
     assert os.path.isfile(os.path.join(docstore.store_dir(), docstore.MANIFEST_NAME))
     assert docstore.delete("Nothing.txt") is False
+
+
+def test_g_a_new_version_differing_only_in_case_keeps_one_document():
+    _reset()
+    ingest.ingest_file(b"old", "Manual.txt")
+    r = _upload("manual.txt", b"new", "Manual.txt")
+    assert r.status_code == 200, r.text
+    assert originals() == ["Manual.txt"]
+    assert open(docstore.find("Manual.txt"), "rb").read() == b"new"
+    assert {m.get("source") for _, m in COL.rows.values()} == {"Manual.txt"}
+    assert list(docstore.load_manifest()["documents"]) == ["Manual.txt"]
+    assert client.get("/source_file/Manual.txt").status_code == 200
+
+
+def test_h_a_new_version_under_another_name_still_removes_the_old():
+    _reset()
+    ingest.ingest_file(b"old", "Manual.txt")
+    r = _upload("Guide.txt", b"new", "Manual.txt")
+    assert r.status_code == 200, r.text
+    assert originals() == ["Guide.txt"]
+    assert {m.get("source") for _, m in COL.rows.values()} == {"Guide.txt"}
+    assert docstore.find("Manual.txt") is None
 
 
 if __name__ == "__main__":
