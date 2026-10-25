@@ -216,8 +216,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261024-13 | Build a test set of real customer questions from ITL's own support history | approved, queued | Dev builds it |
 | D-20261025-01 | Remove the Docker files and every setup-guide mention of Docker | waiting for CEO | your yes |
 | D-20261025-03 | Security item D-20261025-03, details in the office | waiting for CEO | your yes |
-| D-20261025-05 | Security item D-20261025-05, details in the office | built, waiting for the check | the pre-ship check |
-| D-20261025-06 | Security item D-20261025-06, details in the office | approved, queued | Dev builds it |
+| D-20261025-05 | Security item D-20261025-05, details in the office | ready to merge | merges once Security clears it |
+| D-20261025-06 | Security item D-20261025-06, details in the office | built, waiting for the check | the pre-ship check |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
