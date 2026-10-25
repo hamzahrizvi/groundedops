@@ -266,6 +266,17 @@ async def upload(request: Request,
     # each one re-answering the same questions from slightly different text,
     # and each needing to be filed by hand.
     replace = (_h.get("replace-source") or _h.get("replace_source") or "").strip()
+    # D-20261025-05: a new version whose name differs only in letter case is
+    # the same document: keep the name it is indexed under. On a
+    # case-insensitive disk (Windows) both spellings are one file and one
+    # figures folder, so indexing the new spelling and then removing the old
+    # one deleted the new version's figures, and left its chunks, manifest
+    # entry and internal mark split across two names.
+    import docstore as _ds
+    filename = file.filename
+    _base = _ds._safe_basename(filename)
+    if replace and _base and _ds._safe_basename(replace).casefold() == _base.casefold():
+        filename = replace
     clash = _existing_source_like(file.filename)
     if replace and not (category_key and product_key):
         # A replacement with no scope chosen keeps the filing of the version
@@ -307,20 +318,19 @@ async def upload(request: Request,
         internal = bool(replace) and is_excluded(replace)
     # An internal upload always writes its mark: "already in the set" may be
     # the fail-closed or last-good set of an unreadable file, not the file.
-    if internal or file.filename in internal_sources():
+    if internal or filename in internal_sources():
         try:
             # reindex=False: the worker below indexes this upload. Re-indexing
             # the old original first would make it skip the upload as a duplicate.
-            set_internal([file.filename], internal, reindex=False)
+            set_internal([filename], internal, reindex=False)
         except Exception as exc:
             logger.error("upload refused, internal mark not saved for %r: %s",
-                         file.filename, exc)
+                         filename, exc)
             raise HTTPException(status_code=500, detail=(
                 "Could not record whether this document is internal, so it "
                 "was not indexed. Try again."))
 
     content = await file.read()
-    filename = file.filename
     job_id = str(uuid.uuid4())
     with _INGEST_LOCK:
         _INGEST_JOBS[job_id] = {"status": "starting", "file": filename,
