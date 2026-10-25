@@ -213,7 +213,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | waiting for CEO | your yes |
 | D-20261024-13 | Build a test set of real customer questions from ITL's own support history | approved, queued | Dev builds it |
-| D-20261024-14 | The sync replaced nine products' clean PDF manuals with flattened text copies, and the weekly test fell | sent back, rebuilding | Dev rebuilds it |
+| D-20261024-14 | The sync replaced nine products' clean PDF manuals with flattened text copies, and the weekly test fell | ready to merge | merges once Security clears it |
 | D-20261025-01 | Remove the Docker files and every setup-guide mention of Docker | waiting for CEO | your yes |
 | D-20261025-03 | Security item D-20261025-03, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
