@@ -26,8 +26,22 @@ os.environ.setdefault("ENV_FILE_PATH", os.path.join(_SCRATCH, "test.env"))
 os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(_SCRATCH, "secrets.enc"))
 
 OWN_PROCESS_TIMEOUT = 600
+# Names an own-process child must never inherit from the real .env (main.py
+# loads src/.env for any key not already in the environment; "" counts as present).
+LEAKY_ENV = ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ADMIN_PASSWORD")
 TESTS_DIR = Path(__file__).parent / "tests"
 ISOLATED_RUNNER = TESTS_DIR / "_run_isolated.py"
+
+
+def own_process_env():
+    """Environment for an own-process test child: keys blanked, PYTHONPATH set."""
+    env = dict(os.environ)
+    env.update({k: "" for k in LEAKY_ENV})
+    # PYTHONPATH, because a subprocess puts sys.path[0] at the SCRIPT's
+    # directory (tests/), not this one -- _harness.py lives beside run_tests.py.
+    here = str(Path(__file__).parent)
+    env["PYTHONPATH"] = here + os.pathsep + env.get("PYTHONPATH", "")
+    return env
 
 
 class SkipTest(Exception):
@@ -123,12 +137,8 @@ def discover_and_run():
         needs_process = needs_own_process(source)
         if needs_process:
             total += 1
-            # PYTHONPATH, because a subprocess puts sys.path[0] at the
-            # SCRIPT's directory (tests/), not this one -- _harness.py lives
-            # beside run_tests.py and would not be importable otherwise.
-            _env = dict(os.environ)
+            _env = own_process_env()
             _here = str(Path(__file__).parent)
-            _env["PYTHONPATH"] = _here + os.pathsep + _env.get("PYTHONPATH", "")
             try:
                 proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
                                        str(path)],
