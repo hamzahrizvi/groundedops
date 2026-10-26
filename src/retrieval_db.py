@@ -1193,11 +1193,50 @@ def chunks_before(chunks: list[dict]) -> list[str | None]:
     except Exception as exc:
         logger.warning(f"chunks_before skipped: {exc}")
         return [None] * len(chunks)
-    out = []
-    for c in chunks:
-        base, _, n = (c.get("id") or "").rpartition("_")
-        out.append(by_id.get(f"{base}_{int(n) - 1}") if n.isdigit() else None)
-    return out
+    return [by_id.get(_neighbour_id(c.get("id") or "", -1)) for c in chunks]
+
+
+def _neighbour_id(cid: str, step: int) -> str | None:
+    """The id `step` chunks away in the same document, or None. Live ids are
+    "<file>:<hash16>:<n>" (ingest.py); older ones and tests use "<doc>_<n>"."""
+    m = re.match(r"(.*[:_])(\d+)$", cid)
+    return f"{m.group(1)}{int(m.group(2)) + step}" if m else None
+
+
+# A chunk whose last line announces what follows: "...for the following
+# currencies:", "...as follows." The rows are then the next chunk.
+_ANNOUNCES = re.compile(r"(:|\bas follows\.?|\bthe following\b[^.!?|]*)\s*$", re.I)
+
+
+def _opens_like_table(body: str) -> bool:
+    """Pipe rows, or "label: value" lines (NV200S delay table) that are
+    short: a heading or a figure caption followed by prose is not."""
+    import tables as _tables
+    if _tables._starts_with_rows(body):
+        return True
+    lines = [l.strip() for l in body.split("\n") if l.strip()][:3]
+    return len(lines) == 3 and all(len(l) <= 80 and (": " in l or "|" in l)
+                                   for l in lines)
+
+
+def _starts_new_table(text: str, body: str) -> bool:
+    """The next chunk opens with a header row of its own ("Param name | Type |
+    Comment"): a new table, not the rest of this one. A first row equal to this
+    chunk's last table header is still a continuation: carry_table_context
+    repeats the header at the top of every continuation (C-11's button table)."""
+    import tables as _tables
+    def _row(line):
+        cs = _tables.cells(line)
+        while cs and not cs[-1]:
+            cs.pop()
+        return cs
+    first = _row(next((l for l in body.split("\n") if l.strip()), ""))
+    lines = _tables.split_prefix(text)[1].split("\n")
+    blocks = _tables._blocks(lines)
+    header = _row(lines[blocks[-1][0]]) if blocks else []
+    return (first != header and len(first) >= 2
+            and all(c and len(c) <= 30 and not any(ch.isdigit() for ch in c)
+                    for c in first))
 
 
 def complete_tables(chunks: list[dict],
@@ -1209,8 +1248,19 @@ def complete_tables(chunks: list[dict],
     first part (0.995) and the answer is in the second. The next chunk of
     the same document is a continuation when its body opens with table
     rows under the same section (tables.carry_table_context sets that).
-    Appended after, like procedure completion, and marked
-    fetched_by="table_completion". Never raises.
+    Placed directly after the chunk that begins or announces it, marked
+    fetched_by="table_completion" and with_previous=True, so the prompt prints
+    both as ONE passage (main._numbered_passages); an announced table already
+    retrieved lower down is moved up under its announcement. A next chunk that
+    opens with a header row of its own is a new table and is left alone
+    (_starts_new_table). Never raises.
+
+    A prose chunk qualifies too when its last line announces a table
+    ("...counted for the previous 45 minutes:", "...the following
+    currencies:") and the next chunk opens like one (_opens_like_table):
+    the rows sit on the next page. Neighbours are found by _neighbour_id,
+    which reads the live "<file>:<hash>:<n>" ids; until 2026-10-09 this
+    looked for "_<n>" only and never fired on the live index.
     """
     if not chunks:
         return chunks
@@ -1219,34 +1269,60 @@ def complete_tables(chunks: list[dict],
         collection = get_collection()
         _, all_chunks = _get_bm25_index(collection)
         by_id = {c["id"]: c for c in all_chunks}
-        have = {c.get("id") for c in chunks}
-        out, spent = list(chunks), 0
-        for c in chunks:
-            cid, text = c.get("id") or "", c.get("text") or ""
-            if "|" not in text or "_" not in cid:
-                continue
-            base, _, n = cid.rpartition("_")
-            if not n.isdigit():
-                continue
-            nxt = by_id.get(f"{base}_{int(n) + 1}")
-            if not nxt or nxt["id"] in have:
+        pos = {c.get("id"): i for i, c in enumerate(chunks)}
+        after, taken, spent = {}, set(), 0   # source id -> chunk printed under it
+        for i, c in enumerate(chunks):
+            cid = c.get("id") or ""
+            text = c.get("text") or ""
+            nxt = by_id.get(_neighbour_id(cid, 1))
+            if not nxt or nxt["id"] in taken:
                 continue
             _, body = _tables.split_prefix(nxt.get("text") or "")
             same = ((nxt.get("section") or "") == (c.get("section") or "")
                     or not (nxt.get("section") or ""))
-            if not (same and _tables._starts_with_rows(body)):
+            if not same:
+                continue
+            lines = [l for l in _tables.split_prefix(text)[1].split("\n") if l.strip()]
+            continues = ("|" in text and _tables._starts_with_rows(body)
+                         and not _starts_new_table(text, body))
+            announced = bool(lines) and bool(_ANNOUNCES.search(lines[-1])) \
+                and _opens_like_table(body)
+            if not (continues or announced):
+                continue
+            j = pos.get(nxt["id"])
+            if j is not None:
+                # Already retrieved. An announced table ranked BELOW its
+                # announcement moves up under it (C-22: rows 4th, "...the
+                # following currencies:" 1st, not joined by the model). A
+                # continuation, or a table ranked above, stays where it is.
+                if announced and j > i:
+                    taken.add(nxt["id"])
+                    after[cid] = dict(chunks[j], with_previous=True)
+                    logger.info("table completion: moved %s under %s", nxt["id"], cid)
                 continue
             if spent + len(nxt.get("text") or "") > budget:
                 break
-            have.add(nxt["id"])
             spent += len(nxt.get("text") or "")
-            out.append({"id": nxt["id"], "text": nxt["text"],
-                        "source": nxt.get("source"), "page": nxt.get("page"),
-                        "section": nxt.get("section", ""),
-                        "retrieval_score": 0.0,
-                        "fetched_by": "table_completion"})
-        if spent:
-            logger.info("table completion added %d chunk(s)", len(out) - len(chunks))
+            taken.add(nxt["id"])
+            after[cid] = {"id": nxt["id"], "text": nxt["text"],
+                          "source": nxt.get("source"), "page": nxt.get("page"),
+                          "section": nxt.get("section", ""),
+                          "retrieval_score": 0.0,
+                          "fetched_by": "table_completion",
+                          "with_previous": True}
+            logger.info("table completion: %s -> %s (%s)", cid, nxt["id"],
+                        "announced" if announced else "continues")
+        if not after:
+            return chunks
+        out = []
+
+        def _emit(c):
+            out.append(c)
+            if c.get("id") in after:
+                _emit(after[c["id"]])
+        for c in chunks:
+            if c.get("id") not in taken:
+                _emit(c)
         return out
     except Exception as exc:
         logger.warning(f"table completion skipped: {exc}")
