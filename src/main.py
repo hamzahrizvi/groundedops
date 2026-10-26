@@ -178,7 +178,9 @@ async def _limit_body_size(request, call_next):
         cl = request.headers.get("content-length")
         # Large-body paths skip the size cap; their sign-in was checked above.
         path_ = request.scope.get("path", "")
-        if cl and not path_.startswith(_LARGE_BODY_PATHS):
+        if path_.startswith(_LARGE_BODY_PATHS):
+            return await call_next(request)
+        if cl:
             try:
                 if int(cl) > MAX_BODY_BYTES:
                     return JSONResponse(status_code=413,
@@ -186,6 +188,18 @@ async def _limit_body_size(request, call_next):
             except ValueError:
                 return JSONResponse(status_code=400,
                                     content={"detail": "Bad Content-Length"})
+        else:
+            # No length (chunked upload): count the bytes as they arrive and
+            # stop at the same cap (D-20261008-12). Storing them in _body is
+            # what Request.body() does; BaseHTTPMiddleware replays it to the
+            # route (tests/test_route_guards.py checks the route gets it).
+            body = bytearray()
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > MAX_BODY_BYTES:
+                    return JSONResponse(status_code=413,
+                                        content={"detail": "Request too large"})
+            request._body = bytes(body)
     return await call_next(request)
 
 
