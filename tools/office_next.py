@@ -70,7 +70,7 @@ MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, m
 RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that picks it up (take stamps it, end_tick removes it)
 IDLE_EVERY = 3        # ponytail: days between discovery runs (security, audit, rnd, marketing) while nothing else waits
 PARKED = ("state", "parked_review")   # the parked ids last handed to the product owner (take() writes it)
-LANE_ONE_LATE = 30 * 60   # lanes 2 and 3 also work when lane 1 has not looked for work for this long (it stopped)
+LANE_ONE_LATE = 90 * 60   # lanes 2 and 3 also work when lane 1 has not looked for work for this long (it stopped); 1.5 x its hourly schedule (the CEO, 2026-10-26)
 REFRESH = 3600   # an idle lane 1 refreshes the office page and the cost charts this often
 STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped running (longest run seen ~9 h)
 # Minutes a claim may be held before its lane counts as stuck, likely on a permission prompt nobody sees (2026-10-23: the
@@ -278,7 +278,7 @@ def needed(ops, lane, free=()):
         return True, (f"lane {busy[0]} is busy" if len(busy) == 1 else "lanes " + " and ".join(map(str, busy)) + " are busy")
     seen = _mtime(os.path.join(ops, "state", "lane-1-seen"))
     if time.time() - seen > LANE_ONE_LATE:
-        return True, "lane 1 has not looked for work in 30 minutes"
+        return True, "lane 1 has not looked for work in 90 minutes"
     return False, "no other lane is busy"
 
 
@@ -712,7 +712,9 @@ def selftest():
         assert not any("parked to check" in x for x in plan(ops, ops, 11, 38, resets, now)), "same set: not again"
         os.remove(os.path.join(ops, "decisions", "20261008p.md")); os.remove(os.path.join(ops, "state", "parked_review"))
         w("state/lane-1-seen"); t = time.time() - 3600; os.utime(os.path.join(ops, "state", "lane-1-seen"), (t, t))
-        assert needed(ops, 2) == (True, "lane 1 has not looked for work in 30 minutes"), "lane 1 silent"
+        assert needed(ops, 2) == (False, "no other lane is busy"), "an hourly lane 1 an hour ago is on time"
+        t = time.time() - 7200; os.utime(os.path.join(ops, "state", "lane-1-seen"), (t, t))
+        assert needed(ops, 2) == (True, "lane 1 has not looked for work in 90 minutes"), "lane 1 silent"
         assert needed(ops, 1, ["RUN  x"]) == (True, "work is free: RUN  x")
         assert needed(ops, 1) == (False, "nothing to do; refresh due") and needed(ops, 1) == (False, "nothing to do"), "idle: page refresh hourly"
         assert needed(ops, 2) == (False, "no other lane is busy"), "a gated lane 1 still counts as alive"
