@@ -264,7 +264,7 @@ button{font:inherit;color:inherit}
 .detail dt{color:var(--muted);font:12px/1.6 var(--display);letter-spacing:.04em}
 .detail dd{margin:0}
 .detail .donow{margin-top:12px}
-.kcard .donow{margin-top:6px}
+.kcard .donow,.kcard textarea+.btn{margin-top:6px}
 .detail p{margin:0;font-size:14.5px}
 
 .rhythm{margin-top:20px}
@@ -322,7 +322,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
 .src summary{cursor:pointer;font-size:14px}
 .src pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.45 ui-monospace,Consolas,monospace;background:var(--bg);padding:10px;border-radius:3px;max-height:280px;overflow:auto;margin:8px 0 0}
 .field{display:grid;gap:4px;font-size:14px}
-.field textarea,.compose textarea{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:8px 10px;resize:vertical;min-height:64px;width:100%}
+.field textarea,.compose textarea,.kcard textarea{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:8px 10px;resize:vertical;min-height:64px;width:100%}
 .sent{border-left:3px solid var(--ok);padding:4px 10px;font-size:14px;margin:0}
 .oops{border-left:3px solid var(--crit);padding:4px 10px;font-size:14px;margin:0}
 .fabs{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:19;display:flex;gap:12px}
@@ -924,6 +924,27 @@ function cardNow(c){
     : /^(approved, queued|sent back, rebuilding)$/.test(c.stage) ? c.assigned : null;
   return who && DEPT_KEY[who] && hired(who) ? {key: DEPT_KEY[who], dept: nameOf(who), why: c.title, item: c.id} : null;
 }
+/* "Add a card": a CEO note asking the product owner to file it as a proposal at the next triage (tools/ceo_inbox.py note).
+   Sent ones show at the top of Coming up until that run applies them. */
+const ADD_CARD = "New card for the plan board: ";
+function addCardBox(){
+  const li = el("li", "kcard"), ta = el("textarea"), go = el("button", "btn", "Add card"), msg = el("p", "small", "");
+  ta.rows = 2; ta.placeholder = "Add a card: what should be looked at or built?"; ta.setAttribute("aria-label", "New plan board card");
+  const pending = live.inbox.filter(r => r.choice === "note" && r.status === "new" && String(r.note).startsWith(ADD_CARD));
+  if(pending.length) msg.textContent = "Sent, filed at the next check: " + pending.map(r => r.title).join(" · ");
+  go.type = "button";
+  const send = async () => {
+    const t = ta.value.trim(); if(!t) return;
+    go.disabled = true; msg.className = "small"; msg.textContent = "Sending";
+    try { await decide("", "note", ADD_CARD + t + "\nFile it as a proposal so it appears in Coming up, and give it a priority.", t.slice(0, 80));
+      msg.className = "sent"; msg.textContent = `Sent: "${t.slice(0, 80)}". It becomes a card at the next hourly check.`; ta.value = ""; }
+    catch(e){ msg.className = "oops"; msg.textContent = writeError(e); }
+    go.disabled = false; ta.focus();
+  };
+  go.addEventListener("click", send);
+  ta.addEventListener("keydown", e => { if(e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); send(); } });
+  li.append(ta, go, msg); return li;
+}
 function renderBoards(){
   const L = live.ledger || SAMPLE_LEDGER, isSample = !live.ledger;
   const chip = document.getElementById("ledgerChip"); chip.textContent = isSample ? "Sample" : "Live"; chip.className = "chip " + (isSample ? "sample" : "live");
@@ -934,6 +955,7 @@ function renderBoards(){
   document.getElementById("p-plan").replaceChildren(...lanes.map(([k, title]) => {
     const cards = L.cards.filter(c => c.lane === k).sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999)), lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
     lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
+    if(k === "future" && !isSample && live.available) ul.append(addCardBox());
     if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
     for(const c of cards){
       const li = document.createElement("li"); li.className = "kcard " + STAGE_CLS(shownStage(c)); li.textContent = c.title;
