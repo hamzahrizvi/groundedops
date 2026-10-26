@@ -140,7 +140,7 @@ button{font:inherit;color:inherit}
 .lane{background:var(--bg);border-radius:4px;padding:10px;min-width:0}
 .lane h3{font-size:12px;letter-spacing:.08em;margin-bottom:8px;display:flex;justify-content:space-between}
 .lane ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.lanepg{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.lanepg{display:flex;gap:8px;margin-top:10px}
 .kcard{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:3px;padding:7px 9px;font-size:14px;line-height:1.35}
 .kcard.s-merged{border-left-color:var(--ok)} .kcard.s-ready{border-left-color:var(--ok)}
 .kcard.s-ceo{border-left-color:var(--accent)} .kcard.s-bad{border-left-color:var(--crit)}
@@ -927,7 +927,7 @@ function cardNow(c){
 }
 /* "Add a card": a CEO note asking the product owner to file it as a proposal at the next triage (tools/ceo_inbox.py note).
    It shows on the board at once, marked as sent, until that run applies the note and the real card replaces it. */
-const ADD_CARD = "New card for the plan board: ", LANE_SIZE = 5, lanePage = {future: 0, ongoing: 0, past: 0};
+const ADD_CARD = "New card for the plan board: ", LANE_SIZE = 5, laneShown = {future: 5, ongoing: 5, past: 5};
 let cardDraft = "";
 const sentCards = () => live.inbox.filter(r => r.choice === "note" && r.status === "new" && String(r.note).startsWith(ADD_CARD));
 function addCardBox(){
@@ -939,7 +939,7 @@ function addCardBox(){
     const t = ta.value.trim(); if(!t) return;
     go.disabled = true; msg.textContent = "Sending";
     try { await decide("", "note", ADD_CARD + t + "\nFile it as a proposal so it appears in Coming up, and give it a priority.", t.slice(0, 80));
-      cardDraft = ""; lanePage.future = 0; renderBoards(); $("addCardText").focus(); }
+      cardDraft = ""; renderBoards(); $("addCardText").focus(); }
     catch(e){ go.disabled = false; msg.className = "oops"; msg.textContent = writeError(e); }
   };
   go.addEventListener("click", send);
@@ -957,11 +957,11 @@ function renderBoards(){
   document.getElementById("p-plan").replaceChildren(...lanes.map(([k, title]) => {
     const sent = k === "future" && !isSample ? sentCards().map(r => ({title: r.title, sent: true})) : [];
     const cards = [...sent, ...L.cards.filter(c => c.lane === k).sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999))], lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
-    const pages = Math.max(1, Math.ceil(cards.length / LANE_SIZE)), pg = lanePage[k] = Math.min(lanePage[k], pages - 1);
+    const shown = Math.min(laneShown[k], cards.length);
     lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
     if(k === "future" && !isSample && live.available) ul.append(addCardBox());
     if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
-    for(const c of cards.slice(pg * LANE_SIZE, (pg + 1) * LANE_SIZE)){
+    for(const c of cards.slice(0, shown)){
       const li = document.createElement("li"); li.className = "kcard " + (c.sent ? "" : STAGE_CLS(shownStage(c))); li.textContent = c.title;
       const meta = document.createElement("div"); meta.className = "kmeta";
       const st = document.createElement("span"); st.className = "kstage"; st.textContent = c.sent ? "sent, filed at the next check" : shownStage(c);
@@ -974,12 +974,11 @@ function renderBoards(){
       ul.append(li);
     }
     lane.append(h, ul);
-    if(pages > 1){   // at most LANE_SIZE cards per column; the rest are a page away
-      const nav = el("div", "lanepg"), prev = el("button", "btn", "‹"), next = el("button", "btn", "›");
-      prev.type = next.type = "button"; prev.disabled = pg === 0; next.disabled = pg === pages - 1;
-      prev.setAttribute("aria-label", `Previous ${title} cards`); next.setAttribute("aria-label", `Next ${title} cards`);
-      prev.addEventListener("click", () => { lanePage[k]--; renderBoards(); }); next.addEventListener("click", () => { lanePage[k]++; renderBoards(); });
-      nav.append(prev, el("span", "small", `${pg * LANE_SIZE + 1}–${Math.min(cards.length, (pg + 1) * LANE_SIZE)} of ${cards.length}`), next);
+    if(cards.length > LANE_SIZE){   // LANE_SIZE cards to start; Load more adds LANE_SIZE, Close goes back
+      const nav = el("div", "lanepg");
+      const btn = (label, fn) => { const b = el("button", "btn", label); b.type = "button"; b.addEventListener("click", () => { fn(); renderBoards(); }); nav.append(b); };
+      if(shown < cards.length) btn(`Load more (${cards.length - shown})`, () => { laneShown[k] += LANE_SIZE; });
+      if(shown > LANE_SIZE) btn("Close", () => { laneShown[k] = LANE_SIZE; });
       lane.append(nav);
     }
     return lane; }));
