@@ -696,11 +696,14 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
     from docindex import source_index
     rows = source_index()
-    from retrieval_db import internal_sources
+    from retrieval_db import internal_sources, copies_of
     internal = internal_sources()
+    dups = copies_of()
     out = [{"source": r["source"], "category": r["category"],
             "product": r["product"], "chunks": r["chunks"],
-            "internal": r["source"] in internal} for r in rows]
+            "internal": r["source"] in internal,
+            # D-20261026-91: a copy of another document answers through it.
+            "duplicate_of": dups.get(r["source"])} for r in rows]
     try:
         import docstore as _ds
         for item, r in zip(out, rows):
@@ -749,6 +752,10 @@ def admin_source_internal(payload: InternalReq,
     sources = list(dict.fromkeys(s for s in payload.sources if s))
     if not sources:
         raise HTTPException(status_code=400, detail="No documents given")
+    # Every stored byte-identical copy goes with it, both ways: un-marking
+    # one copy of a manual un-marks the manual (D-20261026-91).
+    from retrieval_db import same_content
+    sources += [n for n in same_content(sources) if n not in sources]
     # By every name the manual is held under (its copy, the PDF kept over it,
     # uploads it replaces): set_items then flags every copy, and the
     # sync's _carry_marks does not put back a mark removed here.

@@ -309,7 +309,10 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
          for ex in ("icu_network_api", "icu_age_result_quick_guide")),
      internal_sources=lambda: frozenset(),
      is_marked_internal=lambda source: False,
-     set_internal=lambda sources, on, reindex=True: None)
+     set_internal=lambda sources, on, reindex=True, copies=True: None,
+     same_content=lambda sources: [],
+     copies_of=lambda: {},
+     duplicate_of=lambda source: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
 # faked: more_context.py depends on it to tell new material from a reworded

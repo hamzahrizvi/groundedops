@@ -5846,6 +5846,10 @@ function viewDocuments() {
                          ? "Version " + freshness.version.slice(0, 12) : "" }, "Current"),
       s.internal ? el("span", { class: "tag tag-accent",
         title: "Never used in public answers, downloads or pictures" }, "Internal") : null,
+      s.duplicate_of ? el("span", { class: "tag tag-neutral",
+        title: "Same file as " + s.duplicate_of + "; left out of answers so copies "
+             + "do not crowd the search. Removing " + s.duplicate_of
+             + " makes this one answer." }, "Duplicate of " + s.duplicate_of) : null,
       move,
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
         title: s.internal ? "Let public answers use this document again"

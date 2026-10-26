@@ -321,11 +321,19 @@ def ingest_file(content: bytes, filename: str,
     # the mark, not the EXCLUDED_SOURCES substrings: those are a read-time
     # policy that internal deployments switch off. Un-marking re-indexes it
     # from the original kept here (retrieval_db.set_internal).
-    from retrieval_db import _Everything, internal_sources, is_marked_internal
+    from retrieval_db import (_Everything, internal_sources, is_marked_internal,
+                              same_content, set_internal)
     if isinstance(internal_sources(), _Everything):
         # Unreadable marks file on a cold start: every name reads as marked,
         # and storing-and-skipping would silently drop the old chunks.
         raise RuntimeError("internal_sources.json is unreadable; repair it first")
+    # D-20261026-91: a byte-identical copy of a marked document is the marked
+    # document (the sync stores one per page that attaches the file).
+    # copies=False: the manifest still holds this name's OLD bytes.
+    if not is_marked_internal(filename) and any(
+            (e or {}).get("sha256") == content_hash and is_marked_internal(n)
+            for n, e in docstore.load_manifest()["documents"].items()):
+        set_internal([filename], True, reindex=False, copies=False)
     if is_marked_internal(filename):
         same = (docstore.load_manifest()["documents"].get(
             docstore._safe_basename(filename)) or {}).get("sha256") == content_hash
@@ -336,6 +344,10 @@ def ingest_file(content: bytes, filename: str,
         if old_ids:
             collection.delete(ids=old_ids)
             invalidate_retrieval_cache()
+        # And its stored copies of these bytes, now the manifest holds them.
+        rest = [n for n in same_content([filename]) if not is_marked_internal(n)]
+        if rest:
+            set_internal(rest, True, reindex=False, copies=False)
         if report is not None:
             report["internal"] = True
         logger.info("%s is marked internal: original kept, not indexed", filename)

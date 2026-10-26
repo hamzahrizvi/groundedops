@@ -6,6 +6,10 @@ marked before that still have chunks (hidden at read time). Originals stay in
 the document store; a marked document with NO retained original keeps its
 chunks, since deleting them would lose it for good.
 
+Since D-20261026-91 marking also marks every stored byte-identical copy, so
+the dry run lists those too, and the duplicate groups the index answers from
+one copy of.
+
 Run with the backend STOPPED (as reindex.py): a second process writing Chroma
 leaves the server's handle stale.
 
@@ -42,12 +46,26 @@ def report(marked) -> int:
     return total
 
 
+def copies_report(marked) -> None:
+    extra = [n for n in rdb.same_content(sorted(marked)) if not rdb.is_marked_internal(n)]
+    for n in sorted(extra):
+        print(f"  copy to mark: {n}")
+    print(f"{len(extra)} unmarked copies of marked documents (--apply marks them)")
+    groups: dict[str, list] = {}
+    for dup, keep in rdb.copies_of().items():
+        groups.setdefault(keep, []).append(dup)
+    for keep in sorted(groups):
+        print(f"  answers: {keep} ({len(groups[keep])} copies)")
+    print(f"{len(groups)} duplicate groups, {sum(map(len, groups.values()))} copies left out of answers")
+
+
 def main() -> int:
     marked = rdb.internal_sources()
     if isinstance(marked, rdb._Everything):
         print("internal_sources.json is unreadable; repair it first")
         return 2
     report(marked)
+    copies_report(marked)
     if "--apply" not in sys.argv[1:]:
         print("dry run: add --apply to take them out")
         return 0
