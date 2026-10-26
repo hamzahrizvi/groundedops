@@ -14,6 +14,7 @@ from the decisions file, and a note is quoted so it can never read as a decision
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
   off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
+  sync     nothing on disk: the lane that applies it re-uploads the office page's brief, and starts no work for it
   run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
            (office_next.py); for customer it also files a refresh request, so a held-back test run goes first;
            with item (a Plan board card) for the product owner, also a note naming that item, so the run decides it
@@ -98,6 +99,9 @@ def apply(ops, folder, now=None):
                 os.makedirs(os.path.join(ops, "state"), exist_ok=True)
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
                 out.append(f"APPLIED {doc_id} refresh")
+            continue
+        if choice == "sync":   # the page's Sync button: dispatch.md step 0 re-uploads the brief
+            out.append(f"APPLIED {doc_id} sync")
             continue
         if choice == "run_all":   # the page's "Run all now" pill (office_next.py stamp_run_all, end_tick)
             os.makedirs(os.path.join(ops, "state", "run_now"), exist_ok=True)
@@ -223,6 +227,8 @@ def selftest():
         row("9", id="", choice="refresh")
         got = apply(ops, os.path.join(ops, "pull"))
         assert got[0].startswith("APPLIED 9 refresh (a test run is under way") and not os.path.exists(req), "folded into the run"
+        row("9s", id="", choice="sync")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 9s sync"], "a sync press is applied, nothing filed"
         off = os.path.join(ops, "state", "office_off")
         row("10", id="", choice="off")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 10 off"] and os.path.exists(off), "switched off"

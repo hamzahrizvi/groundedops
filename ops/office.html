@@ -363,6 +363,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <option value="120">Next run: every 2 hours</option>
       </select>
       <button class="btn" id="powerBtn" type="button" hidden aria-pressed="true">Power</button>
+      <button class="btn" id="syncBtn" type="button" hidden title="Rebuilds what this page shows (who is running, what moves next) at lane 1's next check, without starting any work">Sync</button>
     </div>
   </header>
   <p class="banner" id="banner">Connecting to the office…</p>
@@ -1587,7 +1588,7 @@ function openItem(id){
   if(it.text){ const d = el("details", "src"); d.append(el("summary", null, "What the product owner wrote (detailed)"), el("pre", null, it.text)); nodes.push(d); }
   openPop(title, nodes);
 }
-const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on", cap:"Lab cap", mode:"Work mode", every:"Next run"};
+const CHOICE = {approve:"Approve", defer:"Not now", done:"Done", note:"Note", refresh:"Refresh", off:"Switch off", on:"Switch on", cap:"Lab cap", mode:"Work mode", every:"Next run", sync:"Sync"};
 async function decide(id, choice, note, title, extra = {}){
   if(!live.db) throw {code:"no_db"};
   await live.db.collection("ceo_inbox").add({...extra, id, title: title || "", choice, note: String(note || "").slice(0, 2000), status:"new", at: new Date().toISOString()});
@@ -1759,6 +1760,18 @@ $("powerBtn").addEventListener("click", async () => {
   catch(e){ $("banner").textContent = writeError(e); }
   renderPower();
 });
+/* Sync: lane 1 rebuilds and re-uploads the brief at its next check, and starts no work for it (tools/ceo_inbox.py sync) */
+function renderSync(){
+  const b = $("syncBtn"), row = newest("sync"), l1 = ((live.brief && live.brief.lanes) || []).find(l => String(l.lane) === "1");
+  b.hidden = !live.available; b.disabled = !!row;
+  const j = l1 ? (l1.jitter || 0) * 1000 : 0, f = l1 && nextFire(l1.cron, Date.now() - j);
+  b.textContent = row ? "Syncing" + (f ? " at " + fmtTime(new Date(+f + j)) : " at the next check") : "Sync";
+}
+$("syncBtn").addEventListener("click", async () => {
+  $("syncBtn").disabled = true;
+  try { await decide("", "sync", "", "Sync the page"); } catch(e){ $("banner").textContent = writeError(e); }
+  renderSync();
+});
 
 /* ---------- the product owner's chat ---------- */
 const chatEl = $("chat"), msgs = $("msgs"), askBox = $("ask"), fab = $("fabs");
@@ -1901,8 +1914,8 @@ setInterval(sampleStep, 9000);
   live.available = true; live.db = db;
   let firstEvents = true;
   try {
-    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); renderWork(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderLab(); }, () => {});
+    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); renderWork(); renderSync(); setTimeout(maybePop, 1500); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderSync(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); renderAlerts(); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());
