@@ -210,17 +210,20 @@ To change an item, tell the product owner or answer it on the office page; edits
 
 | Item | What | Stage | Next |
 |---|---|---|---|
+| D-20261008-04 | Limits printed in a table on the next page are not given | sent back, rebuilding | Dev rebuilds it |
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261015-01 | Security item D-20261015-01, details in the office | waiting for CEO | your yes |
-| D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | waiting for CEO | your yes |
+| D-20261008-12 | Security item D-20261008-12, details in the office | approved, queued | Dev builds it |
+| D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | approved, queued | Dev builds it |
 | D-20261021-09 | The website screenshots show a dummy phone number, a doubled greeting and an old refusal layout | waiting for CEO | your yes |
+| D-20261021-14 | Thin messages and short follow-ups get a canned refusal plus a list of unrelated questions | approved, queued | Dev builds it |
 | D-20261022-15 | Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it | waiting for CEO | your yes |
-| D-20261024-10 | Synced Confluence pages get their kind from title and folder, and a replaced upload keeps all its products | waiting for CEO | your yes |
 | D-20261025-01 | Remove the Docker files and every setup-guide mention of Docker | waiting for CEO | your yes |
 | D-20261025-08 | A bare question about a documented repair or service price gets the sales brush-off | waiting for CEO | your yes |
 | D-20261025-09 | Security item D-20261025-09, details in the office | waiting for CEO | your yes |
 | D-20261025-11 | A question that names a product's variant gets the base product's figures | waiting for CEO | your yes |
 | D-20261026-01 | Widget text and buttons fail the contrast check in the default look | waiting for CEO | your yes |
+| D-20261026-91 | The same document indexed many times over crowds the manuals out of the search | approved, queued | Dev builds it |
+| D-20261026-92 | A newer NV200 Spectral PDF outranks the SSP manual, so SSP questions on the NV200S are answered wrongly | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
@@ -228,14 +231,13 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/D-20261023-02-reask-diagnosis | D-20261023-02: why the same 40 questions scored 18 points lower today | proposed | the product owner triages it |
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
 | security/20261019 | Security item security/20261019, details in the office | proposed | the product owner triages it |
-| D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
 | D-20261008-06 | Vague complaints get a checklist instead of one question | deferred | parked |
 | D-20261008-10 | Security item D-20261008-10, details in the office | deferred | parked |
-| D-20261008-12 | Security item D-20261008-12, details in the office | deferred | parked |
 | D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
 | D-20261009-07 | Security item D-20261009-07, details in the office | deferred | parked |
 | D-20261010-21 | Security item D-20261010-21, details in the office | deferred | parked |
 | D-20261014-04 | Ask Kapa and Fin the same 88 hidden questions once their access works | deferred | parked |
+| D-20261015-01 | Security item D-20261015-01, details in the office | deferred | parked |
 | D-20261017-03 | A table lookup loses the numbers in the row | deferred | parked |
 | D-20261017-10 | The source line cites every page the bot read, and "Download" fetches the whole manual instead of opening it at the page | deferred | parked |
 | D-20261017-12 | After a manual is uploaded, show the buyer a sample check on it: answered, refused, poor pages | deferred | parked |
@@ -247,7 +249,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261020-03 | On a product with two devices, the answer gives the other device's steps or only one side | deferred | parked |
 | D-20261021-02 | Run the two answer checks at the same time, and switch the faster checker engine on (part B) | deferred | parked |
 | D-20261021-04 | Security item D-20261021-04, details in the office | deferred | parked |
-| D-20261021-14 | Thin messages and short follow-ups get a canned refusal plus a list of unrelated questions | deferred | parked |
 | D-20261021-15 | A two-part ask or a multi-step procedure comes back with one part missing or called "not found" | deferred | parked |
 | D-20261021-22 | A troubleshoot answer gives the wrong cause once in six tries on unchanged code (Spoof 3: "not stable" instead of "poor lighting") | deferred | parked |
 | D-20261021-24 | A customer's own email is refused when the installer offers to create the Owner account | deferred | parked |
@@ -255,6 +256,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261022-05 | Delete the short answer prompt that was tried and turned down | deferred | parked |
 | D-20261022-08 | Send the fixed answer rules first on every call so a hosted answer costs about 40% less | deferred | parked |
 | D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | deferred | parked |
+| D-20261024-10 | Synced Confluence pages get their kind from title and folder, and a replaced upload keeps all its products | deferred | parked |
 | D-20261024-12 | Measure the fully offline tier on a modern open model, and name the hardware it needs | deferred | parked |
 | D-20261024-13 | Build a test set of real customer questions from ITL's own support history | deferred | parked |
 | D-20261025-14 | One screen of what the bot did this week: answered, from FAQ, refused, top unanswered | deferred | parked |
