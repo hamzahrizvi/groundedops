@@ -1419,7 +1419,8 @@ function renderLanes(){
   if(!b || !b.lanes || !live.available){ ul.replaceChildren(); return; }
   const now = Date.now();
   ul.replaceChildren(...b.lanes.map(l => {
-    const li = el("li"), run = (b.running || []).find(m => String(m.lane) === String(l.lane)), t = nextFire(l.cron, now);
+    const li = el("li"), run = (b.running || []).find(m => String(m.lane) === String(l.lane)), j = (l.jitter || 0) * 1000,
+      f = nextFire(l.cron, now - j), t = f && new Date(+f + j);   // the app starts each task a fixed delay after its cron time
     const left = t ? Math.max(0, Math.round((t - now) / 1000)) : null, mmss = left == null ? "" : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
     li.append(el("span", "state " + (b.off ? "off" : run ? "working" : "idle"), `Lane ${l.lane}`),
       el("div", null, b.off ? "Office switched off" : run ? `Running now: ${run.dept}` + (t ? `; checks again at ${fmtTime(t)}` : "")

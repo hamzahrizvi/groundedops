@@ -240,11 +240,11 @@ def every(ops):
 def lane_cron(lane, minutes):
     """The lane's cron: every N minutes, the three lanes a third of N apart. Back to back is every 10 minutes:
     runs of one task never overlap, so the next starts within 10 minutes of the last one ending.
-    Lane 1 always checks every 10 minutes, so the CEO's page decisions (a faster "Next run" too) never wait for a
-    slow schedule; "Next run" spaces only the work it starts (take(), the CEO 2026-10-19).
+    Lane 1 follows "Next run" too, 10 minutes at the fastest (the CEO, 2026-10-26: hourly routines; it was always every
+    10 minutes so page decisions never waited, and at hourly a decision now waits up to an hour).
     Lanes 2 and 3 check at most every 30 minutes: they only add a second job beside a long one, and at every 10
     minutes their wake-ups were a large share of the office's cost (2026-10-21)."""
-    step = 10 if lane == 1 else max(minutes, 30)
+    step = max(minutes, 10) if lane == 1 else max(minutes, 30)
     off = (lane - 1) * step // 3
     if step < 60:
         return ",".join(str(m) for m in range(off, 60, step)) + " * * * *"
@@ -582,7 +582,7 @@ def selftest():
         w("state/mode", "high\n")
         w("state/every", "0")   # back to back: "Next run" spacing is tested on its own below
         assert work_mode(ops, 40, resets, now) == ("high", "set by you")
-        assert lane_cron(1, 120) == "0,10,20,30,40,50 * * * *", "lane 1 always checks every 10 minutes"
+        assert lane_cron(1, 10) == "0,10,20,30,40,50 * * * *" and lane_cron(1, 60) == "0 * * * *", "lane 1 follows Next run"
         assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "20,50 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *", "lanes 2 and 3: 30 minutes at most"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
                                    "## D-20261008-02 | Asks\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n\n"

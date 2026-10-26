@@ -192,6 +192,15 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
     return out
 
 
+def _jitter(ops, lane):
+    """Seconds the app delays this lane's task past its cron time, fixed per task (the scheduled-tasks tool reports it as
+    jitterSeconds; OPS/state/jitter-<lane> holds it). Without it the page's countdown was up to 12 minutes early."""
+    try:
+        return int(open(os.path.join(ops, "state", f"jitter-{lane}"), encoding="utf-8").read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
 def lane_cron_now(ops, lane):
     """The cron the lane's scheduled task has now (OPS/state/cron-<lane>, written by --cron-set); the CEO's setting if unset."""
     try:
@@ -251,7 +260,7 @@ def brief(ops, repo, now=None, usage=None):
     return {"updated": now.isoformat(timespec="seconds"), "usage": {"five": five, "week": week,
             "minutes_old": None if old == float("inf") else round(old)}, "running": running,
             "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
-            "lanes": [{"lane": n, "cron": lane_cron_now(ops, n)} for n in (1, 2, 3)],   # the page's countdown to each lane's next check
+            "lanes": [{"lane": n, "cron": lane_cron_now(ops, n), "jitter": _jitter(ops, n)} for n in (1, 2, 3)],   # the page's countdown
             "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops), repo, now),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}
 
