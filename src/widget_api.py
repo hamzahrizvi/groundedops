@@ -31,12 +31,14 @@ import time
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
-from typing import Literal
+from pydantic import BaseModel, Field, StringConstraints
+from typing import Annotated, Literal
 
 import faq_store
+import pipeline_trace
 import jsonstore
 import quota
+from guards import client_ip as _client_ip, is_local_caller
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +48,33 @@ router = APIRouter(prefix="/widget", tags=["widget"])
 # legitimately pastes 4,000 characters into a support widget.
 MAX_QUESTION_CHARS = int(os.getenv("WIDGET_MAX_QUESTION_CHARS", "500"))
 
+# D-20261020-06: caps for the id-like fields the widget sends. Its ids are
+# 36-char UUIDs and catalogue keys are under 20, so 128 is headroom, not a
+# limit a real embed meets; 35 is the BCP 47 tag length for the word fields.
+MAX_ID_CHARS = 128
+MAX_WORD_CHARS = 35
+
+
+# D-20261008-12: one bound for a chat transcript the widget sends (lead form
+# and enquiry draft). The widget sends 12 turns; 50 turns and 100 000
+# characters a field leave real chats untouched and refuse a megabyte pasted
+# into one turn. widget_config.add_lead still trims what it keeps.
+_TurnValue = Annotated[str, StringConstraints(max_length=100_000)] | int | float | bool | None
+Transcript = Annotated[list[dict[str, _TurnValue]], Field(max_length=50)]
+
 
 class AskRequest(BaseModel):
     q: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
-    session_id: str | None = None
-    visitor_id: str | None = None
-    product: str | None = None
-    category: str | None = None
+    session_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    product: str | None = Field(None, max_length=MAX_ID_CHARS)
+    category: str | None = Field(None, max_length=MAX_ID_CHARS)
     # "standard" or "deep". The MODEL is chosen server-side from this
     # name - see quota.EFFORT. The client never names a model, or anyone
     # could select the most expensive one available.
-    effort: str = "standard"
+    effort: str = Field("standard", max_length=MAX_WORD_CHARS)
     # FAQ disambiguation passthrough.
-    faq_id: str | None = None
+    faq_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     skip_faq: bool = False
     # The visitor's language, as the widget itself determined it (an
     # explicit embed override, the host page's own declared locale, or the
@@ -67,13 +83,13 @@ class AskRequest(BaseModel):
     # own, LLM-based language handling (language.py's looks_foreign/
     # to_english). Any shape survives here -- normalized once, in
     # _resolve_anon_language.
-    language: str | None = None
+    language: str | None = Field(None, max_length=MAX_WORD_CHARS)
 
 
 class FeedbackRequest(BaseModel):
     request_id: str = Field(..., min_length=1, max_length=64)
-    session_id: str | None = None
-    visitor_id: str | None = None
+    session_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     vote: Literal["up", "down"]
     note: str = Field("", max_length=280)
 
@@ -136,28 +152,8 @@ PROGRESS_LINES = {
     "generate":   "Checking the answer against the manual",
     "escalate":   "Trying our backup service",
     "retry":      "Rewriting the answer and checking it again",
+    "widen":      "Widening the search to the whole manual",
 }
-
-
-def _client_ip(request: Request) -> str:
-    """Real client IP behind a reverse proxy.
-
-    Only honours X-Forwarded-For when TRUST_PROXY is set: if the app is
-    ever reachable directly, an attacker could otherwise spoof the header
-    and mint unlimited anonymous identities.
-    """
-    # CF-Connecting-IP first: Cloudflare sets it and a client cannot forge
-    # it, unlike X-Forwarded-For which any caller can prepend to. Getting
-    # this wrong lets anonymous visitors mint unlimited identities and
-    # bypass the per-IP ceiling.
-    cf = request.headers.get("cf-connecting-ip")
-    if cf:
-        return cf.strip()
-    if os.getenv("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes"):
-        fwd = request.headers.get("x-forwarded-for", "")
-        if fwd:
-            return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 def _caller(request: Request, visitor_id: str | None) -> dict:
@@ -217,7 +213,11 @@ def widget_catalog():
         prods = [{"key": p["key"], "name": p["name"],
                   "doc_count": prod_counts.get(p["key"], 0)}
                  for p in (c.get("products") or [])]
-        prods = [p for p in prods if p["doc_count"] > 0]
+        # A range's shared-documents entry is a bucket, not something a
+        # visitor owns (catalog.is_shared_product); its documents already
+        # answer for every product in the range.
+        prods = [p for p in prods if p["doc_count"] > 0
+                 and not catalog_mod.is_shared_product(p["key"])]
         ccount = cat_counts.get(c["key"], 0)
         # Keep a range if either it or any of its products has documents -
         # a document tagged only at category level still makes the range
@@ -277,6 +277,8 @@ def _public_sources(sources) -> list:
     return [{
         "source": s.get("source"),
         "page_label": s.get("page_label"),
+        # Page numbers as ints, so the widget can open the PDF at the first one (D-20261010-14). Same numbers page_label already prints.
+        "pages": s.get("pages") or [],
         "snippet": s.get("snippet"),
         "download_url": s.get("download_url"),
         # Crops from the cited pages: url, page, caption. Already public
@@ -394,19 +396,19 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
 
 
 class DraftRequest(BaseModel):
-    kind: str                                   # "sales" | "support"
-    visitor_id: str | None = None
-    product: str | None = None
+    kind: str = Field(..., max_length=MAX_WORD_CHARS)  # "sales" | "support"
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    product: str | None = Field(None, max_length=MAX_ID_CHARS)
     # What the visitor typed themselves, when they chose to write their own
     # description rather than have the chat summarised.
     notes: str | None = Field(default=None, max_length=2000)
     # Whether to draft from the conversation or from `notes`.
-    source: str = "chat"                        # "chat" | "written"
+    source: str = Field("chat", max_length=MAX_WORD_CHARS)  # "chat" | "written"
     # The conversation so far, sent by the widget — the same shape and the
     # same trust level as the transcript /widget/lead already accepts.
     # Bounded here because prompt cost scales with it, and because there is
     # no legitimate 200-turn support chat.
-    transcript: list | None = None
+    transcript: Transcript | None = None
 
 
 def _assemble_enquiry(kind: str, product: str, notes: str,
@@ -513,6 +515,10 @@ def register(app, answer_query, draft_enquiry=None):
 
     @router.post("/ask")
     async def widget_ask(payload: AskRequest, request: Request):
+        # D-20261008-14: a test session prefix counts only from the box or the
+        # LAN. Set in this request's context; run_in_threadpool copies it into
+        # the pipeline, and /ask/stream runs this handler in its own copy.
+        pipeline_trace.set_local_caller(is_local_caller(request))
         caller = _caller(request, payload.visitor_id)
         tier = caller["tier"]
         level, spec = quota.resolve_effort(payload.effort, tier)
@@ -632,7 +638,8 @@ def register(app, answer_query, draft_enquiry=None):
                 "message": ("The assistant has reached its limit for today. "
                             "Please try again tomorrow, or contact our team."
                             if gate["reason"] == "global_quota" else
-                            "You have used your allowance for today. It resets in 24 hours."),
+                            "You have used your allowance for today. It resets in 24 hours. "
+                            "For help with your question, contact our team."),
             })
 
         started = time.time()

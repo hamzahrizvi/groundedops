@@ -1,13 +1,11 @@
 """9.13: does a stronger model rescue answers the verifier flags?
 
-The plan's population -- 79 flagged turns in logs.jsonl -- went with the
-2026-10-02 log loss (verifier timings were only logged from 09-24 23:51; 2
-such rows survive). So the population is rebuilt by replay: every distinct
-question flagged in the surviving log (no product scope; the log never
-stored it) plus every single-turn "answered" case of the main eval suites
+The population is every single-turn "answered" case of the main eval suites
 (with their product), each run once through the PRODUCTION query() in this
 process. The turns that come back flagged -- after production's own backup
-escalation and grounding retries -- are the population.
+escalation and grounding retries -- are the population. It never reads the
+live log: real visitor questions are not sent to a model by an office tool
+(D-20261015-11).
 
 For each, the exact answer prompt is regenerated on --model (default
 deepseek-v4-pro) with thinking on, through llm.generate (the backup
@@ -46,11 +44,6 @@ def population():
             seen.add(k)
             out.append((q.strip(), product, origin))
 
-    with open("logs.jsonl", encoding="utf-8") as f:
-        for line in f:
-            r = json.loads(line) if line.strip() else {}
-            if str(r.get("flagged")) == "True" and r.get("query"):
-                add(r["query"], None, "log")
     for name in SUITES:
         with open(name, encoding="utf-8") as f:
             d = json.load(f)

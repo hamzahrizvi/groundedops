@@ -50,6 +50,7 @@ import uuid
 import logging
 
 import jsonstore
+from logger import redact
 
 logger = logging.getLogger(__name__)
 
@@ -758,7 +759,7 @@ def record_gap(question: str, scope_key: str | None,
     if not q:
         return
     if not is_curatable_question(q):
-        logger.debug(f"gap not recorded (not a curatable question): {q[:60]!r}")
+        logger.debug(f"gap not recorded (not a curatable question): {redact(q)}")
         return
     key = _gap_key(q)
     if not key:
@@ -1775,7 +1776,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         if _verbatim or _paraphrase:
             logger.info(
                 f"FAQ auto-serve ({'verbatim' if _verbatim else 'paraphrase'}"
-                f" sem={s_sem:.3f} jac={s_verb:.3f}): {question!r}")
+                f" sem={s_sem:.3f} jac={s_verb:.3f}): {redact(question)}")
             return {"mode": "answer", "entry": it,
                     "score": round(max(s_verb, s_sem), 3)}
         if s_sem >= CANDIDATE_COSINE_FLOOR or s_lex >= CANDIDATE_LEXICAL_FLOOR:
@@ -1802,7 +1803,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
     if not scored:
         if record:
             record_gap(question, scope_key, [], language=language)
-        logger.info(f"FAQ: no candidates for {question!r} — going to retrieval")
+        logger.info(f"FAQ: no candidates for {redact(question)} — going to retrieval")
         return {"mode": "none"}
 
     # A product OVERVIEW answers "what is this thing". It must not answer
@@ -1855,7 +1856,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         scored = [t for t in scored if not _is_definitional(t[1])]
         if len(scored) != _before:
             logger.info(f"FAQ: dropped {_before - len(scored)} definitional "
-                        f"entr(ies) for the attribute question {question!r}")
+                        f"entr(ies) for the attribute question {redact(question)}")
 
     # Harvested reference material -- a verbatim spec table, a product
     # overview -- is scored on a stricter bar than curated Q&A.
@@ -1878,7 +1879,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
     if not scored:
         if record:
             record_gap(question, scope_key, [], language=language)
-        logger.info(f"FAQ: only weak harvested matches for {question!r} "
+        logger.info(f"FAQ: only weak harvested matches for {redact(question)} "
                     f"- going to retrieval")
         return {"mode": "none"}
 
@@ -1904,7 +1905,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         if record:
             record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: top match {_best_sem:.3f} semantic with no lexical "
-                    f"overlap for {question!r} - going to retrieval")
+                    f"overlap for {redact(question)} - going to retrieval")
         return {"mode": "none"}
 
     # 0.45 was set when the semantic half of this scoring was dead -- the
@@ -1929,7 +1930,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         if record:
             record_gap(question, scope_key, [], language=language)
         logger.info(f"FAQ: best candidate {scored[0][0]:.3f} < {_floor} for "
-                    f"{question!r} - going to retrieval")
+                    f"{redact(question)} - going to retrieval")
         return {"mode": "none"}
 
     # Relative cut: keep only what's competitive with the best match.
@@ -1966,13 +1967,13 @@ def suggest_candidates(question: str, scope_key: str | None = None,
             if _shared or _paraphrase:
                 _kept.append(t)
             else:
-                logger.info(f"FAQ: dropped {(t[1].get('question') or '')[:40]!r} "
-                            f"({t[2]:.3f}): no content word shared with {question!r}")
+                logger.info(f"FAQ: dropped {t[1].get('id')!r} "
+                            f"({t[2]:.3f}): no content word shared with {redact(question)}")
         if not _kept:
             if record:
                 record_gap(question, scope_key, [], language=language)
             logger.info(f"FAQ: every candidate shared only the product name "
-                        f"for {question!r} - going to retrieval")
+                        f"for {redact(question)} - going to retrieval")
             return {"mode": "none"}
         scored = _kept
 
@@ -1991,7 +1992,7 @@ def suggest_candidates(question: str, scope_key: str | None = None,
                  or scored[0][2] >= _sole_min)):
         _s, _it, _sem_s, _ = scored[0]
         logger.info(f"FAQ auto-serve (sole candidate sem={_sem_s:.3f}) for "
-                    f"{question!r}: {(_it.get('question') or '')[:50]!r}")
+                    f"{redact(question)}: {_it.get('id')!r}")
         return {"mode": "answer", "entry": _it, "score": round(_s, 3)}
 
     # Only question-shaped entries may be OFFERED. A harvested table caption
@@ -2003,8 +2004,8 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         # get here. Serving it beats both offering gibberish and refusing:
         # the ANSWER is a verbatim table, only its title is unpresentable.
         _s, _it, _, _ = scored[0]
-        logger.info(f"FAQ serve-unpresentable ({_s:.3f}) for {question!r}: "
-                    f"{(_it.get('question') or '')[:50]!r}")
+        logger.info(f"FAQ serve-unpresentable ({_s:.3f}) for {redact(question)}: "
+                    f"{_it.get('id')!r}")
         return {"mode": "answer", "entry": _it, "score": round(_s, 3)}
     scored = _showable
 
@@ -2016,6 +2017,6 @@ def suggest_candidates(question: str, scope_key: str | None = None,
         "lexical": round(lex_s, 3),
     } for s, it, sem_s, lex_s in scored[:MAX_CANDIDATES]]
 
-    logger.info(f"FAQ disambiguate {question!r} -> "
-                + "; ".join(f"{c['question'][:40]} ({c['score']})" for c in cands))
+    logger.info(f"FAQ disambiguate {redact(question)} -> "
+                + "; ".join(f"{c['id']} ({c['score']})" for c in cands))
     return {"mode": "disambiguate", "candidates": cands}

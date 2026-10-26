@@ -21,6 +21,9 @@ def test_deep_effort_keeps_the_safety_nets():
         if hasattr(main, "_widget_answer") else True
     assert main.QueryRequest(q="x").forced_by_effort is False
     assert main.QueryRequest(q="x", top_k=10).top_k == 10
+    msrc = inspect.getsource(main)
+    assert 'os.getenv("ONLINE_PROVIDER", "deepseek")' not in msrc.split("async def _widget_answer")[1][:2500]
+    assert "llm.effort_model(model_env)" in msrc
 
 
 def test_a_reranker_outage_is_reported_as_one():
@@ -37,7 +40,10 @@ def test_a_reranker_outage_is_reported_as_one():
         reranker._get = real
     import inspect
     import main
-    assert 'status_code=503' in inspect.getsource(main.query).split("rerank_failed")[1][:800]
+    # Anchored on the outage check itself: the several-ask ranking (D-20261009-09)
+    # mentions rerank_failed earlier in query().
+    assert 'status_code=503' in inspect.getsource(main.query).split(
+        'if _retrieved and _retrieved[0].get("rerank_failed")')[1][:800]
 
 
 def test_a_provider_call_has_an_overall_deadline():

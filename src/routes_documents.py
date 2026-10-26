@@ -38,14 +38,26 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest,
                   x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    removed = delete_source(payload.source)
+    removed = remove_source_now(payload.source)
+    try:
+        import confluence_sync
+        confluence_sync.exclude_removed(payload.source)
+    except Exception as exc:
+        logger.warning("Confluence item for %r not excluded: %s", payload.source, exc)
+    return {"removed_chunks": removed, "source": payload.source}
+
+
+def remove_source_now(source: str) -> int:
+    """What Remove does, for callers inside the server (the Confluence sync)
+    that have no sign-in to show; the route above checks the caller's."""
+    removed = delete_source(source)
     clear_memory()
     try:
         import figures as _figures
-        _figures.remove_figures(payload.source)
+        _figures.remove_figures(source)
     except Exception as exc:
-        logger.warning("figures for %r not removed: %s", payload.source, exc)
-    return {"removed_chunks": removed, "source": payload.source}
+        logger.warning("figures for %r not removed: %s", source, exc)
+    return removed
 
 
 @router.post("/source_chunks")
@@ -463,9 +475,7 @@ def source_file(filename: str):
     basename — without that, "../../etc/passwd" escapes the directory.
     Excluded (internal) sources are refused so they can't be downloaded.
 
-    NOTE: deliberately unauthenticated so the public widget can offer
-    downloads, which means ANY retained document is publicly retrievable by
-    name. Gate this per tenant/product before real customer traffic.
+    Gated in main.py (_TOKEN_GATED_PREFIXES): a proxied caller needs a widget member token; a direct caller does not (D-20261010-32).
     """
     import docstore
     # docstore._safe_basename, not os.path.basename: basename() is
@@ -476,11 +486,9 @@ def source_file(filename: str):
     safe = docstore._safe_basename(filename)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    _lower = safe.lower()
-    from main import EXCLUDED_SOURCES     # the corpus policy main.query applies
-    for _ex in EXCLUDED_SOURCES:
-        if _ex and _ex in _lower:
-            raise HTTPException(status_code=404, detail="Not found")
+    from retrieval_db import is_excluded  # the corpus policy main.query applies
+    if is_excluded(safe):
+        raise HTTPException(status_code=404, detail="Not found")
     # v15: resolved via docstore, which checks <repo>/documents AND the legacy
     # /data/source_files. SOURCE_FILE_DIR alone 404'd any document retained in
     # the newer location -- the answer cited a page, then the link was dead.
@@ -511,11 +519,9 @@ def figure(source: str, name: str):
     safe = docstore._safe_basename(source)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    _lower = safe.lower()
-    from main import EXCLUDED_SOURCES
-    for _ex in EXCLUDED_SOURCES:
-        if _ex and _ex in _lower:
-            raise HTTPException(status_code=404, detail="Not found")
+    from retrieval_db import is_excluded
+    if is_excluded(safe):
+        raise HTTPException(status_code=404, detail="Not found")
     path = _figures.figure_path(safe, docstore._safe_basename(name))
     if not path:
         raise HTTPException(status_code=404, detail="Not found")
@@ -534,17 +540,28 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     category/product — for docs ingested before direct tagging, or to move
     a doc. Updates Chroma metadata in place (no re-embed)."""
     _require_admin(x_admin_password)
+    n = retag_source(payload.source, payload.category_key, payload.product_key)
+    if not n:
+        raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
+    return {"reassigned": n, "source": payload.source,
+            "category": payload.category_key, "product": payload.product_key}
+
+
+def retag_source(source: str, category_key: str | None, product_key: str | None) -> int:
+    """File an indexed source under `product_key` ("a,b" for several, "" for
+    none) in the index and the catalogue. Returns the chunks retagged, 0 when
+    the source is not indexed."""
     from db import get_collection
     col = get_collection()
-    got = col.get(where={"source": payload.source}, include=["metadatas"])
+    got = col.get(where={"source": source}, include=["metadatas"])
     ids = got.get("ids", [])
     if not ids:
-        raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
+        return 0
     # Several products, comma-joined: an installation guide covering the
     # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
     # meant the other product's visitors were never offered it.
     keys = list(dict.fromkeys(
-        k.strip() for k in (payload.product_key or "").split(",") if k.strip()))
+        k.strip() for k in (product_key or "").split(",") if k.strip()))
     # Flags from a previous assignment have to go, or a document moved off
     # a product stays findable under it -- the worst kind of stale tag,
     # because nothing on screen says it is still there. with_product_tags
@@ -553,24 +570,23 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     metas = []
     for m in got["metadatas"]:
         m = with_product_tags(m, keys)
-        m["category"] = payload.category_key
+        m["category"] = category_key
         metas.append(m)
     col.update(ids=ids, metadatas=metas)
     # The catalogue is what reindex.py rebuilds from. Until it was written
     # here too, a retag lived only in Chroma and vanished on the next rebuild.
     try:
-        catalog_mod.refile_source(payload.source, keys)
+        catalog_mod.refile_source(source, keys)
     except Exception as exc:
         logger.warning("reassign_source: catalogue not updated for %r: %s",
-                       payload.source, exc)
+                       source, exc)
     # BM25 and the source inventory both carry the old tags until told.
     try:
         from db import invalidate_retrieval_cache
         invalidate_retrieval_cache()
     except Exception:
         pass
-    return {"reassigned": len(ids), "source": payload.source,
-            "category": payload.category_key, "product": payload.product_key}
+    return len(ids)
 
 
 @router.get("/admin/crossrefs")
@@ -609,8 +625,11 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
     from docindex import source_index
     rows = source_index()
+    from retrieval_db import internal_sources
+    internal = internal_sources()
     out = [{"source": r["source"], "category": r["category"],
-            "product": r["product"], "chunks": r["chunks"]} for r in rows]
+            "product": r["product"], "chunks": r["chunks"],
+            "internal": r["source"] in internal} for r in rows]
     try:
         import docstore as _ds
         for item, r in zip(out, rows):
@@ -622,3 +641,74 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
     except Exception as exc:
         logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
     return {"sources": out}
+
+
+class InternalReq(BaseModel):
+    sources: list[str]
+    internal: bool
+
+
+@router.post("/admin/source_internal")
+def admin_source_internal(payload: InternalReq,
+                          x_admin_password: str | None = Header(default=None)):
+    """Mark documents internal, or customer-facing again, from the
+    Documents page (the Confluence page could already). A synced Confluence
+    document changes its decision there too, or the next sync of a changed
+    page would put the old mark back. FAQs are hand-curated and stay until
+    removed, so the reply lists the ones to offer for removal."""
+    _require_admin(x_admin_password)
+    import confluence_sync
+    sources = list(dict.fromkeys(s for s in payload.sources if s))
+    if not sources:
+        raise HTTPException(status_code=400, detail="No documents given")
+    synced = {}
+    for k, it in confluence_sync._load()["items"].items():
+        if it.get("source") in sources and it.get("synced_version") is not None:
+            synced.setdefault(it["source"], []).append(k)
+    if synced:
+        confluence_sync.set_items([k for ks in synced.values() for k in ks],
+                                  decision="internal" if payload.internal else "approved")
+    rest = [s for s in sources if s not in synced]
+    if rest:
+        from retrieval_db import set_internal
+        set_internal(rest, payload.internal)
+    clear_memory()   # a follow-up could otherwise lean on an earlier answer
+    return {"sources": sources, "internal": payload.internal,
+            "faqs": related_faqs(sources) if payload.internal else []}
+
+
+# Share of an answer's content words that must appear in ONE passage of the
+# documents for the FAQ to be offered as "close wording". Offered unticked, so
+# a loose match costs a glance, not a deletion.
+_RELATED_OVERLAP = 0.7
+
+
+def related_faqs(sources: list[str]) -> list[dict]:
+    """FAQs to offer for removal when `sources` go internal: those made from
+    them (and their translations), marked derived, then others whose answer
+    reads like one of their passages."""
+    import faq_store
+    from db import get_collection
+    items = faq_store._load()
+    wanted = set(sources)
+    derived = {it["id"] for it in items if it.get("source") in wanted}
+    derived |= {it["id"] for it in items if it.get("translation_of") in derived}
+    texts = get_collection().get(where={"source": {"$in": sources}},
+                                 include=["documents"]).get("documents") or []
+    passages = [faq_store._tokens(t) for t in texts]
+    out = []
+    for it in items:
+        row = {"id": it["id"], "question": it.get("question", ""),
+               "answer": it.get("answer", ""), "language": it.get("language", "")}
+        if it["id"] in derived:
+            src = it.get("source") if it.get("source") in wanted else "a document you chose"
+            out.append(dict(row, derived=True, why="made from " + src))
+            continue
+        words = faq_store._tokens(it.get("answer"))
+        if len(words) < 4 or not passages:
+            continue
+        best = max(len(words & p) for p in passages) / len(words)
+        if best >= _RELATED_OVERLAP:
+            out.append(dict(row, derived=False,
+                            why=f"{round(best * 100)}% of its answer is in these documents"))
+    return out

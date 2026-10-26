@@ -29,6 +29,59 @@ logger = logging.getLogger(__name__)
 
 RRF_K = 60
 
+# Internal-only documents, never retrieved, listed, cited or exported
+# (comma-separated substrings matched case-insensitively against source
+# names). Override with the EXCLUDED_SOURCES env var; "" exposes the full
+# corpus (internal deployments, eval_cases_api.json runs). Applied in
+# _matches_scope so every reader of the index gets it, not per call site.
+EXCLUDED_SOURCES = [
+    s.strip().lower()
+    for s in os.getenv("EXCLUDED_SOURCES",
+                       "icu_network_api,icu_age_result_quick_guide").split(",")
+    if s.strip()
+]
+
+# Documents marked Internal on the console's Confluence page, by EXACT name.
+# Not added to EXCLUDED_SOURCES: those are substrings, and "manual.txt" is a
+# substring of "ssp manual.txt", so marking one document would have hidden
+# another. Kept in a file of their own so marking takes effect at once, with
+# no restart; is_excluded() is the one check every reader uses.
+_INTERNAL_PATH = os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json")
+_internal: frozenset | None = None
+_internal_lock = threading.Lock()
+
+
+def internal_sources() -> frozenset:
+    global _internal
+    if _internal is None:
+        import jsonstore
+        _internal = frozenset(jsonstore.load(_INTERNAL_PATH, [], label="internal documents") or [])
+    return _internal
+
+
+def set_internal(sources, on: bool) -> None:
+    """Mark documents internal (on) or customer-facing (off)."""
+    global _internal
+    import jsonstore
+    with _internal_lock:
+        cur = set(internal_sources())
+        cur = cur | set(sources) if on else cur - set(sources)
+        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")
+        _internal = frozenset(cur)
+    try:                                   # inventories and the BM25 index cache by source
+        from db import invalidate_retrieval_cache
+        invalidate_retrieval_cache()
+    except Exception as exc:
+        logger.warning(f"retrieval cache not invalidated after marking internal: {exc}")
+
+
+def is_excluded(source: str | None) -> bool:
+    """True for a document customers must never be answered from: one the
+    EXCLUDED_SOURCES substrings match, or one marked internal."""
+    s = source or ""
+    low = s.lower()
+    return any(ex in low for ex in EXCLUDED_SOURCES) or s in internal_sources()
+
 # How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
 # pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
 # margin retrieve_from_db already computes. See the note at the cut itself.
@@ -300,8 +353,13 @@ def _matches_scope(meta: dict, source_filter: str | None,
     scope = {"product": key} matches chunks tagged with that product;
     scope = {"category": key} matches any chunk in that category. The
     source_filter still supports the single-document 'ask about this doc'
-    flow. None scope = unscoped (whole corpus)."""
+    flow. None scope = unscoped (whole corpus). Internal documents
+    (EXCLUDED_SOURCES) never match unless source_filter names them."""
     if source_filter and meta.get("source") != source_filter:
+        return False
+    # An explicit single-document request (source_filter) still reaches an
+    # internal document, as before; nothing else does.
+    if not source_filter and is_excluded(meta.get("source")):
         return False
     if scope:
         if "product" in scope:
@@ -409,8 +467,14 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
             return ids[:limit]
         return [cid for cid, m in zip(ids, metas)
                 if _matches_scope(m or {}, source_filter, scope)][:limit]
-    res = collection.query(query_embeddings=[q_vec.tolist()], n_results=limit)
-    return res["ids"][0] if res.get("ids") else []
+    res = collection.query(query_embeddings=[q_vec.tolist()], n_results=limit,
+                           include=["metadatas"])
+    ids = res["ids"][0] if res.get("ids") else []
+    metas = (res.get("metadatas") or [None])[0]
+    if not metas:
+        return ids
+    return [cid for cid, m in zip(ids, metas)
+            if _matches_scope(m or {}, None, None)]
 
 
 def apply_arm_guarantee(ranked_ids, keep_n, *arms, guarantee):
@@ -894,7 +958,8 @@ def product_bundle(product: str, ranked: list[dict],
         return []
     mine = sorted((c for c in all_chunks
                    if _matches_scope(c, None, {"product": product})
-                   and not any(ex in (c.get("source") or "").lower() for ex in excluded)),
+                   and not any(ex in (c.get("source") or "").lower() for ex in excluded)
+                   and not is_excluded(c.get("source"))),
                   key=lambda c: (c.get("source") or "", _order_key(c["id"])))
     if sum(len(c.get("text") or "") for c in mine) <= budget:
         return mine
@@ -943,6 +1008,37 @@ def bundle_evidence(bundle: list[dict], answer: str, have: list[dict],
     keys = {_section_key(c) for c in picked[:n]}
     whole = [c for c, _ in pool if _section_key(c) in keys and c not in picked]
     return (picked[:n] + whole)[:max_chunks]
+
+
+def cited_pages(chunks: list[dict], budget: int) -> list[dict]:
+    """The rest of every page the passages come from (D-20261015-02): the
+    chunks of the index on the same (source, page) as a passage, not
+    already among them, page by page in the passages' order and in document
+    order within a page, until `budget` characters. The answer cites these
+    pages; the verifiers judged it against fragments of them. Never raises."""
+    # ponytail: one scan of the chunk cache per turn; index by (source, page) if it shows in timings.
+    try:
+        _, all_chunks = _get_bm25_index(get_collection())
+    except Exception as exc:
+        logger.warning(f"cited pages skipped: {exc}")
+        return []
+    have = {c.get("id") for c in chunks}
+    keys = list(dict.fromkeys((c.get("source"), c.get("page")) for c in chunks
+                              if c.get("source") and isinstance(c.get("page"), int)))
+    found = {k: [] for k in keys}
+    for a in all_chunks:
+        k = (a.get("source"), a.get("page"))
+        if k in found and a.get("id") not in have:
+            found[k].append(a)
+    out, spent = [], 0
+    for k in keys:
+        for a in sorted(found[k], key=lambda a: _order_key(a["id"])):
+            n = len(a.get("text") or "")
+            if spent + n > budget:
+                return out
+            spent += n
+            out.append(dict(a, retrieval_score=0.0, fetched_by="cited_page"))
+    return out
 
 
 TABLE_COMPLETION_CHARS = int(os.getenv("TABLE_COMPLETION_CHARS", "2400"))

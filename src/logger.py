@@ -19,6 +19,7 @@ If you have an existing logs.json, archive or delete it — nothing here
 reads it.
 """
 
+import hmac
 import json
 import logging
 import os
@@ -31,6 +32,17 @@ MAX_ANSWER_LEN = 500
 
 _logger = logging.getLogger(__name__)
 _lock   = threading.Lock()
+_TAG_KEY = os.urandom(16)  # per process, never stored: a tag only matches within one run
+
+
+def redact(text) -> str:
+    """What a console log line may say about visitor text: its length and a
+    short hash, never the text. The process log is outside retention.py's
+    reach (D-20261009-06), so visitor text must never be written there.
+    The tag is keyed with a random per-process key, so it cannot be guessed
+    offline and does not link across restarts."""
+    t = str(text or "")
+    return f"<{len(t)} chars #{hmac.new(_TAG_KEY, t.encode('utf-8'), 'sha256').hexdigest()[:8]}>"
 
 
 def _truncate_answer(answer: str, max_len: int = MAX_ANSWER_LEN) -> str:

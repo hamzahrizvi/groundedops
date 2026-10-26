@@ -1,6 +1,7 @@
 import logging
 import os
 import torch
+from model_pins import revision
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def _get(name: str | None = None):
     if _model is None or _loaded != want:
         logger.info(f"Loading reranker: {want}")
         from sentence_transformers import CrossEncoder   # see embeddings.py
-        _model = CrossEncoder(want)
+        _model = CrossEncoder(want, revision=revision(want))
         _loaded = want
     return _model
 

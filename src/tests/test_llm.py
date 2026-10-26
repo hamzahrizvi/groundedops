@@ -14,6 +14,7 @@ the role="reasoning" chain never appeared to reach deepseek within the
 client's request timeout.
 """
 
+import os
 from unittest.mock import patch
 
 import llm
@@ -240,6 +241,62 @@ def test_local_mode_ignores_key_roles_entirely():
             runtime_config.set_generation_mode("api")
 
 
+# D-20261015-10: the widget's fixed notice names these providers.
+def test_outside_providers_names_default_advanced_and_backup_once_each():
+    with roles({"default": "openai", "advanced": "anthropic", "backup": "deepseek"}):
+        assert llm.outside_providers() == ["openai", "anthropic", "deepseek"]
+    with roles({"default": "openai", "backup": "openai"}):
+        assert llm.outside_providers() == ["openai"]
+
+
+def test_outside_providers_in_local_mode_is_only_the_default_role_escalation():
+    import os
+    from unittest.mock import patch
+    for assigned, expected in (({"default": "openai", "backup": "deepseek"}, ["openai"]),
+                               ({"backup": "deepseek"}, [])):
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": "1"}):
+            with roles(assigned):
+                runtime_config.set_generation_mode("local")
+                try:
+                    assert llm.outside_providers() == expected
+                finally:
+                    runtime_config.set_generation_mode("api")
+    with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": ""}):
+        with roles({"default": "openai", "backup": "deepseek"}):
+            runtime_config.set_generation_mode("local")
+            try:
+                assert llm.outside_providers() == []
+            finally:
+                runtime_config.set_generation_mode("api")
+
+
+def test_escalation_role_follows_the_mode():
+    import os
+    from unittest.mock import patch
+    for flag in ("", "1"):
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": flag}):
+            assert llm.escalation_role() == "backup"
+            runtime_config.set_generation_mode("local")
+            try:
+                assert llm.escalation_role() == ("default" if flag else None)
+            finally:
+                runtime_config.set_generation_mode("api")
+
+
+def test_local_mode_notice_names_the_default_provider_only():
+    import widget_config
+    runtime_config.set_generation_mode("local")
+    try:
+        with patch.dict(os.environ, {"LOCAL_ALLOW_OUTSIDE_ESCALATION": "1"}), \
+                roles({"default": "openai", "backup": "deepseek"}):
+            n = widget_config.ai_notice()
+            assert "OpenAI (USA)" in n and "DeepSeek" not in n, n
+        with roles({"default": "openai"}, keyed=False):
+            assert "processed by" not in widget_config.ai_notice()
+    finally:
+        runtime_config.set_generation_mode("api")
+
+
 def test_deepseek_calls_disable_thinking_unless_asked(monkeypatch=None):
     """DeepSeek V4 thinks by default and bills the thought. Every DeepSeek
     request -- answer and stream alike -- must say so explicitly, and the
@@ -390,3 +447,27 @@ def test_the_verifier_and_selection_calls_are_judgements():
     assert "judging() if _think" in inspect.getsource(main._llm_verified)
     assert "_needs_judgement(question, answer)" in inspect.getsource(main._llm_verified)
     assert inspect.getsource(main.query).count("with judging():") >= 1
+
+
+# D-20261016-05: the deep effort level's forced model.
+def test_deep_effort_in_local_mode_forces_nothing_so_it_stays_local():
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": "deepseek-v4", "ONLINE_PROVIDER": "deepseek"}), \
+         roles({"default": "openai"}):
+        runtime_config.set_generation_mode("local")
+        try:
+            assert llm.effort_model("ONLINE_DEEP_MODEL") is None
+            assert "deepseek" not in llm.outside_providers()
+        finally:
+            runtime_config.set_generation_mode("api")
+
+
+def test_deep_effort_in_api_mode_uses_the_advanced_role_not_online_provider():
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": "claude-opus-x", "ONLINE_PROVIDER": "deepseek"}):
+        with roles({"default": "openai", "advanced": "anthropic"}):
+            assert llm.effort_model("ONLINE_DEEP_MODEL") == ("anthropic", "claude-opus-x")
+            assert "anthropic" in llm.outside_providers()
+        with roles({"default": "openai"}):
+            assert llm.effort_model("ONLINE_DEEP_MODEL") == ("openai", "claude-opus-x")
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}):
+        assert llm.effort_model("ONLINE_DEEP_MODEL") is None
+    assert llm.effort_model(None) is None

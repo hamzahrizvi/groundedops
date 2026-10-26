@@ -205,19 +205,55 @@ def is_commercial_question(q: str) -> bool:
 # manuals first: blind sets 4, 5 and NV4000 (2026-10-07) got the sales reply
 # for "what do i need to buy", "budgeting power supplies", "quoting a job",
 # "order one off RS" and "do we have to pay" (the manual says free), all of
-# which the manuals answer. main._friendly_refusal gives the sales reply when
-# that search finds nothing.
+# which the manuals answer. When that search finds nothing the refusal says so;
+# it no longer turns into the sales reply (D-20261010-01).
+# A rate ("11.2 A per device", "cycles per year") is not a price: only a money
+# word or "how much" makes one.
 _PRICE = re.compile(
     r"\b(?:pric|cost|discount|cheap|expensive|invoic|tariff|rebate|surcharg)\w*"
-    r"|\bquot(?:e|es|ations?)\b|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will|for)\b"
-    r"|\bper\s+(?:unit|device|licence|license|seat|month|year)\b", re.I)
+    r"|\bquot(?:e|es|ations?)\b|\bhow\s+much\s+(?:is|are|does\s+it\s+cost|would|will|for|per)\b", re.I)
+
+
+# A price word beside a technical ask is not a price question (D-20261020-02,
+# blind set 20261019f): "can i use a cheap amazon fire tablet as the remote"
+# is a yes/no the manual answers ("Amazon devices are not supported"), and
+# "how much is it and does it work with the new notes" asks two things. Both
+# got the sales reply. A question deflects only when the price is ALL it
+# asks: no clause of it is a non-commercial question. A clause whose only
+# money word was "a cheap X" or a "£20" counts only as a yes/no ask, and not
+# "is there / do you / can you", which ask the catalogue or the sales team.
+_CLAUSE_SPLIT = re.compile(r"[?.!;,\n]+|\b(?:and|but|also)\b", re.I)
+_ADJ_PRICE = re.compile(
+    r"\b(?:cheap|cheaper|inexpensive|expensive|low[\s-]cost)\s+(?=[\w£$€])", re.I)
+_AMOUNT = re.compile(r"[£$€]\s*\d[\d,.]*")
+_ASKS = re.compile(
+    r"^\s*(?:can|could|will|would|does|do|did|is|are|should|may|must"
+    r"|what|whats|what's|which|how|where|why|when|who)\b", re.I)
+_YES_NO = re.compile(
+    r"^\s*(?:can|could|will|would|does|do|is|are|should)\s+(?!there\b|you\b)", re.I)
+
+
+def _asks_something_else(q: str) -> bool:
+    """True when some clause of q is a question that is not commercial."""
+    for clause in _CLAUSE_SPLIT.split(q or ""):
+        stripped = _ADJ_PRICE.sub("", _AMOUNT.sub("", clause))
+        if _COMMERCIAL.search(stripped):
+            continue
+        if stripped != clause:
+            if _YES_NO.search(stripped):
+                return True
+        elif _ASKS.search(clause):
+            return True
+    return False
 
 
 def is_price_question(q: str) -> bool:
-    """A commercial question that asks what something costs: deflected
-    before retrieval. Other commercial questions search first."""
+    """A commercial question that asks only what something costs: deflected
+    before retrieval. Other commercial questions, and a price word beside a
+    technical ask, search first."""
     q = q or ""
-    return is_commercial_question(q) and bool(_PRICE.search(q))
+    return (is_commercial_question(q) and bool(_PRICE.search(q))
+            and not _asks_something_else(q))
 
 
 # ── spec index ────────────────────────────────────────────────────────────
@@ -270,6 +306,11 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
         key, name, cat = source_to_product.get(fname, ("", "", ""))
         if not key:
             continue
+        # Spec answers go to customers: an internal document's tables must
+        # not reach them by this route either (the ICU Network API PDF did,
+        # being filed under a product while excluded everywhere else).
+        if _excluded(fname):
+            continue
         path = os.path.join(doc_dir, fname)
         # Opened ONCE for the whole document and handed to tables_on_page,
         # which would otherwise reopen it for every page -- this used to be
@@ -314,9 +355,20 @@ def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
     except OSError:
         files = []
     mapping = sorted((k, list(v)) for k, v in (source_to_product or {}).items())
-    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping},
+    # Which documents are internal is part of what the index was built from:
+    # marking one must rebuild it without that document's rows.
+    internal = sorted(f for f, _ in files if _excluded(f))
+    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping, "internal": internal},
                        sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _excluded(fname: str) -> bool:
+    try:
+        from retrieval_db import is_excluded
+    except Exception:                      # no index stack (unit tests): nothing is internal
+        return False
+    return is_excluded(fname)
 
 
 def _load_index_from_disk(key: str) -> list[dict] | None:
@@ -782,7 +834,7 @@ def answer(question: str, faq_items: list[dict], index: list[dict],
                 "products": [h["product"] for h in chosen]}
 
     # 2. A need described in words ("anything that sorts and pays out coins").
-    terms = _terms(question)
+    terms = {t for t in _terms(question) if t not in _STOP}
     if terms and not scoped:
         scored = []
         for f in _overviews(faq_items):

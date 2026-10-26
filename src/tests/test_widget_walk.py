@@ -41,7 +41,8 @@ STREAM_OK = _sse(
     ("done", {"flagged": False}))
 MANUAL = "NV9 Manual.pdf"
 STREAM_DETAIL = _sse(
-    ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12"}],
+    ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12",
+                           "download_url": "/source_file/x", "pages": [12]}],
               "request_id": "rid-mc", "role": "fast",
               "more_context": {"kind": "detail", "label": "x", "support": False,
                                "document": {"source": MANUAL, "download_url": "/source_file/x",
@@ -70,6 +71,7 @@ STREAM_429 = _sse(
 posted = []
 stream_body = [STREAM_OK]
 host_token = [""]
+widget_cfg = [{}]
 
 
 def _stub(route):
@@ -85,6 +87,8 @@ def _stub(route):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(FAQ))
     if "/widget/catalog" in url:
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(CATALOG))
+    if "/widget/config" in url:
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(widget_cfg[0]))
     if url.endswith("/widget/ask/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body=stream_body[0])
     if url.endswith("/widget/lead"):
@@ -117,6 +121,7 @@ def setup_function(func):
     global _page
     posted.clear()
     stream_body[0] = STREAM_OK
+    widget_cfg[0] = {}
     host_token[0] = 'data-token="member-token"' if "signed_in" in func.__name__ else ""
     _page = _browser.new_page()
     _page.route("**/*", _stub)
@@ -160,6 +165,18 @@ def test_a_limit_reached_says_so_instead_of_blaming_the_connection():
     _page.wait_for_selector(".go-b.bot:has-text('reached its limit')")
     assert _page.locator("text=check your connection").count() == 0
     assert _page.locator("button:has-text('Start a new chat')").count() == 1
+    assert _page.locator("button:has-text('Email support')").count() == 0
+
+
+def test_a_daily_allowance_stop_offers_a_route_to_a_person():
+    stream_body[0] = _sse(("error", {"status": 429, "detail": {
+        "error": "quota_exceeded", "reason": "quota",
+        "message": "You have used your allowance for today. It resets in 24 hours. "
+                   "For help with your question, contact our team."}}))
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-b.bot:has-text('contact our team')")
+    assert _page.locator("button:has-text('Email support')").count() == 1
+    assert _page.locator("button:has-text('Start a new chat')").count() == 0
 
 
 def test_the_contact_form_gives_a_reference():
@@ -178,11 +195,20 @@ def test_the_contact_form_gives_a_reference():
 SAVED_COUNT = "JSON.parse(localStorage.getItem('groundedops_widget_v2') || '{}').messages.length"
 
 
+def _open_chips():
+    """The chips after an answer sit folded behind one pill; open the newest."""
+    _page.wait_for_selector(".go-chipfold > summary")
+    _page.locator(".go-chipfold > summary").last.click()
+
+
 def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
     stream_body[0] = STREAM_DETAIL
     _ask("How do I remove the bezel?")
+    _open_chips()
     _page.wait_for_selector("button:has-text('Show more from the manual')")
-    assert _page.locator("summary:has-text('Verified against NV9 Manual, page 12')").count() == 1
+    assert _page.locator(".go-srcline:has-text('Verified against NV9 Manual, page 12')").count() == 1
+    assert _page.locator(".go-srcline a:has-text('Open page 12')").count() == 1
+    assert _page.locator(".go-src").count() == 0, "one source, no figures: no Sources (1) row"
     assert _page.locator("button:has-text('Open NV9 Manual, page 12')").count() == 1
     assert _page.locator("button:has-text('What voltage does it need?')").count() == 1
     assert _page.locator("button:has-text('How do I clean the sensor?')").count() == 1
@@ -198,6 +224,7 @@ def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
 def test_a_related_question_is_asked_by_id():
     stream_body[0] = STREAM_DETAIL
     _ask("How do I remove the bezel?")
+    _open_chips()
     _page.wait_for_selector("button:has-text('What voltage does it need?')")
     _page.click("button:has-text('What voltage does it need?')")
     _page.wait_for_function("document.querySelectorAll('.go-b.usr').length >= 2")
@@ -212,8 +239,156 @@ def test_a_signed_in_refusal_offers_the_closest_page_beside_support():
     assert _page.locator("button:has-text('Open NV9 Manual, page 30')").count() == 1
 
 
+def test_a_guest_sees_the_source_line_with_a_download():
+    stream_body[0] = STREAM_DETAIL
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-srcline")
+    assert "Verified against NV9 Manual, page 12" in _page.inner_text(".go-srcline")
+    assert _page.locator(".go-srcline a:has-text('Download')").count() == 1
+    assert _page.locator("text=Open page").count() == 0
+
+
+def test_signed_in_two_sources_show_the_first_and_fold_the_rest():
+    stream_body[0] = _sse(
+        ("meta", {"sources": [
+            {"source": MANUAL, "page_label": "page 12", "pages": [12],
+             "download_url": "/source_file/x"},
+            {"source": "NV9 Wiring.pdf", "page_label": "pages 3, 4", "pages": [3, 4],
+             "download_url": "/source_file/y"}],
+            "request_id": "rid-two", "role": "fast"}),
+        ("delta", {"text": ANSWER}))
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-srcline")
+    assert _page.locator(".go-srcline").count() == 1
+    assert "NV9 Manual, page 12" in _page.inner_text(".go-srcline")
+    assert _page.locator("summary:has-text('Sources (2)')").count() == 1
+    _page.click("summary:has-text('Sources (2)')")
+    assert _page.locator(".go-src a:has-text('Open page 3')").count() == 1
+
+
+def test_a_refusal_shows_no_source_line():
+    stream_body[0] = STREAM_REFUSAL.replace(
+        '"sources": []',
+        '"sources": [{"source": "' + MANUAL + '", "page_label": "page 30", "pages": [30], '
+        '"download_url": "/source_file/x"}]')
+    _ask("Can it make coffee?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator(".go-srcline").count() == 0
+    assert _page.locator(".go-src").count() == 0
+
+
+def test_a_faq_answer_says_from_not_verified():
+    stream_body[0] = _sse(
+        ("meta", {"sources": [{"source": MANUAL, "page_label": "page 12", "pages": [12]}],
+                  "request_id": "rid-faq", "from_faq": True, "faq_reviewed": True,
+                  "flagged": False}),
+        ("delta", {"text": ANSWER}))
+    _ask("How do I remove the bezel?")
+    _page.wait_for_selector(".go-srcline")
+    assert _page.locator(".go-srcline:has-text('From NV9 Manual, page 12')").count() == 1
+    assert _page.locator("text=Verified against").count() == 0
+
+
 def test_a_guest_is_not_offered_a_document_it_cannot_open():
     stream_body[0] = STREAM_REFUSAL
     _ask("Can it make coffee?")
     _page.wait_for_selector("button:has-text('Email support')")
     assert _page.locator("button:has-text('Open NV9 Manual')").count() == 0
+
+
+PHONE = "+44 161 000 0000"
+SUPPORT_FORM = {"title": "Talk to support", "allow_summary": False, "routed": False,
+                "phone": PHONE,
+                "fields": [{"id": "s_email", "label": "Email", "type": "email", "required": True}]}
+# The four endings src/main.py _friendly_refusal can give a refusal.
+SERVER_REFUSALS = [
+    "I don't have that in the product documentation about the NV9.\n\nOur support team can help with this one.",
+    "I don't have that in the product documentation about the NV9.\n\nHere are some things I can answer:\n- How do I remove the bezel?\n\nIf you meant something else, our support team can help with the detail I don't hold.",
+    "I don't have that in the product documentation about the NV9.\n\nThe manual refers you to the Technical Data sheet for this.\n\nOur support team can send you that, or I can answer anything the user manual does cover.",
+    "I don't have that in the product documentation about the NV9.\n\nThe manual covers this in its drawings section.\n\nOur support team can help with that, or I can answer anything else the user manual covers.",
+]
+HANDOFF = ("Of course \u2014 I'll hand this over to a person. Use the support button below "
+           "to leave your details and a short note of what you need, and our support team "
+           "will pick it up from there.")
+BOTS_AFTER_QUESTION = """(() => { const all = [...document.querySelectorAll('.go-b')];
+  const i = all.map(b => b.classList.contains('usr')).lastIndexOf(true);
+  return all.slice(i + 1).filter(b => b.classList.contains('bot')).length; })()"""
+
+
+def _refusal(text, role="rejected"):
+    return _sse(("meta", {"sources": [], "request_id": "rid-r", "role": role,
+                          "offer_support": True}),
+                ("delta", {"text": text}))
+
+
+def _reopen():
+    global _page
+    _page.close()
+    _page = _browser.new_page()
+    _page.route("**/*", _stub)
+    _page.goto("https://example.test/")
+    _page.click(".go-launch")
+
+
+def test_a_server_refusal_that_offers_support_is_one_bubble():
+    for i, text in enumerate(SERVER_REFUSALS):
+        if i:
+            _reopen()
+        stream_body[0] = _refusal(text)
+        _ask("Can it make coffee?")
+        _page.wait_for_selector("button:has-text('Email support')")
+        assert _page.evaluate(BOTS_AFTER_QUESTION) == 1, text
+        assert _page.locator("text=rather point you at someone").count() == 0, text
+        assert _page.locator("button:has-text('Try rewording my question')").count() == 1
+
+
+def test_a_refusal_without_a_support_line_keeps_the_widget_offer():
+    stream_body[0] = _refusal("The NV9 documentation doesn't mention Bluetooth, so I can't confirm it either way rather than guess.")
+    _ask("Does it have Bluetooth?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator(".go-b.bot:has-text('rather point you at someone')").count() == 1
+    assert _page.evaluate(BOTS_AFTER_QUESTION) == 2
+
+
+def test_with_a_phone_the_refusal_offers_it_as_a_chip_not_a_second_bubble():
+    widget_cfg[0] = {"support_form": SUPPORT_FORM}
+    _reopen()   # config is read when the panel first opens
+    stream_body[0] = _refusal(SERVER_REFUSALS[0])
+    _ask("Can it make coffee?")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.evaluate(BOTS_AFTER_QUESTION) == 1
+    labels = _page.locator(".go-chip").all_inner_texts()
+    assert labels.index("Email support") < labels.index("Call " + PHONE), labels
+
+
+def test_the_handoff_turn_is_unchanged():
+    widget_cfg[0] = {"support_form": SUPPORT_FORM}
+    _reopen()
+    stream_body[0] = _refusal(HANDOFF, role="handoff")
+    _ask("I want to talk to a person")
+    _page.wait_for_selector("button:has-text('Email support')")
+    assert _page.locator(".go-b.bot:has-text('call them on " + PHONE + "')").count() == 1
+    assert _page.locator("button:has-text('Call " + PHONE + "')").count() == 0
+    assert _page.locator("text=rather point you at someone").count() == 0
+
+
+NOTICE = ("AI assistant: answers come from our manuals and can be wrong. Questions are kept "
+          "for 90 days and may be processed by OpenAI (USA) and DeepSeek (China).")
+
+
+def test_the_ai_notice_sits_under_the_welcome_line_for_a_guest():
+    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
+    _reopen()
+    _page.wait_for_selector(".go-notice")
+    assert _page.inner_text(".go-notice") == NOTICE
+    assert _page.locator(".go-notice a").count() == 0
+    assert _page.locator(".go-log > .go-notice").count() == 1
+
+
+def test_the_ai_notice_and_privacy_link_show_signed_in():
+    widget_cfg[0] = {"ai_notice": NOTICE, "privacy_url": "https://example.test/privacy",
+                     "welcome": "Hello from the operator"}
+    _reopen()
+    _page.wait_for_selector(".go-notice a")
+    assert _page.get_attribute(".go-notice a", "href") == "https://example.test/privacy"
+    assert NOTICE in _page.inner_text(".go-notice")

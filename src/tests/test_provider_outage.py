@@ -74,8 +74,9 @@ def test_escalation_does_not_fire_without_an_assigned_backup():
                     if not l.lstrip().startswith("#"))
     assert 'generate("deepseek"' not in src, \
         "escalation must not hardcode a provider; it follows the backup role"
-    assert "_backup_provider" in src and 'keystore.get_role("backup")' in src, \
-        "escalation must read the assigned backup role"
+    assert ("_backup_provider" in src and "keystore.get_role(_esc_role)" in src
+            and "escalation_role()" in src), \
+        "escalation must read the role escalation_role picks for the mode"
     # And it must be gated on that role being set, so an unassigned backup
     # means no automatic spend at all.
     assert "and _backup_provider)" in src, \
@@ -122,6 +123,131 @@ def test_a_forced_model_that_returns_nothing_is_not_a_documentation_gap():
     assert "gpt-4o-mini" in r["answer"], "say WHICH model failed"
     assert r["service_degraded"] is True,         "a failed generation is degraded service, not a missing answer"
     gap.assert_not_called()  # nobody failed to answer it; the model never ran
+
+
+def _escalation_stack(stack, roles):
+    """Patch stack for a flagged local answer; returns the `generate` mock."""
+    from unittest.mock import patch
+    chunk = {"id": "u1", "text": "Connect the device with a USB-B cable.",
+             "source": "MyCheckr User Manual-v7.pdf", "page": 9,
+             "product": "mycheckr", "category": "", "rerank_score": 0.97}
+    main.APP_STATE["ready"] = True
+    po = lambda *a, **k: stack.enter_context(patch.object(*a, **k))
+    po(main, "retrieve_from_db", return_value=[chunk])
+    po(main, "rerank", return_value=[chunk])
+    po(main.faq_store, "suggest_candidates", return_value={"mode": "none"})
+    po(main, "_structures_for", return_value=[])
+    po(main.more_context, "build", return_value={"kind": "support"})
+    po(main.faq_store, "record_gap")
+    po(main, "log_interaction")
+    po(main, "generate_with_fallback", return_value={
+        "text": "Use a USB-B cable.", "provider": "local", "model": "mistral"})
+    po(main, "check_grounding", return_value=(False, 0.1))
+    po(main, "_lexically_supported", return_value=False)
+    po(main, "_llm_verified", return_value=False)
+    po(main, "grounding_retries", return_value=0)
+    gen = po(main, "generate", return_value=None)
+    po(main.keystore, "get_role", side_effect=lambda r: roles.get(r))
+    return gen
+
+
+def test_local_mode_escalates_to_the_default_role_and_api_mode_to_backup():
+    import os
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    with ExitStack() as st:
+        gen = _escalation_stack(st, {"default": "openai", "backup": "deepseek"})
+        st.enter_context(patch.dict(os.environ, {
+            "MODEL_ROLE_DEFAULT": "gpt-test", "MODEL_ROLE_BACKUP": "ds-test"}))
+        for role, provider, model in (("default", "openai", "gpt-test"),
+                                      ("backup", "deepseek", "ds-test")):
+            with patch.object(main, "escalation_role", return_value=role):
+                gen.reset_mock()
+                main.query(main.QueryRequest(q="How do I connect the MyCheckr?"))
+                called = [(c.args[0], c.args[2]) for c in gen.call_args_list]
+                assert (provider, model) in called, (role, called)
+                assert all(p == provider for p, _ in called), (role, called)
+
+
+def test_no_escalation_when_the_mode_role_is_unassigned():
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    with ExitStack() as st:
+        gen = _escalation_stack(st, {"backup": "deepseek"})
+        with patch.object(main, "escalation_role", return_value="default"):
+            main.query(main.QueryRequest(q="How do I connect the MyCheckr?"))
+        assert gen.called is False
+
+
+def test_local_mode_with_the_switch_off_refuses_and_sends_nothing_out():
+    """D-20261016-13: the harness stubs llm, so the real escalation_role is
+    covered in test_llm; here: when it returns None (switch off) a flagged
+    answer calls no provider."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    with ExitStack() as st:
+        gen = _escalation_stack(st, {"default": "openai", "backup": "deepseek"})
+        with patch.object(main, "escalation_role", return_value=None):
+            r = main.query(main.QueryRequest(q="How do I connect the MyCheckr?"))
+        assert gen.called is False
+        assert "USB-B" not in r["answer"]
+
+
+def test_deep_health_is_private_but_plain_health_is_public():
+    """D-20261010-24: from outside, ?deep=1 is a 404 and spends no provider
+    call; from the box, the LAN, the docker bridge or with a staff-tier bearer token (a website member token is a 404, D-20261010-33)
+    it answers in full, PUBLIC_ONLY included. Plain /health stays public."""
+    from unittest.mock import patch
+    import requests
+    import quota
+    from fastapi.testclient import TestClient
+    calls = []
+
+    def fake_get(*a, **k):
+        calls.append(a)
+        raise requests.ConnectionError("down")
+
+    ext = {"cf-connecting-ip": "203.0.113.9"}
+    full = lambda r: (r.status_code in (200, 503)
+                      and "provider_reachable" in r.json() and "roles" in r.json())
+    with patch.object(requests, "get", side_effect=fake_get), \
+         patch.object(main.keystore, "get_key", return_value="k"), \
+         patch.object(main.keystore, "has_key", return_value=True), \
+         patch.object(main.keystore, "get_role",
+                      side_effect=lambda r: None if r == "backup" else "openai"):
+        c = TestClient(main.app)                                  # socket "testclient" (private in the harness)
+        for url in ("/health?deep=1", "/api/health?deep=1", "/health?deep=0"):
+            assert c.get(url, headers=ext).status_code == 404, url
+        assert c.get("/health?deep=1",
+                     headers={**ext, "authorization": "Bearer bad.token"}).status_code == 404
+        member = quota.issue_token("m1", "member")                 # a website customer's token
+        assert c.get("/health?deep=1",
+                     headers={**ext, "authorization": "Bearer " + member}).status_code == 404
+        pub = TestClient(main.app, client=("198.51.100.4", 50000))  # no proxy, public socket
+        assert pub.get("/health?deep=1").status_code == 404
+        r = c.get("/health", headers=ext)
+        assert r.status_code == 200 and r.json() == {"status": "ok"}
+        assert calls == [], "an outside caller must not reach a provider"
+
+        for host in ("127.0.0.1", "172.17.0.1"):                   # the box; docker's bridge
+            r = TestClient(main.app, client=(host, 50000)).get("/health?deep=1")
+            assert full(r), (host, r.status_code)
+        assert calls, "the local deep probe must still contact the provider"
+
+        tok = quota.issue_token("uptime-monitor", "staff")
+        r = c.get("/health?deep=1", headers={**ext, "authorization": "Bearer " + tok})
+        assert full(r), r.status_code
+        from types import SimpleNamespace
+        req = lambda t: SimpleNamespace(headers={"authorization": "Bearer " + t})
+        assert main._bearer_ok(req(member)) and main._bearer_ok(req(tok))
+        assert main._bearer_ok(req(tok), min_tier="staff")
+        assert not main._bearer_ok(req(member), min_tier="staff")
+
+        with patch.object(main, "PUBLIC_ONLY", True):
+            r = TestClient(main.app, client=("127.0.0.1", 50000)).get("/health?deep=1")
+            assert full(r), r.status_code
+            assert c.get("/health?deep=1", headers=ext).status_code == 404
+            assert c.get("/health", headers=ext).status_code == 200
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ _matches_scope, the dense arm filters server-side in Chroma via a `where`
 clause. Widening only the first left the guide still unreachable, because
 the dense arm never saw it. That is the failure this file is really
 guarding -- two filters expressing one rule.
+(That guide is now internal-only, EXCLUDED_SOURCES; the example below uses a neutral name.)
 """
 import os
 import sys
@@ -25,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import retrieval_db as R  # noqa: E402
 
-SHARED = {"source": "ICU_Age_Result_Quick_Guide_v1_1.pdf",
+SHARED = {"source": "Biometrics_Shared_Install_Checklist.pdf",
           "product": "biometrics_general", "category": "biometrics",
           "prod_biometrics_general": True}
 MYCHECKR = {"source": "MyCheckr User Manual-v7.pdf",
@@ -131,6 +132,35 @@ def test_the_dense_arm_still_returns_exactly_limit_ids():
     ids, col = _dense(rows, 4, {"product": "mycheckr"})
     assert ids == ["m-0", "m-1", "m-2", "m-3"]
     assert col.asked[0]["n_results"] == 8
+    assert "metadatas" in col.asked[0]["include"]
+
+
+INTERNAL = dict(SHARED, source="ICU_Age_Result_Quick_Guide_v1_1.pdf")
+
+
+def test_the_default_excludes_the_confidential_age_result_guide():
+    """D-20261019-12: the guide says "Private & Confidential" on every page."""
+    if "EXCLUDED_SOURCES" in os.environ:
+        return  # an override is the operator's choice; only the default is asserted
+    assert any(ex in "icu_age_result_quick_guide_v1_1.pdf"
+               for ex in R.EXCLUDED_SOURCES)
+    assert any(ex in "icu_network_api-v1.0.50.pdf" for ex in R.EXCLUDED_SOURCES)
+
+
+def test_an_internal_document_is_out_of_every_scope():
+    """Every reader of the index goes through _matches_scope (BM25, dense,
+    the documents-in-scope list, titles, the export), so one rule here
+    keeps it out of all of them -- not a filter per call site."""
+    for scope in ({"product": "mycheckr"}, {"category": "biometrics"}, None):
+        assert not R._matches_scope(INTERNAL, None, scope)
+    # an explicit single-document request still reaches it, as before
+    assert R._matches_scope(INTERNAL, INTERNAL["source"], None)
+
+
+def test_the_unscoped_dense_arm_drops_an_internal_document():
+    rows = [("int-1", INTERNAL), ("mycheckr-1", MYCHECKR)]
+    ids, col = _dense(rows, 2, None)
+    assert ids == ["mycheckr-1"]
     assert "metadatas" in col.asked[0]["include"]
 
 

@@ -105,6 +105,8 @@ os.environ["WIDGET_CONFIG_PATH"] = _scratch("widget_config.json")
 os.environ["WIDGET_LEADS_PATH"] = _scratch("widget_leads.json")
 os.environ["WIDGET_FEEDBACK_PATH"] = _scratch("widget_feedback.json")
 os.environ["CATALOG_CONFIG"] = _scratch("catalog.json")
+os.environ["CONFLUENCE_SYNC_STATE"] = _scratch("confluence_sync.json")
+os.environ["INTERNAL_SOURCES_PATH"] = _scratch("internal_sources.json")
 os.environ["ACCOUNTS_PATH"] = _scratch("accounts.json")
 os.environ["ACCOUNT_REQUESTS_PATH"] = _scratch("account_requests.json")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
@@ -260,19 +262,21 @@ stub("db", get_collection=lambda: _Collection(), reset_collection=lambda: None,
 stub("embeddings", _get_model=lambda: None)
 stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
 stub("structure", extract_structured_block=lambda r, query=None: None)
+from logger import redact as _real_redact  # the real one: the stub below replaces the module
 stub("logger", log_interaction=lambda *a, **k: None,
-     log_feedback=lambda *a, **k: None)
+     log_feedback=lambda *a, **k: None, redact=_real_redact)
 stub("router", route_model=lambda q: ("accurate", ("local", "mistral")))
 stub("grounding", check_grounding=lambda a, c, threshold=0.55: (True, 0.9),
      _get_nli_model=lambda: None)
 stub("llm", generate=lambda *a, **k: dict(GEN_RESPONSE),
      generate_with_fallback=_generate_with_fallback,
      warmup_local_models=lambda m=None: {}, RETHINK_OPTIONS=[],
-     condense_query=lambda q, h: q)
+     condense_query=lambda q, h: q, effort_model=lambda model_env: None,
+     escalation_role=lambda: "backup")
 stub("runtime_config", get_settings=lambda: {"mode": "free"},
      set_generation_mode=lambda m: None, set_local_models_loaded=lambda v: None,
      set_online_provider=lambda p: None)
-stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s: None,
+stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s=None: None,
      get_history=lambda s: [], get_last_query=lambda s: None)
 stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0})
 # complete_procedures is a PASS-THROUGH, not a no-op returning []. It is
@@ -289,7 +293,15 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
      apply_arm_guarantee=lambda ranked_ids, keep_n, *a, **k: list(
          ranked_ids[:keep_n]),
      complete_procedures=lambda chunks, *a, **k: chunks,
-     _invalidate_bm25_cache=lambda: None)
+     cited_pages=lambda chunks, *a, **k: [],
+     _invalidate_bm25_cache=lambda: None,
+     EXCLUDED_SOURCES=["icu_network_api", "icu_age_result_quick_guide"],
+     # The real rule's substring half: no document is marked internal here.
+     is_excluded=lambda source: any(
+         ex in (source or "").lower()
+         for ex in ("icu_network_api", "icu_age_result_quick_guide")),
+     internal_sources=lambda: frozenset(),
+     set_internal=lambda sources, on: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
 # faked: more_context.py depends on it to tell new material from a reworded
@@ -304,6 +316,10 @@ from text_utils import normalize_markdown_tables as _real_normalize_markdown  # 
 # which entity a "does X work with Y" question is about, and a lambda here
 # would silently answer None, making every capability test pass vacuously.
 from text_utils import capability_target as _real_capability_target  # noqa: E402
+# Pure, and handed through for the same reason (D-20261009-09): a stub would
+# make every several-ask test pass vacuously.
+from text_utils import split_asks as _real_split_asks  # noqa: E402
+from text_utils import keep_answered_part as _real_keep_answered  # noqa: E402
 
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
@@ -314,7 +330,8 @@ stub("text_utils",
      stem=_real_stem, is_more_request=_real_is_more,
      is_step_reference=_real_is_step_ref,
      capability_target=_real_capability_target,
-     normalize_markdown_tables=_real_normalize_markdown)
+     normalize_markdown_tables=_real_normalize_markdown,
+     split_asks=_real_split_asks, keep_answered_part=_real_keep_answered)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],
      get_conversation=lambda *a: None, delete_conversation=lambda *a: True)

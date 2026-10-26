@@ -121,6 +121,13 @@ services:
       # host and can be backed up with ordinary tools.
       - ../documents:/data/documents
     restart: unless-stopped
+    # The process log is outside retention.py (D-20261009-06): no visitor
+    # text is written to it, and it rolls over at 5 x 10 MB anyway.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # The `frontend` service was removed in v15.2 along with the React SPA it
   # served. It was a third chat surface duplicating the admin console's test

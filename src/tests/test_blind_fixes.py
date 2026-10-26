@@ -47,6 +47,21 @@ def test_the_quantity_arm_matches_the_unit_asked():
     assert R._units("error 5 after 3 flashes") == set()
 
 
+def test_a_passage_is_labelled_with_its_heading():
+    """D-20261016-15: look-alike tables differ only by their heading."""
+    assert main._passage_heading({"section": "Power Requirements › Supply Currents › NV11+"}) == \
+        ', under "Power Requirements › Supply Currents › NV11+"'
+    assert main._passage_heading({"section": 'a "b" [c]\n d'}) == ", under \"a 'b' (c) d\""
+    for chunk in ({"section": ""}, {"section": None}, {}):
+        assert main._passage_heading(chunk) == "", chunk
+    names = {"nv9usb": "NV9USB+"}
+    lab = main._verify_label({"source": "M.pdf", "page": 14, "product": "nv9usb",
+                              "section": "Supply Currents › NV11+"}, names)
+    assert lab == '[M.pdf, page 14, from the NV9USB+ documentation, under "Supply Currents › NV11+"]\n', lab
+    p = main.build_answer_prompt("", "[Passage 1 of 1]\nx", "q")
+    assert "Take a figure only from a passage whose heading matches" in p
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

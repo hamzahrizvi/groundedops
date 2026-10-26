@@ -69,9 +69,24 @@ _SEED = {
 
 def _load() -> dict:
     data = jsonstore.load(_PATH, None, label="catalogue")
-    if isinstance(data, dict) and data.get("categories"):
-        return data
-    return json.loads(json.dumps(_SEED))  # deep copy
+    if not (isinstance(data, dict) and data.get("categories")):
+        data = json.loads(json.dumps(_SEED))  # deep copy
+    return _with_shared(data)
+
+
+def _with_shared(data: dict) -> dict:
+    """Every range has its "<range>_general" entry, the one retrieval treats
+    as shared by all the range's products (retrieval_db._matches_scope).
+    Coin Hoppers had none -- its seed entry was "ch_shared", which retrieval
+    never read, and that was gone too -- so nothing could be filed as shared
+    across the range. Added here, so it holds for a catalogue of any age; it
+    is written out with the next save."""
+    for c in data.get("categories", []):
+        prods = c.setdefault("products", [])
+        if not any(p.get("key") == f"{c['key']}_general" for p in prods):
+            prods.insert(0, {"key": f"{c['key']}_general",
+                             "name": "General (shared docs)", "sources": []})
+    return data
 
 
 def _save(data: dict) -> None:
@@ -342,6 +357,9 @@ def delete_product(category_key: str, product_key: str,
             raise ValueError(f"unknown category '{category_key}'")
         if not any(p.get("key") == product_key for p in cat.get("products", [])):
             raise ValueError(f"unknown product '{product_key}'")
+        if product_key == f"{category_key}_general":
+            raise ValueError("a range's shared documents entry cannot be deleted; "
+                             "move its documents instead")
         if reassign_to:
             known = {p.get("key")
                      for c in data.get("categories", [])
