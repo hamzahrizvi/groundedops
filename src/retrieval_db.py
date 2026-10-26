@@ -15,6 +15,7 @@ For years the window was exactly top_k and this docstring's promise did not
 hold in practice.
 """
 
+import functools
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from rank_bm25 import BM25Okapi
 from embeddings import embed_query
 from db import get_collection
 from text_utils import rrf_merge
+from docstore import _safe_basename
 
 logger = logging.getLogger(__name__)
 
@@ -41,46 +43,177 @@ EXCLUDED_SOURCES = [
     if s.strip()
 ]
 
-# Documents marked Internal on the console's Confluence page, by EXACT name.
+# Documents marked Internal on the console's Confluence page, by name, compared case-folded on the
+# bare file name (see _name_key), still never as a substring.
 # Not added to EXCLUDED_SOURCES: those are substrings, and "manual.txt" is a
 # substring of "ssp manual.txt", so marking one document would have hidden
 # another. Kept in a file of their own so marking takes effect at once, with
 # no restart; is_excluded() is the one check every reader uses.
 _INTERNAL_PATH = os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json")
 _internal: frozenset | None = None
+_internal_good: frozenset | None = None   # last set read from a readable file
 _internal_lock = threading.Lock()
 
 
+class _Everything(frozenset):
+    """What an unreadable internal_sources.json means on a cold start: every
+    document counts as internal (`in` is always true), so nothing is answered
+    from the documents until the file is repaired. Fail closed."""
+    def __contains__(self, item):
+        return True
+
+
 def internal_sources() -> frozenset:
-    global _internal
+    """Names marked internal. An absent file means none. An unreadable one
+    keeps the last good set read in this process, or (cold start) holds every
+    document back; logged at error, cached so it is logged once."""
+    global _internal, _internal_good
     if _internal is None:
         import jsonstore
-        _internal = frozenset(jsonstore.load(_INTERNAL_PATH, [], label="internal documents") or [])
+        try:
+            data = jsonstore._parse(_INTERNAL_PATH) if os.path.exists(_INTERNAL_PATH) else []
+            if not isinstance(data, list):
+                raise ValueError(f"expected a list of names, got {type(data).__name__}")
+            _internal = _internal_good = frozenset(data)
+        except Exception as exc:
+            _internal = _internal_good if _internal_good is not None else _Everything()
+            logger.error(
+                "internal documents file %s is unreadable (%s); %s until it is "
+                "repaired and the backend restarted", _INTERNAL_PATH, exc,
+                "keeping the last good marks" if _internal_good is not None
+                else "every document is held back from answers")
     return _internal
 
 
-def set_internal(sources, on: bool) -> None:
-    """Mark documents internal (on) or customer-facing (off)."""
-    global _internal
+def set_internal(sources, on: bool, reindex: bool = True) -> None:
+    """Mark documents internal (on) or customer-facing (off).
+
+    Marking takes a document's chunks out of the index; its original stays in
+    the document store (downloads stay refused by the mark). A document with
+    no retained original keeps its chunks, hidden at read time by
+    is_excluded(), since deleting them would lose it for good. Un-marking
+    indexes it again from the original, unless the caller indexes it itself
+    (reindex=False: an upload about to ingest, or Remove). Only names whose
+    mark really changed are touched, so un-marking a public document costs
+    nothing."""
+    global _internal, _internal_good
     import jsonstore
     with _internal_lock:
+        _internal = None                    # re-read: never write back a stale or fail-closed set
         cur = set(internal_sources())
+        was = {_name_key(n) for n in cur}
         cur = cur | set(sources) if on else cur - set(sources)
-        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")
-        _internal = frozenset(cur)
+        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")  # refuses an unreadable file
+        _internal = _internal_good = frozenset(cur)
+        now = {_name_key(n) for n in cur}
     try:                                   # inventories and the BM25 index cache by source
         from db import invalidate_retrieval_cache
         invalidate_retrieval_cache()
     except Exception as exc:
         logger.warning(f"retrieval cache not invalidated after marking internal: {exc}")
+    if on:
+        _drop_marked_chunks({_name_key(s) for s in sources})
+    elif reindex:
+        for s in sources:
+            if _name_key(s) in was and _name_key(s) not in now:
+                try:
+                    import ingest
+                    ingest.reindex_source(s)
+                except Exception as exc:
+                    logger.error("%r is public again but was not re-indexed: %s", s, exc)
+
+
+def _drop_marked_chunks(keys: set) -> None:
+    """Delete the indexed chunks of every source whose _name_key is in `keys`
+    and whose original is retained. Never raises: the mark is saved, and
+    readers still hide whatever stays."""
+    try:
+        import docindex
+        import docstore
+        from db import delete_source
+        for row in list(docindex.source_index()):
+            src = row["source"]
+            if _name_key(src) not in keys:
+                continue
+            if docstore.find(src):
+                delete_source(src)
+            else:
+                logger.warning("%r marked internal with no retained original: its "
+                               "chunks are kept (still hidden at read time)", src)
+    except Exception as exc:
+        logger.error("marked internal, but its chunks were not taken out of the "
+                     "index (still hidden at read time): %s", exc)
+
+
+@functools.lru_cache(maxsize=4096)
+def _name_key(name: str) -> str:
+    """What a document name is compared on for the internal mark: the bare
+    file name (docstore's sanitiser), cut at the first ':' (an NTFS stream
+    suffix such as "::$INDEX_ALLOCATION" opens the plain folder), trailing
+    dots and spaces dropped, case folded. That is how Windows resolves the
+    documents and figures folders, so every spelling that opens a marked
+    document's folder meets its mark. Marks go through it too, so one kept
+    with a path ("x/Secret.pdf") still matches the name it is served under."""
+    return _safe_basename(name).split(":", 1)[0].rstrip(". ").casefold()
+
+
+_keys_of: tuple = (None, frozenset())   # (the internal_sources() set, its keys)
+
+
+def _internal_keys() -> frozenset:
+    """internal_sources() as _name_key keys, rebuilt when that set changes.
+    The fail-closed _Everything set passes through unchanged (holds all)."""
+    global _keys_of
+    cur = internal_sources()
+    if _keys_of[0] is not cur:
+        _keys_of = (cur, cur if isinstance(cur, _Everything)
+                    else frozenset(_name_key(n) for n in cur))
+    return _keys_of[1]
 
 
 def is_excluded(source: str | None) -> bool:
     """True for a document customers must never be answered from: one the
-    EXCLUDED_SOURCES substrings match, or one marked internal."""
+    EXCLUDED_SOURCES substrings match, or one marked internal, in any spelling that names the same file on Windows (_name_key)."""
     s = source or ""
     low = s.lower()
-    return any(ex in low for ex in EXCLUDED_SOURCES) or s in internal_sources()
+    return any(ex in low for ex in EXCLUDED_SOURCES) or is_marked_internal(s)
+
+
+def is_marked_internal(source: str | None) -> bool:
+    """True for a document marked internal (not the EXCLUDED_SOURCES
+    substrings, a read-time policy). Ingest checks this: a marked document is
+    stored, never indexed."""
+    return _name_key(source or "") in _internal_keys()
+
+
+# Documents that stand behind the manuals rather than answer customers: test
+# scripts and reports, certificates and declarations, change notices, release
+# notes, and numbered drawings (CN00392, WR02040_4, PA01083, ...). The
+# Confluence import of 2026-10-22 added ~3,600 such chunks to ~5,000, and on
+# the unchanged blind set they outranked the manuals: an NV4000 cassette-width
+# question was answered from a test-script checklist (C20261022c-28). They are
+# still answers when nothing else is ("which firmware added Dutch?"), so they
+# are ranked below the manuals, not removed: a chunk's ORDER is its rerank
+# score times SECONDARY_SOURCE_WEIGHT; rerank_score itself stays the model's,
+# so the gate and the confidence band read what they always read.
+# 1.0 turns it off.
+SECONDARY_SOURCE_WEIGHT = float(os.getenv("SECONDARY_SOURCE_WEIGHT", "0.5"))
+_SECONDARY = re.compile(
+    r"test\s*script|testing\s*procedure|test\s*report|intertek"
+    r"|certificat|declaration|conformity|compliance|-dec\b|-(?:ul|cb)\b"
+    r"|change\s*noti|release\s*(?:notes|documentation)"
+    r"|^(?:cn|wr|pa|ga)[\s_-]?\d{3}|^[a-z]{2}\d{5}", re.I)
+
+
+def is_secondary(source: str | None) -> bool:
+    return bool(_SECONDARY.search(source or ""))
+
+
+def rank_key(chunk: dict) -> float:
+    """The order a reranked chunk takes: its score, less for a secondary
+    document. Every sort of reranked chunks uses this."""
+    s = chunk.get("rerank_score", 0.0)
+    return s * SECONDARY_SOURCE_WEIGHT if is_secondary(chunk.get("source")) else s
 
 # How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
 # pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
@@ -1023,8 +1156,13 @@ def cited_pages(chunks: list[dict], budget: int) -> list[dict]:
         logger.warning(f"cited pages skipped: {exc}")
         return []
     have = {c.get("id") for c in chunks}
+    # Only a PDF has pages. A .txt or .docx is all "page 1" (parsing.py), so
+    # its "rest of the page" was the whole document up to the budget: ~3k
+    # tokens on every verifier call once the Confluence pages replaced the
+    # PDF manuals (median prompt 4.8k -> 8.2k, 2026-10-23).
     keys = list(dict.fromkeys((c.get("source"), c.get("page")) for c in chunks
-                              if c.get("source") and isinstance(c.get("page"), int)))
+                              if (c.get("source") or "").lower().endswith(".pdf")
+                              and isinstance(c.get("page"), int)))
     found = {k: [] for k in keys}
     for a in all_chunks:
         k = (a.get("source"), a.get("page"))

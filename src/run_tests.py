@@ -7,16 +7,59 @@ Usage: python3 run_tests.py
 (pytest works too, if installed: pip install pytest && pytest tests/)
 """
 
+import atexit
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
+# Keep in-process test files off the real src/.env and src/.secrets.enc.
+# setdefault: a file or caller that sets its own path still wins.
+_SCRATCH = tempfile.mkdtemp(prefix="go-tests-")
+atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
+os.environ.setdefault("ENV_FILE_PATH", os.path.join(_SCRATCH, "test.env"))
+os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(_SCRATCH, "secrets.enc"))
+
+OWN_PROCESS_TIMEOUT = 600
+# Name endings an own-process child must see blank. main.py loads src/.env for
+# any key not already in the environment ("" counts as present), so blanking
+# every secret-shaped name -- from the parent AND from src/.env -- keeps the
+# real secrets out of the child, including names added to .env later.
+SECRET_SUFFIXES = ("_KEY", "_SECRET", "_PASSWORD", "_PASSPHRASE", "_TOKEN")
+MAIN_ENV_FILE = Path(__file__).parent / ".env"  # the file main.py loads
+
+
+def secret_names():
+    """Secret-shaped names in os.environ or in src/.env (key names only)."""
+    names = set(os.environ)
+    try:
+        for raw in MAIN_ENV_FILE.read_text(encoding="utf-8-sig").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                names.add(line.partition("=")[0].strip())
+    except OSError:
+        pass
+    return {n for n in names if n.upper().endswith(SECRET_SUFFIXES)}
+
+
 TESTS_DIR = Path(__file__).parent / "tests"
 ISOLATED_RUNNER = TESTS_DIR / "_run_isolated.py"
+
+
+def own_process_env():
+    """Environment for an own-process test child: secrets blanked, PYTHONPATH set."""
+    env = dict(os.environ)
+    env.update({k: "" for k in secret_names()})
+    # PYTHONPATH, because a subprocess puts sys.path[0] at the SCRIPT's
+    # directory (tests/), not this one -- _harness.py lives beside run_tests.py.
+    here = str(Path(__file__).parent)
+    env["PYTHONPATH"] = here + os.pathsep + env.get("PYTHONPATH", "")
+    return env
 
 
 class SkipTest(Exception):
@@ -69,6 +112,9 @@ def needs_own_process(source):
         # test_widget_export start failing, all three of which pass alone.
         or "import main" in source
         or "from main import" in source
+        # Playwright can hang the shared interpreter; match real imports
+        # (also indented ones), not the word in a docstring.
+        or re.search(r"^\s*(from|import)\s+playwright\b", source, re.MULTILINE)
     )
 
 
@@ -109,16 +155,19 @@ def discover_and_run():
         needs_process = needs_own_process(source)
         if needs_process:
             total += 1
-            # PYTHONPATH, because a subprocess puts sys.path[0] at the
-            # SCRIPT's directory (tests/), not this one -- _harness.py lives
-            # beside run_tests.py and would not be importable otherwise.
-            _env = dict(os.environ)
+            _env = own_process_env()
             _here = str(Path(__file__).parent)
-            _env["PYTHONPATH"] = _here + os.pathsep + _env.get("PYTHONPATH", "")
-            proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
-                                   str(path)],
-                                  cwd=_here, env=_env,
-                                  capture_output=True, text=True)
+            try:
+                proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
+                                       str(path)],
+                                      cwd=_here, env=_env,
+                                      capture_output=True, text=True,
+                                      timeout=OWN_PROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                failed.append((path.stem, "(own process)",
+                               f"(timed out) after {OWN_PROCESS_TIMEOUT}s"))
+                print(f"  FAIL  {path.stem}  (own process, timed out)")
+                continue
             out = (proc.stdout or "") + (proc.stderr or "")
             if proc.returncode == 0:
                 if re.search(r"^SKIP(?::| )", out, re.MULTILINE):

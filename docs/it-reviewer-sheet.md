@@ -86,7 +86,7 @@ Who can read it: Admin and Owner accounts. Every console screen that shows visit
 | Cloudflare tunnel on by default in the launcher | `README.md` "Native install" (`run.cmd`, `-NoTunnel`) |
 | First-run model download, `HF_HUB_OFFLINE`, OCR model | `model_pins.py` `REVISIONS`; `docker/Dockerfile.backend` (models baked in, `HF_HUB_OFFLINE=1`); `README.md` installer paragraph and config table; `ocr.py` docstring |
 | Widget notice not operator-editable | `widget_config.py` `ai_notice` docstring |
-| Originals and figures token-gated for proxied callers; direct callers not; exclusions | `main.py` `_TOKEN_GATED_PREFIXES`, `_restrict_private_surface`; `routes_documents.py` `source_file`, `EXCLUDED_SOURCES`; open gap D-20261010-32 |
+| Originals and figures token-gated except for header-less callers from a private address; exclusions | `main.py` `_TOKEN_GATED_PREFIXES`, `_restrict_private_surface`; `routes_documents.py` `source_file`, `EXCLUDED_SOURCES` |
 | Admin LAN-only, allowlist | `README.md` `ADMIN_ALLOWED_IPS`; `main.py` `_restrict_private_surface`, `_admin_ip_allowed` |
 | No TLS in the app | `README.md` `ENABLE_HSTS` row |
 | Levels and names | `accounts.py` `LEVELS`; `docs/website-brief.md` section 0 |

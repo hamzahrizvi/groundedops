@@ -38,7 +38,7 @@ class SourceChunksRequest(BaseModel):
 def remove_source(payload: DeleteSourceRequest,
                   x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    removed = remove_source_now(payload.source)
+    removed = _remove_source(payload.source)   # deletes the original too; an internal mark stays
     try:
         import confluence_sync
         confluence_sync.exclude_removed(payload.source)
@@ -49,7 +49,26 @@ def remove_source(payload: DeleteSourceRequest,
 
 def remove_source_now(source: str) -> int:
     """What Remove does, for callers inside the server (the Confluence sync)
-    that have no sign-in to show; the route above checks the caller's."""
+    that have no sign-in to show; the route above checks the caller's.
+
+    Also drops an internal mark, without re-indexing: the sync un-marks every
+    source it removes, and an un-mark that re-indexed from the original would
+    bring the removed document straight back (D-20261024-06)."""
+    removed = _remove_source(source)
+    from retrieval_db import is_marked_internal, set_internal
+    if is_marked_internal(source):
+        set_internal([source], False, reindex=False)
+    return removed
+
+
+def _remove_source(source: str) -> int:
+    """Remove a document for good: its retained original and manifest entry
+    first, then its chunks, memory and figures. The original goes first so a
+    failure stops here, before remove_source_now drops an internal mark: no
+    moment where an unmarked original is downloadable. A rebuild cannot bring
+    it back (D-20261024-18)."""
+    import docstore
+    docstore.delete(source)
     removed = delete_source(source)
     clear_memory()
     try:
@@ -103,7 +122,7 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
         # deleting first and uploading second.
         if replace_source and replace_source != filename:
             try:
-                removed = delete_source(replace_source)
+                removed = _remove_source(replace_source)
                 logger.info("replaced %r with %r (%s old chunk(s) removed)",
                             replace_source, filename, removed)
             except Exception as exc:
@@ -125,7 +144,10 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
             _INGEST_JOBS[job_id] = {
                 "status": "done", "file": filename, "chunks_added": count,
                 "chunks": count,
-                "warning": None if count else "File already exists or no usable text found",
+                "warning": None if count else (
+                    "Kept as internal: stored, not used for answers, so nothing was indexed."
+                    if report.get("internal") else
+                    "File already exists or no usable text found"),
                 "pages": report.get("pages"),
                 "ocr_candidates": candidates,
                 "ocr_available": ocr_ok,
@@ -244,6 +266,17 @@ async def upload(request: Request,
     # each one re-answering the same questions from slightly different text,
     # and each needing to be filed by hand.
     replace = (_h.get("replace-source") or _h.get("replace_source") or "").strip()
+    # D-20261025-05: a new version whose name differs only in letter case is
+    # the same document: keep the name it is indexed under. On a
+    # case-insensitive disk (Windows) both spellings are one file and one
+    # figures folder, so indexing the new spelling and then removing the old
+    # one deleted the new version's figures, and left its chunks, manifest
+    # entry and internal mark split across two names.
+    import docstore as _ds
+    filename = file.filename
+    _base = _ds._safe_basename(filename)
+    if replace and _base and _ds._safe_basename(replace).casefold() == _base.casefold():
+        filename = replace
     clash = _existing_source_like(file.filename)
     if replace and not (category_key and product_key):
         # A replacement with no scope chosen keeps the filing of the version
@@ -268,8 +301,36 @@ async def upload(request: Request,
                        f"is genuinely a different document.",
         })
 
+    # D-20261022-03: Internal = never used to answer a customer, never
+    # downloadable. Marked BEFORE indexing so the document is never public
+    # for a moment. No header: a new version keeps the mark of the document
+    # it replaces; anything else is public (the upload card says so).
+    from retrieval_db import internal_sources, is_excluded, set_internal
+    raw = (_h.get("internal") or "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        internal = True
+    elif raw in ("0", "false", "no"):
+        internal = False
+    elif raw:
+        raise HTTPException(status_code=400, detail=(
+            "The 'internal' header must be 1 (internal) or 0 (public)."))
+    else:
+        internal = bool(replace) and is_excluded(replace)
+    # An internal upload always writes its mark: "already in the set" may be
+    # the fail-closed or last-good set of an unreadable file, not the file.
+    if internal or filename in internal_sources():
+        try:
+            # reindex=False: the worker below indexes this upload. Re-indexing
+            # the old original first would make it skip the upload as a duplicate.
+            set_internal([filename], internal, reindex=False)
+        except Exception as exc:
+            logger.error("upload refused, internal mark not saved for %r: %s",
+                         filename, exc)
+            raise HTTPException(status_code=500, detail=(
+                "Could not record whether this document is internal, so it "
+                "was not indexed. Try again."))
+
     content = await file.read()
-    filename = file.filename
     job_id = str(uuid.uuid4())
     with _INGEST_LOCK:
         _INGEST_JOBS[job_id] = {"status": "starting", "file": filename,
@@ -278,7 +339,7 @@ async def upload(request: Request,
                      args=(job_id, content, filename, {}, category_key, product_key,
                            ingest_provider, replace or None),
                      daemon=True).start()
-    return {"job_id": job_id, "file": filename, "status": "started"}
+    return {"job_id": job_id, "file": filename, "status": "started", "internal": internal}
 
 
 @router.get("/upload/status/{job_id}")
@@ -475,7 +536,7 @@ def source_file(filename: str):
     basename — without that, "../../etc/passwd" escapes the directory.
     Excluded (internal) sources are refused so they can't be downloaded.
 
-    Gated in main.py (_TOKEN_GATED_PREFIXES): a proxied caller needs a widget member token; a direct caller does not (D-20261010-32).
+    Gated in main.py (_TOKEN_GATED_PREFIXES): a caller needs a widget member token unless it sends no proxy header from a private address (D-20261010-32).
     """
     import docstore
     # docstore._safe_basename, not os.path.basename: basename() is
@@ -525,6 +586,10 @@ def figure(source: str, name: str):
     path = _figures.figure_path(safe, docstore._safe_basename(name))
     if not path:
         raise HTTPException(status_code=404, detail="Not found")
+    # figure_path realpaths the folder: a short name (INTERN~1.PDF) or alias
+    # resolves to the long folder, so test the mark on the folder really opened.
+    if is_excluded(os.path.basename(os.path.dirname(path))):
+        raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path, media_type="image/png")
 
 
@@ -541,7 +606,8 @@ def admin_reassign_source(payload: ReassignReq, x_admin_password: str | None = H
     a doc. Updates Chroma metadata in place (no re-embed)."""
     _require_admin(x_admin_password)
     n = retag_source(payload.source, payload.category_key, payload.product_key)
-    if not n:
+    from retrieval_db import is_marked_internal
+    if not n and not is_marked_internal(payload.source):   # internal: re-filed, no chunks
         raise HTTPException(status_code=404, detail=f"No chunks for source '{payload.source}'")
     return {"reassigned": n, "source": payload.source,
             "category": payload.category_key, "product": payload.product_key}
@@ -555,13 +621,18 @@ def retag_source(source: str, category_key: str | None, product_key: str | None)
     col = get_collection()
     got = col.get(where={"source": source}, include=["metadatas"])
     ids = got.get("ids", [])
-    if not ids:
-        return 0
     # Several products, comma-joined: an installation guide covering the
     # MyCheckr and the MyCheckr Mini belongs to both, and filing it under one
     # meant the other product's visitors were never offered it.
     keys = list(dict.fromkeys(
         k.strip() for k in (product_key or "").split(",") if k.strip()))
+    if not ids:
+        # A document marked internal has no chunks, but its filing still
+        # counts: un-marking indexes it again from the catalogue.
+        from retrieval_db import is_marked_internal
+        if is_marked_internal(source):
+            catalog_mod.refile_source(source, keys)
+        return 0
     # Flags from a previous assignment have to go, or a document moved off
     # a product stays findable under it -- the worst kind of stale tag,
     # because nothing on screen says it is still there. with_product_tags
@@ -640,6 +711,23 @@ def admin_sources(x_admin_password: str | None = Header(default=None)):
             item["ocr"] = _ds.ocr_state(r["source"])
     except Exception as exc:
         logger.warning("source freshness enrichment failed (non-fatal): %s", exc)
+    # Marked documents are kept out of the index (D-20261024-06), so list
+    # them from the store, or the page could never make them public again.
+    try:
+        import docstore as _ds
+        from reindex import catalog_assignment
+        from retrieval_db import _name_key
+        listed = {_name_key(r["source"]) for r in rows}
+        assign = catalog_assignment()
+        for name in sorted(internal):
+            if _name_key(name) in listed or not _ds.find(name):
+                continue
+            listed.add(_name_key(name))
+            cat, prod = assign.get(_ds._safe_basename(name), ("", ""))
+            out.append({"source": name, "category": cat, "product": prod,
+                        "chunks": 0, "internal": True})
+    except Exception as exc:
+        logger.warning("internal documents not listed (non-fatal): %s", exc)
     return {"sources": out}
 
 
@@ -661,20 +749,23 @@ def admin_source_internal(payload: InternalReq,
     sources = list(dict.fromkeys(s for s in payload.sources if s))
     if not sources:
         raise HTTPException(status_code=400, detail="No documents given")
-    synced = {}
-    for k, it in confluence_sync._load()["items"].items():
-        if it.get("source") in sources and it.get("synced_version") is not None:
-            synced.setdefault(it["source"], []).append(k)
-    if synced:
-        confluence_sync.set_items([k for ks in synced.values() for k in ks],
-                                  decision="internal" if payload.internal else "approved")
-    rest = [s for s in sources if s not in synced]
+    # By every name the manual is held under (its copy, the PDF kept over it,
+    # uploads it replaces): set_items then flags every copy, and the
+    # sync's _carry_marks does not put back a mark removed here.
+    held = confluence_sync.items_holding(sources)      # item key -> every name it is held under
+    names = list(dict.fromkeys([*sources, *(n for ns in held.values() for n in ns)]))
+    # Before marking: marking takes the documents' chunks out of the index,
+    # and related_faqs reads their text.
+    faqs = related_faqs(names) if payload.internal else []
+    if held:
+        confluence_sync.set_items(list(held), decision="internal" if payload.internal else "approved")
+    covered = {n for ns in held.values() for n in ns}
+    rest = [s for s in sources if s not in covered]
     if rest:
         from retrieval_db import set_internal
         set_internal(rest, payload.internal)
     clear_memory()   # a follow-up could otherwise lean on an earlier answer
-    return {"sources": sources, "internal": payload.internal,
-            "faqs": related_faqs(sources) if payload.internal else []}
+    return {"sources": sources, "internal": payload.internal, "faqs": faqs}
 
 
 # Share of an answer's content words that must appear in ONE passage of the

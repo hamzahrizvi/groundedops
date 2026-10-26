@@ -4,9 +4,8 @@
  * v2 adds:
  *   1. Guided onboarding — visitors pick an intent from suggested
  *      pointers before free text is available.
- *   2. Mandatory scope — a category AND product must be chosen before a
- *      question can be asked, so retrieval is always scoped and the
- *      backend never answers from the whole corpus by accident.
+ *   2. Optional scope: buttons set a product; a typed first message goes
+ *      unscoped and the backend asks which product if it needs to.
  *   3. Suggested questions — pulled live from the curated FAQ for the
  *      chosen product, so the first answer costs no LLM call.
  *   4. Session persistence — the conversation survives a page refresh,
@@ -82,17 +81,17 @@
   var cfg = {
     api: secureUrl(attr("data-api", "").replace(/\/+$/, "")),
     title: attr("data-title", "Support"),
-    agent: attr("data-agent-name", "Assistant"),
+    agent: attr("data-agent-name", "Support"),
     avatar: attr("data-avatar-url", ""),
     accent: attr("data-accent", "#E4002B"),
-    launcherLabel: attr("data-launcher-label", "Ask a question"),
+    launcherLabel: attr("data-launcher-label", "Ask about our products"),
     salesEmail: attr("data-sales-email", ""),
     // Signed by the website server-side for logged-in users. Absent for
     // anonymous visitors, who get curated FAQ answers only.
     token: attr("data-token", ""),
     signInUrl: secureUrl(attr("data-sign-in-url", "")),
     supportEmail: attr("data-support-email", ""),
-    welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
+    welcome: attr("data-welcome", "Hi, I answer from our product manuals and show the page I used. If the answer is not there I will say so and get you a person. What are you looking for?"),
     prompt: attr("data-prompt", "How can I help today?"),
     // Explicit override for a single-locale embed (a dedicated /fr page, a
     // French subdomain). Falls back to the page's own declared language,
@@ -148,6 +147,16 @@
       Array.prototype.forEach.call(root.querySelectorAll(".go-mav"), function (n) {
         n.innerHTML = avatarHtml;
       });
+    }
+    if (d.name && !hasAttr("data-agent-name")) {
+      var hn = root.querySelector(".go-hname");
+      if (hn) hn.textContent = cfg.agent;
+      if (!cfg.avatar) {
+        avatarHtml = esc(cfg.agent.charAt(0).toUpperCase());
+        Array.prototype.forEach.call(root.querySelectorAll(".go-av, .go-mav"), function (n) {
+          n.innerHTML = avatarHtml;
+        });
+      }
     }
     if (d.intro_options && d.intro_options.length)
       serverCfg.intro_options = d.intro_options;
@@ -509,7 +518,7 @@
     : esc(cfg.agent.charAt(0).toUpperCase());
   root.innerHTML =
     '<button class="go-launch" type="button" aria-haspopup="dialog" aria-expanded="false">' +
-      I_CHAT + "<span>" + esc(cfg.launcherLabel) + "</span></button>" +
+      I_CHAT + '<span class="go-launch-label">' + esc(cfg.launcherLabel) + "</span></button>" +
     '<section class="go-panel" role="dialog" aria-modal="true" tabindex="-1" ' +
       'aria-label="' + esc(cfg.title) + '">' +
       '<div class="go-head"><div class="go-av">' + avatarHtml + "</div>" +
@@ -1297,13 +1306,12 @@
       state.category = null;
       state.stage = "category";
       renderScopeBar();
-      lockComposer();
+      unlockComposer();
       askCategory("No problem — which product range would you like to ask about?");
     });
   }
 
-  // The composer is the gate: free text is impossible until a product is
-  // chosen, which guarantees every /query call carries a scope.
+  // The composer locks only while a form or continue-prompt is open.
   function lockComposer(reason) {
     $in.disabled = true;
     $send.disabled = true;
@@ -1312,7 +1320,7 @@
 
   function unlockComposer() {
     $in.disabled = false;
-    $in.placeholder = "Ask about " + (state.product ? state.product.name : "this product") + "…";
+    $in.placeholder = state.product ? "Ask about " + state.product.name + "…" : "Type your question, or pick an option above…";
     $send.disabled = !$in.value.trim();
   }
 
@@ -1330,7 +1338,7 @@
     };
     $log.innerHTML = "";
     renderScopeBar();
-    lockComposer();
+    unlockComposer();
     say(cfg.welcome);
     showNotice();
     // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
@@ -1821,7 +1829,7 @@
   // already does the same for a range with one product).
   function askCategory(prompt) {
     state.stage = "category";
-    lockComposer();
+    unlockComposer();
     save();
     var s = status("Loading product ranges");
     fetchCatalog()
@@ -1879,7 +1887,7 @@
 
   function askProduct(cat) {
     state.stage = "product";
-    lockComposer();
+    unlockComposer();
     save();
     var prods = (cat.products || []).filter(function (p) {
       return (p.doc_count || 0) > 0;
@@ -1996,8 +2004,8 @@
             state = saved;
             renderLog();
             renderScopeBar();
-            // Only re-open the composer if a scope was actually chosen;
-            // otherwise resume the picker where they left off.
+            // With no scope chosen, resume the picker where they left off
+            // (the composer stays open there too).
             if (state.product) {
               state.stage = "chat";
               unlockComposer();
@@ -2089,7 +2097,7 @@
       style: "alt",
       onClick: function () {
         say("No problem — what would you like to know?");
-        if (state.product) unlockComposer();
+        unlockComposer();
       },
     });
     chips(items, "Contact us");
@@ -2111,12 +2119,6 @@
       }
     }
 
-    // Belt-and-braces: the composer is disabled without a scope, but a
-    // chip callback or a future code path could still get here.
-    if (!state.product) {
-      askCategory("Let me get the right documentation first — which product range?");
-      return;
-    }
     busy = true;
     $send.disabled = true;
     clearChips();
@@ -2134,7 +2136,7 @@
         session_id: state.sessionId,
         visitor_id: visitorId(),
         effort: opts.effort || (quotaState && quotaState.ai_available ? "standard" : "faq_only"),
-        product: state.product.key,
+        product: state.product ? state.product.key : null,
         category: state.category ? state.category.key : null,
         skip_faq: !!opts.skipFaq,
         faq_id: opts.faqId || null,
@@ -2375,7 +2377,7 @@
       })
       .then(function () {
         busy = false;
-        if (state.product) unlockComposer();
+        unlockComposer();
         $in.focus();
       });
   }
@@ -2629,5 +2631,5 @@
     ask(q);
   });
 
-  lockComposer();
+  unlockComposer();
 })();

@@ -62,7 +62,7 @@ from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
-from structure import extract_structured_block
+from structure import extract_structured_block, asks_for_procedure, lists_on_topic, MIN_COPY_RERANK
 from logger import log_interaction, redact
 from router import route_model
 from grounding import check_grounding, _get_nli_model
@@ -319,7 +319,12 @@ async def _restrict_private_surface(request, call_next):
 
     proxied_early = any(h in request.headers for h in _PROXY_HEADERS)
     if path.startswith(_TOKEN_GATED_PREFIXES):
-        if not proxied_early:
+        # D-20261010-32: no proxy header AND a private socket address (the
+        # box, the LAN, the docker bridge), the same rule as the deep probe
+        # above. A server bound straight to a public address must not hand
+        # out documents to a header-less caller.
+        host = request.client.host if request.client else ""
+        if not proxied_early and host and _is_private(host):
             return await call_next(request)          # local/LAN: allowed
         if _bearer_ok(request):
             return await call_next(request)
@@ -2365,8 +2370,8 @@ def _merge_rankings(rankings: list[list[dict]]) -> list[dict]:
             if key not in best or (r.get("rerank_score", 0.0)
                                    > best[key].get("rerank_score", 0.0)):
                 best[key] = r
-    return sorted(best.values(), key=lambda r: r.get("rerank_score", 0.0),
-                  reverse=True)
+    from retrieval_db import rank_key
+    return sorted(best.values(), key=rank_key, reverse=True)
 
 
 def _ask_picks(ask_rankings: list[list[dict]], named: list[str],
@@ -3620,9 +3625,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     results = _retrieved[:_ctx_k]
     retrieval_time = time.time() - t1
 
-    top_score = results[0].get("rerank_score", 0.0) if results else 0.0
+    top_score = max((r.get("rerank_score", 0.0) for r in results), default=0.0)
     confidence = retrieval_confidence_band(results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
-    ptrace.mark("band", f"{confidence} (best {top_score:.3f}, gate "
+    _band_label = ("weak match" if confidence == "confident"
+                   and top_score < MIN_COPY_RERANK else confidence)
+    ptrace.mark("band", f"{_band_label} (best {top_score:.3f}, gate "
             f"{RETRIEVAL_GATE_THRESHOLD}, clear at {AMBIGUOUS_CEILING})")
 
     # UNSCOPED AND WEAK: is this about one of our products at all? Asked
@@ -3964,7 +3971,21 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ── Structured extraction shortcut ───────
     if role != "rethink":
         t2 = time.time()
-        extracted = extract_structured_block(results[:5], query=resolved_query)
+        # D-20261023-04: a list is copied only for a first-hand ask for a
+        # procedure or list (not a follow-up, a comparison or a message with
+        # several asks: one list answers one ask), and only from a passage
+        # the reranker calls relevant whose heading is what was asked.
+        _copyable = []
+        if (not _comparing and not _asks and asks_for_procedure(q)
+                and not _is_followup(q, history, condensed_query)):
+            try:
+                _ignore = _product_words()
+            except Exception as _exc:
+                logger.debug(f"product words for the list check skipped: {_exc}")
+                _ignore = set()
+            _copyable = lists_on_topic(results[:5], resolved_query, _ignore)
+        extracted = (extract_structured_block(_copyable, query=resolved_query)
+                     if _copyable else None)
         extraction_time = time.time() - t2
         ptrace.mark("route", role)
 

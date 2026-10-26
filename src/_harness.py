@@ -109,7 +109,8 @@ os.environ["CONFLUENCE_SYNC_STATE"] = _scratch("confluence_sync.json")
 os.environ["INTERNAL_SOURCES_PATH"] = _scratch("internal_sources.json")
 os.environ["ACCOUNTS_PATH"] = _scratch("accounts.json")
 os.environ["ACCOUNT_REQUESTS_PATH"] = _scratch("account_requests.json")
-os.environ.setdefault("SESSION_SECRET", "test-session-secret-not-a-real-one")
+# "or", not setdefault: run_tests.py hands own-process children every secret blanked to "".
+os.environ["SESSION_SECRET"] = os.environ.get("SESSION_SECRET") or "test-session-secret-not-a-real-one"
 # keystore.set_key/clear_key write to a real file — point that at a scratch
 # path so a key-management test can never touch the real src/.env.
 os.environ["ENV_FILE_PATH"] = _scratch("test.env")
@@ -133,7 +134,7 @@ os.environ["QUOTA_DB_PATH"] = _scratch("quota.db")
 # /admin/widget/preview_token answers 503 -- which is how test_policy.py failed
 # in CI while passing locally, where src/.env supplies the real secret. A test
 # secret, deliberately obvious: it signs nothing outside these tests.
-os.environ.setdefault("WIDGET_TOKEN_SECRET", "test-widget-token-secret-not-a-real-one")
+os.environ["WIDGET_TOKEN_SECRET"] = os.environ.get("WIDGET_TOKEN_SECRET") or "test-widget-token-secret-not-a-real-one"
 # backup.py reads the document store, the Chroma directory and the
 # conversation DB. Without these a backup test would archive the REAL
 # documents/ (~100MB of customer PDFs) and the real index -- slow, and it
@@ -261,7 +262,11 @@ stub("db", get_collection=lambda: _Collection(), reset_collection=lambda: None,
      count_by_product=lambda k: 0)
 stub("embeddings", _get_model=lambda: None)
 stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
-stub("structure", extract_structured_block=lambda r, query=None: None)
+import structure as _real_structure  # the gate is pure; only the copier is pinned
+stub("structure", extract_structured_block=lambda r, query=None: None,
+     asks_for_procedure=_real_structure.asks_for_procedure,
+     lists_on_topic=_real_structure.lists_on_topic,
+     MIN_COPY_RERANK=_real_structure.MIN_COPY_RERANK)
 from logger import redact as _real_redact  # the real one: the stub below replaces the module
 stub("logger", log_interaction=lambda *a, **k: None,
      log_feedback=lambda *a, **k: None, redact=_real_redact)
@@ -278,7 +283,8 @@ stub("runtime_config", get_settings=lambda: {"mode": "free"},
      set_online_provider=lambda p: None)
 stub("memory", add_to_memory=lambda *a: None, clear_memory=lambda s=None: None,
      get_history=lambda s: [], get_last_query=lambda s: None)
-stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0})
+stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0},
+     reindex_source=lambda source: 0)
 # complete_procedures is a PASS-THROUGH, not a no-op returning []. It is
 # additive by contract -- it hands back the chunks it was given plus any
 # steps they point at -- so a stub that dropped them would empty the
@@ -294,6 +300,7 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
          ranked_ids[:keep_n]),
      complete_procedures=lambda chunks, *a, **k: chunks,
      cited_pages=lambda chunks, *a, **k: [],
+     rank_key=lambda c: c.get("rerank_score", 0.0),
      _invalidate_bm25_cache=lambda: None,
      EXCLUDED_SOURCES=["icu_network_api", "icu_age_result_quick_guide"],
      # The real rule's substring half: no document is marked internal here.
@@ -301,7 +308,8 @@ stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
          ex in (source or "").lower()
          for ex in ("icu_network_api", "icu_age_result_quick_guide")),
      internal_sources=lambda: frozenset(),
-     set_internal=lambda sources, on: None)
+     is_marked_internal=lambda source: False,
+     set_internal=lambda sources, on, reindex=True: None)
 # text_utils is stubbed to pin GATE behaviour, not because it is heavy -- it
 # imports nothing but `re`. So stem() is handed through for real rather than
 # faked: more_context.py depends on it to tell new material from a reworded

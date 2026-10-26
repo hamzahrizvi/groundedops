@@ -459,7 +459,9 @@ def passes_retrieval_gate(results: list[dict], threshold: float = 0.5) -> bool:
     """
     if not results:
         return False
-    return results[0].get("rerank_score", 0.0) >= threshold
+    # The best score, not the first: secondary documents rank below the
+    # manuals by order only (retrieval_db.rank_key).
+    return max(r.get("rerank_score", 0.0) for r in results) >= threshold
 
 
 def retrieval_confidence_band(results: list[dict], gate_threshold: float = 0.5,
@@ -474,7 +476,7 @@ def retrieval_confidence_band(results: list[dict], gate_threshold: float = 0.5,
     if not results or not passes_retrieval_gate(results, gate_threshold):
         return "none"
 
-    top_score = results[0].get("rerank_score", 0.0)
+    top_score = max(r.get("rerank_score", 0.0) for r in results)
     if top_score >= ambiguous_ceiling:
         return "confident"
 

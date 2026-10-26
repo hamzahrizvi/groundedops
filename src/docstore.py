@@ -79,6 +79,15 @@ def _safe_basename(filename: str) -> str:
     return os.path.basename(flat).lstrip(".") or ""
 
 
+def _store_file(base: str) -> bool:
+    """The store's own files beside the documents: the manifest and the .tmp
+    and .corrupt copies jsonstore writes next to it. Never a document, so
+    never served or deleted as one: the manifest names every kept document,
+    internal ones included (D-20261025-03)."""
+    b = base.casefold()
+    return b == MANIFEST_NAME or b.startswith(MANIFEST_NAME + ".")
+
+
 def find(filename: str) -> str | None:
     """Absolute path of a retained original, or None if it is genuinely gone.
 
@@ -87,7 +96,7 @@ def find(filename: str) -> str | None:
     directory before being handed back.
     """
     base = _safe_basename(filename)
-    if not base:
+    if not base or _store_file(base):
         return None
     for d in read_dirs():
         if not os.path.isdir(d):
@@ -131,6 +140,36 @@ def save(filename: str, content: bytes) -> str:
     finally:
         if staged and os.path.exists(staged):
             os.remove(staged)
+
+
+def delete(filename: str) -> bool:
+    """Delete a retained original and its manifest entry: what Remove means
+    (D-20261024-18). Every read directory, the legacy one too, because find()
+    reads them all and /source_file serves what find() resolves. Raises
+    OSError when a file cannot be deleted, so the caller stops before it
+    drops an internal mark. True if a file was deleted."""
+    base = _safe_basename(filename)
+    if not base or _store_file(base):
+        return False
+    gone = False
+    for d in read_dirs():
+        if not os.path.isdir(d):
+            continue
+        for entry in os.listdir(d):
+            p = os.path.join(d, entry)
+            if entry == base and os.path.isfile(p):
+                os.remove(p)
+                _HASH_CACHE.pop(os.path.abspath(p), None)
+                gone = True
+    data = load_manifest()
+    if data["documents"].pop(base, None) is not None:
+        try:
+            jsonstore.save(_manifest_path(), data, label="document manifest",
+                           sort_keys=True)
+        except Exception as exc:
+            # The file is gone, which is what stops the download.
+            logger.error("Manifest entry for %s not removed: %s", base, exc)
+    return gone
 
 
 def sha256(content: bytes) -> str:

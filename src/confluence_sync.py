@@ -15,7 +15,9 @@ anything not approved is excluded. "Internal" syncs a document but keeps it
 from customers' answers. In "auto" mode a newly found document is
 approved at once (sync everything); in "review" mode it starts excluded and
 marked new until someone approves it on the console's Confluence page. A
-document that was approved stays approved when it changes in Confluence.
+document that was approved stays approved when it changes in Confluence; in
+review mode its new version waits for approval like a new document (the old
+one keeps answering), in auto mode it syncs.
 
 A folder can be combined into one document: a manual Confluence keeps as
 a page per command (the SSP Manual: 396 of them) is indexed as one source,
@@ -72,7 +74,15 @@ MODES = ("review", "auto")
 # (retrieval_db.is_excluded): kept in the index, never used to answer a
 # customer, ready for a staff mode.
 DECISIONS = ("approved", "internal", "excluded")
+# A title that calls itself internal ("X (Internal)", "INTERNAL - Y",
+# "spec_internal.pdf") is filed internal, not approved, when auto mode
+# finds it; not "internals" or "international". An admin can still
+# approve it on the Confluence page; only a first sighting is filed this way.
+_INTERNAL_TITLE = re.compile(r"(?<![a-z])internal(?![a-z])", re.I)
 _RECENT_DAYS = 14                  # how long "new" and "updated" flags last
+# Attachments larger than this are not downloaded; the run names them in its
+# errors. Uploads have no cap of their own (main.py exempts /upload).
+MAX_FILE_BYTES = int(float(os.getenv("CONFLUENCE_MAX_FILE_MB", "100")) * 1024 * 1024)
 
 # A folder, or a page whose child pages hold the manuals: both are a
 # "Website" container in Confluence, depending on how the space was built.
@@ -88,6 +98,10 @@ _cancel = threading.Event()
 
 class Cancelled(RuntimeError):
     pass
+
+
+class _Moved(Exception):
+    """Edited in Confluence after a person approved it."""
 
 
 def cancel() -> bool:
@@ -174,6 +188,14 @@ def _load() -> dict:
     st.setdefault("mode", "review")
     st.setdefault("items", {})
     st.setdefault("history", [])
+    if "holds_since" not in st:     # updates found before holds existed must not go out unseen
+        st["holds_since"] = _now()
+        if st["mode"] == "review":
+            for it in st["items"].values():
+                if it.get("decision") != "excluded" and it.get("present", True) \
+                        and it.get("synced_version") is not None \
+                        and it.get("version") != it["synced_version"]:
+                    it["held"] = True
     # A combined folder is {"id": its Confluence id, "path": its titles as last
     # seen}. Entries written before ids were plain title lists; a check pins
     # each to its id.
@@ -212,6 +234,8 @@ def status_of(it: dict) -> str:
         return "gone" if synced else "missing"
     if it.get("decision") == "excluded":
         return "remove" if synced else "excluded"
+    if it.get("held"):
+        return "held"           # edited in Confluence; waits for approval (review mode)
     if not synced:
         return "new"
     return "synced" if it.get("synced_version") == it.get("version") else "changed"
@@ -399,7 +423,9 @@ def overview() -> dict:
             (row["uploaded_as"], whole), more = matches[key][0], matches[key][1:]
             row["also_uploaded"] = [u for u, _ in more]
             row["keep_upload"] = row["uploaded_as"] in keep
-            row["replaces"] = whole and not row["keep_upload"]
+            row["pdf_kept"] = any(w and u not in keep and _pdf_first(it, u) and _held(u)
+                                  for u, w in matches[key])
+            row["replaces"] = whole and not row["keep_upload"] and not row["pdf_kept"]
             # Filed as the upload was, unless someone chose otherwise.
             if row["replaces"] and row.get("suggested") is not False and it.get("synced_version") is None \
                     and filed.get(row["uploaded_as"]) and not it.get("product_chosen"):
@@ -418,7 +444,16 @@ def overview() -> dict:
 def set_mode(mode: str) -> None:
     if mode not in MODES:
         raise ValueError("mode must be review or auto")
-    _update(lambda st: st.__setitem__("mode", mode))
+    def change(st):
+        st["mode"] = mode
+        if mode == "auto":
+            for it in st["items"].values():
+                it.pop("held", None)
+        else:   # edits found while in auto and not yet synced must not go out unseen
+            for it in st["items"].values():
+                if status_of({**it, "error": None}) == "changed":
+                    it["held"] = True
+    _update(change)
 
 
 def bundle_key(b: dict) -> str:
@@ -509,7 +544,7 @@ def set_items(keys: list[str], decision: str | None = None,
     if decision is not None and decision not in DECISIONS:
         raise ValueError("decision must be approved, internal or excluded")
     retag, flag = [], []
-    matches = _matches(_load()["items"]) if keep_upload is not None else {}
+    matches = _matches(_load()["items"]) if keep_upload is not None or decision else {}
 
     def change(st):
         for k in keys:
@@ -519,22 +554,35 @@ def set_items(keys: list[str], decision: str | None = None,
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
+                it.pop("held", None)        # a person has now seen this version
+                if decision != "excluded":
+                    it["approved_version"] = it.get("version")    # the version the person saw
                 if it.get("synced_version") is not None and decision != "excluded":
-                    flag.append(it["source"])
+                    # Every name the manual is held under: the copy, the PDF
+                    # kept over it, uploads waiting to be replaced (one manual, one mark).
+                    flag.extend(_copies(it, matches.get(k, []), set(st.get("keep_uploads") or [])))
             if keep_upload is not None:
                 kept = set(st.get("keep_uploads") or [])
                 for upload, _ in matches.get(k, []):
                     (kept.add if keep_upload else kept.discard)(upload)
                 st["keep_uploads"] = sorted(kept)
+                # "Keep both" on a manual whose PDF was kept: the copy goes in at the next sync.
+                if keep_upload and it.pop("pdf_kept", None):
+                    it["synced_version"] = None
             if product is not None:
                 if it.get("synced_version") is not None:
-                    retag.append(it["source"])
+                    retag.append(it.get("pdf_kept") or it["source"])
                 else:
                     it["product"], it["category"] = product, category_of(product)
                     it["product_chosen"] = True
     _update(change)
     if flag:
-        _mark_internal(flag, decision == "internal")
+        on = decision == "internal"
+        # A mark goes only on a name the bot holds (a PDF kept over the copy
+        # leaves the copy's name unheld); a sync marks the copy before ingest.
+        flag = [s for s in dict.fromkeys(flag) if not on or _held(s)]
+        if flag:
+            _mark_internal(flag, on)
     if retag:
         from routes_documents import retag_source
         cat = category_of(product) or ""      # ingest's own "unassigned"
@@ -587,6 +635,9 @@ class _Api:
     def page(self, pid: str) -> dict:
         return self.get(f"/wiki/api/v2/pages/{pid}", **{"body-format": "storage"}).json()
 
+    def attachment(self, att_id: str) -> dict:
+        return self.get(f"/wiki/api/v2/attachments/{att_id}").json()
+
     def download(self, page_id: str, att_id: str) -> bytes:
         return self.get(f"/wiki/rest/api/content/{page_id}/child/attachment/{att_id}/download").content
 
@@ -617,29 +668,61 @@ def _walk(api: _Api, root_kind: str, root_id: str):
                 stack.append(("folders", c["id"], below + [c["title"]], below_ids + [c["id"]], None))
 
 
+_HARD = "\x00"        # a block boundary, made a blank line by page_text
+
+
 class _Text(HTMLParser):
-    """Confluence storage format to plain text: blocks on their own lines,
-    table cells split by " | ", macro parameters dropped."""
+    """Confluence storage format to plain text: paragraphs on consecutive
+    lines, a blank line only at a heading or a table, tables fenced as the PDF
+    parser fences them, a table row on one line with its cells split by " | "
+    (tables.cells), macro parameters dropped."""
     _BLOCK = {"p", "div", "br", "li", "tr", "table", "pre", "blockquote",
               "h1", "h2", "h3", "h4", "h5", "h6"}
+    # Parameters and ADF attributes are settings, not text: they put
+    # "Scroll Pagebreak...ari:cloud:ecosystem::extension/..." and a note
+    # panel's id into the manuals. An ADF fallback repeats its node's content.
+    _SKIP = {"ac:parameter", "ac:adf-parameter", "ac:adf-attribute", "ac:adf-fallback"}
+    _HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
     def __init__(self):
         super().__init__()
-        self.out, self.skip = [], 0
+        self.out, self.skip, self.cell, self.first = [], 0, 0, True
+        # Imported here: chunking pulls in text_utils, which the gate tests stub.
+        from chunking import TABLE_CLOSE, TABLE_OPEN
+        self.fence = (TABLE_OPEN, TABLE_CLOSE)
 
     def handle_starttag(self, tag, attrs):
-        if tag == "ac:parameter":
+        if tag in self._SKIP:
             self.skip += 1
-        elif tag in self._BLOCK:
-            self.out.append("\n")
         elif tag in ("td", "th"):
-            self.out.append(" | ")
+            # Each cell's <p> used to break the line, so a row came out one
+            # cell per line under a lone "|" -- 572 of 619 pages (2026-10-23).
+            self.out.append("" if self.first else " | ")
+            self.first, self.cell = False, self.cell + 1
+        elif tag == "table" and not self.cell:
+            # Fenced as the PDF parser fences its tables: the chunker keeps a
+            # table whole, or splits it by row repeating the header.
+            self.out.append(f"{_HARD}{self.fence[0]}\n")
+        elif tag in self._HEADINGS and not self.cell:
+            self.out.append(_HARD)
+        elif tag in self._BLOCK:
+            self.out.append(" " if self.cell and tag != "tr" else "\n")
+            if tag == "tr":
+                self.first = True
 
     def handle_endtag(self, tag):
-        if tag == "ac:parameter":
+        if tag in self._SKIP:
             self.skip = max(0, self.skip - 1)
+        elif tag in ("td", "th"):
+            self.cell = max(0, self.cell - 1)
+        elif tag == "tr":
+            pass                        # the next row's <tr> breaks the line
+        elif tag == "table" and not self.cell:
+            self.out.append(f"\n{self.fence[1]}{_HARD}")
+        elif tag in self._HEADINGS and not self.cell:
+            self.out.append(_HARD)
         elif tag in self._BLOCK:
-            self.out.append("\n")
+            self.out.append(" " if self.cell else "\n")
 
     def handle_data(self, data):
         if not self.skip:
@@ -654,7 +737,13 @@ def page_text(title: str, storage_html: str) -> str:
     p = _Text()
     p.feed(storage_html or "")
     body = re.sub(r"[ \t]+\n", "\n", "".join(p.out))
-    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    body = "\n".join(re.sub(r"\s{2,}", " ", l).strip() if " | " in l else l
+                     for l in body.split("\n"))    # a cell's <p> leaves spaces
+    # Paragraphs on consecutive lines, a blank line only at a heading or a
+    # table: a blank line after every <p> made each one a block of its own,
+    # which the chunker joins into one long line (a guide lost its steps).
+    body = re.sub(r"\n\s*\n", "\n", body)
+    body = re.sub(r"\s*\x00[\s\x00]*", "\n\n", body).strip()
     return f"{title}\n\n{body}" if body else ""
 
 
@@ -671,6 +760,11 @@ def _link(api: _Api, webui: str | None) -> str | None:
 
 
 # ── check ───────────────────────────────────────────────────────────────
+
+def _stamp(parts: list[str]) -> str:
+    """A combined document's version: any page added, removed or edited changes it."""
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:10]
+
 
 def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     """List the root into the state's items. Indexes nothing."""
@@ -752,7 +846,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     for key, b in combined.items():
         if b["members"]:
             # Its version is its pages': any page added, removed or edited changes it.
-            b["version"] = hashlib.sha1("|".join(b.pop("stamp")).encode()).hexdigest()[:10]
+            b["version"] = _stamp(b.pop("stamp"))
             b["pages"] = len(b["members"])
             found[key] = b
 
@@ -786,7 +880,9 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             it = items.get(key)
             if it is None:
                 cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
-                decision = "approved" if st["mode"] == "auto" else "excluded"
+                decision = "excluded"
+                if st["mode"] == "auto":
+                    decision = "internal" if _INTERNAL_TITLE.search(f["title"] or "") else "approved"
                 chosen = False
                 if f["kind"] == "bundle":
                     pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]
@@ -818,6 +914,8 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             elif it.get("version") is not None and it["version"] != f["version"]:
                 it["updated_at"], it["prev_version"] = res["at"], it["version"]
                 res["changed"].append(f["title"])
+                if st["mode"] == "review" and it.get("decision") != "excluded":
+                    it["held"] = True
             name = f.pop("name")
             if not it.get("source"):
                 # Two documents of the same name: the second gets its id.
@@ -855,6 +953,145 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
 
 # ── apply ───────────────────────────────────────────────────────────────
 
+def _union(*keys: str) -> str:
+    """"a,b" + "b,c" -> "a,b,c", order kept."""
+    return ",".join(dict.fromkeys(k.strip() for s in keys for k in (s or "").split(",") if k.strip()))
+
+
+def _indexed(source: str) -> bool:
+    from db import get_collection
+    return bool(source) and bool(get_collection().get(where={"source": source}, limit=1).get("ids"))
+
+
+def _marked(source: str) -> bool:
+    from retrieval_db import is_marked_internal
+    return is_marked_internal(source)
+
+
+def _stored(source: str) -> bool:
+    import docstore
+    return bool(source) and docstore.find(source) is not None
+
+
+def _held(source: str) -> bool:
+    """The bot holds it: answering from it, or keeping it internal. Since
+    D-20261024-06 a marked document has no chunks, so _indexed alone reads
+    "marked internal" as "gone"."""
+    return _indexed(source) or (_marked(source) and _stored(source))
+
+
+def _copies(it: dict, pairs: list, keep: set) -> list[str]:
+    """Every name one manual can be held under: the Confluence copy, the PDF
+    kept over it, and each upload it is a whole copy of. Not an upload kept
+    beside it ("Keep both" is two documents, each with its own mark)."""
+    return list(dict.fromkeys(n for n in [it.get("source"), it.get("pdf_kept"),
+                                          *(u for u, whole in pairs if whole and u not in keep)] if n))
+
+
+def items_holding(sources: list[str]) -> dict[str, list[str]]:
+    """key -> every name of each synced item holding any of `sources` under one of its names."""
+    st = _load()
+    matches, keep = _matches(st["items"]), set(st.get("keep_uploads") or [])
+    want, out = set(sources), {}
+    for key, it in st["items"].items():
+        if it.get("synced_version") is None:
+            continue
+        names = _copies(it, matches.get(key, []), keep)
+        if want & set(names):
+            out[key] = names
+    return out
+
+
+def _carry_marks(st: dict, matches: dict) -> None:
+    """One manual, one mark. A manual held under several names (its copy,
+    the PDF kept over it, uploads it replaces) is internal under all of them when
+    its item is decided internal or any held name is marked: the mark then
+    goes on every held name and the item is decided internal, here and in
+    `st`, so nothing this sync does next puts a public copy beside it."""
+    if _marked("?"):
+        # No file can be named "?": the marks file is unreadable and every
+        # name reads as marked (fail closed). Not written into the decisions.
+        return
+    marks, flips = [], []
+    keep = set(st.get("keep_uploads") or [])
+    for key, it in st["items"].items():
+        if not it.get("present", True) or it.get("decision") == "excluded":
+            continue
+        names = _copies(it, matches.get(key, []), keep)
+        internal = it.get("decision") == "internal"
+        if not internal and not any(_marked(n) for n in names):
+            continue                                    # the common case: no store reads
+        held = [n for n in names if _held(n)]
+        if not internal and not any(_marked(n) for n in held):
+            continue                                    # a stale mark on a name not held
+        marks += [n for n in held if not _marked(n)]
+        if not internal:
+            flips.append(key)
+    if marks:
+        _mark_internal(list(dict.fromkeys(marks)), True)
+    if flips:
+        def flip(s):
+            for k in flips:
+                if k in s["items"]:
+                    s["items"][k]["decision"] = "internal"
+        _update(flip)
+        for k in flips:
+            st["items"][k]["decision"] = "internal"
+
+
+def _retag(source: str, cat: str | None, prod: str) -> None:
+    from routes_documents import retag_source
+    retag_source(source, cat or "", prod)
+
+
+def _original(source: str) -> bytes | None:
+    import docstore
+    path = docstore.find(source)
+    if not path:
+        return None
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _pdf_first(it: dict, upload: str) -> bool:
+    """An uploaded PDF beats a Confluence copy that is not a PDF: a page
+    converted to text loses its pages, sections, figures and table rows
+    (2026-10-24, the weekly 40: text copies 85.3, the PDFs 87.5)."""
+    return upload.lower().endswith(".pdf") and not (it.get("source") or "").lower().endswith(".pdf")
+
+
+def _keep_pdf(it: dict, upload: str, prod: str | None = None, restore: bool = False) -> bool:
+    """The uploaded PDF stays the one copy and the Confluence text copy
+    goes; the PDF is filed under both copies' products (and `prod`). False,
+    doing nothing, when the PDF is not in the index and is not to be
+    restored from its stored original."""
+    copy = it.get("source") or ""
+    prod = _union(_filed(upload)[1], _filed(copy)[1], prod or "")
+    if it.get("decision") == "internal" or _marked(copy):
+        # Before any ingest: restore_pdfs runs outside _apply's _carry_marks,
+        # and a marked PDF is stored, never indexed.
+        _mark_internal([upload], True)
+    if not _held(upload):
+        content = _original(upload) if restore else None
+        if content is None:
+            return False
+        _ingest(content, upload, category_of(prod), prod or None)
+    if prod and set(prod.split(",")) != set(_filed(upload)[1].split(",")):
+        _retag(upload, category_of(prod), prod)
+    if _held(copy):
+        _remove(copy)
+    return True
+
+
+def _same_name(a: str, b: str) -> bool:
+    """Two spellings of one name, differing only in letter case. On a
+    case-insensitive disk (Windows) they are one original and one figures
+    folder, so removing one can delete the other's (D-20261025-07)."""
+    import docstore
+    a, b = docstore._safe_basename(a), docstore._safe_basename(b)
+    return bool(a) and a != b and a.casefold() == b.casefold()
+
+
 def _ingest(content: bytes, source: str, cat: str | None, prod: str | None) -> None:
     from ingest import ingest_file
     ingest_file(content, source, category_key=cat, product_key=prod,
@@ -877,12 +1114,36 @@ def _remove(source: str) -> None:
     catalog.refile_source(source, [])
 
 
-def _bundle_text(api: _Api, it: dict) -> str:
+def _fetch(api: "_Api", it: dict, review: bool) -> tuple[bytes, object]:
+    """(content, version) of an item, downloaded from Confluence now."""
+    if it["kind"] == "bundle":
+        text, version = _bundle_text(api, it)
+        return text.encode("utf-8"), version
+    if it["kind"] == "page":
+        full = api.page(it["id"])
+        return (page_text(full.get("title") or it["title"], _body(full)).encode("utf-8"),
+                (full.get("version") or {}).get("number"))
+    # ponytail: version read just before the download; an edit in that second slips through. Pin the download to the version if it ever matters.
+    # Auto mode needs no fresh version: one request fewer, nothing new to fail.
+    version = (api.attachment(it["id"]).get("version") or {}).get("number") \
+        if review else it.get("version")
+    if int(it.get("size") or 0) > MAX_FILE_BYTES:
+        raise ValueError(f"{int(it['size']) // 1048576} MB, over the "
+                         f"{MAX_FILE_BYTES // 1048576} MB limit; not downloaded")
+    content = api.download(it["page_id"], it["id"])
+    if len(content) > MAX_FILE_BYTES:     # Confluence listed no size
+        raise ValueError(f"over the {MAX_FILE_BYTES // 1048576} MB limit; not indexed")
+    return content, version
+
+
+def _bundle_text(api: _Api, it: dict) -> tuple[str, str]:
     """A combined folder as one text: its title, then each page under its
     own section heading (the path below the folder), which the chunker keeps
-    as a hard boundary and stores as the chunk's section."""
+    as a hard boundary and stores as the chunk's section. Also returns the
+    version stamp of the pages as read now."""
     from chunking import SECTION_CLOSE, SECTION_OPEN
     parts = [it["title"]]
+    stamp: list[str] = []
     for n, (pid, heading) in enumerate(it.get("members") or []):
         _stop_point()
         _progress.update(page=n + 1, pages=len(it["members"]))
@@ -890,17 +1151,24 @@ def _bundle_text(api: _Api, it: dict) -> str:
         text = page_text(full.get("title") or "", _body(full))
         if text:
             parts.append(f"{SECTION_OPEN}{heading}{SECTION_CLOSE}\n{text}")
+            stamp.append(f"{pid}:{(full.get('version') or {}).get('number')}")
     _progress.pop("page", None)
     _progress.pop("pages", None)
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), _stamp(stamp)
 
 
 def _apply(api: _Api) -> dict:
     st = _load()
     res = {"at": _now(), "kind": "sync", "added": [], "updated": [], "removed": [],
            "errors": []}
+    matches = _matches(st["items"])
+    keep = set(st.get("keep_uploads") or [])
+    # Before the todo copies are taken, so they carry the decision.
+    _carry_marks(st, matches)
     todo = [(k, dict(it)) for k, it in st["items"].items()
-            if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove", "combined")]
+            if status_of({**it, "error": None}) in ("new", "changed", "gone", "remove", "combined")
+            # its PDF was kept and has since been removed: the copy answers again
+            or (it.get("pdf_kept") and status_of(it) == "synced" and not _held(it["pdf_kept"]))]
     # Removals first: a combined document takes its container page's name,
     # so the page's own copy must be gone before the combined one goes in.
     _removing = ("gone", "remove", "combined")
@@ -912,9 +1180,9 @@ def _apply(api: _Api) -> dict:
                              "Check the account can still see the folder.")
         todo = [(k, it) for k, it in todo if it.get("present", True)]
 
-    matches = _matches(st["items"])
-    keep = set(st.get("keep_uploads") or [])
     res["replaced"] = []
+    res["kept_pdf"] = []
+    res["held"] = [it["source"] for it in st["items"].values() if status_of({**it, "error": None}) == "held"]
     for n, (key, it) in enumerate(todo):
         if _cancel.is_set():
             res["cancelled"], res["left"] = True, len(todo) - n
@@ -922,27 +1190,39 @@ def _apply(api: _Api) -> dict:
         _progress.update(phase="syncing", done=n, total=len(todo))
         src, what = it["source"], status_of({**it, "error": None})
         try:
+            pdfs = [] if what in ("gone", "remove", "combined") else \
+                [u for u, whole in matches.get(key, [])
+                 if whole and u not in keep and _pdf_first(it, u) and _held(u)]
             if what in ("gone", "remove", "combined"):
                 _remove(src)
                 res["removed"].append(src)
                 _note(it.get("title") or src, it["kind"], it.get("path") or [], "removed")
                 change = {"synced_version": None, "synced_at": None}
+            elif pdfs:
+                # The PDF answers; the Confluence copy is not read or indexed.
+                for u in pdfs:
+                    _keep_pdf(it, u, it.get("product") if it.get("product_chosen") else None)
+                    res["kept_pdf"].append(f"{u} kept over {src}")
+                    _note(it.get("title") or src, it["kind"], it.get("path") or [], "PDF kept")
+                change = {"synced_version": it.get("version"), "synced_at": _now(),
+                          "approved_version": None, "pdf_kept": pdfs[0]}
             else:
-                if it["kind"] == "bundle":
-                    content = _bundle_text(api, it).encode("utf-8")
-                    version = it.get("version")
-                elif it["kind"] == "page":
-                    full = api.page(it["id"])
-                    content = page_text(full.get("title") or it["title"], _body(full)).encode("utf-8")
-                    version = (full.get("version") or {}).get("number")
-                else:
-                    content = api.download(it["page_id"], it["id"])
-                    version = it.get("version")
-                uploads = [u for u, whole in matches.get(key, []) if whole and u not in keep]
-                cat, prod = _filed(src)
-                for u in uploads:
-                    if not prod and not it.get("product_chosen"):
-                        cat, prod = _filed(u)
+                content, version = _fetch(api, it, st["mode"] == "review")
+                # Only the version a person approved goes out in review mode;
+                # edited again since, it waits for approval again.
+                seen = it.get("approved_version") or it.get("version")
+                if st["mode"] == "review" and None not in (seen, version) and version != seen:
+                    raise _Moved
+                # Not the copy's own name (a new page named like an upload:
+                # removing it would take out what was just ingested), and not
+                # a PDF only on disk (restore_pdfs' to bring back; Remove deletes it).
+                uploads = [u for u, whole in matches.get(key, [])
+                           if whole and u not in keep and u != src and _held(u)]
+                # Both copies' products: the copy kept only its own, and the
+                # Linux guide lost the MyCheckr and MyConnect (2026-10-24).
+                own = _filed(src)[1] or (it.get("product") or "" if it.get("product_chosen") else "")
+                prod = _union(own, *(_filed(u)[1] for u in uploads))
+                cat = category_of(prod) if prod else None
                 if not prod:
                     cat, prod, _ = _effective(it, _name_index())
                 # A product deleted from the catalogue since the document was
@@ -956,13 +1236,25 @@ def _apply(api: _Api) -> dict:
                     cat = category_of(prod) if prod else None
                     res["errors"].append(f"{src}: product {', '.join(gone_keys)} no longer exists; "
                                          "indexed without it")
+                # D-20261025-07: an upload named like the copy but for letter
+                # case shares its figures folder on Windows; removed after the
+                # ingest, it took the copy's figures with it. It goes first
+                # (the copy is already downloaded).
+                twins = [u for u in uploads if _same_name(u, src)]
+                for upload in twins:
+                    _remove(upload)
+                    res["replaced"].append(f"{upload} -> {src}")
+                    _note(it.get("title") or src, it["kind"], it.get("path") or [], "replaced")
                 # Marked before it goes in, so not even a moment passes where
                 # an internal document can answer a customer.
                 _mark_internal([src], it.get("decision") == "internal")
                 _ingest(content, src, cat, prod or None)
-                if prod and not _filed(src)[1]:
+                filed_now = _filed(src)[1]
+                if prod and not filed_now:
                     catalog.attach_source(cat, prod, src)
-                for upload in uploads:
+                elif prod and set(prod.split(",")) != set(filed_now.split(",")):
+                    catalog.refile_source(src, prod.split(","))
+                for upload in (u for u in uploads if u not in twins):
                     # Only once the Confluence copy is in, so a failed
                     # download never leaves the manual missing altogether.
                     _remove(upload)
@@ -971,13 +1263,18 @@ def _apply(api: _Api) -> dict:
                 res["added" if what == "new" else "updated"].append(src)
                 _note(it.get("title") or src, it["kind"], it.get("path") or [],
                       "added" if what == "new" else "updated")
-                change = {"synced_version": version, "synced_at": _now(), "version": version}
+                change = {"synced_version": version, "synced_at": _now(), "version": version,
+                          "approved_version": None, "pdf_kept": None}
             change["error"] = None
         except Cancelled:
             # Stopped while building a combined document: nothing of it
             # was written, so it simply stays pending.
             res["cancelled"], res["left"] = True, len(todo) - n
             break
+        except _Moved:
+            res["held"].append(src)
+            change = {"held": True, "prev_version": seen, "version": version,
+                      "updated_at": res["at"], "error": None}
         except Exception as exc:
             logger.warning("Confluence sync: %s failed: %s", src, exc)
             res["errors"].append(f"{src}: {exc}")
@@ -996,6 +1293,7 @@ def _apply(api: _Api) -> dict:
     if res.get("cancelled"):
         return res
     done = {k for k, _ in todo}
+    kept: dict[str, str] = {}
     for key, it in st["items"].items():
         if key in done or status_of(it) != "synced":
             continue
@@ -1003,12 +1301,66 @@ def _apply(api: _Api) -> dict:
             if not whole or upload in keep:
                 continue
             try:
+                if _pdf_first(it, upload):
+                    # Uploaded again by hand (or restored): the PDF answers and
+                    # the copy goes. A PDF only on disk is an old file: left alone.
+                    if _held(upload) and _held(it.get("source") or "") and _keep_pdf(it, upload):
+                        kept.setdefault(key, upload)
+                        res["kept_pdf"].append(f"{upload} kept over {it.get('source')}")
+                        _note(it.get("title") or upload, it["kind"], it.get("path") or [], "PDF kept")
+                    continue
+                prod = _union(_filed(it.get("source") or "")[1], _filed(upload)[1])
+                # D-20261025-07: on Windows a case twin is the kept copy's own
+                # file: the upload overwrote its original, and removing the
+                # upload deletes it and its figures. Downloaded again first,
+                # so a failed download removes nothing.
+                twin = _same_name(upload, it.get("source") or "")
+                content = _fetch(api, it, False)[0] if twin else None
                 _remove(upload)
+                if content is not None and not _stored(it["source"]):
+                    _ingest(content, it["source"], category_of(prod) if prod else None, prod or None)
+                if prod and set(prod.split(",")) != set(_filed(it.get("source") or "")[1].split(",")):
+                    _retag(it["source"], category_of(prod), prod)
                 res["replaced"].append(f"{upload} -> {it.get('source')}")
                 _note(it.get("title") or upload, it["kind"], it.get("path") or [], "replaced")
             except Exception as exc:
                 res["errors"].append(f"{upload}: not removed: {exc}")
+    if kept:
+        def mark(s):
+            for k, u in kept.items():
+                if k in s["items"]:
+                    s["items"][k]["pdf_kept"] = u
+        _update(mark)
     return res
+
+
+def restore_pdfs(apply: bool = False, products: dict | None = None) -> list[str]:
+    """One-off: before the PDF-first rule (2026-10-22) the sync replaced 13
+    uploaded PDF manuals with their Confluence text copies; the PDFs are still
+    in the document store, out of the index. Lists "pdf <- copy" for each;
+    with apply, indexes the PDF again from its stored original, filed under
+    both copies' products plus products[pdf], and removes the copy. Run it
+    with the backend stopped, dry run first."""
+    st = _load()
+    keep = set(st.get("keep_uploads") or [])
+    out, kept = [], {}
+    for key, pairs in _matches(st["items"]).items():
+        it = st["items"][key]
+        if status_of(it) != "synced":
+            continue
+        for upload, whole in pairs:
+            if not whole or upload in keep or not _pdf_first(it, upload) or _held(upload):
+                continue
+            out.append(f"{upload} <- {it['source']}")
+            if apply and _keep_pdf(it, upload, (products or {}).get(upload), restore=True):
+                kept.setdefault(key, upload)
+    if kept:
+        def mark(s):
+            for k, u in kept.items():
+                if k in s["items"]:
+                    s["items"][k]["pdf_kept"] = u
+        _update(mark)
+    return out
 
 
 # ── runs ────────────────────────────────────────────────────────────────
