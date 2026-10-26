@@ -140,6 +140,7 @@ button{font:inherit;color:inherit}
 .lane{background:var(--bg);border-radius:4px;padding:10px;min-width:0}
 .lane h3{font-size:12px;letter-spacing:.08em;margin-bottom:8px;display:flex;justify-content:space-between}
 .lane ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.lanepg{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
 .kcard{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:3px;padding:7px 9px;font-size:14px;line-height:1.35}
 .kcard.s-merged{border-left-color:var(--ok)} .kcard.s-ready{border-left-color:var(--ok)}
 .kcard.s-ceo{border-left-color:var(--accent)} .kcard.s-bad{border-left-color:var(--crit)}
@@ -925,21 +926,21 @@ function cardNow(c){
   return who && DEPT_KEY[who] && hired(who) ? {key: DEPT_KEY[who], dept: nameOf(who), why: c.title, item: c.id} : null;
 }
 /* "Add a card": a CEO note asking the product owner to file it as a proposal at the next triage (tools/ceo_inbox.py note).
-   Sent ones show at the top of Coming up until that run applies them. */
-const ADD_CARD = "New card for the plan board: ";
+   It shows on the board at once, marked as sent, until that run applies the note and the real card replaces it. */
+const ADD_CARD = "New card for the plan board: ", LANE_SIZE = 5, lanePage = {future: 0, ongoing: 0, past: 0};
+let cardDraft = "";
+const sentCards = () => live.inbox.filter(r => r.choice === "note" && r.status === "new" && String(r.note).startsWith(ADD_CARD));
 function addCardBox(){
   const li = el("li", "kcard"), ta = el("textarea"), go = el("button", "btn", "Add card"), msg = el("p", "small", "");
   ta.rows = 2; ta.placeholder = "Add a card: what should be looked at or built?"; ta.setAttribute("aria-label", "New plan board card");
-  const pending = live.inbox.filter(r => r.choice === "note" && r.status === "new" && String(r.note).startsWith(ADD_CARD));
-  if(pending.length) msg.textContent = "Sent, filed at the next check: " + pending.map(r => r.title).join(" · ");
+  ta.id = "addCardText"; ta.value = cardDraft; ta.addEventListener("input", () => { cardDraft = ta.value; });
   go.type = "button";
   const send = async () => {
     const t = ta.value.trim(); if(!t) return;
-    go.disabled = true; msg.className = "small"; msg.textContent = "Sending";
+    go.disabled = true; msg.textContent = "Sending";
     try { await decide("", "note", ADD_CARD + t + "\nFile it as a proposal so it appears in Coming up, and give it a priority.", t.slice(0, 80));
-      msg.className = "sent"; msg.textContent = `Sent: "${t.slice(0, 80)}". It becomes a card at the next hourly check.`; ta.value = ""; }
-    catch(e){ msg.className = "oops"; msg.textContent = writeError(e); }
-    go.disabled = false; ta.focus();
+      cardDraft = ""; lanePage.future = 0; renderBoards(); $("addCardText").focus(); }
+    catch(e){ go.disabled = false; msg.className = "oops"; msg.textContent = writeError(e); }
   };
   go.addEventListener("click", send);
   ta.addEventListener("keydown", e => { if(e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); send(); } });
@@ -951,25 +952,38 @@ function renderBoards(){
   document.getElementById("ledgerNote").textContent = isSample
     ? "Sample boards, made up to show the layout. The real ones appear after the product owner's first run."
     : `Updated ${new Date(L.updated).toLocaleString()} by the product owner's run. Every card and point comes from the departments' files and git, never from what an agent says about itself.`;
+  const typing = document.activeElement && document.activeElement.id === "addCardText";
   const lanes = [["future","Coming up"],["ongoing","In progress"],["past","Done"]];
   document.getElementById("p-plan").replaceChildren(...lanes.map(([k, title]) => {
-    const cards = L.cards.filter(c => c.lane === k).sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999)), lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
+    const sent = k === "future" && !isSample ? sentCards().map(r => ({title: r.title, sent: true})) : [];
+    const cards = [...sent, ...L.cards.filter(c => c.lane === k).sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999))], lane = document.createElement("div"), h = document.createElement("h3"), ul = document.createElement("ul");
+    const pages = Math.max(1, Math.ceil(cards.length / LANE_SIZE)), pg = lanePage[k] = Math.min(lanePage[k], pages - 1);
     lane.className = "lane"; h.textContent = title; const n = document.createElement("span"); n.textContent = cards.length; h.append(n);
     if(k === "future" && !isSample && live.available) ul.append(addCardBox());
     if(!cards.length){ const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing here yet."; ul.append(li); }
-    for(const c of cards){
-      const li = document.createElement("li"); li.className = "kcard " + STAGE_CLS(shownStage(c)); li.textContent = c.title;
+    for(const c of cards.slice(pg * LANE_SIZE, (pg + 1) * LANE_SIZE)){
+      const li = document.createElement("li"); li.className = "kcard " + (c.sent ? "" : STAGE_CLS(shownStage(c))); li.textContent = c.title;
       const meta = document.createElement("div"); meta.className = "kmeta";
-      const st = document.createElement("span"); st.className = "kstage"; st.textContent = shownStage(c);
-      const who = document.createElement("span"); who.textContent = `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
+      const st = document.createElement("span"); st.className = "kstage"; st.textContent = c.sent ? "sent, filed at the next check" : shownStage(c);
+      const who = document.createElement("span"); who.textContent = c.sent ? "You (CEO) → Product owner" : `${nameOf(c.from)} → ${nameOf(c.assigned)}`;
       meta.append(st, who);
       if(c.priority != null){ const p = el("span", "kprio", `P${c.priority}`); p.title = "The product owner's priority: 1 is done first"; meta.prepend(p); }
       li.append(meta);
-      const now = cardNow(c);
+      const now = !c.sent && cardNow(c);
       if(now && !isSample && live.available && !(live.brief && live.brief.off)){ const b = runNowBtn(now, "Do it now"); b.classList.add("donow"); if(now.key === "dev") devNow(b); li.append(b); }
       ul.append(li);
     }
-    lane.append(h, ul); return lane; }));
+    lane.append(h, ul);
+    if(pages > 1){   // at most LANE_SIZE cards per column; the rest are a page away
+      const nav = el("div", "lanepg"), prev = el("button", "btn", "‹"), next = el("button", "btn", "›");
+      prev.type = next.type = "button"; prev.disabled = pg === 0; next.disabled = pg === pages - 1;
+      prev.setAttribute("aria-label", `Previous ${title} cards`); next.setAttribute("aria-label", `Next ${title} cards`);
+      prev.addEventListener("click", () => { lanePage[k]--; renderBoards(); }); next.addEventListener("click", () => { lanePage[k]++; renderBoards(); });
+      nav.append(prev, el("span", "small", `${pg * LANE_SIZE + 1}–${Math.min(cards.length, (pg + 1) * LANE_SIZE)} of ${cards.length}`), next);
+      lane.append(nav);
+    }
+    return lane; }));
+  if(typing && $("addCardText")) $("addCardText").focus();
   document.getElementById("p-depts").replaceChildren(...Object.entries(L.boards || {}).filter(([id]) => D[id] || id === "po").map(([id, b]) => {
     const el = document.createElement("div"), h = document.createElement("h3"), bar = document.createElement("div"), fill = document.createElement("i");
     el.className = "dboard"; h.textContent = nameOf(id);
@@ -1937,7 +1951,7 @@ setInterval(sampleStep, 9000);
   let firstEvents = true;
   try {
     db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); renderWork(); renderSync(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderSync(); renderLab(); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderBoards(); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderSync(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); renderAlerts(); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());
