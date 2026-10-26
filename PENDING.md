@@ -210,7 +210,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 
 | Item | What | Stage | Next |
 |---|---|---|---|
-| D-20261008-04 | Limits printed in a table on the next page are not given | built, waiting for the check | the pre-ship check |
+| D-20261008-04 | Limits printed in a table on the next page are not given | check passed | Security's review |
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261008-12 | Security item D-20261008-12, details in the office | approved, queued | Dev builds it |
 | D-20261021-09 | The website screenshots show a dummy phone number, a doubled greeting and an old refusal layout | waiting for CEO | your yes |
