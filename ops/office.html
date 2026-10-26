@@ -111,7 +111,7 @@ button{font:inherit;color:inherit}
 .scroller.zoomed .bub.think.below::before{bottom:auto;top:-6px} .scroller.zoomed .bub.think.below::after{bottom:auto;top:-10px}
 
 .roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:8px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:9px 10px;text-align:left;cursor:pointer;display:grid;gap:3px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:9px 10px;text-align:left;cursor:pointer;display:grid;gap:3px;min-width:0;align-content:start}
 .card:hover{border-color:var(--muted)}
 .card[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
 .card.ping{animation:ping .9s ease-out}
@@ -1256,13 +1256,23 @@ for(const b of document.querySelectorAll(".seg button[data-view]")) b.addEventLi
 
 function select(id){ selected = id; renderDetail(); renderRoster(true); }
 const STATE_LABEL = {working:"Working", waiting:"Waiting", idle:"Idle", planned:"Soon", blocked:"Blocked", off:"Off duty"};
+// The card shows a list of item titles as a count ("still broken? 9 items"); the full list stays in the detail panel.
+// 2026-10-26: the product owner's list of 20 titles made its card as tall as the page and stretched the whole row.
+function cardTask(t){
+  return String(t || "").split("; ").map(seg => {
+    const n = (seg.match(/[“"][^”"]+[”"]/g) || seg.match(/D-\d{8}-\d+/g) || []).length;
+    const head = seg.split(/[“"]|D-\d{8}-\d+/)[0].trim();
+    return n >= 2 && head ? `${head} ${n} items` : seg;
+  }).join("; ");
+}
 function renderRoster(force){
   for(const d of DEPTS){
     const w = worker(d.id), c = cards[d.id];
     const label = STATE_LABEL[w.state] || w.state, cls = "state " + w.state;
     if(c.state.className !== cls) c.state.className = cls;
     if(c.state.textContent !== label) c.state.textContent = label;
-    if(c.task.textContent !== w.task) c.task.textContent = w.task;
+    const task = cardTask(w.task);
+    if(c.task.textContent !== task) c.task.textContent = task;
     const nowTxt = AG[d.id] && hired(d.id) ? "Now: " + activity(AG[d.id]) : "Empty desk";
     if(c.now.textContent !== nowTxt) c.now.textContent = nowTxt;
     if(force) c.el.setAttribute("aria-pressed", String(selected === d.id));
