@@ -214,7 +214,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | sent back, rebuilding | Dev rebuilds it |
 | D-20261022-15 | Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it | waiting for CEO | your yes |
 | D-20261025-09 | Security item D-20261025-09, details in the office | approved, queued | Dev builds it |
-| D-20261026-02 | Security item D-20261026-02, details in the office | built, waiting for the check | the pre-ship check |
+| D-20261026-02 | Security item D-20261026-02, details in the office | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
