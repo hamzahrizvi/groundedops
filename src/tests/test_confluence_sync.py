@@ -984,3 +984,28 @@ def test_an_unreadable_marks_file_flips_no_decision():
         w.internal = Everything()
         w.run(api)
         assert w.items()["Installation"]["decision"] == "approved"
+
+
+def test_a_case_twin_write_back_indexes_only_the_approved_version():
+    # D-20261026-02: review mode, a sync without a fresh check, the page
+    # edited in Confluence since, and an upload that is the copy's case twin.
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert w.items()["Installation"]["status"] == "synced"
+        w.uploads = ["installation.txt"]
+        del w.texts["Installation.txt"]          # on Windows the upload overwrote the original
+        api.page_version = 2                     # edited in Confluence, not checked yet
+        n = len(w.ingested)
+        res = w.run(api, check=False)
+        assert len(w.ingested) == n, w.ingested  # version 2 never indexed
+        assert w.uploads == ["installation.txt"] and "installation.txt" not in w.removed, w.removed
+        assert any(e.startswith("installation.txt: not removed:") and "approve" in e
+                   for e in res["errors"]), res
+        api.page_version = 1                     # versions equal: written back as before
+        res = w.run(api, check=False)
+        assert w.ingested[n:] == [("Installation.txt", "sh3")], w.ingested
+        assert "installation.txt" in w.removed, w.removed
+        assert res["replaced"] == ["installation.txt -> Installation.txt"], res
