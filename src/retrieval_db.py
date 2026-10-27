@@ -85,8 +85,14 @@ def internal_sources() -> frozenset:
     return _internal
 
 
-def set_internal(sources, on: bool, reindex: bool = True) -> None:
+def set_internal(sources, on: bool, reindex: bool = True,
+                 copies: bool = True) -> None:
     """Mark documents internal (on) or customer-facing (off).
+
+    Marking also marks every stored byte-identical copy (same_content): the
+    Confluence sync keeps one per page that attaches the file, and a copy left
+    public answered with the marked document's text (D-20261026-91). copies=
+    False only where the manifest does not hold the bytes being marked yet.
 
     Marking takes a document's chunks out of the index; its original stays in
     the document store (downloads stay refused by the mark). A document with
@@ -98,6 +104,9 @@ def set_internal(sources, on: bool, reindex: bool = True) -> None:
     nothing."""
     global _internal, _internal_good
     import jsonstore
+    sources = list(sources)
+    if on and copies:
+        sources += same_content(sources)
     with _internal_lock:
         _internal = None                    # re-read: never write back a stale or fail-closed set
         cur = set(internal_sources())
@@ -143,6 +152,23 @@ def _drop_marked_chunks(keys: set) -> None:
     except Exception as exc:
         logger.error("marked internal, but its chunks were not taken out of the "
                      "index (still hidden at read time): %s", exc)
+
+
+def same_content(sources) -> list[str]:
+    """Every other document in the store byte-identical to one of `sources`
+    (same sha256 in the docstore manifest), by its manifest name. Never
+    raises: [] when the manifest cannot be read."""
+    try:
+        import docstore
+        docs = docstore.load_manifest()["documents"]
+    except Exception as exc:
+        logger.warning("copies of %r not looked up: %s", list(sources), exc)
+        return []
+    by_key = {_name_key(n): (e or {}).get("sha256") for n, e in docs.items()}
+    given = {_name_key(s) for s in sources}
+    hashes = {by_key.get(k) for k in given} - {None}
+    return [n for n, e in docs.items()
+            if (e or {}).get("sha256") in hashes and _name_key(n) not in given]
 
 
 @functools.lru_cache(maxsize=4096)
@@ -334,7 +360,8 @@ def _phrase_ranking(query: str, collection, limit: int,
     return [cid for _, cid in hits[:limit]]
 
 _bm25_lock = threading.Lock()
-_bm25_cache = {"count": -1, "index": None, "chunks": None}
+_bm25_cache = {"count": -1, "index": None, "chunks": None, "copies": None}
+_NO_COPIES = {"of": {}, "others": {}}
 
 
 def _invalidate_bm25_cache():
@@ -342,6 +369,71 @@ def _invalidate_bm25_cache():
     where chunk COUNT is unchanged so the count-based cache wouldn't
     otherwise refresh the metadata it holds."""
     _bm25_cache["count"] = -1
+    _bm25_cache["copies_stale"] = True
+
+
+# ONE ANSWERING COPY PER FILE (D-20261026-91). The Confluence sync stores a
+# file once per page that attaches it, as "<stem> (<id>)<ext>"
+# (confluence_sync), and an upload under another name is a copy too: 74
+# files were indexed 2-18 times over, so one drawing filled every candidate
+# slot and its terms read as 5-18x commoner to BM25. Copies are found by the
+# content hash ingest writes on every chunk, whenever the chunk cache is
+# rebuilt: nothing is stored, so the choice is right after an ingest, after
+# Remove (the next copy answers) and on an index built before this.
+_COPY_SUFFIX = re.compile(r" \((?:att)?\d+\)(?=\.[^.]*$|$)")
+
+
+def _find_copies(first_meta: dict) -> dict:
+    """{"of": {copy: answering copy}, "others": {answering copy: [first
+    metadata of each of its copies]}} from each source's first chunk
+    metadata. The answering copy is the plain name (no sync suffix), else
+    the first indexed, else the first by name."""
+    groups: dict[str, list[str]] = {}
+    for src, m in first_meta.items():
+        h = m.get("content_sha256") or m.get("document_version")
+        if h:
+            groups.setdefault(h, []).append(src)
+    of, others = {}, {}
+    for srcs in groups.values():
+        if len(srcs) < 2:
+            continue
+        keep = min(srcs, key=lambda s: (bool(_COPY_SUFFIX.search(s)),
+                                        first_meta[s].get("indexed_at") or "", s))
+        others[keep] = [first_meta[s] for s in sorted(srcs) if s != keep]
+        for s in srcs:
+            if s != keep:
+                of[s] = keep
+    return {"of": of, "others": others}
+
+
+def _copies() -> dict:
+    """The copies map of the chunk cache. Built once when the cache was
+    never built or was invalidated; never calls count(), since this runs
+    once per chunk. A failed build reads as no copies and is not retried
+    per chunk."""
+    if _bm25_cache.get("copies_stale", True):
+        _bm25_cache["copies_stale"] = False
+        try:
+            _get_bm25_index(get_collection())
+        except Exception as exc:
+            logger.warning("copies of documents not worked out: %s", exc)
+    return _bm25_cache.get("copies") or _NO_COPIES
+
+
+def copies_of() -> dict:
+    """{copy: the copy answering in its place}, a fresh read for the
+    console and the tools. {} when the index cannot be read."""
+    try:
+        _get_bm25_index(get_collection())
+    except Exception as exc:
+        logger.warning("copies of documents unavailable: %s", exc)
+        return {}
+    return (_bm25_cache.get("copies") or _NO_COPIES)["of"]
+
+
+def duplicate_of(source: str | None) -> str | None:
+    """The copy answering in place of `source`, or None when it answers."""
+    return copies_of().get(source) if source else None
 
 
 
@@ -415,6 +507,11 @@ def _get_bm25_index(collection):
             return _bm25_cache["index"], _bm25_cache["chunks"]
 
         data = collection.get(include=["documents", "metadatas"])
+        first_meta: dict[str, dict] = {}
+        for m in data["metadatas"]:
+            if m and m.get("kind", "chunk") != "query":
+                first_meta.setdefault(m.get("source", "unknown"), m)
+        copies = _find_copies(first_meta)
         chunks = [
             {
                 "id": i,
@@ -442,7 +539,22 @@ def _get_bm25_index(collection):
             # synthetic questions never enter BM25 or surface as results;
             # a re-ingest clears them permanently.
             if m.get("kind", "chunk") != "query"
+            # A copy's chunks stay out of the corpus and every reader of
+            # this cache; its answering copy stands for it.
+            and m.get("source", "unknown") not in copies["of"]
         ]
+        # The answering copy carries the products its copies are filed
+        # under, for main.py's per-product picks and labels.
+        import docindex
+        union = {}
+        for keep, metas in copies["others"].items():
+            keys = docindex.product_keys(first_meta[keep])
+            for m in metas:
+                keys += [k for k in docindex.product_keys(m) if k not in keys]
+            union[keep] = ",".join(keys)
+        for c in chunks:
+            if c["source"] in union:
+                c["product"] = union[c["source"]]
 
         corpus = [_bm25_tokens(c["text"]) for c in chunks]
         index = BM25Okapi(corpus) if corpus else None
@@ -450,6 +562,8 @@ def _get_bm25_index(collection):
         _bm25_cache["count"] = count
         _bm25_cache["index"] = index
         _bm25_cache["chunks"] = chunks
+        _bm25_cache["copies"] = copies
+        _bm25_cache["copies_stale"] = False
 
         return index, chunks
 
@@ -494,6 +608,20 @@ def _matches_scope(meta: dict, source_filter: str | None,
     # internal document, as before; nothing else does.
     if not source_filter and is_excluded(meta.get("source")):
         return False
+    if not scope:
+        return bool(source_filter) or meta.get("source") not in _copies()["of"]
+    if source_filter:
+        return _scope_hit(meta, scope)
+    copies = _copies()
+    if meta.get("source") in copies["of"]:
+        return False                      # its answering copy stands for it
+    # The answering copy is filed wherever any of its copies is.
+    return _scope_hit(meta, scope) or any(
+        _scope_hit(m, scope) for m in copies["others"].get(meta.get("source"), ()))
+
+
+def _scope_hit(meta: dict, scope: dict) -> bool:
+    """Whether a chunk's own filing puts it in `scope`."""
     if scope:
         if "product" in scope:
             key = scope["product"]
@@ -590,6 +718,19 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
         where = {"$or": _arms}
     elif scope and "category" in scope:
         where = {"category": scope["category"]}
+    if not source_filter:
+        # Copies never answer; an answering copy is in scope wherever one
+        # of its copies is filed (_matches_scope says the same).
+        copies = _copies()
+        if where and scope:
+            carriers = sorted(k for k, ms in copies["others"].items()
+                              if any(_scope_hit(m, scope) for m in ms))
+            if carriers:
+                arms = where["$or"] if "$or" in where else [where]
+                where = {"$or": arms + [{"source": {"$in": carriers}}]}
+        if copies["of"]:
+            nin = {"source": {"$nin": sorted(copies["of"])}}
+            where = {"$and": [where, nin]} if where else nin
     if where:
         res = collection.query(query_embeddings=[q_vec.tolist()],
                                n_results=max(1, min(limit * 2, collection.count())),
@@ -659,6 +800,9 @@ def retrieve_from_db(
     n = collection.count()
     if n == 0:
         return []
+    # "Ask about this document" on a copy reads the answering copy: the
+    # same bytes, and the copy's own chunks are not in the chunk cache.
+    source_filter = duplicate_of(source_filter) or source_filter
 
     fetch_n = min(max(top_k * 2, top_k), n)
 
