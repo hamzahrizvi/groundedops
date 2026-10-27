@@ -3588,11 +3588,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # rewrite) fetched 16 candidates without the NV9USB+ protocols page
     # (p.37); DeepSeek's wording fetched it at #10. Scoped to the NV9USB+
     # alone it ranks #1. Additive: each product adds its top few.
+    # Each arm rescues passages the joint search LACKS: its top three were
+    # often pages the joint list already held, so they rescued nothing. The
+    # ICU's arm held "Accessing my device on Android" (the only page stating
+    # the ICU's network options) at #8-10 behind shared pages, and a
+    # MyCheckr-vs-ICU comparison never saw it; reranked it is #1, 0.993
+    # (D-20261019-17, C20261026-24).
     if len(_both_named) >= 2:
+        _have = {r.get("id") for r in results}
         results = fuse_ranked_results([results] + [
-            retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
-                             source_filter=payload.source_filter,
-                             scope={"product": _k})
+            [r for r in retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
+                                         source_filter=payload.source_filter,
+                                         scope={"product": _k})
+             if r.get("id") not in _have]
             for _k in _both_named])
     # SEVERAL ASKS: EACH ONE SEARCHED ON ITS OWN (D-20261009-09). The whole
     # message finds the pages that match all of it at once, which for

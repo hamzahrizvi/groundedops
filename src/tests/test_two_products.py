@@ -32,6 +32,30 @@ def test_two_named_products_are_answered_not_asked_which_part():
     assert "which part" not in out["answer"]
 
 
+def test_each_product_arm_rescues_only_what_the_joint_search_lacks():
+    # C20261026-24: the ICU's arm's top three were pages the joint list held,
+    # so its own page at #8 was never rescued. Every arm must offer new ones.
+    joint = [dict(CHUNK, id=f"j{i}", source="MyCheckr.pdf", product="mycheckr",
+                  rerank_score=0.9) for i in range(3)]
+    calls = []
+
+    def spy(sets, *a, **k):
+        calls.append(sets)
+        return [r for s in sets for r in s]
+
+    names = {"mycheckr": "MyCheckr", "icu": "ICU Pro"}
+    with patch.object(main, "_product_names", return_value=names), \
+         patch.object(main, "_product_aliases", return_value={}), \
+         patch.object(main, "retrieve_fused", return_value=joint), \
+         patch.object(main, "fuse_ranked_results", side_effect=spy):
+        _ask(q="what's the difference between the MyCheckr and the ICU Pro "
+               "for network connection?",
+             rerank=joint, retrieve_from_db=joint)
+    assert calls, "a two-product turn fuses the per-product arms"
+    have = {r["id"] for r in calls[0][0]}
+    assert all(r["id"] not in have for arm in calls[0][1:] for r in arm), calls[0]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
