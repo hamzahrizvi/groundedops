@@ -344,3 +344,4 @@ def admin_keys_clear(provider: str,
         raise HTTPException(status_code=404, detail=f"unknown provider '{provider}'")
     logger.info(f"provider key for '{provider}' cleared by {me['email']}")
     return {"ok": True}
+

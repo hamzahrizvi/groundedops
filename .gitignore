@@ -158,3 +158,4 @@ src/chroma_db.before-*/
 *deepseek_key*
 *_env_*.txt
 .env
+confluence_sync.json

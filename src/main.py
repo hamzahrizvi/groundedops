@@ -979,6 +979,8 @@ def startup_event():
     thread.start()
     import credit_watch
     credit_watch.start()
+    import confluence_sync
+    confluence_sync.start()
 
 
 @app.get("/status")
@@ -4664,6 +4666,7 @@ import routes_admin_auth
 import routes_admin_data
 import routes_admin_keys
 import routes_catalog
+import routes_confluence
 import routes_console
 import routes_documents
 import routes_faq
@@ -4672,7 +4675,7 @@ import routes_widget
 
 for _routes in (routes_console, routes_documents, routes_settings, routes_faq,
                 routes_widget, routes_catalog, routes_admin_auth,
-                routes_admin_keys, routes_admin_data):
+                routes_admin_keys, routes_admin_data, routes_confluence):
     app.include_router(_routes.router)
 
 
