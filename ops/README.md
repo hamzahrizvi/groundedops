@@ -1,0 +1,269 @@
+# The agent office
+
+Departments of Claude agents that test GroundedOps every week, propose fixes,
+build the approved ones and report to the CEO. The core loop is
+**test -> decide -> build -> check -> report**; the other departments feed it
+proposals through the product owner.
+
+## Who does what
+
+| Department | Agent | Model, effort | When | Status |
+|---|---|---|---|---|
+| Customer | `.claude/agents/customer.md` | Sonnet 5.5, medium | weekly, or after a fix merges | on |
+| Test lab | `tools/weekly_blind.sh`, `tools/gate_run.sh` | no model (shell) | after Customer; before each PO run | on |
+| Product owner | `.claude/agents/product-owner.md` | Fable 5.1, high | when a hand-back or a new finding waits | on |
+| Dev | `.claude/agents/dev.md` | Opus 5.5, high | when an approved work order waits | on |
+| Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | weekly | phase 2, on since 2026-10-08 |
+| Known-holes check | `tools/dep_audit.py` | no model (pip-audit) | weekly, inside Audit's run | on |
+| Security | `.claude/agents/security.md` | Opus 5.5, high | every 2nd week, or when a passed branch waits | phase 2, on since 2026-10-08 |
+| R&D | `.claude/agents/rnd.md` | Opus 5.5, high | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
+| Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
+| CEO (you) | - | - | when the report lands | ticks approvals; merging is automatic (below) |
+
+**When things run (since 2026-10-08).** No department has a fixed time any
+more (their crons are parked on 29 February). The hourly
+`groundedops-office-dispatch` task reads the plan usage (get_usage) and runs
+`tools/office_next.py`, which lists the departments with work waiting, in the
+order above, and runs the first one that fits the budget itself, by following
+that department's task prompt (a scheduled run cannot start another scheduled
+task: run_scheduled_task is blocked in unattended sessions): the 5-hour window
+stays at or under 70%, and the weekly window may be used only as far as the
+week has gone since the Friday reset, plus 15 points (the CEO, 2026-10-09: a
+strict pace allowed one job per 6-7 hours after each reset), so it can be
+used up by Friday. After
+each department it checks again and runs the next ready one, up to 4 per tick,
+so work flows without waiting for the next hour; a tick that finds the last
+one still running is skipped.
+
+**Lanes (since 2026-10-09).** One runner meant one long job (a 3-hour build,
+a gate) held up every other department. Three lanes now run the same steps
+(`ops/schedules/dispatch.md`): `groundedops-office-dispatch` is lane 1 at :08,
+`groundedops-office-lane-2` and `-lane-3` run at about :25 and :52. Each lane
+takes work with `office_next.py --lane N --take`, which claims it with an
+O_EXCL file in `OPS/state/claims`, so no two lanes ever start the same thing.
+Lane 1 always checks every 10 minutes, whatever "Next run" says, so the CEO's page decisions never
+wait for a slow schedule; "Next run" spaces only the new work lane 1 starts (merges and Run now presses go at once).
+Lane 1 always takes work. Lanes 2 and 3 first run `office_next.py --lane N --needed` and stop at once
+unless another lane holds work (or lane 1 has not looked for work in 90 minutes): they exist so a long
+build or check does not hold everything else up, and most of their wake-ups used to find nothing (CEO,
+2026-10-19). Up to two Dev work orders build at once, each in its own worktree on its own
+branch, so no commits collide; merges and every other department run one at a
+time; work running in other lanes counts against the budget. Test runs take
+turns (`blind_eval.py` locks the lab for its "system" phase) so timings stay
+honest. The CEO's lab spending cap (`OPS/lab_cap.json`, set on the Costs
+tab) stops every paid lab call once the day's, week's or month's spend reaches
+it (`blind_eval.py` exits 3); no file means no cap. A branch that conflicts with a fix merged first is sent back to Dev for
+a rebase by `office_merge.py`, and the gate and Security run again on it.
+New lanes start with manual permissions: set them to Auto in the app before
+switching them on, or the first command waits forever.
+Usage comes from the app's own samples (`plan-usage-history.json`), so the
+runner's one command never changes. `OPS/state/hold` pauses a department:
+`<department> [<ISO end time>]` per line; a line without an end time lapses 4
+hours after the file was written. Never hold without an end in mind: on
+2026-10-08 a hand-set hold plus a missed notice idled the office for 80 minutes.
+Nothing in the office may depend on an interactive session noticing a run end;
+task completion notices to a session did not arrive.
+
+Scheduled tasks are named `groundedops-office-<department>`. Their prompts
+live in `ops/schedules/` (`customer-weekly.md`, `customer-images.md`, `product-owner.md`,
+`dev-approved.md`, `diary.md`, and `department.md` for the other four), each with
+`model-pick.md` and `office-status.md` appended. Edit them there and copy the change into the task.
+
+**Model per job.** Before each department spawn, the `model-picker` agent (Haiku)
+reads the job line and picks a model and effort; `tools/model_pick.py` keeps the
+pick between the job's floor (its `FLOOR` table) and the agent file's own model and
+effort, which stay the ceiling, and logs it to `OPS/state/model_picks.log`.
+`tools/agent_wiring.py` accepts any run inside that range.
+
+**Diary.** Once a day is over (or after 22:00), the dispatcher runs
+`groundedops-office-diary`: `tools/office_diary.py --facts <date>` gathers the day's
+merges, test runs, gates, hand-backs and decisions, and the product owner (job
+DIARY, usually on Haiku) writes `OPS/diary/<date>.md` in three plain lines: Done,
+Problems, Sorted. The office page shows the latest 14 on its Diary tab.
+
+**Where it runs.** The office stays on its own branch,
+`experimental/agent-org-phase1`, and is never merged into `main`. The tasks
+run from that branch's checkout (OFFICE =
+`C:/Users/hrizvi/Downloads/Git/groundedops/.claude/worktrees/agent-org`) and
+test the product in the main checkout (REPO, whatever branch it is on).
+Each task's start folder must be OFFICE too. A task keeps the folder of the
+session that created it, and hand edits to the app's `scheduled-tasks.json`
+are undone on restart, so create (or recreate) the tasks from a session in
+OFFICE. Started anywhere else, the agent files are not loaded, departments
+fall back to general-purpose and run at the orchestrator's effort, not their
+own: step 0's change_directory only applies after the turn ends.
+`tools/agent_wiring.py` checks what really ran; Audit runs it weekly.
+Each task also needs its permission mode set to Auto on the task itself (its
+`permissionMode` in that file). Changing the mode inside one run's session
+changes only that run. In manual mode the first unapproved command waits for a
+click that never comes (the tracker sync sat on one from 2026-10-07 23:18).
+A recreated task starts in manual again. Setting the mode is the CEO's job,
+not an agent's.
+Don't remove that worktree; if it moves, change OFFICE in the seven task
+prompts and their start folders. Dev branches product fixes from REPO's HEAD, and office-tooling fixes
+from `experimental/agent-org-phase1`.
+
+**Purge.** Context costs tokens on every turn, so no phase inherits another
+phase's reading. Each scheduled run starts cleared; inside a run every phase
+is a fresh subagent; only a short file on disk or a five-line message
+crosses a phase boundary:
+- Customer writes questions with one fresh context per product (in
+  parallel), then reviews in another fresh context.
+- Dev works in three fresh contexts: PLAN writes `<id>.plan.md`, BUILD reads
+  only that and writes `<id>.build.md`, CHECK reads only those two and writes
+  the hand-back.
+- The product owner greps PENDING.md instead of reading it, and never reads
+  Dev's working notes.
+- The orchestrating session reads summaries only, never answers, logs or diffs.
+
+**Switching a phase on:** enable its tasks in the Scheduled sidebar, or tell
+Claude "switch on phase 2". Suggested: phase 2 once phase 1 has had two clean
+weeks, phase 3 once Dev has merged a gated fix.
+
+## The week (the order; timing is the dispatcher's)
+
+1. **Mon 01:00, Customer.** Exports each product's manual text from the index
+   (`tools/export_manuals.py`), writes 40 new blind questions from that text
+   alone, the test lab asks the bot and grades the answers against a
+   whole-manual baseline, then Customer re-checks every miss and files one
+   finding per *type* of failure, plus 4 hidden sibling questions per type.
+2. **Tue 08:00, Product owner.** Scores every department's findings, rejects
+   patches for one question, checks the PENDING.md "Rejected" list, approves
+   at most 3 at once, writes the CEO report, then updates the boards.
+3. **Your turn.** Read the report. Approve by ticking `- [x] CEO approved` in
+   the decisions file, or tell any Claude session "approve D-...".
+4. **Weekdays 20:00, Dev.** Takes one approved work order (this month's reward
+   leader's first), builds it in its own worktree on `agents/dev-<id>`, runs
+   the tests, hands back. Never merges.
+5. **Fri 08:00, Product owner.** The test lab runs the gate on each hand-back;
+   Security's branch review (phase 2) can block it; the product owner marks it
+   READY TO MERGE or sends it back. Once Security has cleared the branch, the
+   dispatcher merges it (`tools/office_merge.py`).
+
+## The retrofit gate
+
+A fix passes only if (`tools/retrofit_gate.py`):
+1. no **hidden sibling question** (same weakness, other products and
+   wording, written by Customer, never shown to Dev) drops: each is asked on
+   the branch and on its base code and marked in one pass, and fails the fix
+   only when it scores under 2 on the branch and 2+ on base (such a sibling is
+   first re-asked 6 times on each side, lower median). Under 2 on both sides is
+   reported as unmoved; raised to 2+ as fixed;
+2. no question that was right before is now **wrong** (when only one or two
+   are, `tools/gate_rerun.py` asks each 6 times on the branch and 6 on its base
+   code: it stays wrong only if the branch is wrong at least 2 passes more often);
+3. the overall score does not drop by more than the noise (3 points).
+
+The siblings are the point. Dev sees the failing questions, so passing them
+proves little; passing questions it never saw proves the fix generalises.
+
+## Product status (the pivot)
+
+Customer files every question under a category from its own list
+(`OPS/categories.json`; it started with simple, technical, conversational and
+commercial, and Customer adds one when a question fits none). Every Monday,
+`tools/ops_pivot.py` rolls the graded runs up by category, question type and
+product, week by week (bot score, gap to an AI given the whole manual,
+wrong answers, wrong "not in the manual" replies, question counts), plus the
+week's real website questions by category and how each ended. The office's
+**Product status** tab pivots it live; click a row for the questions behind it.
+
+Above the pivot, **Is the product getting better?** is one line: the bot's
+score per test run adjusted for difficulty (each question type weighs the same
+in every run, since type explains about half the spread in the bot's marks),
+a band for how few questions one run asks (90%), and a numbered mark for each
+Dev fix merged into REPO between runs. A move counts only when it beats that
+noise, and never under the gate's 3 points; with 40 questions a run that is
+about 9 points between two runs. The product owner refreshes it on every run
+and quotes its verdict in the report's Score section. The gap to the
+whole-manual AI is not used for it: that AI's mark on a question explains 2%
+of the bot's (measured 2026-10-10).
+
+## Reports and the planner
+
+Every department reports to the product owner, never to the CEO: proposals
+and notes alike land in `OPS/inbox/<department>/`, and any new one wakes the
+product owner (`tools/office_next.py`; Security's branch reviews are read with
+their branch). The product owner decides whether each report is worth the
+CEO's time, lists them under "Reports read" in its decisions, and puts the
+ones that are in the report's **From the departments** section.
+
+PENDING.md is the product owner's planner. After each of its runs,
+`tools/pending_plan.py` rewrites the "Office plan" block near the top from the
+decisions (every open item, its stage and next step, what finished in the last
+30 days) and copies each "- For the rejected list:" line into "Rejected - do
+not redo without new evidence", then commits PENDING.md alone. If PENDING.md
+has changes nobody committed, or other files are staged, it writes nothing
+and the next run catches up, so nobody else's edits are ever swept in.
+
+## Boards and rewards
+
+`tools/ops_ledger.py` builds three things from the files below and from git,
+after every product owner run, and the office shows them:
+- **Plan board:** every finding and decision as a card in Coming up /
+  In progress / Done, with its stage (proposed, waiting for CEO, approved,
+  built, check passed or failed, ready to merge, merged, rejected, reverted).
+- **Department boards:** each department's doing and queued work against its
+  capacity (Dev 3, product owner 8 to triage, others 2). Full boards turn red.
+- **Improvement of the month:** points from measured results only. Finder:
+  +2 approved, +5 merged after a gate PASS, +1 per wrong answer fixed.
+  Builder: +5 first-try PASS merged (+3 after a send-back), +1 per wrong answer
+  fixed. Product owner: +1 per merge, -3 per revert (builder -3 too). The
+  leader's findings go first in Dev's queue.
+
+The ledger reads the decisions format in `.claude/agents/product-owner.md`
+and the hand-back header in `.claude/agents/dev.md`; keep them in step.
+
+## Where things live
+
+`OPS = C:/Users/hrizvi/groundedops-ops` (outside the repo, so agents never
+touch the shared working tree, and the hidden questions are not in git):
+
+```
+OPS/runs/<YYYYMMDD>/       manuals/, cases.json, cases_state.json, run.log, DONE; visitor text
+                           (widget_feedback.json, real_questions.json, real_categorised.json)
+                           is deleted after RETENTION_DAYS (90) by the weekly run's first step, and votes older than that by created_at from newer runs
+                           (ops_pivot.py --prune); real_counts.json keeps the counts
+OPS/bank/<YYYYMMDD>/       manuals/, cases.json, READY: the next 40 questions, written after a run (tools/question_bank.py)
+OPS/state/blind_focus.json  {"product", "pair", "why"}: the next written set is about that product only; moved to runs/<stamp>/focus.json once used
+OPS/heldout/<YYYYMMDD>/    siblings_<type>.json   (Dev must never read)
+OPS/heldout/gates/<id>.gate-<ts>/  the gate's hidden pass: gate.log, sib_*/ states (Dev never reads)
+OPS/inbox/<department>/    findings and proposals; inbox/dev/ holds hand-backs and gates
+                           (<id>.gate/: gate.json, gate.log of the open set only, after/);
+                           inbox/security/review-<id>.md holds branch reviews
+OPS/decisions/<date>.md    verdicts, work orders, approval boxes
+OPS/reports/<date>.md      the CEO report
+OPS/ledger.json            boards and rewards (also uploaded to the office)
+OPS/state/                 Security's last reviewed commit and run date
+```
+
+## The office
+
+https://claude.ai/artifact/XeDaMgpcp1foLDuX9N8KMD (source: `ops/office.html`).
+An open-plan floor: people sit at their desks while working and take breaks
+around the building otherwise; hand-offs are walked over as papers; the
+report is a meeting with you. Its data store holds `workers/<department>`
+(state, task, last, next), `events/<id>` (from, to, text), `board/ceo`
+(waiting) and `ledger/current` (the boards). A department appears in the
+office once its `workers` row exists; `off` means hired but switched off.
+When nobody is on shift it plays a sample week, labelled as one.
+
+## Rules every agent follows
+
+- Only Dev changes code, only in its own worktree (CLAUDE.md P1).
+- Merging is automatic, on the CEO's standing instruction (2026-10-08): the
+  dispatcher runs `tools/office_merge.py <id>` once a branch has a gate PASS,
+  the product owner's READY TO MERGE and Security's CLEAR, and only if no
+  uncommitted change in the target checkout touches the same files; it reverts
+  a merge whose Python does not compile. No agent merges any other way.
+- Nobody pushes, tags or publishes a release.
+- No reindex, no .exe rebuild, no credentials.
+- Test runs pin the bot's every provider role, the whole-manual baseline and
+  the grader to one provider: DeepSeek V4 Flash, thinking off, since
+  2026-10-10, when the OpenAI credit ran out (`LAB_PROVIDER=openai` in
+  `tools/blind_eval.py` brings back gpt-5-mini and the gpt-5 grader). Every
+  grade logs its tokens and cost; a run's `summary.grader` totals them. Scores
+  under different graders do not compare: `blind_eval.py <run> remark`
+  re-grades an old run with today's grader (the gate does it first), and keeps
+  the old grades beside it as `cases_state.graded-by-<model>.json`.
+- A step that needs a person stops and says so; it never guesses.

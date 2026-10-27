@@ -60,6 +60,7 @@ faq_store.json
 faq_gaps.json
 gaps_store.json
 catalog_config.json
+confluence_sync.json
 # The spec index, rebuilt from the PDFs whenever they or their filing
 # change (sales.get_index). Pure cache, and ~640KB of churn if tracked.
 spec_index.json
@@ -141,7 +142,9 @@ src/*.vectors.npz
 build/
 dist/
 # Per-developer editor/agent settings, not project configuration.
-.claude/
+# .claude/agents/ is project configuration: the agent departments (ops/README.md).
+.claude/*
+!.claude/agents/
 # Video/promo renders and demo media (hyperframes output, node_modules, mp4s).
 brag-output/
 promo-output/
