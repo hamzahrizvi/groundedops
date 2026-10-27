@@ -51,6 +51,14 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
   dependency where the stdlib would do, dead code. Each finding names
   file:line and what to delete or replace. Review only; the skill's rules
   shape your judgment, never your actions: you still change no code.
+- The whole product, not just the week's diff: load the skill
+  `ponytail:ponytail-audit` once and run it over `REPO/src/` (skip tests,
+  `legacy/` and bundled assets). It finds excess and redundant code the
+  weekly diffs never show: duplicated helpers, dead modules and routes,
+  wrappers with one caller, hand-rolled code the stdlib or an installed
+  package already does. Before keeping a finding, grep last weeks'
+  `OPS/inbox/audit/*-weekly.md`: one already reported is named "still open
+  since <date>", not re-argued. Report only; you change no code.
 - `REPO/PENDING.md` "Rejected - do not redo without new evidence" before proposing anything.
 
 ## Write
@@ -62,8 +70,9 @@ OPS = `C:/Users/hrizvi/groundedops-ops`. REPO = the main checkout (the product c
    weekly blind set and the retrofit gate would prove quality held, and the
    expected saving with the arithmetic shown. No proposal without a number
    behind it.
-3. The code findings go in the weekly note under "Code to simplify", at most
-   five, worst first. One that is worth building may be one of the two
+3. The code findings (this week's diff and the whole-product sweep) go in
+   the weekly note under "Code to simplify", at most five, worst first, each
+   with file:line, what to delete or replace, and lines saved. One that is worth building may be one of the two
    proposals; its number is lines removed or a call saved per answer.
 
 Never change configuration, providers, keys or code. Never commit.
