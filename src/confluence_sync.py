@@ -1315,7 +1315,19 @@ def _apply(api: _Api) -> dict:
                 # upload deletes it and its figures. Downloaded again first,
                 # so a failed download removes nothing.
                 twin = _same_name(upload, it.get("source") or "")
-                content = _fetch(api, it, False)[0] if twin else None
+                content = None
+                if twin:
+                    # D-20261026-02: in review mode only the version a person
+                    # approved is indexed, here as on the main path. Edited
+                    # since, the upload stays (as before D-20261025-07) and
+                    # the item is reported so an admin approves the edit first.
+                    review = st["mode"] == "review"
+                    content, version = _fetch(api, it, review)
+                    synced = it.get("synced_version")
+                    if review and None not in (synced, version) and version != synced:
+                        raise ValueError(f"{it['source']} was edited in Confluence since it was "
+                                         f"approved (version {version}, approved {synced}); "
+                                         "approve the edit first")
                 _remove(upload)
                 if content is not None and not _stored(it["source"]):
                     _ingest(content, it["source"], category_of(prod) if prod else None, prod or None)
