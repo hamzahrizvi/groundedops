@@ -128,6 +128,10 @@ body.compact .phaseband .pblurb .easy,body.compact .phaseband .ptitle .easy{disp
 .node.taken{border-color:var(--taken);box-shadow:0 0 0 3px var(--taken-soft),var(--shadow)}
 .node.taken .badge{background:var(--taken-soft);color:var(--taken)}
 .exit.taken{box-shadow:0 0 0 3px var(--taken-soft)}
+.suspect{outline:3px solid var(--stop);outline-offset:3px;opacity:1}
+.diag{border-left:3px solid var(--stop);background:var(--stop-soft);padding:8px 10px;margin:10px 0;font-size:13px}
+.diag ol{margin:6px 0 0;padding-left:18px;display:grid;gap:4px}
+#diagBtn{margin:4px 0 8px;font:inherit;font-size:13px;padding:5px 10px;border:1px solid var(--stop);border-radius:4px;background:var(--stop-soft);color:inherit;cursor:pointer}
 .dim{opacity:.22}
 .wire{fill:none;stroke:var(--rail);stroke-width:2}
 .wire.branch{stroke-dasharray:5 4}
@@ -915,13 +919,29 @@ function showRecorded(t){
   $("status").innerHTML=`ended at <b>${esc(t.exit||"unknown")}</b>${t.because?" — "+esc(t.because):""}`;
   panel.innerHTML=`<h2>Where this question went</h2><div class="where">${esc(t.q||"")}</div>
     ${t.verdict?`<p class="lead">Graded: ${esc(t.verdict)}</p>`:""}
+    ${t.diagnosis?`<button id="diagBtn" type="button" aria-expanded="false">Diagnose: where it went wrong</button><div class="diag" id="diag" hidden></div>`:""}
     <div class="why"><b>Ended at</b>${esc(t.exit||"unknown")}${t.because?"<br>"+esc(t.because):""}</div>
     ${st.length?`<div class="kv">${t.stages.map(([ms,l,n])=>
         `<span>${ms} ms</span><span>${esc(l)}${n?" — "+esc(n):""}</span>`).join("")}</div>`
       :`<p>This run kept only how the answer ended, so the steps before it are not lit. Runs from 12 Oct keep every step.</p>`}
     <p style="font-size:12.5px;color:var(--muted)">Lit = the steps it took. Click any step for what it does.</p>`;
+  if(t.diagnosis) $("diagBtn").onclick=()=>diagnose(t);
   const end=(SERVER_TO_MAP[t.exit_id]||[])[0];   // scroll to where it ended
   if(byId[end]) setTimeout(()=>byId[end].el.scrollIntoView({block:"center"}),300);
+}
+/* "Diagnose": the likely causes tools/ops_pivot.py diagnose() read off this question's record, most likely first;
+   each names a stage, outlined on the map. A second press hides them. */
+function diagnose(t){
+  const box=$("diag"), b=$("diagBtn"), open=box.hidden;
+  box.hidden=!open; b.setAttribute("aria-expanded",open);
+  document.querySelectorAll(".suspect").forEach(e=>e.classList.remove("suspect"));
+  if(!open) return;
+  box.innerHTML=`<b>Most likely first</b><ol>${t.diagnosis.map(([,x])=>`<li>${esc(x)}</li>`).join("")}</ol>`
+    +(t.why?`<p style="margin:8px 0 0"><b>Grader:</b> ${esc(t.why)}</p>`:"");
+  let first;
+  t.diagnosis.forEach(([id])=>(SERVER_TO_MAP[id]||SERVER_TO_MAP[id.split(".")[0]]||[]).forEach(m=>{
+    if(byId[m]){ byId[m].el.classList.add("suspect"); first=first||byId[m].el; }}));
+  if(first) first.scrollIntoView({block:"center",behavior:"smooth"});
 }
 let recorded=null;
 try{ if(location.hash.startsWith("#trace=")) recorded=JSON.parse(decodeURIComponent(location.hash.slice(7))); }catch(e){ recorded=null; }

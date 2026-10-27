@@ -101,6 +101,39 @@ def trace(row, log, labels):
     return None
 
 
+_key = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
+STOPS = ("none.", "span.ask", "refusal", "clarify", "suppress")
+
+
+def diagnose(f, row, t):
+    """Where a wrong or missed answer most likely went wrong: a few plain lines from the run's own record (the steps,
+    the sources, both marks), most likely first. Each line is [stage id, text]; the pipeline map outlines that stage.
+    ponytail: rules over the record, not proof; a doc tagged to no product (e.g. *_general) needs a person to find."""
+    if not t or f["verdict"] in ("correct", "correct_refusal", "clarified"):
+        return None
+    st = {s[3]: s[2] or "" for s in t.get("stages") or [] if s[3]}
+    out, base, bot, ex = [], f["base"], f["bot"], t.get("exit_id") or ""
+    if ex.startswith(STOPS):
+        out.append([ex, f"It stopped at \"{t.get('exit')}\"" + (f" ({t['because']})" if t.get("because") else "") + " instead of answering."])
+    m = re.search(r"over \[(.*?)\]", st.get("retrieve.pair", ""))
+    if m:   # a comparison: did every product it compared reach the sources?
+        prods, names = re.findall(r"'([^']+)'", m[1]), [_key(s) for s in row.get("sources") or {}]
+        miss = [p for p in prods if not any(_key(p) in n for n in names)]
+        if miss:
+            out.append(["retrieve.pair", f"Comparison of {' and '.join(prods)}: no {' or '.join(miss)} document was among the sources, so that half had nothing to go on."])
+    b = st.get("band", "")
+    if b and not b.startswith("confident"):
+        out.append(["band", f"Search found only weak matches: {b}."])
+    m = re.search(r"LLM verifier \(NLI ([\d.]+), needs ([\d.]+)\)", st.get("ground", ""))
+    if m and float(m[1]) < float(m[2]):
+        out.append(["ground", f"The answer check let it through: the strict check scored it {m[1]} (needs {m[2]}), but the AI verifier passed it."])
+    if base is not None and base > bot:
+        out.append(["retrieve", f"The manuals do have it: the whole-manual AI scored {base:.1f}/3 to the bot's {bot:.1f}/3, so the bot lost it in search or in picking passages."])
+    elif base is not None and base < 2:
+        out.append(["entry", f"The whole-manual AI failed too ({base:.1f}/3): the manuals may not say it, or the question or the grading is off."])
+    return out or [["entry", "Nothing in the record stands out: read the grader's reason and the steps."]]
+
+
 def review(run_dir):
     """The run's questions with the bot's answer and the grader's reason, for the CEO's review pop-up."""
     st = _load(os.path.join(run_dir, "cases_state.json"))
@@ -125,6 +158,8 @@ def review(run_dir):
         base = (st.get("baseline") or {}).get(f["id"], {})
         out.append(dict(f, answer=str(row.get("answer", ""))[:600], base_answer=str(base.get("answer", ""))[:600] if f["base"] != f["bot"] else "",   # only where it differs: the page's db doc caps at 256 KB
                         why=why[:400], trace=trace(row, logs.get(f["q"]), labels)))
+        if out[-1]["trace"] and (d := diagnose(f, row, out[-1]["trace"])):
+            out[-1]["trace"]["diagnosis"] = d
     return out
 
 
@@ -534,6 +569,14 @@ def _selftest():
     t = trace({}, {"outcome": "respond", "timing": {"total_time": 1.5, "llm_time": 0.5, "rerank_time": 0}}, {"respond": "Answered"})
     assert t["exit"] == "Answered" and t["ms"] == 1500 and t["times"] == {"llm": 0.5}, t
     assert trace({}, None, {}) is None
+    # C20261026-24: a comparison that never reached ICU, passed by the LLM verifier over a failed NLI check
+    t = {"exit_id": "respond", "stages": [[0, "", "confident (best 0.976)", "band"], [1, "", "4 passages over ['icu', 'mycheckr']", "retrieve.pair"],
+                                          [2, "", "passed by LLM verifier (NLI 0.043, needs 0.55)", "ground"]]}
+    d = diagnose({"verdict": "wrong", "bot": 1, "base": 2}, {"sources": {"MyCheckr User Manual-v7.pdf": [8]}}, t)
+    assert [x[0] for x in d] == ["retrieve.pair", "ground", "retrieve"] and "no icu document" in d[0][1], d
+    d = diagnose({"verdict": "safe_decline", "bot": 1, "base": 1}, {}, {"exit_id": "none.reject", "exit": "Found nothing", "stages": []})
+    assert [x[0] for x in d] == ["none.reject", "entry"], d
+    assert diagnose({"verdict": "correct", "bot": 3, "base": 3}, {}, t) is None
     print("selftest ok")
 
 

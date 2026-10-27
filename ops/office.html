@@ -203,6 +203,7 @@ button{font:inherit;color:inherit}
 .rq .why{font-size:13.5px;color:var(--muted);margin:0}
 .rqpane{display:grid;gap:10px}
 .trace summary{cursor:pointer;font-size:13.5px}
+.diag ol{margin:8px 0 0;padding:8px 10px 8px 28px;border-left:3px solid var(--crit);background:var(--surface);font-size:14px;display:grid;gap:4px}
 .trace ol{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:3px;font-size:13px}
 .trace li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .trace .ms{min-width:58px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -1065,6 +1066,7 @@ function openReview(g, run, pick, title){
     for(const [k, t] of [["answer", "The bot's answer"], ["base_answer", "The whole-manual AI's answer"]])
       if(c[k]){ const d = el("details"); d.append(el("summary", null, t), el("p", "ans", c[k])); box.append(d); }
     if(c.why) box.append(el("p", "why", "Grader: " + c.why));
+    if(c.trace && c.trace.diagnosis) box.append(diagBox(c.trace.diagnosis));
     box.append(traceBox(c.trace, c, lab));
     (panes[cls] || panes.warn).append(box);
     const sent = live.inbox.find(r => r.id === c.id && r.choice === "note");
@@ -1097,7 +1099,7 @@ function traceBox(t, c, lab){
   if(!t){ d.append(el("summary", null, "Where it went: not recorded for this run")); return d; }
   d.append(el("summary", null, `Where it went: ended at "${t.exit || "unknown"}"` + (t.ms != null ? `, ${(t.ms / 1000).toFixed(1)} s` : "")));
   const go = el("button", "btn", "Open pipeline"); go.type = "button";
-  go.addEventListener("click", () => openPipeline(Object.assign({q: c.q, verdict: lab}, t)));
+  go.addEventListener("click", () => openPipeline(Object.assign({q: c.q, verdict: lab, why: c.why}, t)));
   d.append(go);
   if(t.because) d.append(el("p", "why", "Because: " + t.because));
   if(t.stages){
@@ -1112,6 +1114,14 @@ function traceBox(t, c, lab){
     if(tm.length) d.append(el("p", "why", "Time spent: " + tm.map(([k, v]) => `${k.replace(/_/g, " ")} ${v.toFixed(1)} s`).join(", ")));
   }
   return d;
+}
+/* "Diagnose": the likely causes tools/ops_pivot.py diagnose() read off a wrong or missed answer's record, most likely first */
+function diagBox(diag){
+  const w = el("div", "diag"), b = el("button", "btn", "Diagnose"), ol = el("ol");
+  b.type = "button"; b.setAttribute("aria-expanded", "false"); ol.hidden = true;
+  for(const [, x] of diag) ol.append(el("li", null, x));
+  b.addEventListener("click", () => { ol.hidden = !ol.hidden; b.setAttribute("aria-expanded", String(!ol.hidden)); b.textContent = ol.hidden ? "Diagnose" : "Hide diagnosis"; });
+  w.append(b, ol); return w;
 }
 /* the pipeline map (tools/pipeline_map.html, published beside this page) with this question's path lit,
    or, from the pipeline icon, empty and ready to ask; loaded only when asked for, emptied on close */
