@@ -113,7 +113,9 @@ def diagnose(f, row, t):
         return None
     st = {s[3]: s[2] or "" for s in t.get("stages") or [] if s[3]}
     out, base, bot, ex = [], f["base"], f["bot"], t.get("exit_id") or ""
-    if ex.startswith(STOPS):
+    if ex == "extract":
+        out.append(["extract", "It copied a checklist straight out of the manual instead of writing an answer, so it came out as loose fragments that may skip the key step."])
+    elif ex.startswith(STOPS):
         out.append([ex, f"It stopped at \"{t.get('exit')}\"" + (f" ({t['because']})" if t.get("because") else "") + " instead of answering."])
     m = re.search(r"over \[(.*?)\]", st.get("retrieve.pair", ""))
     if m:   # a comparison: did every product it compared reach the sources?
@@ -577,6 +579,8 @@ def _selftest():
     d = diagnose({"verdict": "safe_decline", "bot": 1, "base": 1}, {}, {"exit_id": "none.reject", "exit": "Found nothing", "stages": []})
     assert [x[0] for x in d] == ["none.reject", "entry"], d
     assert diagnose({"verdict": "correct", "bot": 3, "base": 3}, {}, t) is None
+    d = diagnose({"verdict": "wrong", "bot": 1, "base": 3}, {}, {"exit_id": "extract", "exit": "Copied a checklist", "stages": []})
+    assert [x[0] for x in d] == ["extract", "retrieve"], d
     print("selftest ok")
 
 
