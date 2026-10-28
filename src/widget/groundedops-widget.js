@@ -2331,6 +2331,22 @@
               },
             });
           }
+          // D-20261026-93: one stronger re-ask after a refusal, for a member
+          // with the credits for it. Not after a deep ask (used once per
+          // turn), not on a handoff, a FAQ answer or an outage notice.
+          // Guests get deep_available false from the server (quota.status).
+          var qs = quotaState;
+          if (opts.effort !== "deep" && d.role !== "handoff" && !d.from_faq
+              && !d.service_degraded && qs && qs.deep_available
+              && qs.remaining >= qs.deep_cost) {
+            chips([{
+              label: "Search more thoroughly",
+              onClick: function () {
+                ask(q, Object.assign({}, opts, { effort: "deep", silent: true }));
+              },
+            }], "Uses " + qs.deep_cost + " of your " + qs.remaining +
+                " credits today (a normal answer uses " + (qs.standard_cost || 1) + ")");
+          }
           chips(supportChips, "What would you like to do?");
         } else if (!d.flagged && !d.service_degraded && !d.needs_sign_in) {
           afterAnswer(d);
