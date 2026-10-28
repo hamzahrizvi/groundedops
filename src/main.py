@@ -2803,16 +2803,15 @@ def _holds_manual_of(selected: str, named: str) -> bool:
     `named` and not `selected` (CashGenic lists the SMART Coin System Range
     User Manual and the NV200S Range User Manual)."""
     try:
-        import catalog
-        src = {p.get("key"): set(p.get("sources") or [])
-               for c in (catalog.catalog().get("categories") or [])
-               for p in (c.get("products") or [])}
+        import catalog   # catalog() is the picker view, without sources
+        shared = (set(catalog.sources_for(selected) or [])
+                  & set(catalog.sources_for(named) or []))
     except Exception as exc:
         logger.debug(f"catalogue sources skipped: {exc}")
         return False
     return any("manual" in s.lower()
                and _products_named_in(s, [selected, named]) == [named]
-               for s in src.get(selected, set()) & src.get(named, set()))
+               for s in shared)
 
 
 def _scope_for_products(keys: list[str]) -> dict | None:
