@@ -198,6 +198,29 @@ def test_comparison_share_keeps_a_low_scored_table_and_no_third_product():
         main.CONTEXT_K, main.CONTEXT_MIN = k, m
 
 
+def test_a_part_of_the_selected_system_does_not_override_it():
+    """C20261022c-08: "the smart coin system" typed in a CashGenic chat moved
+    the search to the SCS pool and refused; CashGenic lists the SCS manual.
+    A product that only shares a manual named for the selected one (the
+    MyCheckr manual, in a MyCheckr chat asking about the Mini) still overrides."""
+    import catalog
+    real = (catalog.catalog, main._product_names, main._product_aliases)
+    catalog.catalog = lambda: {"categories": [{"products": [
+        {"key": "cashgenic", "sources": ["CashGenic User Manual-v1.pdf", "SMART Coin System Range User Manual-v1.pdf"]},
+        {"key": "sku_scs", "sources": ["SMART Coin System Range User Manual-v1.pdf", "SCS Release Notes.txt"]},
+        {"key": "mycheckr", "sources": ["MyCheckr User Manual-v7.pdf"]},
+        {"key": "mycheckr_mini", "sources": ["MyCheckr User Manual-v7.pdf", "MyCheckr Mini User Manual-v5.pdf"]}]}]}
+    main._product_names = lambda: {"cashgenic": "CashGenic", "sku_scs": "SMART Coin System",
+                                   "mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr Mini"}
+    main._product_aliases = lambda: {}
+    try:
+        assert main._resolve_question_scope("cashgenic", None, ["sku_scs"]) == ({"product": "cashgenic"}, "cashgenic")
+        assert main._resolve_question_scope("sku_scs", None, ["cashgenic"]) == ({"product": "cashgenic"}, "cashgenic")
+        assert main._resolve_question_scope("mycheckr", None, ["mycheckr_mini"]) == ({"product": "mycheckr_mini"}, "mycheckr_mini")
+    finally:
+        catalog.catalog, main._product_names, main._product_aliases = real
+
+
 def test_number_rescue_does_not_judge_a_comparison_verdict_or_absence():
     ctx = [{"text": "MCBF: 200,000 Cycles"}, {"text": "MCBI: 25,000 MCBF: 100,000"}]
     verdict = "The NV4000 is better: 100,000 cycles against 200,000 for the NV200 Spectral."

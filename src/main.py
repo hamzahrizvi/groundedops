@@ -2797,6 +2797,24 @@ def _is_family_parent(named: str, selected: str) -> bool:
     return False
 
 
+def _holds_manual_of(selected: str, named: str) -> bool:
+    """True when `selected` is a system built around `named`: the selected
+    product's catalogue sources include a manual whose filename names
+    `named` and not `selected` (CashGenic lists the SMART Coin System Range
+    User Manual and the NV200S Range User Manual)."""
+    try:
+        import catalog
+        src = {p.get("key"): set(p.get("sources") or [])
+               for c in (catalog.catalog().get("categories") or [])
+               for p in (c.get("products") or [])}
+    except Exception as exc:
+        logger.debug(f"catalogue sources skipped: {exc}")
+        return False
+    return any("manual" in s.lower()
+               and _products_named_in(s, [selected, named]) == [named]
+               for s in src.get(selected, set()) & src.get(named, set()))
+
+
 def _scope_for_products(keys: list[str]) -> dict | None:
     """The narrowest retrieval scope that holds every product in `keys`:
     their shared category, or None (the whole corpus) when they span
@@ -2839,9 +2857,16 @@ def _resolve_question_scope(selected_product: str | None,
     # pool, where the Mini's curated answer is not, and the visitor got a
     # menu. The typed name overrides the picker only when it is not a
     # prefix of the selected product's own name or aliases.
+    # A PART IS NOT AN OVERRIDE either. "Is the supplied 24V PSU big enough
+    # for the Spectral Payout and the SMART Coin System?" in a CashGenic chat
+    # names a product CashGenic is built around; the override searched the
+    # SCS pool alone, best 0.06, and refused (C20261022c-08), while the
+    # CashGenic manual's power table (p.5) ranks near the top in CashGenic's
+    # own scope. The part's own documents are still searched (main.query).
     if (len(named_products) == 1 and selected_product
             and named_products[0] != selected_product
-            and _is_family_parent(named_products[0], selected_product)):
+            and (_is_family_parent(named_products[0], selected_product)
+                 or _holds_manual_of(selected_product, named_products[0]))):
         named_products = []
     effective_product = (named_products[0] if len(named_products) == 1
                          else selected_product)
@@ -3346,6 +3371,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # NV9USB+ while its scope bar said BV30. Without a picker there is no
     # selection to protect, and the rewrite is the only product signal a
     # follow-up has, so it still counts there.
+    # A part of the selected system typed in its chat keeps the chat's scope
+    # (_resolve_question_scope); its own pool is searched as well, below.
+    _part_named = [k for k in _named_typed
+                   if payload.product and len(_named_typed) == 1
+                   and k != payload.product
+                   and _holds_manual_of(payload.product, k)]
     _scope, _effective_product = _resolve_question_scope(
         payload.product, payload.category,
         _named_typed if payload.product else _named)
@@ -3717,6 +3748,16 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                          scope={"product": _k})
              if r.get("id") not in _have]
             for _k in _both_named])
+    # A PART OF THE SELECTED SYSTEM TYPED IN ITS CHAT (C20261022c-08): the
+    # chat keeps its scope, and the part's own manuals are searched too.
+    if _part_named:
+        _have = {r.get("id") for r in results}
+        results = fuse_ranked_results([results] + [
+            [r for r in retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
+                                         source_filter=payload.source_filter,
+                                         scope={"product": _k})
+             if r.get("id") not in _have]
+            for _k in _part_named])
     # SEVERAL ASKS: EACH ONE SEARCHED ON ITS OWN (D-20261009-09). The whole
     # message finds the pages that match all of it at once, which for
     # "which draws less running current and which has better MCBF" was the
