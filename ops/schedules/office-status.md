@@ -1,4 +1,4 @@
-OFFICE STATUS (shared by every scheduled run; never fail a run over it)
+OFFICE STATUS (required, not optional: do every "status", "event" and "board" update the steps above name, at the step that names it. Only if a write is refused or errors, note it in your final lines and carry on; never fail a run over it)
 
 OFFICE = https://claude.ai/artifact/XeDaMgpcp1foLDuX9N8KMD
 

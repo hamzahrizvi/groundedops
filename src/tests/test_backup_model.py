@@ -55,7 +55,9 @@ def test_backup_escalation_uses_the_backup_roles_model():
     import keystore
     import main
     src = inspect.getsource(main.query)
-    assert 'keystore.model_for_role("backup", _backup_provider)' in src
+    # The escalation's role follows the mode (llm.escalation_role,
+    # D-20261016-09); its model is that role's own.
+    assert 'keystore.model_for_role(_esc_role, _backup_provider)' in src
     restore = _with_env(ONLINE_OPENAI_MODEL="itl-gpt-flash", MODEL_ROLE_BACKUP="itl-gpt-pro")
     try:
         assert keystore.model_for_role("backup", "openai") == "itl-gpt-pro"

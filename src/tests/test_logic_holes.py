@@ -156,6 +156,91 @@ def test_a_product_form_matches_whole_words_only():
         main._product_names, main._product_aliases = real_names, real_aliases
 
 
+def test_a_sibling_is_named_by_its_difference_once_the_family_is_typed():
+    """"the mycheckr ... vs the mini" names both; "mini" alone names nothing."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    main._product_names = lambda: {"mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr mini",
+                                   "nv9usb": "NV9USB+"}
+    main._product_aliases = lambda: {"mycheckr": [], "mycheckr_mini": ["MyCheckr Mini"],
+                                     "nv9usb": []}
+    keys = ["mycheckr", "mycheckr_mini", "nv9usb"]
+    try:
+        assert main._products_named_in(
+            "how do you fix the mycheckr to a wall vs the mini?", keys) == ["mycheckr", "mycheckr_mini"]
+        assert main._products_named_in("does the mycheckr mini need wifi", keys) == ["mycheckr_mini"]
+        assert main._products_named_in("is the mycheckr minimal", keys) == ["mycheckr"]
+        assert main._products_named_in("nv9usb with a mini usb cable", keys) == ["nv9usb"]
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
+def test_comparison_share_keeps_a_low_scored_table_and_no_third_product():
+    """D-20261016-08: C20261017b-34 lost the NV9 Spectral's +5C table (0.0076,
+    its side's best 0.045) to the per-product floor; C20261017b-26 filled a
+    slot with a third product's MCBF page."""
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "nv9_spectral", "rerank_score": s} for s in (0.045, 0.024, 0.0076, 0.006)]
+        ranked += [{"product": "bv30", "rerank_score": 0.0055}]
+        ranked += [{"product": "nv9usb", "rerank_score": s} for s in (0.0043, 0.0031, 0.0023)]
+        assert main._comparison_picks(ranked, ["nv9_spectral", "nv9usb"], 0.0225) == [0, 1, 2, 3, 5, 6, 7]
+        ranked = [{"product": "nv200s", "rerank_score": 0.88},
+                  {"product": "nv9_spectral", "rerank_score": 0.82},
+                  {"product": "nv4000", "rerank_score": 0.75},
+                  {"product": "nv4000", "rerank_score": 0.67},
+                  {"product": "nv4000", "rerank_score": 0.55},
+                  {"product": "", "rerank_score": 0.50},
+                  {"product": "biometrics_general,mycheckr,mycheckr_mini", "rerank_score": 0.1}]
+        assert main._comparison_picks(ranked, ["nv200s", "nv4000"], 0.44) == [0, 2, 3, 4, 5]
+        assert main._comparison_picks(ranked, ["mycheckr", "mycheckr_mini"], 0.44) == [5, 6]
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+
+
+def test_number_rescue_does_not_judge_a_comparison_verdict_or_absence():
+    ctx = [{"text": "MCBF: 200,000 Cycles"}, {"text": "MCBI: 25,000 MCBF: 100,000"}]
+    verdict = "The NV4000 is better: 100,000 cycles against 200,000 for the NV200 Spectral."
+    absent = "The NV200 Spectral MCBF is 200,000 cycles. I could not find an MCBF for the NV4000."
+    plain = "The NV200 Spectral MCBF is 200,000 cycles and the NV4000 MCBF is 100,000 cycles."
+    assert main._lexically_supported(verdict, ctx)
+    assert not main._lexically_supported(verdict, ctx, comparing=True)
+    assert not main._lexically_supported(absent, ctx, comparing=True)
+    assert main._lexically_supported(plain, ctx, comparing=True)
+
+
+def test_comparison_rules_reach_the_answer_and_verifier_prompts():
+    p = main.build_answer_prompt("", "ctx", "q")
+    assert "compare the numbers," in p and "worked out from another product's value" in p
+    assert "agrees with the values the SOURCE gives each product" in main._VERIFY_PROMPT
+    assert "do not open with the winner" in p
+
+
+def test_verifier_thinks_on_a_comparison_verdict_or_absence_only():
+    q = "which is better for low temp, the nv9usb+ or the nv9 spectral?"
+    assert main._needs_judgement(q, "The NV9 Spectral is better: +5C against +3C.")
+    assert main._needs_judgement("nv4000 vs nv200 spectral MCBF?", "I could not find an MCBF for the NV4000.")
+    assert not main._needs_judgement(q, "NV9USB+: +3C. NV9 Spectral: +5C.")
+    assert not main._needs_judgement("what is the nv9 minimum temperature?", "It is lower than 5C: +3C.")
+
+
+def test_a_stated_limit_code_or_small_step_is_not_silence():
+    """D-20261017-08: a stated range, code table or default settles the
+    question, and a one-step reading marked as the bot's own is judged on
+    its figures, not refused. The stand-in rule of D-20261016-08 stays."""
+    p = main.build_answer_prompt("", "ctx", "q")
+    assert "If the context is silent on the topic of the question" in p
+    assert "If the context does not contain enough information" not in p
+    assert "a table of codes or messages" in p
+    assert "my reading between the two rows" in p
+    v = main._VERIFY_PROMPT
+    assert "marks as its own reading" in v
+    assert "Leaving out something the SOURCE says is not a reason" in v
+    assert "even when the passage text uses another product's name" in v
+    assert "gives as a product's own value is not supported" in v
+    assert "agrees with the values the SOURCE gives each product" in v
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

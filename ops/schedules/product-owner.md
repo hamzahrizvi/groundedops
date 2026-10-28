@@ -8,6 +8,7 @@ PURGE: the triage runs in a fresh subagent that starts from a cleared context; t
 
 0. Move the session to OFFICE with the change_directory tool. Use the OFFICE STATUS section at the end for every "status" and "event" below.
    If OFFICE/.claude/agents/product-owner.md or OFFICE/tools/gate_run.sh is missing: status po idle "The office checkout is missing", then stop.
+   If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
 1. Status po working "Reading this week's findings".
 2. Gates. For each OPS/inbox/dev/<id>.md whose status is not BLOCKED, that has no OPS/inbox/dev/<id>.gate/gate.json yet, and whose branch agents/dev-<id> is not already merged (`git -C "<REPO>" branch --merged HEAD` or `--merged experimental/agent-org-phase1`):
    find its work order in OPS/decisions/*.md for the run folder and the hidden sibling file paths, and the worktree path in the hand-back.

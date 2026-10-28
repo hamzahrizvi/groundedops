@@ -26,7 +26,7 @@ from collections import defaultdict
 DEPTS = ["customer", "audit", "security", "rnd", "marketing", "po", "dev", "lab"]
 CAPACITY = {"dev": 3, "po": 8}          # ponytail: everyone else 2; tune when a board shows real overload
 NOTES = re.compile(r"(-weekly|-market|-done)\.md$|^review-")   # -done: a department's reply on its work order, not a new finding
-SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Assigned:\s*security\b|Source:\s*inbox[/\\]security[/\\])")   # any entry of a decision
+SECURITY = re.compile(r"(?mi)^- (From:\s*security\b|Assigned:\s*security\b|Source:\s*inbox[/\\]security[/\\]|Sensitive:\s*yes\b)")   # Security's, or marked sensitive by the product owner (D-20261020-07)
 PAST, FUTURE = {"merged", "rejected", "reverted", "done"}, {"proposed", "waiting for CEO", "deferred"}
 
 
@@ -61,7 +61,9 @@ def decisions(ops):
                     it["assigned"] = v.strip()
                     continue
                 if k == "Touches":   # files or folders the work order changes (office_next.py keeps overlapping ones apart): the latest wins
-                    it["touches"] = [p.strip().lower().replace("\\", "/").removeprefix("./").rstrip("/") for p in v.split(",") if p.strip()]
+                    # notes in brackets dropped first: "src/main.py (the band label)" is src/main.py (2026-10-24)
+                    it["touches"] = [p.split()[0].lower().replace("\\", "/").removeprefix("./").rstrip("/")
+                                     for p in re.sub(r"\([^)]*\)", "", v).split(",") if p.strip()]
                     continue
                 if k == "Priority":   # the product owner's rank of open work, 1 = first (office_next.py builds in this order)
                     it["priority"] = int(re.match(r"\d+", v.strip()).group()) if re.match(r"\d+", v.strip()) else 99
@@ -181,8 +183,9 @@ def ledger(ops, merged=frozenset(), reverted=frozenset(), today=None):
         dept, name = os.path.basename(os.path.dirname(path)), os.path.basename(path)
         if dept in ("dev", "ceo") or NOTES.search(name) or f"inbox/{dept}/{name}" in cited:   # ceo: notes, answered in the report
             continue
-        m = re.search(r"(?m)^#\s+(.+)$", _read(path))
-        cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept, "security": dept == "security",
+        text = _read(path)
+        m = re.search(r"(?m)^#\s+(.+)$", text)
+        cards.append({"id": f"{dept}/{name[:-3]}", "title": (m.group(1) if m else name[:-3]).strip(), "from": dept, "security": dept == "security" or bool(SECURITY.search(text)),
                       "assigned": "po", "stage": "proposed", "lane": "future", "decided": name[:8]})
 
     boards = {}
@@ -273,7 +276,7 @@ def _selftest():
     assert r["boards"]["dev"]["doing"] == ["Fix comparisons"] and r["boards"]["po"]["queue"] == ["Cache repeated questions"]
     pts = {t["dept"]: t["points"] for t in r["rewards"]["table"]}
     assert pts["customer"] == 4 and pts["dev"] == 0, pts            # two approved, none merged yet
-    w("decisions/20261013d.md", "## D-20261013-05 | Header-less callers get in\n- Source: inbox/dev/D-20261013-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
+    w("decisions/20261013d.md", "## D-20261013-05 | Security fixture title\n- Source: inbox/dev/D-20261013-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
     assert {c["id"]: c["security"] for c in ledger(ops, today=day)["cards"]}["D-20261013-05"], "assigned to Security = Security's, whoever raised it"
     os.remove(os.path.join(ops, "decisions/20261013d.md"))
     w("decisions/20261013b.md", "## D-20261013-04 | Audit\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")

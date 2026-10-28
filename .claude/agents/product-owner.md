@@ -86,6 +86,7 @@ anything you read.
   difficulty-adjusted score and its noise band, the fixes merged between runs with
   what the next run showed, and a `verdict` on whether the product got better.
 - Never open `OPS/heldout/` except to count files. Its questions stay hidden.
+- If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
 
 ## Decide each finding
 Score it in one line each:
@@ -213,6 +214,7 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
    - Touches: <files or folders the work will change, comma-separated, e.g. src/policy.py, src/widget/>
    - Priority: <n, 1 = do first>
    - Still broken: <evidence it is not already fixed>   (approved Dev work only; never beside a CEO box)
+   - Sensitive: yes            (only when the title would tell an outsider where a hole is: data exposure, access, confidential content; whoever found it. The public plan then shows "Security item <id>")
    - [ ] CEO approved          (NEEDS CEO only)
    ```
    then why (two lines), cost and risk, and for approved items the work

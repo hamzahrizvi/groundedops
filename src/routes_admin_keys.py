@@ -93,6 +93,8 @@ def admin_keys_list(x_admin_password: str | None = Header(default=None)):
         # unassigned default will fall back to rather than implying nothing
         # answers at all.
         "fallback_provider": get_settings().get("online_provider"),
+        "local_escalation": keystore.local_escalation_allowed(),
+        "generation_mode": get_settings().get("generation_mode"),
     }
 
 
@@ -208,6 +210,21 @@ def admin_keys_set_role(role: str, payload: KeyRoleReq,
             pass
     logger.info(f"key role '{role}' set to {provider or 'none'} by {me['email']}")
     return {"ok": True, "roles": _key_roles()}
+
+
+class LocalEscalationReq(BaseModel):
+    allow: bool
+
+
+@router.post("/admin/keys/local_escalation")
+def admin_keys_set_local_escalation(payload: LocalEscalationReq,
+                                    x_admin_password: str | None = Header(default=None)):
+    """D-20261016-13: whether local mode may send a flagged answer to the
+    Default provider. Off by default; read per request, no restart."""
+    me = _require_root(x_admin_password)
+    keystore.set_local_escalation_allowed(payload.allow)
+    logger.info(f"local-mode outside escalation set {payload.allow} by {me['email']}")
+    return {"ok": True, "local_escalation": keystore.local_escalation_allowed()}
 
 
 class KeyNameReq(BaseModel):
@@ -344,3 +361,4 @@ def admin_keys_clear(provider: str,
         raise HTTPException(status_code=404, detail=f"unknown provider '{provider}'")
     logger.info(f"provider key for '{provider}' cleared by {me['email']}")
     return {"ok": True}
+

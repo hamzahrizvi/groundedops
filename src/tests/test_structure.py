@@ -5,6 +5,7 @@ from structure import (
     is_bad_line,
     is_meaningful_line,
     simple_similarity,
+    reports_failure,
 )
 
 
@@ -162,3 +163,43 @@ def test_simple_similarity_disjoint():
 def test_simple_similarity_empty():
     assert simple_similarity("", "anything") == 0
     assert simple_similarity("anything", "") == 0
+
+
+def test_reports_failure_true_for_failure_reports():
+    for q in [
+        "the tablet won't find the hub, what do I try",
+        "app cant connect to the unit during setup",
+        "registration keeps failing at step 4",
+        "firmware update stuck at 50%",
+        "it shows an error when I log in",
+        "the device is not detected when I search",
+        "it doesn\u2019t power on after install",
+    ]:
+        assert reports_failure(q), q
+
+
+def test_reports_failure_false_for_plain_how_to():
+    for q in [
+        "how do I install the hub",
+        "how to connect tablet to hub",
+        "give me the checklist before leaving site after installation",
+        "what are the steps to register a new device",
+        "walk me through configuring device rules",
+        "steps to mount the hub on the wall",
+        "how do I set up the client component at the front point",
+        None,
+    ]:
+        assert not reports_failure(q), q
+
+
+def test_failure_report_gets_no_verbatim_checklist():
+    checklist = (
+        "Check the power connection is stable\n"
+        "Verify the network cable is connected\n"
+        "Confirm the hub IP is reachable\n"
+        "Test the MyConnect app on tablet\n"
+        "Ensure device registration completed"
+    )
+    chunks = [{"text": checklist, "source": "manual.pdf", "rerank_score": 0.8}]
+    assert extract_structured_block(chunks, query="how do I connect the tablet to the hub") is not None
+    assert extract_structured_block(chunks, query="tablet won't find the hub when I search, what do I try") is None

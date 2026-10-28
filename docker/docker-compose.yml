@@ -87,6 +87,9 @@ services:
       CREDIT_ALERT_STATE_PATH: /data/credit_alerts.json
       # Outstanding password-reset and sign-in links (hashed, single use).
       AUTH_TOKENS_PATH: /data/auth_tokens.json
+      # Days visitor questions, answers, chats, votes, unsent enquiries and
+      # unanswered questions are kept before deletion (retention.py). 0 = never.
+      RETENTION_DAYS: ${RETENTION_DAYS:-90}
       # The console address emailed links point at, e.g.
       # https://staging.yourcompany.com. Required behind a proxy: without it
       # the request's Host header is not trusted and links are refused.
@@ -118,6 +121,13 @@ services:
       # host and can be backed up with ordinary tools.
       - ../documents:/data/documents
     restart: unless-stopped
+    # The process log is outside retention.py (D-20261009-06): no visitor
+    # text is written to it, and it rolls over at 5 x 10 MB anyway.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # The `frontend` service was removed in v15.2 along with the React SPA it
   # served. It was a third chat surface duplicating the admin console's test

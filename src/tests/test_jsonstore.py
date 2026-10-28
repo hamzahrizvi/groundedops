@@ -15,6 +15,7 @@ case is covered.
 import json
 import os
 import tempfile
+import threading
 
 import jsonstore
 
@@ -201,3 +202,46 @@ def test_accounts_chain_is_broken():
         accounts._PATH = old_path
 
     assert open(p, encoding="utf-8").read() == before
+
+
+# -- save: a briefly held target still ends with the new contents ---------
+
+def test_save_retries_while_target_is_held_open():
+    """Windows refuses os.replace onto a file another handle has open
+    (indexer, antivirus). save() must wait it out, not lose the write."""
+    p = _tmp()
+    jsonstore.save(p, {"v": 1})
+    fh = open(p, "rb")              # no FILE_SHARE_DELETE on Windows
+    timer = threading.Timer(0.15, fh.close)
+    timer.start()
+    try:
+        jsonstore.save(p, {"v": 2})
+    finally:
+        timer.cancel()
+        fh.close()
+    assert jsonstore.load(p, None) == {"v": 2}
+    assert not os.path.exists(p + ".tmp")
+
+
+def test_save_still_raises_when_rename_never_allowed():
+    """A lasting permissions problem must surface, not be swallowed."""
+    p = _tmp()
+    calls = []
+
+    def refuse(src, dst):
+        calls.append(1)
+        raise PermissionError(5, "Access is denied")
+
+    real_replace, real_sleep = jsonstore.os.replace, jsonstore.time.sleep
+    jsonstore.os.replace = refuse
+    jsonstore.time.sleep = lambda s: None
+    try:
+        raised = False
+        try:
+            jsonstore.save(p, {"v": 1})
+        except PermissionError:
+            raised = True
+    finally:
+        jsonstore.os.replace, jsonstore.time.sleep = real_replace, real_sleep
+    assert raised
+    assert len(calls) == 5

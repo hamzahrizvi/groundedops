@@ -14,6 +14,7 @@ proposals through the product owner.
 | Product owner | `.claude/agents/product-owner.md` | Fable 5.1, high | when a hand-back or a new finding waits | on |
 | Dev | `.claude/agents/dev.md` | Opus 5.5, high | when an approved work order waits | on |
 | Audit | `.claude/agents/audit.md` | Sonnet 5.5, low | weekly | phase 2, on since 2026-10-08 |
+| Known-holes check | `tools/dep_audit.py` | no model (pip-audit) | weekly, inside Audit's run | on |
 | Security | `.claude/agents/security.md` | Opus 5.5, high | every 2nd week, or when a passed branch waits | phase 2, on since 2026-10-08 |
 | R&D | `.claude/agents/rnd.md` | Opus 5.5, high | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
 | Marketing | `.claude/agents/marketing.md` | Sonnet 5.5, medium | monthly (30 days after its last run) | phase 3, on since 2026-10-10 |
@@ -64,7 +65,7 @@ Nothing in the office may depend on an interactive session noticing a run end;
 task completion notices to a session did not arrive.
 
 Scheduled tasks are named `groundedops-office-<department>`. Their prompts
-live in `ops/schedules/` (`customer-weekly.md`, `product-owner.md`,
+live in `ops/schedules/` (`customer-weekly.md`, `customer-images.md`, `product-owner.md`,
 `dev-approved.md`, `diary.md`, and `department.md` for the other four), each with
 `model-pick.md` and `office-status.md` appended. Edit them there and copy the change into the task.
 
@@ -224,6 +225,7 @@ OPS/runs/<YYYYMMDD>/       manuals/, cases.json, cases_state.json, run.log, DONE
                            is deleted after RETENTION_DAYS (90) by the weekly run's first step, and votes older than that by created_at from newer runs
                            (ops_pivot.py --prune); real_counts.json keeps the counts
 OPS/bank/<YYYYMMDD>/       manuals/, cases.json, READY: the next 40 questions, written after a run (tools/question_bank.py)
+OPS/state/blind_focus.json  {"product", "pair", "why"}: the next written set is about that product only; moved to runs/<stamp>/focus.json once used
 OPS/heldout/<YYYYMMDD>/    siblings_<type>.json   (Dev must never read)
 OPS/heldout/gates/<id>.gate-<ts>/  the gate's hidden pass: gate.log, sib_*/ states (Dev never reads)
 OPS/inbox/<department>/    findings and proposals; inbox/dev/ holds hand-backs and gates

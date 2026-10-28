@@ -33,6 +33,22 @@ _PROVIDER_LABEL = {
     "anthropic": "Claude",
 }
 
+# Who processes a visitor's text, and where, for the widget's fixed notice
+# (D-20261015-10). Keyed by provider id, never operator text.
+_PROVIDER_PROCESSOR = {
+    "deepseek": "DeepSeek (China)",
+    "openai": "OpenAI (USA)",
+    "anthropic": "Anthropic (USA)",
+}
+
+
+def processor_label(provider: str) -> str:
+    """'OpenAI (USA)'. An openai slot pointed at another base URL (the on-prem
+    gateway) is not OpenAI, and its location is not known here."""
+    if kind_label(provider) == "OpenAI-compatible":
+        return "an OpenAI-compatible service"
+    return _PROVIDER_PROCESSOR.get(provider, provider)
+
 # Overridable so tests can point this at a scratch file instead of the real
 # .env — see _harness.py. Resolved lazily (a function, not a constant) so
 # a test can set the env var before the first call.
@@ -243,9 +259,9 @@ _ROLE_LABEL = {
 }
 
 _ROLE_HINT = {
-    "default": "Answers a normal question, and condenses follow-ups.",
+    "default": "Answers a normal question, and condenses follow-ups. In local mode it gets flagged answers only if the switch below is on.",
     "advanced": "Answers a 'deep' question, where reasoning is worth the cost.",
-    "backup": "Tried only when the provider above fails on a request.",
+    "backup": "Online mode only: tried when the provider above fails on a request.",
 }
 
 
@@ -264,6 +280,25 @@ def role_label(role: str) -> str:
 
 def role_hint(role: str) -> str:
     return _ROLE_HINT.get(role, "")
+
+
+# D-20261016-13: in local mode a flagged answer may be retried on the Default
+# role's provider (llm.escalation_role). That sends the question and the
+# manual passages outside, so it is OFF unless the operator turns it on.
+_LOCAL_ESCALATION_ENV = "LOCAL_ALLOW_OUTSIDE_ESCALATION"
+
+
+def local_escalation_allowed() -> bool:
+    return (os.getenv(_LOCAL_ESCALATION_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def set_local_escalation_allowed(on: bool) -> None:
+    _rewrite_env_line(_LOCAL_ESCALATION_ENV, "1" if on else None)
+    if on:
+        os.environ[_LOCAL_ESCALATION_ENV] = "1"
+    else:
+        os.environ.pop(_LOCAL_ESCALATION_ENV, None)
+    logger.info(f"local-mode outside escalation {'on' if on else 'off'} (via console)")
 
 
 def get_role_assignment(role: str) -> str | None:
@@ -452,6 +487,46 @@ def set_sso_settings(provider: str, changes: dict) -> None:
     elif changes.get("clear_secret"):
         _set_vault_secret(f"sso_{provider}_client_secret", legacy_env_name, None)
     logger.info(f"SSO settings for {provider} updated (via console)")
+
+
+# ── Confluence manuals sync (confluence_sync.py) ────────────────────────
+# The folder link and account email are configuration; the API token is a
+# secret, write-only from the console like the SMTP password.
+_CONFLUENCE_ENV = {"folder_url": "CONFLUENCE_FOLDER_URL",
+                   "email": "CONFLUENCE_EMAIL"}
+_CONFLUENCE_LEGACY_ENV = "CONFLUENCE_API_TOKEN"
+
+
+def get_confluence_settings() -> dict:
+    out = {k: (os.getenv(env) or "").strip() for k, env in _CONFLUENCE_ENV.items()}
+    out["token_set"] = bool(get_confluence_token())
+    return out
+
+
+def get_confluence_token() -> str:
+    return _vault_secret("confluence_token", _CONFLUENCE_LEGACY_ENV)
+
+
+def set_confluence_settings(changes: dict) -> None:
+    """Apply only the fields present. The caller validates the folder link
+    (confluence_sync.parse_folder_url)."""
+    for field, env in _CONFLUENCE_ENV.items():
+        if field not in changes:
+            continue
+        val = str(changes[field] or "").strip()
+        if field == "email" and val and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", val):
+            raise ValueError("that is not an email address")
+        _rewrite_env_line(env, val or None)
+        if val:
+            os.environ[env] = val
+        else:
+            os.environ.pop(env, None)
+    if changes.get("token") and str(changes["token"]).strip():
+        _set_vault_secret("confluence_token", _CONFLUENCE_LEGACY_ENV,
+                          str(changes["token"]).strip())
+    elif changes.get("clear_token"):
+        _set_vault_secret("confluence_token", _CONFLUENCE_LEGACY_ENV, None)
+    logger.info("Confluence sync settings updated (via console)")
 
 
 # ── low-credit alerts ───────────────────────────────────────────────────

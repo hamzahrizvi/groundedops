@@ -98,6 +98,10 @@
     // French subdomain). Falls back to the page's own declared language,
     // then the browser's, when not set -- see detectedLanguage().
     language: attr("data-language", ""),
+    // D-20261015-10: replaced by the server's live line from /widget/config.
+    // Deliberately no data- attribute: the embed must not be able to change it.
+    aiNotice: "AI assistant: answers come from our manuals and can be wrong.",
+    privacyUrl: "",
   };
 
   // The anonymous FAQ-only path uses this to match same-language curated
@@ -129,6 +133,8 @@
     if (d.name && !hasAttr("data-agent-name")) cfg.agent = d.name;
     if (d.name && !hasAttr("data-title")) cfg.title = d.name;
     if (d.welcome && !hasAttr("data-welcome")) cfg.welcome = d.welcome;
+    if (d.ai_notice) cfg.aiNotice = d.ai_notice;
+    cfg.privacyUrl = /^https?:\/\//i.test(d.privacy_url || "") ? secureUrl(d.privacy_url) : "";
     if (d.color && !hasAttr("data-accent")) {
       cfg.accent = d.color;
       // The stylesheet bakes the accent in as `.go-w{--a:...}`; an inline
@@ -332,6 +338,8 @@
     ".go-mav img{width:100%;height:100%;object-fit:cover}" +
     ".go-b{max-width:78%;min-width:0;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}" +
     ".go-b.bot{background:var(--pane);border-bottom-left-radius:5px}" +
+    ".go-notice{margin:-4px 0 0 37px;font-size:12px;line-height:1.4;color:var(--mut)}" +
+    ".go-notice a{color:var(--a)}" +
     // Markdown blocks. The bubble sets white-space:pre-wrap for plain text,
     // which would add phantom blank lines around real block elements, so
     // rendered markdown resets it to normal.
@@ -377,6 +385,12 @@
     ".go-chip.alt:hover{background:var(--pane)}" +
     ".go-chip.q{background:var(--bg);color:var(--ink);border:1.5px solid var(--line);font-weight:500;text-align:left}" +
     ".go-chip.q:hover{border-color:var(--a);background:var(--pane)}" +
+    ".go-chipfold{display:flex;flex-direction:column;align-items:flex-end;margin-top:2px}" +
+    ".go-chipfold>summary{list-style:none;align-self:flex-end;font-size:13px;padding:8px 14px}" +
+    ".go-chipfold>summary::-webkit-details-marker{display:none}" +
+    ".go-chipfold>summary::after{content:' \\25BE'}" +
+    ".go-chipfold[open]>summary::after{content:' \\25B4'}" +
+    ".go-chipfold>.go-chips{margin-top:8px}" +
     ".go-chiplabel{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);" +
     "align-self:flex-end;margin-top:6px}" +
     // contact forms (sales / support), built from the console's config
@@ -394,6 +408,12 @@
     ".go-fnote{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.45}" +
     // sources
     ".go-src{margin-top:9px;border-top:1px solid var(--line);padding-top:8px}" +
+    ".go-srcline{margin-top:9px;border-top:1px solid var(--line);padding-top:8px;font-size:12px;" +
+    "color:var(--mut);display:flex;flex-wrap:wrap;align-items:center;gap:5px;line-height:1.4}" +
+    ".go-srcline svg{width:12px;height:12px;flex:0 0 auto}" +
+    ".go-srcline span{overflow-wrap:anywhere}" +
+    ".go-srcline .go-dl{margin-top:0}" +
+    ".go-srcline+.go-src{margin-top:4px;border-top:0;padding-top:0}" +
     // The summary is the button. list-style:none plus the ::-webkit- rule
     // removes the native triangle in every engine that still ships one, so
     // the chevron below is the only marker and it can be rotated.
@@ -772,66 +792,65 @@
     row._txt = txt;
 
     if (msg.sources && msg.sources.length) {
-      // COLLAPSED by default, and short when open. It used to be an always-
-      // expanded list carrying a text snippet per source, which put several
-      // lines of document prose under every answer -- the answer is the
-      // answer, and provenance is something you go and look at.
-      //
-      // <details>/<summary> rather than a click handler: the open/closed
-      // state, the keyboard behaviour and the ARIA semantics all come free,
-      // which matters in a widget injected into someone else's page.
-      var s = document.createElement("details");
-      s.className = "go-src";
-      var n = Math.min(msg.sources.length, 4);
-      // 8.12: one source on a generated answer is the manual it was checked
-      // against, so say that. A curated answer (badge) was not checked here.
       var one = msg.sources[0];
-      var summaryText = n === 1 && !msg.badge
-        ? "Verified against " + esc(pretty(one.source)) +
-          (one.page_label ? ", " + esc(one.page_label) : "")
-        : "Sources (" + n + ")";
-      s.innerHTML = '<summary class="go-srch">' + I_SHIELD + summaryText + "</summary>";
-      msg.sources.slice(0, 4).forEach(function (x) {
-        var i = document.createElement("div");
-        i.className = "go-srci";
-        // Name, the pages that actually carried the answer, and a way to
-        // open the original. The snippet is deliberately gone: it repeated
-        // in prose what the answer had just said.
-        //
-        // The page label is built server-side so every client renders it
-        // identically ("page 12" / "pages 12, 14").
-        var head = '<span class="go-srcn">' + esc(pretty(x.source)) + "</span>" +
-          (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "");
-        // Fetched with the bearer token rather than a plain link: external
-        // /source_file access now requires a valid member token, and an
-        // <a href> cannot carry an Authorization header.
-        var dl = x.download_url
-          ? ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>'
-          : "";
-        i.innerHTML = head + dl;
-        // The pictures that sat beside the cited text: a wiring diagram is
-        // the answer to "where does pin 3 go" in a way prose is not. Loaded
-        // with the bearer token, like the download: /figure is gated and an
-        // <img src> cannot carry a header. Click toggles full size.
-        if (x.figures && x.figures.length) {
-          var strip = document.createElement("div");
-          strip.className = "go-figs";
-          x.figures.slice(0, 4).forEach(function (f) {
-            var im = document.createElement("img");
-            im.className = "go-fig";
-            im.alt = f.caption || ("Figure, page " + f.page);
-            im.title = (f.caption ? f.caption + " — " : "") + "page " + f.page;
-            im.setAttribute("data-fig", f.url);
-            im.addEventListener("click", function () {
-              im.classList.toggle("big");
+      var line = document.createElement("div");
+      line.className = "go-srcline";
+      // D-20261010-14: the first source is on the answer, not behind a click.
+      // "Verified against" only where the grounding check ran (a generated
+      // answer); a curated FAQ answer (badge) was not checked here: "From".
+      line.innerHTML = I_SHIELD + "<span>" + (msg.badge ? "From " : "Verified against ") +
+        esc(pretty(one.source)) + (one.page_label ? ", " + esc(one.page_label) : "") +
+        "</span>" + srcLink(one);
+      b.appendChild(line);
+      var n = Math.min(msg.sources.length, 4);
+      if (n > 1 || (one.figures || []).length) {
+        // <details>/<summary> rather than a click handler: the open/closed
+        // state, the keyboard behaviour and the ARIA semantics all come free,
+        // which matters in a widget injected into someone else's page.
+        var s = document.createElement("details");
+        s.className = "go-src";
+        s.innerHTML = '<summary class="go-srch">Sources (' + n + ")</summary>";
+        msg.sources.slice(0, 4).forEach(function (x) {
+          var i = document.createElement("div");
+          i.className = "go-srci";
+          // Name, the pages that actually carried the answer, and a way to
+          // open the original. The snippet is deliberately gone: it repeated
+          // in prose what the answer had just said.
+          //
+          // The page label is built server-side so every client renders it
+          // identically ("page 12" / "pages 12, 14").
+          var head = '<span class="go-srcn">' + esc(pretty(x.source)) + "</span>" +
+            (x.page_label ? ' <span class="go-pg">' + esc(x.page_label) + "</span>" : "");
+          // Fetched with the bearer token rather than a plain link: external
+          // /source_file access now requires a valid member token, and an
+          // <a href> cannot carry an Authorization header.
+          var dl = srcLink(x);
+          i.innerHTML = head + dl;
+          // The pictures that sat beside the cited text: a wiring diagram is
+          // the answer to "where does pin 3 go" in a way prose is not. Loaded
+          // with the bearer token, like the download: /figure is gated and an
+          // <img src> cannot carry a header. Click toggles full size.
+          if (x.figures && x.figures.length) {
+            var strip = document.createElement("div");
+            strip.className = "go-figs";
+            x.figures.slice(0, 4).forEach(function (f) {
+              var im = document.createElement("img");
+              im.className = "go-fig";
+              im.alt = f.caption || ("Figure, page " + f.page);
+              im.title = (f.caption ? f.caption + " — " : "") + "page " + f.page;
+              im.setAttribute("data-fig", f.url);
+              im.addEventListener("click", function () {
+                im.classList.toggle("big");
+              });
+              strip.appendChild(im);
             });
-            strip.appendChild(im);
-          });
-          i.appendChild(strip);
-        }
-        s.appendChild(i);
-      });
-      s.querySelectorAll("[data-fig]").forEach(function (im) {
+            i.appendChild(strip);
+          }
+          s.appendChild(i);
+        });
+        b.appendChild(s);
+      }
+      b.querySelectorAll("[data-fig]").forEach(function (im) {
         var headers = {};
         if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
         fetch(cfg.api + im.getAttribute("data-fig"), { headers: headers })
@@ -839,7 +858,13 @@
           .then(function (blob) { im.src = URL.createObjectURL(blob); })
           .catch(function () { im.remove(); });
       });
-      s.querySelectorAll("[data-dl]").forEach(function (a) {
+      b.querySelectorAll("[data-open]").forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          openDoc(a.getAttribute("data-open"), a.getAttribute("data-page"));
+        });
+      });
+      b.querySelectorAll("[data-dl]").forEach(function (a) {
         a.addEventListener("click", function (ev) {
           ev.preventDefault();
           var headers = {};
@@ -857,7 +882,6 @@
             .catch(function () { a.textContent = "Download unavailable"; });
         });
       });
-      b.appendChild(s);
     }
     if (msg.badge) {
       var bd = document.createElement("div");
@@ -1067,6 +1091,25 @@
     save();
   }
 
+  // D-20261015-10: who answers, how long questions are kept, who processes
+  // them. Not a message: kept out of state.messages so it is never sent back
+  // as conversation history, and not a .go-b bubble.
+  function showNotice() {
+    var p = document.createElement("p");
+    p.className = "go-notice";
+    p.textContent = cfg.aiNotice;
+    if (cfg.privacyUrl) {
+      var a = document.createElement("a");
+      a.href = cfg.privacyUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Privacy notice";
+      p.appendChild(document.createTextNode(" "));
+      p.appendChild(a);
+    }
+    $log.appendChild(p);
+  }
+
   // Turns a reset_at epoch-seconds (quota.py's WINDOW_SECONDS boundary)
   // into "It resets at 3:00 PM." / "It resets tomorrow at 3:00 PM." so a
   // quota message tells the visitor when to come back instead of just
@@ -1180,10 +1223,23 @@
    *  from the current stage — deliberately NOT stored in messages, so a
    *  resumed conversation doesn't show stale buttons for choices that
    *  were already made. */
-  function chips(items, label) {
+  function chips(items, label, collapsed) {
     var wrap = document.createElement("div");
     wrap.className = "go-chips";
-    wrap.setAttribute("data-chips", "");
+    var outer = wrap;
+    if (collapsed) {
+      // Folded behind one pill so suggestions don't push the answer away.
+      outer = document.createElement("details");
+      outer.className = "go-chipfold";
+      var sm = document.createElement("summary");
+      sm.className = "go-chip alt";
+      sm.textContent = (label || "Suggestions") + " (" + items.length + ")";
+      outer.appendChild(sm);
+      outer.appendChild(wrap);
+      outer.addEventListener("toggle", scrollDown);
+      label = null;
+    }
+    outer.setAttribute("data-chips", "");
     if (label) {
       var l = document.createElement("div");
       l.className = "go-chiplabel";
@@ -1201,7 +1257,7 @@
       });
       wrap.appendChild(b);
     });
-    $log.appendChild(wrap);
+    $log.appendChild(outer);
     scrollDown();
   }
 
@@ -1276,6 +1332,7 @@
     renderScopeBar();
     lockComposer();
     say(cfg.welcome);
+    showNotice();
     // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
     // quota fetch that can resolve AFTER these two synchronous calls would
     // already have put askIntent()'s menu on screen. The visible effect was
@@ -1929,6 +1986,7 @@
         (last ? ', and your last question was "' + last + '"' : "") +
         ". Would you like to carry on or start again?"
     );
+    showNotice();
     lockComposer("Choose continue or start over…");
     chips(
       [
@@ -2158,7 +2216,11 @@
           //    reachable" one character at a time is a slow way to deliver
           //    bad news.
           reveal: !d.from_faq && !d.flagged && !d.service_degraded,
-          sources: d.flagged ? null : d.sources,
+          // D-20261010-14: a source line only under an answer. A refusal, a
+          // clarify question or a service notice carries the pages it searched,
+          // which are not where an answer came from.
+          sources: (d.flagged || d.offer_support || d.needs_clarification ||
+                    d.service_degraded) ? null : d.sources,
           flagged: !!d.flagged,
           badge: d.from_faq ? (d.faq_reviewed ? "Reviewed answer" : "From our FAQ") : null,
           // Only a generated answer can be voted on: a curated one has been
@@ -2216,17 +2278,26 @@
           // knows. The backend's refusal text is accurate but bare, and
           // "I cannot answer that" with no route onward reads as a brush-off.
           var sForm = formFor("support");
-          // A handoff turn ("I want to talk to a person") has already said
-          // what happens next; repeating "that is not in my knowledge base"
-          // under it would contradict the answer. Only the route is added.
-          var offer = d.role === "handoff" ? ""
-            : "That is not something I have in my knowledge base, so I "
-            + "would rather point you at someone than guess.";
-          if (sForm.phone) {
-            offer += (offer ? " You" : "You") + " can email our support team, or call them on "
-                   + sForm.phone + ".";
-          } else if (offer) {
-            offer += " I can pass it to our support team by email.";
+          // D-20261010-13: every refusal the server words itself
+          // (_friendly_refusal, the handoff reply) already ends by offering
+          // the support team, so a second bubble saying the same reads as the
+          // bot talking to itself. The widget's own sentence is kept only for
+          // a refusal whose text has no such offer ("not mentioned", the
+          // verifier-unavailable notice).
+          // ponytail: matched on the server's wording; swap for a server
+          // flag when main.py next changes (part 2 of this order).
+          var serverOffered = d.role === "handoff"
+            || /support team|contact support/i.test(d.answer || "");
+          var offer = "";
+          if (!serverOffered) {
+            offer = "That is not something I have in my knowledge base, so I "
+              + "would rather point you at someone than guess."
+              + (sForm.phone
+                 ? " You can email our support team, or call them on " + sForm.phone + "."
+                 : " I can pass it to our support team by email.");
+          } else if (d.role === "handoff" && sForm.phone) {
+            // Unchanged handoff behaviour: the route, as its own line.
+            offer = "You can email our support team, or call them on " + sForm.phone + ".";
           }
           if (offer) say(offer);
 
@@ -2247,6 +2318,17 @@
           // 8.12: the closest page the search did find, when there is one.
           var nearDoc = docChip(d.more_context);
           if (nearDoc) supportChips.splice(1, 0, nearDoc);
+          // The phone, when the server's text made the offer: a tappable
+          // chip right after "Email support", not a second bubble.
+          if (serverOffered && d.role !== "handoff" && sForm.phone) {
+            supportChips.splice(1, 0, {
+              label: "Call " + sForm.phone,
+              style: "alt",
+              onClick: function () {
+                window.location.href = "tel:" + sForm.phone.replace(/[^\d+]/g, "");
+              },
+            });
+          }
           chips(supportChips, "What would you like to do?");
         } else if (!d.flagged && !d.service_degraded && !d.needs_sign_in) {
           afterAnswer(d);
@@ -2267,6 +2349,21 @@
               label: "Start a new chat",
               onClick: function () { startFresh(); },
             });
+          } else {
+            var sForm = formFor("support");
+            quotaChips.push({
+              label: "Email support",
+              onClick: function () { openContactForm("support"); },
+            });
+            if (sForm.phone) {
+              quotaChips.push({
+                label: "Call " + sForm.phone,
+                style: "alt",
+                onClick: function () {
+                  window.location.href = "tel:" + sForm.phone.replace(/[^\d+]/g, "");
+                },
+              });
+            }
           }
           say(msg, { flagged: true });
           if (quotaChips.length) chips(quotaChips, "What would you like to do?");
@@ -2307,7 +2404,7 @@
         items.push({ label: f.question, style: "q",
                      onClick: function () { ask(f.question, { faqId: f.id }); } });
       });
-      if (items.length) chips(items, rel.length ? "Related questions" : null);
+      if (items.length) chips(items, rel.length ? "Related questions" : "Suggestions", true);
     });
   }
 
@@ -2339,6 +2436,19 @@
         if (w) w.close();
         say("That document could not be opened just now.", { flagged: true });
       });
+  }
+
+  /** D-20261010-14: the link beside a source. Signed in and a page known:
+   *  "Open page N", the PDF at that page (openDoc). Otherwise the old
+   *  whole-file Download: /source_file is token gated, as for docChip. */
+  function srcLink(x) {
+    if (!x.download_url) return "";
+    var page = (x.pages || [])[0];
+    if (cfg.token && page) {
+      return ' <a class="go-dl" href="#" data-open="' + esc(x.download_url) +
+        '" data-page="' + esc(page) + '">Open page ' + esc(page) + "</a>";
+    }
+    return ' <a class="go-dl" href="#" data-dl="' + esc(x.download_url) + '">Download</a>';
   }
 
   /** Document excerpts, labelled with where they came from. Shown as a

@@ -15,6 +15,8 @@
    (and writes no file); a commit both the branch and the product checkout contain is used and shows as gate_base;
 10. with REPEATS and GATE_RULE unset the gate asks 3 answers per question and rules on their mean (adopted 2026-10-19);
 11. a merged branch re-gated with GATE_BASE at its own tip: office_only PASS with gate_base.
+12. REPEATS=2 with a sibling: both ADAPTIVE_FROM values (the open set's and the sibling's) name a file Windows python
+    can open, as the fake lab checks (D-20261021-21).
 Every full gate carries cost_usd and wall_s. Cases 1-7, 9 and 11 pin REPEATS=1, GATE_RULE=r1: the one-answer path.
 """
 import json
@@ -34,6 +36,8 @@ if "--repeats" in sys.argv:   # as blind_eval.py: each repeat its own process wi
     sys.exit(0)
 k = int(os.environ.get("REPEAT", "1"))
 run, phase = sys.argv[1], sys.argv[2]
+if phase == "system" and os.environ.get("ADAPTIVE_FROM") and not os.path.exists(os.environ["ADAPTIVE_FROM"].rsplit(":", 1)[0]):
+    sys.exit(9)   # as blind_eval.py: Windows python must open ADAPTIVE_FROM's file (D-20261021-21)
 tag = " manuals" if phase == "grade" and os.path.isdir(os.path.join(run, "manuals")) else ""
 open(os.environ["FAKE_LOG"], "a").write(phase + " " + os.path.basename(run) + tag + (" #%d" % k if k > 1 else "") + "\\n")
 p = os.path.join(run, "cases_state.json" if k == 1 else "cases_state.r%d.json" % k)
@@ -62,7 +66,7 @@ elif phase in ("system", "grade"):
 def main():
     tmp = tempfile.mkdtemp()
     env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-           "REPEATS": "1", "GATE_RULE": "r1"}
+           "REPEATS": "1", "GATE_RULE": "r1", "LAB_PAUSE": "0"}
     git = lambda cwd, *a: subprocess.run(["git", "-C", cwd, *a], env=env, check=True, capture_output=True)
     fwd = lambda p: p.replace("\\", "/")
 
@@ -134,9 +138,9 @@ def main():
     assert held["sys_normal"]["passes"] == [1] * 6 and held["sys_before"]["passes"] == [3] * 6, held
     assert gate("g4", "1", cap="1") == ("lab stopped at the cap", False)   # fails closed: no PASS without a measurement
     g, seen, out = gate("g7", "1", extra={"REPEATS": "2"})
-    assert seen == ["remark run", "models run", "reset before", "reset before #2", "system before", "system before #2",
-                    "reset after", "reset after #2", "system after", "system after #2",
-                    "grade after manuals", "grade after manuals #2"], seen
+    assert seen == ["remark run", "models run", "reset before", "reset before #2", "system before",   # repeat 1 graded
+                    "reset after", "reset after #2", "system after", "grade after manuals",            # first (ADAPTIVE),
+                    "system before #2", "system after #2", "grade after manuals #2"], seen             # then the rest
     assert g["verdict"] == "PASS" and g["mean_of_repeats"]["repeats"] == 2 and g["repeats"] == 1 and g["before"] == "re-asked", g
     r2 = json.load(open(os.path.join(out, "after", "cases_state.r2.json")))
     assert (r2["sys_before"]["c1"]["answer"], r2["sys_normal"]["c1"]["answer"]) == ("x = 1\n", "x = 2\n"), r2
@@ -154,6 +158,8 @@ def main():
     assert "office_only" not in g and g["gate_base"] == b0 and "system after" in seen, (g, seen)
     g, seen, _ = gate("g10", "1", extra={"REPEATS": None, "GATE_RULE": None})
     assert g["repeats"] == 3 and g["r1"]["repeats"] == 1 and seen.count("system after #3") == 1, (g, seen)
+    g, seen, _ = gate("g12", "1", sibs=[sa], extra={"REPEATS": "2"})   # ADAPTIVE_FROM for the open set and a sibling
+    assert seen.count("system before #2") == 1 and seen.count("system base #2") == 1 and seen.count("system sib_sibA #2") == 1, seen
     git(base, "merge", "-q", "--ff-only", "dev")                       # merged: re-gated from its own tip
     g, seen, _ = gate("g11", "1", extra={"GATE_BASE": tip})
     assert g.get("office_only") and g["gate_base"] == tip and seen == [], (g, seen)

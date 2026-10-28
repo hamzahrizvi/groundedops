@@ -24,6 +24,7 @@ Always, in every phase:
   `OPS/inbox/dev/*.gate*` are off limits too (not even a listing of their
   `sib_*`): reading either fails the item. The product owner's reasons carry
   what you need.
+- If a path under OPS does not exist, write "missing: <path>" in the hand-back and stop that step. Never search for it: no `find`, `dir /s`, `Get-ChildItem -Recurse` or glob outside OPS, REPO and OFFICE, and never from / or C:/.
 - Stop and write `OPS/inbox/dev/<id>.md` with `Status: BLOCKED` instead of
   guessing when the work needs credentials, an outside service, a reindex,
   an .exe rebuild, or a decision that belongs to the CEO, or when a test
@@ -92,8 +93,9 @@ Read: `OPS/inbox/dev/<id>.plan.md` and `<id>.build.md` only. In the worktree:
   Larger trouble is yours to finish too, but say so. Count what you fixed.
 - full suite once, under the lab lock: `cd src && REPO/.venv/Scripts/python.exe OFFICE/tools/lab_lock.py REPO/.venv/Scripts/python.exe run_tests.py`;
 - re-run the finding's cases with `OFFICE/tools/blind_eval.py`
-  (`GO_CODE=<worktree>/src GO_DATA=REPO/src`, on a COPY of the run folder,
-  `reset` first, `SYSTEMS=sys_normal,baseline`) and report them case by case,
+  (`GO_CODE=<worktree>/src GO_DATA=REPO/src`, on a COPY of the run folder
+  that includes its `cases_state.json`, so `reset` keeps the baseline answers and
+  only the bot and grader spend; `reset` first, `SYSTEMS=sys_normal,baseline`) and report them case by case,
   never as a total.
 
 Write `OPS/inbox/dev/<id>.md` starting with these lines exactly:

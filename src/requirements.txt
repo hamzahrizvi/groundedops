@@ -1,3 +1,9 @@
+# Inputs only. Every install (install.ps1, install.sh, Docker, CI, the .exe
+# venv) installs from requirements.lock, which pins every package. After
+# changing this file, regenerate the lock from src/:
+#   uv pip compile requirements.txt --universal --python-version 3.11 --no-header --generate-hashes -o requirements.lock
+# Installs use `pip install --require-hashes -r requirements.lock`.
+# (existing pins are kept as preferences; CI fails if the lock is stale).
 fastapi
 uvicorn[standard]
 pydantic
@@ -16,7 +22,6 @@ sentence-transformers
 rank-bm25
 torch
 
-pypdf
 # Layout-aware PDF reading (parsing.py). pypdf alone flattens tables
 # into space-joined cells, which made spec tables unusable. MIT, unlike
 # PyMuPDF which is AGPL-3.0 without a commercial licence.
@@ -31,7 +36,6 @@ python-docx
 
 cryptography
 
-streamlit
 requests
 
 # Local (no model call, no network) language guess for an anonymous
@@ -40,3 +44,13 @@ requests
 # unlike the FAQ-multilingual feature's own translation calls, this one
 # runs on every unhinted anonymous question, so it must not cost a request.
 langdetect
+
+# Security floors (D-20261008-17, D-20261020-05, D-20261021-23). Transitive except pypdf; listed so the
+# lock cannot fall back below the fixed versions.
+pypdf>=6.21.1
+urllib3>=2.8.0
+multidict>=6.9.1
+oauthlib>=4.0.0
+pillow>=13.0.0
+aiohttp>=3.14.4
+certifi>=2026.10.19

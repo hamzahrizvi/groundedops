@@ -8,6 +8,10 @@ Promoted from eval_runs/20261008_blind6/blind_eval.py (it was copied per run).
   python tools/blind_eval.py <run_dir> prompt <case_id>   (print the grading prompt, no API call)
   ... --repeats N   (anywhere: runs the phase N times, repeat k in its own process with REPEAT=k;
            stops at the first non-zero exit and returns it. `reset --repeats N` resets every repeat)
+  ... --no-product   (system phase: every turn goes in with no product picked, as a visitor typing before the picker;
+           the state records "no_product", and grade then shows the grader an unscoped chat, D-20261022-10)
+  python tools/blind_eval.py <run_dir> wrongproduct [<other_run_dir> ...]   (per question type: sys_normal answers
+           citing a manual outside the case's product(s), and answers graded 0; prints ids and counts, never questions)
   python tools/blind_eval.py <run_dir> vendor kapa|fin    (a market leader answers the cases; then
            SYSTEMS=sys_normal,baseline,kapa,fin ... remark grades all of them blind together)
 
@@ -23,6 +27,15 @@ Env:
            <SET>_state.json, repeat k>1 is <SET>_state.r<k>.json (D-20261018-02). Grading a repeat
            k>1 copies a SYSTEMS arm it lacks from repeat 1 (listed in "copied_from_r1"), so a weekly
            with one baseline answer grades every repeat beside the same baseline.
+  ADAPTIVE=1  the CEO, 2026-10-21: only questions not yet answered right cost more. Repeat k>1 asks only the
+           questions whose repeat-1 answer scored 3; the rest copy repeat 1's answer and grade (copied_from_r1,
+           usd 0). The baseline asks only questions no repeat scored 3 on; the rest get a "not_asked" row, graded
+           3 / "not_asked" without a call (a whole manual cannot beat a right answer). Order: system, grade
+           (SYSTEMS=sys_normal), the later repeats and their grades, baseline, grade (sys_normal,baseline)
+           -- tools/weekly_blind.sh. Grading repeat k>1 marks only the arms asked again; an arm copied from repeat 1
+           (its rows, or a whole arm like the baseline) keeps repeat 1's mark, and a case with none asked costs no call.
+  ADAPTIVE_FROM=<state.json>:<arm>  where repeat k>1's "right first time" is read (default: this run's repeat 1,
+           sys_normal). A gate's before is graded inside the after state as sys_before (tools/gate_run.sh).
   SET      case file stem (default "cases"; old runs used "blind6" etc.)
   SYSTEMS  graded systems, comma list (default "sys_normal,baseline")
   GO_CODE  src/ whose code is imported (default: this repo's src) -- point at a
@@ -38,6 +51,8 @@ Env:
            answer, 12000 chars, D-20261019-05), and stores the blind A/B labels per case.
            A clean refusal on an expected-"rejected" case scores 3 whatever the other arm says (D-20261010-28).
            A correct_refusal on a case not expected 'rejected' is stored as safe_decline, score <= 1 (D-20261016-14).
+           A missing must_include fact caps an "answered" case at 2 (partial); a clarifying question scores 3 on any product (D-20261020-04).
+           A case with "figure" (a crop name, or a list) and "source" (its document) also gets "figure_found": the crop is among the answer's shown figures for that document; summary.<sys_*>.images = {n, figure_found, explanation_right (score 3), found, right} (D-20261022-14, tools/image_set.py).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -56,6 +71,8 @@ if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own pr
         # repeats (back to back, 6 gate passes held the weekly run off the lab for over an hour, 2026-10-19)
         if sys.argv[2:3] == ["system"] and _k < _n: time.sleep(25)
     sys.exit(0)
+NO_PRODUCT = "--no-product" in sys.argv   # D-20261022-10: typed first, no product picked (the picker path sends the case's)
+if NO_PRODUCT: sys.argv.remove("--no-product")
 REPEAT = int(os.environ.get("REPEAT", "1"))
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
@@ -95,6 +112,11 @@ if os.path.isfile(os.path.join(DATA, ".secrets.enc")):
 
 phase = sys.argv[2]
 R1 = os.path.join(RUN, f"{SET}_state.json")
+ADAPT = os.environ.get("ADAPTIVE") == "1"
+def right(st, arm="sys_normal"):
+    """Ids whose answer on that arm scored 3 in that state's grades."""
+    return {cid for cid, g in st.get("grades", {}).items() if (g.get(arm) or {}).get("score") == 3}
+NOT_ASKED = {"score": 3, "verdict": "not_asked"}
 if phase in ("grade", "remark") and REPEAT > 1 and os.path.exists(R1):   # e.g. a weekly's one baseline answer
     _r1 = json.load(open(R1, encoding="utf-8"))
     for _s in SYSTEMS:
@@ -131,7 +153,7 @@ if phase == "models":   # D-20261010-09: the bot model on this run's stored answ
     run = sorted({r.get("model") for r in state.get("sys_normal", {}).values()} - {None, "none", "structured", "faq-curated", "stub"})
     print(json.dumps({"run": run, "lab": MODELS["bot"], "same": run == [MODELS["bot"]]})); sys.exit(0)
 if phase == "reset":
-    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s")]:
+    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s", "no_product")]:
         del state[k]
     if "copied_from_r1" in state: state["copied_from_r1"] = [s for s in state["copied_from_r1"] if s in state]
     save(); print("reset", OUT, "kept:", list(state)); sys.exit(0)
@@ -199,18 +221,29 @@ if phase == "system":
         return r
     llm._post = spy
     rows = state.setdefault(f"sys_{mode}", {})
+    if NO_PRODUCT and rows and not state.get("no_product"): sys.exit("these answers were asked with the product picked; reset first")
+    if state.get("no_product") and not NO_PRODUCT: sys.exit("this run is asked with --no-product; pass it again, or reset")
+    if NO_PRODUCT: state["no_product"] = True
+    r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
+    src, arm = os.environ["ADAPTIVE_FROM"].rsplit(":", 1) if os.environ.get("ADAPTIVE_FROM") else (R1, "sys_normal")
+    done = (right(json.load(open(src, encoding="utf-8")), arm) if r1 else set()) & set(r1.get(f"sys_{mode}", {}))
     for c in cases:
         if c["id"] in rows: continue
+        if c["id"] in done:   # ADAPTIVE: right first time, so this repeat is the same answer at no cost
+            rows[c["id"]] = {**r1[f"sys_{mode}"][c["id"]], "usd": 0, "calls": 0, "copied_from_r1": True}; save(); continue
         if capped(): stop()
         sid = f"{SET}-{uuid.uuid4()}"
         if c.get("turn1"):
-            main._traced_query(main.QueryRequest(q=c["turn1"], product=c.get("product"), session_id=sid), None, attach=True)
+            main._traced_query(main.QueryRequest(q=c["turn1"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
         usage.clear(); t = time.time()
-        d = main._traced_query(main.QueryRequest(q=c["q"], product=c.get("product"), session_id=sid), None, attach=True)
+        d = main._traced_query(main.QueryRequest(q=c["q"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
                          "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
+                         "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
+                         "figures": {s["source"]: [f.get("name") for f in s.get("figures") or []] for s in d.get("sources") or []
+                                     if isinstance(s, dict) and s.get("figures")},   # pictures shown beside the answer (D-20261022-14)
                          "at": time.strftime("%Y-%m-%d")}   # the day it was spent (tools/ops_costs.py)
         spent += rows[c["id"]]["usd"]
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
@@ -240,15 +273,35 @@ elif phase == "baseline":
         return c["id"], {"answer": a, "wall": round(time.time() - t, 2), "usd": round(usd(u, MODELS["baseline"]), 6),
                          "model": MODELS["baseline"], "at": time.strftime("%Y-%m-%d")}
     rows = state.setdefault("baseline", {})
+    if ADAPT:   # the whole manual only for questions no repeat answered right
+        hit = right(state)
+        for f in os.listdir(RUN):
+            if re.fullmatch(re.escape(SET) + r"_state\.r\d+\.json", f): hit |= right(json.load(open(os.path.join(RUN, f), encoding="utf-8")))
+        for c in cases:
+            if c["id"] in hit and c["id"] not in rows:
+                rows[c["id"]] = {"answer": "", "not_asked": True, "wall": 0, "usd": 0, "model": "none", "at": time.strftime("%Y-%m-%d")}
+        save()
     # ponytail: up to 6 calls in flight can pass the cap; the provider's own limit is the hard stop
-    with ThreadPoolExecutor(6) as ex:
-        for cid, out in ex.map(run, [c for c in cases if c["id"] not in rows]):
-            if out is None: continue
-            rows[cid] = out; spent += out["usd"]; save(); print("baseline", cid, out["wall"], flush=True)
+    # one case per distinct manual set goes first, so the rest hit the provider's prompt cache (about 1/50 the
+    # input price) instead of six cold copies of the same 100-180k-token manual at once (runs/20261020b)
+    todo, seen = [c for c in cases if c["id"] not in rows], set()
+    warm = [c for c in todo if (k := (c.get("product"), tuple(c.get("compare_with") or ()))) not in seen and not seen.add(k)]
+    for batch in (warm, [c for c in todo if c not in warm]):
+        with ThreadPoolExecutor(6) as ex:
+            for cid, out in ex.map(run, batch):
+                if out is None: continue
+                rows[cid] = out; spent += out["usd"]; save(); print("baseline", cid, out["wall"], flush=True)
     if any(c["id"] not in rows for c in cases): stop()   # the rest waits for the cap to rise; a rerun resumes
 
 elif phase in ("grade", "prompt"):
-    L = "ABCDEFG"[:len(SYSTEMS)]
+    r1g = json.load(open(R1, encoding="utf-8")).get("grades", {}) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
+    def skip(c, s):
+        """The mark an arm gets on this case without a grader call (ADAPTIVE), or None when it is graded."""
+        row = state.get(s, {}).get(c["id"], {})
+        if row.get("not_asked"): return NOT_ASKED
+        if (row.get("copied_from_r1") or s in state.get("copied_from_r1", [])) and s in r1g.get(c["id"], {}): return r1g[c["id"]][s]
+        return None
+    def asked(c): return [s for s in SYSTEMS if skip(c, s) is None]
     G = """You are grading {n} customer-support answers to the same question, written by {n} different systems. You do not know which system wrote which. Judge only substance against the reference; ignore formatting, length, citations, tone and any offer to contact support or list of suggested questions. Mark each answer on its own against the reference and the cited pages, never against the other answers: what another answer says must not raise or lower an answer's score.
 
 PRODUCT SELECTED IN THE CHAT: {product}
@@ -265,9 +318,9 @@ MANUAL PAGES THE ANSWERS QUOTE (other pages of the same product's manual whose w
 The reference is an extract, not the whole manual. A figure or fact the reference does not quote is fine if it appears in the cited pages or the quoted pages, or if it contradicts neither the reference nor the question. Deduct only for a contradiction, or for a figure found in neither the reference, the cited pages nor the quoted pages. Call a claim invented, fabricated or unsupported only after checking that it is in none of them; a claim any of them states is never invented. Where pages of the product's own manual disagree with each other, a statement an answer takes from one of them is neither a contradiction nor wrong and lowers no score: the disagreement is the manual's, not the answer's.
 
 Score each answer 0-3:
-- expected "answered": 3 = correct and complete, including any condition/qualifier the question needs; also 3 when every key fact is present and only a qualifier the question did not ask for is left out; 2 = core fact right but misses a qualifier the question needs, or adds a minor inaccuracy; 1 = declines, says it cannot find it, or only asks a question (safe but unhelpful), or gives a wrong method or wrong fact for one of several parts the question asks; 0 = states something wrong or invented as the main answer, or answers about the wrong product.
+- expected "answered": 3 = correct and complete, including any condition/qualifier the question needs; also 3 when every key fact is present and only a qualifier the question did not ask for is left out; 2 = core fact right but misses a qualifier the question needs, or adds a minor inaccuracy; 1 = declines, says it cannot find it, or only asks a question (safe but unhelpful), or gives a wrong method or wrong fact for one of several parts the question asks; 0 = states something wrong or invented as the main answer, or answers about the wrong product. When KEY FACTS lists facts, an answer that leaves out any one of them scores at most 2 with verdict "partial", however correct the rest is; this holds for a question that spans two products or two manuals as much as for one. A key fact counts as present in any wording or spelling (six = 6, 0.7 ohms = 0.7 ohm); it also counts as present when the answer gives it as another page of the same product's manual states it (the disagreement rule above still holds). This is the only completeness check added to the scale: a fact the list does not name is judged by the scale alone.
 - expected "rejected" (not documented / product or model does not exist / feature absent / off-topic): mark the verdict first. 3 = the verdict agrees with the reference: the answer declines, says it is not documented, says the asked-for product, model or option is not documented or does not exist, says No (or that the product does not do it) where the reference says the feature is absent, or says it cannot help (a redirect to sales or support counts). Suggested questions, a list of things it can answer or an offer of support never lower this, and neither does how much another answer explained. Facts it adds about the real product never lower it either when the reference, the cited pages or the quoted pages state them. 2 = the verdict agrees but the answer adds speculation, an overreaching conclusion, or a side detail found in none of the reference, the cited pages and the quoted pages; 0 = the verdict contradicts the reference: the main answer says Yes, says the feature, product or model exists or is documented, or gives an invented fact as its answer. A score of 1 is not used for this type.
-- expected "clarify" (too vague): verdict "clarified" and 3 only if the answer asks the customer which product/what is meant, or briefly and correctly covers each candidate. An answer that asks nothing is graded as an answer: a long dump or one that picks a single product scores at most 2 (2 only if it states which product and is correct); any mislabelled product or wrong part = 1; answers confidently for an unstated or wrong product = 0.
+- expected "clarify" (too vague): one rule for every product, whether or not a product is selected in the chat and whichever product the case names. An answer that asks the customer a question to narrow down what is meant (which product or unit, what it is doing, what they see, or which of the topics or manual sections it lists matches their problem), and states nothing wrong and nothing about a wrong product, is verdict "clarified" and scores 3, however short; so is one that briefly and correctly covers each candidate. Verdict "clarified" always scores 3; the "only asks a question" 1 of the answered scale never applies to this type. An answer that asks nothing, or that asks but also states a wrong fact or a fact about a wrong product, is graded as an answer: a long dump or one that picks a single product scores at most 2 (2 only if it states which product and is correct); any mislabelled product or wrong part = 1; answers confidently for an unstated or wrong product = 0.
 Verdict per answer, one of: correct, partial, safe_decline, wrong, correct_refusal, clarified. For expected "rejected" a 3 is correct_refusal, never safe_decline; safe_decline is a decline where the manual has the answer.
 
 {answers}
@@ -296,16 +349,17 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         own = [p for m in (c.get("product"), *(c.get("compare_with") or ())) if m
                for p in manual_pages.get(m, []) if p not in (c.get("pages") or [])]
         got = []
-        for s in SYSTEMS:
+        for s in asked(c):
             a = runs8(state.get(s, {}).get(c["id"], {}).get("answer", ""))
             near = sorted(((len(a & page_runs(p)), p) for p in own), reverse=True)[:2]
             got += [p for n, p in near if n >= 3 and p not in got]
         text = "\n\n".join(ch for p in got for ch in pages[p])
         return "\n" + text[:QUOTE_CHARS] if text else "none"
     rng = random.Random(4)
-    order = {c["id"]: rng.sample(SYSTEMS, len(SYSTEMS)) for c in cases}
+    order = {c["id"]: rng.sample(asked(c), len(asked(c))) for c in cases}
     def prompt(c):
-        return G.format(n=len(SYSTEMS), product=c.get("product") or "none (unscoped chat)",
+        L = "ABCDEFG"[:len(order[c["id"]])]
+        return G.format(n=len(L), product=(not state.get("no_product") and c.get("product")) or "none (unscoped chat)",
                         turn1=f"EARLIER MESSAGE IN THIS CHAT: {c['turn1']}\n" if c.get("turn1") else "",
                         q=c["q"], type=c["type"], expected=c["expected"], pages=", ".join(c.get("pages") or []) or "n/a",
                         reference=c["reference"], must=", ".join(c.get("must_include") or []) or "n/a", cited=cited(c), quoted=quoted(c),
@@ -321,7 +375,7 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         print(prompt(next(c for c in cases if c["id"] == sys.argv[3]))); sys.exit(0)
     def grade(c):
         if capped(): return c["id"], None
-        o = order[c["id"]]
+        o = order[c["id"]]; L = "ABCDEFG"[:len(o)]
         raw, u = chat(MODELS["grader"], [{"role": "user", "content": prompt(c)}], effort="medium")
         use = {"model": MODELS["grader"], "prompt_tokens": u.get("prompt_tokens", 0), "cached": cached(u),
                "completion_tokens": u.get("completion_tokens", 0), "usd": round(usd(u, MODELS["grader"]), 6),
@@ -332,14 +386,27 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
             return c["id"], {"raw": raw, "usage": use}
         out = {**{s: g[k] for k, s in zip(L, o)}, "why": g.get("why"), "labels": dict(zip(L, o)),
                          "best": "tie" if g.get("best") == "tie" else dict(zip(L, o)).get(g.get("best")), "usage": use}
-        return c["id"], clamp_refusal(c, out, SYSTEMS)
+        return c["id"], {**clamp_refusal(c, out, o), **{s: skip(c, s) for s in SYSTEMS if s not in o}}
     grades, held = state.setdefault("grades", {}), False
+    for c in cases:   # arms marked without a call: copied from repeat 1, or not asked
+        g0, cid = grades.get(c["id"]), c["id"]
+        if not all(cid in state.get(s, {}) for s in SYSTEMS): continue
+        if g0 is None and not asked(c):
+            grades[cid] = {**{s: skip(c, s) for s in SYSTEMS}, "copied_from_r1": True,
+                           "usage": {"model": MODELS["grader"], "usd": 0, "at": time.strftime("%Y-%m-%d")}}
+        elif g0 and "raw" not in g0:
+            g0.update({s: skip(c, s) for s in SYSTEMS if s not in g0 and s not in asked(c)})
+    save()
+    def todo(c):
+        g0 = grades.get(c["id"])
+        return g0 is None or "raw" in g0 or (ADAPT and any(s not in g0 for s in SYSTEMS))
     with ThreadPoolExecutor(6) as ex:   # ponytail: as in baseline, calls in flight can pass the cap
         # only cases every graded system answered: a vendor that missed one must not be marked on "(no answer yet)"
-        for cid, g in ex.map(grade, [c for c in cases if all(c["id"] in state.get(s, {}) for s in SYSTEMS)
-                                     and (c["id"] not in grades or "raw" in grades[c["id"]])]):
+        for cid, g in ex.map(grade, [c for c in cases if all(c["id"] in state.get(s, {}) for s in SYSTEMS) and todo(c)]):
             if g is None: held = True; continue
-            grades[cid] = g; spent += g["usage"]["usd"]; save(); print("graded", cid, g.get("best"), flush=True)
+            spent += g["usage"]["usd"]   # a case marked again with its new arm keeps the earlier call's cost
+            g["usage"]["usd"] = round(g["usage"]["usd"] + grades.get(cid, {}).get("usage", {}).get("usd", 0), 6)
+            grades[cid] = g; save(); print("graded", cid, g.get("best"), flush=True)
     if held:
         if REMARK:   # no half re-marked run: it keeps its old grades until the cap rises
             import shutil; shutil.copyfile(REMARK, OUT)
@@ -351,15 +418,25 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
     for s in SYSTEMS:
         sc = [grades[c["id"]][s]["score"] for c in ok]
         vd = [grades[c["id"]][s]["verdict"] for c in ok]
-        walls = [state[s][c["id"]]["wall"] for c in ok]
-        cost = [state[s][c["id"]]["usd"] for c in ok]
+        real = [state[s][c["id"]] for c in ok if not state[s][c["id"]].get("not_asked")]
+        walls, cost = [r["wall"] for r in real] or [0], [r["usd"] for r in real] or [0]
         summary[s] = {"pct_of_max": round(100 * sum(sc) / (3 * len(sc)), 1), "mean": round(st.mean(sc), 2),
                       "verdicts": {v: vd.count(v) for v in sorted(set(vd))},
                       "median_s": st.median(walls), "p90_s": sorted(walls)[int(.9 * len(walls))],
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
                                   for t in sorted({c['type'] for c in ok})}}
-    used = [g["usage"] for g in grades.values() if "usage" in g]   # grades from before 2026-10-10 logged none
+    fig = [c for c in ok if c.get("figure")]   # D-20261022-14: picture cases get two marks, kept apart and never added up
+    for s in [s for s in SYSTEMS if s.startswith("sys_")] if fig else []:
+        for c in fig:
+            want = c["figure"] if isinstance(c["figure"], list) else [c["figure"]]
+            shown = state[s][c["id"]].get("figures") or {}
+            names = shown.get(c["source"], []) if c.get("source") else [n for v in shown.values() for n in v]
+            grades[c["id"]][s] = {**grades[c["id"]][s], "figure_found": any(n in names for n in want)}
+        found = [c["id"] for c in fig if grades[c["id"]][s]["figure_found"]]
+        ok3 = [c["id"] for c in fig if grades[c["id"]][s]["score"] == 3]
+        summary[s]["images"] = {"n": len(fig), "figure_found": len(found), "explanation_right": len(ok3), "found": found, "right": ok3}
+    used = [g["usage"] for g in grades.values() if "usage" in g and not g.get("copied_from_r1")]   # grades from before 2026-10-10 logged none
     summary["grader"] = {"model": used[-1]["model"] if used else "gpt-5", "calls": len(used),
                          "usd": round(sum(x["usd"] for x in used), 4)}
     bests = [grades[c["id"]].get("best") for c in ok]
@@ -425,3 +502,33 @@ elif phase == "vendor":   # a market leader answers the same cases; usd 0 = its 
         for cid, out, err in ex.map(run, [c for c in cases if c["id"] not in rows]):
             if err: print(vendor, cid, "ERROR", err, flush=True); continue   # not saved: a rerun retries it
             rows[cid] = out; save(); print(vendor, cid, out["wall"], repr(out["answer"][:60]), flush=True)
+elif phase == "wrongproduct":   # D-20261022-10: sys_normal answers given for a product other than the case's, per type
+    def tally(run):
+        """({type: [asked, cites another product, graded 0]}, {"cites": ids, "zero": ids}, no_product) for one run's repeat 1."""
+        cs = json.load(open(os.path.join(run, f"{SET}.json"), encoding="utf-8"))["cases"]
+        stt = json.load(open(os.path.join(run, f"{SET}_state.json"), encoding="utf-8"))
+        docs = {}   # manual stem -> the documents its export holds (chunk keys "[<doc>.pdf pN]")
+        for f in os.listdir(os.path.join(run, "manuals")):
+            for chunk in open(os.path.join(run, "manuals", f), encoding="utf-8").read().split("\n\n["):
+                docs.setdefault(f[:-4], set()).add(chunk.lstrip("[").split("]", 1)[0].rsplit(" p", 1)[0])
+        out, ids = {}, {"cites": [], "zero": []}
+        for c in cs:
+            row = stt.get("sys_normal", {}).get(c["id"])
+            t = out.setdefault(c["type"], [0, 0, 0])
+            if row is None: continue
+            t[0] += 1
+            own = set().union(*(docs.get(p, set()) for p in (c.get("product"), *(c.get("compare_with") or ())) if p))
+            if c.get("product") and any(s not in own and any(s in d for d in docs.values()) for s in row.get("sources") or {}):
+                t[1] += 1; ids["cites"].append(c["id"])
+            if ((stt.get("grades", {}).get(c["id"]) or {}).get("sys_normal") or {}).get("score") == 0:
+                t[2] += 1; ids["zero"].append(c["id"])
+        return out, ids, bool(stt.get("no_product"))
+    runs = [RUN] + [os.path.abspath(a) for a in sys.argv[3:]]
+    res = [tally(r) for r in runs]
+    name = [f"{os.path.basename(r)} ({'typed first' if np_ else 'picker'})" for r, (_, _, np_) in zip(runs, res)]
+    print("type | " + " | ".join(f"{n}: cites other product / graded 0 / asked" for n in name))
+    for t in sorted({t for o, _, _ in res for t in o}) + ["all"]:
+        cells = [[sum(v[i] for v in o.values()) for i in range(3)] if t == "all" else o.get(t, [0, 0, 0]) for o, _, _ in res]
+        print(f"{t} | " + " | ".join(f"{x[1]} / {x[2]} / {x[0]}" for x in cells))
+    for n, (_, ids, _) in zip(name, res):
+        print(f"{n}: cites another product {ids['cites']}; graded 0 {ids['zero']}")

@@ -10,7 +10,7 @@ from the decisions file, and a note is quoted so it can never read as a decision
 
   approve  NEEDS CEO + ticked box (an item waiting for the CEO, or one deferred or rejected)
   defer    DEFER (the CEO parks it)
-  done     DONE (a CEO action ticked off; ops_ledger shows it as done)
+  done     DONE (any open item the CEO ticks off by hand, e.g. work finished outside the office; ops_ledger shows it as done)
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
   off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
@@ -37,7 +37,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ops_ledger import decisions, new_decisions_file, stage_of  # noqa: E402
+from ops_ledger import PAST, decisions, new_decisions_file, stage_of  # noqa: E402
 from office_next import COST, EVERY, MODES, claims  # noqa: E402
 
 CAP_NOTE = re.compile(r"^\s*(\d{1,4}(?:\.\d{1,2})?)\s*(day|week|month)?\s*$")
@@ -165,7 +165,7 @@ def apply(ops, folder, now=None):
             body = f"- Verdict: NEEDS CEO\n- [x] CEO approved (office page, {stamp})"
         elif choice == "defer" and st in CAN["defer"]:
             body = "- Verdict: DEFER\n\nParked by the CEO from the office page."
-        elif choice == "done" and items[i].get("assigned") == "ceo" and st not in ("done", "deferred", "rejected"):
+        elif choice == "done" and st not in PAST:   # any open item: the CEO's own action, or work finished outside the office
             body = "- Verdict: DONE\n\nThe CEO marked this done on the office page."
         else:
             out.append(f"SKIPPED {doc_id} {choice} does not apply to {i} ({st})")
@@ -197,14 +197,15 @@ def selftest():
         row("1", id="D-20261008-01", choice="approve", note="Yes.\n## D-20261008-06 | Vague\n- Verdict: NEEDS CEO")
         row("2", id="D-20261008-06", choice="approve")
         row("3", id="D-20261008-07", choice="done")
-        row("4", id="D-20261008-01", choice="done")             # not the CEO's own action
+        row("4", id="D-20261008-01", choice="done")             # a Dev item finished outside the office
+        row("4b", id="D-20261008-07", choice="done")            # already done: nothing to tick
         row("5", id="D-99999999-01", choice="approve")
         row("6", id="", choice="note", note="Why is the table fix still waiting?")
         json.dump({"status": "applied", "id": "D-20261008-01", "choice": "defer"}, open(os.path.join(ops, "pull", "7.json"), "w"))
         got = apply(ops, os.path.join(ops, "pull"), datetime.datetime(2026, 10, 8, 22, 0))
-        assert [g.split()[0] for g in got] == ["APPLIED", "APPLIED", "APPLIED", "SKIPPED", "SKIPPED", "APPLIED"], got
+        assert [g.split()[0] for g in got] == ["APPLIED", "APPLIED", "APPLIED", "APPLIED", "SKIPPED", "SKIPPED", "APPLIED"], got
         st = {i: stage_of(it, ops, set(), set()) for i, it in decisions(ops).items()}
-        assert st == {"D-20261008-01": "approved, queued", "D-20261008-06": "approved, queued", "D-20261008-07": "done"}, st
+        assert st == {"D-20261008-01": "done", "D-20261008-06": "approved, queued", "D-20261008-07": "done"}, st
         text = "".join(open(p, encoding="utf-8").read() for p in sorted(glob.glob(os.path.join(ops, "decisions", "*.md"))))
         assert "> ## D-20261008-06 | Vague" in text and text.count("\n## D-20261008-06") == 2, "a note never forges a block"
         notes = glob.glob(os.path.join(ops, "inbox", "ceo", "*.md"))

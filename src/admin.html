@@ -135,12 +135,19 @@
   .tagpick[open]>summary{background:var(--color-accent-800);
         color:var(--color-accent-100)}
   .tagpick-list{position:absolute;right:0;top:calc(100% + 4px);z-index:50;
-        width:250px;max-height:232px;overflow-y:auto;padding:6px;
+        width:100%;min-width:180px;box-sizing:border-box;max-height:232px;overflow-y:auto;padding:6px;
         background:var(--color-surface);border-radius:var(--radius-md);
         box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider)}
   .tagpick-row{display:flex;align-items:center;gap:8px;padding:5px 7px;
         border-radius:var(--radius-sm);font-size:12.5px;cursor:pointer}
   .tagpick-row:hover{background:color-mix(in srgb, var(--color-text) 7%, transparent)}
+  .tagpick-row input{appearance:none;-webkit-appearance:none;margin:0;flex:0 0 16px;
+        width:16px;height:16px;display:grid;place-content:center;cursor:pointer;
+        font-size:15px;line-height:1;color:color-mix(in srgb, var(--color-text) 60%, transparent)}
+  .tagpick-row input::before{content:"+"}
+  .tagpick-row input:checked::before{content:"\2713";font-size:13px}
+  .tagpick-row:has(input:checked),.tagpick-row input:checked{color:var(--color-accent-ink)}
+  .tagpick-row input:focus-visible{outline:2px solid var(--color-accent-ink);border-radius:3px}
   .tagbox{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;
           max-width:460px}
   .chip{border:0;cursor:pointer;font:inherit;font-size:11.5px;
@@ -172,6 +179,184 @@
   /* Indeterminate while the server has not reported a figure yet: a bar
      sitting at 0% says "stuck", and a made-up percentage is a lie. */
   .bar.indet>i{width:34%;animation:indet 1.15s ease-in-out infinite}
+  /* Confluence run feed: ten rows tall, scrolls for the rest. A new row
+     rises out of a slight blur and its tint fades, so the eye catches the
+     arrivals without anything flashing. */
+  .cf-feed{--cf-row:27px;margin-top:10px;max-height:calc(var(--cf-row) * 10);overflow-y:auto;
+        padding:4px 0;border-radius:var(--radius-md);scrollbar-width:thin;
+        scrollbar-color:color-mix(in srgb,var(--color-text) 25%,transparent) transparent;
+        background:color-mix(in srgb,var(--color-text) 4%,transparent);
+        -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%);
+        mask-image:linear-gradient(to bottom,transparent 0,#000 12px,#000 calc(100% - 12px),transparent 100%)}
+  .cf-feed::-webkit-scrollbar{width:6px}
+  .cf-feed::-webkit-scrollbar-thumb{border-radius:99px;
+        background:color-mix(in srgb,var(--color-text) 25%,transparent)}
+  .cf-feed-row{display:flex;align-items:baseline;gap:8px;min-height:var(--cf-row);
+        padding:4px 12px;box-sizing:border-box;font-size:12.5px;line-height:1.4;
+        animation:cfRise .5s cubic-bezier(.2,.75,.25,1) both, cfTint 1.8s ease-out both}
+  .cf-feed-k{flex:0 0 auto;font-size:10.5px;padding:1px 7px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-accent-ink) 14%,transparent);color:var(--color-accent-ink)}
+  .cf-feed-t{overflow-wrap:anywhere}
+  .cf-feed-p{margin-left:auto;padding-left:10px;font-size:11.5px;text-align:right;overflow-wrap:anywhere;
+        color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+  @keyframes cfRise{from{opacity:0;transform:translateY(9px);filter:blur(3px)}
+                    to{opacity:1;transform:none;filter:none}}
+  @keyframes cfTint{from{background:color-mix(in srgb,var(--color-accent) 13%,transparent)}
+                    to{background:transparent}}
+  @media (prefers-reduced-motion: reduce){.cf-feed-row{animation:none}}
+  /* Confluence documents: a folder tree, closed to start */
+  .cf-tick{accent-color:var(--color-accent);width:15px;height:15px;margin:0;flex:0 0 auto;cursor:pointer}
+  .cf-prod{border:1px solid color-mix(in srgb,var(--color-text) 14%,transparent);background:none;color:inherit;
+        font:inherit;font-size:12px;padding:4px 11px;border-radius:999px;cursor:pointer;max-width:240px;
+        overflow-wrap:anywhere;text-align:left;transition:border-color .15s,background .15s}
+  .cf-prod:hover{border-color:color-mix(in srgb,var(--color-accent) 55%,transparent)}
+  .cf-prod.filed{border-color:color-mix(in srgb,#3fb97a 55%,transparent);
+        background:color-mix(in srgb,#3fb97a 14%,transparent)}
+  .cf-prod.filed::before{content:"✓ ";color:#3fb97a;font-weight:700}
+  .cf-prod.sug{border-style:dashed;color:color-mix(in srgb,var(--color-text) 70%,transparent)}
+  .cf-prod.sug::before{content:"Suggested: ";opacity:.65}
+  .cf-prod.none{border-style:dashed;border-color:color-mix(in srgb,#e0a030 60%,transparent);color:#e0a030}
+  .cf-folder-filed{font-size:11.5px;padding:1px 8px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-text) 8%,transparent)}
+  .cf-folder-filed.all{background:color-mix(in srgb,#3fb97a 18%,transparent);color:#3fb97a}
+  .cf-ap-row{display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:6px;border-radius:10px;
+        border:1px solid color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .cf-ap-row.filed{border-left:3px solid #3fb97a}
+  .cf-ap-row.suggested{border-left:3px dashed color-mix(in srgb,var(--color-text) 40%,transparent)}
+  .cf-ap-row.none{border-left:3px solid #e0a030;background:color-mix(in srgb,#e0a030 7%,transparent)}
+  .cf-ap-row.off{opacity:.5}
+  .cf-ap-row .cf-tick{flex:0 0 auto}
+  .cf-ap-for{width:auto;flex:0 0 auto;font-size:12.5px;padding:4px 8px}
+  .cf-ap-n{font-size:18px;font-weight:600;min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
+  .cf-ap-main{flex:1;min-width:0}
+  .cf-ap-main b{display:block;font-size:13.5px;font-weight:600;overflow-wrap:anywhere}
+  .cf-ap-main span{font-size:12px;overflow-wrap:anywhere;color:color-mix(in srgb,var(--color-text) 58%,transparent)}
+  .cf-ap-warn{margin:6px 20px 0;padding:10px 14px !important;border-radius:10px;font-size:12.5px;
+        background:color-mix(in srgb,#e0a030 10%,transparent);border:1px solid color-mix(in srgb,#e0a030 35%,transparent)}
+  .cf-ap-warn p{margin:3px 0}
+  .cf-dlg{border:0;padding:0;border-radius:16px;width:min(680px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 40px));
+        background:var(--color-surface);color:var(--color-text);box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);
+        display:flex;flex-direction:column}
+  .cf-dlg:not([open]){display:none}
+  .cf-dlg[open]{animation:cfRise .28s cubic-bezier(.2,.75,.25,1) both}
+  .cf-dlg::backdrop{background:rgba(6,8,14,.55);backdrop-filter:blur(3px)}
+  .cf-dlg>:not(input){padding-left:20px;padding-right:20px}
+  .cf-dlg>input{margin:0 20px;width:auto}
+  .cf-dlg-head{display:flex;align-items:center;justify-content:space-between;padding-top:16px;font-size:15px}
+  .cf-dlg-x{border:0;background:none;color:inherit;font-size:22px;line-height:1;cursor:pointer;opacity:.6;
+        padding:2px 8px;border-radius:8px}
+  .cf-dlg-x:hover{opacity:1;background:color-mix(in srgb,var(--color-text) 8%,transparent)}
+  .cf-dlg-why{margin:4px 0 12px;font-size:12.5px;color:color-mix(in srgb,var(--color-text) 62%,transparent)}
+  .cf-dlg-list{flex:1 1 auto;overflow-y:auto;margin-top:10px;padding-bottom:6px;scrollbar-width:thin}
+  .cf-dlg-range{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin:12px 0 6px;
+        color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+  .cf-dlg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px}
+  .cf-dlg-opt{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;
+        border:1px solid color-mix(in srgb,var(--color-text) 10%,transparent);transition:background .15s,border-color .15s}
+  .cf-dlg-opt:hover{background:color-mix(in srgb,var(--color-text) 5%,transparent)}
+  .cf-dlg-opt.on{border-color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 10%,transparent)}
+  .cf-dlg-opt span{flex:1;overflow-wrap:anywhere}
+  .cf-dlg-opt em{font-style:normal;font-size:10.5px;padding:1px 7px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-accent-ink) 16%,transparent);color:var(--color-accent-ink)}
+  .cf-dlg-empty{font-size:12.5px;padding:14px 0;color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+  .cf-dlg-new{padding-top:12px;padding-bottom:12px;border-top:1px solid var(--color-divider)}
+  .cf-dlg-new.hint{background:color-mix(in srgb,var(--color-accent) 7%,transparent)}
+  .busy-dlg{width:min(420px,calc(100vw - 32px));padding-bottom:20px}
+  .busy-dlg .bar{height:6px;margin-top:12px}
+  .busy-line{font-size:12.5px;margin-top:4px;min-height:1.4em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+        color:color-mix(in srgb,var(--color-text) 65%,transparent)}
+  .ask-dlg{width:min(460px,calc(100vw - 32px))}
+  .ask-body{margin:6px 0 14px;font-size:13.5px;line-height:1.5;color:color-mix(in srgb,var(--color-text) 80%,transparent)}
+  .ask-snooze{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;cursor:pointer;
+        color:color-mix(in srgb,var(--color-text) 70%,transparent)}
+  .cf-dlg-foot{display:flex;justify-content:flex-end;gap:8px;padding-top:12px;padding-bottom:16px;
+        border-top:1px solid var(--color-divider)}
+  .cf-seg{display:inline-flex;padding:3px;border-radius:999px;
+        background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+  .cf-seg button{border:0;background:none;font:inherit;font-size:12.5px;padding:5px 12px;border-radius:999px;
+        cursor:pointer;color:color-mix(in srgb,var(--color-text) 65%,transparent);transition:background .2s,color .2s}
+  .cf-seg button[aria-selected=true]{background:var(--color-surface);color:var(--color-text);
+        box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .cf-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;font-size:12.5px;
+        color:color-mix(in srgb,var(--color-text) 60%,transparent)}
+  .cf-tools span{margin-right:auto}
+  .cf-folder{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px 8px calc(10px + var(--d) * 22px);
+        margin-top:4px;border-radius:var(--radius-md);transition:background .15s;
+        background:color-mix(in srgb,var(--color-text) 3.5%,transparent)}
+  .cf-folder:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+  .cf-chev{border:0;background:none;cursor:pointer;width:22px;height:22px;border-radius:6px;flex:0 0 auto;
+        display:grid;place-content:center;color:inherit}
+  .cf-chev::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+        transform:rotate(-45deg);transition:transform .22s cubic-bezier(.2,.75,.25,1)}
+  .cf-folder.open .cf-chev::before{transform:rotate(45deg) translate(-2px,-2px)}
+  .cf-chev:hover{background:color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .cf-folder-name{display:flex;align-items:center;gap:9px;font-weight:600;font-size:13.5px;cursor:pointer;
+        flex:1 1 200px;min-width:0;overflow-wrap:anywhere}
+  .cf-folder-meta{display:flex;align-items:center;gap:8px;font-size:12px;
+        color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+  .cf-meter{width:54px;height:4px;border-radius:99px;overflow:hidden;
+        background:color-mix(in srgb,var(--color-text) 12%,transparent)}
+  .cf-meter>i{display:block;height:100%;background:var(--color-accent);transition:width .4s ease}
+  .cf-folder-body.anim{animation:cfRise .3s cubic-bezier(.2,.75,.25,1) both}
+  .cf-folder-body{margin-left:calc(20px + var(--d) * 22px);padding-left:10px;
+        border-left:1px solid color-mix(in srgb,var(--color-text) 10%,transparent)}
+  .cf-doc{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 8px;border-radius:var(--radius-md);
+        border-top:1px solid color-mix(in srgb,var(--color-text) 7%,transparent);transition:background .15s}
+  .cf-doc:hover{background:color-mix(in srgb,var(--color-text) 4%,transparent)}
+  .cf-doc.on{box-shadow:inset 3px 0 0 var(--color-accent)}
+  .cf-doc.int{box-shadow:inset 3px 0 0 #9b7be0}
+  .cf-seg-sm{padding:2px;flex:0 0 auto}
+  .cf-seg-sm button{font-size:11.5px;padding:3px 9px}
+  .cf-seg-sm button[aria-checked=true]{background:var(--color-surface);color:var(--color-text);
+        box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .cf-seg-sm button.d-approved[aria-checked=true]{background:var(--color-accent);color:var(--color-accent-100)}
+  .cf-seg-sm button.d-internal[aria-checked=true]{background:#9b7be0;color:#fff}
+  .cf-seg-sm button:disabled{opacity:.45;cursor:default}
+  .cf-doc-main{flex:1 1 240px;min-width:0}
+  .cf-doc-title{font-size:13.5px;overflow-wrap:anywhere;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .cf-doc-meta{font-size:12px;margin-top:2px;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+  .cf-doc-err{color:var(--color-accent-ink);margin-top:2px}
+  .cf-up{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;font-size:12px;
+        padding:3px 9px;border-radius:8px;width:fit-content;max-width:100%;overflow-wrap:anywhere}
+  .cf-up.rep{background:color-mix(in srgb,#5b9cf0 14%,transparent);color:#7fb2f5}
+  .cf-up.keep{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+  .cf-up.part{background:color-mix(in srgb,#e0a030 12%,transparent);color:#e0a030}
+  .cf-up-btn{border:0;background:none;color:inherit;font:inherit;font-weight:600;text-decoration:underline;
+        cursor:pointer;padding:0}
+  .cf-badge{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:999px;letter-spacing:.02em}
+  .cf-badge.new{background:color-mix(in srgb,#3fb97a 20%,transparent);color:#3fb97a}
+  .cf-badge.upd{background:color-mix(in srgb,#5b9cf0 20%,transparent);color:#6aa7f5}
+  .cf-switch{position:relative;width:36px;height:20px;border-radius:99px;border:0;cursor:pointer;flex:0 0 auto;
+        background:color-mix(in srgb,var(--color-text) 22%,transparent);transition:background .2s}
+  .cf-switch::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;
+        background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .22s cubic-bezier(.2,.75,.25,1)}
+  .cf-switch[aria-checked=true]{background:var(--color-accent)}
+  .cf-switch[aria-checked=true]::after{transform:translateX(16px)}
+  .cf-switch:disabled{opacity:.4;cursor:default}
+  .cf-switch:focus-visible,.cf-chev:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+  .cf-open{text-decoration:none;font-size:15px;padding:2px 6px;border-radius:6px;color:inherit;opacity:.6}
+  .cf-open:hover{opacity:1;background:color-mix(in srgb,var(--color-text) 8%,transparent)}
+  .cf-more{display:block;margin:8px auto}
+  .cf-combine{border:1px dashed color-mix(in srgb,var(--color-text) 22%,transparent);background:none;color:inherit;
+        font:inherit;font-size:11.5px;padding:3px 10px;border-radius:999px;cursor:pointer;opacity:.75;
+        transition:opacity .15s,border-color .15s}
+  .cf-combine:hover{opacity:1;border-color:var(--color-accent)}
+  .cf-combine:disabled{cursor:default;opacity:.55;border-style:solid}
+  .cf-recent-path{font-size:11.5px;margin:10px 0 0 8px;color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+  /* The selection bar: pinned to the bottom of the screen while anything is
+     ticked, rising into place; sticky inside the list it floated over rows
+     in the middle of the page. The list gets room at its foot for it. */
+  .cf-bulk{position:fixed;left:50%;bottom:18px;z-index:40;display:flex;align-items:center;gap:8px;
+        flex-wrap:wrap;width:max-content;max-width:calc(100vw - 32px);padding:10px 14px;border-radius:14px;
+        background:var(--color-surface);box-shadow:var(--shadow-lg),inset 0 0 0 1px var(--color-divider);
+        opacity:0;pointer-events:none;transform:translate(-50%,16px);
+        transition:opacity .2s ease,transform .25s cubic-bezier(.2,.75,.25,1)}
+  .cf-bulk.on{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+  .card.cf-has-bulk{padding-bottom:84px !important}
+  .cf-bulk b{font-weight:600;margin-right:6px}
+  .tagpick summary.unfiled{color:var(--color-accent-ink)}
+  .cf-bulk-sel{width:auto;max-width:260px;padding-top:6px;padding-bottom:6px}
+  @media (prefers-reduced-motion: reduce){.cf-folder-body{animation:none}}
   @keyframes indet{0%{margin-left:-34%}100%{margin-left:100%}}
 
   /* background jobs, bottom left, over whatever page you moved to */
@@ -222,7 +407,7 @@
            color:var(--color-accent-ink)}
   .who-mail{font-size:11px;margin-top:2px;
             color:color-mix(in srgb, var(--color-text) 45%, transparent);
-            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+            overflow-wrap:anywhere}
   .who-acts{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
   .who-acts .btn{font-size:11.5px;padding:3px 7px}
   /* a basic account gets no rail, so the main column carries the page */
@@ -264,7 +449,9 @@
      size the cap is trying to counteract. Prose is still measured: these
      pages are as wide as the window, and a 1900px line of 12.5px text is
      not readable however tidy it looks. */
-  .wrap{width:100%;animation:rise .18s ease both;--measure:780px}
+  /* backwards, not both: a kept final transform would make .wrap the box
+     every position:fixed child pins to (the Confluence selection bar). */
+  .wrap{width:100%;animation:rise .18s ease backwards;--measure:780px}
   h1{font-size:26px;letter-spacing:-.025em;margin:0 0 4px;font-family:var(--font-heading);font-weight:500}
   .lede{margin:0 0 22px;max-width:var(--measure,780px);font-size:14px;
         color:color-mix(in srgb, var(--color-text) 60%, transparent)}
@@ -358,7 +545,7 @@
         border-top:1px solid color-mix(in srgb, var(--color-text) 9%, transparent)}
   .item:first-child{border-top:0}
   .item .grow{flex:1;min-width:0}
-  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .grow b{display:block;font-size:13.5px;font-weight:400;overflow-wrap:anywhere}
   .item .grow span{font-size:12px;color:color-mix(in srgb, var(--color-text) 50%, transparent)}
   .item.flagged{box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
                 border-radius:var(--radius-md);padding:10px 12px;border-top:0;margin-bottom:2px}
@@ -893,7 +1080,7 @@ function paintBoot() {
          : (waiting.length
             ? "Documents, answers and settings work now. Anything greyed is "
               + "waiting on the models."
-            : "Nearly there\u2026")));
+            : "Nearly there")));
 }
 
 // Sentinel for "answers carrying no product tag at all" in the answers-page
@@ -929,6 +1116,13 @@ const el = (t, a = {}, ...kids) => {
   kids.flat(Infinity).forEach(c => c && n.append(c.nodeType ? c : document.createTextNode(c)));
   return n;
 };
+
+// A product picker (<details class="tagpick">) closes on a click anywhere
+// outside it, or on Escape, like any other dropdown.
+const closeTagpicks = keep => document.querySelectorAll("details.tagpick[open]")
+  .forEach(d => { if (!d.contains(keep)) d.open = false; });
+document.addEventListener("click", e => closeTagpicks(e.target));
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeTagpicks(null); });
 
 function toast(msg, bad) {
   document.querySelectorAll(".toast").forEach(t => t.remove());
@@ -1308,6 +1502,9 @@ function render() {
         // customers asked, then try it as a customer.
         nav("catalog", "Products"),
         nav("documents", "Documents", unassigned().length),
+        nav("confluence", "Confluence", confluenceCache && confluenceCache.items
+          ? confluenceCache.items.filter(i => i.status === "error"
+              || (i.is_new && i.decision !== "approved")).length : 0),
         nav("faq", "Generate/Edit FAQs"),
         nav("gaps", "FAQs from customers", cache.gaps.length),
         nav("widget", "Widget design"),
@@ -1547,6 +1744,7 @@ function body() {
   if (view === "backup") return viewBackup();
   if (view === "overview") return viewOverview();
   if (view === "documents") return viewDocuments();
+  if (view === "confluence") return viewConfluence();
   if (view === "faq") return viewFaq();
   if (view === "gaps") return viewGaps();
   if (view === "catalog") return viewCatalog();
@@ -1586,6 +1784,7 @@ function brandMark(h, cls) {
 const NAV_ICON = {
   overview:  '<path d="M3 13h8V3H3zM13 21h8V11h-8zM13 7h8V3h-8zM3 21h8v-4H3z"/>',
   documents: '<path d="M14 3v5h5"/><path d="M19 8v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7z"/>',
+  confluence:'<path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.4-6.4L21 8"/><path d="M21 3v5h-5"/>',
   faq:       '<path d="M12 3a9 9 0 0 1 0 18H4l2.3-2.3A9 9 0 0 1 12 3z"/><path d="M9 10h6M9 14h4"/>',
   gaps:      '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.5 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.5A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.5z"/>',
   catalog:   '<path d="M21 16V8l-9-5-9 5v8l9 5z"/><path d="m3.3 7.5 8.7 5 8.7-5M12 21.5v-9"/>',
@@ -1999,7 +2198,7 @@ function draftReviewCard() {
         el("span", { style: "flex:0 0 18px" }, ""),
         el("div", { class: "step-b" },
           el("div", { style: "font-size:13.5px;font-weight:500" },
-            d.partial.question || "writing the next question…"),
+            d.partial.question || "writing the next question"),
           el("p", { style: "white-space:pre-wrap" }, d.partial.answer || "",
             el("span", { class: "caret" }, ""))))
     : null;
@@ -2066,7 +2265,9 @@ function drawJobs() {
     bar.firstChild.style.width = j.pct ? Math.min(100, j.pct) + "%" : "";
 
     const acts = card.querySelector(".bgtask-acts");
-    if (done && !acts.childElementCount && j.kind === "ocr") {
+    if (done && !acts.childElementCount && j.acts) {
+      acts.append(...j.acts(id));
+    } else if (done && !acts.childElementCount && j.kind === "ocr") {
       acts.append(el("button", { class: "btn btn-ghost",
         onclick: () => { jobs.delete(id); drawJobs(); } }, "Done"));
     } else if (done && !acts.childElementCount) {
@@ -2081,7 +2282,7 @@ function drawJobs() {
                       + " could not be read"),
           el("span", {}, " (page" + (n === 1 ? " " : "s ")
                       + oc.candidates.slice(0, 12).join(", ")
-                      + (n > 12 ? "…" : "") + ") — scanned or image-only, "
+                      + (n > 12 ? " and more" : "") + ") — scanned or image-only, "
                       + "so not searchable."),
           oc.available
             ? el("button", { class: "btn btn-secondary",
@@ -2124,7 +2325,7 @@ function drawJobs() {
 // anybody watching one is actually asking.
 function pctText(pct, status) {
   if (status === "done" || status === "error") return "";
-  return pct ? " — " + Math.round(pct) + "%" : " — starting…";
+  return pct ? " — " + Math.round(pct) + "%" : " — starting";
 }
 
 // One poller per job, however many things are watching it. The Documents page
@@ -2294,7 +2495,7 @@ function gate() {
                                 placeholder: "you@company.com", autofocus: "true" });
   const pwIn = el("input", { class: "input", type: "password", placeholder: "Password" });
   const status = el("p", { class: "sec-hint", style: "margin-bottom:16px" },
-                    "Checking this install\u2026");
+                    "Checking this install");
   const btn = el("button", { class: "btn btn-primary gate-primary", disabled: "true" }, "Sign in");
   // Signing in checks a password hash and then loads every cache the console
   // renders from, which is long enough that a button doing nothing reads as a
@@ -2563,7 +2764,7 @@ function gate() {
       // Back from Microsoft/Google: trade the handoff for a session at once.
       const token = pendingLink.token;
       showSignIn();
-      status.textContent = "Finishing sign-in…";
+      status.textContent = "Finishing sign-in";
       busy(true);
       try {
         await enter(await api("/admin/auth/sso/finish", { method: "POST",
@@ -2644,7 +2845,7 @@ async function loadAccounts() {
 
 function viewAccounts() {
   if (!acctCache) { loadAccounts(); return [el("h1", {}, "Accounts"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (acctCache.error) return [el("h1", {}, "Accounts"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load accounts"), acctCache.error))];
@@ -2814,7 +3015,7 @@ function ssoCard() {
         + "sign-in page. It only proves who someone is: their address must already "
         + "have an account above, at the level you gave it."));
     const c = ssoCache;
-    if (!c) return card.append(el("div", {}, "Loading…"));
+    if (!c) return card.append(el("div", {}, "Loading"));
     if (c.error) return card.append(el("div", { class: "empty" }, c.error));
     if (!c.console_url) card.append(el("div", { class: "empty", style: "margin-bottom:10px" },
       "Set ADMIN_PUBLIC_URL to this console's address (e.g. https://support.company.com) "
@@ -2882,7 +3083,7 @@ function viewBackup() {
       + "backup is unreadable \u2014 there is no way back in, by design. Store it "
       + "with your other secrets, NOT next to the backup file.\n\nContinue?"))
       return;
-    exportBtn.disabled = true; exportBtn.textContent = "Preparing\u2026";
+    exportBtn.disabled = true; exportBtn.textContent = "Preparing";
     try {
       // POST, not GET: a passphrase in a query string ends up in proxy and
       // server access logs.
@@ -3025,7 +3226,7 @@ function viewBackup() {
       + "that backup you will be signed out and unable to sign back in, and "
       + "would have to use manage_accounts.py on the server. Continue?"))
       return;
-    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring\u2026";
+    restoreBtn.disabled = true; restoreBtn.textContent = "Restoring";
     const fd = new FormData(); fd.append("file", picked);
     if (rPw.value) fd.append("passphrase", rPw.value);
     const qs = "?restore_accounts=" + rAccounts.checked
@@ -3089,7 +3290,7 @@ async function loadPolicy() {
 
 function viewPolicy() {
   if (!polCache) { loadPolicy(); return [el("h1", {}, "Access & limits"),
-    el("p", { class: "lede" }, "Loading\u2026")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (polCache.error) return [el("h1", {}, "Access & limits"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load settings"), polCache.error))];
@@ -3209,7 +3410,7 @@ function viewPolicy() {
     mk.splice(0, 2));
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       await api("/admin/policy", { method: "PUT",
         body: JSON.stringify({ changes: p }) });
@@ -3318,7 +3519,7 @@ function viewPolicy() {
 // and what it costs -- not what the code does.
 function viewAdvanced() {
   if (!polCache) { loadPolicy(); return [el("h1", {}, "Advanced"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (polCache.error) return [el("h1", {}, "Advanced"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load settings"), polCache.error))];
@@ -3534,7 +3735,7 @@ function viewAdvanced() {
       + "guessing mode that has been lucky."));
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       await api("/admin/policy", { method: "PUT",
         body: JSON.stringify({ changes: p }) });
@@ -3566,7 +3767,7 @@ async function loadKeys() {
 
 function viewKeys() {
   if (!keysCache) { loadKeys(); return [el("h1", {}, "API keys"),
-    el("p", { class: "lede" }, "Loading…")]; }
+    el("p", { class: "lede" }, "Loading")]; }
   if (keysCache.error) return [el("h1", {}, "API keys"),
     el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
       el("b", {}, "Could not load key status"), keysCache.error))];
@@ -3654,6 +3855,966 @@ function viewKeys() {
   ];
 }
 
+// Confluence: manuals from one Confluence folder or page, with a person
+// between Confluence and the bot. The server checks what is there (indexing
+// nothing), people approve or exclude each document and choose its product,
+// and a sync indexes only what is approved. The connection holds an API
+// token, so only root sees that card; the rest is for anyone at support.
+let confluenceCache = null, cfLoadedAt = 0, cfSeen = null;
+let cfFilter = "all", cfSearch = "", cfSelected = new Set(), cfPoll = null, cfShown = 100;
+let cfMode = "tree", cfOpen = new Set(), cfDocLimit = new Map(), cfJustOpened = null;
+
+const CF_STATUS = {
+  synced: ["Synced", "tag-neutral"],
+  new: ["Will be added", "tag-accent"],
+  changed: ["Will update", "tag-accent"],
+  remove: ["Will be removed", "tag-accent"],
+  combined: ["Now part of a combined document", "tag-accent"],
+  gone: ["Deleted in Confluence", "tag-accent"],
+  error: ["Failed", "tag-accent"],
+  excluded: ["Excluded", "tag-neutral"],
+  missing: ["Not in Confluence", "tag-neutral"],
+};
+const CF_PENDING = ["new", "changed", "remove", "gone", "combined"];
+const CF_FILTERS = [
+  ["all", "All", () => true],
+  ["approved", "For customers", i => i.decision === "approved"],
+  ["internal", "Internal", i => i.decision === "internal"],
+  ["excluded", "Excluded", i => i.decision !== "approved" && i.decision !== "internal"],
+  ["new", "New", i => i.is_new],
+  ["updated", "Updated", i => i.is_updated],
+  ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
+  ["unfiled", "Not filed", i => !cfFiled(i)],
+  ["uploaded", "Uploaded before", i => !!i.uploaded_as],
+  ["error", "Failed", i => i.status === "error"],
+];
+
+// While a run is going only the run box changes: the bar, its line, and a
+// feed of each document as the server reaches it. Redrawing the whole page
+// every poll made it blink and threw away scroll and open pickers. Polls ask
+// only for feed entries after the ones already shown; the full page is
+// fetched once, when the run ends.
+// Reading Confluence has no known end, so its bar runs without one; a sync
+// knows how many documents it has to index and fills as it goes.
+let cfStatusEl = null, cfFeedCount = 0;
+const CF_ACTION = { found: null, added: "Added", updated: "Updated", removed: "Removed" };
+const cfRunText = r => r.phase === "syncing" ? "Indexing " + (r.done + 1) + " of " + r.total
+  : r.phase === "checking" ? "Reading Confluence: " + (r.log_total || r.done || 0) + " documents found so far"
+  : "Connecting to Confluence";
+function cfRunBar() {
+  const fill = el("i", {}), bar = el("div", { class: "bar indet" }, fill);
+  const label = el("div", { style: "font-size:12px;margin-top:5px;"
+    + "color:color-mix(in srgb,var(--color-text) 55%,transparent)" });
+  const feed = el("div", { class: "cf-feed", role: "log", "aria-live": "polite",
+    "aria-label": "Documents reached so far" });
+  const box = el("div", { style: "flex:1 1 100%;min-width:0" }, bar, label, feed);
+  box.update = r => {
+    const known = r.phase === "syncing" && r.total;
+    bar.className = "bar" + (known ? "" : " indet");
+    fill.style.width = known ? Math.round((r.done + 1) / r.total * 100) + "%" : "";
+    label.textContent = cfRunText(r);
+    const entries = r.log || [];
+    if (!entries.length) return;
+    // Follow the newest only if the reader is already at the bottom; someone
+    // scrolled up to read keeps their place.
+    const follow = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    entries.forEach((e, i) => feed.append(el("div", {
+        class: "cf-feed-row", style: "animation-delay:" + Math.min(i, 9) * 55 + "ms" },
+      el("span", { class: "cf-feed-k" }, CF_ACTION[e.action] || (e.kind === "page" ? "Page" : "File")),
+      el("span", { class: "cf-feed-t" }, e.title),
+      e.path ? el("span", { class: "cf-feed-p" }, e.path) : null)));
+    feed.hidden = false;
+    if (follow) feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+  };
+  feed.hidden = true;
+  return box;
+}
+
+async function cfLoad() {
+  cfLoadedAt = Date.now();
+  const before = confluenceCache && !confluenceCache.error ? JSON.stringify(confluenceCache) : null;
+  try { confluenceCache = await api("/admin/confluence"); }
+  catch (e) { confluenceCache = { error: e.message }; }
+  // A background re-read that found nothing new does not redraw (no blink).
+  if (before && JSON.stringify(confluenceCache) === before) return;
+  if (view === "confluence") render();
+}
+
+async function cfTick() {
+  clearTimeout(cfPoll);
+  if (view !== "confluence") return;
+  let r;
+  try { r = (await api("/admin/confluence/progress?since=" + cfFeedCount)).running; }
+  catch (e) { cfPoll = setTimeout(cfTick, 4000); return; }
+  if (!r || !cfStatusEl || !cfStatusEl.isConnected) { cfFeedCount = 0; return cfLoad(); }
+  cfStatusEl.update(r);
+  cfFeedCount = r.log_total || cfFeedCount;
+  cfPoll = setTimeout(cfTick, 1500);
+}
+
+function cfBundle(path, on) {
+  cfOpen.delete(path.join(""));
+  cfPost("/admin/confluence/bundle", { path, on }, on
+    ? "“" + path[path.length - 1] + "” will be one document. Checking Confluence to combine it"
+    : "“" + path[path.length - 1] + "” will be split into its pages. Checking Confluence");
+}
+
+async function cfPost(path, body, msg) {
+  try {
+    confluenceCache = await withBusy("Updating documents",
+      () => api(path, { method: "POST", body: JSON.stringify(body || {}) }));
+    if (msg) toast(msg);
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+// "File under": a dialog rather than a dropdown, because filing two thousand
+// documents means choosing among forty products for hundreds at once. It
+// opens with the recommendation ticked -- what the documents' own folders
+// point to -- and when nothing in the catalogue matches, offers to create
+// the product their folder names, in the range its siblings are in.
+const cfClean = s => (s || "").replace(/\s+(Range|Documentation|Repair Information)\b.*$/i, "")
+  .replace(/^[A-Z0-9-]+\s+-\s+/, "").trim();
+const cfFlat = s => (s || "").toLowerCase().replace(/[^a-z0-9+]/g, "");
+// Folders that hold products rather than being one.
+const CF_CONTAINER = /^(obsolete|archived?|legacy|discontinued|internal|other|misc)\b/i;
+
+// The folder in `path`, from `start` down, that names a product. A product
+// folder's own subfolders repeat its name ("BV50" > "BV50 Documentation"),
+// so it stops there; a folder whose child does not ("Obsolete" > "BV100",
+// "Biometrics" > "ICU Range Documentation") holds products and is passed.
+function cfProductFolder(path, start) {
+  let k = start;
+  if (k >= path.length) return "";
+  while (k + 1 < path.length && !cfFlat(path[k + 1]).startsWith(cfFlat(cfClean(path[k])))) k++;
+  return CF_CONTAINER.test(path[k]) ? "" : path[k];
+}
+
+function cfFileDialog(keys, after, opts = {}) {
+  const items = (confluenceCache.items || []).filter(i => keys.includes(i.key));
+  const prods = products();
+  const nameOf = k => { const p = prods.find(p => p.key === k); return p ? p.name : k; };
+
+  // What the documents point to, most common first.
+  const votes = new Map();
+  items.forEach(i => (i.product || "").split(",").filter(Boolean)
+    .forEach(k => votes.set(k, (votes.get(k) || 0) + 1)));
+  const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
+  const rec = !opts.pick && ranked.length === 1 ? [ranked[0][0]] : [];
+  const chosen = new Set(rec);
+
+  // Nothing matched: the folder they share, named like a product.
+  const common = items.length ? items.map(i => i.path || []).reduce((a, p) => {
+    let n = 0; while (n < a.length && a[n] === p[n]) n++; return a.slice(0, n); }) : [];
+  // Below the top folder ("Products"), which is never itself a product.
+  const folder = cfProductFolder(common, 1);
+  const newName = rec.length || opts.pick ? "" : cfClean(folder);
+  const guessRange = () => {
+    const n = newName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    let best = null, len = 1;
+    prods.forEach(p => {
+      const m = p.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      let k = 0; while (k < n.length && n[k] === m[k]) k++;
+      if (k > len) { len = k; best = p.category; }
+    });
+    return best || "";
+  };
+
+  const dlg = el("dialog", { class: "cf-dlg", "aria-label": "File under products" });
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener("click", e => { if (e.target === dlg) close(); });   // the backdrop
+  dlg.addEventListener("close", () => dlg.remove());
+
+  const search = el("input", { class: "input", type: "search", placeholder: "Find a product" });
+  const grid = el("div", {});
+  const go = el("button", { class: "btn btn-primary" });
+  const syncGo = () => {
+    go.textContent = chosen.size
+      ? "File " + items.length + " document" + (items.length === 1 ? "" : "s")
+        + " under " + (chosen.size === 1 ? nameOf([...chosen][0]) : chosen.size + " products")
+      : "Leave " + (items.length === 1 ? "it" : "them") + " unfiled";
+  };
+  const drawGrid = () => {
+    grid.textContent = "";
+    const q = search.value.trim().toLowerCase();
+    (cache.catalog || []).forEach(c => {
+      const ps = (c.products || []).filter(p => !q || (c.name + " " + p.name).toLowerCase().includes(q));
+      if (!ps.length) return;
+      grid.append(el("div", { class: "cf-dlg-range" }, c.name),
+        el("div", { class: "cf-dlg-grid" }, ps.map(p => el("label", {
+            class: "cf-dlg-opt" + (chosen.has(p.key) ? " on" : "") + (rec.includes(p.key) ? " rec" : "") },
+          el("input", { type: "checkbox", class: "cf-tick", checked: chosen.has(p.key) ? "true" : null,
+            onchange: e => { e.target.checked ? chosen.add(p.key) : chosen.delete(p.key); drawGrid(); syncGo(); } }),
+          el("span", {}, /_general$|_shared$/.test(p.key) ? "Shared by all " + c.name : p.name),
+          rec.includes(p.key) ? el("em", {}, "recommended") : null))));
+    });
+    if (!grid.childElementCount) grid.append(el("div", { class: "cf-dlg-empty" }, "No product matches. Create it below."));
+  };
+  search.addEventListener("input", drawGrid);
+
+  // Creating a product (and its range, if that is new too).
+  const NEW = "__new__";
+  // No range pre-chosen unless a product's name resembles this one: a wrong
+  // default ("Obsolete" in Coin Hoppers) is easier to miss than an empty one.
+  const rangeSel = el("select", { class: "input" },
+    el("option", { value: "" }, "Choose a range"),
+    (cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
+    el("option", { value: NEW }, "New range"));
+  rangeSel.value = guessRange();
+  const rangeName = el("input", { class: "input", placeholder: "Range name", hidden: true });
+  rangeSel.addEventListener("change", () => { rangeName.hidden = rangeSel.value !== NEW; });
+  const prodName = el("input", { class: "input", placeholder: "Product name", value: newName });
+  const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  const create = el("button", { class: "btn btn-secondary", onclick: async () => {
+    const name = prodName.value.trim();
+    if (!name) return toast("Give the product a name", true);
+    try {
+      let cat = rangeSel.value;
+      if (!cat) return toast("Choose the range the product belongs to", true);
+      if (cat === NEW) {
+        if (!rangeName.value.trim()) return toast("Give the range a name", true);
+        cat = slug(rangeName.value);
+        await api("/admin/category", { method: "POST",
+          body: JSON.stringify({ key: cat, name: rangeName.value.trim() }) });
+      }
+      const key = slug(name);
+      await api("/admin/product", { method: "POST",
+        body: JSON.stringify({ category_key: cat, key, name, sources: [] }) });
+      await refresh();
+      chosen.clear(); chosen.add(key);
+      prodName.value = ""; toast(name + " added to the catalogue");
+      rangeSel.replaceChildren(...(cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
+        el("option", { value: NEW }, "New range"));
+      rangeSel.value = cat; rangeName.hidden = true;
+      drawGrid(); syncGo();
+    } catch (e) { toast(e.message, true); }
+  } }, "Create");
+
+  go.addEventListener("click", async () => {
+    close();
+    if (!after) cfSelected.clear();
+    await cfPost("/admin/confluence/items", { keys, product: [...chosen].join(",") },
+      chosen.size ? "Filed " + items.length + " document" + (items.length === 1 ? "" : "s") : "Unfiled");
+    if (after) after();
+  });
+
+  const why = opts.pick ? "Every one of them goes under the products you tick here."
+    : rec.length
+    ? (ranked[0][1] === items.length ? "All " : ranked[0][1] + " of ") + items.length
+      + " point to " + nameOf(rec[0]) + " by their folder or earlier filing."
+    : newName ? "Nothing in the catalogue matches “" + folder + "”. Create it below, or pick a product."
+    : "Pick one or more products.";
+  dlg.append(
+    el("div", { class: "cf-dlg-head" },
+      el("b", {}, "File " + items.length + " document" + (items.length === 1 ? "" : "s") + " under"),
+      el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+    el("p", { class: "cf-dlg-why" }, why),
+    search,
+    el("div", { class: "cf-dlg-list" }, grid),
+    el("div", { class: "cf-dlg-new" + (newName ? " hint" : "") },
+      el("div", { class: "cf-dlg-range", style: "margin-top:0" }, "New product"),
+      el("div", { class: "row", style: "gap:6px;flex-wrap:wrap;align-items:center" },
+        el("div", { style: "flex:1 1 140px" }, rangeSel), rangeName,
+        el("div", { style: "flex:2 1 180px" }, prodName), create)),
+    el("div", { class: "cf-dlg-foot" },
+      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"), go));
+  drawGrid(); syncGo();
+  document.body.append(dlg);
+  dlg.showModal();
+  (newName ? prodName : search).focus();
+}
+
+// A document's product, as a button that opens the dialog for it alone.
+function cfProductButton(it) {
+  const prods = products();
+  const keys = (it.product || "").split(",").filter(Boolean);
+  const names = keys.map(k => (prods.find(p => p.key === k) || { name: k }).name);
+  const state = !keys.length ? "none" : it.suggested ? "sug" : "filed";
+  return el("button", { class: "cf-prod " + state,
+    title: { none: "Not filed under any product. Click to file it",
+             sug: "Only suggested by its folder, not filed yet. Click to change or confirm",
+             filed: "Filed. Click to change" }[state],
+    onclick: () => cfFileDialog([it.key]) },
+    keys.length ? names.join(", ") : "Not filed");
+}
+
+// Filed means someone chose the product (or the document is synced under
+// one); a folder's suggestion is not filing until it is accepted.
+const cfFiled = it => !!it.product && !it.suggested;
+// Paths that read like they were never meant for customers.
+const CF_INTERNAL = /\b(internal|confidential|draft|due release|obsolete|do not publish|do not use|work in progress|wip)\b/i;
+
+// A selection grouped by where it will be filed: each product it is filed
+// or suggested under, and, for documents nothing matched, each product
+// folder they sit in (BV50, NV10USB+), so each can be given its product.
+function cfGroups(items) {
+  const common = items.length ? items.map(i => i.path || []).reduce((a, p) => {
+    let n = 0; while (n < a.length && a[n] === p[n]) n++; return a.slice(0, n); }) : [];
+  const groups = new Map();
+  items.forEach(i => {
+    const kind = !i.product ? "none" : cfFiled(i) ? "filed" : "suggested";
+    const folder = kind === "none"
+      ? cfProductFolder(i.path || [], Math.max(common.length, 1)) || (i.path || [])[common.length] || "" : "";
+    const g = kind + "|" + (i.product || "") + "|" + folder;
+    if (!groups.has(g)) groups.set(g, { kind, product: i.product || "", folder, items: [] });
+    groups.get(g).items.push(i);
+  });
+  const order = { filed: 0, suggested: 1, none: 2 };
+  return [...groups.values()].sort((a, b) => order[a.kind] - order[b.kind] || b.items.length - a.items.length);
+}
+
+// Approving or filing many at once: first say where each will be filed,
+// group by group, so nothing goes into the wrong product, or none, unseen.
+// mode "approve": approve, filing the suggested ones as shown.
+// mode "file": confirm each group's suggestion, or put all under one product.
+function cfReviewDialog(keys, mode) {
+  const wanted = new Set(keys);
+  const items = (confluenceCache.items || []).filter(i => wanted.has(i.key));
+  const prods = products();
+  const label = p => p.split(",").map(k => {
+    const x = prods.find(q => q.key === k); return x ? x.categoryName + " › " + x.name : k; }).join(", ");
+  const groups = cfGroups(items);
+  const isInternal = i => CF_INTERNAL.test((i.path || []).join(" ") + " " + i.title);
+  const n = k => k + " document" + (k === 1 ? "" : "s");
+  const again = () => cfReviewDialog(keys, mode);
+
+  // Which groups the main button acts on. Groups with a product start
+  // ticked; groups with none, and groups that are all internal-looking,
+  // start unticked, so leaving them out takes no effort. When approving,
+  // an internal-looking group starts as Internal instead: synced, and kept
+  // from customers.
+  const ticked = new Set(groups.filter(g => g.kind !== "none" && !g.items.every(isInternal)));
+  const asInternal = new Set(mode === "approve" ? groups.filter(g => g.items.every(isInternal)) : []);
+
+  const dlg = el("dialog", { class: "cf-dlg", "aria-label": mode === "approve" ? "Approve documents" : "File documents" });
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
+  dlg.addEventListener("close", () => dlg.remove());
+
+  // Suggestions become the filing: the product shown is the product it gets.
+  const confirmSuggestions = async (list, extra) => {
+    const byProduct = new Map();
+    list.filter(i => i.product && i.suggested).forEach(i =>
+      byProduct.has(i.product) ? byProduct.get(i.product).push(i.key) : byProduct.set(i.product, [i.key]));
+    for (const [product, ks] of byProduct)
+      confluenceCache = await api("/admin/confluence/items", { method: "POST",
+        body: JSON.stringify({ keys: ks, product, ...extra }) });
+  };
+  const chosen = () => groups.filter(g => ticked.has(g)).flatMap(g => g.items);
+  const internals = () => groups.filter(g => asInternal.has(g)).flatMap(g => g.items);
+  const act = async () => {
+    const list = chosen();
+    close();
+    try {
+      if (mode === "approve") {
+        const ints = internals();
+        await confirmSuggestions(list, { decision: "approved" });
+        if (list.length) confluenceCache = await api("/admin/confluence/items", { method: "POST",
+          body: JSON.stringify({ keys: list.map(i => i.key), decision: "approved" }) });
+        if (ints.length) confluenceCache = await api("/admin/confluence/items", { method: "POST",
+          body: JSON.stringify({ keys: ints.map(i => i.key), decision: "internal" }) });
+        ints.forEach(i => cfSelected.delete(i.key));
+        toast([list.length ? "Approved " + n(list.length) + " for customers" : "",
+               ints.length ? n(ints.length) + " marked internal" : ""].filter(Boolean).join(", ")
+              + ". They sync at the next sync");
+      } else {
+        await confirmSuggestions(list, {});
+        toast("Filed " + n(list.length) + (list.length < items.length
+          ? ". " + n(items.length - list.length) + " left as they were" : ""));
+      }
+      list.forEach(i => cfSelected.delete(i.key));
+      render();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  const go = el("button", { class: "btn btn-primary", onclick: act });
+  const warnBox = el("div", { class: "cf-ap-warn" });
+  // The button and the warnings follow the ticks: only what is ticked is acted on.
+  const sync = () => {
+    const list = chosen();
+    const unfiled = list.filter(i => !i.product), internal = list.filter(isInternal);
+    const rep = list.filter(i => i.replaces && i.status !== "synced");
+    const part = list.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload);
+    const warn = [];
+    if (mode === "approve" && rep.length) warn.push(n(rep.length) + (rep.length === 1 ? " replaces a PDF" : " replace PDFs")
+      + " you uploaded (" + rep.slice(0, 3).map(i => i.uploaded_as).join(", ") + (rep.length > 3 ? " and " + (rep.length - 3) + " more" : "")
+      + "). The upload is removed once the Confluence copy is in, and its product filing carries over.");
+    if (mode === "approve" && part.length) warn.push(n(part.length) + (part.length === 1 ? " is" : " are")
+      + " only the cover page of a manual you uploaded (" + part.slice(0, 3).map(i => i.uploaded_as).join(", ")
+      + "). Both copies stay unless you press Replace it on them, which combines each with its chapters.");
+    if (unfiled.length) warn.push(n(unfiled.length) + (unfiled.length === 1 ? " has" : " have") + " no product. Customers can still be answered "
+      + "from them, but the widget never offers them under a product.");
+    if (mode === "approve" && internal.length) warn.push(n(internal.length) + (internal.length === 1 ? " sits" : " sit")
+      + " under folders or titles that look internal ("
+      + [...new Set(internal.map(i => ((i.path || []).join(" ") + " " + i.title).match(CF_INTERNAL)[0]))].join(", ")
+      + "). Customers will be answered from them.");
+    warnBox.replaceChildren(...warn.map(w => el("p", {}, w)));
+    warnBox.hidden = !warn.length;
+    const ints = mode === "approve" ? internals().length : 0;
+    go.disabled = !list.length && !ints;
+    go.textContent = mode === "approve"
+      ? [list.length ? "Approve " + list.length + " for customers" + (warn.length ? " anyway" : "") : "",
+         ints ? "mark " + ints + " internal" : ""].filter(Boolean).join(", ").replace(/^m/, "M")
+      : "File " + (list.length === items.length ? (list.length === 1 ? "it" : "all " + list.length)
+                                                : "the " + list.length + " ticked");
+  };
+
+  const groupRow = g => {
+    const list = g.items;
+    // Filing: a tick. Approving: who the group is for.
+    const tick = mode === "approve"
+      ? el("select", { class: "input cf-ap-for", "aria-label": "Who this group is for",
+          onchange: e => {
+            ticked.delete(g); asInternal.delete(g);
+            if (e.target.value === "approved") ticked.add(g);
+            if (e.target.value === "internal") asInternal.add(g);
+            row.classList.toggle("off", e.target.value === "leave"); sync(); } },
+          [["approved", "Customers"], ["internal", "Internal"], ["leave", "Leave out"]].map(([v, l]) =>
+            el("option", { value: v, selected: (ticked.has(g) ? "approved" : asInternal.has(g) ? "internal" : "leave") === v
+                                                ? "true" : null }, l)))
+      : el("input", { type: "checkbox", class: "cf-tick", "aria-label": "Include this group",
+          checked: ticked.has(g) ? "true" : null,
+          onchange: e => { e.target.checked ? ticked.add(g) : ticked.delete(g);
+                           row.classList.toggle("off", !e.target.checked); sync(); } });
+    const row = el("div", { class: "cf-ap-row " + g.kind + (ticked.has(g) || asInternal.has(g) ? "" : " off") },
+      tick,
+      el("span", { class: "cf-ap-n" }, String(list.length)),
+      el("div", { class: "cf-ap-main" },
+        el("b", {}, g.kind === "none" ? (g.folder ? "“" + g.folder + "”: no product matches" : "No product")
+                                      : label(g.product)),
+        el("span", {}, g.kind === "filed" ? "Filed" : g.kind === "suggested"
+          ? "Suggested by their folder: " + (mode === "approve" ? "approving" : "filing") + " files them here"
+          : "Not offered in the widget for any product",
+          list.every(isInternal) ? " · looks internal" : "",
+          " · ", list.slice(0, 3).map(i => i.title).join(", ") + (list.length > 3 ? " and " + (list.length - 3) + " more" : ""))),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+        onclick: () => { close(); cfFileDialog(list.map(i => i.key), again); } },
+        g.kind === "none" ? (g.folder ? "Create or choose" : "File") : "Change"));
+    return row;
+  };
+
+  dlg.append(
+    el("div", { class: "cf-dlg-head" },
+      el("b", {}, (mode === "approve" ? "Approve " : "File ") + n(items.length)),
+      el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+    el("p", { class: "cf-dlg-why" }, (mode === "approve"
+      ? "Where each will be filed, and who it is for: Customers, Internal (synced, never used to answer "
+        + "customers) or Leave out. Groups that look internal start as Internal."
+      : "These belong to " + groups.length + " different places. Each group goes where its folder points; "
+        + "change any group, or untick it to leave it as it is.")),
+    el("div", { class: "cf-dlg-list" }, groups.map(groupRow)),
+    warnBox,
+    el("div", { class: "cf-dlg-foot" },
+      el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"),
+      mode === "file" ? el("button", { class: "btn btn-secondary",
+        onclick: () => { close(); cfFileDialog(keys, again, { pick: true }); } },
+        "Put all " + items.length + " under one product") : null,
+      go));
+  sync();
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+function cfConnectionCard(c) {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Connection",
+    style: "padding:14px 18px;margin-bottom:18px" });
+  const s = c.settings || {};
+  if (!isRoot()) {
+    card.append(el("b", {}, "Connection"), el("p", { style: "margin:4px 0 0;font-size:13px" },
+      c.configured ? "Reading from " + s.folder_url
+                   : "Not connected yet. A root admin connects Confluence on this page."));
+    return card;
+  }
+  const f = {
+    folder_url: el("input", { class: "input", value: s.folder_url || "",
+      placeholder: "Link of the folder or page that holds the manuals" }),
+    email: el("input", { class: "input", value: s.email || "", autocomplete: "off",
+      placeholder: "Email of the Atlassian account the token belongs to" }),
+    token: el("input", { class: "input", type: "password", autocomplete: "new-password",
+      placeholder: s.token_set ? "Token saved (leave blank to keep)" : "API token" }),
+  };
+  const save = el("button", { class: "btn btn-primary", onclick: () => {
+    const body = { folder_url: f.folder_url.value, email: f.email.value };
+    if (f.token.value) body.token = f.token.value;
+    cfPost("/admin/confluence", body, "Connection saved");
+  } }, "Save");
+  card.append(el("b", {}, "Connection"),
+    el("p", { style: "margin:4px 0 10px;font-size:13px" },
+      "A read-only Atlassian API token for an account that can see only what customers may see. "
+      + "Everything under the folder or page below is offered here; nothing reaches the bot until it is approved."),
+    el("div", { style: "display:flex;flex-direction:column;gap:6px" }, f.folder_url,
+      el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
+        el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token))),
+    el("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save,
+      el("span", { class: "tag " + (c.configured ? "tag-accent" : "tag-neutral") },
+        c.configured ? "connected" : "not connected")));
+  return card;
+}
+
+function cfSyncCard(c) {
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const card = el("div", { class: "card elev-sm", "data-sec": "Sync",
+    style: "padding:14px 18px;margin-bottom:18px" });
+  const mode = (m, label, hint) => el("button", {
+    class: "chip" + (c.mode === m ? " chip-on" : ""), title: hint,
+    onclick: () => c.mode !== m && cfPost("/admin/confluence/mode", { mode: m },
+      m === "auto" ? "New documents will sync without approval" : "New documents will wait for approval"),
+  }, label);
+  const busy = c.running;
+  const pending = c.items.filter(i => CF_PENDING.includes(i.status)).length;
+  const run = apply => cfPost("/admin/confluence/run", { apply },
+    apply ? "Sync started" : "Checking Confluence");
+  const checkBtn = el("button", { class: "btn btn-ghost", onclick: () => run(false) }, "Check for changes");
+  const syncBtn = el("button", { class: "btn btn-primary", onclick: () => run(true) },
+    "Sync now" + (pending ? " (" + pending + ")" : ""));
+  checkBtn.disabled = syncBtn.disabled = !c.configured || !!busy;
+
+  // Stop, with what stopping means said first.
+  const stopBtn = busy ? el("button", { class: "btn btn-ghost", disabled: busy.cancelling ? "true" : null,
+    onclick: async () => {
+      const syncing = busy.phase === "syncing";
+      if (!await askConfirm({ title: "Stop the " + (syncing ? "sync" : "check") + "?",
+          body: syncing
+            ? "Documents already synced in this run stay in the bot. The rest are left as they "
+              + "are and wait for the next sync. A combined document being built is not added."
+            : "Nothing found so far is kept: a check only saves when it finishes, so the "
+              + "document list stays as it was. If a sync was to follow, it will not start.",
+          ok: "Stop" })) return;
+      try { await api("/admin/confluence/cancel", { method: "POST" }); toast("Stopping after the current document"); }
+      catch (e) { toast(e.message, true); }
+      cfLoad();
+    } }, busy.cancelling ? "Stopping\u2026" : "Stop") : null;
+
+  // When it syncs on its own.
+  const sch = Object.assign({ every: "off", hours: 24, time: "02:00", day: 0 }, c.schedule || {});
+  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const every = el("select", { class: "input", style: "width:auto" },
+    [["off", "Off"], ["hours", "Every"], ["daily", "Daily at"], ["weekly", "Weekly on"]].map(([v, l]) =>
+      el("option", { value: v, selected: sch.every === v ? "true" : null }, l)));
+  const hours = el("input", { class: "input", type: "number", min: "1", max: "168", value: String(sch.hours),
+    style: "width:80px", "aria-label": "Hours between syncs" });
+  const day = el("select", { class: "input", style: "width:auto", "aria-label": "Day of the week" },
+    DAYS.map((d, i) => el("option", { value: String(i), selected: sch.day === i ? "true" : null }, d)));
+  const at = el("input", { class: "input", type: "time", value: sch.time, style: "width:auto",
+    "aria-label": "Time of day" });
+  const hoursLbl = el("span", { style: muted }, "hours");
+  const atLbl = el("span", { style: muted }, "at");
+  const shape = () => {
+    const v = every.value;
+    hours.hidden = hoursLbl.hidden = v !== "hours";
+    day.hidden = atLbl.hidden = v !== "weekly";
+    at.hidden = v !== "daily" && v !== "weekly";
+  };
+  every.addEventListener("change", shape);
+  const saveSch = el("button", { class: "btn btn-secondary", onclick: () =>
+    cfPost("/admin/confluence/schedule", { every: every.value, hours: Number(hours.value) || 24,
+      time: at.value || "02:00", day: Number(day.value) }, "Schedule saved") }, "Save");
+  shape();
+  const nextRun = c.next_run ? "Next automatic sync: " + new Date(c.next_run).toLocaleString() + "."
+    : "Automatic sync is off.";
+
+  card.append(el("b", {}, "Sync"),
+    el("div", { class: "chips", style: "margin:8px 0 6px" },
+      mode("review", "Approve new documents first",
+        "New documents start excluded, marked New, until someone approves them"),
+      mode("auto", "Sync everything",
+        "Every new document is approved as soon as it is found")),
+    el("p", { style: muted + ";margin:0 0 10px" }, c.mode === "auto"
+      ? "Every document found is synced. Exclude one to take it out of the bot."
+      : "New documents start excluded and are marked New until someone approves them. "
+        + "Approved documents stay approved and update when they change."),
+    el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn, stopBtn,
+      busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
+              cfFeedCount = busy.log_total || 0, cfStatusEl)
+           : el("span", { style: muted }, (c.checked_at ? "Last checked " + new Date(c.checked_at).toLocaleString() + ". " : "")
+               + "Sync now indexes what is approved, reading Confluence first only if the last check "
+               + "is over 6 hours old.")),
+    el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px" },
+      el("span", { style: "font-size:13px;font-weight:600;margin-right:4px" }, "Automatic sync"),
+      every, hours, hoursLbl, day, atLbl, at, saveSch),
+    el("div", { style: muted + ";margin-top:6px" }, nextRun
+      + " An automatic sync checks Confluence first, then syncs. Times are the server's."));
+  return card;
+}
+
+// The browser's confirm() ignores the theme and sits at the top of the
+// page. This is the console's own: centred, page blurred behind it. With
+// `snooze`, a "don't warn me for a week" tick remembers the answer per
+// browser (only for actions that can be undone).
+const SNOOZE_DAYS = 7;
+function snoozed(key) {
+  try { return Number(localStorage.getItem("go.snooze." + key) || 0) > Date.now(); }
+  catch (e) { return false; }
+}
+// Work on documents can take a while and showed nothing, so people clicked
+// again. busy() blurs the page behind a progress bar until done() -- the
+// page cannot be clicked meanwhile, so the same action cannot be sent twice.
+// step(i, n, line) moves the bar; without it the bar just runs.
+function busy(title) {
+  const dlg = el("dialog", { class: "cf-dlg busy-dlg", "aria-label": title, "aria-busy": "true" });
+  const line = el("div", { class: "busy-line" }, "Working\u2026");
+  const bar = el("div", { class: "bar indet" }, el("i", {}));
+  dlg.addEventListener("cancel", e => e.preventDefault());   // Escape does not hide it
+  dlg.append(el("div", { class: "cf-dlg-head" }, el("b", {}, title)), line, bar);
+  document.body.append(dlg);
+  dlg.showModal();
+  return {
+    step(i, n, text) {
+      bar.className = "bar";
+      bar.firstChild.style.width = Math.max(2, Math.round(100 * i / n)) + "%";
+      line.textContent = (i + 1 > n ? n : i + 1) + " of " + n + (text ? ": " + text : "");
+    },
+    say(text) { line.textContent = text; },
+    done() { dlg.close(); dlg.remove(); },
+  };
+}
+
+// Run fn behind busy(); always clears, even when fn throws.
+async function withBusy(title, fn) {
+  const b = busy(title);
+  try { return await fn(b); } finally { b.done(); }
+}
+
+function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
+  if (snooze && snoozed(snooze)) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const dlg = el("dialog", { class: "cf-dlg ask-dlg", "aria-label": title });
+    let answer = false;
+    const tick = snooze ? el("input", { type: "checkbox", class: "cf-tick" }) : null;
+    const done = yes => {
+      answer = yes;
+      if (yes && tick && tick.checked) {
+        try { localStorage.setItem("go.snooze." + snooze, String(Date.now() + SNOOZE_DAYS * 864e5)); }
+        catch (e) {}
+      }
+      dlg.close();
+    };
+    dlg.addEventListener("click", e => { if (e.target === dlg) done(false); });
+    dlg.addEventListener("close", () => { dlg.remove(); resolve(answer); });
+    const go = el("button", { class: "btn btn-primary",
+                              onclick: () => done(true) }, ok);
+    dlg.append(
+      el("div", { class: "cf-dlg-head" }, el("b", {}, title),
+        el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: () => done(false) }, "\u00d7")),
+      el("p", { class: "ask-body" }, body),
+      tick ? el("label", { class: "ask-snooze" }, tick, "Don't warn me about this for a week") : null,
+      el("div", { class: "cf-dlg-foot" },
+        el("button", { class: "btn btn-ghost", onclick: () => done(false) }, "Cancel"), go));
+    document.body.append(dlg);
+    dlg.showModal();
+    go.focus();
+  });
+}
+
+// The documents, as the folder tree they live in. Two thousand rows cannot be
+// read; folders can. Every folder starts closed and says what is inside
+// (how many, how many approved, what is new or updated); its tick box selects
+// everything under it, subfolders included, and its arrow opens it.
+// "Recently edited" drops the tree and lists by Confluence's own edit date,
+// for checking what changed.
+// The bar for ticked documents, the same wherever documents are ticked
+// (Documents page, Confluence page): who they are for, and what they are
+// filed under. Each page says what each choice does to its own documents.
+//   on.who(v)    v = "approved" | "internal" | "excluded"
+//   on.file(key) one product;  on.more()  several products, or a new one
+//   on.clear()
+function docSelectionBar(bar, n, on) {
+  bar.textContent = "";
+  bar.classList.toggle("on", n > 0);
+  if (!n) return;
+  const pick = (label, opts, fn) => el("select", { class: "input cf-bulk-sel", "aria-label": label,
+    onchange: e => { const v = e.target.value; e.target.value = ""; if (v) fn(v); } }, opts);
+  const MORE = "__more__";
+  bar.append(
+    el("b", {}, n + " selected"),
+    pick("Who the selected documents are for", [
+      el("option", { value: "" }, "Set to\u2026"),
+      el("option", { value: "approved" }, "Customers \u2014 used to answer customers"),
+      el("option", { value: "internal" }, "Internal \u2014 kept, never answers customers"),
+      el("option", { value: "excluded" }, "Exclude \u2014 taken out of the bot")], on.who),
+    pick("File the selected documents under", [
+      el("option", { value: "" }, "File under\u2026"),
+      (cache.catalog || []).map(cat => el("optgroup", { label: cat.name },
+        (cat.products || []).map(p => el("option", { value: p.key },
+          /_general$|_shared$/.test(p.key) ? "Shared by all " + cat.name : p.name)))),
+      el("option", { value: MORE }, "Several products, or a new one\u2026")],
+      v => v === MORE ? on.more() : on.file(v)),
+    el("button", { class: "btn btn-ghost", onclick: on.clear }, "Clear"));
+}
+
+function cfBox(checked, onchange, label) {
+  return el("input", { type: "checkbox", class: "cf-tick", "aria-label": label,
+    checked: checked ? "true" : null, onchange });
+}
+
+const cfAgo = at => {
+  if (!at) return "";
+  const d = (Date.now() - new Date(at)) / 864e5;
+  return d < 1 ? "today" : d < 2 ? "yesterday" : d < 31 ? Math.floor(d) + " days ago"
+    : new Date(at).toLocaleDateString();
+};
+
+// What happens to the copy of this manual someone uploaded by hand.
+function cfUploadLine(it) {
+  const set = keep => cfPost("/admin/confluence/items", { keys: [it.key], keep_upload: keep },
+    keep ? "The uploaded copy stays alongside" : "The uploaded copy will be replaced");
+  // A combined manual can stand in for several uploads (its sections').
+  const name = [it.uploaded_as, ...(it.also_uploaded || [])].map(u => "“" + u + "”").join(" and ");
+  const [text, cls, btn] = it.keep_upload
+    ? ["Kept alongside your upload " + name + ": the bot reads both", "keep",
+       el("button", { class: "cf-up-btn", onclick: () => set(false) }, "Replace it")]
+    : it.replaces
+      ? [(it.status === "synced" ? "Replaced your upload " : "Replaces your upload ") + name
+           + (it.status === "synced" ? "" : " when synced, keeping its product"), "rep",
+         el("button", { class: "cf-up-btn", onclick: () => set(true) }, "Keep both")]
+      // The cover page of a manual kept as a page per chapter: replacing it
+      // means combining the cover and its chapters into the one document.
+      : ["Same manual as your upload " + name + ", kept in Confluence as a page per chapter", "part",
+         el("button", { class: "cf-up-btn", title: "Combine this page and its chapters into one document, "
+             + "which replaces the upload when synced",
+           onclick: () => cfBundle([...(it.path || []), it.title], true) }, "Replace it")];
+  return el("div", { class: "cf-up " + cls }, text, btn);
+}
+
+function cfRow(it, onTick) {
+  const [label, cls] = CF_STATUS[it.status] || [it.status, "tag-neutral"];
+  const set = body => cfPost("/admin/confluence/items", { keys: [it.key], ...body });
+  const size = it.size ? (it.size > 1048576 ? (it.size / 1048576).toFixed(1) + " MB"
+                                            : Math.max(1, Math.round(it.size / 1024)) + " KB") : "";
+  const ext = it.kind === "bundle" ? "Combined · " + it.pages + " pages"
+    : it.kind === "page" ? "Page" : ((it.title || "").split(".").pop() || "file").toUpperCase();
+  const on = it.decision === "approved", internal = it.decision === "internal";
+  // Excluded: not synced. Internal: synced, never used to answer a customer.
+  // Customers: synced and answered from.
+  const sw = el("div", { class: "cf-seg cf-seg-sm", role: "radiogroup", "aria-label": "Who " + it.title + " is for" },
+    [["excluded", "Excluded", "Not synced"],
+     ["internal", "Internal", "Synced, but never used to answer customers"],
+     ["approved", "Customers", "Synced and used to answer customers"]].map(([d, l, hint]) =>
+      el("button", { role: "radio", "aria-checked": (it.decision || "excluded") === d ? "true" : "false",
+        class: "d-" + d, title: hint, disabled: it.present === false ? "true" : null,
+        onclick: () => (it.decision || "excluded") !== d && set({ decision: d }) }, l)));
+  return el("div", { class: "cf-doc" + (on ? " on" : internal ? " int" : "") },
+    cfBox(cfSelected.has(it.key), e => {
+      e.target.checked ? cfSelected.add(it.key) : cfSelected.delete(it.key); onTick(); },
+      "Select " + it.title),
+    el("div", { class: "cf-doc-main" },
+      el("div", { class: "cf-doc-title" }, it.title,
+        it.is_new ? el("span", { class: "cf-badge new" }, "New") : null,
+        it.is_updated ? el("span", { class: "cf-badge upd",
+          title: "Version " + it.prev_version + " to " + it.version + ", found " + cfAgo(it.updated_at) },
+          "Updated") : null),
+      el("div", { class: "cf-doc-meta" }, [ext, size,
+        it.modified_at ? "edited " + cfAgo(it.modified_at) : "",
+        it.version && it.kind !== "bundle" ? "v" + it.version : ""].filter(Boolean).join(" · "),
+        it.error ? el("div", { class: "cf-doc-err" }, it.error) : null,
+        it.uploaded_as ? cfUploadLine(it) : null)),
+    el("span", { class: "tag " + cls }, label),
+    cfProductButton(it),
+    sw,
+    it.kind === "bundle" ? el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+      title: "Index its pages as separate documents again",
+      onclick: () => cfBundle([...(it.path || []), it.title], false) }, "Split") : null,
+    it.url ? el("a", { class: "cf-open", href: it.url, target: "_blank", rel: "noopener",
+      title: "Open in Confluence", "aria-label": "Open " + it.title + " in Confluence" }, "↗") : null);
+}
+
+function cfDocumentsCard(c) {
+  const card = el("div", { class: "card elev-sm", "data-sec": "Documents",
+    style: "padding:14px 18px;margin-bottom:18px" });
+  const known = new Set(c.items.map(i => i.key));
+  cfSelected.forEach(k => known.has(k) || cfSelected.delete(k));
+  const filt = CF_FILTERS.find(f => f[0] === cfFilter) || CF_FILTERS[0];
+
+  const viewSw = el("div", { class: "cf-seg", role: "tablist" },
+    [["tree", "By folder"], ["recent", "Recently edited"]].map(([k, l]) => el("button", {
+      role: "tab", "aria-selected": cfMode === k ? "true" : "false",
+      onclick: () => { cfMode = k; cfShown = 100; render(); } }, l)));
+  const chips = el("div", { class: "chips", style: "margin:10px 0" },
+    CF_FILTERS.map(([key, label, test]) => el("button", {
+      class: "chip" + (cfFilter === key ? " chip-on" : ""),
+      onclick: () => { cfFilter = key; cfShown = 100; render(); } },
+      label, el("span", { class: "chip-n" }, String(c.items.filter(test).length)))));
+  const search = el("input", { class: "input", type: "search", value: cfSearch,
+    placeholder: "Find a document or folder" });
+  search.addEventListener("input", () => { cfSearch = search.value; cfShown = 100; draw(); });
+
+  const bulk = el("div", { class: "cf-bulk" });
+  const body = el("div", {});
+  const tools = el("div", { class: "cf-tools" });
+
+  const matching = () => {
+    const q = cfSearch.trim().toLowerCase();
+    return c.items.filter(i => filt[2](i)
+      && (!q || (i.title + " " + (i.path || []).join(" ")).toLowerCase().includes(q)));
+  };
+
+  const drawBulk = () => {
+    bulk.textContent = "";
+    const keys = [...cfSelected];
+    bulk.classList.toggle("on", keys.length > 0);
+    card.classList.toggle("cf-has-bulk", keys.length > 0);
+    if (!keys.length) return;
+    const set = body => { cfPost("/admin/confluence/items", { keys, ...body },
+      keys.length + " document" + (keys.length === 1 ? "" : "s") + " updated"); cfSelected.clear(); };
+    const its = c.items.filter(i => cfSelected.has(i.key));
+    docSelectionBar(bulk, keys.length, {
+      // Customers on a document not yet filed goes through the review, which
+      // asks for its product first: approved unfiled, it would be searchable
+      // but never offered in the widget.
+      who: v => v === "approved" && !its.every(cfFiled) ? cfReviewDialog(keys, "approve")
+                                                        : set({ decision: v }),
+      file: key => set({ product: key }),
+      more: () => cfGroups(its).length > 1 ? cfReviewDialog(keys, "file") : cfFileDialog(keys),
+      clear: () => { cfSelected.clear(); draw(); } });
+  };
+
+  // path -> node, with every document under it (not just its own) for counts
+  const buildTree = rows => {
+    const root = { name: "", key: "", kids: new Map(), docs: [], all: [] };
+    rows.forEach(r => {
+      let node = root;
+      root.all.push(r);
+      (r.path || []).forEach((name, i) => {
+        if (!node.kids.has(name)) node.kids.set(name, { name, key: (r.path || []).slice(0, i + 1).join("\u0001"),
+          kids: new Map(), docs: [], all: [] });
+        node = node.kids.get(name);
+        node.all.push(r);
+      });
+      node.docs.push(r);
+    });
+    return root;
+  };
+
+  const drawFolder = (node, depth, into) => {
+    const open = cfOpen.has(node.key) || !!cfSearch.trim();
+    const sel = node.all.filter(r => cfSelected.has(r.key)).length;
+    const appr = node.all.filter(r => r.decision === "approved").length;
+    const nInt = node.all.filter(r => r.decision === "internal").length;
+    const nNew = node.all.filter(r => r.is_new).length, nUpd = node.all.filter(r => r.is_updated).length;
+    const tick = cfBox(sel === node.all.length, e => {
+      node.all.forEach(r => e.target.checked ? cfSelected.add(r.key) : cfSelected.delete(r.key));
+      draw(); }, "Select everything in " + node.name);
+    tick.indeterminate = sel > 0 && sel < node.all.length;
+    const head = el("div", { class: "cf-folder" + (open ? " open" : ""), style: "--d:" + depth },
+      el("button", { class: "cf-chev", "aria-expanded": open ? "true" : "false",
+        "aria-label": (open ? "Close " : "Open ") + node.name,
+        onclick: () => { open ? cfOpen.delete(node.key) : (cfOpen.add(node.key), cfJustOpened = node.key);
+                         draw(); } }),
+      el("label", { class: "cf-folder-name" }, tick, el("span", {}, node.name)),
+      el("span", { class: "cf-folder-meta" },
+        node.all.length + " doc" + (node.all.length === 1 ? "" : "s"),
+        el("span", { class: "cf-meter", title: appr + " of " + node.all.length + " approved" },
+          el("i", { style: "width:" + Math.round(appr / node.all.length * 100) + "%" })),
+        appr + " approved" + (nInt ? ", " + nInt + " internal" : "")),
+      (() => { const f = node.all.filter(cfFiled).length;
+        return el("span", { class: "cf-folder-filed" + (f === node.all.length ? " all" : ""),
+          title: f + " of " + node.all.length + " filed under a product" },
+          f === node.all.length ? "all filed" : f + " filed"); })(),
+      nNew ? el("span", { class: "cf-badge new" }, nNew + " new") : null,
+      nUpd ? el("span", { class: "cf-badge upd" }, nUpd + " updated") : null,
+      (() => {
+        const path = node.key.split("");
+        const pending = (c.bundles || []).some(b => b.join("") === node.key);
+        const b = el("button", { class: "cf-combine", disabled: pending ? "true" : null,
+          title: "Index everything in this folder as one document, each page a section",
+          onclick: () => cfBundle(path, true) }, pending ? "Combining at the next check" : "Combine");
+        return node.all.some(r => r.kind === "page") || pending ? b : null;
+      })());
+    into.append(head);
+    if (!open) return;
+    const inner = el("div", { class: "cf-folder-body" + (cfJustOpened === node.key ? " anim" : ""),
+      style: "--d:" + depth });
+    [...node.kids.values()].sort((a, b) => a.name.localeCompare(b.name))
+      .forEach(k => drawFolder(k, depth + 1, inner));
+    const limit = cfDocLimit.get(node.key) || 50;
+    node.docs.slice(0, limit).forEach(r => inner.append(cfRow(r, drawBulk)));
+    if (node.docs.length > limit) inner.append(el("button", { class: "btn btn-ghost cf-more",
+      onclick: () => { cfDocLimit.set(node.key, limit + 50); draw(); } },
+      "Show " + Math.min(50, node.docs.length - limit) + " more of " + (node.docs.length - limit)));
+    into.append(inner);
+  };
+
+  const draw = () => {
+    body.textContent = "";
+    tools.textContent = "";
+    const rows = matching();
+    tools.append(
+      el("span", {}, rows.length + " of " + c.items.length + " documents"),
+      el("button", { class: "btn btn-ghost", onclick: () => {
+        rows.forEach(r => cfSelected.add(r.key)); draw(); } }, "Select all " + rows.length),
+      cfMode === "tree" ? el("button", { class: "btn btn-ghost", onclick: () => {
+        const all = new Set(); const walk = n => n.kids.forEach(k => { all.add(k.key); walk(k); });
+        walk(buildTree(rows)); cfOpen = cfOpen.size ? new Set() : all; draw(); } },
+        cfOpen.size ? "Close all folders" : "Open all folders") : null);
+    if (!rows.length) {
+      body.append(el("div", { class: "empty" }, el("b", {}, c.items.length ? "Nothing here" : "No documents yet"),
+        c.items.length ? "Try another filter." : "Press Check for changes to read the folder."));
+    } else if (cfMode === "recent") {
+      const sorted = rows.slice().sort((a, b) =>
+        String(b.updated_at || b.modified_at || "").localeCompare(String(a.updated_at || a.modified_at || "")));
+      sorted.slice(0, cfShown).forEach(r => body.append(el("div", { class: "cf-recent" },
+        el("div", { class: "cf-recent-path" }, (r.path || []).join(" › ") || "Top level"), cfRow(r, drawBulk))));
+      if (rows.length > cfShown) body.append(el("button", { class: "btn btn-ghost cf-more",
+        onclick: () => { cfShown += 100; draw(); } }, "Show " + Math.min(100, rows.length - cfShown) + " more"));
+    } else {
+      const root = buildTree(rows);
+      [...root.kids.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(k => drawFolder(k, 0, body));
+      root.docs.forEach(r => body.append(cfRow(r, drawBulk)));
+    }
+    drawBulk();
+    cfJustOpened = null;
+  };
+  draw();
+  card.append(
+    el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
+      el("b", { style: "flex:1" }, "Documents"), viewSw),
+    el("p", { style: "margin:4px 0 0;font-size:12.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
+      "Only approved documents reach the bot; everything else is excluded. Tick a folder to select everything in it."),
+    chips, search, tools, body, bulk);
+  return card;
+}
+
+function cfHistoryCard(c) {
+  const muted = "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)";
+  const n = (r, k) => Array.isArray(r[k]) ? r[k].length : (r[k] || 0);
+  const line = r => r.failed ? "Failed: " + r.failed
+    : r.cancelled && r.kind === "check" ? "Stopped before it finished; nothing changed"
+    : r.cancelled && !n(r, "added") && !n(r, "updated") && !n(r, "removed") && !r.left
+      ? "Stopped during the check; nothing changed"
+    : r.cancelled ? "Stopped: " + n(r, "added") + " added, " + n(r, "updated") + " updated, "
+      + n(r, "removed") + " removed; " + (r.left || 0) + " left for the next sync"
+    : r.kind === "check"
+      ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
+      : n(r, "added") + " added, " + n(r, "updated") + " updated, " + n(r, "removed") + " removed"
+        ;
+  return el("div", { class: "card elev-sm", "data-sec": "History", style: "padding:14px 18px" },
+    el("b", {}, "History"),
+    c.history.length
+      ? c.history.map(r => el("div", { class: "item" },
+          el("div", { class: "grow" },
+            el("b", {}, (r.kind === "check" ? "Check" : "Sync") + " · " + new Date(r.at).toLocaleString()),
+            el("span", {}, line(r)),
+            (r.errors || []).map(e => el("div", { style: muted }, e)))))
+      : el("div", { style: muted + ";margin-top:6px" }, "Nothing has run yet."));
+}
+
+function viewConfluence() {
+  const head = [el("h1", {}, "Confluence"),
+    el("p", { class: "lede" }, "Manuals kept in Confluence. Check what is there, approve what customers "
+      + "should be answered from, and sync. Documents excluded or deleted in Confluence are taken out of the bot.")];
+  const c = confluenceCache;
+  clearTimeout(cfPoll);
+  if (!c) { cfLoad(); return [...head, el("p", { class: "lede" }, "Loading")]; }
+  // The cached copy is shown at once and re-read in the background on each
+  // visit: the Documents page changes the same documents (internal, filing,
+  // remove), and the counts here went stale until something here was done.
+  if (c !== cfSeen) { cfSeen = c; cfLoadedAt = Date.now(); }   // fresh from an action here
+  else if (!c.running && Date.now() - cfLoadedAt > 5000) cfLoad();
+  if (c.error) return [...head, el("div", { class: "empty" }, c.error)];
+  if (c.running) cfPoll = setTimeout(cfTick, 1500);
+  return [...head, cfConnectionCard(c), cfSyncCard(c), cfDocumentsCard(c), cfHistoryCard(c)];
+}
+
 // Low-credit alerts: balances, the threshold, and the mail settings the
 // alert goes out through. Its own cache so a check does not reload the page.
 let creditsCache = null;
@@ -3670,7 +4831,7 @@ function creditsCard() {
         "Balances are checked every few hours. When one drops below the "
         + "threshold, or a provider refuses a request for lack of credit, "
         + "the root admins are emailed (once a day while it stays low)."));
-    if (!c) { card.append(el("div", {}, "Loading…")); return; }
+    if (!c) { card.append(el("div", {}, "Loading")); return; }
     if (c.error) { card.append(el("div", { class: "empty" }, c.error)); return; }
 
     const statusTag = r => {
@@ -3704,7 +4865,7 @@ function creditsCard() {
       } catch (e) { toast(e.message, true); }
     });
     const checkBtn = el("button", { class: "btn btn-ghost", onclick: async () => {
-      checkBtn.disabled = true; checkBtn.textContent = "Checking…";
+      checkBtn.disabled = true; checkBtn.textContent = "Checking";
       try {
         creditsCache = await api("/admin/credits/check", { method: "POST" });
         toast(creditsCache.alerted && creditsCache.alerted.length
@@ -3885,6 +5046,39 @@ function keyRolesCard() {
         modelPicker(r)));
   });
 
+  // D-20261016-13: local mode sends a flagged answer outside only when this
+  // is on, and the page names where it goes.
+  const defRole = (keysCache.roles || []).find(r => r.role === "default") || {};
+  const defLabel = (keysCache.providers.find(p => p.key === defRole.effective) || {}).label;
+  const escNote = el("div", { style: "font-size:12.5px;margin-top:4px;"
+    + "color:color-mix(in srgb,var(--color-text) 60%,transparent)" });
+  const escBox = el("input", { type: "checkbox", style: "margin-top:3px" });
+  escBox.checked = !!keysCache.local_escalation;
+  const drawEsc = () => {
+    escNote.textContent = !escBox.checked
+      ? "Off: in local mode nothing leaves this machine. An answer that fails its check becomes a refusal."
+      : defLabel
+        ? "On: in local mode, when an answer fails its check, the question, the manual passages and the prompt are sent to "
+          + defLabel + " (the Default job) for a second try."
+          + (keysCache.generation_mode === "local" ? " Local mode is active now." : "")
+        : "On, but no Default provider is set, so nothing is sent.";
+  };
+  escBox.addEventListener("change", async () => {
+    try {
+      const res = await api("/admin/keys/local_escalation", {
+        method: "POST", body: JSON.stringify({ allow: escBox.checked }) });
+      keysCache.local_escalation = res.local_escalation;
+      drawEsc();
+      toast("Local mode outside escalation " + (res.local_escalation ? "on" : "off"));
+    } catch (e) { toast(e.message, true); escBox.checked = !escBox.checked; drawEsc(); }
+  });
+  drawEsc();
+  const escRow = el("div", { class: "row", style: "align-items:flex-start;margin-top:6px" },
+    escBox,
+    el("div", { style: "flex:1 1 220px;min-width:0" },
+      el("b", {}, "Local mode: send flagged answers to the Default provider"),
+      escNote));
+
   return el("div", { class: "card elev-sm", "data-sec": "Which key does what",
                      "data-tour": "keys-roles", style: "margin-top:18px" },
     el("h2", {}, "Which key does what"),
@@ -3902,7 +5096,8 @@ function keyRolesCard() {
     configured.length
       ? el("div", {}, rows)
       : el("div", { class: "empty" }, el("b", {}, "No keys configured yet"),
-          "Save a key above and it can then be given a job."));
+          "Save a key above and it can then be given a job."),
+    escRow);
 }
 
 /* ---------------- overview ---------------- */
@@ -4114,6 +5309,10 @@ let pendingReplace = null;
 
 // Survives render(), which rebuilds the page on every change.
 let docFilter = { cat: "", prod: "" };
+// Ticked rows on the Documents page, by source name. Module-level so a
+// re-render keeps them; pruned to the rows on screen, so a filter change can
+// never leave a hidden document in a bulk Remove.
+let docSelected = new Set();
 
 function viewDocuments() {
   const prods = products();
@@ -4124,7 +5323,7 @@ function viewDocuments() {
   // instead of one long "Category > Product" dropdown.
   const catSel = el("select", { class: "input", onchange: e => {
     chosenCat = e.target.value; chosen = ""; syncProductOptions(); sync();
-  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category\u2026" : "No categories yet"),
+  } }, el("option", { value: "" }, cache.catalog.length ? "Choose a category" : "No categories yet"),
      cache.catalog.map(c => el("option", { value: c.key }, c.name)));
   if (chosenCat) catSel.value = chosenCat;
 
@@ -4134,7 +5333,7 @@ function viewDocuments() {
     const inCat = prods.filter(p => p.category === chosenCat);
     prodSel.disabled = !chosenCat;
     prodSel.append(el("option", { value: "" },
-      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product\u2026" : "No products in this category"));
+      !chosenCat ? "Choose a category first" : inCat.length ? "Choose a product" : "No products in this category"));
     inCat.forEach(p => prodSel.append(el("option", { value: p.key }, p.name)));
     if (chosen) prodSel.value = chosen;
   }
@@ -4146,13 +5345,13 @@ function viewDocuments() {
   // files the source under each in the catalogue.
   const also = new Set();
   const alsoPick = el("details", { class: "tagpick" },
-    el("summary", {}, "Also file under…"),
+    el("summary", {}, "Also file under"),
     el("div", { class: "tagpick-list", style: "right:auto;left:0" },
       prods.map(p => el("label", { class: "tagpick-row" },
         el("input", { type: "checkbox", onchange: e => {
           e.target.checked ? also.add(p.key) : also.delete(p.key);
           alsoPick.querySelector("summary").textContent = also.size
-            ? "Also under " + also.size + " more" : "Also file under…";
+            ? "Also under " + also.size + " more" : "Also file under";
         } }),
         el("span", {}, p.categoryName + " › " + p.name)))));
   const productKeys = p => [...new Set([p.key, ...also])].join(",");
@@ -4196,7 +5395,7 @@ function viewDocuments() {
     const p = prods.find(x => x.key === chosen);
     for (const f of files) {
       const line = el("div", { class: "item" },
-        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading...")));
+        el("div", { class: "grow" }, el("b", {}, f.name), el("span", {}, "Uploading")));
       progress.append(line);
       try {
         let res = await postUpload(f, p, null);
@@ -4220,7 +5419,7 @@ function viewDocuments() {
                   onclick: () => resolve("skip") }, "Skip")));
           });
           if (choice === "skip") { line.querySelector("span").textContent = "Skipped"; continue; }
-          line.querySelector("span").textContent = "Replacing...";
+          line.querySelector("span").textContent = "Replacing";
           res = await postUpload(f, p, d.existing);
           if (res.duplicate) throw new Error("Still refused as a duplicate");
           track(res.job_id, line, f.name, { product: p.key, category: p.category });
@@ -4260,7 +5459,7 @@ function viewDocuments() {
           "Answers written from the old version may no longer match it.")),
       el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
         el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
-          const b = e.target; b.disabled = true; b.textContent = "Generating…";
+          const b = e.target; b.disabled = true; b.textContent = "Generating";
           try {
             await api("/admin/faq/autogenerate", { method: "POST", body: JSON.stringify({
               source: r.newName, product: p.key, category: p.category }) });
@@ -4319,6 +5518,220 @@ function viewDocuments() {
   // it under one meant the other product's visitors were never offered it.
   // A chip per product, because a multi-select is a control nobody can use
   // without being told to hold ctrl.
+  // Internal: the document stays indexed but no public path reads it. FAQs
+  // are hand-curated and stay until removed, so the ones made from it (ticked)
+  // and the ones worded like it (unticked) are offered for removal here.
+  // Progress goes to the bottom-right task panel and only the changed rows
+  // are redrawn: refresh() + render() rebuilt the whole page, which blinked.
+  const label = docs => docs.length === 1 ? docs[0].source : docs.length + " documents";
+  const redrawRow = d => {
+    const row = [...document.querySelectorAll(".main .item[data-src]")]
+      .find(r => r.getAttribute("data-src") === d.source);
+    if (row) row.replaceWith(docRow(d));
+  };
+  const finish = (j, stage, acts) => {
+    j.status = "done"; j.pct = 100; j.stage = stage;
+    j.acts = id => (acts || []).concat(el("button", { class: "btn btn-ghost",
+      onclick: () => { jobs.delete(id); drawJobs(); } }, "Done"));
+    drawJobs();
+  };
+
+  const setInternal = async (docs, on) => {
+    const name = label(docs);
+    if (on && !await askConfirm({ title: "Make " + name + " internal?",
+        body: "Public answers, downloads and pictures stop using "
+          + (docs.length === 1 ? "it" : "them") + " from the next question. Staff still see "
+          + (docs.length === 1 ? "it" : "them") + " here, and Make public undoes it.",
+        ok: "Make internal", snooze: "make-internal" })) return;
+    let res;
+    try {
+      res = await withBusy((on ? "Making " : "Making public: ") + name + (on ? " internal" : ""), b => {
+        b.say(on ? "Taking it out of public answers and finding related FAQs" : "Letting public answers use it");
+        return api("/admin/source_internal", { method: "POST",
+          body: JSON.stringify({ sources: docs.map(d => d.source), internal: on }) });
+      });
+    } catch (e) { return toast(e.message, true); }
+    docs.forEach(d => { d.internal = on; redrawRow(d); });
+    docSelected.clear(); drawDocBulk();
+    const faqs = (on && res.faqs) || [];
+    toast(on ? name + " is internal" : name + " is public again");
+    if (faqs.length) {
+      // Kept in the panel too, so closing the review does not lose it.
+      const j = { name, stage: "", pct: 0, status: "working" };
+      const id = "internal:" + Date.now();
+      jobs.set(id, j);
+      finish(j, faqs.length + " FAQ" + (faqs.length === 1 ? "" : "s") + " may still answer from it",
+        [el("button", { class: "btn btn-secondary",
+          onclick: () => internalFaqDialog(name, faqs) }, "Review FAQs")]);
+      internalFaqDialog(name, faqs);
+    }
+  };
+
+  // One request per document, so the panel can say how far along it is.
+  // The page is redrawn once at the end: rows move between ranges or go.
+  const runBulk = async (title, docs, step) => {
+    let ok = 0;
+    const failed = [];
+    await withBusy(title, async b => {
+      for (let i = 0; i < docs.length; i++) {
+        b.step(i, docs.length, docs[i].source);
+        try { await step(docs[i]); ok++; }
+        catch (e) { failed.push(docs[i].source + " (" + e.message + ")"); }
+      }
+      b.step(docs.length, docs.length, "refreshing the list");
+      try { await refresh(); } catch (e) {}
+    });
+    toast(ok + " of " + docs.length + " done", failed.length > 0);
+    if (failed.length) {
+      const j = { name: title, stage: "", pct: 0, status: "working" };
+      jobs.set("bulk:" + Date.now(), j);
+      finish(j, failed.length + " failed: " + failed.slice(0, 3).join("; ")
+        + (failed.length > 3 ? " and " + (failed.length - 3) + " more" : ""));
+    }
+    docSelected.clear();
+    render();
+  };
+
+  const removeDocs = async docs => {
+    if (!await askConfirm({ title: "Remove " + label(docs) + "?", ok: "Remove",
+        body: "Answers already given stay, but " + (docs.length === 1 ? "it" : "they")
+          + " can no longer be searched. This cannot be undone." })) return;
+    runBulk("Removing " + label(docs), docs, d =>
+      api("/delete_source", { method: "POST", body: JSON.stringify({ source: d.source }) }));
+  };
+
+  // File the ticked documents under the products picked here, replacing what
+  // they were filed under. No products ticked = unfiled.
+  const fileDocsDialog = docs => {
+    const chosen = new Set();
+    const dlg = el("dialog", { class: "cf-dlg", "aria-label": "File documents under" });
+    const close = () => { dlg.close(); dlg.remove(); };
+    dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
+    dlg.addEventListener("close", () => dlg.remove());
+    const search = el("input", { class: "input", type: "search", placeholder: "Find a product" });
+    const grid = el("div", {});
+    const go = el("button", { class: "btn btn-primary" });
+    const sync = () => {
+      go.textContent = chosen.size
+        ? "File under " + chosen.size + " product" + (chosen.size === 1 ? "" : "s")
+        : "Leave unfiled";
+    };
+    const draw = () => {
+      grid.textContent = "";
+      const q = search.value.trim().toLowerCase();
+      (cache.catalog || []).forEach(c => {
+        const ps = (c.products || []).filter(p => !q || (c.name + " " + p.name).toLowerCase().includes(q));
+        if (!ps.length) return;
+        grid.append(el("div", { class: "cf-dlg-range" }, c.name),
+          el("div", { class: "cf-dlg-grid" }, ps.map(p => el("label", {
+              class: "cf-dlg-opt" + (chosen.has(p.key) ? " on" : "") },
+            el("input", { type: "checkbox", class: "cf-tick", checked: chosen.has(p.key) ? "true" : null,
+              onchange: e => { e.target.checked ? chosen.add(p.key) : chosen.delete(p.key); draw(); sync(); } }),
+            el("span", {}, /_general$|_shared$/.test(p.key) ? "Shared by all " + c.name : p.name)))));
+      });
+      if (!grid.childElementCount) grid.append(el("div", { class: "cf-dlg-empty" }, "No product matches."));
+    };
+    search.addEventListener("input", draw);
+    go.addEventListener("click", () => {
+      close();
+      const keys = [...chosen];
+      const first = prods.find(x => x.key === keys[0]);
+      runBulk("Filing " + label(docs), docs, d => api("/admin/reassign_source", { method: "POST",
+        body: JSON.stringify({ source: d.source, category_key: first ? first.category : "",
+                               product_key: keys.join(",") }) }));
+    });
+    dlg.append(
+      el("div", { class: "cf-dlg-head" },
+        el("b", {}, "File " + label(docs) + " under"),
+        el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+      el("p", { class: "cf-dlg-why" }, "Replaces the products they are filed under now. "
+        + "Tick several for a document shared by several products."),
+      search, el("div", { class: "cf-dlg-list" }, grid),
+      el("div", { class: "cf-dlg-foot" },
+        el("button", { class: "btn btn-ghost", onclick: close }, "Cancel"), go));
+    draw(); sync();
+    document.body.append(dlg);
+    dlg.showModal();
+    search.focus();
+  };
+
+  const docBulk = el("div", { class: "cf-bulk" });
+  const drawDocBulk = () => {
+    const docs = cache.sources.filter(d => docSelected.has(d.source));
+    document.querySelectorAll(".main input[data-doc]").forEach(b => {
+      b.checked = docSelected.has(b.getAttribute("data-doc")); });
+    document.querySelectorAll(".main input[data-range]").forEach(b => {
+      const mine = cache.sources.filter(d => d._range === b.getAttribute("data-range") && shownNames.has(d.source));
+      const n = mine.filter(d => docSelected.has(d.source)).length;
+      b.checked = n > 0 && n === mine.length; b.indeterminate = n > 0 && n < mine.length;
+    });
+    docSelectionBar(docBulk, docs.length, {
+      who: v => v === "excluded" ? removeDocs(docs) : setInternal(docs, v === "internal"),
+      file: key => {
+        const p = prods.find(x => x.key === key);
+        runBulk("Filing " + label(docs), docs, d => api("/admin/reassign_source", { method: "POST",
+          body: JSON.stringify({ source: d.source, category_key: p ? p.category : "", product_key: key }) }));
+      },
+      more: () => fileDocsDialog(docs),
+      clear: () => { docSelected.clear(); drawDocBulk(); } });
+  };
+
+  const internalFaqDialog = (source, faqs) => {
+    const picked = new Set(faqs.filter(f => f.derived).map(f => f.id));
+    const dlg = el("dialog", { class: "cf-dlg", "aria-label": "Remove FAQs from this document" });
+    const close = () => { dlg.close(); dlg.remove(); };
+    dlg.addEventListener("click", e => { if (e.target === dlg) close(); });
+    dlg.addEventListener("close", () => dlg.remove());
+    const go = el("button", { class: "btn btn-primary" });
+    const sync = () => {
+      go.textContent = "Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s");
+      go.disabled = !picked.size;
+    };
+    go.addEventListener("click", async () => {
+      if (!await askConfirm({ title: "Remove " + picked.size + " FAQ" + (picked.size === 1 ? "" : "s") + "?",
+          body: "This cannot be undone.", ok: "Remove" })) return;
+      let done = 0;
+      close();
+      const ids = [...picked];
+      await withBusy("Removing FAQs", async b => {
+        for (let i = 0; i < ids.length; i++) {
+          b.step(i, ids.length);
+          try { await api("/faq/" + encodeURIComponent(ids[i]), { method: "DELETE" }); done++; }
+          catch (e) { toast(e.message, true); }
+        }
+      });
+      toast("Removed " + done + " FAQ" + (done === 1 ? "" : "s"));
+      refresh().catch(() => {});
+    });
+    dlg.append(
+      el("div", { class: "cf-dlg-head" },
+        el("b", {}, "FAQs that can still answer from " + source),
+        el("button", { class: "cf-dlg-x", "aria-label": "Close", onclick: close }, "×")),
+      el("p", { class: "cf-dlg-why" }, "The document is internal now, but these FAQs keep "
+        + "serving their answers until removed. Ones made from it are ticked; ones "
+        + "worded like it are not."),
+      el("div", { class: "cf-dlg-list" }, faqs.map(f => el("label", {
+          class: "cf-dlg-opt", style: "align-items:flex-start;margin-bottom:6px" },
+        el("input", { type: "checkbox", class: "cf-tick",
+          checked: picked.has(f.id) ? "true" : null,
+          onchange: e => { e.target.checked ? picked.add(f.id) : picked.delete(f.id); sync(); } }),
+        el("span", {},
+          el("b", {}, f.question),
+          el("div", { style: "font-size:12px;opacity:.7;margin-top:2px" },
+            (f.answer || "").slice(0, 220) + ((f.answer || "").length > 220 ? "…" : "")),
+          el("em", { style: "display:inline-block;margin-top:4px" },
+            f.why + (f.language ? " · " + f.language : "")))))),
+      el("div", { class: "cf-dlg-foot" },
+        el("button", { class: "btn btn-ghost", onclick: close }, "Keep all"), go));
+    sync();
+    document.body.append(dlg);
+    dlg.showModal();
+  };
+
+  const nameOfKey = k => {
+    const p = prods.find(x => x.key === k);
+    return !p ? k : /_general$|_shared$/.test(k) ? "Shared by all " + p.categoryName : p.name;
+  };
   const docRow = s => {
     const cur = (s.product || s.products || "")
       .split(",").map(x => x.trim()).filter(Boolean);
@@ -4345,10 +5758,10 @@ function viewDocuments() {
       keys = [...new Set(keys)];
       const first = prods.find(x => x.key === keys[0]);
       try {
-        await api("/admin/reassign_source", { method: "POST",
+        await withBusy("Filing " + s.source, () => api("/admin/reassign_source", { method: "POST",
           body: JSON.stringify({ source: s.source,
                                  category_key: first ? first.category : "",
-                                 product_key: keys.join(",") }) });
+                                 product_key: keys.join(",") }) }));
         toast(keys.length
           ? "Filed under " + keys.length + " product" + (keys.length === 1 ? "" : "s")
           : "Unfiled — searchable, but never offered in the widget");
@@ -4360,9 +5773,8 @@ function viewDocuments() {
     // is a wide row that pushes the filename off the line, and a chip that
     // toggles on click gives no sign it is a multiple choice until you try.
     const box = el("details", { class: "tagpick" },
-      el("summary", {}, cur.length
-        ? cur.length + " product" + (cur.length === 1 ? "" : "s")
-        : "Not filed"),
+      el("summary", { class: cur.length ? "" : "unfiled", title: cur.map(nameOfKey).join(", ") },
+        cur.length ? nameOfKey(cur[0]) + (cur.length > 1 ? " +" + (cur.length - 1) : "") : "Not filed"),
       el("div", { class: "tagpick-list" },
         prods.map(p => {
           const cb = el("input", { type: "checkbox",
@@ -4385,7 +5797,7 @@ function viewDocuments() {
              + "(scanned or image-only) and are not searchable" },
         pending.length + " page" + (pending.length === 1 ? "" : "s") + " unreadable"));
       ocrBits.push(el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-        onclick: () => offerOcr(s.source, pending) }, "OCR…"));
+        onclick: () => offerOcr(s.source, pending) }, "OCR"));
     } else if (ocrDone.length) {
       ocrBits.push(el("span", { class: "tag tag-neutral",
         title: "Pages " + ocrDone.join(", ") + " were read by OCR — text "
@@ -4393,24 +5805,30 @@ function viewDocuments() {
         "OCR: " + ocrDone.length + " page" + (ocrDone.length === 1 ? "" : "s")));
     }
 
-    return el("div", { class: "item" + (cur.length ? "" : " flagged") },
+    return el("div", { class: "item" + (cur.length ? "" : " flagged"), "data-src": s.source },
+      el("input", { type: "checkbox", class: "cf-tick", "data-doc": s.source,
+        "aria-label": "Select " + s.source, checked: docSelected.has(s.source) ? "true" : null,
+        onchange: e => { e.target.checked ? docSelected.add(s.source) : docSelected.delete(s.source);
+                         drawDocBulk(); } }),
       el("div", { class: "grow" },
         el("b", {}, s.source),
-        el("span", {}, (s.chunks || 0) + " sections" + indexedWhen)),
+        el("span", {}, (s.chunks || 0) + (s.chunks === 1 ? " section" : " sections") + indexedWhen)),
       ...ocrBits,
       freshness.status === "stale"
         ? el("span", { class: "tag tag-accent", title: staleWhy }, "Needs re-index")
         : el("span", { class: "tag tag-neutral",
                        title: freshness.version
                          ? "Version " + freshness.version.slice(0, 12) : "" }, "Current"),
-      cur ? el("span", { class: "tag tag-neutral" }, cur) : el("span", { class: "tag tag-accent" }, "no product"),
+      s.internal ? el("span", { class: "tag tag-accent",
+        title: "Never used in public answers, downloads or pictures" }, "Internal") : null,
       move,
-      el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
-        if (!confirm("Remove " + s.source + "? Its answers stay, but it can no longer be searched.")) return;
-        try { await api("/delete_source", { method: "POST", body: JSON.stringify({ source: s.source }) });
-              toast("Removed"); await refresh(); render(); }
-        catch (e) { toast(e.message, true); }
-      } }, "Remove"));
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+        title: s.internal ? "Let public answers use this document again"
+                          : "Keep this document out of every public answer, download and picture",
+        onclick: () => setInternal([s], !s.internal) },
+        s.internal ? "Make public" : "Make internal"),
+      el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
+        onclick: () => removeDocs([s]) }, "Remove"));
   };
 
   // Grouped by CATEGORY, filtered by product. Grouping by product put a
@@ -4434,8 +5852,11 @@ function viewDocuments() {
 
   const catName = k => (cache.catalog.find(c => c.key === k) || {}).name || k;
   const groups = new Map();
+  const shownNames = new Set(cache.sources.filter(matches).map(s => s.source));
+  docSelected.forEach(n => shownNames.has(n) || docSelected.delete(n));
   cache.sources.filter(matches).forEach(s => {
     const key = catOfDoc(s);
+    s._range = key;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   });
@@ -4468,7 +5889,12 @@ function viewDocuments() {
 
   const list = ordered.length ? ordered.map(([key, docs]) =>
     el("div", { style: "margin-bottom:16px" },
-      el("div", { class: "sec-title", style: key ? "" : "color:var(--color-accent-ink)" },
+      el("div", { class: "sec-title", style: "display:flex;align-items:center;gap:8px" + (key ? "" : ";color:var(--color-accent-ink)") },
+        el("input", { type: "checkbox", class: "cf-tick", "data-range": key,
+          "aria-label": "Select every document in " + (key ? catName(key) : "this group"),
+          onchange: e => { docs.forEach(d => e.target.checked ? docSelected.add(d.source)
+                                                             : docSelected.delete(d.source));
+                           drawDocBulk(); } }),
         (key ? catName(key) : "Not filed against a range")
         + " · " + docs.length + (docs.length === 1 ? " document" : " documents")),
       docs.map(docRow)))
@@ -4478,6 +5904,8 @@ function viewDocuments() {
         cache.sources.length ? "Clear the filters to see the rest."
           : "Add a manual or datasheet above and the widget can start answering from it.")];
 
+  // After mount: range ticks and the bar follow a selection kept across a re-render.
+  setTimeout(drawDocBulk);
   return [
     el("h1", {}, "Documents"),
     el("p", { class: "lede" }, "The manuals and datasheets answers are drawn from. Each one belongs to a product, which is how the widget knows what to offer."),
@@ -4501,8 +5929,9 @@ function viewDocuments() {
                 "data-tour": "doc-list", "data-sec": "All documents" },
       el("div", { class: "sec-title" }, "All documents"),
       filters,
-      el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget."),
-      list),
+      el("div", { class: "sec-hint" }, "A document with no product is searchable but never offered in the widget. "
+        + "Tick documents, or a range, to act on several at once."),
+      list, docBulk),
   ];
 }
 
@@ -4561,7 +5990,7 @@ function viewFaq() {
 
   const scopeSel = el("select", { class: "input", style: "width:auto",
                                   onchange: e => { faqScope = e.target.value; render2(); } },
-    el("option", { value: "" }, "Choose a product\u2026"),
+    el("option", { value: "" }, "Choose a product"),
     prods.map(p => el("option", { value: p.key },
       p.categoryName + " \u203a " + p.name + " (" + countFor(p.key) + ")")),
     orphanScopes.map(k => el("option", { value: k },
@@ -4666,7 +6095,7 @@ function viewFaq() {
         row.addEventListener("click", () => { faqExpandedId = f.id; render2(); });
         row.append(
           el("div", { class: "grow" }, el("b", {}, f.question),
-            el("span", {}, (f.answer || "").slice(0, 90) + ((f.answer || "").length > 90 ? "\u2026" : ""))),
+            el("span", {}, ((f.answer || "").length > 90 ? (f.answer || "").slice(0, 90).replace(/\s+\S*$/, "") : (f.answer || "")))),
           el("span", { class: "tag" }, faqScopeText(f)),
           f.language && f.language !== "en"
             ? el("span", { class: "tag" }, FAQ_LANGUAGES[f.language] || f.language)
@@ -4730,7 +6159,7 @@ function viewFaq() {
   });
 
   const srcSel = el("select", { class: "input" },
-    el("option", { value: "" }, "Choose a document\u2026"),
+    el("option", { value: "" }, "Choose a document"),
     el("option", { value: ALL_DOCS }, "Every document with no FAQs yet"));
 
   // Eleven documents in one flat list is already a hunt, and the list only
@@ -5135,7 +6564,7 @@ function viewGaps() {
             draftBox),
           el("div", { class: "gap-actions" },
             el("button", { class: "btn btn-secondary", onclick: async e => {
-              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting\u2026";
+              const btn = e.target; btn.disabled = true; btn.textContent = "Drafting";
               try {
                 const r = await api("/admin/faq/answer_gap", { method: "POST", body: JSON.stringify({
                   gap_id: g.id, provider: provSel.value || null, model: modelIn.value.trim() || null }) });
@@ -5526,7 +6955,7 @@ function viewWidget() {
           el("div", { style: "display:flex;flex-direction:column;gap:6px;align-items:flex-start" },
             d.intro_options.map(o => el("span", {
               style: "font-size:12px;padding:6px 12px;border-radius:99px;color:#fff;white-space:nowrap;background:" + d.color
-            }, o.label || "\u2026")))),
+            }, o.label || "")))),
         el("div", { style: "padding:10px 12px;border-top:1px solid var(--color-divider);display:flex;gap:8px" },
           el("div", { style: "flex:1;height:30px;border-radius:8px;background:var(--color-bg);box-shadow:inset 0 0 0 1px var(--color-divider)" }),
           el("div", { style: "width:30px;height:30px;border-radius:8px;background:" + d.color }))));
@@ -5540,6 +6969,9 @@ function viewWidget() {
   const iconIn = el("input", { class: "input", type: "text", value: d.icon_url || "",
                                placeholder: "https://example.com/icon.png" });
   iconIn.addEventListener("input", () => { d.icon_url = iconIn.value.trim(); drawPreview(); });
+  const privacyIn = el("input", { class: "input", type: "text", value: d.privacy_url || "",
+                                  placeholder: "https://example.com/privacy" });
+  privacyIn.addEventListener("input", () => { d.privacy_url = privacyIn.value.trim(); });
   const colorIn = el("input", { type: "color", value: d.color,
       style: "width:34px;height:34px;padding:0;border:0;border-radius:8px;cursor:pointer;background:transparent" });
   const swatchRow = el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" });
@@ -5729,7 +7161,7 @@ function viewWidget() {
         + "spend your API budget. Send it only to the person installing it, "
         + "over something private \u2014 not a shared drive, not a mailing list.\n\n"
         + "Continue?")) return;
-      dlBtn.disabled = true; dlBtn.textContent = "Building\u2026";
+      dlBtn.disabled = true; dlBtn.textContent = "Building";
       try {
         // fetch, not a plain link: the endpoint needs an auth header, and an
         // <a href> cannot carry one. Same reason as the backup download.
@@ -5788,7 +7220,7 @@ function viewWidget() {
   };
 
   const saveBtn = el("button", { class: "btn btn-primary", onclick: async () => {
-    saveBtn.disabled = true; saveBtn.textContent = "Saving\u2026";
+    saveBtn.disabled = true; saveBtn.textContent = "Saving";
     try {
       const saved = await api("/admin/widget/config", { method: "PUT", body: JSON.stringify(d) });
       cache.widget = saved;
@@ -5812,6 +7244,9 @@ function viewWidget() {
             el("label", { class: "flabel" }, "Welcome message"), welcomeIn),
           el("div", { style: "margin-top:10px" },
             el("label", { class: "flabel" }, "Icon URL (optional)"), iconIn),
+          el("div", { style: "margin-top:10px" },
+            el("label", { class: "flabel" }, "Privacy notice link (optional)"), privacyIn,
+            el("div", { class: "sec-hint" }, "Shown as a \"Privacy notice\" link under the widget's fixed AI notice. The notice itself cannot be changed here.")),
           el("div", { style: "margin-top:12px" },
             el("label", { class: "flabel" }, "Accent colour"), swatchRow)),
         el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",

@@ -1276,3 +1276,89 @@ def classify_by_similarity(
                 best_role = role
 
     return best_role
+
+
+# ── one message, several asks (D-20261009-09) ────────────────────────────
+#
+# "what ip do i hit for the api, and how long does the bearer token last?"
+# is two questions. Ranked as one string, its passages are the ones that
+# match the WHOLE message best (C20261019c-03 got the one row both manuals
+# share, not the running current or MCBF rows it asked for), and its
+# confidence band can sit below the gate when each ask alone is strong
+# (C20261014-12: 0.036 whole, 0.989 for the first ask). split_asks finds the
+# asks so query() can search, rank and answer each one. Measured on 240
+# distinct questions from six blind runs: 41 split, every one a real
+# multi-ask; single asks with "and" ("what protocol, address and baud rate",
+# "how do i install and mount") stay whole.
+_ASK_WH = r"(?:what|what's|whats|which|how|how's|hows|why|who|whose)"
+_ASK_WHEN = r"(?:when|where|where's|wheres)"
+_ASK_AUX = (r"(?:is|are|am|was|were|does|do|did|can|could|should|will|would|"
+            r"has|have|must|may|shall|isn't|aren't|doesn't|don't|can't|won't)")
+# An ask opens with a wh-word, "when/where" + auxiliary, an auxiliary, or a
+# stated need ("I also need ...", "also need ..."); "also"/"plus" may lead it.
+_ASK_OPENER = (rf"(?:(?:also|plus)\s+)?(?:{_ASK_WH}\b|{_ASK_WHEN}\s+{_ASK_AUX}\b"
+               rf"|{_ASK_AUX}\b)|(?:(?:i|we)\s+)?also\s+(?:need|want)\b")
+_ASK_BOUND = re.compile(rf"(?:(?<=\?)\s+|;\s*|,?\s+and\s+|,\s+)(?={_ASK_OPENER})",
+                        re.I)
+_ASK_OPEN = re.compile(rf"^(?:{_ASK_OPENER})", re.I)
+_ASK_HAS_WH = re.compile(rf"(?:^|[\s,:-])(?:{_ASK_WH})\b", re.I)
+_ASK_STOP = set("""what whats what's which how hows how's where wheres when why
+who whose is are am was were does do did can could should will would has have
+must may shall i we you it they he she that this these those there the a an my
+our your its their me us them to of in on at for from with by into over about
+as or and if so not no be been mean need use get set make work happen go take
+put want also plus one just any anything else isn't aren't doesn't don't can't
+won't""".split())
+
+
+def _ask_lead_split(text: str) -> tuple[str, str]:
+    """Leading sentences that end in "." or "!", hold no "?" and do not open
+    like an ask are context ("linux box, mini connected over rndis.")."""
+    sents = re.split(r"(?<=[.!])\s+", " ".join((text or "").split()))
+    lead = []
+    while len(sents) > 1 and "?" not in sents[0] and not _ASK_OPEN.match(sents[0]):
+        lead.append(sents.pop(0))
+    return " ".join(lead), " ".join(sents)
+
+
+def split_asks(text: str) -> tuple[list[str], str]:
+    """(asks, lead) for a message that asks 2-4 separate things, else
+    ([], lead). The lead is the context the asks share; callers prefix it
+    to each ask before searching. Pure."""
+    lead, rest = _ask_lead_split(text)
+    asks: list[str] = []
+    for p in (p.strip(" ,;") for p in _ASK_BOUND.split(rest)):
+        if not p:
+            continue
+        words = re.findall(r"[a-z0-9+']+", p.lower())
+        if asks and not (_ASK_OPEN.match(p) and len(words) >= 3
+                         and any(w not in _ASK_STOP and len(w) > 2 for w in words)):
+            asks[-1] += ", " + p          # not an ask of its own: rejoin
+        else:
+            asks.append(p)
+    # A first part with no question in it is context ("we have old SMART
+    # Hoppers in 30 cabinets, can we ..."), not an ask.
+    if (len(asks) >= 2 and "?" not in asks[0] and not _ASK_OPEN.match(asks[0])
+            and not _ASK_HAS_WH.search(asks[0])):
+        lead = (lead + " " + asks.pop(0)).strip()
+    return (asks if 2 <= len(asks) <= 4 else []), lead
+
+
+_REFUSAL_SENTENCE_RE = re.compile(
+    re.escape(REFUSAL_PHRASE).replace(r"\ ", r"\s+") + r"\.?", re.I)
+PARTIAL_REFUSAL = "I could not find the rest of that in the documentation."
+
+
+def keep_answered_part(answer: str) -> str:
+    """An answer to a several-ask message that answers some asks and writes
+    the canonical refusal for the rest is a PARTIAL answer, not a refusal.
+    is_refusal is a substring test, so left alone the whole reply would be
+    thrown away for the part it could not answer. When at least 60 letters
+    remain once the refusal sentence is removed, that sentence becomes
+    PARTIAL_REFUSAL (which is_refusal does not match); otherwise unchanged."""
+    if not answer or not _REFUSAL_SENTENCE_RE.search(answer):
+        return answer
+    rest = _REFUSAL_SENTENCE_RE.sub("", answer)
+    if sum(c.isalpha() for c in rest) < 60:
+        return answer
+    return _REFUSAL_SENTENCE_RE.sub(PARTIAL_REFUSAL, answer)

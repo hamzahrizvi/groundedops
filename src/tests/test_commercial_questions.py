@@ -57,7 +57,7 @@ def test_money_or_ordering_in_passing_is_still_technical():
 
 def test_only_a_price_question_deflects_before_the_search():
     """Blind sets 4, 5 and NV4000 (2026-10-07): the manuals answer these, so
-    they search first; _friendly_refusal deflects them only on a refusal."""
+    they search first; a refusal stays a refusal."""
     for q in ("mounting screws weren't in the box. what do i need to buy for "
               "the bezel and for the cashbox?",
               "budgeting power supplies for a twin smart coin system. what "
@@ -66,13 +66,45 @@ def test_only_a_price_question_deflects_before_the_search():
               "lost a few £10s to people fishing notes back out",
               "we already stock PA00650 locks. do i have to buy cams separately",
               "which PSU do you recommend? I'd like to just order one off RS",
-              "do we have to pay for validator manager?"):
+              "do we have to pay for validator manager?",
+              "how many notes per device can the cashbox hold",
+              "it draws 2 A per unit, what supply rating do i need",
+              "how many coins per month can it count before it needs a service"):
         assert not sales.is_price_question(q), q
     for q in ("what is the price for a nv9 st",
               "how much does the NV200 cost",
               "can I get a quote for 50 units",
               "price for 50 units",
-              "do you offer a discount for volume"):
+              "do you offer a discount for volume",
+              "what is the cost per device",
+              "how much per seat for the software"):
+        assert sales.is_price_question(q), q
+
+
+def test_a_price_word_beside_a_technical_ask_searches_first():
+    """D-20261020-02 (blind set 20261019f): a yes/no about a requirement is
+    technical with "cheap" in it, and "how much is it and does it work with
+    X" asks two things. Both got the sales reply before any search."""
+    for q in ("can i use a cheap amazon fire tablet as the remote for cashgenic?",
+              "how much is it and does it work with the new notes",
+              "will a cheap class 4 sd card work in the nv4000",
+              "are cheap 75mm tickets ok in the bv30?",
+              "whats the part number and price so i can order one",
+              "how much would it cost, and will it take the new £20",
+              "how much does the nv9 cost and what voltage does it need"):
+        assert not sales.is_price_question(q), q
+    # ...and a question that asks only the price still deflects.
+    for q in ("what is the price for 50 NV9s",
+              "how much is a spare part for the bezel",
+              "how much is it?",
+              "what's the cheapest validator",
+              "is there a cheaper alternative to the NV9",
+              "is the nv9 expensive?",
+              "hi, what's the price of an nv9? thanks",
+              "is the NV200 in stock and how much is it",
+              "can I get a quote and how long is the lead time",
+              "do you sell cheap tickets",
+              "can you do a cheaper price for 20"):
         assert sales.is_price_question(q), q
 
 

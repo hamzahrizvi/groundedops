@@ -60,6 +60,7 @@ LABELS: dict[str, str] = {
     "none.vague":  "Could not tell which device was meant",
     "none.reject": "Found nothing relevant and said so",
     "span.ask":    "Evidence spanned several products, so asked which",
+    "symptom.ask": "Not sure what was wrong, offered the manual's checklist",
     # writing
     "route":       "Picked the model for this kind of question",
     "extract":     "Copied a checklist straight out of the manual",
@@ -155,19 +156,28 @@ def mark(stage: str, note: str | None = None) -> None:
 # id prefix (eval.py sends "eval-", run_live.py "live-", the eval preflight
 # "preflight-"), else a visitor on the widget or a person in the console on
 # /query. The prefix wins on the widget too, so run_live --path widget
-# (M12) is not counted as customers. It is derived server-side; a widget
-# visitor does choose their own session id, so one could label their own
-# turns a test -- that hides only themselves from the report and unlocks
-# nothing.
+# (M12) is not counted as customers. The prefix counts on the widget only
+# when the caller is on this box or the LAN (D-20261008-14): widget_api sets
+# that per request with set_local_caller, so a visitor cannot hide their own turns from the review views by naming their session eval-.
 _ORIGIN_PREFIXES = (("eval-", "eval"), ("live-", "live"),
                     ("preflight-", "preflight"))
+_local_caller: ContextVar[bool] = ContextVar("pipeline_local_caller", default=False)
+
+
+def set_local_caller(flag: bool) -> None:
+    """Whether this request's real caller is on the box or the LAN."""
+    try:
+        _local_caller.set(bool(flag))
+    except Exception:
+        pass
 
 
 def origin_for(session_id: str | None, surface: str | None = None) -> str:
     sid = session_id or ""
-    for prefix, origin in _ORIGIN_PREFIXES:
-        if sid.startswith(prefix):
-            return origin
+    if surface != "widget" or _local_caller.get():
+        for prefix, origin in _ORIGIN_PREFIXES:
+            if sid.startswith(prefix):
+                return origin
     return "widget" if surface == "widget" else "console"
 
 
@@ -198,6 +208,7 @@ def get_meta(key: str):
 OUTCOMES = frozenset({
     "steps", "faq.picked", "faq.answer", "faq.ask", "more", "sales",
     "extract", "none.follow", "none.vague", "none.reject", "span.ask",
+    "symptom.ask",
     "verbatim", "suppress", "capability", "inference", "clarify",
     "refusal", "respond",
 })

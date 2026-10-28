@@ -82,10 +82,17 @@ def doc_counts() -> tuple[dict[str, int], dict[str, int]]:
     """Distinct ingested sources per product key and per category key. A
     document tagged to several products counts under EACH of them --
     counting the comma-joined value as one key filed a shared manual under
-    a product nobody has and showed 0 against the products that carry it."""
+    a product nobody has and showed 0 against the products that carry it.
+
+    Internal documents do not count: the widget offers a product only when
+    it has documents, and one holding only internal documents has nothing
+    a customer can be answered from."""
+    from retrieval_db import is_excluded
     by_product: dict[str, set] = {}
     by_category: dict[str, set] = {}
     for row in source_index():
+        if is_excluded(row["source"]):
+            continue
         for key in row["products"]:
             by_product.setdefault(key, set()).add(row["source"])
         ckey = (row["category"] or "").strip()

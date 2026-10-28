@@ -159,7 +159,7 @@ EFFORT = {
         "role": "reasoning",
         "top_k": 10,
         "min_tier": "member",
-        # Optional explicit override, e.g. ONLINE_DEEP_MODEL=deepseek-v4
+        # Optional explicit model, e.g. ONLINE_DEEP_MODEL=deepseek-v4; api mode only, on the Advanced role's provider (llm.effort_model)
         "model_env": "ONLINE_DEEP_MODEL",
     },
 }

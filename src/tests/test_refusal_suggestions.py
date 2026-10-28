@@ -167,6 +167,24 @@ def test_a_broken_faq_store_does_not_break_the_refusal():
         faq_store.list_for_product = saved
 
 
+def test_buying_words_do_not_turn_a_refusal_into_the_sales_reply():
+    """D-20261010-01: a refusal in a message with buying words says what
+    was not found; it used to be replaced by the operator's sales reply."""
+    setup_module()
+    import policy
+    saved = policy.value
+    over = {"sales_mode": "deflect", "sales_reply": "SALES REPLY"}
+    policy.value = lambda k: over[k] if k in over else saved(k)
+    try:
+        for q in ("what's the max range on the NV9 Turbo 9000? thinking of buying a few",
+                  "which bracket fits it? we need to order one this week"):
+            text = main._friendly_refusal("nv9_spectral", "NV9 Spectral", query=q, sources=[])
+            assert "SALES REPLY" not in text, text
+            assert text.startswith("I don't have that in the product documentation about the NV9 Spectral"), text
+    finally:
+        policy.value = saved
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

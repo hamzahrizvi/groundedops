@@ -6,7 +6,7 @@
 Rewrites one block between the office-plan markers near the top of PENDING.md: every open office
 item with its stage and next step, and what finished or was turned down in the last 30 days. Each
 "- For the rejected list: ..." line in a decision is added once to "Rejected - do not redo without
-new evidence". Then commits PENDING.md alone. Items that came from Security or are assigned to it show only as "Security item
+new evidence". Then commits PENDING.md alone. Items that came from Security, are assigned to it, or carry `- Sensitive: yes` show only as "Security item
 <id>, details in the office": the repository is public.
 
 PENDING.md is also edited by hand and by other sessions (its header, CLAUDE.md P1): when it has
@@ -36,10 +36,11 @@ NEXT = {"waiting for CEO": "your yes", "approved, queued": "Dev builds it", "sen
 
 
 def masked(c):
-    """Security's items by where they came from, never by name: the repository is public."""
+    """Security's items, and any marked `- Sensitive: yes`, by where they came from, never by name: the repository is public."""
     if not c.get("security"):
         return c
-    cid = c["id"][:len("security/") + 8] if c["id"].startswith("security/") else c["id"]
+    dept, _, name = c["id"].partition("/")   # an inbox card's file name can name the hole: keep only its date
+    cid = f"{dept}/{name[:8]}" if name else dept
     return {**c, "id": cid, "title": f"Security item {cid}, details in the office"}
 
 
@@ -151,13 +152,13 @@ def selftest():
         w(os.path.join(ops, "decisions", "20261010.md"),
           "## D-20261010-01 | Sales brush-off\n- From: customer\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [ ] CEO approved\n\n"
           "## D-20261010-02 | Bigger reranker\n- From: rnd\n- Verdict: REJECT\n- For the rejected list: A bigger reranker: no gain on 40 blind questions.\n"
-          "\n## D-20261010-03 | Rate limits trust a forged header\n- Source: inbox/security/20261010-forge.md\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
-          "## D-20261010-04 | Uploads stored before sign-in\n- Source: inbox/security/20261010-upload.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Uploads stored before sign-in: accepted risk.\n"
-          "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/dev/D-20261010-01.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Test lines in the live log: later.\n"
-          "\n## D-20261010-05 | Test lines in the live log\n- Source: inbox/security/20261010-log.md\n- From: audit\n- Verdict: REJECT\n"
-          "\n## D-20261010-06 | Header-less callers skip the gate\n- Source: inbox/dev/D-20261010-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
+          "\n## D-20261010-03 | Security fixture A\n- Source: inbox/security/20261010-a.md\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n\n"
+          "## D-20261010-04 | Security fixture B\n- Source: inbox/security/20261010-b.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Security fixture B: accepted risk.\n"
+          "\n## D-20261010-05 | Security fixture D\n- Source: inbox/dev/D-20261010-01.md\n- From: audit\n- Verdict: REJECT\n- For the rejected list: Security fixture D: later.\n"
+          "\n## D-20261010-05 | Security fixture D\n- Source: inbox/security/20261010-log.md\n- From: audit\n- Verdict: REJECT\n"
+          "\n## D-20261010-06 | Security fixture E\n- Source: inbox/dev/D-20261010-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
         w(os.path.join(ops, "inbox", "audit", "20261010-cache.md"), "# Cache repeated answers\n")
-        w(os.path.join(ops, "inbox", "security", "20261010-chunked-cap.md"), "# The size cap misses chunked uploads\n")
+        w(os.path.join(ops, "inbox", "security", "20261010-c.md"), "# Security fixture C\n")
         w(os.path.join(repo, "PENDING.md"), "# Pending\r\n\r\nIntro.\r\n\r\n**Friday review.** Once a week.\r\n\r\n## The plan\r\n\r\n"
                                            "### Rejected - do not redo without new evidence\r\n\r\n- Old idea.\r\n\r\n### Waiting\r\n\r\nSMTP.\r\n")
         for a in (("init", "-q"), ("config", "user.email", "t@t"), ("config", "user.name", "t"), ("add", "PENDING.md"), ("commit", "-qm", "x")):
@@ -174,7 +175,7 @@ def selftest():
         assert "D-20261010-04 Security item D-20261010-04, details in the office (rejected)" in t, t
         assert "D-20261010-05 Security item D-20261010-05, details in the office (rejected)" in t, t
         assert "| D-20261010-06 | Security item D-20261010-06, details in the office |" in t, t
-        for leak in ("Header-less", "forged", "chunked", "Uploads stored", "sign-in", "live log"):
+        for leak in ("Security fixture A", "Security fixture B", "Security fixture C", "Security fixture D", "Security fixture E"):
             assert leak not in t, (leak, t)
         assert "- Old idea.\r\n- A bigger reranker: no gain on 40 blind questions. (D-20261010-02, product owner)\r\n\r\n### Waiting" in t, t
         assert run(ops, repo, today) == "UNCHANGED", "a second run changes nothing"

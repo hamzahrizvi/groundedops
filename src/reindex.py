@@ -28,7 +28,7 @@ USAGE
   python reindex.py --dry-run           # what would be rebuilt, and from where
   python reindex.py --check             # is every indexed source recoverable?
   python reindex.py                     # rebuild everything
-  python reindex.py --only "NV9*"       # rebuild matching sources only
+  python reindex.py --only "NV9*"       # refused: re-upload one document through the console
   CHUNK_SIZE=1600 python reindex.py     # rebuild at different geometry
   python reindex.py --from-store        # rebuild from the document store,
                                         # ignoring the current index entirely
@@ -45,6 +45,11 @@ logging.getLogger("chromadb").setLevel(logging.WARNING)
 logger = logging.getLogger("reindex")
 
 import docstore                                              # noqa: E402
+
+PARTIAL_REBUILD_REFUSAL = (
+    "Partial rebuild is not supported: resetting the collection would "
+    "drop the documents you did not select. Re-upload that one "
+    "document through the console instead, or run without --only.")
 
 
 def indexed_sources() -> dict[str, dict]:
@@ -288,6 +293,10 @@ def main() -> int:
         return 0
 
     if "--from-store" in argv:
+        if only is not None:
+            # A partial rebuild cannot reset the whole collection (also under --dry-run).
+            print(PARTIAL_REBUILD_REFUSAL)
+            return 2
         targets = from_store()
         if not targets:
             print(f"No documents in {docstore.store_dir()} "
@@ -328,15 +337,13 @@ def main() -> int:
         return 0
 
     targets = recoverable
-    if only:
+    if only is not None:
         targets = [e for e in targets if fnmatch.fnmatch(e["source"], only)]
         if not targets:
             print(f"No retained document matches {only!r}")
             return 1
         # A partial rebuild cannot reset the whole collection.
-        print("Partial rebuild is not supported: resetting the collection would "
-              "drop the documents you did not select. Re-upload that one "
-              "document through the console instead, or run without --only.")
+        print(PARTIAL_REBUILD_REFUSAL)
         return 2
 
     if orphaned and not allow_loss:

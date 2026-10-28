@@ -7,11 +7,19 @@ looking alike, and telling them apart meant reading backend.log against a
 fixes, so the route now reports the stages it passed through and the one
 that decided the turn (pipeline_trace.py).
 """
+import contextvars
 from unittest.mock import patch
 
 import _harness  # noqa: F401 -- installs the lightweight main.py stubs first
 import main
 import pipeline_trace
+
+
+def _as_local(fn, *args, **kwargs):
+    """Run fn as a caller on the box or the LAN (run_live, eval)."""
+    ctx = contextvars.copy_context()
+    ctx.run(pipeline_trace.set_local_caller, True)
+    return ctx.run(fn, *args, **kwargs)
 
 
 CHUNK = {
@@ -142,7 +150,8 @@ def test_the_log_line_knows_the_session_origin_and_outcome():
 
 def test_origin_is_who_asked_and_surface_is_the_door():
     assert pipeline_trace.origin_for("live-abc") == "live"
-    assert pipeline_trace.origin_for("live-abc", "widget") == "live"
+    assert _as_local(pipeline_trace.origin_for, "live-abc", "widget") == "live"
+    assert pipeline_trace.origin_for("live-abc", "widget") == "widget"  # D-20261008-14
     assert pipeline_trace.origin_for("preflight-x") == "preflight"
     assert pipeline_trace.origin_for("3f2a-uuid") == "console"
     assert pipeline_trace.origin_for("3f2a-uuid", "widget") == "widget"
@@ -156,10 +165,15 @@ def test_origin_is_who_asked_and_surface_is_the_door():
     # ...and run_live --path widget (M12) is a test on the widget surface,
     # not a customer.
     rows, spy = _log_spy()
-    _ask(log=spy, session_id="live-11-abcd",
-         entry=lambda req: main._traced_query(req, None, "widget"))
+    _as_local(_ask, log=spy, session_id="live-11-abcd",
+              entry=lambda req: main._traced_query(req, None, "widget"))
     assert rows[0]["meta"]["origin"] == "live"
     assert rows[0]["meta"]["surface"] == "widget"
+    # ...but only from the box or the LAN; a visitor naming their session so is a visitor.
+    rows, spy = _log_spy()
+    _ask(log=spy, session_id="live-11-abcd",
+         entry=lambda req: main._traced_query(req, None, "widget"))
+    assert rows[0]["meta"]["origin"] == "widget"
     # /query is the "query" surface.
     rows, spy = _log_spy()
     _ask(log=spy)
