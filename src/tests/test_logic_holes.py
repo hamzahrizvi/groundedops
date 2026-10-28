@@ -229,6 +229,26 @@ def test_comparison_share_counts_a_shared_document_for_each_product():
         retrieval_db._category_of = real
 
 
+def test_a_shared_page_below_the_floor_takes_no_comparison_slot():
+    """D-20261019-17 round 2: a shared page earns a comparison slot on score,
+    or it pushes a product's own pages out (C20261010-35, C20261025e-05)."""
+    import retrieval_db
+    real = retrieval_db._category_of
+    retrieval_db._category_of = lambda k: {"icu": "biometrics", "mycheckr": "biometrics"}.get(k, "")
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "mycheckr", "rerank_score": s} for s in (0.97, 0.9, 0.8, 0.7)]
+        ranked += [{"product": "biometrics_general", "rerank_score": 0.10},
+                   {"product": "icu", "rerank_score": 0.05}]
+        assert main._comparison_picks(ranked, ["icu", "mycheckr"], 0.44) == [0, 1, 2, 3, 5]
+        assert main._comparison_picks([{"product": "biometrics_general", "rerank_score": 0.01}],
+                                      ["icu", "mycheckr"], 0.44) == []
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+        retrieval_db._category_of = real
+
+
 def test_a_sibling_named_by_its_difference_in_its_own_chat():
     """D-20261019-17: C20261021e-15."""
     real_names, real_aliases = main._product_names, main._product_aliases
@@ -243,27 +263,6 @@ def test_a_sibling_named_by_its_difference_in_its_own_chat():
         assert main._products_named_in(q, keys) == ["myconnect"]
         assert main._products_named_in("is the myconnect minimal", keys,
                                        selected="mycheckr_mini") == ["myconnect"]
-    finally:
-        main._product_names, main._product_aliases = real_names, real_aliases
-
-
-def test_a_comparison_in_a_product_chat_keeps_the_chat_product():
-    """D-20261019-17: C20261026-31."""
-    real_names, real_aliases = main._product_names, main._product_aliases
-    main._product_names = lambda: {"nv200s": "NV200S", "nv201_spectral": "NV201 Spectral",
-                                   "mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr mini"}
-    main._product_aliases = lambda: {"nv200s": ["NV200 Spectral", "NV200"],
-                                     "mycheckr_mini": ["MyCheckr Mini"]}
-    try:
-        q = ("we have NV200ST rev 32 and NV201 Spectral rev 2 units. what did each change, "
-             "and does either need a minimum firmware?")
-        assert main._with_chat_product(["nv201_spectral"], "nv200s", q) == ["nv200s", "nv201_spectral"]
-        assert main._with_chat_product(["nv201_spectral"], "nv200s",
-                                       "what firmware does the NV201 Spectral need?") == ["nv201_spectral"]
-        assert main._with_chat_product(["mycheckr"], "mycheckr_mini",
-                                       "is the MyCheckr app the same?") == ["mycheckr"]
-        assert main._with_chat_product(["nv201_spectral"], None, q) == ["nv201_spectral"]
-        assert main._with_chat_product(["nv201_spectral"], "note_val", q) == ["nv201_spectral"]
     finally:
         main._product_names, main._product_aliases = real_names, real_aliases
 

@@ -2364,22 +2364,29 @@ def _comparison_picks(ranked: list[dict], named: list[str], floor: float,
     product (C20261017b-26 filled one with the NV9 Spectral's MCBF page, and
     the model worked a stand-in figure out of it). `k` is the size of the
     whole pick, CONTEXT_K unless one ask's share is being picked. A shared
-    `<category>_general` passage counts for each named product of that
-    category."""
+    `<category>_general` passage counts for each named product of that category
+    only at or above `floor`: the no-floor share is for a product's own pages,
+    and floor-free shared pages ("Central Bank Relationships", "ITL Device
+    Flash Codes" at 0.001-0.06) pushed the products' own pages out
+    (D-20261019-17 round 2)."""
     k = k or CONTEXT_K
 
     def tags(c):
         return {t.strip() for t in (c.get("product") or "").split(",")} - {""}
+
+    def counts_for(r, key):
+        return key in tags(r) or (_tagged_for(r, key)
+                                  and r.get("rerank_score", 0.0) >= floor)
     per = max(2, k // len(named))
     picked: list[int] = []
     for key in named:
         picked += [i for i, r in enumerate(ranked)
-                   if _tagged_for(r, key) and i not in picked][:per]
+                   if counts_for(r, key) and i not in picked][:per]
     for i, r in enumerate(ranked[:k]):
         if len(picked) >= k:
             break
         t = tags(r)
-        if i in picked or (t and not any(_tagged_for(r, key) for key in named)):
+        if i in picked or (t and not any(counts_for(r, key) for key in named)):
             continue
         if r.get("rerank_score", 0.0) >= floor or len(picked) < CONTEXT_MIN:
             picked.append(i)
@@ -2714,25 +2721,6 @@ def _resolve_question_scope(selected_product: str | None,
     if category:
         return {"category": category}, None
     return None, None
-
-
-def _with_chat_product(named: list[str], selected: str | None,
-                       typed: str) -> list[str]:
-    """The products a turn is about, with the chat's product counted
-    (D-20261019-17). A comparison typed in a product chat that names ONE
-    other product compares it with the chat's product. "NV200ST rev 32 and
-    NV201 Spectral rev 2 ... does either need a minimum firmware" in an
-    NV200S chat named only the NV201 Spectral (no catalogue form is
-    "NV200ST"). The override scoped the turn to it, and the NV200 build note
-    was never searched (C20261026-31). Not for a category or shared bucket in
-    the product slot, nor for the family name typed in a sibling's chat."""
-    if (selected and len(named) == 1 and named[0] != selected
-            and selected in _product_names()
-            and not selected.endswith("_general")
-            and not _is_family_parent(named[0], selected)
-            and _is_comparison(typed)):
-        return sorted({selected, named[0]})
-    return named
 
 
 def _build_sources(results: list[dict]) -> list[dict]:
@@ -3214,8 +3202,6 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                     selected=payload.product)
         _named_typed = _products_named_in(_normalize_query(q), _keys,
                                           selected=payload.product)
-        _named_typed = _with_chat_product(_named_typed, payload.product,
-                                          _normalize_query(q))
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
 
