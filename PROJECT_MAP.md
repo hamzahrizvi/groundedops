@@ -20,8 +20,7 @@ collapsed; `__pycache__/` omitted.
 
 ```
 groundedops/
-├── .claude/                      Claude Code config for this project; only agents/ is tracked
-│   └── agents/                   the agent office's departments (ops/README.md)
+├── .claude/                      Claude Code config for this project
 ├── .git/  .venv/
 ├── .obsidian/                    editor config for the notes vault, gitignored
 ├── GroundedOps-Vault/            Obsidian notes vault — NOT part of the app, gitignored
@@ -72,9 +71,6 @@ groundedops/
 │   └── .dockerignore
 ├── conversations.db  quota.db                  runtime, gitignored
 ├── backend.log(.err)  tunnel.log(.err)  testpage.log(.err)   gitignored
-├── ops/                          the agent office: handbook, office page, scheduled-task
-│                                 prompts, findings template. Its runtime data lives
-│                                 outside the repo in C:/Users/hrizvi/groundedops-ops
 ├── corpus/                       source docs ingested by /ingest/reload_folder
 │   ├── README.md
 │   └── 7 vendor PDFs — MyCheckr User Manual v7, MyCheckr Mini v5, MyConnect
