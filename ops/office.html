@@ -1493,7 +1493,7 @@ $("runAllBtn").addEventListener("click", async () => {
 
 /* "Run now": the CEO lifts a budget, hold or fixes-in-flight wait for one start (tools/ceo_inbox.py run_now) */
 function runNowBtn(m, label = "Run now"){
-  const sent = live.inbox.find(r => r.choice === "run_now" && r.id === m.key && r.status === "new"), go = el("button", "btn", sent ? "Sent: starts at the next check" : label);
+  const sent = live.inbox.find(r => r.choice === "run_now" && r.id === m.key && (!m.item || r.item === m.item) && r.status === "new"), go = el("button", "btn", sent ? "Sent: starts at the next check" : label);
   go.type = "button"; go.disabled = !!sent;
   go.title = "Start this at the next hourly check, past the budget pace or a hold. The lab spending cap and the 5-hour limit still apply.";
   go.addEventListener("click", async () => {
