@@ -2341,6 +2341,18 @@ def _is_comparison(query: str) -> bool:
     return bool(_COMPARISON.search(query or ""))
 
 
+def _tagged_for(c: dict, key: str) -> bool:
+    """True when passage `c` is filed under product `key`: tagged with it, or
+    with its category's shared "<category>_general" bucket, which retrieval
+    counts as every product's in that category (retrieval_db._matches_scope).
+    D-20261019-17: C20261026-24's Android access guide, tagged only
+    biometrics_general, holds both the MyCheckr's and the ICU's network
+    options and was left out of a MyCheckr-vs-ICU comparison."""
+    from retrieval_db import _category_of
+    t = {x.strip() for x in (c.get("product") or "").split(",")} - {""}
+    return key in t or f"{_category_of(key)}_general" in t
+
+
 def _comparison_picks(ranked: list[dict], named: list[str], floor: float,
                       k: int | None = None) -> list[int]:
     """Indexes into `ranked` (reranked, best first) for a question naming two
@@ -2352,21 +2364,30 @@ def _comparison_picks(ranked: list[dict], named: list[str], floor: float,
     in global order above `floor`, but never with a passage about another
     product (C20261017b-26 filled one with the NV9 Spectral's MCBF page, and
     the model worked a stand-in figure out of it). `k` is the size of the
-    whole pick, CONTEXT_K unless one ask's share is being picked."""
+    whole pick, CONTEXT_K unless one ask's share is being picked. A shared
+    `<category>_general` passage counts for each named product of that category
+    only at or above `floor`: the no-floor share is for a product's own pages,
+    and floor-free shared pages ("Central Bank Relationships", "ITL Device
+    Flash Codes" at 0.001-0.06) pushed the products' own pages out
+    (D-20261019-17 round 2)."""
     k = k or CONTEXT_K
 
     def tags(c):
         return {t.strip() for t in (c.get("product") or "").split(",")} - {""}
+
+    def counts_for(r, key):
+        return key in tags(r) or (_tagged_for(r, key)
+                                  and r.get("rerank_score", 0.0) >= floor)
     per = max(2, k // len(named))
     picked: list[int] = []
     for key in named:
         picked += [i for i, r in enumerate(ranked)
-                   if key in tags(r) and i not in picked][:per]
+                   if counts_for(r, key) and i not in picked][:per]
     for i, r in enumerate(ranked[:k]):
         if len(picked) >= k:
             break
         t = tags(r)
-        if i in picked or (t and not t & set(named)):
+        if i in picked or (t and not any(counts_for(r, key) for key in named)):
             continue
         if r.get("rerank_score", 0.0) >= floor or len(picked) < CONTEXT_MIN:
             picked.append(i)
@@ -2484,8 +2505,10 @@ def _described_among(query: str, results: list[dict], span: list[str],
     return [key] if key else []
 
 
-def _products_named_in(query: str, candidates: list[str]) -> list[str]:
+def _products_named_in(query: str, candidates: list[str],
+                       selected: str | None = None) -> list[str]:
     """Which of `candidates` the question wording actually picks out.
+    `selected` is the chat's product: its sibling's name may stand for the family.
 
     Returns every candidate whose key or display name appears in the query.
     A single hit means we can scope the question ourselves instead of asking.
@@ -2519,12 +2542,18 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     # mini USB cable as often as a product.
     hit_forms = [form for _len, _key, form in hits]
     hit_keys = {key for _len, key, _form in hits}
+    # In a sibling's own chat the chat's product stands in for the typed
+    # family name: "adding a new mini to the myconnect app" in a MyCheckr
+    # mini chat names the Mini (D-20261019-17, C20261021e-15).
+    family = [f for k in candidates if selected and k != selected
+              for f in _product_alias_tokens(k, names.get(k, ""), aliases.get(k, ()))]
     for key in candidates:
         if key in hit_keys:
             continue
+        prefixes = hit_forms + (family if key == selected else [])
         for form in _product_alias_tokens(key, names.get(key, ""),
                                           aliases.get(key, ())):
-            rest = next((form[len(p):] for p in hit_forms
+            rest = next((form[len(p):] for p in prefixes
                          if form != p and form.startswith(p)), "")
             if len(rest) >= 3 and not rest.isdigit() and rest in runs:
                 hits.append((len(rest), key, rest))
@@ -3170,8 +3199,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _named_typed: list[str] = []
     try:
         _keys = list(_product_names().keys())
-        _named = _products_named_in(resolved_query, _keys)
-        _named_typed = _products_named_in(_normalize_query(q), _keys)
+        _named = _products_named_in(resolved_query, _keys,
+                                    selected=payload.product)
+        _named_typed = _products_named_in(_normalize_query(q), _keys,
+                                          selected=payload.product)
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
 
@@ -3472,8 +3503,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # difference between Ads mode and Bill mode" is one manual's question and
     # should still be offered its curated answer.
     _comparing = (_is_comparison(resolved_query)
-                  and len(_products_named_in(resolved_query,
-                                             list(_product_names().keys()))) >= 2)
+                  and len(set(_products_named_in(resolved_query,
+                                                 list(_product_names().keys())))
+                          | set(_both_named)) >= 2)
     # Several asks are never answered by one curated FAQ either, for the same
     # reason: it answers one of them at most (D-20261009-09).
     if not payload.skip_faq and not _comparing and not _asks:
@@ -3543,11 +3575,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # rewrite) fetched 16 candidates without the NV9USB+ protocols page
     # (p.37); DeepSeek's wording fetched it at #10. Scoped to the NV9USB+
     # alone it ranks #1. Additive: each product adds its top few.
+    # Each arm rescues passages the joint search LACKS: its top three were
+    # often pages the joint list already held, so they rescued nothing. The
+    # ICU's arm held "Accessing my device on Android" (the only page stating
+    # the ICU's network options) at #8-10 behind shared pages, and a
+    # MyCheckr-vs-ICU comparison never saw it; reranked it is #1, 0.993
+    # (D-20261019-17, C20261026-24).
     if len(_both_named) >= 2:
+        _have = {r.get("id") for r in results}
         results = fuse_ranked_results([results] + [
-            retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
-                             source_filter=payload.source_filter,
-                             scope={"product": _k})
+            [r for r in retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
+                                         source_filter=payload.source_filter,
+                                         scope={"product": _k})
+             if r.get("id") not in _have]
             for _k in _both_named])
     # SEVERAL ASKS: EACH ONE SEARCHED ON ITS OWN (D-20261009-09). The whole
     # message finds the pages that match all of it at once, which for
@@ -3877,8 +3917,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # The asks were ranked over the unscoped candidates: keep only
             # the narrowed product's passages in their shares, or a share
             # brings back another device's page (D-20261009-09).
-            _ask_ranks = [[r for r in _rk if payload.product in
-                           {t.strip() for t in (r.get("product") or "").split(",")}]
+            _ask_ranks = [[r for r in _rk if _tagged_for(r, payload.product)]
                           for _rk in _ask_ranks]
             # Scoping pulls in the product's shared documents, so the top
             # four span more sources and a confident result read as
@@ -3924,9 +3963,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _ask_product = (not payload.product and not payload.category
                     and len(_span) > 1
                     and confidence != "none"
-                    and len(_cmp_named) < 2)
+                    and len(_cmp_named) < 2
+                    and len(_both_named) < 2)
     if _ask_product:
         confidence = "ambiguous"
+    # TWO PRODUCTS NAMED ARE NEVER AMBIGUOUS (D-20261019-17). Their passages
+    # spread over two manuals because the question asked for both; the band's
+    # "several sources, middling score" asked "which part do you mean?" of
+    # "a smart coin system and an nv4000 ... which one pulls more max
+    # current?" (C20261021e-37, best 0.528).
+    if confidence == "ambiguous" and len(_both_named) >= 2:
+        confidence = "confident"
 
     # The product came from the wording ("my nv4000 is showing an error").
     if _symptom_open and payload.product and not _wm_none:

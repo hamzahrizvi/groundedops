@@ -116,7 +116,7 @@ def test_the_picker_is_overridden_by_the_typed_question_only():
     import inspect
     src = inspect.getsource(main.query)
     assert "_named_typed if payload.product else _named" in src
-    assert "_named_typed = _products_named_in(_normalize_query(q), _keys)" in src
+    assert "_named_typed = _products_named_in(_normalize_query(q), _keys," in src
 
 
 def test_a_curated_question_typed_in_a_product_chat_is_served():
@@ -207,6 +207,64 @@ def test_number_rescue_does_not_judge_a_comparison_verdict_or_absence():
     assert not main._lexically_supported(verdict, ctx, comparing=True)
     assert not main._lexically_supported(absent, ctx, comparing=True)
     assert main._lexically_supported(plain, ctx, comparing=True)
+
+
+def test_comparison_share_counts_a_shared_document_for_each_product():
+    """D-20261019-17: C20261026-24's Android guide, tagged only
+    biometrics_general, holds both products' options."""
+    import retrieval_db
+    real = retrieval_db._category_of
+    retrieval_db._category_of = lambda k: {"icu": "biometrics", "mycheckr": "biometrics"}.get(k, "")
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "mycheckr", "rerank_score": s} for s in (0.97, 0.9, 0.8, 0.7, 0.6)]
+        ranked += [{"product": "biometrics_general", "rerank_score": 0.5},
+                   {"product": "note_val_general", "rerank_score": 0.4}]
+        assert main._comparison_picks(ranked, ["icu", "mycheckr"], 0.44) == [0, 1, 2, 3, 4, 5]
+        assert main._tagged_for({"product": "biometrics_general"}, "icu")
+        assert not main._tagged_for({"product": "biometrics_general"}, "nv200s")
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+        retrieval_db._category_of = real
+
+
+def test_a_shared_page_below_the_floor_takes_no_comparison_slot():
+    """D-20261019-17 round 2: a shared page earns a comparison slot on score,
+    or it pushes a product's own pages out (C20261010-35, C20261025e-05)."""
+    import retrieval_db
+    real = retrieval_db._category_of
+    retrieval_db._category_of = lambda k: {"icu": "biometrics", "mycheckr": "biometrics"}.get(k, "")
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "mycheckr", "rerank_score": s} for s in (0.97, 0.9, 0.8, 0.7)]
+        ranked += [{"product": "biometrics_general", "rerank_score": 0.10},
+                   {"product": "icu", "rerank_score": 0.05}]
+        assert main._comparison_picks(ranked, ["icu", "mycheckr"], 0.44) == [0, 1, 2, 3, 5]
+        assert main._comparison_picks([{"product": "biometrics_general", "rerank_score": 0.01}],
+                                      ["icu", "mycheckr"], 0.44) == []
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+        retrieval_db._category_of = real
+
+
+def test_a_sibling_named_by_its_difference_in_its_own_chat():
+    """D-20261019-17: C20261021e-15."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    main._product_names = lambda: {"mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr mini",
+                                   "myconnect": "MyConnect"}
+    main._product_aliases = lambda: {"mycheckr": [], "mycheckr_mini": ["MyCheckr Mini"],
+                                     "myconnect": []}
+    try:
+        keys = ["mycheckr", "mycheckr_mini", "myconnect"]
+        q = "adding a new mini to the myconnect app, what age threshold will the mini be on out of the box?"
+        assert main._products_named_in(q, keys, selected="mycheckr_mini") == ["mycheckr_mini", "myconnect"]
+        assert main._products_named_in(q, keys) == ["myconnect"]
+        assert main._products_named_in("is the myconnect minimal", keys,
+                                       selected="mycheckr_mini") == ["myconnect"]
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
 
 
 def test_comparison_rules_reach_the_answer_and_verifier_prompts():
