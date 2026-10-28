@@ -11,11 +11,11 @@ GroundedOps answers support questions from your own manuals. This sheet says whe
 - One customer per installation. Two customers do not share one instance.
 
 ## 1. Where your documents live
-| | Installed on your Windows machine | Docker on your server |
-|---|---|---|
-| Original files | Folder on that machine (`documents`) | Mounted `documents` folder |
-| Search index | Folder on that machine (`chroma_db`) | Docker volume `grounded-data` |
-| Conversations, logs, accounts | Files and SQLite databases on that machine | Same, on the volume |
+| | Installed on your Windows machine |
+|---|---|
+| Original files | Folder on that machine (`documents`) |
+| Search index | Folder on that machine (`chroma_db`) |
+| Conversations, logs, accounts | Files and SQLite databases on that machine |
 
 Your documents are used only to answer questions and to run the console's tools on your instance. Nothing in the product sends your documents, questions or logs to GroundedOps.
 
@@ -34,7 +34,7 @@ Other outside connections, each only if you set it up:
 - Mail server you configure (SMTP): sign-in links, credit alerts, and enquiry forms visitors send from the widget.
 - Microsoft (Entra ID) or Google Workspace: only when you set up work-account sign-in.
 - Cloudflare tunnel: the Windows launcher (`run.cmd`) opens one by default to publish the widget; `run.cmd -NoTunnel` does not.
-- A Windows or source install downloads the local search models once, on its first run, each at a pinned version; set `HF_HUB_OFFLINE=1` afterwards to stop re-checking. The Docker image carries these models inside and does not download them. A source or Docker install still fetches the OCR model the first time a scanned page is read.
+- A Windows or source install downloads the local search models once, on its first run, each at a pinned version; set `HF_HUB_OFFLINE=1` afterwards to stop re-checking. A source install still fetches the OCR model the first time a scanned page is read.
 
 The widget tells visitors which providers may process their question, and how long questions are kept; the operator cannot edit that line.
 
@@ -63,14 +63,14 @@ Who can read it: Admin and Owner accounts. Every console screen that shows visit
 - A single conversation: there is no console screen for this; conversations go with the rest of the visitor text under retention.
 - A staff account: an Owner deletes it in the console.
 - All visitor text: lower `RETENTION_DAYS`, or run `python retention.py` once.
-- Everything: uninstall (delete the install folder), or remove the Docker volumes.
+- Everything: uninstall (delete the install folder).
 
 ---
 
 ## Appendix for the reviewer only (code references; remove before sending)
 | Sheet statement | Where it is true |
 |---|---|
-| Documents and index stay on the machine | `docstore.py` `store_dir` (`documents`, `SOURCE_FILE_DIR`); `docker/docker-compose.yml` volume `grounded-data`, `../documents:/data/documents`; `CHROMA_DIR` in README config table |
+| Documents and index stay on the machine | `docstore.py` `store_dir` (`documents`, `SOURCE_FILE_DIR`); `CHROMA_DIR` in README config table |
 | SQLite and file stores | `conversations.py` `DB_PATH`, `quota.py` (sqlite3), `accounts.py` `_PATH`, `logger.py` `LOG_FILE` |
 | Nothing sent to GroundedOps | Outbound hosts in `src/*.py`: provider APIs (`llm.py`), `credit_watch.py` balance checks, `sso.py` Microsoft/Google, Ollama; none of ours |
 | OCR runs locally | `ocr.py` (RapidOCR, ONNX, local) |
@@ -84,7 +84,7 @@ Who can read it: Admin and Owner accounts. Every console screen that shows visit
 | SMTP: sign-in links, credit alerts, enquiries | `mailer.py`; callers `routes_admin_auth.py`, `credit_watch.py`, `routes_widget.py` (enquiry email) |
 | SSO, tenant and domain binding, no account created by sign-in | `sso.py` module docstring; `routes_admin_auth.py` `/admin/auth/sso/*` |
 | Cloudflare tunnel on by default in the launcher | `README.md` "Native install" (`run.cmd`, `-NoTunnel`) |
-| First-run model download, `HF_HUB_OFFLINE`, OCR model | `model_pins.py` `REVISIONS`; `docker/Dockerfile.backend` (models baked in, `HF_HUB_OFFLINE=1`); `README.md` installer paragraph and config table; `ocr.py` docstring |
+| First-run model download, `HF_HUB_OFFLINE`, OCR model | `model_pins.py` `REVISIONS`; `README.md` installer paragraph and config table; `ocr.py` docstring |
 | Widget notice not operator-editable | `widget_config.py` `ai_notice` docstring |
 | Originals and figures token-gated except for header-less callers from a private address; exclusions | `main.py` `_TOKEN_GATED_PREFIXES`, `_restrict_private_surface`; `routes_documents.py` `source_file`, `EXCLUDED_SOURCES` |
 | Admin LAN-only, allowlist | `README.md` `ADMIN_ALLOWED_IPS`; `main.py` `_restrict_private_surface`, `_admin_ip_allowed` |

@@ -13,7 +13,7 @@ Also ships an **embeddable website widget** that puts the same grounded
 Q&A on any web page with a single `<script>` tag.
 
 > **Just want to run it?** See [QUICKSTART.md](QUICKSTART.md) — installs
-> with a double-click, no Docker required.
+> with a double-click.
 > New to the app once it's running? See [USER_GUIDE.md](USER_GUIDE.md).
 
 ## See it working
@@ -358,27 +358,6 @@ address `run.cmd` prints under "On the LAN".
 The admin console (manage documents, FAQ, gaps, categories/products) is
 at `/admin` on the same backend — `run.cmd`'s summary prints this too.
 
-### Run with Docker
-
-Docker Compose is for **deploying this as a real service**, not local
-day-to-day development — use `run.cmd` for that (faster to iterate on,
-and it's how this app is actually packaged for install). The Compose
-files live in `docker/`:
-
-```bash
-cd docker
-docker compose up -d --build      # first build downloads models
-# app on http://localhost:8080, API on http://localhost:8000
-```
-
-Brings up backend, frontend, and Ollama (for Free mode) together.
-`docker/docker-compose.override.yml` (auto-merged when present) switches
-this to a hot-reloading dev stack instead — see the comment at its top for
-how to disable it for a real production run.
-
-> Compose publishes the backend on port **8000**, the same port the
-> native launcher uses. Run `cd docker && docker compose down` before `run.cmd`.
-
 ### Manual / development
 
 ```bash
@@ -448,9 +427,9 @@ See [.env.example](.env.example) for the annotated full list.
 | `ONLINE_OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI answering model. Also the model the backup escalation and console generations send on this slot (set it to the gateway's name, e.g. `itl-gpt-flash`). |
 | `ONLINE_ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Override the Anthropic answering model |
 | `WIDGET_ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins for the widget |
-| `SOURCE_FILE_DIR` | `/data/source_files` | Where original documents are retained |
+| `SOURCE_FILE_DIR` | `<repo>/documents` | Where original documents are retained |
 | `CHROMA_DIR` | `./chroma_db` | Vector store location |
-| `CONVO_DB_PATH` | `conversations.db` | Keep on a persistent volume under Docker |
+| `CONVO_DB_PATH` | `conversations.db` | Keep on a persistent disk |
 | `FAQ_STORE_PATH` | `faq_store.json` | Curated FAQ |
 | `FAQ_GAP_PATH` | `faq_gaps.json` | Unanswered-question log |
 | `FAQ_ENABLED` | `on` | `off` sends every question through retrieval |

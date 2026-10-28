@@ -65,5 +65,3 @@ Check `logs\service.log` says `starting NAMED tunnel`, not `QUICK`, and
   `Authorization: Bearer <staff token>` (mint one with
   `quota.issue_token("uptime", "staff", ttl_seconds=...)`; a website member token gets a 404); without it, it is a 404.
   Never restart on the deep one.
-- Docker path instead: STAGING.md step 0 first (the override file turns on
-  `--reload` and `WIDGET_ALLOWED_ORIGINS=*`).
