@@ -2319,7 +2319,7 @@ def _product_aliases() -> dict[str, list[str]]:
                     out[key] = [str(a) for a in raw if str(a).strip()]
     except Exception as exc:
         logger.warning(f"Could not read product aliases: {exc}")
-    return _variant_short_forms(out, _product_names())
+    return _variant_short_forms(_product_names(), out)
 
 
 def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:

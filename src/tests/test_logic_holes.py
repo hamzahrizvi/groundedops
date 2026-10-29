@@ -304,6 +304,19 @@ def test_a_variant_named_by_its_qualifier_or_short_form():
         main._product_names, main._product_aliases = real_names, real_aliases
 
 
+def test_product_aliases_reads_the_catalogue_and_adds_the_short_forms():
+    """D-20261025-11: the live path, not the helper alone. The build passed
+    (aliases, names) the wrong way round and every question crashed."""
+    from unittest.mock import patch
+    import catalog
+    cat = {"categories": [{"key": "coin", "products": [
+        {"key": k, "name": n, "aliases": _D11_RAW.get(k, [])} for k, n in _D11_NAMES.items()]}]}
+    with patch.object(catalog, "catalog", lambda: cat):
+        aliases = main._product_aliases()
+    assert "gSCS" in aliases["global_smart_coin_system"], aliases
+    assert aliases["sku_scs"] == _D11_RAW["sku_scs"]
+
+
 def test_a_family_alias_shared_by_several_products_is_not_one_of_them():
     """D-20261025-11: C20261029-37/-39."""
     real_names, real_aliases = main._product_names, main._product_aliases
