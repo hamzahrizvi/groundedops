@@ -137,7 +137,10 @@ def stage_of(it, ops, merged, reverted):
     rode = re.search(r"(?m)^Branch:\s*agents/dev-(D-\d{8}-\d+)", _read(dev + ".md")) if os.path.exists(dev + ".md") else None
     # the latest verdict judged another order's gate: this one rides on that branch (D-20261010-09/-11/-23 on -07)
     host = re.search(r"inbox/dev/(D-\d{8}-\d+)\.gate", it.get("last_source", ""))
-    host = host.group(1) if host and host.group(1) != it["id"] and latest == "READY TO MERGE" else None
+    # an order with a hand-back on its own branch rides on nobody, whatever gate its finding came from
+    # (2026-10-29: D-20261029-05, raised from -25-11's FAILED gate, read as riding on -25-11 and never merged)
+    own = rode and rode.group(1) == it["id"]
+    host = host.group(1) if host and host.group(1) != it["id"] and latest == "READY TO MERGE" and not own else None
     if it["id"] in merged or (rode and rode.group(1) in merged) or host in merged:   # built on another order's branch (D-13 rode on D-08)
         return "merged"
     if host:
@@ -286,6 +289,9 @@ def _selftest():
     w("decisions/20261013c.md", "## D-20261013-04 | Audit\n- Source: inbox/dev/D-20261013-01.gate/gate.json\n- Verdict: READY TO MERGE\n")
     assert {c["id"]: c["stage"] for c in ledger(ops, today=day)["cards"]}["D-20261013-04"] == "rides on D-20261013-01"
     assert {c["id"]: c["stage"] for c in ledger(ops, merged={"D-20261013-01"}, today=day)["cards"]}["D-20261013-04"] == "merged"
+    w("inbox/dev/D-20261013-04.md", "Status: READY\nBranch: agents/dev-D-20261013-04\n")   # its own branch: rides on nobody
+    assert {c["id"]: c["stage"] for c in ledger(ops, today=day)["cards"]}["D-20261013-04"] != "rides on D-20261013-01"
+    os.remove(os.path.join(ops, "inbox/dev/D-20261013-04.md"))
     for p in ("decisions/20261013b.md", "decisions/20261013c.md"):
         os.remove(os.path.join(ops, p))
     r = ledger(ops, merged={"D-20261013-01"}, today=day)
