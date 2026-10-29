@@ -29,6 +29,7 @@ per-question after-minus-before difference in points with its 90% interval (t, q
 --leakcheck: does any file under the paths hold text of a hidden question?
 Prints case ids and file names only (never the text); exit 1 on a hit.
 """
+import datetime
 import argparse
 import glob
 import json
@@ -129,15 +130,34 @@ def _needle(text):
     return run[:40] if len(run) >= 15 else None
 
 
-def leaks(cases, paths):
-    """[(case id, file)] for every file under paths that contains a case's q or turn1."""
+def _late(f, text, n, since):
+    """True if a row of f holding n could be newer than `since` (datetime); an undatable row or file counts."""
+    base = os.path.basename(f)
+    try:
+        if base.endswith(".jsonl"):
+            for l in (l for l in text.splitlines() if n in l):
+                try:
+                    if datetime.datetime.fromisoformat(json.loads(l)["timestamp"]).replace(tzinfo=None) >= since:
+                        return True
+                except Exception:
+                    return True
+            return False
+        if base == "faq_gaps.json":
+            return any(datetime.datetime.fromtimestamp(e["ts"]) >= since for e in json.loads(text) if n in json.dumps(e))
+    except Exception:
+        return True
+    return True   # any other file has no row dates
+
+
+def leaks(cases, paths, since=None):
+    """[(case id, file)] for every file under paths that contains a case's q or turn1 (only rows at or after `since` if given)."""
     needles = [(c["id"], n) for c in cases for n in map(_needle, (c.get("q"), c.get("turn1"))) if n]
-    files = [os.path.join(r, f) for p in paths for r, _, fs in os.walk(p) for f in fs] + \
-            [p for p in paths if os.path.isfile(p)]
+    files = [os.path.join(r, f) for p in paths for r, _, fs in os.walk(p) for f in fs] +             [p for p in paths if os.path.isfile(p)]
     hits = []
     for f in files:
         text = open(f, encoding="utf-8", errors="ignore").read()
-        hits += [(cid, f) for cid, n in needles if n in text and (cid, f) not in hits]
+        hits += [(cid, f) for cid, n in needles
+                 if n in text and (cid, f) not in hits and (since is None or _late(f, text, n, since))]
     return hits
 
 
@@ -211,6 +231,19 @@ def _selftest():
         bad = os.path.join(d, "sub", "app.log")
         open(bad, "w").write(json.dumps({"q": sibs[0]["q"]}) + "\nINFO 'Which models accept polymer notes?'")
         assert leaks(sibs, [d]) == [("h1", bad), ("h2", bad)], leaks(sibs, [d])  # escaped + repr both hit
+    with tempfile.TemporaryDirectory() as d:
+        def one(name, content, since=datetime.datetime(2026, 10, 25)):
+            sub = tempfile.mkdtemp(dir=d); f = os.path.join(sub, name)
+            open(f, "w").write(content)
+            return leaks(sibs, [f], since=since), f
+        row = lambda **k: json.dumps({"query": sibs[0]["q"], **k}) + "\n"
+        assert one("logs.jsonl", row(timestamp="2026-10-09T18:37:00"))[0] == []
+        h, f = one("logs.jsonl", row(timestamp="2026-10-26T01:00:00")); assert h == [("h1", f)], h
+        h, f = one("logs.jsonl", row()); assert h == [("h1", f)], h
+        ep = lambda y, m, dd: datetime.datetime(y, m, dd).timestamp()
+        assert one("faq_gaps.json", json.dumps([{"question": sibs[0]["q"], "ts": ep(2026, 10, 9)}]))[0] == []
+        h, f = one("faq_gaps.json", json.dumps([{"question": sibs[0]["q"], "ts": ep(2026, 10, 27)}])); assert h == [("h1", f)], h
+        h, f = one("logs.jsonl", row(timestamp="2026-10-09T18:37:00"), since=None); assert h == [("h1", f)], h
     print("selftest ok")
 
 
@@ -221,9 +254,14 @@ if __name__ == "__main__":
         ap = argparse.ArgumentParser()
         ap.add_argument("--leakcheck", nargs="+", required=True)
         ap.add_argument("--cases", nargs="+", required=True)
+        ap.add_argument("--dated", action="store_true")
         o = ap.parse_args()
         cs = [c for p in o.cases for c in json.load(open(p, encoding="utf-8"))["cases"]]
-        hits = leaks(cs, o.leakcheck)
+        since = None
+        if o.dated:   # ignore log rows older than the earliest case folder's date; no date in a folder name = plain match
+            ms = [re.match(r"\d{8}", os.path.basename(os.path.dirname(os.path.abspath(p)))) for p in o.cases]
+            since = min(datetime.datetime.strptime(m.group(), "%Y%m%d") for m in ms) if all(ms) else None
+        hits = leaks(cs, o.leakcheck, since=since)
         print("; ".join(f"{cid} in {f}" for cid, f in hits))
         sys.exit(1 if hits else 0)
     ap = argparse.ArgumentParser()
