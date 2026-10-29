@@ -29,8 +29,8 @@ per-question after-minus-before difference in points with its 90% interval (t, q
 --leakcheck: does any file under the paths hold text of a hidden question?
 Prints case ids and file names only (never the text); exit 1 on a hit.
 """
-import datetime
 import argparse
+import datetime
 import glob
 import json
 import os
@@ -152,7 +152,8 @@ def _late(f, text, n, since):
 def leaks(cases, paths, since=None):
     """[(case id, file)] for every file under paths that contains a case's q or turn1 (only rows at or after `since` if given)."""
     needles = [(c["id"], n) for c in cases for n in map(_needle, (c.get("q"), c.get("turn1"))) if n]
-    files = [os.path.join(r, f) for p in paths for r, _, fs in os.walk(p) for f in fs] +             [p for p in paths if os.path.isfile(p)]
+    files = [os.path.join(r, f) for p in paths for r, _, fs in os.walk(p) for f in fs] + \
+            [p for p in paths if os.path.isfile(p)]
     hits = []
     for f in files:
         text = open(f, encoding="utf-8", errors="ignore").read()
