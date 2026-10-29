@@ -7004,13 +7004,31 @@ function viewWidget() {
   privacyIn.addEventListener("input", () => { d.privacy_url = privacyIn.value.trim(); });
   const colorIn = el("input", { type: "color", value: d.color,
       style: "width:34px;height:34px;padding:0;border:0;border-radius:8px;cursor:pointer;background:transparent" });
+  // White text sits on the accent (header name, launcher, send and form
+  // buttons), so warn when that pair is under WCAG's 4.5:1. Warn only:
+  // the colour is the customer's brand, never recoloured silently.
+  const whiteOn = hex => {
+    const ch = i => { const v = parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 1.05 / (0.2126 * ch(0) + 0.7152 * ch(1) + 0.0722 * ch(2) + 0.05);
+  };
+  const colorWarn = el("p", { class: "sec-hint",
+    style: "margin:6px 0 0;color:var(--color-warn,#c98a00)" });
+  const drawColorWarn = () => {
+    const r = /^#[0-9a-f]{6}$/i.test(d.color || "") ? whiteOn(d.color) : 21;
+    colorWarn.textContent = r < 4.5
+      ? "White text on this colour is " + r.toFixed(1) + ":1, under the 4.5:1 small text needs. "
+        + "Some visitors will struggle to read the widget's header, launcher and buttons; a darker shade fixes it."
+      : "";
+  };
   const swatchRow = el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" });
-  const setColor = hex => { d.color = hex; colorIn.value = hex; drawPreview(); };
-  ["#9184d9", "#2f7de1", "#0e7a54", "#b26a00", "#e4002b", "#12161c"].forEach(hex =>
+  const setColor = hex => { d.color = hex; colorIn.value = hex; drawPreview(); drawColorWarn(); };
+  ["#6a5acd", "#2368c4", "#0e7a54", "#935700", "#e4002b", "#12161c"].forEach(hex =>
     swatchRow.append(el("button", { title: hex, onclick: () => setColor(hex),
       style: "width:28px;height:28px;border-radius:50%;border:0;cursor:pointer;background:" + hex })));
   swatchRow.append(colorIn);
   colorIn.addEventListener("input", () => setColor(colorIn.value));
+  drawColorWarn();
 
   // ---- opening options ----
   const optBox = el("div", {});
@@ -7278,7 +7296,7 @@ function viewWidget() {
             el("label", { class: "flabel" }, "Privacy notice link (optional)"), privacyIn,
             el("div", { class: "sec-hint" }, "Shown as a \"Privacy notice\" link under the widget's fixed AI notice. The notice itself cannot be changed here.")),
           el("div", { style: "margin-top:12px" },
-            el("label", { class: "flabel" }, "Accent colour"), swatchRow)),
+            el("label", { class: "flabel" }, "Accent colour"), swatchRow, colorWarn)),
         el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                     "data-tour": "wd-options", "data-sec": "Opening options" },
           el("div", { class: "sec-title" }, "Opening options"),
