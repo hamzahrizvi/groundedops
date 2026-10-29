@@ -309,7 +309,7 @@
   // ── styles ────────────────────────────────────────────────────────────
   var css =
     ".go-w,.go-w *{box-sizing:border-box}" +
-    ".go-w{--a:" + cfg.accent + ";--ink:#16191c;--mut:#6b7480;--line:#e6e8eb;--bg:#fff;--pane:#f6f7f9;" +
+    ".go-w{--a:" + cfg.accent + ";--ink:#16191c;--mut:#5f6873;--line:#e6e8eb;--fld:#878f99;--bg:#fff;--pane:#f6f7f9;" +
     "position:fixed;bottom:20px;right:20px;z-index:2147483000;" +
     "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;" +
     "font-size:15px;line-height:1.5;color:var(--ink);text-align:left}" +
@@ -325,14 +325,14 @@
     ".go-open .go-panel{display:flex}.go-open .go-launch{display:none}" +
     // header
     ".go-head{background:var(--a);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:11px;flex:0 0 auto}" +
-    ".go-av{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.25);flex:0 0 auto;" +
+    ".go-av{width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.15);flex:0 0 auto;" +
     "display:flex;align-items:center;justify-content:center;font-weight:700;overflow:hidden}" +
     ".go-av img{width:100%;height:100%;object-fit:cover}" +
     ".go-hname{font-weight:700;font-size:16px;flex:1}" +
     ".go-hbtn{border:0;background:transparent;color:#fff;cursor:pointer;padding:5px;border-radius:7px;line-height:0;opacity:.9}" +
     ".go-hbtn:hover{background:rgba(255,255,255,.18)}.go-hbtn svg{width:17px;height:17px}" +
     // scope bar
-    ".go-scope{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#eef1f4;" +
+    ".go-scope{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--pane);" +
     "border-bottom:1px solid var(--line);font-size:12.5px;color:var(--mut);flex:0 0 auto}" +
     ".go-scope b{color:var(--ink);font-weight:600}" +
     ".go-scope button{margin-left:auto;border:0;background:transparent;color:var(--a);cursor:pointer;" +
@@ -380,7 +380,7 @@
     "@keyframes go-spin{to{transform:rotate(360deg)}}" +
     // The wait line fades in rather than snapping to the next string. An
     // instant swap of one short phrase for another reads as a flicker.
-    ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;opacity:.6;font-size:11.5px}" +
+    ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;font-size:11.5px}" +
     ".go-waitin{animation:go-waitfade .5s ease}" +
     "@keyframes go-waitfade{from{opacity:.25}to{opacity:1}}" +
     "@media (prefers-reduced-motion:reduce){.go-waitin{animation:none}}" +
@@ -408,7 +408,7 @@
     ".go-fhead{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:10px}" +
     ".go-flab{display:block;font-size:12px;color:var(--mut);margin:9px 0 4px}" +
     ".go-fin{width:100%;box-sizing:border-box;font:inherit;font-size:14px;color:var(--ink);" +
-    "background:var(--bg);border:1.5px solid var(--line);border-radius:9px;padding:9px 10px;resize:vertical}" +
+    "background:var(--bg);border:1.5px solid var(--fld);border-radius:9px;padding:9px 10px;resize:vertical}" +
     ".go-fin:focus{outline:none;border-color:var(--a)}" +
     ".go-fbtn{margin-top:12px;border:0;background:var(--a);color:#fff;font:inherit;font-size:14px;" +
     "font-weight:600;padding:11px 16px;border-radius:999px;cursor:pointer}" +
@@ -457,7 +457,7 @@
     ".go-vote button:disabled{cursor:default}" +
     // composer
     ".go-form{display:flex;gap:8px;padding:11px;border-top:1px solid var(--line);background:var(--bg);flex:0 0 auto}" +
-    ".go-in{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;" +
+    ".go-in{flex:1;resize:none;border:1px solid var(--fld);border-radius:10px;padding:10px 12px;font:inherit;" +
     "font-size:14px;max-height:110px;color:var(--ink);background:var(--bg)}" +
     ".go-in:focus{outline:2px solid var(--a);border-color:var(--a)}" +
     ".go-in:disabled{background:var(--pane);color:var(--mut);cursor:not-allowed}" +
