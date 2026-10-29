@@ -68,15 +68,6 @@ def test_unknown_model_is_unpinned():
     assert model_pins.revision("someone/else") is None
 
 
-def test_dockerfile_bakes_what_the_code_loads():
-    d = (REPO / "docker" / "Dockerfile.backend").read_text(encoding="utf-8")
-    for n in model_pins.REVISIONS:
-        assert n in d, n
-    assert "all-MiniLM-L6-v2" not in d
-    assert "HF_HUB_OFFLINE=1" in d
-    assert "revision=R[" in d
-
-
 def test_installers_prefetch_what_the_code_loads():
     for f in ("install.sh", "install.ps1"):
         s = (REPO / f).read_text(encoding="utf-8")

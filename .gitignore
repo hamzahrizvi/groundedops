@@ -30,9 +30,7 @@ __pycache__/
 .venv/
 
 # ── Node / build output ───────────────────
-# Both are regenerated: install.ps1/install.sh run `npm install && npm run build`,
-# and docker/Dockerfile.frontend builds its own copy. docker/.dockerignore skips
-# them too.
+# Both are regenerated: install.ps1/install.sh run `npm install && npm run build`.
 node_modules/
 dist/
 
