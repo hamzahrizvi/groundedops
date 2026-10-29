@@ -315,7 +315,7 @@
     "font-size:15px;line-height:1.5;color:var(--ink);text-align:left}" +
     ".go-launch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;border:0;background:var(--a);" +
     "color:#fff;padding:13px 20px;border-radius:999px;font-size:15px;font-weight:600;" +
-    "box-shadow:0 6px 24px rgba(0,0,0,.2);transition:transform .12s}" +
+    "box-shadow:0 0 0 2px #fff,0 6px 24px rgba(0,0,0,.2);transition:transform .12s}" +
     ".go-launch:hover{transform:translateY(-1px)}" +
     ".go-launch:focus-visible{outline:3px solid rgba(0,0,0,.3);outline-offset:2px}" +
     ".go-launch svg{width:18px;height:18px}" +
