@@ -267,6 +267,69 @@ def test_a_sibling_named_by_its_difference_in_its_own_chat():
         main._product_names, main._product_aliases = real_names, real_aliases
 
 
+_D11_NAMES = {"sku_scs": "SMART Coin System", "compact_smart_coin_system": "Compact SMART Coin System",
+              "global_smart_coin_system": "Global SMART Coin System", "smart_hopper_3": "Smart Hopper 3",
+              "nv9usb": "NV9USB+", "nv9_spectral": "NV9 Spectral"}
+_D11_RAW = {"sku_scs": ["SMART Hopper", "SCS", "Twin SMART Coin System"],
+            "nv9usb": ["NV11+"], "nv9_spectral": ["NV11 Spectral"]}
+
+
+def test_a_variant_named_by_its_qualifier_or_short_form():
+    """D-20261025-11: C20261025e-11/-14/-16."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    names, raw = _D11_NAMES, _D11_RAW
+    aliases = main._variant_short_forms(names, raw)
+    main._product_names = lambda: names
+    main._product_aliases = lambda: aliases
+    keys = list(names)
+    C, G, S, H = "compact_smart_coin_system", "global_smart_coin_system", "sku_scs", "smart_hopper_3"
+    try:
+        assert "gSCS" in aliases[G] and "global SCS" in aliases[G]
+        assert "cSCS" in aliases[C]
+        assert aliases[S] == raw[S]
+        assert H not in aliases
+        assert main._products_named_in("whats the MCBF and MCBI on the G-SCS?", keys) == [G]
+        assert main._products_named_in("payout speed of the C-SCS", keys) == [C]
+        assert main._products_named_in("compact vs the normal smart coin system, which one pulls more current?",
+                                       keys, selected=C) == [C, S]
+        q11 = "we're swapping old SCS units for the compact one. does the compact still support payout by denomination?"
+        assert main._products_named_in(q11, keys, selected=C) == [C]
+        assert main._products_named_in(q11, keys) == [C, S]
+        assert main._products_named_in("G-SCS vs C-SCS, which has the higher MCBF?", keys) == [C, G]
+        assert main._products_named_in("does the compact one need 24V", keys) == []
+        assert main._products_named_in("what is the scs", keys) == [S]
+        assert main._is_family_parent(S, C) and not main._is_family_parent(C, S)
+        assert main._resolve_question_scope(C, None, [S])[1] == C
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
+def test_a_family_alias_shared_by_several_products_is_not_one_of_them():
+    """D-20261025-11: C20261029-37/-39."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    names = _D11_NAMES
+    aliases = main._variant_short_forms(names, _D11_RAW)
+    main._product_names = lambda: names
+    main._product_aliases = lambda: aliases
+    keys = list(names)
+    S, H = "sku_scs", "smart_hopper_3"
+    try:
+        q = "our smart hopper is flashing red 4 times and wont pay out"
+        assert main._products_named_in(q, keys, selected=H) == [H]
+        assert main._products_named_in(q, keys, selected=S) == [S]
+        assert main._products_named_in(q, keys) == []
+        assert main._products_named_in(q, keys, selected="nv9usb") == []
+        assert main._products_named_in("smart hopper 3 payout speed", keys) == [H]
+        assert main._products_named_in("scs smart hopper payout speed", keys) == [S]
+        assert main._products_named_in("note float capacity on the NV11+?", keys) == ["nv9usb"]
+        q2 = "how do i change the smart hopper over to ssp"
+        out = main._add_selected_product_context(
+            q2, main._products_named_in(q2, keys, selected=H), {"product": H})
+        assert out.endswith("(Smart Hopper 3)"), out
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
 def test_comparison_rules_reach_the_answer_and_verifier_prompts():
     p = main.build_answer_prompt("", "ctx", "q")
     assert "compare the numbers," in p and "worked out from another product's value" in p
