@@ -230,7 +230,7 @@ def brief(ops, repo, now=None, usage=None):
         todo.append({"id": "new-product", "title": "Give the office a new product's manual", "kind": "info", "why": good})
     titles = {i: c["title"] for i, c in cards.items()}
     stalled = ""
-    if old > 60:
+    if old > 60 + max(every(ops), 60):   # lane 1 fetches fresh figures itself whenever it has work, so only a missed tick is a pause
         moving = []
         stalled = (f"Paused: the office's usage figures are {old / 60:.0f} hours old, and it starts nothing on"
                    " old figures. The hourly runner now fetches fresh ones itself.") if old != float("inf") else \

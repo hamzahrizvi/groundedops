@@ -285,7 +285,8 @@ def needed(ops, lane, free=()):
 def _spaced(ops, lane):
     """"Next run": lane 1 starts new work only every N minutes."""
     gap = every(ops)
-    return lane == 1 and gap > 10 and time.time() - _mtime(os.path.join(ops, "state", "lane-1-worked")) < gap * 60
+    # 3/4 of the gap: lane 1 ticks on that same period, so a full gap skipped every other tick (2026-10-29)
+    return lane == 1 and gap > 10 and time.time() - _mtime(os.path.join(ops, "state", "lane-1-worked")) < gap * 45
 
 
 def startable(ops, rows, lane):
@@ -332,7 +333,7 @@ def take(ops, repo, five, week, resets, now, lane):
             pass
         return [r[0] for r in rows] + [f"TOOK {key} | {line}"]
     if _spaced(ops, lane) and any(ok and not r.startswith("MERGE") for r, _, ok in rows):
-        due = datetime.datetime.fromtimestamp(_mtime(worked) + gap * 60).strftime("%H:%M")
+        due = datetime.datetime.fromtimestamp(_mtime(worked) + gap * 45).strftime("%H:%M")
         rows = rows + [(f"SPACED lane 1 starts new work at {due} (Next run: every {gap} min); your decisions were read now", None, False)]
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
 
