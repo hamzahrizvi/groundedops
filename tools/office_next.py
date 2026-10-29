@@ -353,6 +353,13 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     merged, reverted = git_sets(repo)
     dev = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") == "dev"}
     check = [i for i, s in dev.items() if s == "built, waiting for the check"]
+    # a gate that stopped without a verdict since its hand-back and since the last commit stops the same way again: it
+    # waits for a change (2026-10-29: D-20261025-11's false leak alarm took lane 1 every hour and nothing else ran)
+    head = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%ct"], capture_output=True, text=True).stdout.strip()
+    gate = lambda i, f: os.path.join(ops, "inbox", "dev", i + ".gate", f)
+    stuck = [i for i in check if os.path.exists(gate(i, "FAILED")) and not os.path.exists(gate(i, "gate.json"))
+             and _mtime(gate(i, "FAILED")) > max(_mtime(os.path.join(ops, "inbox", "dev", i + ".md")), int(head or 0))]
+    check = [i for i in check if i not in stuck]
     build = sorted((i for i, s in dev.items() if s in ("approved, queued", "sent back, rebuilding")),
                    key=lambda i: (items[i].get("from") != "security", items[i].get("priority", 99), i))   # security, then the PO's rank
     # the CEO, 2026-10-15: nothing reaches Dev until the product owner has checked, after its latest approval (a CEO tick
@@ -368,7 +375,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
             return ""
         m = re.search(r"(?mi)^Verdict:\s*(CLEAR|BLOCK)", open(review(i), encoding="utf-8").read())
         return m.group(1).upper() if m else ""
-    out = []
+    out = [("product-owner", f"check {i} waits: its gate stopped without a verdict; it runs again after the next commit", None) for i in stuck]
     for i in sorted(i for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"):   # tools/office_merge.py
         # someone's uncommitted edit in the way waits, and the lanes take the next work (2026-10-16: one such merge
         # came first in every lane's plan, so nothing else ran for hours)
@@ -597,6 +604,13 @@ def selftest():
         assert got[0].startswith("RUN  groundedops-office-product-owner  check D-20261008-01"), got
         assert got[1].startswith("RUN  groundedops-office-dev  build D-20261008-02"), got
         assert len(got) == 2, got                                       # D-07 is the CEO's; tests, reviews not due
+        os.makedirs(os.path.join(ops, "inbox/dev/D-20261008-01.gate"))
+        w("inbox/dev/D-20261008-01.gate/FAILED", "hidden questions in the live log\n")   # stopped since the hand-back
+        os.utime(os.path.join(ops, "inbox/dev/D-20261008-01.gate/FAILED"), (time.time() + 5, time.time() + 5))
+        got = plan(ops, ops, 11, 38, resets, now)
+        assert got[0].startswith("WAIT groundedops-office-product-owner  check D-20261008-01 waits: its gate stopped"), got
+        assert got[1].startswith("RUN  groundedops-office-dev  build D-20261008-02"), got
+        os.remove(os.path.join(ops, "inbox/dev/D-20261008-01.gate/FAILED")); os.rmdir(os.path.join(ops, "inbox/dev/D-20261008-01.gate"))
         os.remove(os.path.join(ops, "state/rnd_last_run.txt"))
         assert any("office-rnd  monthly research due" in x for x in plan(ops, ops, 11, 38, resets, now)), "R&D due monthly"
         w("state/rnd_last_run.txt")
