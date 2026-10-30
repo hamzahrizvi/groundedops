@@ -320,6 +320,12 @@ def build(ops, repo=None):
                 groups[f[dim]].append(f)
             for g, fs in groups.items():
                 blind[dim][g][name] = agg(fs, ci=dim == "type")
+        pic = os.path.join(ops, "runs", "images-" + name, "score.json")   # the week's hidden picture questions: counts only
+        if os.path.exists(pic):
+            s = _load(pic)
+            blind["category"]["picture"][name] = {"n": s["n"], "bot_pct": round(100 * s["explanation_right"] / s["n"], 1),
+                                                  "base_pct": None, "right": s["explanation_right"],
+                                                  "wrong": s["n"] - s["explanation_right"], "declined": 0}
         rc = real_counts(d)
         if rc is not None:
             real[name] = rc
@@ -452,8 +458,11 @@ def _selftest():
     json.dump([{"q": "price?", "category": "commercial", "type": "lookup", "outcome": "refused"},
                {"q": "jam", "category": "technical", "type": "procedure_or_troubleshoot", "outcome": "answered"}],
               open(os.path.join(ops, "runs", "20261012", "real_categorised.json"), "w"))
+    os.makedirs(os.path.join(ops, "runs", "images-20261012"))
+    json.dump({"n": 4, "figure_found": 2, "explanation_right": 1}, open(os.path.join(ops, "runs", "images-20261012", "score.json"), "w"))
     r = build(ops)
     assert r["runs"] == ["20261005", "20261012"], r["runs"]
+    assert r["blind"]["category"]["picture"] == {"20261012": {"n": 4, "bot_pct": 25.0, "base_pct": None, "right": 1, "wrong": 3, "declined": 0}}
     o = r["overall"]["20261005"]
     assert {k: o[k] for k in o if k not in ("bot_lo", "bot_hi")} == {"n": 3, "bot_pct": 44.4, "base_pct": 100.0, "right": 1, "wrong": 1, "declined": 1}, o
     assert o["bot_lo"] < 44.4 < o["bot_hi"], o

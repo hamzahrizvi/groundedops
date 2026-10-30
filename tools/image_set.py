@@ -6,7 +6,7 @@
 
 RUN is OPS/heldout/images/<stamp>: merge stamps every case "src": "images", so blind_eval.py runs them only from a
 folder under OPS/heldout. FIGS is REPO/documents/figures. Nothing here prints a question, an answer or a reference.
-The score lives only in its own folder: ops_pivot.py and office_brief.py read runs/<YYYYMMDD[a-z]> only.
+The score lives in its own folder; ops_pivot.py shows its counts as the Picture row of the weekly run with the same stamp.
 """
 import glob, json, os, re, sys
 
@@ -21,15 +21,22 @@ def docs_by_stem(run):
             for f in sorted(glob.glob(os.path.join(run, "manuals", "*.txt")))}
 
 
-def plan(run, figs):
-    """Each document with crops goes to the manuals file holding the fewest documents (its own manual), ties by name."""
-    by, out = docs_by_stem(run), {}
+def plan(run, figs, limit=None):
+    """Each document with crops goes to the manuals file holding the fewest documents (its own manual), ties by name.
+    limit (the weekly run's few picture questions): one question each for that many documents, those used least in
+    earlier picture sets first, so the weeks rotate through the manuals."""
+    by, out, docs = docs_by_stem(run), {}, []
     for doc in sorted({d for ds in by.values() for d in ds}):
         side = os.path.join(figs, doc, "figures.json")
         n = len(json.load(open(side, encoding="utf-8")).get("figures") or {}) if os.path.isfile(side) else 0
-        if not n: continue
+        if n: docs.append((doc, 2 if n >= BIG else 1))
+    if limit:
+        used = [c.get("source") for f in glob.glob(os.path.join(os.path.dirname(os.path.abspath(run)), "*", "cases.json"))
+                for c in json.load(open(f, encoding="utf-8")).get("cases", [])]
+        docs = [(d, 1) for d, _ in sorted(docs, key=lambda x: (used.count(x[0]), x[0]))[:int(limit)]]
+    for doc, n in docs:
         stem = min((s for s in by if doc in by[s]), key=lambda s: (len(by[s]), s))
-        out.setdefault(stem, []).append(f"{doc}={2 if n >= BIG else 1}")
+        out.setdefault(stem, []).append(f"{doc}={n}")
     return [f"{s} | " + " | ".join(v) for s, v in sorted(out.items())]
 
 

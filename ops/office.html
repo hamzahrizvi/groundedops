@@ -1047,7 +1047,8 @@ const METRICS = {
 function openReview(g, run, pick, title){
   const P = live.pivot || SAMPLE_PIVOT, cases = (((P.cases || {})[run]) || []).filter(pick || (c => c[pv.dim] === g));
   const nodes = [el("p", "small", `${cases.length} questions in ${runLabel(run)}, weakest first. Comments go to the product owner's next triage as your note.`)];
-  if(!cases.length) nodes.push(el("p", "empty", "The questions behind these figures appear once the live figures are in."));
+  if(!cases.length) nodes.push(el("p", "empty", g === "picture" && !pick ? "Picture questions stay hidden so Dev cannot fit fixes to them; only their counts come here."
+    : "The questions behind these figures appear once the live figures are in."));
   /* tabs by how the grader judged it: Wrong / Partly right (incl. "said not found") / Right */
   const TABS = [["bad", "Wrong"], ["warn", "Partly right"], ["ok", "Right"]], panes = {}, seg = el("div", "seg"), btns = [];
   seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Show questions");
