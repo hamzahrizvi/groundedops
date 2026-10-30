@@ -230,9 +230,48 @@ _SECONDARY = re.compile(
     r"|change\s*noti|release\s*(?:notes|documentation)"
     r"|^(?:cn|wr|pa|ga)[\s_-]?\d{3}|^[a-z]{2}\d{5}", re.I)
 
+# A synced Confluence page's kind, from its title and folder (confluence_sync.kind_of), stored by the
+# sync in this file as {document name: kind} (D-20261024-10). A stored release note or certificate
+# goes on the second shelf whatever its name; a document not in the file (an upload) still goes by its name.
+# Read once per process; a hand edit takes effect at the next restart, and a check or sync never
+# overwrites a kind already stored.
+# Only these stored kinds move a page to the second shelf. Test scripts and drawings go by the name rule
+# (round 2: a test-script page moved there cost global_smart_coin_system-03). Change notices too (round 3):
+# accessory and build-revision notices hold the part numbers customers order from (nv200s-02 went wrong x3).
+SECONDARY_KINDS = frozenset({"certificate", "release_note"})
+_KINDS_PATH = os.getenv("DOC_KINDS_PATH", "doc_kinds.json")
+_kinds: dict | None = None
+
+
+def source_kinds() -> dict:
+    """{document name: kind} the Confluence sync stored. An absent file means none; an
+    unreadable one also means none (logged once): kinds then come from the names."""
+    global _kinds
+    if _kinds is None:
+        import jsonstore
+        try:
+            data = jsonstore._parse(_KINDS_PATH) if os.path.exists(_KINDS_PATH) else {}
+            if not isinstance(data, dict):
+                raise ValueError(f"expected names to kinds, got {type(data).__name__}")
+            _kinds = data
+        except Exception as exc:
+            logger.error("document kinds file %s is unreadable (%s); kinds come from the "
+                         "names until it is repaired and the backend restarted", _KINDS_PATH, exc)
+            _kinds = {}
+    return _kinds
+
+
+def set_kinds(kinds: dict) -> None:
+    """Store the whole {name: kind} map (jsonstore refuses to overwrite an unreadable file)."""
+    global _kinds
+    import jsonstore
+    jsonstore.save(_KINDS_PATH, dict(sorted(kinds.items())), label="document kinds")
+    _kinds = dict(kinds)
+
 
 def is_secondary(source: str | None) -> bool:
-    return bool(_SECONDARY.search(source or ""))
+    return (source_kinds().get(source or "") in SECONDARY_KINDS
+            or bool(_SECONDARY.search(source or "")))
 
 
 def rank_key(chunk: dict) -> float:

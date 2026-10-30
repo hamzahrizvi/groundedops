@@ -276,6 +276,7 @@ try:
 finally:
     backup.MAX_UNCOMPRESSED_BYTES = _was
 
+check("doc_kinds.json" in backup._stores(False), "the document kinds file is backed up (D-20261024-10)")
 print("\n== restore ==")
 faq_path = os.environ["FAQ_STORE_PATH"]
 with open(faq_path, "w", encoding="utf-8") as fh:

@@ -60,6 +60,7 @@ gaps_store.json
 catalog_config.json
 confluence_sync.json
 internal_sources.json
+doc_kinds.json
 # The spec index, rebuilt from the PDFs whenever they or their filing
 # change (sales.get_index). Pure cache, and ~640KB of churn if tracked.
 spec_index.json

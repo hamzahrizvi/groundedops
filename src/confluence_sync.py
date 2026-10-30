@@ -79,6 +79,41 @@ DECISIONS = ("approved", "internal", "excluded")
 # finds it; not "internals" or "international". An admin can still
 # approve it on the Confluence page; only a first sighting is filed this way.
 _INTERNAL_TITLE = re.compile(r"(?<![a-z])internal(?![a-z])", re.I)
+
+_KIND_TITLE = [
+    ("test_script", r"test\s*scripts?|testing\s*procedure|test\s*report|test\s*plan|intertek|field\s*trials?"),
+    ("certificate", r"certificat|declaration|conformity|compliance|\(doc\)|-dec\b|-(?:ul|cb)\b|\brohs\b|\breach\b|\bweee\b|\bukca\b|\bfcc\b"),
+    ("change_notice", r"change\s*notif|\bpcn\b"),
+    ("release_note", r"release\s*(?:notes?|documentation)|changelog"),
+    ("drawing", r"^(?:cn|wr|pa|ga|mc|pm)[\s_-]?\d{3}|^[a-z]{2}\d{5}|drawing|\bassembly\b|\bassy\b"),
+]
+_KIND_PATH = [
+    ("test_script", r"test\s*scripts?"),
+    # not "ICU Certificate Management": the device's API pages (USB ports, vision parameters), not compliance certificates
+    ("certificate", r"product\s*compliance|cumplimiento|certificat(?!e\s*management)"),
+    ("change_notice", r"change\s*notification"),
+    ("release_note", r"release\s*notes"),
+    ("drawing", r"spare\s*parts"),
+]
+_KIND_PATH_FILE = [("drawing", r"appendix|ap.ndice|disclaimer\s*and\s*safety")]
+_KIND_TITLE = [(k, re.compile(p, re.I)) for k, p in _KIND_TITLE]
+_KIND_PATH = [(k, re.compile(p, re.I)) for k, p in _KIND_PATH]
+_KIND_PATH_FILE = [(k, re.compile(p, re.I)) for k, p in _KIND_PATH_FILE]
+
+
+def kind_of(title, path, item_kind):
+    """A synced page's kind from its title, then its folders nearest first (D-20261024-04: wrong on 5 of
+    120 hand-checked pages); "manual" when nothing matches."""
+    t = title or ""
+    for k, rx in _KIND_TITLE:
+        if rx.search(t):
+            return k
+    rules = _KIND_PATH + (_KIND_PATH_FILE if item_kind == "file" else [])
+    for folder in reversed(list(path or [])):
+        for k, rx in rules:
+            if rx.search(folder or ""):
+                return k
+    return "manual"
 _RECENT_DAYS = 14                  # how long "new" and "updated" flags last
 # Attachments larger than this are not downloaded; the run names them in its
 # errors. Uploads have no cap of their own (main.py exempts /upload).
@@ -951,6 +986,25 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     return res
 
 
+def write_kinds() -> int:
+    """Store the kind (kind_of) of every synced document, and of the PDF kept over one, in
+    retrieval_db's kinds file, for names not in it yet. Returns how many were added."""
+    # ponytail: a kind is written once per name, so a hand edit stands; a page later moved to another folder keeps its first kind. Delete its entry (or the file) and the next check or sync writes it again.
+    from retrieval_db import set_kinds, source_kinds
+    cur = source_kinds()
+    new = {}
+    for it in _load()["items"].values():
+        if it.get("synced_version") is None:
+            continue
+        kind = kind_of(it.get("title"), it.get("path"), it.get("kind"))
+        for name in (it.get("source"), it.get("pdf_kept")):
+            if name and name not in cur:
+                new[name] = kind
+    if new:
+        set_kinds({**cur, **new})
+    return len(new)
+
+
 # ── apply ───────────────────────────────────────────────────────────────
 
 def _union(*keys: str) -> str:
@@ -1422,6 +1476,10 @@ def run(apply: bool = True, check: bool | None = None) -> dict:
         def record(st):
             st["history"] = (st["history"] + [kept])[-_HISTORY:]
         _update(record)
+        try:
+            write_kinds()        # also on a failed or check-only run: the first one after an upgrade fills the file
+        except Exception as exc:
+            logger.warning("Confluence: document kinds not stored: %s", exc)
         logger.info("Confluence %s: %s", res["kind"],
                     {k: (len(v) if isinstance(v, list) else v) for k, v in res.items() if k != "at"})
         return res
