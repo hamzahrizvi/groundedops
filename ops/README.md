@@ -153,6 +153,18 @@ weeks, phase 3 once Dev has merged a gated fix.
      usually takes longer than the time left (`TYPICAL`, half the `STUCK`
      limit), so no new Dev build starts in the sweep.
 
+   Two more ways Mo sweeps, with the same rules:
+   - **Batches.** From Thursday 00:00 UTC (`BATCH_FROM`, 43 h before the
+     reset), while the week is `BATCH_PACE` (2.3) times ahead of its pace
+     (about 60% left on Thursday, less as Friday nears), he sweeps the last
+     `BATCH_MIN` (30) minutes before each 5-hour window resets. What is left of
+     that window would expire anyway, so a batch may run it to `BATCH_FIVE`
+     (95%); a fresh window follows within the half hour. The 5-hour reset time
+     comes from `usage.json`'s `r5`, written from get_usage.
+   - **Your button.** "Call Mo" on the page sweeps for `MO_CALL` (2) hours from
+     the next check. "Send Mo home" stops any sweep for `MO_HOME` (6) hours.
+     Both go through `tools/ceo_inbox.py` (choice `mo`, note `call` or `home`).
+
    Mo stays a character, not a session. A 2026-10-30 judge panel turned down an
    Opus "ultracode" Mo that would plan and then fan out helpers:
    - the 5-hour window runs out before the week does, and a running workflow

@@ -18,7 +18,7 @@ STAY AWAKE. First, load mcp__ccd_host__request_keep_awake with ToolSearch and ca
 1. Take work. Run:
    "C:/Users/hrizvi/Downloads/Git/groundedops/.venv/Scripts/python.exe" "C:/Users/hrizvi/Downloads/Git/groundedops/.claude/worktrees/agent-org/tools/office_next.py" --lane <LANE> --take
    It prints a USAGE line, the plan (MERGE / RUN / WAIT lines, or IDLE), and last "TOOK <key> | <line>" or "TOOK nothing"; or only a STALE line.
-   STALE means the Claude app stopped recording usage. Load mcp__ccd_session_mgmt__get_usage with ToolSearch, call it, and Write the file C:\Users\hrizvi\groundedops-ops\state\usage.json with exactly {"u": {"fh": <percentUsed of the "5-hour limit" window>, "sd": <percentUsed of the "Weekly · all models" window>}}. Then run the command once more. Still STALE, or no figures from get_usage: go to step 5.
+   STALE means the Claude app stopped recording usage. Load mcp__ccd_session_mgmt__get_usage with ToolSearch, call it, and Write the file C:\Users\hrizvi\groundedops-ops\state\usage.json with exactly {"u": {"fh": <percentUsed of the "5-hour limit" window>, "sd": <percentUsed of the "Weekly · all models" window>}, "r5": "<resetsAt of the "5-hour limit" window>"} (r5 times Mo's batches before each 5-hour reset). Then run the command once more. Still STALE, or no figures from get_usage: go to step 5.
    TOOK nothing: go to step 5.
    Otherwise this lane now holds that work and no other lane will start it. Do the page refresh (step 4) once, so the page shows it running, then step 2.
 2. Do the work, then go back to step 1, which drops this lane's claim and takes the next piece. After 8 pieces in this tick (merges do not count), go to step 5.

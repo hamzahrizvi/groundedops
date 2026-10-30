@@ -379,6 +379,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
         <option value="120">Next run: every 2 hours</option>
       </select>
       <button class="btn" id="powerBtn" type="button" hidden aria-pressed="true">Power</button>
+      <button class="btn" id="moBtn" type="button" hidden>Call Mo</button>
       <button class="btn" id="syncBtn" type="button" hidden title="Rebuilds what this page shows (who is running, what moves next) at lane 1's next check, without starting any work">Sync</button>
     </div>
   </header>
@@ -609,9 +610,11 @@ function worker(id){
   if(!hired(id)) return {state:"planned", task:d.planned};
   if(id === "cleaner"){ const on = sweepOn(), done = swept();
     return {state: on && !done ? "working" : "idle", last: "", updated: "", screen: [],
-            task: !on ? "Mopping. Just mopping." : done ? "Backlog swept. Back to the mop." :
-              `Sweeping: ${sweepRuns().length} piece${sweepRuns().length === 1 ? "" : "s"} finishing before the ` +
-              (live.brief && live.brief.sweep && live.brief.sweep.until ? fmtTime(new Date(live.brief.sweep.until)) + " reset" : "weekly reset")}; }
+            task: !on ? "Mopping. Just mopping." : done ? "Backlog swept. Back to the mop." : (() => {
+              const s = (live.brief && live.brief.sweep) || {}, n = sweepRuns().length, p = `${n} piece${n === 1 ? "" : "s"}`;
+              if(/^Mo's batch/.test(s.why || "")) return `Batch: ${p} before the 5-hour window resets`;
+              if(/^you called Mo/.test(s.why || "")) return `Called in: sweeping ${p}`;
+              return `Sweeping: ${p} finishing before the ` + (s.until ? fmtTime(new Date(s.until)) + " reset" : "weekly reset"); })()}; }
   if(d.secret){ const r = sweepRuns()[SECRET.indexOf(id)];
     return {state: "working", task: r ? `${r.dept}: ${r.why}` : "On assignment", last: "", updated: "", screen: []}; }
   let w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
@@ -1888,6 +1891,27 @@ $("powerBtn").addEventListener("click", async () => {
   catch(e){ $("banner").textContent = writeError(e); }
   renderPower();
 });
+/* Mo: "Call Mo" sweeps pending work for office_next.MO_CALL hours; "Send Mo home" stops any sweep for MO_HOME hours
+   (tools/ceo_inbox.py mo). Two clicks, like the power button: calling him spends allowance. */
+let moArmed = false;
+function renderMo(){
+  const b = $("moBtn"), row = newest("mo"), s = live.brief && live.brief.sweep, on = !!(s && s.on);
+  b.hidden = !live.available || !!(live.brief && live.brief.off);
+  b.disabled = !!row;
+  b.className = on ? "btn go" : "btn";
+  b.textContent = row ? (row.note === "call" ? "Mo is on his way" : "Mo is packing up")
+    : on ? (moArmed ? "Click again: send Mo home" : "Send Mo home") : (moArmed ? "Click again: Mo sweeps for 2 h" : s && s.home ? "Mo is home" : "Call Mo");
+  b.title = on ? `Mo is sweeping: ${s.why}. Sending him home stops the sweep for 6 hours; work goes back to the usual budget pace.`
+    : "Mo sweeps the pending work for 2 hours from the next check: every lane works, past the budget pace, finishing work in flight first. Your holds, the lab cap and 85% of the 5-hour window still stop him.";
+}
+$("moBtn").addEventListener("click", async () => {
+  if(!moArmed){ moArmed = true; renderMo(); setTimeout(() => { moArmed = false; renderMo(); }, 6000); return; }
+  moArmed = false; $("moBtn").disabled = true;
+  const on = !!(live.brief && live.brief.sweep && live.brief.sweep.on);
+  try { await decide("", "mo", on ? "home" : "call", on ? "Send Mo home" : "Call Mo"); }
+  catch(e){ $("banner").textContent = writeError(e); }
+  renderMo();
+});
 /* Sync: lane 1 rebuilds and re-uploads the brief at its next check, and starts no work for it (tools/ceo_inbox.py sync) */
 function renderSync(){
   const b = $("syncBtn"), row = newest("sync"), l1 = ((live.brief && live.brief.lanes) || []).find(l => String(l.lane) === "1");
@@ -2042,8 +2066,8 @@ setInterval(sampleStep, 9000);
   live.available = true; live.db = db;
   let firstEvents = true;
   try {
-    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); renderWork(); renderSync(); setTimeout(maybePop, 1500); }, () => {});
-    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderBoards(); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderSync(); renderLab(); }, () => {});
+    db.doc("brief/current").onSnapshot(d => { live.brief = d.exists ? d.data() : null; renderAlerts(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderTray(); renderPower(); renderWork(); renderSync(); renderMo(); setTimeout(maybePop, 1500); }, () => {});
+    db.collection("ceo_inbox").orderBy("at","desc").limit(40).onSnapshot(s => { live.inbox = s.docs.map(d => d.data()); renderBoards(); renderTray(); renderMove(); renderDetail(); if(tab === "diary") renderDiary(); renderRefresh(); renderPower(); renderWork(); renderSync(); renderMo(); renderLab(); }, () => {});
     db.collection("workers").onSnapshot(s => { live.workers = Object.fromEntries(s.docs.map(d => [d.id, d.data()])); renderAlerts(); decideMode(); if(mode === "live"){ renderRoster(); renderDetail(); } }, () => {});
     db.collection("events").orderBy("at","desc").limit(20).onSnapshot(s => {
       live.events = s.docs.map(d => d.data());

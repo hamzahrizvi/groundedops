@@ -22,7 +22,7 @@ from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E4
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import (STUCK, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
-                         stuck, stuck_why, sweep, work_mode)
+                         MO_HOME, stuck, stuck_why, sweep, work_mode)
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
@@ -261,7 +261,9 @@ def brief(ops, repo, now=None, usage=None):
             "minutes_old": None if old == float("inf") else round(old)}, "running": running,
             "mode": dict(zip(("mode", "why"), work_mode(ops, week, next_reset(now), now)), every=every(ops)), "moving": moving, "stalled": stalled, "off": is_off(ops),
             # the page's Cleaner: on in the last hours before the reset while the week has allowance left (office_next.sweep)
-            "sweep": dict(zip(("on", "why"), sweep(ops, week, next_reset(now), now)), until=next_reset(now).isoformat(timespec="seconds")),
+            "sweep": dict(zip(("on", "why"), sweep(ops, week, next_reset(now), now)), until=next_reset(now).isoformat(timespec="seconds"),
+                          home=os.path.exists(os.path.join(ops, "state", "mo_home"))
+                          and time.time() - os.path.getmtime(os.path.join(ops, "state", "mo_home")) < MO_HOME * 3600),
             "lanes": [{"lane": n, "cron": lane_cron_now(ops, n), "jitter": _jitter(ops, n)} for n in (1, 2, 3)],   # the page's countdown
             "todo": todo, "items": fit(cards), "alerts": alerts(ops, cards, stalled, is_off(ops), repo, now),
             "report": open(reports[-1], encoding="utf-8").read()[:12000] if reports else ""}

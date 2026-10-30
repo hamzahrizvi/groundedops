@@ -71,6 +71,13 @@ MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2), "sweep": (8, 
 # budget pace, and the "sweep" caps above apply. Holds, the office switch, the lab cap and SWEEP_FIVE still stop it;
 # OPS/state/no_sweep switches it off.
 SWEEP_HOURS, SWEEP_LEFT, SWEEP_FIVE = 3, 10, 85
+# Mo's batches (the CEO, 2026-10-30): from Thursday 00:00 UTC (BATCH_FROM hours before the reset), while the week is
+# BATCH_PACE times ahead of its pace (about 60% left on Thursday, less as Friday nears), he sweeps the last BATCH_MIN
+# minutes before each 5-hour window resets: what is left of that window would expire anyway, and a fresh one follows.
+# The 5-hour reset time is OPS/state/usage.json "r5" (written from get_usage by dispatch.md step 1).
+BATCH_FROM, BATCH_PACE, BATCH_MIN, BATCH_FIVE = 43, 2.3, 30, 95
+# The page's "Call Mo" sweeps for MO_CALL hours from the press; "Send Mo home" stops any sweep for MO_HOME hours.
+MO_CALL, MO_HOME = 2, 6
 MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, merges are serialized
 RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that picks it up (take stamps it, end_tick removes it)
 IDLE_EVERY = 3        # ponytail: days between discovery runs (security, audit, rnd, marketing) while nothing else waits
@@ -231,12 +238,39 @@ def sweep_rank(line):
     return SWEEP_ORDER.index(dept) if dept in SWEEP_ORDER else len(SWEEP_ORDER) + (dept == "dev")
 
 
-def sweep(ops, week, resets, now):
-    """(on, why): the cleaner's sweep, the last SWEEP_HOURS before the weekly reset with SWEEP_LEFT % or more unspent."""
+def five_reset(ops):
+    """When the current 5-hour window resets (usage.json "r5"), or None if unknown or already past."""
+    try:
+        r = datetime.datetime.fromisoformat(json.load(open(os.path.join(ops, "state", "usage.json"), encoding="utf-8"))["r5"].replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return r if r > datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1) else None
+
+
+def _since(ops, name):
+    """Hours since OPS/state/<name> was written, or None."""
+    p = os.path.join(ops, "state", name)
+    return (time.time() - os.path.getmtime(p)) / 3600 if os.path.exists(p) else None
+
+
+def sweep(ops, week, resets, now, r5=None):
+    """(on, why): Mo's sweep. On when you called him (MO_CALL hours), in the last SWEEP_HOURS before the weekly reset with
+    SWEEP_LEFT % unspent, or in a batch: the last BATCH_MIN minutes of a 5-hour window, from BATCH_FROM hours before the
+    reset, while the week is BATCH_PACE times ahead of its pace. Off while the office is off, OPS/state/no_sweep exists,
+    or you sent him home in the last MO_HOME hours. `r5` (the 5-hour reset) defaults to usage.json's."""
     left, to_go = 100 - week, (resets - now).total_seconds()
-    if is_off(ops) or os.path.exists(os.path.join(ops, "state", "no_sweep")) or not 0 < to_go <= SWEEP_HOURS * 3600 or left < SWEEP_LEFT:
+    home, called = _since(ops, "mo_home"), _since(ops, "mo_called")
+    if is_off(ops) or os.path.exists(os.path.join(ops, "state", "no_sweep")) or (home is not None and home < MO_HOME) or left < SWEEP_LEFT:
         return False, ""
-    return True, f"the cleaner's sweep: {left:.0f}% of the week left, {to_go / 3600:.1f} h to the reset"
+    if called is not None and called < MO_CALL:
+        return True, f"you called Mo: {left:.0f}% of the week left, until {MO_CALL - called:.1f} h from now"
+    if 0 < to_go <= SWEEP_HOURS * 3600:
+        return True, f"the cleaner's sweep: {left:.0f}% of the week left, {to_go / 3600:.1f} h to the reset"
+    r5 = r5 or five_reset(ops)
+    pace = 100 * to_go / WEEK.total_seconds()
+    if r5 and 0 < to_go <= BATCH_FROM * 3600 and left >= BATCH_PACE * pace and 0 < (r5 - now).total_seconds() <= BATCH_MIN * 60:
+        return True, f"Mo's batch: {left:.0f}% of the week left with {pace:.0f}% of the week to go; the 5-hour window resets at {r5:%H:%M} UTC"
+    return False, ""
 
 
 def work_mode(ops, week, resets, now):
@@ -582,7 +616,7 @@ def entries(ops, repo, five, week, resets, now, taken):
     since two lanes starting together both see the same usage figures."""
     held, forced = holds(ops, now), run_now(ops)
     mode = MODES[work_mode(ops, week, resets, now)[0]]
-    swept = sweep(ops, week, resets, now)[0]
+    swept, swept_why = sweep(ops, week, resets, now)   # a batch may run the 5-hour window to BATCH_FIVE: it resets within the half hour
     if is_off(ops):
         held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken, mode)}
     cost = lambda k: (0, 0) if taken[k].get("lane") == "hand" else COST.get("dev" if k.startswith("dev-") else k, (0, 0))   # a blind test spends no Claude usage
@@ -605,7 +639,7 @@ def entries(ops, repo, five, week, resets, now, taken):
                 f"{mode[1]} builds already running" if dept == "dev" and building >= mode[1] else
                 f"5-hour window at {five}%" if pressed and five >= 90 else
                 None if pressed else
-                (f"5-hour window at {five}%" if five >= SWEEP_FIVE else
+                (f"5-hour window at {five}%" if five >= (BATCH_FIVE if swept_why.startswith("Mo's batch") else SWEEP_FIVE) else
                  f"cannot finish before the reset (usually {TYPICAL.get(dept, 60)} min)" if not sweep_fits(dept, resets, now) else
                  None) if swept else   # the sweep skips the pace, not a hold
                 over_budget(dept, five, week, resets, now))
@@ -641,6 +675,19 @@ def selftest():
         w("state/no_sweep")
         assert work_mode(ops, 50, resets, late) == ("high", "set by you"), "the CEO's switch-off"
         os.remove(os.path.join(ops, "state", "no_sweep"))
+        # Mo's batches: Thursday on, well ahead of pace, only in the last BATCH_MIN minutes of a 5-hour window
+        thu = resets - datetime.timedelta(hours=40)   # 40 h to go = 24% of the week; 2.3x that is 55% left needed
+        soon, later = thu + datetime.timedelta(minutes=20), thu + datetime.timedelta(hours=2)
+        assert sweep(ops, 40, resets, thu, r5=soon)[1].startswith("Mo's batch"), "60% left on Thursday, window resets in 20 min"
+        assert not sweep(ops, 40, resets, thu, r5=later)[0], "not with the window two hours from resetting"
+        assert not sweep(ops, 50, resets, thu, r5=soon)[0], "50% left is not ahead enough on Thursday"
+        assert not sweep(ops, 20, resets, resets - datetime.timedelta(hours=60), r5=resets - datetime.timedelta(hours=59, minutes=50))[0], "not before Thursday"
+        # "Call Mo" sweeps now; "Send Mo home" stops even the end-of-week sweep
+        w("state/mo_called")
+        assert sweep(ops, 70, resets, thu)[1].startswith("you called Mo")
+        os.remove(os.path.join(ops, "state", "mo_called")); w("state/mo_home")
+        assert not sweep(ops, 50, resets, late)[0], "sent home"
+        os.remove(os.path.join(ops, "state", "mo_home"))
         # finishing beats starting: a Dev build (usually 3.5 h) does not start 1 h before the reset, a Security review does;
         # merges go first, then Security, then the product owner, Dev last
         hour = resets - datetime.timedelta(hours=1)
@@ -913,7 +960,7 @@ def main():
         a.five, a.week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
         if old > 60:
             return print(f"STALE usage figures are {old:.0f} minutes old; start nothing"
-                         ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}} from get_usage to OPS/state/usage.json and run again)')
+                         ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}, "r5": "<5-hour resetsAt>"} from get_usage to OPS/state/usage.json and run again)')
     resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
     print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC;"
           " work mode {} ({})".format(*work_mode(a.ops, a.week, resets, now)))

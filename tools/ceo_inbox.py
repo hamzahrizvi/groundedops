@@ -13,6 +13,8 @@ from the decisions file, and a note is quoted so it can never read as a decision
   done     DONE (any open item the CEO ticks off by hand, e.g. work finished outside the office; ops_ledger shows it as done)
   note     OPS/inbox/ceo/<stamp>.md for the product owner's next triage
   off/on   OPS/state/office_off created/removed: the power button; office_next.py starts nothing while it exists
+  mo       note call: OPS/state/mo_called, Mo sweeps for office_next.MO_CALL hours; note home: OPS/state/mo_home, no sweep
+           for MO_HOME hours (the page's Call Mo / Send Mo home)
   refresh  OPS/state/refresh_request: Customer's blind run goes first (office_next.py); folded into a run under way
   sync     nothing on disk: the lane that applies it re-uploads the office page's brief, and starts no work for it
   run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
@@ -91,6 +93,15 @@ def apply(ops, folder, now=None):
             elif os.path.exists(path):
                 os.remove(path)
             out.append(f"APPLIED {doc_id} {choice}")
+            continue
+        if choice == "mo" and str(d.get("note") or "") in ("call", "home"):   # the page's Call Mo / Send Mo home (office_next.sweep)
+            st_dir = os.path.join(ops, "state")
+            os.makedirs(st_dir, exist_ok=True)
+            keep, drop = ("mo_called", "mo_home") if d["note"] == "call" else ("mo_home", "mo_called")
+            open(os.path.join(st_dir, keep), "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
+            if os.path.exists(os.path.join(st_dir, drop)):
+                os.remove(os.path.join(st_dir, drop))
+            out.append(f"APPLIED {doc_id} mo {d['note']}")
             continue
         if choice == "refresh":   # no item: the dispatcher re-uploads the status figures; office_next.py puts the test run first
             if "customer" in claims(ops):
@@ -229,6 +240,11 @@ def selftest():
         assert got[0].startswith("APPLIED 9 refresh (a test run is under way") and not os.path.exists(req), "folded into the run"
         row("9s", id="", choice="sync")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 9s sync"], "a sync press is applied, nothing filed"
+        st_ = lambda n: os.path.exists(os.path.join(ops, "state", n))
+        row("9m", id="", choice="mo", note="call")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 9m mo call"] and st_("mo_called") and not st_("mo_home")
+        row("9n", id="", choice="mo", note="home")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 9n mo home"] and st_("mo_home") and not st_("mo_called")
         off = os.path.join(ops, "state", "office_off")
         row("10", id="", choice="off")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 10 off"] and os.path.exists(off), "switched off"
