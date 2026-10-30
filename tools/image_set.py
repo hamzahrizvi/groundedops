@@ -12,6 +12,7 @@ import glob, json, os, re, sys
 
 LABEL = re.compile(r"^\[(.+?) p\d+\]", re.M)
 NAME = re.compile(r"^p(\d+)_\d+\.png$")
+CERT = re.compile(r"certific|declaration|conformity|-UL", re.I)   # paperwork: logos and stamps, no product pictures
 BIG = 50   # a manual with this many crops gets 2 questions, else 1 (13 manuals -> 20 questions on 2026-10-22)
 NEED = ("q", "reference", "product", "source", "figure", "must_include")
 
@@ -24,16 +25,19 @@ def docs_by_stem(run):
 def plan(run, figs, limit=None):
     """Each document with crops goes to the manuals file holding the fewest documents (its own manual), ties by name.
     limit (the weekly run's few picture questions): one question each for that many documents, those used least in
-    earlier picture sets first, so the weeks rotate through the manuals."""
+    earlier picture sets first, then those with the most pictures (a certificate has a logo or two), so the weeks
+    rotate through the real manuals."""
     by, out, docs = docs_by_stem(run), {}, []
     for doc in sorted({d for ds in by.values() for d in ds}):
         side = os.path.join(figs, doc, "figures.json")
         n = len(json.load(open(side, encoding="utf-8")).get("figures") or {}) if os.path.isfile(side) else 0
-        if n: docs.append((doc, 2 if n >= BIG else 1))
+        if n: docs.append((doc, n))
     if limit:
         used = [c.get("source") for f in glob.glob(os.path.join(os.path.dirname(os.path.abspath(run)), "*", "cases.json"))
                 for c in json.load(open(f, encoding="utf-8")).get("cases", [])]
-        docs = [(d, 1) for d, _ in sorted(docs, key=lambda x: (used.count(x[0]), x[0]))[:int(limit)]]
+        docs = [(d, 1) for d, _ in sorted((x for x in docs if not CERT.search(x[0])), key=lambda x: (used.count(x[0]), -x[1], x[0]))[:int(limit)]]
+    else:
+        docs = [(d, 2 if n >= BIG else 1) for d, n in docs]
     for doc, n in docs:
         stem = min((s for s in by if doc in by[s]), key=lambda s: (len(by[s]), s))
         out.setdefault(stem, []).append(f"{doc}={n}")
