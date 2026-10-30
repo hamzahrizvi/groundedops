@@ -43,7 +43,7 @@ mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
 rm -f "$OUT/FAILED"   # an earlier attempt's (a cap stop is retried once the cap rises)
 export PYTHONIOENCODING=utf-8 HF_HUB_OFFLINE=1 GO_CODE="$DEV/src" GO_DATA="${GO_DATA:-$REPO/src}"
 # D-20261010-20: this gate's hidden siblings must not be readable in the live log Dev works beside
-if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --leakcheck "$GO_DATA"/logs*.jsonl "$GO_DATA/faq_gaps.json" --cases "$@")"; then
+if [ $# -gt 0 ] && ! hits="$("$PY" "$REPO/tools/retrofit_gate.py" --dated --leakcheck "$GO_DATA"/logs*.jsonl "$GO_DATA/faq_gaps.json" --cases "$@")"; then
   echo "hidden questions in the live log: $hits" > "$OUT/FAILED"; exit 1
 fi
 BE="${BE:-$REPO/tools/blind_eval.py}"
