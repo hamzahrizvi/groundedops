@@ -89,7 +89,8 @@ _KIND_TITLE = [
 ]
 _KIND_PATH = [
     ("test_script", r"test\s*scripts?"),
-    ("certificate", r"product\s*compliance|cumplimiento|certificat"),
+    # not "ICU Certificate Management": the device's API pages (USB ports, vision parameters), not compliance certificates
+    ("certificate", r"product\s*compliance|cumplimiento|certificat(?!e\s*management)"),
     ("change_notice", r"change\s*notification"),
     ("release_note", r"release\s*notes"),
     ("drawing", r"spare\s*parts"),

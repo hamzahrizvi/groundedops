@@ -574,6 +574,7 @@ def test_kind_of_rules():
         ("Accessing my device in Linux Environment", ["Products", "Biometrics", "Biometric Range FAQ's", "Technical FAQs"], "page", "manual"),
         ("NV200S Range User Manual", [], "bundle", "manual"),
         ("Get Device Status", ["Products", "Biometrics", "API Specifications"], "page", "manual"),
+        ("Get Vision Parameters", ["Products", "Biometrics", "Docs Due Release", "ICU Certificate Management"], "page", "manual"),
     ]
     for t, p, k, want in cases:
         assert cs.kind_of(t, p, k) == want, (t, cs.kind_of(t, p, k), want)
