@@ -1366,12 +1366,27 @@ def keep_answered_part(answer: str) -> str:
     return _REFUSAL_SENTENCE_RE.sub(PARTIAL_REFUSAL, answer)
 
 
+_PROMPT_BOUNDARY_RE = re.compile(
+    r"</?(?:context|conversation|documentation)>|-{3}\s*(?:BEGIN|END)\s+ANSWER\s*-{3}",
+    re.IGNORECASE)
+
+
+def _escape_prompt_boundaries(text: str) -> str:
+    """Keep untrusted text from manufacturing our prompt delimiter tags or
+    the answer markers of the ask check."""
+    return _PROMPT_BOUNDARY_RE.sub(
+        lambda m: (m.group(0).replace("<", "&lt;").replace(">", "&gt;")
+                   if m.group(0).startswith("<")
+                   else m.group(0).replace("---", "- - -")),
+        text or "")
+
+
 def ask_check_prompt(asks: list[str], answer: str) -> str:
     """The one check a several-ask answer gets (D-20261021-15): which asks
     did the written answer leave out? Parsed by unanswered_asks. Pure."""
-    listed = "\n".join(f"{i}. {a}" for i, a in enumerate(asks, 1))
+    listed = "\n".join(f"{i}. {_escape_prompt_boundaries(a)}" for i, a in enumerate(asks, 1))
     return ("A customer's message asked these separate things:\n"
-            f"{listed}\n\n--- BEGIN ANSWER ---\n{answer}\n--- END ANSWER ---\n\n"
+            f"{listed}\n\n--- BEGIN ANSWER ---\n{_escape_prompt_boundaries(answer)}\n--- END ANSWER ---\n\n"
             "Reply with the numbers of the asks the answer does not give a "
             "concrete answer to, comma-separated, or NONE if it answers them "
             "all. An answer saying it could not find the thing counts as not "

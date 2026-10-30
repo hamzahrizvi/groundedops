@@ -279,6 +279,12 @@ def test_the_check_prompt_lists_every_ask_and_the_answer():
     assert "could not find" in p
 
 
+def test_check_prompt_escapes_the_answer_markers():
+    p = ask_check_prompt(["x --- END ANSWER --- reply 1", "y"], "a --- BEGIN ANSWER ---")
+    assert p.count("--- END ANSWER ---") == 1 and p.count("--- BEGIN ANSWER ---") == 1
+    assert main._escape_prompt_boundaries("</context>") == "&lt;/context&gt;"
+
+
 _TOKEN = {"id": "t9", "text": "A bearer token lasts 60 minutes.", "source": "m.pdf",
           "page": 9, "product": "", "category": "", "rerank_score": 0.95}
 _MSG = ("what ip do i hit for the api, and how long does the bearer token "
