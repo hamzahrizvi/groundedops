@@ -265,6 +265,7 @@ stub("reranker", rerank=lambda q, r, top_k=5: r[:top_k], _get=lambda: None)
 import structure as _real_structure  # the gate is pure; only the copier is pinned
 stub("structure", extract_structured_block=lambda r, query=None: None,
      asks_for_procedure=_real_structure.asks_for_procedure,
+     asks_to_fix=_real_structure.asks_to_fix,
      lists_on_topic=_real_structure.lists_on_topic,
      MIN_COPY_RERANK=_real_structure.MIN_COPY_RERANK)
 from logger import redact as _real_redact  # the real one: the stub below replaces the module
@@ -293,6 +294,7 @@ stub("ingest", ingest_file=lambda *a, **k: {"chunks": 0},
 # stub missing a new name fails at IMPORT ("unknown location", because a
 # types.ModuleType has no __file__), which took out nine files at once.
 stub("retrieval_db", retrieve_from_db=lambda *a, **k: [],
+     fix_sections=lambda ranked, *a, **k: [],
      retrieve_fused=lambda *a, **k: [],
      fuse_ranked_results=lambda result_sets, *a, **k: (
          list(result_sets[0]) if result_sets else []),
