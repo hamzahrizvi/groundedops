@@ -159,6 +159,132 @@ def _code_readout(labels: tuple, rows: list[list[str]]) -> list[str]:
     return out
 
 
+# COUNT TABLES UNDER A NON-BLANK HEADER (D-20261026-04). The shared "ITL
+# Device Flash Codes" document writes its tables as
+#
+#     BV Range (BV20, BV30, BV50 and BV100)          <- a plain text line
+#     LED Colour Status (Flashes) | Description | Recommended Action
+#     Long | Short |
+#     4x | 1x | Power Supply to Low | Check power supply
+#     2x | Power Supply to high                      <- 4 long, 2 short
+#
+# _code_labels wants a blank header[1] and plain integers, so none of it was
+# read out; "4 long 2 short" was answered with the 1-long-4-short row. The
+# product line is not a section either (every chunk has section ""), and it
+# is often in the chunk before. code_groups reads these tables line by line,
+# from the chunk above through this one, and names the product line each
+# table sits under.
+_COUNT_RE = re.compile(r"^(\d+)\s*x?$", re.I)
+_MODEL_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{2,4}-?\d{1,4}[A-Z]*\+?(?![A-Za-z0-9])")
+_CODES_LINE = re.compile(r"\bcodes?\s*$", re.I)
+# A read-out line spell_out wrote (at ingest, or on an earlier pass): not
+# document text, so it neither ends a table nor names one.
+_READOUT = re.compile(r"^(Read cell by cell\b.*:|.*\b\d+ and .*\b\d+: .*)$")
+
+
+def _count(v: str) -> int | None:
+    """4 for "4", "4x", "4 x"; else None."""
+    m = _COUNT_RE.match((v or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def _sub_header(line: str) -> tuple[str, str] | None:
+    """("Long", "Short") for a sub-header row "Long | Short |", else None."""
+    if not is_row(line):
+        return None
+    cs = cells(line)
+    while cs and not cs[-1]:
+        cs.pop()
+    if (len(cs) == 2 and all(c and len(c) <= 15 and _count(c) is None
+                             and _CODE_AXIS.search(c) for c in cs)):
+        return cs[0], cs[1]
+    return None
+
+
+def _code_rows(lines: list[str]) -> list:
+    """Per line: (table no, heading, read-out line) for a count row, else None."""
+    recs: list = [None] * len(lines)
+    pending, table, no = None, None, 0
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not s or (not is_row(s) and _READOUT.match(s)):
+            continue
+        if not is_row(s):
+            table = None
+            if len(s) <= 80 and not s.endswith((".", ":")) and _MODEL_RE.search(s):
+                pending = s
+            elif not _CODES_LINE.search(s):
+                pending = None
+            continue
+        cs = cells(s)
+        if table and cs == table["header"]:
+            continue                  # a header repeated on the next page
+        nxt = next((l.strip() for l in lines[i + 1:] if l.strip()), "")
+        sub = _sub_header(nxt)
+        if sub and len(cs) >= 2 and cs[0] and cs[1] and _count(cs[0]) is None:
+            no += 1
+            table = {"no": no, "heading": pending, "header": cs, "first": None,
+                     "sub": nxt, "labels": [l if "flash" in l.lower()
+                                            else f"{l} flashes" for l in sub]}
+            pending = None            # one heading feeds one table
+            continue
+        if not table or s == table["sub"]:
+            continue
+        while cs and not cs[0]:
+            cs = cs[1:]
+        a = _count(cs[0]) if len(cs) >= 2 else None
+        if a is None:
+            continue
+        b = _count(cs[1])
+        if b is not None:
+            table["first"] = a
+            desc = cs[2] if len(cs) >= 3 else ""
+        elif table["first"] is not None:
+            a, b, desc = table["first"], a, cs[1]
+        else:
+            continue
+        if desc:
+            l0, l1 = table["labels"]
+            recs[i] = (table["no"], table["heading"], f"{l0} {a} and {l1} {b}: {desc}")
+    return recs
+
+
+def code_groups(text: str, above: str | None = None
+                ) -> list[tuple[str | None, list[str]]]:
+    """[(heading or None, read-out lines)] for the count-table rows of `text`.
+
+    `above` is the chunk before in its document: it sets the table, the long
+    count and the heading that the first rows of `text` continue. A chunk
+    opens with an overlap of the one above (the cut tail of a line, its last
+    rows, a header carry_table_context put back); those rows keep the reading
+    they had there, never one replayed from the end of `above`.
+    """
+    body = split_prefix(text)[1].split("\n")
+    prev = split_prefix(above)[1].split("\n") if above else []
+    tail = [l.strip() for l in prev[-40:] if l.strip()]
+    k = 0
+    while k < len(body) and (not body[k].strip()
+                             or any(t.endswith(body[k].strip()) for t in tail)):
+        k += 1
+    recs = _code_rows(prev + body[k:])
+    n = len(prev)
+    mine = []
+    for line in body[:k]:
+        s = line.strip()
+        if s and is_row(s):
+            j = next((j for j in range(n - 1, max(n - 40, 0) - 1, -1)
+                      if prev[j].strip().endswith(s)), None)
+            if j is not None and recs[j]:
+                mine.append(recs[j])
+    mine += [r for r in recs[n:] if r]
+    groups: dict[int, tuple[str | None, list[str]]] = {}
+    for no, heading, ln in mine:
+        g = groups.setdefault(no, (heading, []))
+        if ln not in g[1]:
+            g[1].append(ln)
+    return list(groups.values())
+
+
 def _context_above(above: str | None):
     """What a continuation chunk needs from the chunk before it:
     (width, flash-code labels or None, last data row filled), or None when
@@ -250,6 +376,12 @@ def spell_out(text: str, above: str | None = None) -> str:
                     out.extend(reading)
         pos = end
     out.extend(lines[pos:])
+    done = "\n".join(out)
+    for heading, reading in code_groups(text, above):
+        new = [ln for ln in reading if ln not in done]
+        if new:
+            out.append(f'Read cell by cell under "{heading}":' if heading else READ_MARK)
+            out.extend(new)
     return "\n".join(out)
 
 
