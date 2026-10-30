@@ -2271,6 +2271,31 @@ def _product_names() -> dict[str, str]:
     return out
 
 
+def _variant_short_forms(names: dict[str, str],
+                         aliases: dict[str, list[str]]) -> dict[str, list[str]]:
+    """`aliases` plus the short forms of every variant named "<qualifier>
+    <family name>" (D-20261025-11). The Global SMART Coin System is "G-SCS"
+    and the Compact "C-SCS" in their own manuals; the catalogue has "SCS" for
+    the SMART Coin System only, so "G-SCS" scoped to the plain SCS and got its
+    MCBF. Each one-word alias of the family gives the variant "<qualifier>
+    <alias>" and "<initials><alias>"."""
+    words = lambda t: re.findall(r"[a-z0-9]+", (t or "").lower())  # noqa: E731
+    out = {k: list(v) for k, v in aliases.items()}
+    for v, vname in names.items():
+        wv = words(vname)
+        for f, fname in names.items():
+            wf = words(fname)
+            if (v == f or v.endswith("_general") or f.endswith("_general")
+                    or not wf or len(wv) <= len(wf) or wv[-len(wf):] != wf):
+                continue
+            q = wv[:-len(wf)]
+            for a in aliases.get(f, ()):
+                if len(words(a)) == 1:
+                    out.setdefault(v, []).extend(
+                        [f"{' '.join(q)} {a}", "".join(w[0] for w in q) + a])
+    return out
+
+
 def _product_aliases() -> dict[str, list[str]]:
     """product key -> extra names the catalogue says this product goes by.
 
@@ -2294,7 +2319,7 @@ def _product_aliases() -> dict[str, list[str]]:
                     out[key] = [str(a) for a in raw if str(a).strip()]
     except Exception as exc:
         logger.warning(f"Could not read product aliases: {exc}")
-    return out
+    return _variant_short_forms(_product_names(), out)
 
 
 def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:
@@ -2553,8 +2578,10 @@ def _products_named_in(query: str, candidates: list[str],
         prefixes = hit_forms + (family if key == selected else [])
         for form in _product_alias_tokens(key, names.get(key, ""),
                                           aliases.get(key, ())):
-            rest = next((form[len(p):] for p in prefixes
-                         if form != p and form.startswith(p)), "")
+            # Either side: "MyCheckr mini" after the family, "Compact SMART Coin System" before it (D-20261025-11).
+            rest = next((form[len(p):] if form.startswith(p) else form[:-len(p)]
+                         for p in prefixes
+                         if form != p and (form.startswith(p) or form.endswith(p))), "")
             if len(rest) >= 3 and not rest.isdigit() and rest in runs:
                 hits.append((len(rest), key, rest))
                 break
@@ -2571,6 +2598,45 @@ def _products_named_in(query: str, candidates: list[str],
     kept = {key for key, form in forms.items()
             if not any(other != form and form in other
                        for other in forms.values())}
+    # A FAMILY NAME SHARED BY SEVERAL PRODUCTS (D-20261025-11). "SMART
+    # Hopper" is an alias of the SMART Coin System, but it is also the start
+    # of "Smart Hopper 3": "our smart hopper is flashing red 4 times" in a
+    # Hopper 3 chat was scoped to the Coin System and got its feeder row
+    # (C20261029-37). An alias whose words begin another product's display
+    # name names that whole family: the chat's product when it is one of
+    # them, otherwise no one product (an unscoped question then asks which).
+    def _words(t):
+        return re.findall(r"[a-z0-9]+", (t or "").lower())
+
+    def _sharers(key):
+        if any(f in runs for f in _product_alias_tokens(key, names.get(key, ""))):
+            return None
+        typed = [a for a in aliases.get(key, ())
+                 if re.sub(r"[^a-z0-9]+", "", a.lower()) in runs]
+        out = set()
+        for a in typed:
+            wa = _words(a)
+            s = {b for b, bn in names.items()
+                 if b != key and len(_words(bn)) > len(wa) and _words(bn)[:len(wa)] == wa}
+            if not s:
+                return None
+            out |= s
+        return out or None
+
+    for key in sorted(kept):
+        shared = _sharers(key)
+        if shared is not None:
+            kept.discard(key)
+            if selected and selected in shared | {key}:
+                kept.add(selected)
+    # In a variant's own chat its family's name is the variant, unless the
+    # question compares them: "swapping old SCS units for the compact one,
+    # does the compact still support payout by denomination" in a Compact
+    # chat is the Compact's question (C20261025e-11); "compact vs the normal
+    # smart coin system" stays two products (C20261025e-14).
+    if selected in kept and not _is_comparison(query):
+        kept = {k for k in kept
+                if k == selected or not _is_family_parent(k, selected)}
     return sorted(kept)
 
 
@@ -2656,15 +2722,18 @@ def _category_keys() -> set[str]:
 def _is_family_parent(named: str, selected: str) -> bool:
     """True when `named` is the family `selected` belongs to: its display
     name is a strict prefix of the selected product's name or an alias,
-    letter for letter ("MyCheckr" -> "MyCheckr mini")."""
+    letter for letter ("MyCheckr" -> "MyCheckr mini"), or a strict word-suffix
+    of it ("SMART Coin System" -> "Compact SMART Coin System", D-20261025-11)."""
     names = _product_names()
     flat = lambda t: re.sub(r"[^a-z0-9]+", "", (t or "").lower())  # noqa: E731
     parent = flat(names.get(named, ""))
     if not parent:
         return False
+    pw = re.findall(r"[a-z0-9]+", names.get(named, "").lower())
     for form in [names.get(selected, "")] + list(_product_aliases().get(selected) or []):
         f = flat(form)
-        if f != parent and f.startswith(parent):
+        w = re.findall(r"[a-z0-9]+", (form or "").lower())
+        if (f != parent and f.startswith(parent)) or (len(w) > len(pw) and w[-len(pw):] == pw):
             return True
     return False
 
