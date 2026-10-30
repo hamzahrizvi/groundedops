@@ -83,6 +83,23 @@ def test_numbered_passages_keeps_the_label():
         == "[Passage 1 of 1, from X]\na"
 
 
+def test_the_cap_keeps_a_table_read_out():
+    """D-20261026-04: the BV flash-code chunk is ~1,550 characters, so its
+    read-out was cut off by the plain cap before either model saw it."""
+    cap = main.CHUNK_CHAR_CAP
+    body = "x" * (cap - 50)
+    readout = '\nRead cell by cell under "BV Range":\nLong flashes 4 and Short flashes 2: PSU high'
+    text = body + readout
+    assert len(text[:cap]) == cap and "Long flashes 4" not in text[:cap]
+    assert main._capped(text) == text
+    assert "Long flashes 4" in main._numbered_passages([{"text": text}])
+    # an over-long body is still cut to the cap; the read-out is kept whole
+    long = "y" * (cap * 2) + readout
+    assert main._capped(long) == "y" * cap + readout
+    # no read-out: the plain cap, as before
+    assert main._capped("z" * (cap * 2)) == "z" * cap
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
