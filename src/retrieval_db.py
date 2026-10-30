@@ -231,13 +231,14 @@ _SECONDARY = re.compile(
     r"|^(?:cn|wr|pa|ga)[\s_-]?\d{3}|^[a-z]{2}\d{5}", re.I)
 
 # A synced Confluence page's kind, from its title and folder (confluence_sync.kind_of), stored by the
-# sync in this file as {document name: kind} (D-20261024-10). A stored change notice, release note or
-# certificate goes on the second shelf whatever its name; a document not in the file (an upload) still goes by its name.
+# sync in this file as {document name: kind} (D-20261024-10). A stored release note or certificate
+# goes on the second shelf whatever its name; a document not in the file (an upload) still goes by its name.
 # Read once per process; a hand edit takes effect at the next restart, and a check or sync never
 # overwrites a kind already stored.
-# Only these stored kinds move a page to the second shelf (D-20261024-10 round 2: a test-script page moved there cost
-# global_smart_coin_system-03; no number shows moving scripts or drawings helps, so they go by the name rule).
-SECONDARY_KINDS = frozenset({"certificate", "change_notice", "release_note"})
+# Only these stored kinds move a page to the second shelf. Test scripts and drawings go by the name rule
+# (round 2: a test-script page moved there cost global_smart_coin_system-03). Change notices too (round 3):
+# accessory and build-revision notices hold the part numbers customers order from (nv200s-02 went wrong x3).
+SECONDARY_KINDS = frozenset({"certificate", "release_note"})
 _KINDS_PATH = os.getenv("DOC_KINDS_PATH", "doc_kinds.json")
 _kinds: dict | None = None
 
