@@ -397,7 +397,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `BACKUP_ALLOW_PLAINTEXT` | *(unset)* | Permit an unencrypted export. Off: an archive holds password hashes and customer contact details. |
 | `BACKUP_MAX_BYTES` | `4294967296` | Ceiling on what an uploaded archive may expand to. |
 | `BACKUP_SNAPSHOT_DIR` | `backup_snapshots` | Where the automatic pre-restore snapshot is written. |
-| `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
+| `ADMIN_ALLOWED_IPS` | *(empty)* | Addresses or CIDR ranges (an entry ending in a dot, like `203.0.113.`, still works as a range) allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
 | `ADMIN_NETWORK_URL` | *(auto-detected)* | Exact console origin to advertise in the sidebar, e.g. `http://192.168.1.50:8000`. Set this when VPNs, proxies, or multiple adapters make automatic LAN-address selection ambiguous. |
 | `BOOTSTRAP_TOKEN` | *(empty)* | Required in an `X-Bootstrap-Token` header for first-run root creation **over the network**. Unproxied/LAN setup needs no token. Clear it once the root account exists. |
 | `TRUST_PROXY` | *(unset)* | Honour `X-Forwarded-For`. Set only with a proxy you control in front — otherwise the header is forgeable and anonymous quotas can be bypassed. |

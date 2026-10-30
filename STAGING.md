@@ -28,7 +28,7 @@ That default was written when the admin surface had one shared password and
 no accounts. It now has real accounts with levels, so opening it for internal
 testing is reasonable — but it stays a deliberate act:
 
-- `ADMIN_ALLOWED_IPS` — comma-separated IP **prefixes** allowed to reach the
+- `ADMIN_ALLOWED_IPS` — comma-separated addresses or CIDR ranges (`198.51.100.4` is that one host, `203.0.113.0/24` a range; an entry ending in a dot such as `203.0.113.` still works as a /24) allowed to reach the
   admin surface from outside. Empty (default) keeps it LAN-only.
 - It is an allowlist **in front of** authentication, not instead of it. A
   request from an allowed address still has to sign in.
