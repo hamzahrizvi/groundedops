@@ -260,6 +260,43 @@ def is_price_question(q: str) -> bool:
             and not _asks_something_else(q))
 
 
+# A price the documents themselves state (2026-10-30): the Repair
+# Information pages list Level 3 repair prices in GBP/EUR/USD, and an
+# uploaded price list would too, so a price question is deflected only when
+# the passages it retrieves hold no price. Both a currency AND a price word,
+# so the BV30's "$5 note" or a "£1 coin" is not read as a price.
+#
+# The passage must also price the THING asked about: "how much does the NV9
+# cost" retrieves the NV9 repair table, and quoting a repair price as the
+# unit price is worse than the sales reply. So the question's own words,
+# less product names, model codes and price/filler words ("level 3 repair"),
+# must appear in the passage. A question with nothing left ("how much is the
+# NV9") asks the product's own price, which only a price list states.
+# ponytail: price lists are recognised by file name; read the rows if an
+# operator's list is named otherwise.
+_CURRENCY = re.compile(r"\b(?:GBP|EUR|USD)\b|[£€$]\s?\d", re.I)
+_PRICE_WORD = re.compile(r"\b(?:pric|cost|charg|fee)\w*", re.I)
+_PRICE_LIST = re.compile(r"pric|tariff|rate.?card", re.I)
+_PRICE_FILLER = {"how", "much", "does", "what", "would", "will", "can", "get", "you", "your",
+                 "they", "them", "one", "unit", "gbp", "eur", "usd", "pound", "euro", "dollar",
+                 "pric", "cost", "charg", "fee", "quot", "exact", "current", "today"}
+
+
+def documents_price(question: str, passages: list[dict], names=()) -> bool:
+    """True when a retrieved passage states a price for what `question` asks
+    about. `names` are product names, which say whose price, not what."""
+    drop = {_stem(w) for w in _PRICE_FILLER} | {t for n in names for t in _terms(n)}
+    item = {t for t in _terms(question) if not any(c.isdigit() for c in t)
+            and not _PRICE_WORD.match(t) and t not in drop}
+    for p in passages:
+        text = p.get("text") or ""
+        if not (_CURRENCY.search(text) and _PRICE_WORD.search(text)):
+            continue
+        if item <= _stems_in(text) if item else _PRICE_LIST.search(p.get("source") or ""):
+            return True
+    return False
+
+
 # ── spec index ────────────────────────────────────────────────────────────
 
 _INDEX: list[dict] | None = None

@@ -160,3 +160,22 @@ def test_a_missing_documents_folder_is_an_empty_spec_index():
     import tempfile
     missing = os.path.join(tempfile.mkdtemp(), "documents")
     assert sales.build_index(missing, {}) == []
+
+
+def test_a_price_the_documents_state_is_searched_not_deflected():
+    """Blind runs (2026-10-30): every repair-price question got the sales
+    reply although the Repair Information pages list the prices."""
+    table = {"source": "NV9 Spectral Range Repair Information.txt",
+             "text": "Level 3 Electronic Repair price:\n| Currency | Price |\n| GBP | 92 |\n| EUR | 107 |"}
+    names = ["NV9 Spectral"]
+    ask = "what is the level 3 repair price for an NV9S in GBP"
+    assert sales.documents_price(ask, [{"text": "Clean the sensors weekly."}, table], names)
+    # the repair table is not the unit price: that one still gets the sales reply
+    assert not sales.documents_price("how much does the NV9 Spectral cost", [table], names)
+    # ... unless a price list states it
+    plist = {"source": "2026 Price List.pdf", "text": "NV9 Spectral unit price GBP 250"}
+    assert sales.documents_price("how much does the NV9 Spectral cost", [table, plist], names)
+    # a currency without a price word, or a price word without a currency, is not a price
+    assert not sales.documents_price("repair price", [{"text": "Insert a $5 note to repair credit."}])
+    assert not sales.documents_price("repair cost", [{"text": "Repair costs less in sleep mode."}])
+    assert not sales.documents_price(ask, [], names)

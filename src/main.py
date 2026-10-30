@@ -1579,7 +1579,8 @@ def _friendly_refusal(scope_key: str | None, product_label: str = "",
     """
     # No sales reply here (D-20261010-01, CEO 2026-10-10): a refusal says what
     # was not found and offers support, whatever buying words the message holds.
-    # Price questions are deflected before the search in _sales_answer.
+    # Price questions are deflected before the search in _sales_answer,
+    # unless the passages they retrieve state a price.
 
     what = f" about the {product_label}" if product_label else ""
     lines = [f"I don't have that in the product documentation{what}."]
@@ -1791,7 +1792,8 @@ def _is_product_scope(scope_key: str | None) -> bool:
         return False
 
 
-def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None):
+def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None,
+                  scope: dict | None = None):
     """A cross-product answer, or None to fall through to the pipeline.
 
     Reads the RAW question as well as the condensed one: condensation
@@ -1852,9 +1854,20 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
                 # sales.is_commercial_question about what the manuals
                 # actually say about pricing.
                 return None
-            # `answer` and `deflect` both deflect a commercial question: the
-            # catalogue answer is assembled from manuals that contain no
-            # prices, and no setting can put a price in a document.
+            # The documents can state a price: the Repair Information pages
+            # list repair prices, and an uploaded price list is searched like
+            # any manual. Blind runs scored "declines although the manual
+            # has it" on every repair-price question while this deflected
+            # before looking. So look first, and deflect only when the
+            # passages hold no price for the model to quote (2026-10-30).
+            try:
+                if sales.documents_price(q, retrieve_from_db(q, top_k=CONTEXT_K, scope=scope),
+                                         _product_names().values()):
+                    logger.info("price question searched: the documents state a price")
+                    return None
+            except Exception as _exc:
+                logger.debug(f"price lookup before deflect skipped: {_exc}")
+            # `answer` and `deflect` both deflect a price nothing documents.
             reply = (policy.value("sales_reply") or "").strip()
             if not reply:
                 return None
@@ -3553,7 +3566,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "response_time": round(total_time, 3),
         }
 
-    _sales = _sales_answer(payload.q, resolved_query, payload.product)
+    _sales = _sales_answer(payload.q, resolved_query, payload.product, _scope)
     # A spec-table answer covers one dimension at most, so several asks go to
     # retrieval instead (D-20261009-09): "bv30 vs nv9usb+ - which draws less
     # running current and which has better MCBF?" got one shared "Maximum
