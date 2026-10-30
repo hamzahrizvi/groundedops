@@ -224,7 +224,7 @@ def _code_rows(lines: list[str]) -> list:
         if sub and len(cs) >= 2 and cs[0] and cs[1] and _count(cs[0]) is None:
             no += 1
             table = {"no": no, "heading": pending, "header": cs, "first": None,
-                     "sub": nxt, "labels": [l if "flash" in l.lower()
+                     "act": None, "sub": nxt, "labels": [l if "flash" in l.lower()
                                             else f"{l} flashes" for l in sub]}
             pending = None            # one heading feeds one table
             continue
@@ -236,16 +236,25 @@ def _code_rows(lines: list[str]) -> list:
         if a is None:
             continue
         b = _count(cs[1])
+        act = ""
         if b is not None:
             table["first"] = a
             desc = cs[2] if len(cs) >= 3 else ""
+            table["act"] = cs[3] if len(cs) >= 4 else None
         elif table["first"] is not None:
             a, b, desc = table["first"], a, cs[1]
+            # A short row with no action cell under an action column: the
+            # document merged its group's action over it, the way it merged
+            # the long count ("4x | 1x | Power Supply to Low | Check power
+            # supply" then "2x | Power Supply to high"). Name it here, or the
+            # verifier refuses the action for the 4-long-2-short row.
+            if len(cs) == 2 and len(table["header"]) >= 3 and table["act"]:
+                act = f". {table['header'][-1]}: {table['act']}"
         else:
             continue
         if desc:
             l0, l1 = table["labels"]
-            recs[i] = (table["no"], table["heading"], f"{l0} {a} and {l1} {b}: {desc}")
+            recs[i] = (table["no"], table["heading"], f"{l0} {a} and {l1} {b}: {desc}{act}")
     return recs
 
 

@@ -185,6 +185,12 @@ def test_bv_long_count_is_carried_to_its_short_rows():
     assert not any("Long flashes 4" in ln and "Cashbox" in ln
                    for ln in out.split(chr(10)))
     assert 'Read cell by cell under "BV Range (BV20, BV30, BV50 and BV100)":' in out
+    # the action cell is merged over the group like the long count: the
+    # 4-long-2-short row names it, so "check the power supply" is supported
+    assert ("Long flashes 4 and Short flashes 2: Power Supply to high. "
+            "Recommended Action: Check power supply") in out
+    # a row with its own action keeps only its row text, nothing appended
+    assert "Long flashes 4 and Short flashes 1: Power Supply to Low" in out.split(chr(10))
 
 
 def test_nv22s_rows_are_read_under_the_heading_in_the_chunk_before():
