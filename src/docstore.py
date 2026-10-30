@@ -38,7 +38,9 @@ import jsonstore
 logger = logging.getLogger(__name__)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-LEGACY_DIR = "/data/source_files"
+# LEGACY_SOURCE_DIR: a test rebuild points this at a missing folder, or
+# --from-store also re-ingests whatever the legacy folder still holds.
+LEGACY_DIR = os.getenv("LEGACY_SOURCE_DIR", "/data/source_files")
 MANIFEST_NAME = "manifest.json"
 _HASH_CACHE: dict[str, tuple[int, int, str]] = {}
 
