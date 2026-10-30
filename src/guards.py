@@ -44,7 +44,7 @@ def is_private_host(host: str) -> bool:
 
 
 @lru_cache(maxsize=8)
-def _trusted_networks(raw: str) -> tuple:
+def _trusted_networks(raw: str, name: str = "TRUSTED_PROXIES") -> tuple:
     nets = []
     for entry in raw.split(","):
         entry = entry.strip()
@@ -53,7 +53,7 @@ def _trusted_networks(raw: str) -> tuple:
         try:
             nets.append(ipaddress.ip_network(entry, strict=False))
         except ValueError:
-            logger.warning(f"TRUSTED_PROXIES: ignoring {entry!r}, not an address or range")
+            logger.warning(f"{name}: ignoring {entry!r}, not an address or range")
     return tuple(nets)
 
 
