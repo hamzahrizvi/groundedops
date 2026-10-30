@@ -22,6 +22,7 @@
       .\serve.ps1 -Install         start automatically at boot
       .\serve.ps1 -Uninstall       stop doing that
       .\serve.ps1 -Status          is it registered, is it up
+      .\serve.ps1 -Lan             with TUNNEL_HOSTNAME set, also listen on the LAN
 
     NAMED TUNNEL
 
@@ -31,6 +32,8 @@
 
     and this uses it. Without it, a quick tunnel is started instead and a
     warning is logged, because that address will not survive a restart.
+    With TUNNEL_HOSTNAME set the backend listens on 127.0.0.1 only; pass
+    -Lan (also with -Install) if other machines must reach host:<port>.
     Creating the tunnel needs a Cloudflare login and a DNS record; both are
     one-time operator steps -- see TUNNEL_SETUP.md.
 #>
@@ -38,6 +41,7 @@
 param(
     [int]$Port = 8000,
     [switch]$Local,           # bind 127.0.0.1 only (no LAN)
+    [switch]$Lan,             # with TUNNEL_HOSTNAME set: still listen on every interface
     [switch]$NoTunnel,
     [switch]$Install,
     [switch]$Uninstall,
@@ -55,6 +59,7 @@ if ($Install) {
     $ps = (Get-Command powershell).Source
     $a  = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Port $Port"
     if ($Local)    { $a += " -Local" }
+    if ($Lan)      { $a += " -Lan" }
     if ($NoTunnel) { $a += " -NoTunnel" }
 
     $action  = New-ScheduledTaskAction -Execute $ps -Argument $a -WorkingDirectory $root
@@ -144,7 +149,11 @@ if (Test-Path $envFile) {
 
 $venvPy = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPy)) { throw "no venv at $venvPy - run install.cmd first" }
-$bind = if ($Local) { "127.0.0.1" } else { "0.0.0.0" }
+# A named tunnel reaches the backend on 127.0.0.1 (see the tunnel block
+# below), so a tunnelled host listens on loopback only: other machines on
+# its network would otherwise reach the backend with no proxy header and
+# count as "the box or the LAN". -Lan opts back in; -Local always wins.
+$bind = if ($Local -or ($tunnelHost -and -not $Lan)) { "127.0.0.1" } else { "0.0.0.0" }
 
 # Another instance already listening is the likeliest operator error (a
 # run.cmd window still open). Binding would just fail, so say why.

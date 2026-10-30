@@ -36,6 +36,13 @@ powercfg /change hibernate-timeout-ac 0
 .\serve.ps1 -Status
 ```
 
+With `TUNNEL_HOSTNAME` set, the backend listens on `127.0.0.1` only: the
+tunnel is the way in, and other machines on this network cannot reach
+`host:8000` directly. `logs\service.log` says `backend started ... on
+127.0.0.1:8000`. To open it to the LAN anyway, install with
+`.\serve.ps1 -Install -Lan`; for the console from another machine, prefer
+the tunnel URL with `ADMIN_ALLOWED_IPS` or Cloudflare Access (below).
+
 Check `logs\service.log` says `starting NAMED tunnel`, not `QUICK`, and
 `https://<host>/health` answers `{"status":"ok"}`.
 
