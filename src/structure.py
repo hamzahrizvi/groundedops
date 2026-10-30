@@ -361,6 +361,22 @@ def asks_for_procedure(query: str | None) -> bool:
     return bool(query and _PROCEDURE_ASK_RE.search(query))
 
 
+# D-20261029-03: a fix-it ask -- how to clear, free, fix or reset, or what to do
+# about a fault -- is answered with the manual's steps for that fault first.
+_FIX_VERB_RE = re.compile(
+    r"\b(?:clear|free|fix|reset|unjam|unblock|unstick|release|jam(?:s|med)?|stuck"
+    r"|get\s+(?:\w+\s+){0,2}out)\b", re.I)
+_WHAT_TO_DO_RE = re.compile(r"\bwhat\s+(?:do|should|can|must)\s+(?:i|we)\s+do\b", re.I)
+
+
+def asks_to_fix(query: str | None) -> bool:
+    """True when the message asks how to clear, free, fix or reset a fault."""
+    if not query:
+        return False
+    asks = asks_for_procedure(query) or bool(_WHAT_TO_DO_RE.search(query))
+    return asks and (reports_failure(query) or bool(_FIX_VERB_RE.search(query)))
+
+
 def _topic_stems(text: str | None, ignore=frozenset()) -> set[str]:
     # ponytail: 4-letter prefixes as stems ("belts"/"belt", "testing"/"test");
     # a loose match only lets a list through, the floor and the ask still apply.

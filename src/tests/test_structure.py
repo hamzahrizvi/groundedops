@@ -7,6 +7,7 @@ from structure import (
     simple_similarity,
     reports_failure,
     asks_for_procedure,
+    asks_to_fix,
     lists_on_topic,
 )
 
@@ -262,3 +263,16 @@ def test_lists_on_topic_uses_the_title_when_there_is_no_section():
     c = {"text": _LIST, "source": "SCS Bench Test Procedure.txt", "section": "",
          "rerank_score": 0.9}
     assert lists_on_topic([c], "how do we bench test an scs after repair?") == [c]
+
+
+def test_asks_to_fix():
+    for q in ("note stuck in our bv30 on the arcade machine, how do i get it out?",
+              "our smart hopper is flashing red 4 times and wont pay out, coins look stuck. how do i clear it without breaking anything",
+              "a note is jammed in my nv9usb+, how do i free it?",
+              "my nv10 usb+ keeps flashing 4 long and its stopped taking notes. what does that mean and what do I do?"):
+        assert asks_to_fix(q), q
+    for q in ("how do I clean the bv30?", "what is the escrow timeout on the bv30?",
+              "how do i change it over to ssp with the button on the front",
+              "how do I install the bezel?", None):
+        assert not asks_to_fix(q), q
+

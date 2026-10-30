@@ -1243,6 +1243,74 @@ def complete_procedures(chunks: list[dict],
         return chunks
 
 
+# D-20261029-03: a fault-clearing section, by its own (leaf) heading: "Clearing a
+# Jam", "Coin Feeder Coin Jam", "Fault Finding Flow Chart", "Testing After an
+# Error Has Been Cleared". 48 of 1351 leaf headings in the live index.
+_FIX_HEADING = _re.compile(
+    r"\b(?:clear(?:ing|ed|ance)?|jam(?:s|med)?|unjam\w*|troubleshoot\w*|fault)\b", _re.I)
+# Lay words for a fault ("note stuck ... get it out") score the manual's term
+# ("Clearing a Jam") 0.24-0.50; every unrelated BV30 passage scored under 0.11.
+FIX_STEPS_MIN_RERANK = float(os.getenv("FIX_STEPS_MIN_RERANK", "0.2"))
+
+
+def fix_sections(ranked: list[dict], floor: float = FIX_STEPS_MIN_RERANK,
+                 max_sections: int = 2,
+                 budget: int = PROCEDURE_COMPLETION_CHARS) -> list[dict]:
+    """The fault-clearing sections a ranking found, each whole and in document
+    order, best-ranked section first. A section is picked from a reranked chunk
+    (best first) whose leaf heading matches _FIX_HEADING, scoring >= floor, not
+    from a secondary document (test scripts, certificates). The section is the
+    unbroken run of chunks around it in its document with the same `section`;
+    a run longer than what is left of `budget` gives the retrieved chunk alone.
+    The retrieved chunk keeps its dict; fetched ones are new dicts with
+    retrieval_score=0.0 and fetched_by="fix_section". [] when nothing matches;
+    never raises ([] and a warning)."""
+    try:
+        picks, seen = [], set()
+        for c in ranked:
+            sec = (c.get("section") or "").strip()
+            leaf = sec.split("›")[-1].strip()
+            src = c.get("source")
+            if (not leaf or (src, sec) in seen or not _FIX_HEADING.search(leaf)
+                    or is_secondary(src) or c.get("rerank_score", 0.0) < floor):
+                continue
+            seen.add((src, sec))
+            picks.append((c, src, sec))
+            if len(picks) >= max_sections:
+                break
+        if not picks:
+            return []
+        collection = get_collection()
+        out, spent = [], 0
+        for c, src, sec in picks:
+            got = collection.get(where={"source": src})
+            rows = sorted(zip(got.get("ids") or [], got.get("documents") or [],
+                              got.get("metadatas") or []),
+                          key=lambda r: _order_key(r[0]))
+            at = next((i for i, r in enumerate(rows) if r[0] == c.get("id")), None)
+            run = [c]
+            if at is not None:
+                lo = hi = at
+                same = lambda i: (rows[i][2].get("section") or "").strip() == sec
+                while lo > 0 and same(lo - 1):
+                    lo -= 1
+                while hi < len(rows) - 1 and same(hi + 1):
+                    hi += 1
+                size = sum(len(r[1] or "") for r in rows[lo:hi + 1])
+                if spent + size <= budget:
+                    run = [c if r[0] == c.get("id") else {
+                        "id": r[0], "text": r[1], "source": src,
+                        "page": r[2].get("page"), "section": sec,
+                        "retrieval_score": 0.0, "fetched_by": "fix_section",
+                    } for r in rows[lo:hi + 1]]
+                    spent += size
+            out.extend(run)
+        return out
+    except Exception as exc:
+        logger.warning(f"fix sections skipped: {exc}")
+        return []
+
+
 # ── Performance mode: the product's own documents as context ─────────────
 #
 # Blind set 3 (2026-10-07, PENDING "Market-relative rating"): gpt-5-mini

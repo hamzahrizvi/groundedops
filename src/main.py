@@ -63,7 +63,7 @@ from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root, 
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
-from structure import extract_structured_block, asks_for_procedure, lists_on_topic, MIN_COPY_RERANK
+from structure import extract_structured_block, asks_for_procedure, asks_to_fix, lists_on_topic, MIN_COPY_RERANK
 from logger import log_interaction, redact
 from router import route_model
 from grounding import check_grounding, _get_nli_model
@@ -76,7 +76,7 @@ import mentions
 import conversations as convo_store
 from memory import add_to_memory, get_history
 from retrieval_db import (retrieve_from_db, retrieve_fused, complete_procedures,
-                          fuse_ranked_results)
+                          fuse_ranked_results, fix_sections)
 import pipeline_trace as ptrace
 from text_utils import (
     passes_retrieval_gate,
@@ -4340,6 +4340,20 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _qty = _qty[:3 * max(1, len(_both_named))]
         top_chunks = top_chunks + [_strip_breadcrumb(r) for r in _qty]
         ptrace.mark("retrieve.quantity", f"{len(_qty)} limit row(s) for the value asked")
+    # A FIX-IT ASK GETS THE MANUAL'S STEPS FOR THE FAULT FIRST (D-20261029-03).
+    # "note stuck in our bv30, how do i get it out?" ranked Cashbox Options,
+    # Escrow Control and Low Power Mode 1-9 and Clearing a Jam 10th (0.50),
+    # outside the context, so the answer explained free-fall and escrow. The
+    # fault-clearing section the ranking found goes first, whole, in document
+    # order. One product only: across products it could be a sibling's steps.
+    if (asks_to_fix(q) and (_scope or {}).get("product")
+            and len(_both_named) < 2 and not _comparing):
+        _fix = fix_sections(_retrieved)
+        if _fix:
+            _fix_ids = {c.get("id") for c in _fix}
+            top_chunks = ([_strip_breadcrumb(dict(c)) for c in _fix]
+                          + [c for c in top_chunks if c.get("id") not in _fix_ids])
+            ptrace.mark("retrieve.fix", f"{len(_fix)} passage(s) of the fault's steps, first")
     # Was a flat 1200, which silently clipped anything larger. Tied to the
     # chunk size now so a whole chunk always survives into the prompt.
     #
