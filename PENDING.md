@@ -211,7 +211,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261022-15 | Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it | approved, queued | Dev builds it |
+| D-20261022-15 | Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it | ready to merge | merges once Security clears it |
 | D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | waiting for CEO | your yes |
 | D-20261025-11 | A question that names a product's variant gets the base product's figures | built, waiting for the check | the pre-ship check |
 | D-20261026-01 | Widget text and buttons fail the contrast check in the default look | ready to merge | merges once Security clears it |
