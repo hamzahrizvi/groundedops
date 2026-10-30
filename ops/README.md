@@ -153,6 +153,20 @@ weeks, phase 3 once Dev has merged a gated fix.
      usually takes longer than the time left (`TYPICAL`, half the `STUCK`
      limit), so no new Dev build starts in the sweep.
 
+   - work that pays off next week: in the Friday sweep a Dev build that
+     cannot finish runs its PLAN phase only (`plan <id>`; the build after the
+     reset skips PLAN, see `planned_ahead()`), and an empty question bank is
+     refilled (`write the bank`). Each line is offered only once the task's
+     own prompt has the matching rule (`prompt_knows()`: "PLAN AHEAD:" in the
+     Dev task, "BANK ONLY:" in the Customer task), so a lane never gets a line
+     its prompt cannot read.
+   - the week's record: in each reset's last 20 minutes `sweep_log()` appends
+     one line to `OPS/state/sweep_log.jsonl`: the share of the week unspent,
+     the pieces waiting on budget, those waiting because they could not finish,
+     and what was startable. `revisit()` reads the last two; when both left
+     more than 5% unspent with work waiting on budget, the page raises "Mo left
+     allowance unspent two Fridays running".
+
    Two more ways Mo sweeps, with the same rules:
    - **Batches.** From Thursday 00:00 UTC (`BATCH_FROM`, 43 h before the
      reset), while the week is `BATCH_PACE` (2.3) times ahead of its pace

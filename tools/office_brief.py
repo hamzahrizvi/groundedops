@@ -22,7 +22,7 @@ from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E4
 from ops_costs import cap_status  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import (STUCK, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
-                         MO_HOME, stuck, stuck_why, sweep, work_mode)
+                         MO_HOME, revisit, stuck, stuck_why, sweep, work_mode)
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
         "audit": "Audit", "rnd": "R&D", "marketing": "Marketing", "merge": "Merge", "diary": "Diary",
@@ -140,6 +140,13 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
                            " person who is not there.",
                     "suggest": "Open that lane's latest run in the Claude app and answer the prompt or stop the run. The other"
                                " lanes keep taking other work meanwhile.", "actions": []})
+    # README's revisit rule (office_next.sweep_log): two weekly resets left allowance unspent while work waited on budget
+    left = revisit(ops)
+    if left:
+        out.append({"id": "revisit-" + left[-30:], "title": "Mo left allowance unspent two Fridays running",
+                    "why": left[0].upper() + left[1:] + ". That is the handbook's point for another look at giving Mo more helpers.",
+                    "suggest": "Ask Claude in any session to judge again whether Mo should get more helpers, with these figures.",
+                    "actions": []})
     lab = cap_status(ops)
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",

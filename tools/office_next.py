@@ -229,6 +229,31 @@ TYPICAL = {k: v // 2 for k, v in STUCK.items()}
 SWEEP_ORDER = ("merge", "security", "product-owner")   # a merge, Security on a built branch, a gate check; then the rest
 
 
+# Work that pays off next week (the CEO, 2026-10-30): in the end-of-week sweep a Dev build that cannot finish runs its
+# PLAN phase only (ops/schedules/dev-approved.md "plan <id>"; next week's build skips PLAN), and an empty question bank
+# is refilled (customer-weekly.md "write the bank"). Both outputs keep after the reset. ponytail: guessed lengths.
+AHEAD_JOBS = {"dev-plan": 45, "customer-bank": 40}
+SWEEP_LOG = ("state", "sweep_log.jsonl")   # one line per weekly reset: what the week left unspent, and why (sweep_log())
+
+
+SKILLS = os.path.join(os.path.expanduser("~"), ".claude", "scheduled-tasks")   # the tasks' own prompts (SKILL.md)
+
+
+def prompt_knows(task, marker):
+    """True when the scheduled task's prompt has `marker`: a lane follows that prompt, so a line it cannot read (e.g. a
+    Dev "plan <id>" under a prompt that only knows "build") is never offered."""
+    try:
+        return marker in open(os.path.join(SKILLS, TASK + task, "SKILL.md"), encoding="utf-8").read()
+    except OSError:
+        return False
+
+
+def planned_ahead(ops, i):
+    """A sweep's PLAN-only run for work order `i` that no later BUILD or hand-back has used yet."""
+    d = os.path.join(ops, "inbox", "dev", i)
+    return os.path.exists(d + ".planned-ahead") and _mtime(d + ".planned-ahead") > max(_mtime(d + ".build.md"), _mtime(d + ".md"))
+
+
 def sweep_fits(dept, resets, now):
     return (resets - now).total_seconds() / 60 >= TYPICAL.get(dept, 60)
 
@@ -627,6 +652,7 @@ def entries(ops, repo, five, week, resets, now, taken):
     # every department a day after the reset (the CEO, 2026-10-24); a few points over pace is caught next tick
     five = five + sum(cost(k)[0] for k in taken)
     building = sum(k.startswith("dev-") for k in taken)
+    week_end, left_min = swept and swept_why.startswith("the cleaner's sweep"), (resets - now).total_seconds() / 60
     out = []
     for dept, why, key in waiting(ops, repo, now, taken, mode):
         if key is None:   # waits on other work, not on the budget
@@ -647,10 +673,59 @@ def entries(ops, repo, five, week, resets, now, taken):
                  f"cannot finish before the reset (usually {TYPICAL.get(dept, 60)} min)" if not sweep_fits(dept, resets, now) else
                  None) if swept else   # the sweep skips the pace, not a hold
                 over_budget(dept, five, week, resets, now))
+        # end of the week: a build that cannot finish plans now and builds after the reset (AHEAD_JOBS)
+        if (week_end and dept == "dev" and stop and stop.startswith("cannot finish") and key.startswith("dev-")
+                and not planned_ahead(ops, key[4:]) and left_min >= AHEAD_JOBS["dev-plan"] and prompt_knows("dev", "PLAN AHEAD:")):
+            why, stop = f"plan {key[4:]}: the plan now, the build after the reset", None
         out.append((f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}", key, not stop))
+    # ... and an empty question bank is refilled, so next week's test starts asking at once
+    if (week_end and "customer" not in taken and left_min >= AHEAD_JOBS["customer-bank"] and five < SWEEP_FIVE
+            and prompt_knows("customer", "BANK ONLY:")):
+        import question_bank
+        at = next((n for n, r in enumerate(out) if r[0].split()[1:2] == [TASK + "customer"]), None)
+        if (at is None or not out[at][2]) and question_bank.need(ops) == "EMPTY":
+            row = (f"RUN  {TASK}customer  write the bank: next week's 40 questions in advance", "customer", True)
+            out[at if at is not None else len(out):(at + 1) if at is not None else len(out)] = [row]
     if swept:   # finish what is in flight first; sort is stable, so the usual order holds within each rank
         out.sort(key=lambda r: sweep_rank(r[0]))
     return out
+
+
+def sweep_log(ops, repo, five, week, now):
+    """Once per weekly reset, in its last 20 minutes: one line in OPS/state/sweep_log.jsonl with the share of the week
+    left unspent and the work that waited on the budget or on time, so README's revisit rule can be checked. Call it
+    only with fresh usage figures. Returns the record written, or None."""
+    resets = next_reset(now)
+    if (resets - now).total_seconds() > 20 * 60:
+        return None
+    p, key = os.path.join(ops, *SWEEP_LOG), resets.isoformat(timespec="minutes")
+    try:
+        if any(json.loads(l).get("reset") == key for l in open(p, encoding="utf-8") if l.strip()):
+            return None
+    except (OSError, ValueError):
+        pass
+    rows = [r[0] for r in entries(ops, repo, five, week, resets, now, claims(ops))]
+    budget = [l for l in rows if re.search(r"would pass|ahead of the week's pace|5-hour window at", l)]
+    late = [l for l in rows if "cannot finish before the reset" in l]
+    rec = {"reset": key, "at": now.isoformat(timespec="seconds"), "unspent": round(100 - week, 1), "five": five,
+           "waiting_budget": len(budget), "waiting_time": len(late), "startable": sum(l.startswith(("RUN", "MERGE")) for l in rows),
+           "lines": budget + late}
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+    return rec
+
+
+def revisit(ops):
+    """README's rule for reconsidering a bigger Mo: the last two weekly resets each left more than 5% of the week
+    unspent while work waited on the budget. The reason, or ""."""
+    try:
+        recs = [json.loads(l) for l in open(os.path.join(ops, *SWEEP_LOG), encoding="utf-8") if l.strip()][-2:]
+    except (OSError, ValueError):
+        return ""
+    if len(recs) == 2 and all(r.get("unspent", 0) > 5 and r.get("waiting_budget", 0) > 0 for r in recs):
+        return " and ".join(f"{r['unspent']:.0f}% unspent at {r['reset'][:10]} with {r['waiting_budget']} waiting on budget" for r in recs)
+    return ""
 
 
 def plan(ops, repo, five, week, resets, now, taken=None):
@@ -714,6 +789,30 @@ def selftest():
         assert got[0].startswith("RUN  groundedops-office-product-owner  check D-20261008-01"), got
         assert got[1].startswith("RUN  groundedops-office-dev  build D-20261008-02"), got
         assert len(got) == 2, got                                       # D-07 is the CEO's; tests, reviews not due
+        # end of the week: the build that cannot finish plans now, an empty bank is refilled; both keep after the reset
+        end = resets - datetime.timedelta(hours=1)
+        global SKILLS
+        real_skills, SKILLS = SKILLS, os.path.join(ops, "skills")
+        assert not any(" plan D-" in l or "write the bank" in l for l in plan(ops, ops, 11, 38, resets, end)), "not before the prompts know them"
+        for t, m in (("dev", "PLAN AHEAD:"), ("customer", "BANK ONLY:")):
+            os.makedirs(os.path.join(SKILLS, TASK + t)); w(os.path.join("skills", TASK + t, "SKILL.md"), m)
+        got = plan(ops, ops, 11, 38, resets, end)
+        assert any(l.startswith("RUN  groundedops-office-dev  plan D-20261008-02: the plan now") for l in got), got
+        assert any(l.startswith("RUN  groundedops-office-customer  write the bank") for l in got), got
+        w("inbox/dev/D-20261008-02.planned-ahead")
+        got = plan(ops, ops, 11, 38, resets, end)
+        assert any(l.startswith("WAIT groundedops-office-dev  build D-20261008-02") and "cannot finish" in l for l in got), "planned once"
+        os.remove(os.path.join(ops, "inbox/dev/D-20261008-02.planned-ahead"))
+        SKILLS = real_skills
+        # the week's record, once, in the reset's last 20 minutes; two such Fridays with work on budget trip the revisit rule
+        assert sweep_log(ops, ops, 11, 38, end) is None, "too early"
+        rec = sweep_log(ops, ops, 11, 38, resets - datetime.timedelta(minutes=10))
+        assert rec and rec["unspent"] == 62 and sweep_log(ops, ops, 11, 38, resets - datetime.timedelta(minutes=5)) is None, rec
+        assert not revisit(ops), "one Friday is not a pattern"
+        open(os.path.join(ops, *SWEEP_LOG), "a").write(json.dumps({"reset": "2026-10-16T19:00+00:00", "unspent": 12, "waiting_budget": 2}) + "\n")
+        open(os.path.join(ops, *SWEEP_LOG), "a").write(json.dumps({"reset": "2026-10-23T19:00+00:00", "unspent": 9, "waiting_budget": 1}) + "\n")
+        assert "12% unspent" in revisit(ops) and "9% unspent" in revisit(ops)
+        os.remove(os.path.join(ops, *SWEEP_LOG))
         os.makedirs(os.path.join(ops, "inbox/dev/D-20261008-01.gate"))
         w("inbox/dev/D-20261008-01.gate/FAILED", "hidden questions in the live log\n")   # stopped since the hand-back
         os.utime(os.path.join(ops, "inbox/dev/D-20261008-01.gate/FAILED"), (time.time() + 5, time.time() + 5))
@@ -945,6 +1044,8 @@ def main():
         free = ()
         now = datetime.datetime.now(datetime.timezone.utc)
         five, week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
+        if old <= 60:
+            sweep_log(a.ops, a.repo, five, week, now)
         # lane 1 always; lanes 2 and 3 only in the cleaner's sweep, when free work, not a busy lane, wakes them
         if a.lane == 1 or (old <= 60 and sweep(a.ops, week, next_reset(now), now)[0]):
             five, week = (0, 0) if old > 60 else (five, week)   # stale figures count as room: the full tick refreshes them and checks the budget itself
@@ -968,6 +1069,8 @@ def main():
         if old > 60 or no_r5:
             return print(f"STALE usage figures are {old:.0f} minutes old" + (" and the 5-hour reset time is unknown" if no_r5 else "") + "; start nothing"
                          ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}, "r5": "<5-hour resetsAt>"} from get_usage to OPS/state/usage.json and run again)')
+        if not a.resets:   # fresh figures, the real reset: the week's record (only in the reset's last 20 minutes)
+            sweep_log(a.ops, a.repo, a.five, a.week, now)
     resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
     print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC;"
           " work mode {} ({})".format(*work_mode(a.ops, a.week, resets, now)))
