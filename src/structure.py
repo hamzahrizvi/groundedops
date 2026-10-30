@@ -363,9 +363,11 @@ def asks_for_procedure(query: str | None) -> bool:
 
 # D-20261029-03: a fix-it ask -- how to clear, free, fix or reset, or what to do
 # about a fault -- is answered with the manual's steps for that fault first.
+# "stopped/stopping" ("its stopped taking notes") is a fault word _FAILURE_RE
+# leaves out; it is added here, not there, so the copy gate is unchanged.
 _FIX_VERB_RE = re.compile(
     r"\b(?:clear|free|fix|reset|unjam|unblock|unstick|release|jam(?:s|med)?|stuck"
-    r"|get\s+(?:\w+\s+){0,2}out)\b", re.I)
+    r"|stopp(?:ed|ing)|get\s+(?:\w+\s+){0,2}out)\b", re.I)
 _WHAT_TO_DO_RE = re.compile(r"\bwhat\s+(?:do|should|can|must)\s+(?:i|we)\s+do\b", re.I)
 
 
