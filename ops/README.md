@@ -159,8 +159,11 @@ weeks, phase 3 once Dev has merged a gated fix.
      (about 60% left on Thursday, less as Friday nears), he sweeps the last
      `BATCH_MIN` (30) minutes before each 5-hour window resets. What is left of
      that window would expire anyway, so a batch may run it to `BATCH_FIVE`
-     (95%); a fresh window follows within the half hour. The 5-hour reset time
-     comes from `usage.json`'s `r5`, written from get_usage.
+     (95%), counting the piece about to start; a fresh window follows within
+     the half hour. A batch keeps the approval cap at 3 (work mode `batch`),
+     since approvals outlive it. The 5-hour reset time comes from
+     `usage.json`'s `r5`, written from get_usage; from Thursday a missing `r5`
+     makes the next tick fetch it.
    - **Your button.** "Call Mo" on the page sweeps for `MO_CALL` (2) hours from
      the next check. "Send Mo home" stops any sweep for `MO_HOME` (6) hours.
      Both go through `tools/ceo_inbox.py` (choice `mo`, note `call` or `home`).

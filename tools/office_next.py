@@ -65,7 +65,7 @@ CLAIMS = ("state", "claims")
 MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged items (.claude/agents/product-owner.md)
 # Work modes (the CEO, 2026-10-14): (approved not merged, Dev builds at once, work orders per department at once).
 # More in flight means more lanes run side by side: two Dev builds, or two copies of one department on different orders.
-MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2), "sweep": (8, 4, 3)}
+MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2), "sweep": (8, 4, 3), "batch": (3, 4, 3)}   # batch: approvals outlive it
 # The cleaner's sweep (the CEO, 2026-10-30; the page's Cleaner): in the last SWEEP_HOURS before the weekly reset, with at
 # least SWEEP_LEFT % of the week unspent, the allowance would expire unused, so every lane works, nothing waits on the
 # budget pace, and the "sweep" caps above apply. Holds, the office switch, the lab cap and SWEEP_FIVE still stop it;
@@ -241,8 +241,11 @@ def sweep_rank(line):
 def five_reset(ops):
     """When the current 5-hour window resets (usage.json "r5"), or None if unknown or already past."""
     try:
-        r = datetime.datetime.fromisoformat(json.load(open(os.path.join(ops, "state", "usage.json"), encoding="utf-8"))["r5"].replace("Z", "+00:00"))
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        v = json.load(open(os.path.join(ops, "state", "usage.json"), encoding="utf-8"))["r5"]
+        r = (datetime.datetime.fromtimestamp(v / 1000 if v > 1e11 else v, datetime.timezone.utc) if isinstance(v, (int, float))
+             else datetime.datetime.fromisoformat(v.replace("Z", "+00:00")))
+        r = r if r.tzinfo else r.replace(tzinfo=datetime.timezone.utc)   # a time written without a zone is UTC, never a crash
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
         return None
     return r if r > datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1) else None
 
@@ -279,7 +282,7 @@ def work_mode(ops, week, resets, now):
     and the cleaner's sweep overrides both: what is left of the week would otherwise expire."""
     on, why = sweep(ops, week, resets, now)
     if on:
-        return "sweep", why
+        return ("batch" if why.startswith("Mo's batch") else "sweep"), why
     try:
         m = open(os.path.join(ops, "state", "mode"), encoding="utf-8").read().strip().lower()
         if m in MODES:
@@ -639,7 +642,8 @@ def entries(ops, repo, five, week, resets, now, taken):
                 f"{mode[1]} builds already running" if dept == "dev" and building >= mode[1] else
                 f"5-hour window at {five}%" if pressed and five >= 90 else
                 None if pressed else
-                (f"5-hour window at {five}%" if five >= (BATCH_FIVE if swept_why.startswith("Mo's batch") else SWEEP_FIVE) else
+                (f"5-hour window at {five}%" if five + (COST.get(dept, (0, 0))[0] if swept_why.startswith("Mo's batch") else 0)
+                 >= (BATCH_FIVE if swept_why.startswith("Mo's batch") else SWEEP_FIVE) else
                  f"cannot finish before the reset (usually {TYPICAL.get(dept, 60)} min)" if not sweep_fits(dept, resets, now) else
                  None) if swept else   # the sweep skips the pace, not a hold
                 over_budget(dept, five, week, resets, now))
@@ -958,8 +962,11 @@ def main():
     now = datetime.datetime.now(datetime.timezone.utc)
     if a.five is None or a.week is None:
         a.five, a.week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
-        if old > 60:
-            return print(f"STALE usage figures are {old:.0f} minutes old; start nothing"
+        u = os.path.join(a.ops, "state", "usage.json")
+        no_r5 = (five_reset(a.ops) is None and 0 < (next_reset(now) - now).total_seconds() <= BATCH_FROM * 3600
+                 and time.time() - (os.path.getmtime(u) if os.path.exists(u) else 0) > 15 * 60)   # Mo's batches need r5
+        if old > 60 or no_r5:
+            return print(f"STALE usage figures are {old:.0f} minutes old" + (" and the 5-hour reset time is unknown" if no_r5 else "") + "; start nothing"
                          ' (write {"u": {"fh": <5-hour %>, "sd": <weekly %>}, "r5": "<5-hour resetsAt>"} from get_usage to OPS/state/usage.json and run again)')
     resets = datetime.datetime.fromisoformat(a.resets.replace("Z", "+00:00")) if a.resets else next_reset(now)
     print(f"USAGE 5-hour {a.five}%, weekly {a.week}%, weekly resets {resets:%a %d %b %H:%M} UTC;"
