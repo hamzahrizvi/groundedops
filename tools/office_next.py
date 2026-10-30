@@ -371,6 +371,10 @@ def needed(ops, lane, free=()):
     now = datetime.datetime.now(datetime.timezone.utc)
     if free and old <= 60 and sweep(ops, week, next_reset(now), now)[0]:
         return True, f"the cleaner's sweep: every lane works until the weekly reset; {free[0]}"
+    # stale figures while the clock alone says Mo could be sweeping: wake, so the full tick refreshes them from get_usage
+    # (2026-10-30: lanes 1 and 3 sat in long runs, nobody refreshed usage, and the 16:00 sweep never started)
+    if old > 60 and sweep(ops, 0, next_reset(now), now)[0]:
+        return True, "usage figures are stale during Mo's sweep window: refresh them and look for work"
     busy = sorted({c.get("lane") for c in held if c.get("lane") not in (lane, None, "hand")})
     if busy:
         return True, (f"lane {busy[0]} is busy" if len(busy) == 1 else "lanes " + " and ".join(map(str, busy)) + " are busy")
