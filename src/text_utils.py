@@ -1364,3 +1364,28 @@ def keep_answered_part(answer: str) -> str:
     if sum(c.isalpha() for c in rest) < 60:
         return answer
     return _REFUSAL_SENTENCE_RE.sub(PARTIAL_REFUSAL, answer)
+
+
+def ask_check_prompt(asks: list[str], answer: str) -> str:
+    """The one check a several-ask answer gets (D-20261021-15): which asks
+    did the written answer leave out? Parsed by unanswered_asks. Pure."""
+    listed = "\n".join(f"{i}. {a}" for i, a in enumerate(asks, 1))
+    return ("A customer's message asked these separate things:\n"
+            f"{listed}\n\n--- BEGIN ANSWER ---\n{answer}\n--- END ANSWER ---\n\n"
+            "Reply with the numbers of the asks the answer does not give a "
+            "concrete answer to, comma-separated, or NONE if it answers them "
+            "all. An answer saying it could not find the thing counts as not "
+            "answered. Reply with the numbers or NONE only.")
+
+
+_ASK_NUMBERS_RE = re.compile(r"\d+(?:\s*(?:,|and)\s*\d+)*")
+
+
+def unanswered_asks(check_reply: str, n: int) -> list[int]:
+    """The 1-based asks a check reply names, deduplicated, within 1..n. NONE,
+    an empty reply or anything that is not a bare list of numbers is []: a
+    check that cannot be read never causes a retry. Pure."""
+    text = (check_reply or "").strip().strip(".").strip()
+    if not _ASK_NUMBERS_RE.fullmatch(text):
+        return []
+    return sorted({k for k in map(int, re.findall(r"\d+", text)) if 1 <= k <= n})

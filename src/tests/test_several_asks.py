@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 # The real module, taken before _harness stubs it (its is_refusal is a
 # constant False there, which would make the refusal checks below vacuous).
-from text_utils import split_asks, keep_answered_part, is_refusal, PARTIAL_REFUSAL
+from text_utils import (split_asks, keep_answered_part, is_refusal, PARTIAL_REFUSAL,
+                        ask_check_prompt, unanswered_asks)
 import _harness  # noqa: F401 -- load main with lightweight test dependencies
 import main
 
@@ -182,15 +183,17 @@ _HIT = {"id": "u1", "text": "The API is at 192.168.7.1.", "source": "m.pdf",
         "page": 1, "product": "", "category": "", "rerank_score": 0.99}
 
 
-def _ask(msg, answer, rerank_fn):
+def _ask(msg, answer, rerank_fn, gen_fn=None, rdb_fn=None):
     main.APP_STATE["ready"] = True
     with patch.object(main, "retrieve_fused", return_value=[dict(_HIT)]), \
-         patch.object(main, "retrieve_from_db", return_value=[dict(_HIT)]) as rdb, \
+         patch.object(main, "retrieve_from_db", return_value=[dict(_HIT)],
+                      side_effect=rdb_fn) as rdb, \
          patch.object(main, "rerank", side_effect=rerank_fn) as rr, \
          patch.object(main.faq_store, "suggest_candidates", return_value={"mode": "none"}), \
          patch.object(main, "route_model", return_value=("accurate", ("local", "mistral"))), \
          patch.object(main, "generate_with_fallback", return_value={
-             "text": answer, "model": "mistral", "provider": "local"}) as gen, \
+             "text": answer, "model": "mistral", "provider": "local"},
+             side_effect=gen_fn) as gen, \
          patch.object(main, "check_grounding", return_value=(True, 0.97)), \
          patch.object(main, "_structures_for", return_value=[]), \
          patch.object(main.more_context, "build", return_value={"kind": "support"}), \
@@ -213,8 +216,10 @@ def test_two_asks_reach_the_model_and_a_partial_answer_is_served():
     assert gen.called, "the asks' passages must reach the model"
     assert rr.call_count == 3, "ranked whole and once per ask"
     assert rdb.call_count >= 2, "each ask searched on its own"
-    prompt = gen.call_args[0][1]
+    prompt = gen.call_args_list[0][0][1]
     assert "The question asks 2 separate things:" in prompt
+    assert gen.call_count == 2, "the answer, then one check; no retry"
+    assert "Reply with the numbers" in gen.call_args_list[1][0][1]
     assert "192.168.7.1" in out["answer"], out["answer"]
     assert not is_refusal(out["answer"]), out["answer"]
     assert not out.get("offer_support"), out
@@ -227,6 +232,7 @@ def test_a_single_ask_is_ranked_once_as_before():
     assert rr.call_count == 1, rr.call_count
     assert rdb.call_count == 0, "no per-ask searches"
     assert "separate things" not in gen.call_args[0][1]
+    assert gen.call_count == 1, "one ask: no check"
     assert "192.168.7.1" in out["answer"]
 
 
@@ -247,6 +253,89 @@ def test_a_spec_table_does_not_answer_several_asks():
         out, gen, _, _ = _ask("is there a bv30 xl, and what notes does it take?",
                               "unused", same)
         assert not gen.called and out["answer"] == declined["answer"]
+
+
+# -- the written answer checked against the asks (D-20261021-15) ------------
+
+def test_the_check_reply_is_read_strictly():
+    assert unanswered_asks("NONE", 3) == []
+    assert unanswered_asks("none.", 3) == []
+    assert unanswered_asks("", 3) == []
+    assert unanswered_asks("2", 3) == [2]
+    assert unanswered_asks("1, 3", 3) == [1, 3]
+    assert unanswered_asks("3 and 1.", 3) == [1, 3]
+    assert unanswered_asks("2, 2", 3) == [2]
+    assert unanswered_asks("4", 3) == [] and unanswered_asks("0, 2", 3) == [2]
+    # an answer echoed back, or prose, is not a list of asks: no retry
+    assert unanswered_asks("The API is at 192.168.7.1.", 3) == []
+    assert unanswered_asks("Ask 2 is not answered", 3) == []
+
+
+def test_the_check_prompt_lists_every_ask_and_the_answer():
+    p = ask_check_prompt(["what ip do i hit", "how long does the token last"],
+                         "The API is at 192.168.7.1.")
+    assert "1. what ip do i hit" in p and "2. how long does the token last" in p
+    assert "The API is at 192.168.7.1." in p and "NONE" in p
+    assert "could not find" in p
+
+
+_TOKEN = {"id": "t9", "text": "A bearer token lasts 60 minutes.", "source": "m.pdf",
+          "page": 9, "product": "", "category": "", "rerank_score": 0.95}
+_MSG = ("what ip do i hit for the api, and how long does the bearer token "
+        "last before i need a new one?")
+_PARTIAL = ("The API is reached at http://192.168.7.1 over the RNDIS link, on "
+            "port 80 for every call you make to it. I could not find that in "
+            "the knowledge base.")
+
+
+def _gen_retrying(retry_text):
+    def _gen(role, prompt, *a, **k):
+        if "Reply with the numbers" in prompt:
+            return {"text": "2", "model": "m", "provider": "local"}
+        return {"text": retry_text if "60 minutes" in prompt else _PARTIAL,
+                "model": "mistral", "provider": "local"}
+    return _gen
+
+
+def _rdb(qq, top_k=10, **k):    # only the deeper search reaches the token page
+    return [dict(_HIT)] + ([dict(_TOKEN)] if top_k > main.RETRIEVE_K else [])
+
+
+def _keep_all(qq, rs, *a, **k):
+    return [dict(r) for r in rs]
+
+
+def test_a_missed_ask_is_searched_again_and_answered():
+    full = "The API is at 192.168.7.1 and a bearer token lasts 60 minutes."
+    out, gen, rr, rdb = _ask(_MSG, None, _keep_all, _gen_retrying(full), _rdb)
+    deeper = [c for c in rdb.call_args_list if c[1].get("top_k", 0) > main.RETRIEVE_K]
+    assert len(deeper) == 1 and "bearer" in deeper[0][0][0], "only the missed ask"
+    assert gen.call_count == 3, "answer, check, one retry"
+    assert "60 minutes" in out["answer"], out["answer"]
+
+
+def test_a_missed_ask_is_also_searched_without_the_lead():
+    # The lead outweighs a short ask: here only the ask alone reaches the
+    # token page (C20261021c-28, the warm-up rate behind the cashbox weights).
+    msg = "our kiosk runs linux. " + _MSG
+    def rdb(qq, top_k=10, **k):
+        alone = top_k > main.RETRIEVE_K and "kiosk" not in qq
+        return [dict(_HIT)] + ([dict(_TOKEN)] if alone else [])
+    full = "The API is at 192.168.7.1 and a bearer token lasts 60 minutes."
+    out, gen, _, rdb_ = _ask(msg, None, _keep_all, _gen_retrying(full), rdb)
+    deeper = [c[0][0] for c in rdb_.call_args_list if c[1].get("top_k", 0) > main.RETRIEVE_K]
+    assert len(deeper) == 2 and all("bearer" in q for q in deeper), deeper
+    assert sum("kiosk" in q for q in deeper) == 1, deeper
+    assert "60 minutes" in out["answer"], out["answer"]
+
+
+def test_a_retry_that_refuses_keeps_the_first_answer():
+    out, gen, _, _ = _ask(_MSG, None, _keep_all,
+                          _gen_retrying("I could not find that in the knowledge base."),
+                          _rdb)
+    assert gen.call_count == 3
+    assert "192.168.7.1" in out["answer"] and "60 minutes" not in out["answer"]
+    assert not is_refusal(out["answer"]), out["answer"]
 
 
 if __name__ == "__main__":
