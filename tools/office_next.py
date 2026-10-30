@@ -216,6 +216,21 @@ def end_tick(ops, lane):
         pass
 
 
+# In the sweep, finishing beats starting (judge panel, 2026-10-30): in-flight work goes first, and nothing starts that
+# cannot end before the reset. ponytail: a piece's usual length is half its STUCK limit; tune from the transcripts.
+TYPICAL = {k: v // 2 for k, v in STUCK.items()}
+SWEEP_ORDER = ("merge", "security", "product-owner")   # a merge, Security on a built branch, a gate check; then the rest
+
+
+def sweep_fits(dept, resets, now):
+    return (resets - now).total_seconds() / 60 >= TYPICAL.get(dept, 60)
+
+
+def sweep_rank(line):
+    dept = "merge" if line.startswith(("MERGE", "WAIT merge")) else line.split()[1].removeprefix(TASK)
+    return SWEEP_ORDER.index(dept) if dept in SWEEP_ORDER else len(SWEEP_ORDER) + (dept == "dev")
+
+
 def sweep(ops, week, resets, now):
     """(on, why): the cleaner's sweep, the last SWEEP_HOURS before the weekly reset with SWEEP_LEFT % or more unspent."""
     left, to_go = 100 - week, (resets - now).total_seconds()
@@ -590,9 +605,13 @@ def entries(ops, repo, five, week, resets, now, taken):
                 f"{mode[1]} builds already running" if dept == "dev" and building >= mode[1] else
                 f"5-hour window at {five}%" if pressed and five >= 90 else
                 None if pressed else
-                (f"5-hour window at {five}%" if five >= SWEEP_FIVE else None) if swept else   # the sweep skips the pace, not a hold
+                (f"5-hour window at {five}%" if five >= SWEEP_FIVE else
+                 f"cannot finish before the reset (usually {TYPICAL.get(dept, 60)} min)" if not sweep_fits(dept, resets, now) else
+                 None) if swept else   # the sweep skips the pace, not a hold
                 over_budget(dept, five, week, resets, now))
         out.append((f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}", key, not stop))
+    if swept:   # finish what is in flight first; sort is stable, so the usual order holds within each rank
+        out.sort(key=lambda r: sweep_rank(r[0]))
     return out
 
 
@@ -622,6 +641,14 @@ def selftest():
         w("state/no_sweep")
         assert work_mode(ops, 50, resets, late) == ("high", "set by you"), "the CEO's switch-off"
         os.remove(os.path.join(ops, "state", "no_sweep"))
+        # finishing beats starting: a Dev build (usually 3.5 h) does not start 1 h before the reset, a Security review does;
+        # merges go first, then Security, then the product owner, Dev last
+        hour = resets - datetime.timedelta(hours=1)
+        assert not sweep_fits("dev", resets, hour) and sweep_fits("security", resets, hour)
+        lines = [f"RUN  {TASK}dev  build x", f"RUN  {TASK}customer  re-ask", f"RUN  {TASK}product-owner  check y",
+                 "MERGE D-1  gate PASS", f"RUN  {TASK}security  review z"]
+        assert [l.split()[1] for l in sorted(lines, key=sweep_rank)] == [
+            "D-1", f"{TASK}security", f"{TASK}product-owner", f"{TASK}customer", f"{TASK}dev"]
         assert lane_cron(1, 10) == "0,10,20,30,40,50 * * * *" and lane_cron(1, 60) == "0 * * * *", "lane 1 follows Next run"
         assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "20,50 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *", "lanes 2 and 3: 30 minutes at most"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"

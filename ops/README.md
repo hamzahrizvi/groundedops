@@ -147,7 +147,21 @@ weeks, phase 3 once Dev has merged a gated fix.
    - work mode `sweep`: up to 8 approved items, 4 Dev builds and 3 copies of a
      department at once;
    - nothing waits on the budget pace;
-   - lanes 2 and 3 wake for free work, not only when lane 1 is busy.
+   - lanes 2 and 3 wake for free work, not only when lane 1 is busy;
+   - finishing beats starting: merges go first, then Security on a built
+     branch, then the product owner's checks, Dev last, and nothing starts that
+     usually takes longer than the time left (`TYPICAL`, half the `STUCK`
+     limit), so no new Dev build starts in the sweep.
+
+   Mo stays a character, not a session. A 2026-10-30 judge panel turned down an
+   Opus "ultracode" Mo that would plan and then fan out helpers:
+   - the 5-hour window runs out before the week does, and a running workflow
+     never rechecks the budget;
+   - the lab lock and one-at-a-time merges cap how much can run at once anyway;
+   - an extra unattended session adds hidden-prompt and slot risks.
+
+   Revisit only if the sweep leaves more than 5% of the week unspent, with
+   startable work waiting, two Fridays running.
 
    It still stops at:
    - the CEO's holds (`OPS/state/hold`);
