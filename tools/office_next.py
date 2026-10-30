@@ -367,13 +367,13 @@ def needed(ops, lane, free=()):
         return False, "nothing to do; refresh due"
     if any(c.get("lane") == lane for c in held):   # a leftover claim of this lane's last run: run, so take() drops it (else it blocks every lane until STALE)
         return True, f"lane {lane} holds a leftover claim"
-    _, week, old = latest_usage(fallback=os.path.join(ops, "state", "usage.json"))
+    _, week, old = latest_usage(HISTORY, fallback=os.path.join(ops, "state", "usage.json"))   # HISTORY read now: the selftest swaps it
     now = datetime.datetime.now(datetime.timezone.utc)
     if free and old <= 60 and sweep(ops, week, next_reset(now), now)[0]:
         return True, f"the cleaner's sweep: every lane works until the weekly reset; {free[0]}"
     # stale figures while the clock alone says Mo could be sweeping: wake, so the full tick refreshes them from get_usage
     # (2026-10-30: lanes 1 and 3 sat in long runs, nobody refreshed usage, and the 16:00 sweep never started)
-    if old > 60 and sweep(ops, 0, next_reset(now), now)[0]:
+    if 60 < old < float("inf") and sweep(ops, 0, next_reset(now), now)[0]:   # inf: no figures ever (nothing to refresh from)
         return True, "usage figures are stale during Mo's sweep window: refresh them and look for work"
     busy = sorted({c.get("lane") for c in held if c.get("lane") not in (lane, None, "hand")})
     if busy:
@@ -740,6 +740,8 @@ def selftest():
     import office_diary
     now = datetime.datetime(2026, 10, 8, 7, 0, tzinfo=datetime.timezone.utc)
     resets = datetime.datetime(2026, 10, 9, 19, 0, tzinfo=datetime.timezone.utc)   # pace ~79%, so up to ~94% with AHEAD
+    global HISTORY
+    HISTORY = os.path.join(tempfile.gettempdir(), "no-such-usage-history.json")   # the app's real usage must not steer the test
     with tempfile.TemporaryDirectory() as ops:
         office_diary.OFFICE = ops   # no real commits in the test's diary
         for d in ("decisions", "inbox/dev", "inbox/audit", "runs/20261008", "state"):
