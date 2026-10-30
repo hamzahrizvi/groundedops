@@ -35,6 +35,14 @@ button{font:inherit;color:inherit}
 .top p{margin:6px 0 0;color:var(--muted);max-width:62ch}
 .shift{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .clock{font:26px/1 var(--data);color:var(--muted);font-variant-numeric:tabular-nums}
+.batts{display:flex;gap:12px;align-items:center}
+.batt{display:flex;align-items:center;gap:6px;font:12px/1 var(--display);letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
+.batt .cell{display:block;position:relative;width:44px;height:20px;border:2px solid var(--ink);border-radius:3px;background:var(--surface);padding:2px;box-sizing:border-box}
+.batt .cell::after{content:"";position:absolute;right:-6px;top:5px;width:4px;height:6px;background:var(--ink);border-radius:0 2px 2px 0}
+.batt .fill{display:block;height:100%;background:var(--ok);border-radius:1px;transition:width .4s}
+.batt[data-lvl="mid"] .fill{background:var(--accent)} .batt[data-lvl="low"] .fill{background:var(--crit)}
+.batt b{font:18px/1 var(--data);color:var(--ink);font-weight:400;font-variant-numeric:tabular-nums;min-width:4ch;text-align:right}
+.batts.stale{opacity:.5}
 .chip{font:12px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:3px;border:1px solid var(--line);background:var(--surface);color:var(--muted);white-space:nowrap}
 .chip.live{background:var(--ok);border-color:var(--ok);color:#fff}
 .chip.sample{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -353,6 +361,10 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
       <p>The agent departments that test the chatbot, fix what they find and report to you. Working people sit at their desks; everyone else is on a break somewhere in the building.</p>
     </div>
     <div class="shift">
+      <div class="batts" id="batts" hidden>
+        <span class="batt" id="batt5"><span>5-hour</span><span class="cell" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Claude 5-hour allowance left"><span class="fill"></span></span><b>--</b></span>
+        <span class="batt" id="battW"><span>Week</span><span class="cell" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Claude weekly allowance left"><span class="fill"></span></span><b>--</b></span>
+      </div>
       <span class="clock" id="clock">--:--</span>
       <span class="chip" id="modeChip">Sample week</span>
       <button class="btn" id="modeBtn" type="button" hidden>Show live office</button>
@@ -1433,8 +1445,26 @@ const replied = id => live.inbox.find(r => r.id === id && r.choice !== "refresh"
 const itemOf = id => ((live.brief && live.brief.items) || {})[id] || {};
 const ago = m => m < 90 ? Math.round(m) + " minutes" : m < 48*60 ? Math.round(m/60) + " hours" : Math.round(m/1440) + " days";
 
+// The header's batteries: Claude allowance LEFT (100 - used), from the brief's usage figures.
+function renderBatts(u){
+  const box = $("batts");
+  box.hidden = !(u && u.five != null && u.week != null);
+  if(box.hidden) return;
+  const old = u.minutes_old;
+  box.classList.toggle("stale", old != null && old > 60);
+  for(const [id, used, what] of [["batt5", u.five, "the 5-hour limit"], ["battW", u.week, "this week's allowance"]]){
+    const left = Math.max(0, Math.min(100, Math.round(100 - used))), el = $(id), cell = el.querySelector(".cell");
+    el.dataset.lvl = left < 20 ? "low" : left < 50 ? "mid" : "ok";
+    el.querySelector(".fill").style.width = left + "%";
+    el.querySelector("b").textContent = left + "%";
+    cell.setAttribute("aria-valuenow", left);
+    el.title = `${left}% of ${what} left (${Math.round(used)}% used)` + (old != null ? `, figures ${old} min old` : "");
+  }
+}
+
 function renderMove(){
   const p = $("movePanel"), b = live.brief;
+  renderBatts(live.available && b ? b.usage : null);
   p.hidden = !live.available;
   if(!live.available) return;
   const set = (cls, label, text) => { p.dataset.s = cls; $("moveState").className = "state " + cls; $("moveState").textContent = label; $("moveLead").textContent = text; };
