@@ -573,9 +573,20 @@ const DEPTS = [
   {id:"rnd", name:"R&D", tag:"R&D", model:"Opus 5.5 · high", sched:"Once a month, when the budget allows", planned:"Desk ready, opens in phase 3",
    role:"Researches infrastructure and new features that would move the product forward as a whole."},
   {id:"marketing", name:"Marketing", tag:"Marketing", model:"Sonnet 5.5 · medium", sched:"Once a month, when the budget allows", planned:"Desk ready, opens in phase 3",
-   role:"Compares the product with market leaders and suggests look-and-feel improvements."}
+   role:"Compares the product with market leaders and suggests look-and-feel improvements."},
+  // Mo, the cleaner (the CEO, 2026-10-30): mops all week; in the last hours before the weekly reset, while allowance is
+  // left, he is the office's sweep (tools/office_next.py sweep): every lane works, nothing waits on the budget pace.
+  {id:"cleaner", name:"Cleaner", tag:"Mo", model:"Mop · bucket · [classified]", sched:"Evenings. And Fridays, three hours before the weekly reset. Don't ask.",
+   role:"Mo has cleaned this office since before the chatbot could spell \"manual\". Nobody has seen him clock in. On Fridays, three hours before the weekly reset, if any Claude allowance is left, the lights flicker, he puts on sunglasses, hires a few people in suits, and every department's pending work disappears. By Monday he's back on the mop."},
+  {id:"agent1", secret:true, name:"Agent 01", tag:"Agent", model:"Hired by Mo", sched:"Fridays, until the reset", planned:"Not on the payroll",
+   role:"Mo's contractor. Walks in when the sweep starts, takes a pile of work, and was never here."},
+  {id:"agent2", secret:true, name:"Agent 02", tag:"Agent", model:"Hired by Mo", sched:"Fridays, until the reset", planned:"Not on the payroll",
+   role:"Mo's contractor. Walks in when the sweep starts, takes a pile of work, and was never here."},
+  {id:"agent3", secret:true, name:"Agent 03", tag:"Agent", model:"Hired by Mo", sched:"Fridays, until the reset", planned:"Not on the payroll",
+   role:"Mo's contractor. Walks in when the sweep starts, takes a pile of work, and was never here."}
 ];
 const D = Object.fromEntries(DEPTS.map(d => [d.id, d]));
+const SECRET = DEPTS.filter(d => d.secret).map(d => d.id);
 const fmtWhen = d => d ? d.toLocaleString(undefined,{weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "";
 const fmtTime = d => d.toLocaleTimeString(undefined,{hour:"2-digit", minute:"2-digit"});
 
@@ -585,10 +596,22 @@ const sample = {workers:{}, events:[], waiting:[], step:0};
 let mode = "sample", forced = null, selected = "customer";
 const view = () => mode === "live" ? live : sample;
 /* phase 2-3 departments exist once their worker row does (written when they are hired) */
-const hired = id => !D[id].planned || !!live.workers[id];
+// the cleaner's sweep, from the brief (tools/office_brief.py "sweep"); Mo hires one agent per piece of work running
+// #sweep in the address: a one-minute demo of the sweep, then the empty-queue surprise
+const DEMO = location.hash === "#sweep" ? Date.now() : 0, demoBusy = () => DEMO && Date.now() - DEMO < 60000;
+const DEMO_RUNS = [{dept:"Dev", why:"build two work orders"}, {dept:"Product owner", why:"check three hand-backs"}, {dept:"Customer", why:"re-ask the hidden siblings"}];
+const sweepOn = () => !!DEMO || (mode === "live" && !!(live.brief && live.brief.sweep && live.brief.sweep.on));
+const sweepRuns = () => DEMO ? (demoBusy() ? DEMO_RUNS : []) : (live.brief && live.brief.running) || [];
+const swept = () => sweepOn() && !sweepRuns().length && (DEMO ? !demoBusy() : !((live.brief.moving) || []).some(m => m.state === "run"));
+const hired = id => D[id].secret ? sweepOn() && SECRET.indexOf(id) < sweepRuns().length : !D[id].planned || !!live.workers[id];
 function worker(id){
   const d = D[id];
   if(!hired(id)) return {state:"planned", task:d.planned};
+  if(id === "cleaner"){ const on = sweepOn(), done = swept();
+    return {state: on && !done ? "working" : "idle", last: "", updated: "", screen: [],
+            task: !on ? "Mopping. Just mopping." : done ? "Backlog swept. Back to the mop." : "Sweeping the backlog before the weekly reset"}; }
+  if(d.secret){ const r = sweepRuns()[SECRET.indexOf(id)];
+    return {state: "working", task: r ? `${r.dept}: ${r.why}` : "On assignment", last: "", updated: "", screen: []}; }
   let w = view().workers[id] || (d.planned ? live.workers[id] : null) || {};
   // a lane running this department is in the brief every tick; lanes skip the workers row, so the brief wins over a stale idle row
   const run = mode === "live" && w.state !== "working" && w.state !== "blocked" && ((live.brief && live.brief.running) || []).find(m => m.key === DEPT_KEY[id]);
@@ -704,7 +727,7 @@ const DOCK = S("dock",28,8,"down","charge");
 const ACT = {type:"At the desk, working", wait:"At the desk, waiting", blocked:"At the desk, stuck", office:"In the office", rest:"On the office sofa",
   coffee:"Making a coffee", snack:"Having a snack", cooler:"At the water cooler", tv:"Watching TV", pool:"Playing pool", arcade:"On the arcade machine",
   foos:"Playing table football", bean:"On a beanbag", smoke:"At the smoking shelter", picnic:"Sitting outside", plan:"At the plan board",
-  meeting:"In a meeting", rack:"Running tests in the lab", charge:"Charging"};
+  meeting:"In a meeting", rack:"Running tests in the lab", charge:"Charging", clean:"Mopping the floor"};
 
 /* ================= people ================= */
 const SKIN = ["#F2C9A8","#C88E63","#8B5A3C"];
@@ -717,8 +740,19 @@ const AG = {
   audit:{id:"audit", desk:S("d-a",3,22,"up","type",{sit:true}), look:{shirt:"#7A5BA6", pants:"#2E3440", hair:"#A3A7AB", skin:1, glasses:true}},
   security:{id:"security", desk:S("d-s",7,22,"up","type",{sit:true}), look:{shirt:"#22272E", pants:"#22272E", hair:"#121212", skin:2, beanie:"#C8433A"}},
   rnd:{id:"rnd", desk:S("d-r",11,22,"up","type",{sit:true}), look:{shirt:"#EEF1F3", pants:"#3B3F4A", hair:"#B5651D", skin:0, long:true, coat:true}},
-  marketing:{id:"marketing", desk:S("d-m",15,22,"up","type",{sit:true}), look:{shirt:"#E58A2E", pants:"#2B2F36", hair:"#E2B95A", skin:0, long:true}}
+  marketing:{id:"marketing", desk:S("d-m",15,22,"up","type",{sit:true}), look:{shirt:"#E58A2E", pants:"#2B2F36", hair:"#E2B95A", skin:0, long:true}},
+  // Mo: overalls and a mop all week; the suit and shades come out for the sweep. His "desk" is the safe.
+  cleaner:{id:"cleaner", desk:S("d-cl",29,15,"left","type"), look:{shirt:"#4F6D7A", pants:"#4F6D7A", hair:"#8E8E8E", skin:1, beanie:"#2F4858", mop:true},
+    suit:{shirt:"#15181C", pants:"#15181C", hair:"#8E8E8E", skin:1, tie:true, shades:true}},
+  // his hires take the open plan's spare seats
+  agent1:{id:"agent1", desk:S("d-x1",7,17,"up","type",{sit:true}), look:{shirt:"#15181C", pants:"#15181C", hair:"#121212", skin:2, tie:true, shades:true}},
+  agent2:{id:"agent2", desk:S("d-x2",15,17,"up","type",{sit:true}), look:{shirt:"#15181C", pants:"#15181C", hair:"#B5651D", skin:0, tie:true, shades:true, long:true}},
+  agent3:{id:"agent3", desk:S("d-x3",11,14,"down","type",{sit:true}), look:{shirt:"#15181C", pants:"#15181C", hair:"#3B2A1E", skin:1, tie:true, shades:true}}
 };
+// where Mo mops when there is no sweep on (open floor, clear of furniture)
+const MOPS = [S("mop1",20,14,"down","clean"), S("mop2",14,12,"left","clean"), S("mop3",30,22,"right","clean"),
+              S("mop4",22,20,"down","clean"), S("mop5",8,24,"up","clean"), S("mop6",33,15,"down","clean")];
+const DOOR = {x:20, y:25};   // his hires walk in from reception
 const AGENTS = Object.values(AG);
 AGENTS.forEach((a, i) => { a.x = a.desk.x; a.y = a.desk.y; a.face = a.desk.f; a.path = []; a.spot = null; a.arrived = false;
   a.queue = []; a.errand = null; a.seed = i*1.37 + .4; a.brkUntil = 0; a.gotUntil = 0; a.got = ""; });
@@ -786,6 +820,11 @@ function desired(a){
     return RACK[rackIdx];
   }
   if(w.state === "working" || w.state === "waiting" || w.state === "blocked") return a.desk;
+  if(a.id === "cleaner"){   // no breaks for Mo: he does his round
+    if(a.spot && a.spot.act === "clean" && now < a.brkUntil) return a.spot;
+    a.brkUntil = now + rnd(6, 12);
+    return MOPS[Math.floor(Math.random()*MOPS.length)];
+  }
   if(a.spot && a.spot.act !== "deliver" && a.spot.act !== "meeting" && now < a.brkUntil) return a.spot;
   a.brkUntil = now + (mode === "sample" ? rnd(7,14) : rnd(14,30));
   return pickBreak(a);
@@ -854,7 +893,7 @@ for(const d of DEPTS){
   b.querySelector(".name").textContent = d.name; b.querySelector(".model").textContent = d.model;
   b.addEventListener("click", () => select(d.id));
   roster.append(b);
-  cards[d.id] = {el:b, state:b.querySelector(".state"), task:b.querySelector(".task"), now:b.querySelector(".now")};
+  cards[d.id] = {el:b, name:b.querySelector(".name"), state:b.querySelector(".state"), task:b.querySelector(".task"), now:b.querySelector(".now")};
 }
 for(const a of AGENTS){
   const t = document.createElement("span"); t.className = "tag"; t.textContent = D[a.id].tag; overlay.append(t); tags[a.id] = t;
@@ -1330,6 +1369,14 @@ function cardTask(t){
   }).join("; ");
 }
 function renderRoster(force){
+  // Mo's cover drops during the sweep; his hires have a card only while they are in the building
+  const undercover = !sweepOn(), mo = undercover ? "Cleaner" : "Agent 00 (the cleaner)";
+  if(cards.cleaner.name.textContent !== mo){ cards.cleaner.name.textContent = mo; tags.cleaner.textContent = undercover ? "Mo" : "Agent 00"; }
+  for(const id of SECRET){
+    const in_ = hired(id), a = AG[id];
+    cards[id].el.hidden = !in_;
+    if(!in_ && (a.x !== DOOR.x || a.y !== DOOR.y)){ release(a); a.x = DOOR.x; a.y = DOOR.y; a.path = []; a.spot = null; a.arrived = false; }
+  }
   for(const d of DEPTS){
     const w = worker(d.id), c = cards[d.id];
     const label = STATE_LABEL[w.state] || w.state, cls = "state " + w.state;
@@ -2249,7 +2296,7 @@ function drawParts(){ for(const p of PARTS){ c.globalAlpha = Math.max(0, .7*(1 -
 
 /* people and the robot */
 function drawPerson(a, t){
-  const L = a.look, skin = SKIN[L.skin], X = Math.round(a.x*T + T/2), Y = Math.round(a.y*T + T - 1);
+  const L = a.suit && sweepOn() ? a.suit : a.look, skin = SKIN[L.skin], X = Math.round(a.x*T + T/2), Y = Math.round(a.y*T + T - 1);
   const f = a.face, sit = a.sitting && !a.moving, stp = a.moving ? Math.floor(t*9 + a.seed) % 2 : 0;
   const top = Y - 13 + (sit ? 3 : 0) - (a.moving && stp ? 1 : 0);
   const act = a.arrived && a.spot ? a.spot.act : "";
@@ -2293,6 +2340,11 @@ function drawPerson(a, t){
   if(L.hood && f === "down"){ px(X-4, top+1, 1, 5, L.shirt2); px(X+3, top+1, 1, 5, L.shirt2); }
   if(L.glasses && f === "down"){ px(X-3, top+3, 6, 1, "#2B2B2B"); px(X-2, top+3, 1, 1, "#9FD3EE"); px(X+1, top+3, 1, 1, "#9FD3EE"); }
   if(L.beanie){ px(X-3, top-1, 6, 3, L.beanie); px(X-3, top+1, 6, 1, "#A23329"); }
+  if(L.shades && f !== "up"){ px(X-3, top+3, 6, 1, "#050505"); if(f === "down"){ px(X-2, top+4, 1, 1, "#050505"); px(X+1, top+4, 1, 1, "#050505"); } }
+  // Mo's mop: held upright, swishing while he mops
+  if(L.mop && !sit){ const sx = act === "clean" && a.arrived ? Math.round(Math.sin(t*5 + a.seed)*1.5) : 0;
+    for(let i = 0; i < 9; i++) px(X + 4 + (i > 6 ? sx : 0), top + 3 + i, 1, 1, "#B08850");
+    px(X + 3 + sx, top + 12, 3, 2, "#D9D4BC"); }
   if(L.coat && f === "down"){ px(X+1, top+7, 1, 2, "#2F6FD0"); px(X-1, top+6, 1, 5, "#C9D1D6"); }
   // pool cue
   if(act === "pool" && a.arrived){ const back = POOL.strike && now - POOL.strike < .3 ? 2 : 0, dir = f === "left" ? -1 : 1;
@@ -2436,6 +2488,30 @@ const THOUGHTS = {
   audit: ["That answer cost a fifth of a penny. Outrageous.", "Somebody ran the lab twice. I will find you.", "{other} is on the arcade. I'm logging that as overhead."],
   rnd: ["What if we just used a bigger model? ...no? Okay.", "Reading paper number 14 on retrieval. Still no answer.", "In theory this works. In theory."],
   marketing: ["Can we make the chatbot... pop more?", "Kapa uses a gradient. Just saying.", "We're not a chatbot, we're a 'grounded support experience'."],
+  // Mo, all week: the cover story
+  cleaner: ["Mop. Bucket. Mop. Nobody suspects the mop.", "{other} spilled coffee on the merge queue again.",
+    "I've seen things in this backlog. Terrible things. Unmerged things.", "Clean floors, clean diffs. Same job, really.",
+    "They think I'm here for the bins.", "Friday's coming. Friday's always coming.", "Someone left a stack trace under the sofa.",
+    "I don't take breaks. I take positions.", "Allowance left over at the weekend is a mess. I hate mess.",
+    "Just the floors. Definitely just the floors."],
+  // Mo, during the sweep
+  sweep: ["Three hours to the reset. Lock the doors.", "Allowance left on the table? Not on my floor.", "Agents: you're cleared for the backlog. Go.",
+    "{other}'s queue. Gone. Next.", "Nobody saw anything. Especially not me.", "Sunglasses on. Mop holstered.",
+    "Every pending card, every lane. Move.", "The weekly reset waits for no one. Neither do I."],
+  swept: ["Backlog: swept. Floor: next.", "Suit back in the cupboard. Nobody saw a thing.", "Same time next Friday.", "Where did I leave my mop?"],
+  // his hires
+  agent: ["Agent reporting. Which pile?", "I was never here. Neither was this pull request.", "{task}. Don't tell {other}.",
+    "Hired at four, gone by seven. Contract work.", "Mo sends his regards.", "Sunglasses stay on. Office policy.",
+    "Fast, quiet, merged. Pick three."],
+  // everyone else: rumours all week, unease during the sweep, and the surprise when their queue is empty
+  rumour: ["Has anyone ever seen the cleaner leave?", "My backlog was shorter on Monday. I didn't do that.",
+    "The cleaner said 'nice diff'. Cleaners don't say 'nice diff'.", "Why is there a server rack in the mop cupboard?",
+    "Last Friday my queue cleared itself. Again.", "Ever notice Mo only mops near the merge queue?", "Mo knows my password. I never told Mo my password."],
+  sweepRumour: ["Did the lights just flicker?", "Who are the people in suits at the spare desks?", "My queue is moving and I'm on the sofa. How?",
+    "The cleaner just walked past in sunglasses. Indoors.", "Somebody's typing at the empty desks. Loudly.", "Is it Friday afternoon? It's Friday afternoon."],
+  surprised: ["Wait. Where did all my work go?", "My queue is EMPTY. Who did this?", "Every card on the plan board says done. I've been at the pool table all afternoon.",
+    "Did... did the cleaner just merge my branch?", "Nothing pending. Nothing. I don't like it.", "Is this what an empty backlog looks like? It's beautiful.",
+    "I went for a coffee and came back to a finished week.", "I'm taking credit for this. Nobody tell Mo."],
   // where they are and what they are doing; {role:act} lines beat the shared ones
   act: {
     pool: ["Can't even play pool in peace.", "Have I been playing too long? ...One more frame.", "If I sink this, I'm taking the afternoon off.",
@@ -2457,6 +2533,7 @@ const THOUGHTS = {
     walk: ["Walking with purpose. No purpose. But walking.", "If I walk fast, people think I'm important.", "Where was I going? Keep walking. Look sure."],
     rack: ["Racks humming. Chatbot sweating.", "Running the tests. Judging the answers. Silently."],
     charge: ["Charging. Do not disturb.", "Battery at 40%. Patience at 2%."],
+    clean: ["Wet floor. Like the chatbot's grounding on a Monday.", "Mop left, mop right. Watch the merge queue.", "Nobody looks at the cleaner. That's the point."],
     rest: ["Five minutes on the sofa. Executive privilege.", "I'm not napping, I'm strategising horizontally."],
     office: ["The view from the top is mostly emails.", "Door's open. Please nobody come in."]
   },
@@ -2477,10 +2554,15 @@ function think(id, watched){
   const act = a.moving || a.errand ? "walk" : a.spot === a.desk && !a.robot ? (w.state === "waiting" ? "wait" : w.state === "blocked" ? "blocked" : id === "ceo" ? "office" : "type") : a.spot && a.spot.act;
   const here = [...(THOUGHTS.roleact[id + ":" + act] || []), ...(THOUGHTS.act[act] || [])];
   // what they are doing comes up most, then who they are, then (when you are watching) being watched
-  const pools = [[here, 4], [THOUGHTS[id] || [], 3], [watched && id !== "ceo" ? THOUGHTS.watched : [], 3]].filter(([l]) => l.length);
+  const sw = sweepOn(), done = swept(), secret = D[id].secret;
+  const own = secret ? THOUGHTS.agent : id === "cleaner" && sw ? (done ? THOUGHTS.swept : THOUGHTS.sweep) : THOUGHTS[id] || [];
+  // the others, about Mo: a rumour now and then, unease while he sweeps, surprise once their queues are empty
+  const gossip = secret || id === "cleaner" || a.robot ? [] : done ? [THOUGHTS.surprised, 10] : sw ? [THOUGHTS.sweepRumour, 4] : [THOUGHTS.rumour, 1];
+  const pools = [[secret || (id === "cleaner" && sw) ? [] : here, 4], [own, secret || (id === "cleaner" && sw) ? 8 : 3],
+                 [watched && id !== "ceo" ? THOUGHTS.watched : [], 3], gossip.length ? gossip : [[], 0]].filter(([l]) => l.length);
   let r = Math.random()*pools.reduce((n, [, w]) => n + w, 0), pool = pools[0][0];
   for(const [l, wt] of pools){ if((r -= wt) < 0){ pool = l; break; } }
-  const others = DEPTS.filter(d => d.id !== id && d.id !== "ceo" && hired(d.id)).map(d => d.name);
+  const others = DEPTS.filter(d => d.id !== id && d.id !== "ceo" && !d.secret && hired(d.id)).map(d => d.name);
   let t = pickFrom(pool); for(let i = 0; i < 4 && t === a.thought; i++) t = pickFrom(pool);
   a.thought = t.replace("{task}", (w.task || "This").replace(/[.!]$/, "")).replace(/\{other\}/g, others.length ? pickFrom(others) : "someone");
   a.thoughtUntil = now + 7 + Math.min(5, a.thought.length/12);

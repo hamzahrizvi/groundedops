@@ -139,6 +139,26 @@ weeks, phase 3 once Dev has merged a gated fix.
    Security's branch review (phase 2) can block it; the product owner marks it
    READY TO MERGE or sends it back. Once Security has cleared the branch, the
    dispatcher merges it (`tools/office_merge.py`).
+6. **Fri, last 3 hours before the weekly reset: the cleaner's sweep.** Mo, the
+   office cleaner on the page, mops all week. In the last `SWEEP_HOURS` (3)
+   before the Friday ~19:00 UTC reset, with at least `SWEEP_LEFT` (10%) of the
+   week's allowance unspent, that allowance would expire unused, so
+   `office_next.py sweep()` turns on:
+   - work mode `sweep`: up to 8 approved items, 4 Dev builds and 3 copies of a
+     department at once;
+   - nothing waits on the budget pace;
+   - lanes 2 and 3 wake for free work, not only when lane 1 is busy.
+
+   It still stops at:
+   - the CEO's holds (`OPS/state/hold`);
+   - the office switch;
+   - the lab spending cap;
+   - 85% of the 5-hour window (`SWEEP_FIVE`).
+
+   `OPS/state/no_sweep` switches it off. On the page Mo becomes Agent 00, puts
+   on a suit, and hires one agent in shades per piece of work running. The
+   others notice, and once every queue is empty they are surprised. Add
+   `#sweep` to the page's address for a one-minute demo.
 
 ## The retrofit gate
 

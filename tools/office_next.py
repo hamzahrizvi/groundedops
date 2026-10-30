@@ -65,7 +65,12 @@ CLAIMS = ("state", "claims")
 MAX_APPROVED = 3      # the product owner's cap on approved, not yet merged items (.claude/agents/product-owner.md)
 # Work modes (the CEO, 2026-10-14): (approved not merged, Dev builds at once, work orders per department at once).
 # More in flight means more lanes run side by side: two Dev builds, or two copies of one department on different orders.
-MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2)}
+MODES = {"easy": (3, 1, 1), "high": (3, 2, 1), "ultra": (6, 3, 2), "sweep": (8, 4, 3)}
+# The cleaner's sweep (the CEO, 2026-10-30; the page's Cleaner): in the last SWEEP_HOURS before the weekly reset, with at
+# least SWEEP_LEFT % of the week unspent, the allowance would expire unused, so every lane works, nothing waits on the
+# budget pace, and the "sweep" caps above apply. Holds, the office switch, the lab cap and SWEEP_FIVE still stop it;
+# OPS/state/no_sweep switches it off.
+SWEEP_HOURS, SWEEP_LEFT, SWEEP_FIVE = 3, 10, 85
 MAX_DEV = 2         # ponytail: Dev builds at once; each has its own worktree, merges are serialized
 RUN_ALL = 4 * 3600    # backstop only: "Run all now" ends with the tick that picks it up (take stamps it, end_tick removes it)
 IDLE_EVERY = 3        # ponytail: days between discovery runs (security, audit, rnd, marketing) while nothing else waits
@@ -211,9 +216,21 @@ def end_tick(ops, lane):
         pass
 
 
+def sweep(ops, week, resets, now):
+    """(on, why): the cleaner's sweep, the last SWEEP_HOURS before the weekly reset with SWEEP_LEFT % or more unspent."""
+    left, to_go = 100 - week, (resets - now).total_seconds()
+    if is_off(ops) or os.path.exists(os.path.join(ops, "state", "no_sweep")) or not 0 < to_go <= SWEEP_HOURS * 3600 or left < SWEEP_LEFT:
+        return False, ""
+    return True, f"the cleaner's sweep: {left:.0f}% of the week left, {to_go / 3600:.1f} h to the reset"
+
+
 def work_mode(ops, week, resets, now):
     """(mode, why): the weekly allowance left against the time left before the reset. 1.5x or more is ultra,
-    1.1x or more high, less easy. OPS/state/mode holding easy, high or ultra overrides it (the CEO's choice)."""
+    1.1x or more high, less easy. OPS/state/mode holding easy, high or ultra overrides it (the CEO's choice),
+    and the cleaner's sweep overrides both: what is left of the week would otherwise expire."""
+    on, why = sweep(ops, week, resets, now)
+    if on:
+        return "sweep", why
     try:
         m = open(os.path.join(ops, "state", "mode"), encoding="utf-8").read().strip().lower()
         if m in MODES:
@@ -273,6 +290,10 @@ def needed(ops, lane, free=()):
         return False, "nothing to do; refresh due"
     if any(c.get("lane") == lane for c in held):   # a leftover claim of this lane's last run: run, so take() drops it (else it blocks every lane until STALE)
         return True, f"lane {lane} holds a leftover claim"
+    _, week, old = latest_usage(fallback=os.path.join(ops, "state", "usage.json"))
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if free and old <= 60 and sweep(ops, week, next_reset(now), now)[0]:
+        return True, f"the cleaner's sweep: every lane works until the weekly reset; {free[0]}"
     busy = sorted({c.get("lane") for c in held if c.get("lane") not in (lane, None, "hand")})
     if busy:
         return True, (f"lane {busy[0]} is busy" if len(busy) == 1 else "lanes " + " and ".join(map(str, busy)) + " are busy")
@@ -546,6 +567,7 @@ def entries(ops, repo, five, week, resets, now, taken):
     since two lanes starting together both see the same usage figures."""
     held, forced = holds(ops, now), run_now(ops)
     mode = MODES[work_mode(ops, week, resets, now)[0]]
+    swept = sweep(ops, week, resets, now)[0]
     if is_off(ops):
         held |= {"merge"} | {d for d, _, _ in waiting(ops, repo, now, taken, mode)}
     cost = lambda k: (0, 0) if taken[k].get("lane") == "hand" else COST.get("dev" if k.startswith("dev-") else k, (0, 0))   # a blind test spends no Claude usage
@@ -567,7 +589,9 @@ def entries(ops, repo, five, week, resets, now, taken):
         stop = ("held (OPS/state/hold)" if dept in held and not pressed else f"already running{lane}" if lane else
                 f"{mode[1]} builds already running" if dept == "dev" and building >= mode[1] else
                 f"5-hour window at {five}%" if pressed and five >= 90 else
-                None if pressed else over_budget(dept, five, week, resets, now))
+                None if pressed else
+                (f"5-hour window at {five}%" if five >= SWEEP_FIVE else None) if swept else   # the sweep skips the pace, not a hold
+                over_budget(dept, five, week, resets, now))
         out.append((f"WAIT {TASK}{dept}  {why}; {stop}" if stop else f"RUN  {TASK}{dept}  {why}", key, not stop))
     return out
 
@@ -590,6 +614,14 @@ def selftest():
         w("state/mode", "high\n")
         w("state/every", "0")   # back to back: "Next run" spacing is tested on its own below
         assert work_mode(ops, 40, resets, now) == ("high", "set by you")
+        # the cleaner's sweep: only in the last SWEEP_HOURS, only with SWEEP_LEFT % unspent, and it outranks a set mode
+        late = resets - datetime.timedelta(hours=2)
+        assert work_mode(ops, 50, resets, late)[0] == "sweep" and sweep(ops, 50, resets, late)[0]
+        assert not sweep(ops, 50, resets, resets - datetime.timedelta(hours=4))[0], "too early"
+        assert not sweep(ops, 95, resets, late)[0], "too little left to sweep"
+        w("state/no_sweep")
+        assert work_mode(ops, 50, resets, late) == ("high", "set by you"), "the CEO's switch-off"
+        os.remove(os.path.join(ops, "state", "no_sweep"))
         assert lane_cron(1, 10) == "0,10,20,30,40,50 * * * *" and lane_cron(1, 60) == "0 * * * *", "lane 1 follows Next run"
         assert lane_cron(2, 60) == "20 * * * *" and lane_cron(3, 0) == "20,50 * * * *" and lane_cron(3, 120) == "20 1-23/2 * * *", "lanes 2 and 3: 30 minutes at most"
         w("decisions/20261008.md", "## D-20261008-01 | Two products\n- Assigned: dev\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n"
@@ -833,11 +865,12 @@ def main():
         ap.error("--take, --release, --cron-set and --needed need --lane")
     if a.needed:
         free = ()
-        if a.lane == 1:   # stale usage figures count as room: the full tick refreshes them and checks the budget itself
-            now = datetime.datetime.now(datetime.timezone.utc)
-            five, week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
-            five, week = (0, 0) if old > 60 else (five, week)
-            free = [line for line, _ in startable(a.ops, entries(a.ops, a.repo, five, week, next_reset(now), now, claims(a.ops)), 1)]
+        now = datetime.datetime.now(datetime.timezone.utc)
+        five, week, old = latest_usage(fallback=os.path.join(a.ops, "state", "usage.json"))
+        # lane 1 always; lanes 2 and 3 only in the cleaner's sweep, when free work, not a busy lane, wakes them
+        if a.lane == 1 or (old <= 60 and sweep(a.ops, week, next_reset(now), now)[0]):
+            five, week = (0, 0) if old > 60 else (five, week)   # stale figures count as room: the full tick refreshes them and checks the budget itself
+            free = [line for line, _ in startable(a.ops, entries(a.ops, a.repo, five, week, next_reset(now), now, claims(a.ops)), a.lane)]
         ok, why = needed(a.ops, a.lane, free)
         # a lane past its department's limit is told here: every lane's every wake-up runs this check first
         return print("\n".join([("NEEDED " if ok else "NOT NEEDED ") + why] + tell_stuck(a.ops, datetime.datetime.now(datetime.timezone.utc))))
