@@ -24,6 +24,7 @@ _SCRATCH = tempfile.mkdtemp(prefix="go-tests-")
 atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
 os.environ.setdefault("ENV_FILE_PATH", os.path.join(_SCRATCH, "test.env"))
 os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(_SCRATCH, "secrets.enc"))
+os.environ.setdefault("DOC_KINDS_PATH", os.path.join(_SCRATCH, "doc_kinds.json"))
 
 OWN_PROCESS_TIMEOUT = 600
 # Name endings an own-process child must see blank. main.py loads src/.env for

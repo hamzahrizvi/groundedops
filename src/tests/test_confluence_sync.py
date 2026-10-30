@@ -12,6 +12,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import confluence_sync as cs  # noqa: E402
+import retrieval_db  # noqa: E402
 
 BODY = "<p>" + "Fit the hopper to the rail and tighten both screws. " * 6 + "</p>"
 
@@ -82,6 +83,9 @@ class World:
         cs._original = lambda s: b"%PDF stored" if s in self.uploads else None
         cs._marked = lambda s: s in self.internal
         cs._stored = lambda s: s in self.uploads or s in self.texts
+        kinds_was = (retrieval_db._KINDS_PATH, retrieval_db._kinds)
+        retrieval_db._KINDS_PATH = os.path.join(os.path.dirname(self.state), "doc_kinds.json")
+        retrieval_db._kinds = None
         def mark(sources, on):
             # As retrieval_db.set_internal does since D-20261024-06: marking
             # takes the chunks out; un-marking indexes it again from the original.
@@ -117,6 +121,7 @@ class World:
         finally:
             (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
              cs._mark_internal, cs._indexed, cs._retag, cs._original, cs._marked, cs._stored) = saved
+            retrieval_db._KINDS_PATH, retrieval_db._kinds = kinds_was
 
     def run(self, api, apply=True, check=True):
         return self._with(lambda: cs.run(apply, check), api)
@@ -554,6 +559,53 @@ def test_a_title_that_says_internal_is_filed_internal_in_auto_mode():
         w = World(os.path.join(d, "s.json"))
         w.run(InternalTitlesApi(), apply=False)
         assert w.items()["X (Internal).pdf"]["decision"] == "excluded"
+
+
+def test_kind_of_rules():
+    P = ["Products", "SMART Coin System Range"]
+    cases = [
+        ("General Instructions", P + ["SMART Coin System Integration Test Script"], "page", "test_script"),
+        ("NV201 Spectral - Revision 3.13", P + ["NV201 Spectral Product Change Notification"], "page", "change_notice"),
+        ("PA02265 - NV9USB+ Full Assembly V2", [], "page", "drawing"),
+        ("NV9USB+ Disassembly Guide", P + ["NV9USB+ Range Repair Information"], "page", "manual"),
+        ("CN214_1 USB A to USB B Cable Assembly (att644645101)", P + ["NV200 Range Disclaimer and Safety Information"], "file", "drawing"),
+        ("EU Declaration of Conformity RoHS NV4000 07May2025 GA02336_1", [], "file", "certificate"),
+        ("BV50 Firmware Release Notes", [], "page", "release_note"),
+        ("Accessing my device in Linux Environment", ["Products", "Biometrics", "Biometric Range FAQ's", "Technical FAQs"], "page", "manual"),
+        ("NV200S Range User Manual", [], "bundle", "manual"),
+        ("Get Device Status", ["Products", "Biometrics", "API Specifications"], "page", "manual"),
+    ]
+    for t, p, k, want in cases:
+        assert cs.kind_of(t, p, k) == want, (t, cs.kind_of(t, p, k), want)
+
+
+class NoticeFolderApi(FakeApi):
+    tree = {("pages", "1"): [{"type": "folder", "id": "10", "title": "Smart Hopper 3 Product Change Notification"},
+                             {"type": "page", "id": "30", "title": "Overview"}],
+            ("folders", "10"): [{"type": "page", "id": "20", "title": "Installation"}]}
+
+
+def test_a_sync_stores_each_documents_kind():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(NoticeFolderApi())
+        got = w._with(lambda: dict(retrieval_db.source_kinds()))
+        assert got["Installation.txt"] == "change_notice", got
+        assert got["SH3 manual.pdf"] == "change_notice", got
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(FakeApi())
+        assert w._with(lambda: dict(retrieval_db.source_kinds()))["Installation.txt"] == "manual"
+        # a hand edit stands: a later run never overwrites a stored kind
+        with open(os.path.join(d, "doc_kinds.json"), "w") as f:
+            json.dump({"Installation.txt": "test_script"}, f)
+        def reread():
+            retrieval_db._kinds = None
+        w._with(reread)
+        w.run(FakeApi())
+        assert w._with(lambda: dict(retrieval_db.source_kinds()))["Installation.txt"] == "test_script"
 
 
 if __name__ == "__main__":

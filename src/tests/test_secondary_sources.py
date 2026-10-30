@@ -1,8 +1,11 @@
 """Test scripts, drawings, certificates and the like rank below the manuals (2026-10-23)."""
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+os.environ.setdefault("DOC_KINDS_PATH", os.path.join(tempfile.gettempdir(), "go-test-doc-kinds-absent.json"))
 
 import retrieval_db as r  # noqa: E402
 
@@ -29,6 +32,26 @@ def test_a_manual_outranks_a_test_script_but_keeps_its_score():
     weak = {"source": PRIMARY[1], "rerank_score": 0.1}
     assert sorted([weak, ts, man], key=r.rank_key, reverse=True) == [man, ts, weak]
     assert ts["rerank_score"] == 0.99
+
+
+def test_a_stored_kind_beats_the_name():
+    was = (r._KINDS_PATH, r._kinds)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r._KINDS_PATH, r._kinds = os.path.join(d, "doc_kinds.json"), None
+            notice, script = "NV201 Spectral - Revision 3.13.txt", "NV4000 Integration Test Script-v1.pdf"
+            r.set_kinds({notice: "change_notice", script: "manual"})
+            assert r.is_secondary(notice) and not r.is_secondary(script)
+            assert r.is_secondary("WR02040_4.pdf") and not r.is_secondary("BV30 User Manual.txt")
+            r._kinds = None                      # re-read from the file
+            assert r.is_secondary(notice)
+            man, cn = {"source": script, "rerank_score": 0.6}, {"source": notice, "rerank_score": 0.99}
+            assert sorted([cn, man], key=r.rank_key, reverse=True) == [man, cn]
+            open(r._KINDS_PATH, "w").write("{not json")
+            r._kinds = None                      # unreadable: the name rule
+            assert not r.is_secondary(notice) and r.is_secondary("WR02040_4.pdf")
+    finally:
+        r._KINDS_PATH, r._kinds = was
 
 
 if __name__ == "__main__":
