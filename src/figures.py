@@ -302,16 +302,43 @@ def extract_figures(pdf_path: str, source: str, progress=None) -> dict[int, list
 FIGURE_TEXT_DPI = 220
 MAX_FIGURE_SIDE_PX = 2400
 MIN_FIGURE_TEXT_CHARS = 6
+VISION_MAX_SIDE_PX = 1600
+VISION_WORKERS = 4        # ponytail: fixed pool; a setting if a provider rate-limits
+VISION_PROMPT = (
+    "This picture is cut from a product's technical manual. Describe it so a customer's "
+    "question can be matched to it and answered from it. Plain text, no preamble, at most "
+    "200 words.\n"
+    "1. One line: what it shows (which product, part, screen or connector, and the view: "
+    "front, side, top, rear, wiring diagram, pinout, label).\n"
+    "2. Every dimension printed on it as 'what it measures: value unit' (height, width, depth, "
+    "length, diameter, hole spacing), naming the edge or feature the dimension line spans.\n"
+    "3. Every label, callout, part name, button, LED, switch, connector, pin number with its "
+    "signal name, and wire colour, as written.\n"
+    "Copy numbers and names exactly as printed. Never guess: leave out what you cannot read.")
+
+
+def _vision_png(pil) -> bytes:
+    import io
+    im = pil.convert("RGB")
+    im.thumbnail((VISION_MAX_SIDE_PX, VISION_MAX_SIDE_PX))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
-                progress=None) -> dict[str, tuple[str, float]]:
+                progress=None, vision: bool = False) -> dict[str, tuple[str, float]]:
     """OCR the text in a document's figures. Returns {name: (text, conf)}
     for the figures that had legible text, and writes it into the sidecar.
 
     Re-rendered from the PDF at FIGURE_TEXT_DPI rather than read from the
     stored crop: the crops are cut at 120 DPI for display, and a pin
     number on a connector photo is a few pixels tall at that size.
+
+    vision=True also describes each figure with a vision model
+    (llm.describe_image) into the sidecar's `desc`, once: a figure already
+    described is not paid for again; vision=False leaves an existing `desc`
+    as it is.
     """
     import ocr as _ocr
     engine = _ocr._load_engine()
@@ -326,6 +353,11 @@ def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
     if not wanted:
         return out
 
+    import llm
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(VISION_WORKERS) if vision else None
+    asked = {}
+    doc = os.path.splitext(source)[0]
     with pdfplumber.open(pdf_path) as pdf:
         total = len(wanted)
         for done, name in enumerate(wanted, start=1):
@@ -336,6 +368,11 @@ def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
                 w_pt = max(box[2] - box[0], box[3] - box[1], 1)
                 dpi = min(FIGURE_TEXT_DPI, MAX_FIGURE_SIDE_PX * 72 / w_pt)
                 pil = page.crop(box).to_image(resolution=dpi).original
+                if pool and not m.get("desc"):
+                    where = f"Manual: {doc}. Page {m.get('page')}." + (
+                        f" Caption: {m['caption']}." if m.get("caption") else "")
+                    asked[name] = pool.submit(llm.describe_image, _vision_png(pil),
+                                              VISION_PROMPT + "\n\n" + where)
                 result = engine(np.asarray(pil.convert("RGB")))
                 if isinstance(result, tuple):
                     result = result[0]
@@ -356,6 +393,19 @@ def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
                     progress(done, total)
                 except Exception:
                     pass
+
+    if pool:
+        failed = 0
+        for name, fut in asked.items():
+            got = fut.result()
+            if got:
+                meta[name] = {**meta[name], "desc": got["text"], "desc_model": got["model"],
+                              "desc_tokens": [got["in"], got["out"]]}
+            else:
+                failed += 1
+        pool.shutdown()
+        if failed:
+            logger.warning("figure description: %d of %d failed for %r", failed, len(asked), source)
 
     d = figures_dir(source)
     try:

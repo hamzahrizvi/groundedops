@@ -26,6 +26,9 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 # prose chunk that actually answers, and it is guessed text competing with
 # typed text. index_figure_text() adds them to a document already held.
 FIGURE_TEXT_INDEX = os.getenv("FIGURE_TEXT_INDEX", "0") == "1"
+# Describe each figure with a vision model (figures.figure_text vision=True) when its
+# labels are read; needs FIGURE_TEXT_INDEX=1 and an OpenAI or Anthropic key. D-20261022-16.
+FIGURE_DESCRIBE = os.getenv("FIGURE_DESCRIBE", "0") == "1"
 from embeddings import embed_texts
 from db import get_collection, invalidate_retrieval_cache
 
@@ -397,7 +400,8 @@ def ingest_file(content: bytes, filename: str,
                 import figures as _figures
                 fig_read = _figures.figure_text(
                     tmp_path, filename,
-                    progress=lambda d, t: _step("reading text in figures", d, t))
+                    progress=lambda d, t: _step("reading text in figures", d, t),
+                    vision=FIGURE_DESCRIBE)
             except Exception as exc:
                 logger.warning("figure text skipped for %r: %s", filename, exc)
 
@@ -763,8 +767,9 @@ def _figure_chunks(filename: str,
                    headings: dict[int, str] | None = None,
                    ) -> list[tuple[int, str, str, float, str]]:
     """One chunk per figure with legible text: what the figure is (page,
-    section, caption) and the labels read out of it. Returns (page, name,
-    body, conf, heading).
+    section, caption) and the labels read out of it. A described figure gets
+    a chunk even with no legible label. Returns (page, name, body, conf,
+    heading).
 
     The body names itself a figure so the model knows it is looking at
     labels, not prose: "1 2 15 16" under "connector pinout" is a pinout;
@@ -781,8 +786,13 @@ def _figure_chunks(filename: str,
     import figures as _figures
     meta = _figures.figures_for(filename)
     out = []
-    for name, (text, conf) in read.items():
+    names = list(read) + [n for n, x in meta.items() if x.get("desc") and n not in read]
+    for name in names:
+        text, conf = read.get(name, ("", 0.0))
         m = meta.get(name) or {}
+        desc = (m.get("desc") or "").strip()
+        if not text and not desc:
+            continue
         try:
             pno = int(m.get("page") or 0)
         except (TypeError, ValueError):
@@ -794,7 +804,8 @@ def _figure_chunks(filename: str,
                         if p <= pno), "")
         head = (f"Figure on page {pno}" + (f", {heading}" if heading else "")
                 + (f": {caption}" if caption else ""))
-        body = head + "\nText in the figure:\n" + text
+        body = (head + (f"\nWhat the figure shows:\n{desc}" if desc else "")
+                + (f"\nText in the figure:\n{text}" if text else ""))
         crumb = f"Figure: {caption}" if caption else "Figure"
         if heading:
             crumb = f"{heading} — {crumb}"
@@ -843,7 +854,8 @@ def index_figure_text(filename: str, progress=None) -> int:
                                  progress=lambda d, t: _step("cutting out figures", d, t))
     _step("reading text in figures", 0, 1)
     read = _figures.figure_text(
-        path, filename, progress=lambda d, t: _step("reading text in figures", d, t))
+        path, filename, progress=lambda d, t: _step("reading text in figures", d, t),
+        vision=FIGURE_DESCRIBE)
     collection = get_collection()
     held = collection.get(where={"source": filename}, include=["metadatas"]) or {}
     chunks = _figure_chunks(filename, read, _page_headings(

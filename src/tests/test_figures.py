@@ -128,3 +128,49 @@ def test_an_empty_or_dotted_name_never_reaches_the_figures_root():
             figures.remove_figures(bad)
             assert figures.figure_path(bad, "p1_1.png") is None
         assert figures.figure_path("Manual.pdf", "p1_1.png")
+
+
+def test_figure_text_describes_each_figure_once():
+    """D-20261022-16: vision=True describes a figure into the sidecar once;
+    vision off pays nothing and keeps what is there."""
+    from unittest.mock import Mock
+    import llm
+    import ocr
+    got = {"text": "Front view. Height: 120 mm.", "model": "m", "in": 900, "out": 60}
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(docstore, "store_dir", return_value=tmp), \
+         patch.object(ocr, "_load_engine", lambda: (lambda a: [])), \
+         patch.object(ocr, "_lines_in_reading_order", lambda r: [("PIN 1 TX", 0.99)]), \
+         patch.object(llm, "describe_image", Mock(return_value=got)) as call:
+        pdf = os.path.join(tmp, "m.pdf")
+        _pdf(pdf, [[(100, 500, 200, 150, RED)]])
+        figures.extract_figures(pdf, "Manual.pdf")
+        figures.figure_text(pdf, "Manual.pdf")
+        assert call.call_count == 0 and "desc" not in figures.figures_for("Manual.pdf")["p1_1.png"]
+        assert figures.figure_text(pdf, "Manual.pdf", vision=True) == {"p1_1.png": ("PIN 1 TX", 0.99)}
+        m = figures.figures_for("Manual.pdf")["p1_1.png"]
+        assert m["desc"] == got["text"] and m["desc_tokens"] == [900, 60]
+        png, prompt = call.call_args.args[:2]
+        assert png.startswith(b"\x89PNG") and "Manual" in prompt and "Page 1" in prompt
+        figures.figure_text(pdf, "Manual.pdf", vision=True)
+        assert call.call_count == 1
+        figures.figure_text(pdf, "Manual.pdf")
+        assert figures.figures_for("Manual.pdf")["p1_1.png"]["desc"] == got["text"]
+
+
+def test_describe_image_uses_claude_when_an_anthropic_key_is_set():
+    """With an Anthropic key and no model named, the picture goes to Claude
+    as an image block, and its token counts come back."""
+    from unittest.mock import Mock
+    import llm
+    res = Mock(status_code=200)
+    res.json.return_value = {"content": [{"type": "text", "text": "Height: 120 mm"}],
+                             "usage": {"input_tokens": 2000, "output_tokens": 50}}
+    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}), \
+         patch.object(llm, "FIGURE_DESCRIBE_MODEL", ""), \
+         patch.object(llm, "_post", Mock(return_value=res)) as post:
+        got = llm.describe_image(b"\x89PNG", "describe")
+    assert got == {"text": "Height: 120 mm", "model": "claude-sonnet-5-5", "in": 2000, "out": 50}
+    assert "anthropic.com" in post.call_args.args[0]
+    block = post.call_args.kwargs["json"]["messages"][0]["content"][0]
+    assert block["type"] == "image" and block["source"]["media_type"] == "image/png"

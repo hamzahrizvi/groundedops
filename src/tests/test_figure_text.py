@@ -153,3 +153,20 @@ def test_ingest_file_indexes_no_figure_text_by_default():
         _, meta = next(iter(collection.rows.values()))
         assert meta["figures"] == "p1_1.png"
         assert "figure_text" not in meta
+
+
+def test_figure_chunk_carries_the_description():
+    """D-20261022-16: a vision description goes into the chunk before the
+    labels, and a described figure with no legible label still gets one."""
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(docstore, "store_dir", return_value=tmp):
+        _sidecar(tmp, "M.pdf", {
+            "p12_1.png": {"page": 12, "caption": "Figure 4", "desc": "Front view. Height: 120 mm"},
+            "p13_1.png": {"page": 13, "caption": "", "desc": "Wiring drawing, red wire to pin 1"}})
+        out = ingest._figure_chunks("M.pdf", {"p12_1.png": ("1 +V", 0.9)})
+    assert [(p, n) for p, n, *_ in out] == [(12, "p12_1.png"), (13, "p13_1.png")]
+    body = out[0][2]
+    assert "What the figure shows:\nFront view. Height: 120 mm" in body
+    assert body.index("What the figure shows:") < body.index("Text in the figure:")
+    assert "Wiring drawing, red wire to pin 1" in out[1][2]
+    assert "Text in the figure" not in out[1][2] and out[1][3] == 0.0

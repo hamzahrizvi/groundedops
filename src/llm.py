@@ -581,6 +581,92 @@ def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
         return None
 
 
+FIGURE_DESCRIBE_MODEL = os.getenv("FIGURE_DESCRIBE_MODEL", "")
+
+
+def describe_image(png: bytes, prompt: str, model: str | None = None,
+                   timeout: int = 90) -> dict | None:
+    """One picture and an instruction to a vision model: a claude-* model on
+    Anthropic's API, anything else on the OpenAI-shaped API (OpenAI, or the
+    gateway OPENAI_BASE_URL names). Unset FIGURE_DESCRIBE_MODEL means
+    claude-sonnet-5-5 with an Anthropic key, else gpt-5-mini. Measured
+    2026-11-04 on three manual drawings: Sonnet 5.5 read them as well as
+    Opus 5.5; Haiku 5.5 misread a height by 8 mm and named unlabelled
+    dimensions. About 2-3k input tokens a picture. Upload time only:
+    figures.figure_text describes manual figures with it (D-20261022-16);
+    never on the answering path. Returns {"text", "model", "in", "out"}
+    (prompt and completion tokens) or None. DeepSeek V4 takes no images."""
+    import base64
+    b64 = base64.b64encode(png).decode("ascii")
+    model = model or FIGURE_DESCRIBE_MODEL or (
+        "claude-sonnet-5-5" if (os.getenv("ANTHROPIC_API_KEY") or "").strip() else "gpt-5-mini")
+    if model.startswith("claude"):
+        return _describe_image_anthropic(b64, prompt, model, timeout)
+    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not key:
+        logger.warning("figure description skipped: no OpenAI key")
+        return None
+    url = "data:image/png;base64," + b64
+    try:
+        res = _post(
+            OPENAI_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            json={"model": model, **_openai_sampling(model),
+                  "max_completion_tokens": 700,
+                  "messages": [{"role": "user", "content": [
+                      {"type": "text", "text": prompt},
+                      {"type": "image_url", "image_url": {"url": url, "detail": "high"}}]}]},
+            timeout=timeout,
+        )
+        if res.status_code != 200:
+            _note_credit_failure("openai", res)
+        res.raise_for_status()
+        body = res.json()
+        text = (body["choices"][0]["message"].get("content") or "").strip()
+        u = body.get("usage") or {}
+        return ({"text": text, "model": model, "in": int(u.get("prompt_tokens", 0)),
+                 "out": int(u.get("completion_tokens", 0))} if text else None)
+    except Exception as e:
+        logger.warning(f"figure description failed ({model}): {e}")
+        return None
+
+
+def _describe_image_anthropic(b64: str, prompt: str, model: str,
+                              timeout: int) -> dict | None:
+    """describe_image on Anthropic's messages API. Effort low: reading labels
+    off a drawing needs eyes, not reasoning, and current Claude models think
+    by default (max_tokens covers the thinking too)."""
+    key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not key:
+        logger.warning("figure description skipped: no Anthropic key")
+        return None
+    try:
+        res = _post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": model, "max_tokens": 4000,
+                  "output_config": {"effort": "low"},
+                  "messages": [{"role": "user", "content": [
+                      {"type": "image", "source": {"type": "base64",
+                                                   "media_type": "image/png", "data": b64}},
+                      {"type": "text", "text": prompt}]}]},
+            timeout=timeout,
+        )
+        if res.status_code != 200:
+            _note_credit_failure("anthropic", res)
+        res.raise_for_status()
+        body = res.json()
+        text = "".join(b.get("text", "") for b in body.get("content", [])
+                       if b.get("type") == "text").strip()
+        u = body.get("usage") or {}
+        return ({"text": text, "model": model, "in": int(u.get("input_tokens", 0)),
+                 "out": int(u.get("output_tokens", 0))} if text else None)
+    except Exception as e:
+        logger.warning(f"figure description failed ({model}): {e}")
+        return None
+
+
 def generate(
     provider: str,
     prompt: str,
