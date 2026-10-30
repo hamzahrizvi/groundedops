@@ -215,7 +215,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | waiting for CEO | your yes |
 | D-20261024-10 | Synced Confluence pages get their kind from title and folder, and a replaced upload keeps all its products | ready to merge | merges once Security clears it |
 | D-20261030-01 | Security item D-20261030-01, details in the office | waiting for CEO | your yes |
-| D-20261030-02 | The test question C20261029-26 expects the wrong flash-code row | approved, queued | Dev builds it |
+| D-20261030-02 | The test question C20261029-26 expects the wrong flash-code row | built, waiting for the check | the pre-ship check |
 | D-20261030-03 | Security item D-20261030-03, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
