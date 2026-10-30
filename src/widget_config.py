@@ -87,7 +87,7 @@ _DEFAULT = {
     "name": "Support",
     "welcome": "Hi — I can answer questions from our product documentation. "
                "What are you looking for?",
-    "color": "#9184d9",
+    "color": "#6a5acd",
     "icon_url": "",
     "privacy_url": "",
     "intro_options": [
@@ -202,7 +202,7 @@ def validate(payload: dict) -> dict:
 
     color = (payload.get("color") or _DEFAULT["color"]).strip()
     if not _HEX_RE.match(color):
-        raise ValueError(f"color must be a 6-digit hex value like #9184d9 (got '{color}')")
+        raise ValueError(f"color must be a 6-digit hex value like #6a5acd (got '{color}')")
 
     opts_in = payload.get("intro_options")
     if not isinstance(opts_in, list):
