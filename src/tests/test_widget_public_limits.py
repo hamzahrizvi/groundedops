@@ -18,22 +18,16 @@ def _hdr(sid):
 
 
 def test_a_10000_character_question_gets_422_on_every_question_route():
-    import pydantic
-    import pytest
     main.APP_STATE["ready"] = True
     client = TestClient(main.app)
     long_q = "x" * 10000
     for path in ("/widget/ask", "/widget/ask/stream"):
         r = client.post(path, json={"q": long_q}, headers=_hdr("long-q"))
         assert r.status_code == 422, (path, r.status_code)
-    for path, model in (("/query", main.QueryRequest),
-                        ("/query/stream", main.StreamQueryRequest)):
-        r = client.post(path, json={"q": long_q})
-        if r.status_code in (404, 403):  # not reachable from the test socket
-            with pytest.raises(pydantic.ValidationError):
-                model(q=long_q)
-        else:
-            assert r.status_code == 422, (path, r.status_code)
+    lan = TestClient(main.app, client=("127.0.0.1", 50000))  # /query is LAN-only
+    for path in ("/query", "/query/stream"):
+        r = lan.post(path, json={"q": long_q})
+        assert r.status_code == 422, (path, r.status_code)
     assert main.QueryRequest(q="y" * main.MAX_QUERY_CHARS)
 
 
