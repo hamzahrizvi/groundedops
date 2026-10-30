@@ -52,7 +52,7 @@ _ENV_COUNT = _load_env_file(
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import more_context
 import keystore
@@ -100,15 +100,19 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # ── CORS (v10.17) ────────────────────────────────────────────────────
-# The embeddable website widget runs on a DIFFERENT origin (the customer's
-# site) and calls /query cross-origin, so the browser requires CORS. This
-# is deliberately wide-open for now to get the widget functional; lock
-# `allow_origins` down to the specific customer domains — and add auth /
-# rate limiting — before this faces real public traffic. Origins can be
-# supplied as a comma-separated WIDGET_ALLOWED_ORIGINS env var; default "*".
+# The widget runs on the customer's site and calls /widget/* cross-origin.
+# Origins come from the comma-separated WIDGET_ALLOWED_ORIGINS; "*" (the
+# default) lets any website embed the widget and spend the guest quota, so set
+# the customer domains before hosted launch. Visitor limits live in
+# widget_api/quota.py (500-char question, session caps, daily credits,
+# FAQ-only guests). No credentials are allowed, so "*" exposes no signed-in
+# session.
 from fastapi.middleware.cors import CORSMiddleware
 
 _cors_origins = [o.strip() for o in os.getenv("WIDGET_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+if "*" in _cors_origins:
+    logger.warning("WIDGET_ALLOWED_ORIGINS is '*': any website can embed the widget. "
+                   "Set it to the customer domains before hosted launch.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -1093,8 +1097,14 @@ being referred to — but every FACT in your answer must still come from
 Answer:"""
 
 
+# D-20261030-03: /query and /query/stream are LAN/admin only, but an
+# ADMIN_ALLOWED_IPS entry opens them; 4000 characters is far above any
+# real question (the widget's own cap is 500) and stops a 2 MB prompt.
+MAX_QUERY_CHARS = 4000
+
+
 class QueryRequest(BaseModel):
-    q: str
+    q: str = Field(..., max_length=MAX_QUERY_CHARS)
     session_id: str | None = None
     deepseek_api_key: str | None = None
     openai_api_key: str | None = None
@@ -5639,7 +5649,7 @@ _CANNED_REFUSAL = "I could not find that in the knowledge base."
 
 
 class StreamQueryRequest(BaseModel):
-    q: str
+    q: str = Field(..., max_length=MAX_QUERY_CHARS)
     session_id: str | None = None
     product: str | None = None
     category: str | None = None
