@@ -176,6 +176,10 @@ _DEFAULTS = {
     # every check, else the first refusal stands.
     "self_route": os.getenv("SELF_ROUTE", "1").strip().lower()
                   in ("1", "true", "yes"),
+    # A several-ask answer is checked against its asks once; the asks it
+    # left out are searched again and answered once more (D-20261021-15).
+    "ask_recheck": os.getenv("ASK_RECHECK", "1").strip().lower()
+                   in ("1", "true", "yes"),
 }
 
 _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits",
@@ -183,7 +187,7 @@ _INT_FIELDS = ("anon_llm_credits", "member_daily_credits", "staff_daily_credits"
                "tokens_per_session", "grounding_retries", "global_llm_daily")
 _BOOL_FIELDS = ("anon_llm_enabled", "llm_verify", "dedupe_shadowed_chunks",
                "multilingual_faq_enabled", "performance_mode",
-               "self_route")
+               "self_route", "ask_recheck")
 _TEXT_FIELDS = ("anon_notice", "sales_reply")
 # faq_enabled_languages is text-shaped (a comma list) but needs its own
 # validation -- a typo'd code would otherwise silently produce a language

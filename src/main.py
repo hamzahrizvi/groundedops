@@ -92,6 +92,8 @@ from text_utils import (
     normalize_markdown_tables,
     split_asks,
     keep_answered_part,
+    ask_check_prompt,
+    unanswered_asks,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -4375,22 +4377,25 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # top_chunks, not a separate list: the grounding check verifies
     # against top_chunks, and an answer built from steps the verifier
     # cannot see would be refused as ungrounded.
-    top_chunks = complete_procedures(top_chunks)
+    def _completed(chunks: list[dict]) -> list[dict]:
+        chunks = complete_procedures(chunks)
+        try:
+            from retrieval_db import complete_tables
+            import tables as _tables
+            chunks = complete_tables(chunks)
+            # Merged cells filled and matrices read out, for the model AND the
+            # verifiers -- both read top_chunks. Idempotent, so an index already
+            # migrated by backfill_table_context.py is left as it is.
+            # The chunk before each one lets a continuation borrow its table's
+            # labels and merged-cell values (tables.spell_out, 2026-09-27).
+            from retrieval_db import chunks_before
+            chunks = [dict(c, text=_tables.spell_out(c.get("text") or "", above=_above))
+                      for c, _above in zip(chunks, chunks_before(chunks))]
+        except Exception as _exc:
+            logger.warning(f"table completion skipped: {_exc}")
+        return chunks
+    top_chunks = _completed(top_chunks)
     ptrace.mark("procedures", f"{len(top_chunks)} passage(s) in hand")
-    try:
-        from retrieval_db import complete_tables
-        import tables as _tables
-        top_chunks = complete_tables(top_chunks)
-        # Merged cells filled and matrices read out, for the model AND the
-        # verifiers -- both read top_chunks. Idempotent, so an index already
-        # migrated by backfill_table_context.py is left as it is.
-        # The chunk before each one lets a continuation borrow its table's
-        # labels and merged-cell values (tables.spell_out, 2026-09-27).
-        from retrieval_db import chunks_before
-        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or "", above=_above))
-                      for c, _above in zip(top_chunks, chunks_before(top_chunks))]
-    except Exception as _exc:
-        logger.warning(f"table completion skipped: {_exc}")
 
     # PERFORMANCE MODE (S29): a product chat also reads the product's whole
     # documentation, as a <documentation> block ahead of everything else
@@ -4499,6 +4504,68 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     def _kept(text: str) -> str:
         return keep_answered_part(text) if _asks else text
     answer = _kept(answer)
+
+    # SEVERAL ASKS: EACH ONE ANSWERED, OR SEARCHED AGAIN (D-20261021-15). The
+    # shares above give each ask its best passages, but nothing checked the
+    # WRITTEN answer: when an ask's page was not among them the model dropped
+    # that part or wrote "I could not find it" (C20261021c-28 warm-up time,
+    # -34 the lock's parts, -10 the udev rule). One check names the asks left
+    # unanswered; only those are searched again, deeper, and their best new
+    # passages added for one more answer, served only if it does not refuse.
+    # A whole refusal is left to the retries below (follow-up, library,
+    # self_route).
+    if (_asks and top_chunks and role != "rethink" and not generation_failed
+            and not is_refusal(answer) and _policy_setting("ask_recheck", True)):
+        _chk = _billed(generate_with_fallback(
+            "fast", ask_check_prompt(_asks, answer),
+            deepseek_api_key=deepseek_api_key, api_keys=api_keys))
+        _missed = unanswered_asks((_chk or {}).get("text") or "", len(_asks))
+        ptrace.mark("recheck", f"asks missed: {_missed or 'none'}")
+        if _missed:
+            def _deeper(i: int) -> list[dict]:
+                _aq = _ask_queries[i - 1]
+                try:
+                    _found = retrieve_from_db(_aq, top_k=2 * RETRIEVE_K,
+                                              source_filter=payload.source_filter,
+                                              scope=_scope)
+                except Exception as exc:
+                    logger.warning(f"ask recheck search skipped: {exc}")
+                    _found = []
+                _pool = {r.get("id"): r for r in _found}
+                for r in _ask_ranks[i - 1] if i - 1 < len(_ask_ranks) else []:
+                    _pool.setdefault(r.get("id"), r)
+                _pool = [r for r in _pool.values()
+                         if payload.source_filter or not is_excluded(r.get("source"))]
+                _rk = rerank(_aq, _pool, top_k=len(_pool)) if _pool else []
+                return [] if (_rk and _rk[0].get("rerank_failed")) else _rk
+            _have = {c.get("id") for c in top_chunks}
+            _extra = []
+            for _rk in _run_parallel(_deeper, _missed):
+                _new = [r for r in _rk if r.get("id") not in _have][:3]
+                _have.update(r.get("id") for r in _new)
+                _extra += [_strip_breadcrumb(r) for r in _new]
+            if _extra:
+                _rc_chunks = _completed(top_chunks + _extra)
+                _rc_context = _numbered_passages(
+                    _rc_chunks,
+                    lambda r: _passage_product(r, _names_now) + _passage_heading(r))
+                _rc_prompt = build_answer_prompt(_hist, _rc_context, resolved_query,
+                                                 library=_library, asks=_asks)
+                _rc = _billed(generate_with_fallback(role, _rc_prompt,
+                                                     deepseek_api_key=deepseek_api_key,
+                                                     api_keys=api_keys))
+                _rc_text = _kept(((_rc or {}).get("text") or "").strip())
+                if (_rc_text and (_rc or {}).get("model") != "none"
+                        and not is_refusal(_rc_text)):
+                    output, raw_text = _rc, _rc_text
+                    answer = normalize_markdown_tables(
+                        _strip_meta(_strip_preamble(raw_text)))
+                    top_chunks, context, prompt = _rc_chunks, _rc_context, _rc_prompt
+                    ptrace.mark("recheck", f"answered again with {len(_extra)} more passage(s)")
+                else:
+                    ptrace.mark("recheck", "retry refused or failed; first answer kept")
+            else:
+                ptrace.mark("recheck", "no new passages for the missed asks")
 
     # A REFUSAL ON A FOLLOW-UP, WITH CONFIDENT RETRIEVAL: ask once more
     # without the conversation block. Scenarios 11, 16 and 20 (2026-09-25):
