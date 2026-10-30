@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import os
 import re
@@ -58,7 +59,7 @@ import keystore
 import policy
 from app_state import APP_STATE, APP_STATE_LOCK, _run_stage, _set_app_state, capability
 from db import get_collection
-from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root
+from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root, _trusted_networks
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
@@ -232,28 +233,48 @@ _PUBLIC_PREFIXES = ("/widget", "/health")
 # exposing it for internal testing is a reasonable thing to want — but it
 # must stay a DELIBERATE act, not a side effect of putting a proxy in front.
 #
-# ADMIN_ALLOWED_IPS is that deliberate act: a comma-separated list of IP
-# prefixes permitted to reach the admin surface from outside. Empty (the
-# default) keeps the old behaviour exactly — nothing external gets in.
-# Prefix matching, not CIDR, to match PRIVATE_NETWORKS above and to avoid
-# pulling in ipaddress parsing for a list an operator hand-writes.
+# ADMIN_ALLOWED_IPS is that deliberate act: a comma-separated list of
+# addresses or ranges permitted to reach the admin surface from outside.
+# Empty (the default) keeps the old behaviour exactly: nothing external
+# gets in. D-20261029-04: entries are parsed, not matched as text, so a
+# bare address (203.0.113.5) is exactly that host and CIDR (203.0.113.0/24)
+# is a range. It used to be a text prefix, and 203.0.113.5 also let in
+# 203.0.113.50-59. An entry ending in a dot (203.0.113.) is the old prefix
+# form and still means its whole octet range (/24 here). An entry that
+# cannot be parsed admits nothing and is named in a warning at start-up.
 #
 # This is an allowlist in front of authentication, not instead of it: a
 # request from an allowed address still has to sign in.
 ADMIN_ALLOWED_IPS = [n.strip() for n in
                      os.getenv("ADMIN_ALLOWED_IPS", "").split(",") if n.strip()]
+
+
+def _admin_networks(entries) -> tuple:
+    """The allowlist as networks. "10.1." (the old prefix form) -> 10.1.0.0/16."""
+    def as_cidr(e: str) -> str:
+        if not e.endswith("."):
+            return e
+        octets = e.rstrip(".").split(".")
+        return ".".join(octets + ["0"] * (4 - len(octets))) + f"/{8 * len(octets)}"
+    return _trusted_networks(",".join(as_cidr(e) for e in entries), "ADMIN_ALLOWED_IPS")
+
+
 if ADMIN_ALLOWED_IPS:
     logger.warning(
         "ADMIN_ALLOWED_IPS is set: the admin console is reachable from "
-        f"{len(ADMIN_ALLOWED_IPS)} external prefix(es). Sign-in is still "
-        "required, but this surface is no longer LAN-only."
+        f"{', '.join(map(str, _admin_networks(ADMIN_ALLOWED_IPS))) or 'nothing (no entry parsed)'}. "
+        "Sign-in is still required, but this surface is no longer LAN-only."
     )
 
 
 def _admin_ip_allowed(ip: str | None) -> bool:
     if not ADMIN_ALLOWED_IPS or not ip:
         return False
-    return any(ip.startswith(p) for p in ADMIN_ALLOWED_IPS)
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in _admin_networks(ADMIN_ALLOWED_IPS))
 
 # /source_file is reachable externally only WITH a valid member token.
 # It was on the open allowlist, which meant every ingested document could
