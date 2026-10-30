@@ -34,18 +34,23 @@ def test_a_manual_outranks_a_test_script_but_keeps_its_score():
     assert ts["rerank_score"] == 0.99
 
 
-def test_a_stored_kind_beats_the_name():
+def test_a_stored_kind_shelves_notices_release_notes_and_certificates():
     was = (r._KINDS_PATH, r._kinds)
     try:
         with tempfile.TemporaryDirectory() as d:
             r._KINDS_PATH, r._kinds = os.path.join(d, "doc_kinds.json"), None
             notice, script = "NV201 Spectral - Revision 3.13.txt", "NV4000 Integration Test Script-v1.pdf"
-            r.set_kinds({notice: "change_notice", script: "manual"})
-            assert r.is_secondary(notice) and not r.is_secondary(script)
+            r.set_kinds({notice: "change_notice", "Firmware 4.1.txt": "release_note",
+                         "UL listing.txt": "certificate", "Power Conditions.txt": "test_script",
+                         "Smart Payout Final Assembly.txt": "drawing", script: "manual"})
+            assert all(r.is_secondary(n) for n in (notice, "Firmware 4.1.txt", "UL listing.txt"))
+            # a stored script or drawing does not move a page
+            assert not r.is_secondary("Power Conditions.txt") and not r.is_secondary("Smart Payout Final Assembly.txt")
+            assert r.is_secondary(script)        # a stored kind never lifts a page the name rule shelves
             assert r.is_secondary("WR02040_4.pdf") and not r.is_secondary("BV30 User Manual.txt")
             r._kinds = None                      # re-read from the file
             assert r.is_secondary(notice)
-            man, cn = {"source": script, "rerank_score": 0.6}, {"source": notice, "rerank_score": 0.99}
+            man, cn = {"source": "BV30 User Manual.txt", "rerank_score": 0.6}, {"source": notice, "rerank_score": 0.99}
             assert sorted([cn, man], key=r.rank_key, reverse=True) == [man, cn]
             open(r._KINDS_PATH, "w").write("{not json")
             r._kinds = None                      # unreadable: the name rule

@@ -231,11 +231,13 @@ _SECONDARY = re.compile(
     r"|^(?:cn|wr|pa|ga)[\s_-]?\d{3}|^[a-z]{2}\d{5}", re.I)
 
 # A synced Confluence page's kind, from its title and folder (confluence_sync.kind_of), stored by the
-# sync in this file as {document name: kind} (D-20261024-10). It beats the name rule above, which
-# only sees the file name; a document not in the file (an upload) still goes by its name.
+# sync in this file as {document name: kind} (D-20261024-10). A stored change notice, release note or
+# certificate goes on the second shelf whatever its name; a document not in the file (an upload) still goes by its name.
 # Read once per process; a hand edit takes effect at the next restart, and a check or sync never
 # overwrites a kind already stored.
-SECONDARY_KINDS = frozenset({"test_script", "drawing", "certificate", "change_notice", "release_note"})
+# Only these stored kinds move a page to the second shelf (D-20261024-10 round 2: a test-script page moved there cost
+# global_smart_coin_system-03; no number shows moving scripts or drawings helps, so they go by the name rule).
+SECONDARY_KINDS = frozenset({"certificate", "change_notice", "release_note"})
 _KINDS_PATH = os.getenv("DOC_KINDS_PATH", "doc_kinds.json")
 _kinds: dict | None = None
 
@@ -267,10 +269,8 @@ def set_kinds(kinds: dict) -> None:
 
 
 def is_secondary(source: str | None) -> bool:
-    kind = source_kinds().get(source or "")
-    if kind:
-        return kind in SECONDARY_KINDS
-    return bool(_SECONDARY.search(source or ""))
+    return (source_kinds().get(source or "") in SECONDARY_KINDS
+            or bool(_SECONDARY.search(source or "")))
 
 
 def rank_key(chunk: dict) -> float:
