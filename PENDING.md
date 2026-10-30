@@ -212,11 +212,12 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261022-15 | Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it | approved, queued | Dev builds it |
+| D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | waiting for CEO | your yes |
 | D-20261025-11 | A question that names a product's variant gets the base product's figures | built, waiting for the check | the pre-ship check |
 | D-20261026-01 | Widget text and buttons fail the contrast check in the default look | ready to merge | merges once Security clears it |
 | D-20261026-04 | A right flash-code answer is thrown away by the answer check because the code table is shared or "not tied" to the named product | approved, queued | Dev builds it |
 | D-20261029-04 | Security item D-20261029-04, details in the office | approved, queued | Dev builds it |
-| D-20261029-05 | The pre-ship check mistakes an old test question for a leaked hidden one when their first 40 characters match | rides on D-20261025-11 | - |
+| D-20261029-05 | The pre-ship check mistakes an old test question for a leaked hidden one when their first 40 characters match | ready to merge | merges once Security clears it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
@@ -249,7 +250,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261022-02 | The website may say the bot answers in French, German and Spanish | deferred | parked |
 | D-20261022-05 | Delete the short answer prompt that was tried and turned down | deferred | parked |
 | D-20261022-08 | Send the fixed answer rules first on every call so a hosted answer costs about 40% less | deferred | parked |
-| D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | deferred | parked |
 | D-20261024-10 | Synced Confluence pages get their kind from title and folder, and a replaced upload keeps all its products | deferred | parked |
 | D-20261024-12 | Measure the fully offline tier on a modern open model, and name the hardware it needs | deferred | parked |
 | D-20261024-13 | Build a test set of real customer questions from ITL's own support history | deferred | parked |
