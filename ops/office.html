@@ -35,14 +35,16 @@ button{font:inherit;color:inherit}
 .top p{margin:6px 0 0;color:var(--muted);max-width:62ch}
 .shift{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .clock{font:26px/1 var(--data);color:var(--muted);font-variant-numeric:tabular-nums}
-.batts{display:flex;gap:12px;align-items:center}
-.batt{display:flex;align-items:center;gap:6px;font:12px/1 var(--display);letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
-.batt .cell{display:block;position:relative;width:44px;height:20px;border:2px solid var(--ink);border-radius:3px;background:var(--surface);padding:2px;box-sizing:border-box}
-.batt .cell::after{content:"";position:absolute;right:-6px;top:5px;width:4px;height:6px;background:var(--ink);border-radius:0 2px 2px 0}
-.batt .fill{display:block;height:100%;background:var(--ok);border-radius:1px;transition:width .4s}
+.top{position:relative;padding-right:124px}
+.batts{position:absolute;top:0;right:0;display:flex;gap:14px;align-items:flex-start}
+.batt{display:flex;flex-direction:column;align-items:center;gap:4px;font:11px/1 var(--display);letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
+.batt .cell{display:flex;flex-direction:column;justify-content:flex-end;position:relative;width:24px;height:44px;margin-top:5px;border:2px solid var(--ink);border-radius:3px;background:var(--surface);padding:2px;box-sizing:border-box}
+.batt .cell::before{content:"";position:absolute;top:-7px;left:50%;transform:translateX(-50%);width:10px;height:5px;background:var(--ink);border-radius:2px 2px 0 0}
+.batt .fill{display:block;width:100%;background:var(--ok);border-radius:1px;transition:height .4s}
 .batt[data-lvl="mid"] .fill{background:var(--accent)} .batt[data-lvl="low"] .fill{background:var(--crit)}
-.batt b{font:18px/1 var(--data);color:var(--ink);font-weight:400;font-variant-numeric:tabular-nums;min-width:4ch;text-align:right}
+.batt b{font:18px/1 var(--data);color:var(--ink);font-weight:400;font-variant-numeric:tabular-nums}
 .batts.stale{opacity:.5}
+@media (max-width:640px){.top{padding-right:0} .batts{position:static;order:-1;width:100%;justify-content:flex-end}}
 .chip{font:12px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:3px;border:1px solid var(--line);background:var(--surface);color:var(--muted);white-space:nowrap}
 .chip.live{background:var(--ok);border-color:var(--ok);color:#fff}
 .chip.sample{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -360,11 +362,11 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
       <h1>GroundedOps HQ</h1>
       <p>The agent departments that test the chatbot, fix what they find and report to you. Working people sit at their desks; everyone else is on a break somewhere in the building.</p>
     </div>
+    <div class="batts" id="batts" hidden>
+      <span class="batt" id="batt5"><span class="cell" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Claude 5-hour allowance left"><span class="fill"></span></span><b>--</b><span>5-hour</span></span>
+      <span class="batt" id="battW"><span class="cell" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Claude weekly allowance left"><span class="fill"></span></span><b>--</b><span>Week</span></span>
+    </div>
     <div class="shift">
-      <div class="batts" id="batts" hidden>
-        <span class="batt" id="batt5"><span>5-hour</span><span class="cell" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Claude 5-hour allowance left"><span class="fill"></span></span><b>--</b></span>
-        <span class="batt" id="battW"><span>Week</span><span class="cell" role="meter" aria-valuemin="0" aria-valuemax="100" aria-label="Claude weekly allowance left"><span class="fill"></span></span><b>--</b></span>
-      </div>
       <span class="clock" id="clock">--:--</span>
       <span class="chip" id="modeChip">Sample week</span>
       <button class="btn" id="modeBtn" type="button" hidden>Show live office</button>
@@ -1455,7 +1457,7 @@ function renderBatts(u){
   for(const [id, used, what] of [["batt5", u.five, "the 5-hour limit"], ["battW", u.week, "this week's allowance"]]){
     const left = Math.max(0, Math.min(100, Math.round(100 - used))), el = $(id), cell = el.querySelector(".cell");
     el.dataset.lvl = left < 20 ? "low" : left < 50 ? "mid" : "ok";
-    el.querySelector(".fill").style.width = left + "%";
+    el.querySelector(".fill").style.height = left + "%";
     el.querySelector("b").textContent = left + "%";
     cell.setAttribute("aria-valuenow", left);
     el.title = `${left}% of ${what} left (${Math.round(used)}% used)` + (old != null ? `, figures ${old} min old` : "");
