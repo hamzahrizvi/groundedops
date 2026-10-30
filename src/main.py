@@ -293,6 +293,20 @@ _TOKEN_GATED_PREFIXES = ("/source_file", "/figure")
 RETRIEVE_K = int(os.getenv("RETRIEVE_K", "16"))
 CONTEXT_K = int(os.getenv("CONTEXT_K", "8"))
 CHUNK_CHAR_CAP = int(os.getenv("CHUNK_CHAR_CAP", "1600"))
+
+
+def _capped(text: str) -> str:
+    """A passage cut to CHUNK_CHAR_CAP, keeping its table read-out.
+
+    tables.spell_out appends "Read cell by cell..." lines to a passage. A
+    flash-code chunk is often near the cap already (the BV range one is
+    ~1,550 characters), so a plain [:CHUNK_CHAR_CAP] cut the read-out off
+    before either model saw it (D-20261026-04). The text before the first
+    read-out and the read-out from there on each get up to the cap."""
+    i = text.find("\nRead cell by cell")
+    if i < 0:
+        return text[:CHUNK_CHAR_CAP]
+    return text[:min(i, CHUNK_CHAR_CAP)] + text[i:i + CHUNK_CHAR_CAP]
 # Never let the relative floor starve the prompt below this many chunks.
 CONTEXT_MIN = int(os.getenv("CONTEXT_MIN", "4"))
 
@@ -685,7 +699,7 @@ _VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send
 
 The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
 
-Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label. The product a passage's label names ("from the X documentation") is the product its facts belong to even when the passage text uses another product's name: manuals reuse sentences written for a sibling product.
+Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label. The product a passage's label names ("from the X documentation") is the product its facts belong to even when the passage text uses another product's name: manuals reuse sentences written for a sibling product. Inside a passage, rows read out under a heading that lists products (Read cell by cell under "BV Range (BV20, BV30, BV50 and BV100)":) belong to each product that heading lists, even when the passage's label names no product; they are not about a product the heading does not list.
 
 Judge two things separately.
 
@@ -814,7 +828,7 @@ def _llm_verified(answer: str, chunks: list[dict],
         if not any((c.get("text") or "").strip() for c in chunks):
             return False
         _names = _product_names()
-        ctx = "\n\n".join(_verify_label(c, _names) + c.get("text", "")[:CHUNK_CHAR_CAP]
+        ctx = "\n\n".join(_verify_label(c, _names) + _capped(c.get("text", ""))
                           for c in chunks)
         from contextlib import nullcontext
         from llm import judging
@@ -1017,6 +1031,7 @@ Answer directly and factually, then stop. No preamble, no meta-commentary.
 If the question asks whether something exists, is supported, or works with something else, begin with a plain Yes or No, then give the specifics. A question asking what, which, how or how much ("What voltage is supported?") is not a yes/no question; never open its answer with Yes or No. Answer No only when the context says the thing is absent or unsupported; when the context simply never mentions it, that is not a No, so respond with the exact sentence below. A passage that merely MENTIONS both things — a table listing them side by side, a specification they share — is not an answer to that question; keep looking for a passage that states whether it is supported.
 When the Yes or No turns on whether a value falls inside a documented range or limit (an input voltage against the logic-high minimum, a note length against the maximum), compare the two numbers before writing the first word, and make the Yes or No agree with that comparison: below a minimum or above a maximum is No.
 A passage that states a range, a limit, a default, or a table of codes or messages for the thing asked about answers the question even when the customer's own value, code or wording is not written in it: a 50 °C room against a stated 0 °C to 40 °C is a No with that range, a 25 °C room inside it is a Yes with that range, a flash pattern or status message found in a code table gets that row's meaning and its action, and a login asked for gets the default the passages give.
+When the customer reports a flashing, blinking or coloured light but gives no number or pattern of flashes, and the context has a flash-code table for their product, do not pick a row and do not say you could not find it: ask how many flashes of each kind they count (long and short, or each colour) and what the unit is doing, so the code can be read from the table.
 Support is often conditional. When the context qualifies it by firmware version, model variant, region or configuration, say so in the first sentence ("Yes, but only on firmware below 1.21"), because an unqualified Yes is wrong the moment the condition applies.
 A value read from a table is conditional in the same way. When its row or cell carries a condition — an operating mode or load, a product variant with its own column, a minimum or maximum, a tolerance, "if no other coins in device", "whichever is greater" — give the value together with that condition, in the manual's own words, even if the question did not ask about it. A figure quoted without the condition it depends on is a wrong answer, not a shorter one.
 The passages are numbered in the order a retrieval system ranked them, so [Passage 1] is the most likely to contain the answer. That is a hint, not a rule: use whichever passage actually answers the question, and prefer an earlier one when two say the same thing.
@@ -2261,7 +2276,7 @@ def _numbered_passages(chunks: list[dict], label=lambda r: "") -> str:
     import tables as _tables
     groups: list[list] = []
     for r in chunks:
-        text = (r.get("text") or "")[:CHUNK_CHAR_CAP]
+        text = _capped(r.get("text") or "")
         if r.get("with_previous") and groups:
             groups[-1][1] += "\n" + _tables.split_prefix(text)[1]
         else:
@@ -5678,7 +5693,7 @@ def query_stream(payload: StreamQueryRequest,
                 "retrieval_score": round(_top, 4),
             })
 
-            context = "\n\n".join(r["text"][:CHUNK_CHAR_CAP] for r in top_chunks)
+            context = "\n\n".join(_capped(r["text"]) for r in top_chunks)
             prompt = build_answer_prompt("", context, payload.q)
 
             role, (provider, model) = route_model(payload.q)
