@@ -314,6 +314,21 @@ def test_a_missed_ask_is_searched_again_and_answered():
     assert "60 minutes" in out["answer"], out["answer"]
 
 
+def test_a_missed_ask_is_also_searched_without_the_lead():
+    # The lead outweighs a short ask: here only the ask alone reaches the
+    # token page (C20261021c-28, the warm-up rate behind the cashbox weights).
+    msg = "our kiosk runs linux. " + _MSG
+    def rdb(qq, top_k=10, **k):
+        alone = top_k > main.RETRIEVE_K and "kiosk" not in qq
+        return [dict(_HIT)] + ([dict(_TOKEN)] if alone else [])
+    full = "The API is at 192.168.7.1 and a bearer token lasts 60 minutes."
+    out, gen, _, rdb_ = _ask(msg, None, _keep_all, _gen_retrying(full), rdb)
+    deeper = [c[0][0] for c in rdb_.call_args_list if c[1].get("top_k", 0) > main.RETRIEVE_K]
+    assert len(deeper) == 2 and all("bearer" in q for q in deeper), deeper
+    assert sum("kiosk" in q for q in deeper) == 1, deeper
+    assert "60 minutes" in out["answer"], out["answer"]
+
+
 def test_a_retry_that_refuses_keeps_the_first_answer():
     out, gen, _, _ = _ask(_MSG, None, _keep_all,
                           _gen_retrying("I could not find that in the knowledge base."),

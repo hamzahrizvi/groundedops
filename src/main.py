@@ -4523,21 +4523,34 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         ptrace.mark("recheck", f"asks missed: {_missed or 'none'}")
         if _missed:
             def _deeper(i: int) -> list[dict]:
-                _aq = _ask_queries[i - 1]
-                try:
-                    _found = retrieve_from_db(_aq, top_k=2 * RETRIEVE_K,
-                                              source_filter=payload.source_filter,
-                                              scope=_scope)
-                except Exception as exc:
-                    logger.warning(f"ask recheck search skipped: {exc}")
-                    _found = []
-                _pool = {r.get("id"): r for r in _found}
+                # Searched as first (lead + ask) AND as the ask alone: the
+                # lead names the setting and outweighs a short ask, so "how
+                # fast can we warm it up" after "shipping an nv4000 with a
+                # cashbox" ranked the cashbox weights first and the warm-up
+                # rate 21st; alone it ranks first (C20261021c-28). The lead
+                # stays for asks that lean on it ("what does that mean").
+                _qs = list(dict.fromkeys([_ask_queries[i - 1], _add_selected_product_context(
+                    _asks[i - 1], _named, _scope)]))   # no lead: one search
+                _pool = {}
+                for _q in _qs:
+                    try:
+                        _found = retrieve_from_db(_q, top_k=2 * RETRIEVE_K,
+                                                  source_filter=payload.source_filter,
+                                                  scope=_scope)
+                    except Exception as exc:
+                        logger.warning(f"ask recheck search skipped: {exc}")
+                        _found = []
+                    for r in _found:
+                        _pool.setdefault(r.get("id"), r)
                 for r in _ask_ranks[i - 1] if i - 1 < len(_ask_ranks) else []:
                     _pool.setdefault(r.get("id"), r)
                 _pool = [r for r in _pool.values()
                          if payload.source_filter or not is_excluded(r.get("source"))]
-                _rk = rerank(_aq, _pool, top_k=len(_pool)) if _pool else []
-                return [] if (_rk and _rk[0].get("rerank_failed")) else _rk
+                if not _pool:
+                    return []
+                _rks = [rerank(_q, _pool, top_k=len(_pool)) for _q in _qs]
+                return _merge_rankings([_rk for _rk in _rks
+                                        if not (_rk and _rk[0].get("rerank_failed"))])
             _have = {c.get("id") for c in top_chunks}
             _extra = []
             for _rk in _run_parallel(_deeper, _missed):
