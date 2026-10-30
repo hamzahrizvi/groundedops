@@ -213,9 +213,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261021-15 | A two-part ask or a multi-step procedure comes back with one part missing or called "not found" | approved, queued | Dev builds it |
 | D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | approved, queued | Dev builds it |
-| D-20261029-03 | A fix-it question gets background about the part instead of the clearing steps | waiting for CEO | your yes |
-| D-20261030-01 | Security item D-20261030-01, details in the office | built, waiting for the check | the pre-ship check |
-| D-20261030-03 | Security item D-20261030-03, details in the office | approved, queued | Dev builds it |
+| D-20261029-03 | A fix-it question gets background about the part instead of the clearing steps | approved, queued | Dev builds it |
+| D-20261030-01 | Security item D-20261030-01, details in the office | ready to merge | merges once Security clears it |
+| D-20261030-03 | Security item D-20261030-03, details in the office | built, waiting for the check | the pre-ship check |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
