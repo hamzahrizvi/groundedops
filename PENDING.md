@@ -101,6 +101,26 @@ handoffs, 0 votes, no latency (10-16: 269 / 164 / 98 / 0 / 0, p50 5.77s /
 p90 14.41s). `src/logs.jsonl` was last written 10-20 16:51. Nothing was
 committed; this file is modified in the tree.
 
+**Friday review 2026-10-30 (automated, not yet reviewed by hand).** About
+163 commits since 10-23, nearly all office work orders (D-20261024-* to
+D-20261030-*: Confluence shelves and internal marks, content-hash copies,
+two-product retrieval, several-asks checking, widget contrast, Docker
+removal, admin allowlist CIDR, the "Search more thoroughly" button), which
+carry their own status in the office plan. Ticked off: the `test_keyvault`
+failures (pass in the full run today) and the NV9 Spectral biometrics tag
+(0 stale flags in the live index, checked read-only). Obsolete: nothing
+deleted. Corrected: the staging item (Docker is gone; staging is now
+`serve.ps1` + Cloudflare tunnel). Added: no new item; the real-use item
+gained a 10-30 note, since a probe with **no** session id now logs as a
+person. Checked in this review: `run_tests.py` **380/381 passed, 1
+skipped, 0 failed** (10-23: 367/373, 6 failed). Retrieval baseline
+`--selfcheck` OK (35 cases, armed). The LiteLLM gateway is **still
+NXDOMAIN**. `log_report --since 7d`: 22 questions, 15 answered, 5 refused,
+2 asked back, 0 handoffs, 0 of 1 conversations resolved, 0 votes, p50
+0.62s / p90 5.61s (10-23: all zeros). All 22 are a sales-deflect probe
+logged as `console` with session `default`, not customers. Nothing was
+committed; this file is modified in the tree.
+
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
 independent planners (59 proposals) and an adversarial verdict on each of 37
@@ -2521,38 +2541,6 @@ see *Shipped — the four follow-ups* above; kept for the record.
 
 ## In progress / known gaps
 
-- **Six `test_keyvault` tests fail in the full suite but pass alone
-  (found in the Friday review 2026-10-23).** `cd src &&
-  ../.venv/Scripts/python.exe run_tests.py` gives 367/373, 6 failed:
-  `test_save_load_roundtrip`, `test_clear_removes_key`,
-  `test_key_is_not_plaintext_on_disk`, `test_legacy_plaintext_migration`,
-  `test_corrupt_vault_returns_none_not_crash` and
-  `test_console_secrets_are_encrypted_at_rest_and_never_in_env`, all with
-  `TypeError: Expected instance of hashes.HashAlgorithm`, raised at
-  `keyvault._fernet()` (`src/keyvault.py:71`, `algorithm=hashes.SHA256()`).
-  Run alone (`PYTHONPATH=. ../.venv/Scripts/python.exe
-  tests/test_keyvault.py`) it exits 0, and `hashes.SHA256()` builds fine in
-  a fresh interpreter (cryptography 50.0.0). That error means `cryptography`
-  was imported twice, so an earlier test in the shared process purges or
-  swaps `sys.modules` entries; candidates are the files that touch it
-  (`tests/test_model_pins.py`, `test_self_route.py`, `test_several_asks.py`,
-  `test_reindex_safety.py`, `test_nli_backend.py`,
-  `test_streaming_and_tables.py`, `test_ocr_end_to_end.py`). Not bisected.
-  Why it matters: last week was 339/339, so a suite that fails six on a
-  clean tree trains people to ignore red, and these six cover the code that
-  keeps console-saved secrets encrypted. Done looks like: the full run
-  passes keyvault again, either by restoring `sys.modules` in the offending
-  test or by moving `test_keyvault` to its own process like `test_keystore`.
-  Not checked: whether the onnxruntime embedder merge (`bb90455`) is the
-  trigger; last week's pass predates it.
-
-  **Real-use report, 2026-10-23 note.** Still open (`origin_for` unchanged,
-  `src/pipeline_trace.py:162`), but this week `log_report --since 7d --all`
-  shows 0 rows at all, and `src/logs.jsonl` has not been written since 10-20.
-  So there is no harness noise to measure this week, and also no customer
-  data. Whoever picks this up should not read the zeros as "real use is
-  zero": check that the lab and the backend were simply idle.
-
 - **The weekly "real use" report counts our own test runs as customers.**
   Found in the Friday review 2026-10-09. `python -m log_report --since 7d`
   (src/) reported 1963 questions, 1469 answered, 387 refused, 0 votes,
@@ -2591,6 +2579,26 @@ see *Shipped — the four follow-ups* above; kept for the record.
   `reg-`, `e2e-` are new since 10-09), which argues for the runners
   sending `eval-…`, not for a longer list in `origin_for`.
 
+  **Real-use report, 2026-10-23 note.** Still open (`origin_for` unchanged,
+  `src/pipeline_trace.py:162`), but this week `log_report --since 7d --all`
+  shows 0 rows at all, and `src/logs.jsonl` has not been written since 10-20.
+  So there is no harness noise to measure this week, and also no customer
+  data. Whoever picks this up should not read the zeros as "real use is
+  zero": check that the lab and the backend were simply idle.
+
+  **Real-use report, 2026-10-30 note.** Still open (`_ORIGIN_PREFIXES` in
+  `src/pipeline_trace.py` still holds only `eval-`, `live-`, `preflight-`).
+  `log_report --since 7d`: 22 questions, 15 answered, 5 refused, 2 asked
+  back, 0 handoffs, 0 votes, p50 0.62s / p90 5.61s. All 22 are `origin:
+  console` with session id `default`, and they are not customers: one
+  NV4000 question at 10-24 01:08, then 21 in four bursts on 10-30 (10:06,
+  10:17-10:18, 14:17) that are all price/stock/repair-cost phrasings, i.e.
+  a probe of the sales-deflect fix `c3c9b8e`. So a harness that sends **no**
+  session id is now a third way to log as a person, and a prefix list in
+  `origin_for` cannot catch it. Done looks like (added): a probe without a
+  session id is either refused a `default` session in the console path or
+  logged under `--all` only.
+
 - **The office's Dev builds lose backslash-newlines, and a person repairs
   them afterwards.** Found in the Friday review 2026-10-16. Three of this
   week's 28 code commits exist only to put a lost line continuation back:
@@ -2610,7 +2618,14 @@ see *Shipped — the four follow-ups* above; kept for the record.
   build stops writing files through a shell heredoc.
 
 - **Staging deploy is prepared but has never been run.** `STAGING.md` is the
-  runbook; `docker/.env.example` is the template. **Carries two deferred
+  runbook. **Corrected in the Friday review 2026-10-30:** the Docker stack
+  this item described is gone (`03f1913`, `0b6ebe6`, `7a0995e`,
+  D-20261025-01; there is no `docker/` folder any more). Staging is now the
+  backend run as on a desktop, kept up by `serve.ps1 -Install`, behind a
+  named Cloudflare tunnel (`TUNNEL_SETUP.md`); since `e5eec94` a tunnelled
+  host listens on 127.0.0.1 unless `-Lan`. Read the Docker sentences below
+  as history; "not exercised on a real host" is still unconfirmed either
+  way. **Carries two deferred
   decisions from 2026-08-27:** the nightly backup cron belongs here (see the
   backup item above), and backup encryption should be switched back on
   (`BACKUP_ALLOW_PLAINTEXT` removed, a passphrase chosen and stored) before
@@ -3234,10 +3249,6 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   cashbox and escrow text in the top 3 — nothing about note handling. BV30
   also has the highest share of content-free chunks (15%), so this may be an
   extraction gap rather than a ranking one.
-- **`nv9_spectral,biometrics_general` tagging.** Every chunk of the NV9
-  Spectral manual carries a biometrics tag. A note validator is not a
-  biometrics device; if this is wrong it widens retrieval into unrelated
-  material.
 - **Existing documents still carry running footers.** `9c138d3` strips them
   at ingest, so this only takes effect on a reindex
   (`python reindex.py --from-store`, ~40 min for 11 docs).
@@ -3415,6 +3426,23 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   running before).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-10-30 (Friday review) — ticked off from the open list:**
+  - ~~**Six `test_keyvault` tests fail in the full suite but pass
+    alone**~~ (added 10-23). Re-run 2026-10-30: `run_tests.py` **380/381
+    passed, 1 skipped, 0 failed**, all eight `test_keyvault` tests PASS in
+    the shared run. No commit names the fix; the likeliest is the runner
+    work in `4511778`/`b4e4bb1`/`663aa15` (scratch env and vault paths,
+    Playwright files and secret-free children in their own process), but
+    the 10-23 cause was never bisected. If the `Expected instance of
+    hashes.HashAlgorithm` error comes back, re-open with that note.
+  - ~~**`nv9_spectral,biometrics_general` tagging.**~~ Fixed by `8a1a8e9`
+    (8.2: stale `prod_*` flags deleted, dense arm held to the scope rule)
+    plus the one-off `repair_product_flags.py --apply`, whose script was
+    then removed in `0ad8a25` (D-20261030-05). Checked against the live
+    index today, read-only: 9435 chunks, **0** stale product flags
+    (`db.stale_product_flags`), and the NV9 Spectral manual's 361 main
+    chunks are tagged `nv9_spectral` with no `prod_biometrics_general`.
 
 - **2026-10-16 (Friday review) — ticked off from the open list:**
   - ~~**`eval.py` grades nothing unless `DEEPSEEK_API_KEY` is exported, and
