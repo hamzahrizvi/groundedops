@@ -969,7 +969,8 @@ def _asks_block(asks: list[str] | None) -> str:
 
 
 def build_answer_prompt(hist: str, context: str, question: str,
-                        library: str = "", asks: list[str] | None = None) -> str:
+                        library: str = "", asks: list[str] | None = None,
+                        note: str = "") -> str:
     """The answering prompt, shared by the normal and streaming paths.
 
     Extracted from answer_query v16.2 so /query/stream cannot drift from
@@ -998,6 +999,8 @@ def build_answer_prompt(hist: str, context: str, question: str,
             f"</documentation>\n\n") if library else ""
     _where = ("<documentation> and <context>" if library else "<context>")
     _asks = _asks_block(asks)
+    # D-20261030-13: what the passages give for the named item (_named_item_note).
+    _note = (_escape_prompt_boundaries(note.strip()) + "\n\n") if note.strip() else ""
     # D-20261020-12: arm B of the rule-block ablation. ANSWER_PROMPT=short
     # swaps the 49-rule block below for the eight rules something else
     # depends on (R&D 20261020-short-writer-prompt). Read per call so a lab
@@ -1020,7 +1023,7 @@ A value read from a table goes with the condition its row or cell carries (an op
 A product name in brackets at the very end of the question is the customer's selected product, added automatically; when the question itself names a different product or model, the one it names is what they are asking about.
 Write a set of values (a pinout, a specification, a list of options) as a markdown list with one item per line, or as a markdown table with a header row when there are two or more columns.
 
-{_asks}Question: {resolved_query}
+{_note}{_asks}Question: {resolved_query}
 Answer:"""
     return f"""{_lib}{_hist}<context>
 {safe_context}
@@ -1095,7 +1098,7 @@ one", "which product was that for"), use <conversation> to work out what is
 being referred to — but every FACT in your answer must still come from
 <context>.
 
-{_asks}Question: {resolved_query}
+{_note}{_asks}Question: {resolved_query}
 Answer:"""
 
 
@@ -2043,10 +2046,8 @@ def _unknown_product_text(q: str) -> str | None:
         import clarify as _clarify
         names = _product_names()
         shown = [n for k, n in names.items() if not k.endswith("_general")]
-        prefixes = _clarify.model_prefixes(
-            shown + [a for v in _product_aliases().values() for a in v])
         found = _clarify.unknown_model_name(
-            q, _product_words(), _clarify.product_vocabulary(), prefixes)
+            q, _product_words(), _clarify.product_vocabulary(), _model_prefix_set())
         if not found:
             return None
         aliases = _product_aliases()
@@ -2057,6 +2058,200 @@ def _unknown_product_text(q: str) -> str | None:
     except Exception as _exc:
         logger.warning(f"unknown-product check skipped: {_exc}")
         return None
+
+
+def _model_prefix_set() -> set[str]:
+    """The letter prefixes of the catalogue's model names ("nv", "bv",
+    "cscs"), from every product's display name and aliases."""
+    import clarify as _clarify
+    shown = [n for k, n in _product_names().items() if not k.endswith("_general")]
+    return _clarify.model_prefixes(
+        shown + [a for v in _product_aliases().values() for a in v])
+
+
+def _documented_model_keys(q: str) -> list[str]:
+    """Products a model code in the question names although no catalogue
+    entry has it, because exactly one product's own pages print it: "the
+    NV9ST" names the NV9USB+ (D-20261030-13). Named products like any
+    other, so scope and comparisons treat them the same."""
+    try:
+        import clarify as _clarify
+        return _clarify.documented_model_products(
+            q, _product_words(), _clarify.product_vocabulary(), _model_prefix_set())
+    except Exception as _exc:
+        logger.warning(f"documented-model check skipped: {_exc}")
+        return []
+
+
+def _named_item_note(question: str, chunks: list[dict], product_key: str | None,
+                     vocab: dict | None = None) -> str:
+    """A note for the answer prompt when the item the question names is not
+    what the passages give for the asked product (D-20261030-13), else "".
+
+    (a) The named item appears only on lines or passages about another
+    product, and the product's own pages never print it: the NV201's "bunch
+    note feeder" sits only on the NV200S row of a shared flash-code table.
+    (b) A look-alike: the question's phrase with one word swapped is in the
+    passages ("float by denomination" beside "payout by denomination").
+    Text matches on the passages in hand, no model call; the answer model
+    weighs it. At most two notes."""
+    try:
+        import clarify as _clarify
+        names, aliases = _product_names(), _product_aliases()
+        if not product_key or product_key not in names or product_key.endswith("_general"):
+            return ""
+        own = names[product_key]
+        # Real products' words only: "note" from "note_val_general" is no
+        # product name, and "bunch note feeder" must stay one item.
+        pwords = set()
+        for k, n in names.items():
+            if not k.endswith("_general"):
+                al = aliases.get(k, ())
+                pwords |= _product_alias_tokens(k, n, al) | set(
+                    re.findall(r"[a-z0-9]+", f"{k} {n} {' '.join(al)}".lower()))
+        vocab = _clarify.product_vocabulary() if vocab is None else vocab
+        words = lambda t: re.findall(r"[a-z][a-z0-9]*", (t or "").lower())  # noqa: E731
+
+        def content(w: str) -> bool:
+            return (bool(_clarify.content_words(w)) and w not in pwords
+                    and not re.search(r"\d", w))
+
+        def has(w: str, ws: set) -> bool:
+            return any(f in ws for f in (w, w.rstrip("s"), w + "s"))
+
+        # Each product's forms, plus the model codes in its names ("nv201"
+        # from "NV201 Spectral"), as a flash-code row writes them.
+        forms = {}
+        for k, n in names.items():
+            if k.endswith("_general"):
+                continue
+            al = aliases.get(k, ())
+            forms[k] = _product_alias_tokens(k, n, al) | {
+                t for x in (n, *al) for t in re.findall(r"[a-z0-9]+", x.lower())
+                if re.search(r"\d", t) and re.match(r"[a-z]", t)}
+
+        def named_on(line: str) -> set:
+            runs = _token_runs(line)
+            return {k for k, fs in forms.items() if fs & runs}
+
+        def stem(w: str) -> str:
+            return w if len(w) <= 4 else w[:max(4, len(w) - 3)]
+
+        def loose(ws) -> str:
+            """A phrase, each longer word by its stem: "clean" finds "cleaning"."""
+            return r"\b" + " ".join(re.escape(stem(w)) + r"[a-z0-9]*" if len(w) > 2
+                                    else re.escape(w) for w in ws) + r"\b"
+
+        def tags(c: dict) -> set:
+            return {t.strip() for t in (c.get("product") or "").split(",")}
+
+        lines = [(c, ln, set(words(ln))) for c in chunks or []
+                 for ln in (c.get("text") or "").splitlines()]
+        notes: list[str] = []
+        q_tokens = words(question)
+        covered: set = set()
+        for i, w in enumerate(q_tokens):
+            if len(notes) >= 2 or w in covered or not content(w):
+                continue
+            printers = _clarify._lookup(vocab, w) or set()
+            # Printed by the product's own pages, or by most products' (a
+            # word like "connected" is no one product's item).
+            if product_key in printers or 2 * len(printers) > len(forms):
+                continue
+            holding = [(c, ln) for c, ln, ws in lines if has(w, ws)]
+            if (not holding or any(product_key in tags(c) for c, _ in holding)
+                    or any(product_key in named_on(ln) for _, ln in holding)):
+                continue
+            others = set()
+            for c, ln in holding:
+                others |= named_on(ln) | (tags(c) & forms.keys())
+            others.discard(product_key)
+            if not others:
+                continue
+            # The item is the run of the question's words those lines print
+            # together: "bunch note feeder", not "... feeder connected".
+            held = [" ".join(re.findall(r"[a-z0-9]+", ln.lower())) for _, ln in holding]
+
+            def printed(ws) -> bool:
+                return any(re.search(loose(ws), h) for h in held)
+            a, b = i, i
+            while a > 0 and content(q_tokens[a - 1]) and printed(q_tokens[a - 1:b + 1]):
+                a -= 1
+            while (b + 1 < len(q_tokens) and content(q_tokens[b + 1])
+                   and printed(q_tokens[a:b + 2])):
+                b += 1
+            covered |= set(q_tokens[a:b + 1])
+            run = " ".join(q_tokens[a:b + 1])
+            where = " or the ".join(sorted(names[k] for k in others)[:3])
+            notes.append(
+                f'"{run}" appears in these passages only for the {where}, never '
+                f"for the {own}. Unless a passage states it for the {own}, say "
+                f"it is not documented for the {own}; you may name the product "
+                "it is documented for. Never answer from another product's row.")
+
+        # (b) look-alikes, on the passages' words with all punctuation gone.
+        otext = "\n".join(" ".join(re.findall(r"[A-Za-z0-9]+", c.get("text") or ""))
+                          for c in chunks or [])
+        text = otext.lower()
+        toks = re.findall(r"[a-z0-9]+", (question or "").lower())
+
+        def related(x: str, y: str) -> bool:
+            k = min(4, len(x), len(y))
+            return x[:k] == y[:k]
+
+        def titled(phrase: str) -> bool:
+            """Printed as an item's name: "Float By Denomination", not prose."""
+            return all(p[0].isupper() for p in phrase.split() if len(p) > 2)
+
+        seen: set = set()
+        for i in range(len(toks) - 2):
+            if len(notes) >= 2:
+                break
+            win = toks[i:i + 3]
+            # "clean the note" against "wipe the note" is a different action,
+            # not a look-alike item: names, not verb and object.
+            # The phrase ends the question's run of content words, and only its
+            # qualifier (first word) is swapped: "payout by denomination" vs
+            # "float by denomination". A fragment of a longer name ("note
+            # feeder lid" of "... lid sensor") would match unrelated rows.
+            if (not (content(win[0]) and content(win[2])) or " ".join(win) in seen
+                    or win[1] in ("the", "a", "an", "my", "our", "your", "this",
+                                  "that", "its", "their")
+                    or (i + 3 < len(toks) and content(toks[i + 3]))):
+                continue
+            for j in (0,):
+                pat = " ".join(r"([a-z][a-z0-9]*)" if k == j else re.escape(t)
+                               for k, t in enumerate(win))
+                alts: list[str] = []
+                for m in re.finditer(r"\b" + pat + r"\b", otext, re.I):
+                    alt = m.group(1).lower()
+                    if (content(alt) and not related(alt, win[j]) and alt not in alts
+                            and titled(m.group(0))):
+                        alts.append(alt)
+                if not alts:
+                    continue
+                W = " ".join(win)
+                L = '" or "'.join(" ".join(a if k == j else t for k, t in enumerate(win))
+                                  for a in alts[:3])
+                if re.search(loose(win), text):
+                    notes.append(f'The question asks about "{W}". The passages also '
+                                 f'mention "{L}", '
+                                 + ("a different item" if len(alts) == 1 else "different items")
+                                 + f': answer about "{W}" only.')
+                elif not re.search(r"\b" + re.escape(stem(win[j])), text):
+                    notes.append(f'The passages never mention "{W}"; they mention "{L}". '
+                                 f'Unless they show "{L}" is the same thing, say "{W}" is '
+                                 f'not documented for the {own}; you may mention "{L}".')
+                else:
+                    continue
+                seen.add(W)
+                break
+        if not notes:
+            return ""
+        return "Before you answer, note:\n" + "\n".join(f"- {n}" for n in notes[:2])
+    except Exception as _exc:
+        logger.warning(f"named-item note skipped: {_exc}")
+        return ""
 
 
 def _asked_to_clarify_last_turn(history: list[dict] | None) -> bool:
@@ -3357,6 +3552,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                     selected=payload.product)
         _named_typed = _products_named_in(_normalize_query(q), _keys,
                                           selected=payload.product)
+        # A model code only one product's pages print names that product
+        # ("cba9 or the nv9st" -> CBA9 and NV9USB+), D-20261030-13.
+        for _k in _documented_model_keys(_normalize_query(q)):
+            for _lst in (_named, _named_typed):
+                if _k not in _lst:
+                    _lst.append(_k)
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
 
@@ -3618,6 +3819,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "comparison_table", "comparison_specs", "spec_match"):
         ptrace.mark("sales", f"{_sales.get('kind')} skipped: {len(_asks)} asks")
         _sales = None
+    # A model we do not make, in any scope (D-20261030-13): a product chat
+    # asked about the "CSCS-9000 Ultra" got the Compact's pin table.
+    if not _sales:
+        _unknown = _unknown_product_text(q)
+        if _unknown:
+            _sales = {"answer": _unknown, "kind": "unknown_model"}
     if _sales:
         _role = {"deflected": "sales", "declined": "rejected",
                  "unknown_model": "clarify"}.get(_sales.get("kind"), "catalogue")
@@ -4519,8 +4726,15 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _turns.append(f"You: {(_h.get('a') or '')[:400] or _unanswered}")
         _hist = "<conversation>\n" + "\n".join(_turns) + "\n</conversation>\n\n"
 
+    # D-20261030-13: a one-product question whose named item the passages
+    # give only for another product, or beside a look-alike.
+    _note_on = bool(payload.product) and len(_both_named) < 2
+    _note = (_named_item_note(resolved_query, top_chunks + _bundle, payload.product)
+             if _note_on else "")
+    if _note:
+        ptrace.mark("named_item", _note[:200])
     prompt = build_answer_prompt(_hist, context, resolved_query, library=_library,
-                                 asks=_asks)
+                                 asks=_asks, note=_note)
 
     # ── LLM ──────────────────────────────────
     t3 = time.time()
@@ -4617,7 +4831,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                     _rc_chunks,
                     lambda r: _passage_product(r, _names_now) + _passage_heading(r))
                 _rc_prompt = build_answer_prompt(_hist, _rc_context, resolved_query,
-                                                 library=_library, asks=_asks)
+                                                 library=_library, asks=_asks,
+                                                 note=_note)
                 _rc = _billed(generate_with_fallback(role, _rc_prompt,
                                                      deepseek_api_key=deepseek_api_key,
                                                      api_keys=api_keys))
@@ -4646,7 +4861,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if (_hist and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
         _bare = build_answer_prompt("", context, resolved_query, library=_library,
-                                    asks=_asks)
+                                    asks=_asks, note=_note)
         _again = _billed(generate_with_fallback(role, _bare, deepseek_api_key=deepseek_api_key,
                                                 api_keys=api_keys))
         _again_text = _kept(((_again or {}).get("text") or "").strip())
@@ -4664,7 +4879,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # the turn (checks, retries, citations) runs as normal mode.
     if (_library and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
-        _plain = build_answer_prompt(_hist, context, resolved_query, asks=_asks)
+        _plain = build_answer_prompt(_hist, context, resolved_query, asks=_asks,
+                                     note=_note)
         _again = _billed(generate_with_fallback(role, _plain, deepseek_api_key=deepseek_api_key,
                                                 api_keys=api_keys))
         _again_text = _kept(((_again or {}).get("text") or "").strip())
@@ -4688,8 +4904,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if not _wb:
             _self_route_done("no_bundle")
         else:
+            # The note again, on the passages this prompt carries.
+            _wnote = (_named_item_note(resolved_query, top_chunks + _wb, payload.product)
+                      if _note_on else "")
             _wprompt = build_answer_prompt(_hist, context, resolved_query,
-                                           library=_wl, asks=_asks)
+                                           library=_wl, asks=_asks, note=_wnote)
             _wout = _billed(generate_with_fallback(role, _wprompt,
                                                    deepseek_api_key=deepseek_api_key,
                                                    api_keys=api_keys))
