@@ -336,6 +336,7 @@ from text_utils import split_asks as _real_split_asks  # noqa: E402
 from text_utils import keep_answered_part as _real_keep_answered  # noqa: E402
 from text_utils import ask_check_prompt as _real_ask_check_prompt  # noqa: E402
 from text_utils import unanswered_asks as _real_unanswered_asks  # noqa: E402
+from text_utils import _escape_prompt_boundaries as _real_escape  # noqa: E402
 
 stub("text_utils",
      passes_retrieval_gate=lambda *a, **k: True,
@@ -348,7 +349,8 @@ stub("text_utils",
      capability_target=_real_capability_target,
      normalize_markdown_tables=_real_normalize_markdown,
      split_asks=_real_split_asks, keep_answered_part=_real_keep_answered,
-     ask_check_prompt=_real_ask_check_prompt, unanswered_asks=_real_unanswered_asks)
+     ask_check_prompt=_real_ask_check_prompt, unanswered_asks=_real_unanswered_asks,
+     _escape_prompt_boundaries=_real_escape)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,
      save_turn=lambda *a, **k: None, list_conversations=lambda u: [],
      get_conversation=lambda *a: None, delete_conversation=lambda *a: True)

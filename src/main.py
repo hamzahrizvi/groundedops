@@ -79,6 +79,7 @@ from retrieval_db import (retrieve_from_db, retrieve_fused, complete_procedures,
                           fuse_ranked_results, fix_sections)
 import pipeline_trace as ptrace
 from text_utils import (
+    _escape_prompt_boundaries,
     passes_retrieval_gate,
     retrieval_confidence_band,
     is_refusal,
@@ -931,16 +932,6 @@ def _run_parallel(fn, items: list) -> list:
 # during condensation. Every real client (app.py, test_queries.py)
 # generates and sends its own id.
 DEFAULT_SESSION_ID = "default"
-
-
-_PROMPT_BOUNDARY_RE = re.compile(r"</?(?:context|conversation|documentation)>", re.IGNORECASE)
-
-
-def _escape_prompt_boundaries(text: str) -> str:
-    """Keep untrusted text from manufacturing our prompt delimiter tags."""
-    return _PROMPT_BOUNDARY_RE.sub(
-        lambda match: match.group(0).replace("<", "&lt;").replace(">", "&gt;"),
-        text or "")
 
 
 def _asks_block(asks: list[str] | None) -> str:
