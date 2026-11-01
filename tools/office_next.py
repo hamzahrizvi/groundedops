@@ -352,6 +352,8 @@ def needed(ops, lane, free=()):
     Lanes 2 and 3 exist for when a long job (a build, a check) holds a lane, so the
     rest of the work is not stuck behind it: they run only while another lane holds work, or when lane 1
     has not looked for work in LANE_ONE_LATE (the CEO, 2026-10-19: most of their wake-ups found nothing)."""
+    if is_off(ops):   # red for every lane; lane 1's step 0 still reads the page first, so its power button turns it back on
+        return False, "the office is off"
     held = claims(ops).values()
     if lane == 1:
         os.makedirs(os.path.join(ops, "state"), exist_ok=True)
@@ -952,6 +954,9 @@ def selftest():
         w("state/claims/dev-D-1.json", json.dumps({"lane": 1, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 1 is busy") and needed(ops, 3)[0]
         assert needed(ops, 1) == (True, "lane 1 holds a leftover claim"), "lane 1 must run to drop its leftover claim"
+        w("state/office_off", "x\n")
+        assert needed(ops, 3) == needed(ops, 1, ["RUN  x"]) == (False, "the office is off"), "off: every lane stops at the check"
+        os.remove(os.path.join(ops, "state", "office_off"))
         w("state/claims/dev-D-2.json", json.dumps({"lane": 2, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 2 holds a leftover claim"), "own leftover claim: lane must run to drop it"
         os.remove(os.path.join(ops, "state", "claims", "dev-D-2.json"))
