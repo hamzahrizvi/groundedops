@@ -2333,10 +2333,12 @@
           }
           // D-20261026-93: one stronger re-ask after a refusal, for a member
           // with the credits for it. Not after a deep ask (used once per
-          // turn), not on a handoff, a FAQ answer or an outage notice.
+          // turn), not on a handoff, a FAQ answer or an outage notice, or
+          // when this chat already searched this question deeply (server's
+          // deep_done, D-20261030-09).
           // Guests get deep_available false from the server (quota.status).
           var qs = quotaState;
-          if (opts.effort !== "deep" && d.role !== "handoff" && !d.from_faq
+          if (opts.effort !== "deep" && !d.deep_done && d.role !== "handoff" && !d.from_faq
               && !d.service_degraded && qs && qs.deep_available
               && qs.remaining >= qs.deep_cost) {
             chips([{
