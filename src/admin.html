@@ -5362,11 +5362,14 @@ function scopePrompt() {
             + " as well; " + s.other_name + " keeps them.")),
         el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
           el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
-            e.target.disabled = true; e.target.textContent = "Filing…";
+            const b = e.target; b.disabled = true;
             try {
-              for (const d of s.sources)
+              // one call per document, so the count shows it moving (76 of them took minutes with no sign of life)
+              for (const [i, d] of s.sources.entries()) {
+                b.textContent = "Filing " + (i + 1) + " of " + s.sources.length + "…";
                 await api("/admin/reassign_source", { method: "POST", body: JSON.stringify({
                   source: d.source, category_key: d.category, product_key: d.keys.join(",") }) });
+              }
               toast(s.other_name + "'s manuals are now searched in " + s.product_name + " chats");
             } catch (err) { toast(err.message, true); }
             await refresh(); render();
