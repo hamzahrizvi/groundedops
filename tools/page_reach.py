@@ -18,6 +18,9 @@ the prompt (decline, clarify, FAQ).
   report  python -I page_reach.py report reading.json [--diff older.json] [--fault fault.json] > readout.md
   index   python -I page_reach.py index --out DIR --drop-pdfs PRODUCT   (a TEST copy; never the live one)
 
+`pages_now` on a case is today's page for it (preferred over `pages`, which stays as the run's grader reads it);
+`gold_gone` skips the case. Both are set in OPS runs/*/cases.json.
+
 Run `run` under the lab lock (tools/lab_lock.py). REPO and OPS default to this laptop's paths.
 """
 import argparse, ast, collections, glob, json, os, re, shutil, socket, sys, time, uuid
@@ -30,7 +33,7 @@ TYPES_ANSWERED = ("lookup", "yes_no_documented", "table_condition", "procedure_o
 
 
 def gold_pages(c):
-    p = c.get("pages") or []
+    p = c.get("pages_now") or c.get("pages") or []
     if isinstance(p, str):
         try: p = ast.literal_eval(p)
         except Exception: p = [p]
@@ -50,7 +53,7 @@ def case_set(ops=OPS):
         cs = cs["cases"] if isinstance(cs, dict) else cs
         run = os.path.basename(os.path.dirname(f))
         for c in cs:
-            if c.get("expected") != "answered" or not gold_pages(c): continue
+            if c.get("expected") != "answered" or c.get("gold_gone") or not gold_pages(c): continue
             k = (c.get("product"), (c.get("turn1") or "").strip().lower(), c["q"].strip().lower())
             s = seen.setdefault(k, {"key": f"{c['id']}@{run}", "product": c.get("product"), "type": c["type"],
                                     "q": c["q"], "turn1": c.get("turn1"), "gold": gold_pages(c), "seen_in": []})
@@ -227,6 +230,7 @@ def marks():
 
 
 def report(args):
+    sys.stdout.reconfigure(encoding="utf-8")
     R = json.load(open(args.reading, encoding="utf-8")); rows = R["rows"]
     std = [r for r in rows if r["type"] != "followup"]
     print(f"# Page-reach reading {R['at']}\n\nIndex: {R['chroma']} ({R['chunks']} chunks). {len(rows)} questions, "
