@@ -256,11 +256,16 @@ def effort_model(model_env: str | None) -> tuple[str, str] | None:
     (the deep level's job, see _JOB_FOR_ROLE): it used to take
     ONLINE_PROVIDER in any mode, so "local, nothing leaves" could still
     send a deep question out, past the role settings and the widget's
-    notice (D-20261016-05). Read live, like _chain_for."""
+    notice (D-20261016-05). Read live, like _chain_for. With no override
+    set, the Advanced role's configured model (D-20261030-09)."""
     from runtime_config import get_generation_mode
-    model = os.getenv(model_env, "").strip() if model_env else ""
-    if not model or get_generation_mode() != "api":
+    if not model_env or get_generation_mode() != "api":
         return None
+    model = os.getenv(model_env, "").strip()
+    if not model:
+        # D-20261030-09: no override -> the Advanced role's own model, the
+        # strongest one already configured; it used to answer the normal way.
+        return _online_provider_model("advanced")
     return _provider_for_job("advanced"), model
 
 

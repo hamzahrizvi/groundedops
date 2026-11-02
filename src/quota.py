@@ -157,7 +157,7 @@ EFFORT = {
     "deep": {
         "credits": int(os.getenv("EFFORT_DEEP_CREDITS", "4")),
         "role": "reasoning",
-        "top_k": 10,
+        "top_k": 16,  # CONTEXT_K*2, the most main.query allows
         "min_tier": "member",
         # Optional explicit model, e.g. ONLINE_DEEP_MODEL=deepseek-v4; api mode only, on the Advanced role's provider (llm.effort_model)
         "model_env": "ONLINE_DEEP_MODEL",
@@ -622,3 +622,28 @@ def session_record(session_id: str | None, tokens_used: int = 0) -> None:
         _add(c, _session_key(session_id, "q"), win, 1)
         if tokens_used > 0:
             _add(c, _session_key(session_id, "t"), win, int(tokens_used))
+
+
+# ── one deep search per question per chat (D-20261030-09) ─────────────
+# ponytail: kept in the current daily window, so a chat left open across the
+# reset may deep-search one question once more.
+def deep_claim(key: str) -> bool:
+    """True for the first deep search of `key`, False after. Atomic, so a
+    double click cannot run (and charge) twice."""
+    win = _window_start()
+    with _lock, _conn() as c:
+        if _used(c, "deep:" + key, win):
+            return False
+        _add(c, "deep:" + key, win, 1)
+    return True
+
+
+def deep_done(key: str) -> bool:
+    with _lock, _conn() as c:
+        return bool(_used(c, "deep:" + key, _window_start()))
+
+
+def deep_release(key: str) -> None:
+    """Our own failure: give the one search back."""
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM usage WHERE identity=?", ("deep:" + key,))
