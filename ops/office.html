@@ -2079,6 +2079,7 @@ setInterval(sampleStep, 9000);
     db.doc("costs/current").onSnapshot(d => { live.costs = d.exists ? d.data() : null; renderCosts(); }, () => {});
     db.doc("diary/current").onSnapshot(d => { live.diary = d.exists ? d.data() : null; if(tab === "diary") renderDiary(); }, () => {});
     db.doc("pivot/current").onSnapshot(d => { live.pivot = d.exists ? d.data() : null; renderPivot(); }, () => {});
+    db.doc("labfeed/current").onSnapshot(d => { live.labfeed = d.exists ? d.data() : null; }, () => {});   // the lab's questions screen (screenFor "labqa") redraws from it
   } catch(e) { live.available = false; }
   decideMode();
 })();
@@ -2654,7 +2655,20 @@ function screenFor(id){
     head("ROUTINES RUNNING"); runs(b.running, ">"); if(!(b.running || []).length) line("nothing running", "dim");
     head("STARTING NEXT"); runs(b.moving, "next"); if(!(b.moving || []).length) line("nothing queued", "dim");
     if(b.stalled) line("held: " + b.stalled, "h");
+    const f = live.labfeed;
+    if(f){ head(`QUESTIONS · ${f.asked}/${f.total} · ${f.phase.toUpperCase()}`);
+      f.rows.slice(-2).forEach(x => { line("Q: " + x.q); line("A: " + (x.a || "").slice(0, 160), "dim"); }); }
+    foot.push(["Watch the questions live", () => { zoomed = "labqa"; screenText = ""; renderScreen(false); $("screenBody").scrollTop = 1e9; }]);
     return {title: "TEST LAB · ROUTINES" + (live.brief ? "" : " · NO LIVE DATA"), out, foot};
+  }
+  if(id === "labqa"){   // the week's questions and the chatbot's answers as they come in (tools/lab_feed.py), newest at the bottom
+    const f = live.labfeed;
+    if(!f) line("No test run has reached the office yet. The questions appear here while the next weekly run asks them.", "dim");
+    else { line(`${runLabel(f.run)} · ${f.phase.toLowerCase()} · ${f.asked} of ${f.total} asked` + (f.rows.length > f.asked ? `, ${f.rows.length - f.asked} asked again` : ""), "dim");
+      f.rows.forEach(x => { head(`${x.id.replace(/^.*-/, "Q")} · ${x.product}` + (x.r > 1 ? ` · again (${x.r})` : "") + (x.s != null ? ` · ${Math.round(x.s)} s` : ""));
+        line("> " + x.q); line(x.a || "(no answer)", "dim"); }); }
+    foot.push(["Back to routines", () => { zoomed = "lab"; screenText = ""; renderScreen(false); }]);
+    return {title: "TEST LAB · QUESTIONS" + (f && f.updated ? " · UPDATED " + hhmm(f.updated) : ""), out, foot};
   }
   if(id === "tv"){
     head("IS THE PRODUCT GETTING BETTER?"); line([...$("trVerdict").childNodes].map(n => n.textContent.trim()).filter(Boolean).join(": ") || "no score yet");
@@ -2692,12 +2706,14 @@ function renderScreen(typing){
   if(text === screenText) return; screenText = text;
   $("screenH").textContent = title; $("screenClock").textContent = fmtTime(new Date());
   screenEl.classList.toggle("typing", !!typing);
-  $("screenBody").replaceChildren(...out.map(([cls, t, acts], i) => {
+  const sb = $("screenBody"), atEnd = sb.scrollTop + sb.clientHeight >= sb.scrollHeight - 30;   // a live log stays on its newest line unless you scrolled up
+  sb.replaceChildren(...out.map(([cls, t, acts], i) => {
     const p = el("p", cls || null, t); if(typing) p.style.animationDelay = (i*0.07) + "s";
     if(acts && acts.length){ const a = el("span", "acts");
       for(const [label, fn, c] of acts){ const b = el("button", c || "btn", label); b.type = "button"; b.disabled = !live.db && label !== "More"; b.addEventListener("click", () => fn(b)); a.append(b); }
       p.append(a); }
     return p; }));
+  if(zoomed === "labqa" && atEnd) sb.scrollTop = sb.scrollHeight;
   const back = el("button", "btn", "Back to the floor"); back.type = "button"; back.id = "screenBack"; back.addEventListener("click", unzoom);
   $("screenFoot").replaceChildren(back, ...foot.map(([label, fn]) => { const x = el("button", "btn", label); x.type = "button"; x.addEventListener("click", fn); return x; }));
 }
