@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
 import main
+import quota
 import widget_api
 from fastapi.testclient import TestClient
 
@@ -49,9 +50,10 @@ def test_deep_that_finds_more_is_charged_and_answered():
     uid = _uid_new()
     seen, fake = _run([REFUSAL, ANSWER])
     with patch.object(main, "_traced_query", fake):
-        _post(uid, "standard")
+        s = _post(uid, "standard")
         d = _post(uid, "deep")
     assert d["answer"] == ANSWER["answer"]
+    assert s["quota"]["remaining"] - d["quota"]["remaining"] == quota.EFFORT["deep"]["credits"]
     assert d["deep_done"] is True
     assert seen[1].top_k == 16
 
