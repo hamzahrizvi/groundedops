@@ -49,7 +49,9 @@ def _uid_new():
 def test_deep_that_finds_more_is_charged_and_answered():
     uid = _uid_new()
     seen, fake = _run([REFUSAL, ANSWER])
-    with patch.object(main, "_traced_query", fake):
+    one_free = {"free_deep_daily": 1}  # so a slot not handed back would show
+    with patch.object(quota, "_policy", lambda k, f: one_free.get(k, f)), \
+         patch.object(main, "_traced_query", fake):
         s = _post(uid, "standard")
         d = _post(uid, "deep")
     assert d["answer"] == ANSWER["answer"]
@@ -124,7 +126,8 @@ def test_free_deep_runs_are_capped_and_counted():
     uid, sid = _uid_new(), "cap-chat-" + _uid_new()
     pol = {"member_daily_credits": 4, "questions_per_session": 50}
     seen, fake = _run([REFUSAL] * 10)
-    with patch.object(quota, "_policy", lambda k, f: pol.get(k, f)),          patch.object(main, "_traced_query", fake):
+    with patch.object(quota, "_policy", lambda k, f: pol.get(k, f)), \
+         patch.object(main, "_traced_query", fake):
         cap = quota.free_deep_limit()
         for i in range(cap):
             r = _post_raw(uid, "deep", f"off-topic question number {i}?", sid)
