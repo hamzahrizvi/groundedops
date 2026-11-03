@@ -10,7 +10,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from page_reach import case_set, gold_pages  # noqa: E402
+from page_reach import case_set, gold_pages, resolve_name, supervise  # noqa: E402
 
 
 def case(i, q, **kw):
@@ -31,6 +31,28 @@ def main():
         assert ga["gold"] == [("A.pdf", "3")] and [s[0] for s in ga["seen_in"]] == ["r1", "r2"], ga
         assert all(g["q"] != "qb" for g in got)
     assert gold_pages({"pages": ["A.txt p1"]}) == [("A.txt", "1")]
+    assert gold_pages({"pages": ["Q p6, p8, p10"]}) == [("Q", "6"), ("Q", "8"), ("Q", "10")]
+    assert gold_pages({"pages": ["C p1-p2", "p5", "X.pdf p3 (Card)"]}) == [("C", "1"), ("C", "2"), ("C", "5"), ("X.pdf", "3")]
+    assert gold_pages({"pages": ["NV200 Spectral SSP Manual v.1 p88"]}) == [("NV200 Spectral SSP Manual v.1", "88")]
+    qs = "CS-MyConnect Quick Start Guide – Installer Edition-240226-141456.pdf"
+    S = {qs, "CS-MyCheckr Installation & MyConnect App Pre-Requisites Checklist-170925-134345.pdf", "C-SCS  - Sales Guide.txt",
+         "NV200 Spectral SSP Manual v.1.pdf", "MyCheckr Mini User Manual-v5.pdf", "A.pdf", "A.txt", "Manual X-v1.pdf", "Manual X-v2.pdf"}
+    assert resolve_name("CS-MyConnect Quick Start Guide - Installer Edition", S) == (qs, "suffix")
+    assert resolve_name("CS-MyConnect Quick Start Guide", S) == (qs, "prefix")
+    assert resolve_name("CS-MyCheckr Installation & MyConnect App Pre-Requisites Checklist", S)[0].endswith("134345.pdf")
+    assert resolve_name("C-SCS - Sales Guide.txt", S) == ("C-SCS  - Sales Guide.txt", "name")
+    assert resolve_name("NV200 Spectral SSP Manual v.1", S) == ("NV200 Spectral SSP Manual v.1.pdf", "name")
+    assert resolve_name("MyCheckr Mini User Manual.txt", S) == (None, None)   # a .txt never becomes a PDF
+    assert resolve_name("A", S)[0] is None and resolve_name("Manual X", S)[0] is None   # two hits: ambiguous
+    assert resolve_name("Old Name", S, {"old name": "A.pdf"}) == ("A.pdf", "table")
+    assert resolve_name("A.pdf", S, copy_of={"A.pdf": "A.txt"}) == ("A.txt", "exact")
+    with tempfile.TemporaryDirectory() as t:
+        out = os.path.join(t, "r.json")
+        code = ("import os,sys\no=sys.argv[1]\nif not os.path.exists(o+'.flag'):\n"
+                " open(o+'.flag','w').close(); open(o+'.current','w').write('k1'); sys.exit(3)\n")
+        assert supervise([sys.executable, "-c", code, out], out) == 0          # crashed on k1, restarted, finished
+        assert json.load(open(out + ".crashes.json")) == {"k1": 1}
+        assert supervise([sys.executable, "-c", "import sys; sys.exit(4)"], out) == 4   # died before a question: no restart
     print("ok")
 
 
