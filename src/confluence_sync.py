@@ -721,9 +721,15 @@ def link_hosts() -> list[str]:
 
 
 def _host_ok(url: str, hosts: list[str]) -> bool:
-    u = urlsplit(url)
-    host = (u.path.rpartition("@")[2] if u.scheme == "mailto" else u.hostname or "").lower()
-    return bool(host) and any(host == h or host.endswith("." + h) for h in hosts)
+    """Every host the url names is allowlisted (each recipient of a mailto)."""
+    try:
+        u = urlsplit(url)
+        names = ([a.rpartition("@")[2] for a in u.path.split(",")] if u.scheme == "mailto"
+                 else [u.hostname or ""])
+    except ValueError:                 # a malformed address (http://[x) is not kept
+        return False
+    names = [n.strip().lower() for n in names]
+    return all(n and any(n == h or n.endswith("." + h) for h in hosts) for n in names)
 
 
 class _Text(HTMLParser):

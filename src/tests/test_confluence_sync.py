@@ -241,6 +241,10 @@ def test_link_hosts_setting():
         assert cs.link_hosts() == ["docs.example.com", "dropbox.com", "itl.atlassian.net"]
         assert cs._host_ok("https://a.docs.example.com/p", cs.link_hosts())
         assert not cs._host_ok("https://notdocs.example.com/p", cs.link_hosts())
+        assert not cs._host_ok("http://[docs.example.com/p", cs.link_hosts())    # malformed
+        assert not cs._host_ok("mailto:a@evil.example,b@docs.example.com", cs.link_hosts())
+        assert cs._host_ok("mailto:a@docs.example.com?subject=x", cs.link_hosts())
+        assert "bad" in cs.page_text("P", '<a href="http://[x/y">bad</a>')       # no crash
     finally:
         os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
         if old is not None:
