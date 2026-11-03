@@ -161,6 +161,9 @@ def base_code(dev, data, dest):
     p =subprocess.Popen(["git", "-C", dev, "archive", base, "src"], stdout=subprocess.PIPE)
     with tarfile.open(fileobj=p.stdout, mode="r|") as t:
         t.extractall(dest, filter="data")
+    # tarfile stops at the end-of-archive marker; git still has padding to write, and blocked on the full pipe it
+    # never exits, so wait() hung forever (two D-20261102-02 gates, 2026-11-03, one for 5.5 hours)
+    p.stdout.read()
     if p.wait():
         raise RuntimeError(f"git -C {dev} archive {base} src")
     return base
