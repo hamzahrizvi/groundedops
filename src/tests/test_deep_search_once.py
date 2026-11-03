@@ -56,6 +56,7 @@ def test_deep_that_finds_more_is_charged_and_answered():
     assert s["quota"]["remaining"] - d["quota"]["remaining"] == quota.EFFORT["deep"]["credits"]
     assert d["deep_done"] is True
     assert seen[1].top_k == 16
+    assert d["quota"]["deep_available"] is True  # the paid run handed its free slot back
 
 
 def test_deep_that_finds_nothing_more_is_free():
@@ -110,3 +111,31 @@ def test_adds_detail_is_strict():
 
 def test_effort_widens_the_prompt():
     assert "results[:_ctx_k]" in inspect.getsource(main.query)
+
+
+def _post_raw(uid, effort, q, sid="cap-chat"):
+    main.APP_STATE["ready"] = True
+    return client.post("/widget/ask", json={"q": q, "session_id": sid, "product": "nv9",
+                                            "effort": effort},
+                       headers={"Authorization": "Bearer " + run_live.member_token(uid)})
+
+
+def test_free_deep_runs_are_capped_and_counted():
+    uid, sid = _uid_new(), "cap-chat-" + _uid_new()
+    pol = {"member_daily_credits": 4, "questions_per_session": 50}
+    seen, fake = _run([REFUSAL] * 10)
+    with patch.object(quota, "_policy", lambda k, f: pol.get(k, f)),          patch.object(main, "_traced_query", fake):
+        cap = quota.free_deep_limit()
+        for i in range(cap):
+            r = _post_raw(uid, "deep", f"off-topic question number {i}?", sid)
+            assert r.status_code == 200, r.text
+            assert r.json()["answer"] == widget_api.NO_MORE_DETAILS
+            assert r.json()["quota"]["remaining"] == 4
+        assert r.json()["quota"]["deep_available"] is False
+        over = _post_raw(uid, "deep", "one more off-topic question?", sid)
+        assert over.status_code == 429
+        assert over.json()["detail"]["reason"] == "deep_daily"
+        assert len(seen) == cap, "the capped run never reached the pipeline"
+        assert quota.session_check(sid)["questions_used"] == cap
+        # the cap stops only deep: a normal question in the same chat still runs
+        assert _post_raw(uid, "standard", "still works?", sid).status_code == 200
