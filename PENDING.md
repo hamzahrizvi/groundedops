@@ -235,7 +235,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261030-14 | Flash-code questions still get "I don't have that" when the code sits in a shared table, and a vague "flashing red" gets no question back | approved, queued | Dev builds it |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-02 | Security item D-20261102-02, details in the office | built, waiting for the check | the pre-ship check |
-| D-20261103-01 | The page-reach check still names old documents for new questions, takes 16 hours instead of 1 and crashed once | built, waiting for the check | the pre-ship check |
+| D-20261103-01 | The page-reach check still names old documents for new questions, takes 16 hours instead of 1 and crashed once | ready to merge | merges once Security clears it |
 | D-20261103-02 | Security item D-20261103-02, details in the office | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
