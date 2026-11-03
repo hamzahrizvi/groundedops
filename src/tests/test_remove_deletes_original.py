@@ -233,6 +233,7 @@ def test_i_the_store_list_is_never_served_as_a_document():
 
 class _Page:
     """A Confluence root page with one child page "manual" (manual.txt)."""
+    site = "itl.atlassian.net"
     def each(self, path, **params):
         parts = path.split("/")
         if parts[-1] == "direct-children" and parts[-2] == "1":

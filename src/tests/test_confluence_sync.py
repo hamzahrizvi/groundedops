@@ -172,6 +172,41 @@ def test_page_text_keeps_a_table_row_on_one_line():
     assert t.count("Check the PSU.") == 1 and "baad7fce" not in t and "note" not in t
 
 
+def test_page_text_keeps_where_links_point():
+    # The SMART Update FAQ's download buttons (real markup, 2026-11-03): a link
+    # around an icon came out as nothing, so the chatbot had no link to give.
+    box = "https://www.dropbox.com/scl/fo/cob/AFH?rlkey=1wo&amp;dl=1"
+    icon = ('<ac:image ac:alt="download-zip-icon.svg">'
+            '<ri:attachment ri:filename="download-zip-icon.svg" ri:version-at-save="1" /></ac:image>')
+    t = cs.page_text("FAQ", '<table><tbody><tr><th><p>Latest GBP SMART Update Package</p></th></tr>'
+                     f'<tr><td><a href="{box}">{icon}</a></td></tr></tbody></table>'
+                     '<ac:adf-extension><ac:adf-content><p>Visit the <a href="https://itl.com/hub/">'
+                     'Support Hub</a>.</p></ac:adf-content><ac:adf-fallback><p>Visit the '
+                     '<a href="https://itl.com/hub/">Support Hub</a>.</p></ac:adf-fallback></ac:adf-extension>'
+                     '<p><a href="https://itl.com/x">https://itl.com/x</a> <a href="#Steps">Steps</a> '
+                     '<a href="https://itl.atlassian.net/wiki/spaces/CS/pages/456#Sides">Sides</a> '
+                     '<a href="https://outlook.office.com/local/path/file://fs1/Shared">fs1</a> '
+                     '<a href="mailto:support@itl.com">Email us</a></p>'
+                     '<p><ac:link><ri:attachment ri:filename="Update V2.zip" /><ac:plain-text-link-body>'
+                     '<![CDATA[the update]]></ac:plain-text-link-body></ac:link></p>'
+                     '<p><ac:link><ri:attachment ri:filename="notes.pdf"><ri:page ri:content-title="Other" />'
+                     '</ri:attachment></ac:link></p>'
+                     '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
+                     '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>',
+                     page_id="456", site="itl.atlassian.net")
+    att = "https://itl.atlassian.net/wiki/download/attachments/456/"
+    assert "Latest GBP SMART Update Package\nhttps://www.dropbox.com/scl/fo/cob/AFH?rlkey=1wo&dl=1\n" in t, t
+    assert "download-zip-icon" not in t                      # a picture is not a link
+    assert t.count("Support Hub (https://itl.com/hub/)") == 1
+    # Not said twice, and no #anchor, link to the page itself or file share.
+    assert "https://itl.com/x Steps Sides fs1 Email us (mailto:support@itl.com)" in t, t
+    assert f"the update ({att}Update%20V2.zip)" in t
+    assert "\nnotes.pdf\n" in t                              # another page's file: no id, no url
+    assert f"\nManual.pdf ({att}Manual.pdf)" in t
+    assert cs.page_text("F", '<ac:structured-macro ac:name="view-file">'    # no site: name only
+                        '<ri:attachment ri:filename="Manual.pdf" /></ac:structured-macro>') == "F\n\nManual.pdf"
+
+
 def test_review_mode_excludes_until_approved():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()

@@ -54,6 +54,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
+from urllib.parse import quote
 
 import requests
 
@@ -710,7 +711,9 @@ class _Text(HTMLParser):
     """Confluence storage format to plain text: paragraphs on consecutive
     lines, a blank line only at a heading or a table, tables fenced as the PDF
     parser fences them, a table row on one line with its cells split by " | "
-    (tables.cells), macro parameters dropped."""
+    (tables.cells), macro parameters dropped. A link keeps where it points,
+    as "text (url)": the SMART Update FAQ's two download buttons came out as
+    nothing, and the chatbot refused a customer the link (2026-11-02)."""
     _BLOCK = {"p", "div", "br", "li", "tr", "table", "pre", "blockquote",
               "h1", "h2", "h3", "h4", "h5", "h6"}
     # Parameters and ADF attributes are settings, not text: they put
@@ -718,15 +721,49 @@ class _Text(HTMLParser):
     # panel's id into the manuals. An ADF fallback repeats its node's content.
     _SKIP = {"ac:parameter", "ac:adf-parameter", "ac:adf-attribute", "ac:adf-fallback"}
     _HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+    _FILE_MACROS = {"view-file", "viewpdf", "viewdoc", "viewxls", "viewppt"}
 
-    def __init__(self):
+    def __init__(self, page_id: str = "", site: str = ""):
         super().__init__()
         self.out, self.skip, self.cell, self.first = [], 0, 0, True
+        self.page_id, self.site = page_id, site
+        self.links: list[list] = []      # open <a>/<ac:link>: [where its text starts, url, file name]
+        self.macros: list[str] = []      # names of the open structured macros
+        self.image = 0                   # inside <ac:image>: its attachment is a picture
         # Imported here: chunking pulls in text_utils, which the gate tests stub.
         from chunking import TABLE_CLOSE, TABLE_OPEN
         self.fence = (TABLE_OPEN, TABLE_CLOSE)
 
+    def _attachment(self, name: str) -> str:
+        if not (self.site and self.page_id):
+            return ""
+        return f"https://{self.site}/wiki/download/attachments/{self.page_id}/{quote(name)}"
+
     def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "ac:structured-macro":
+            self.macros.append(a.get("ac:name") or "")
+        elif tag == "ac:image":
+            self.image += 1
+        elif tag in ("a", "ac:link") and not self.skip:
+            href = (a.get("href") or "").strip()
+            # Not #anchors, not the page itself (SMART Hopper 4 Spare Parts
+            # links its own sections 288 times), not a file share wrapped in
+            # an Outlook link (file://fs1/... in internal release notes).
+            keep = (href.startswith(("http://", "https://", "mailto:")) and "file:" not in href
+                    and not (self.page_id and re.search(rf"/pages/{self.page_id}(?:[/#?]|$)", href)))
+            self.links.append([len(self.out), href if keep else "", ""])
+        elif tag == "ri:attachment" and not self.image:
+            name = a.get("ri:filename") or ""
+            if self.links and not self.skip:          # <ac:link> to a file
+                self.links[-1][1:] = [self._attachment(name), name]
+            elif self.macros and self.macros[-1] in self._FILE_MACROS and name:
+                url = self._attachment(name)        # its file sits in a skipped parameter
+                sep = " " if self.cell else "\n"
+                self.out.append(f"{sep}{name} ({url}){sep}" if url else f"{sep}{name}{sep}")
+        elif tag in ("ri:page", "ri:blog-post") and self.links and self.links[-1][2]:
+            self.links[-1][1] = ""                  # a file on another page: id unknown
+
         if tag in self._SKIP:
             self.skip += 1
         elif tag in ("td", "th"):
@@ -746,6 +783,18 @@ class _Text(HTMLParser):
                 self.first = True
 
     def handle_endtag(self, tag):
+        if tag == "ac:structured-macro" and self.macros:
+            self.macros.pop()
+        elif tag == "ac:image":
+            self.image = max(0, self.image - 1)
+        elif tag in ("a", "ac:link") and self.links and not self.skip:
+            start, url, name = self.links.pop()
+            text = "".join(self.out[start:]).strip()
+            if url and url not in text:         # a bare url is not said twice
+                self.out.append(f" ({url})" if text else f"{name} ({url})" if name else url)
+            elif name and not text:
+                self.out.append(name)
+
         if tag in self._SKIP:
             self.skip = max(0, self.skip - 1)
         elif tag in ("td", "th"):
@@ -768,8 +817,9 @@ class _Text(HTMLParser):
             self.out.append(data[6:])
 
 
-def page_text(title: str, storage_html: str) -> str:
-    p = _Text()
+def page_text(title: str, storage_html: str, page_id: str = "", site: str = "") -> str:
+    """page_id and site make links to the page's attached files whole URLs."""
+    p = _Text(page_id, site)
     p.feed(storage_html or "")
     body = re.sub(r"[ \t]+\n", "\n", "".join(p.out))
     body = "\n".join(re.sub(r"\s{2,}", " ", l).strip() if " | " in l else l
@@ -1175,7 +1225,8 @@ def _fetch(api: "_Api", it: dict, review: bool) -> tuple[bytes, object]:
         return text.encode("utf-8"), version
     if it["kind"] == "page":
         full = api.page(it["id"])
-        return (page_text(full.get("title") or it["title"], _body(full)).encode("utf-8"),
+        return (page_text(full.get("title") or it["title"], _body(full),
+                          it["id"], api.site).encode("utf-8"),
                 (full.get("version") or {}).get("number"))
     # ponytail: version read just before the download; an edit in that second slips through. Pin the download to the version if it ever matters.
     # Auto mode needs no fresh version: one request fewer, nothing new to fail.
@@ -1202,7 +1253,7 @@ def _bundle_text(api: _Api, it: dict) -> tuple[str, str]:
         _stop_point()
         _progress.update(page=n + 1, pages=len(it["members"]))
         full = api.page(pid)
-        text = page_text(full.get("title") or "", _body(full))
+        text = page_text(full.get("title") or "", _body(full), pid, api.site)
         if text:
             parts.append(f"{SECTION_OPEN}{heading}{SECTION_CLOSE}\n{text}")
             stamp.append(f"{pid}:{(full.get('version') or {}).get('number')}")
