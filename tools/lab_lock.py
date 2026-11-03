@@ -63,7 +63,9 @@ def lab_lock(poll=20):
     # release, and a gate polling every 20 s waited 3.5 hours behind R&D's three arms (2026-11-03).
     queue = path + ".queue"
     os.makedirs(queue, exist_ok=True)
-    mine = f"{time.time_ns():020d}-{os.getpid()}"
+    # GO_LAB_PRIORITY (a gate, tools/gate_run.sh): its ticket sorts before every plain one, so it goes next; a gate
+    # holds the lab for one gate (about 1.5 hours), and the lanes wait on it
+    mine = ("0000" if os.environ.get("GO_LAB_PRIORITY") else "") + f"{time.time_ns():020d}-{os.getpid()}"
     ticket = open(os.path.join(queue, mine), "a+")
     ticket.seek(0)
     grab(ticket)
@@ -145,6 +147,18 @@ def selftest():
     assert first.wait() == a.wait() == b.wait() == 0
     assert open(order).read() == "HAB", open(order).read()
     assert os.listdir(env["GO_LAB_LOCK"] + ".queue") == [], os.listdir(env["GO_LAB_LOCK"] + ".queue")
+    # a gate (GO_LAB_PRIORITY) queued after a plain waiter still goes before it
+    open(order, "w").close()
+    first = job("H", 1, 4)
+    assert first.stdout.readline().strip() == "held"
+    a = job("A", 0.1, 0)
+    assert "waiting" in a.stdout.readline()
+    env["GO_LAB_PRIORITY"] = "1"
+    g = job("G", 1, 1)
+    del env["GO_LAB_PRIORITY"]
+    assert "waiting" in g.stdout.readline()
+    assert first.wait() == a.wait() == g.wait() == 0
+    assert open(order).read() == "HGA", open(order).read()
     print("lab_lock selftest ok")
 
 

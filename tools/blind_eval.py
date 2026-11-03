@@ -69,7 +69,7 @@ if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own pr
         if _rc: sys.exit(_rc)
         # ponytail: a fixed pause longer than lab_lock's 20 s poll, so a job waiting for the lab gets it between
         # repeats (back to back, 6 gate passes held the weekly run off the lab for over an hour, 2026-10-19)
-        if sys.argv[2:3] == ["system"] and _k < _n: time.sleep(25)
+        if sys.argv[2:3] == ["system"] and _k < _n and not os.environ.get("GO_LAB_LOCK_HELD"): time.sleep(25)   # held: nobody to let in
     sys.exit(0)
 NO_PRODUCT = "--no-product" in sys.argv   # D-20261022-10: typed first, no product picked (the picker path sends the case's)
 if NO_PRODUCT: sys.argv.remove("--no-product")

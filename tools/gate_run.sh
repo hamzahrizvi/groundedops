@@ -36,6 +36,7 @@ export ADAPTIVE="${ADAPTIVE:-1}"
 RULE=(); [ "${GATE_RULE:-mean}" = mean ] && RULE=(--rule mean)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-$REPO/.venv/Scripts/python.exe}"; [ -x "$PY" ] || PY="$REPO/.venv/bin/python"
+ARGS=("$@")
 DEV="$(cd "$1" && pwd)" || exit 1
 RUN="$(cd "$2" && pwd)" || exit 1
 OUT="$3"; shift 3
@@ -43,10 +44,19 @@ mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
 # one gate per <out_dir>: a second one resets the first's before/after and base_code under it (two D-20261103-02
 # gates, 2026-11-03). RUNNING names the live gate's shell; a gate killed with no EXIT trap leaves a stale one, so it
 # counts only while that pid is still a gate_run.sh on this <out_dir>. Exits without FAILED: the live gate's result stands.
-if p="$(cat "$OUT/RUNNING" 2>/dev/null)" && [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -F gate_run.sh | grep -qF "$(basename "$OUT")"; then
-  echo "gate_run.sh: another gate on $OUT is running (pid $p); not starting a second" >&2; exit 1
+if [ -z "${GATE_IN_LAB:-}" ]; then
+  if p="$(cat "$OUT/RUNNING" 2>/dev/null)" && [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -F gate_run.sh | grep -qF "$(basename "$OUT")"; then
+    echo "gate_run.sh: another gate on $OUT is running (pid $p); not starting a second" >&2; exit 1
+  fi
+  echo $$ > "$OUT/RUNNING"; trap 'rm -f "$OUT/RUNNING"' EXIT
+  # The whole gate holds the lab once, ahead of any non-gate waiter (GO_LAB_PRIORITY), and runs again inside the hold;
+  # its blind_eval and gate_rerun passes see GO_LAB_LOCK_HELD and never wait. Taking it per pass, a job queued during
+  # the gate took the lab between two passes and held it for hours with the gate half done (R&D, lane 3: 2026-11-03).
+  B="$BASH"; command -v cygpath > /dev/null && B="$(cygpath -m "$BASH")"   # this bash: a bare "bash" from Windows python can be WSL's
+  GATE_IN_LAB=1 GO_LAB_PRIORITY=1 "$PY" -c 'import os, subprocess, sys; sys.path.insert(0, sys.argv[1]); import lab_lock
+h = lab_lock.lab_lock()[0]; sys.exit(subprocess.call(sys.argv[2:], env={**os.environ, lab_lock.HELD: "1"}))' "$REPO/tools" "$B" "$0" "${ARGS[@]}"
+  exit $?
 fi
-echo $$ > "$OUT/RUNNING"; trap 'rm -f "$OUT/RUNNING"' EXIT
 rm -f "$OUT/FAILED"   # an earlier attempt's (a cap stop is retried once the cap rises)
 export PYTHONIOENCODING=utf-8 HF_HUB_OFFLINE=1 GO_CODE="$DEV/src" GO_DATA="${GO_DATA:-$REPO/src}"
 # D-20261010-20: this gate's hidden siblings must not be readable in the live log Dev works beside
