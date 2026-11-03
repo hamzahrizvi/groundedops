@@ -4334,9 +4334,11 @@ function cfConnectionCard(c) {
       placeholder: "Email of the Atlassian account the token belongs to" }),
     token: el("input", { class: "input", type: "password", autocomplete: "new-password",
       placeholder: s.token_set ? "Token saved (leave blank to keep)" : "API token" }),
+    link_hosts: el("input", { class: "input", value: s.link_hosts || "",
+      placeholder: "Hosts links may point to, comma separated (default: " + (s.link_hosts_default || "") + ")" }),
   };
   const save = el("button", { class: "btn btn-primary", onclick: () => {
-    const body = { folder_url: f.folder_url.value, email: f.email.value };
+    const body = { folder_url: f.folder_url.value, email: f.email.value, link_hosts: f.link_hosts.value };
     if (f.token.value) body.token = f.token.value;
     cfPost("/admin/confluence", body, "Connection saved");
   } }, "Save");
@@ -4346,7 +4348,10 @@ function cfConnectionCard(c) {
       + "Everything under the folder or page below is offered here; nothing reaches the bot until it is approved."),
     el("div", { style: "display:flex;flex-direction:column;gap:6px" }, f.folder_url,
       el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
-        el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token))),
+        el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token)),
+      f.link_hosts,
+      el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+        "Links to any other host keep their text but not their address. Add your Confluence site to keep links to its pages and files (only if that space is public). Applies from the next sync of each page.")),
     el("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save,
       el("span", { class: "tag " + (c.configured ? "tag-accent" : "tag-neutral") },
         c.configured ? "connected" : "not connected")));
