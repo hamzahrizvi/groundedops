@@ -31,6 +31,7 @@ import sys
 import tarfile
 
 from retrofit_gate import wrong, repeat_paths, scores   # one rule for "wrong" (D-20261010-11)
+from lab_lock import lab_lock, HELD
 
 ROUNDS, MARGIN, MAX_CASES = 6, 2, 2
 MAX_SIBS = 3   # the CEO, 2026-10-14: a hidden sibling under 2 is re-asked before it fails a fix; more than this many is a real miss
@@ -66,6 +67,7 @@ def sibling_rerun(held, states, dev_src, data, base_src):
     shutil.rmtree(rr, ignore_errors=True)
     log = open(os.path.join(held, "sib_rerun.log"), "a", encoding="utf-8")
     try:
+        lab = lab_lock()[0]   # once for every pass, held while they run (see run())
         for sp, ids in low.items():
             if not ids:
                 continue
@@ -79,7 +81,7 @@ def sibling_rerun(held, states, dev_src, data, base_src):
                     d = os.path.join(rr, name, k, f"r{r}")
                     os.makedirs(d)
                     json.dump({"cases": cases}, open(os.path.join(d, "cases.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
-                    env = {**os.environ, "GO_CODE": src, "GO_DATA": data, "SYSTEMS": "sys_normal"}
+                    env = {**os.environ, "GO_CODE": src, "GO_DATA": data, "SYSTEMS": "sys_normal", HELD: "1"}
                     for cmd in ([sys.executable, "-X", "faulthandler", be, d, "system", "normal"], [sys.executable, be, d, "grade"]):
                         log.write(f"== {d}: {' '.join(cmd[-2:])}\n"); log.flush()
                         if subprocess.run(cmd, env=env, stdout=log, stderr=subprocess.STDOUT).returncode:
@@ -205,10 +207,15 @@ def run(dev, run_dir, out):
                 states["head"].append(x)
                 states["base"].append({"grades": {c: {"sys_normal": g["sys_before"]} for c, g in x.get("grades", {}).items() if "sys_before" in g}})
             log.write(f"seeded {len(rp)} passes from the gate's repeats\n"); log.flush()
+        # The lab once for all the passes (minutes), not per pass: between passes another job took it and, wrapped
+        # whole in lab_lock.py, would have held it for hours with the gate half done (lane 3's evals, 2026-11-03).
+        # Held while they run (the handle lives to the end of run()); the passes see GO_LAB_LOCK_HELD and don't wait for it themselves.
+        if len(states["head"]) < ROUNDS:
+            lab = lab_lock()[0]
         for n in range(len(states["head"]) + 1, ROUNDS + 1):
             for side, src in sides.items():
                 d = os.path.join(rr, side)
-                env = {**os.environ, "GO_CODE": src, "GO_DATA": data, "SYSTEMS": "sys_normal,baseline"}
+                env = {**os.environ, "GO_CODE": src, "GO_DATA": data, "SYSTEMS": "sys_normal,baseline", HELD: "1"}
                 for cmd in ([sys.executable, be, d, "reset"],
                             [sys.executable, "-X", "faulthandler", be, d, "system", "normal"],
                             [sys.executable, be, d, "grade"]):
@@ -285,7 +292,8 @@ def _selftest():
     assert r["skipped"].startswith("none") and r["asked"] == 0, "unmoved siblings are not re-asked"
     # D-20261018-02: a sibling with 3 repeat files is seeded with 3 passes per side and asked 3 more
     fake = os.path.join(tmp, "fake_be.py")
-    open(fake, "w").write("import json, os, sys\nrun, ph = sys.argv[1], sys.argv[2]\np = os.path.join(run, 'cases_state.json')\n"
+    open(fake, "w").write("import json, os, sys\nassert os.environ.get('GO_LAB_LOCK_HELD'), 'the re-ask holds the lab for its passes'\n"
+                          "run, ph = sys.argv[1], sys.argv[2]\np = os.path.join(run, 'cases_state.json')\n"
                           "s = json.load(open(p)) if os.path.exists(p) else {}\n"
                           "ids = [c['id'] for c in json.load(open(os.path.join(run, 'cases.json')))['cases']]\n"
                           "if ph == 'system': s['sys_normal'] = {c: {'answer': os.environ['GO_CODE']} for c in ids}\n"
@@ -297,6 +305,7 @@ def _selftest():
         json.dump({"grades": {"s9": {"sys_normal": {"score": a}, "sys_before": {"score": b}}}},
                   open(os.path.join(d3, "cases_state.json" if k == 1 else f"cases_state.r{k}.json"), "w"))
     old_be = os.environ.get("BE"); os.environ["BE"] = fake
+    os.environ["GO_LAB_LOCK"] = os.path.join(tmp, "lab.lock")   # not the real lab's
     try:
         r = sibling_rerun(tmp, [os.path.join(d3, "cases_state.json")], os.path.join(tmp, "dev"), tmp, os.path.join(tmp, "base"))
     finally:
