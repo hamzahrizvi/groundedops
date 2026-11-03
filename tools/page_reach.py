@@ -74,6 +74,7 @@ def block_network(counter):
 
 def run(args):
     import faulthandler; faulthandler.enable()   # a native crash (seen once at case 690) leaves its stack in the log
+    args.out = os.path.abspath(args.out)   # run() chdirs to REPO/src below
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["PERFORMANCE_MODE"] = "0"
     lab = os.path.join(os.environ.get("TEMP", "/tmp"), "groundedops-lab", "page_reach")
