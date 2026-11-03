@@ -231,11 +231,12 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261030-09 | The "Search more thoroughly" button costs customers 4 credits for the same answer as 1 | ready to merge | merges once Security clears it |
+| D-20261030-09 | The "Search more thoroughly" button costs customers 4 credits for the same answer as 1 | sent back, rebuilding | Dev rebuilds it |
 | D-20261030-11 | Measure a checker trained for grounding: today's first check fails most right answers, so the slow AI check throws away 8% of written answers | approved, queued | Dev builds it |
 | D-20261030-14 | Flash-code questions still get "I don't have that" when the code sits in a shared table, and a vague "flashing red" gets no question back | waiting for CEO | your yes |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-02 | Security item D-20261102-02, details in the office | approved, queued | Dev builds it |
+| D-20261103-02 | Security item D-20261103-02, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
@@ -250,7 +251,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
 | rnd/D-20261031-02-edits | D-20261031-02-edits | proposed | the product owner triages it |
 | security/20261019 | Security item security/20261019, details in the office | proposed | the product owner triages it |
-| security/20261103 | Security item security/20261103, details in the office | proposed | the product owner triages it |
 | D-20261008-10 | Security item D-20261008-10, details in the office | deferred | parked |
 | D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
 | D-20261009-07 | Security item D-20261009-07, details in the office | deferred | parked |
