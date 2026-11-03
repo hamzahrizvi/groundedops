@@ -40,6 +40,13 @@ DEV="$(cd "$1" && pwd)" || exit 1
 RUN="$(cd "$2" && pwd)" || exit 1
 OUT="$3"; shift 3
 mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
+# one gate per <out_dir>: a second one resets the first's before/after and base_code under it (two D-20261103-02
+# gates, 2026-11-03). RUNNING names the live gate's shell; a gate killed with no EXIT trap leaves a stale one, so it
+# counts only while that pid is still a gate_run.sh on this <out_dir>. Exits without FAILED: the live gate's result stands.
+if p="$(cat "$OUT/RUNNING" 2>/dev/null)" && [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -F gate_run.sh | grep -qF "$(basename "$OUT")"; then
+  echo "gate_run.sh: another gate on $OUT is running (pid $p); not starting a second" >&2; exit 1
+fi
+echo $$ > "$OUT/RUNNING"; trap 'rm -f "$OUT/RUNNING"' EXIT
 rm -f "$OUT/FAILED"   # an earlier attempt's (a cap stop is retried once the cap rises)
 export PYTHONIOENCODING=utf-8 HF_HUB_OFFLINE=1 GO_CODE="$DEV/src" GO_DATA="${GO_DATA:-$REPO/src}"
 # D-20261010-20: this gate's hidden siblings must not be readable in the live log Dev works beside
@@ -80,7 +87,7 @@ log "$OUT/gate.log" "$PY" "$BE" "$RUN" remark
 # D-20261010-09: stored answers from another bot model are re-asked on the base code with today's model
 "$PY" "$BE" "$RUN" models > "$OUT/models.json" 2>> "$OUT/gate.log" || { echo "failed: models" > "$OUT/FAILED"; exit 1; }
 # the branch's base code: for a before re-asked on today's model, and for every hidden sibling's before (D-20261016-10)
-BASE="$OUT/base_code"; rm -rf "$BASE"; trap 'rm -rf "$BASE"' EXIT
+BASE="$OUT/base_code"; rm -rf "$BASE"; trap 'rm -rf "$BASE" "$OUT/RUNNING"' EXIT
 SAME=0; grep -q '"same": true' "$OUT/models.json" && SAME=1
 if [ $SAME = 0 ] || [ $# -gt 0 ] || [ "$REPEATS" -gt 1 ]; then
   log "$OUT/gate.log" "$PY" "$REPO/tools/gate_rerun.py" --base-code "$DEV" "$BASE"

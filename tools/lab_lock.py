@@ -21,6 +21,30 @@ HELD = "GO_LAB_LOCK_HELD"
 LAB_DIR = os.path.join(tempfile.gettempdir(), "groundedops-lab")
 
 
+def _remove(p):
+    try:
+        os.remove(p)
+    except OSError:
+        pass   # gone already, or another waiter has it open for a moment; whoever finds it unlocked removes it
+
+
+def _alive(ticket, grab):
+    """A queue ticket is alive while its waiter holds the lock on it; a crashed waiter's ticket is removed."""
+    try:
+        f = open(ticket, "a+")
+    except OSError:
+        return False
+    f.seek(0)
+    try:
+        grab(f)
+    except OSError:
+        f.close()
+        return True
+    f.close()
+    _remove(ticket)
+    return False
+
+
 def lab_lock(poll=20):
     """Waits for the lock; returns (handle, seconds waited). Keep the handle for the life of the
     process: the OS releases the lock when the process ends, so a crashed run never leaves it
@@ -34,19 +58,31 @@ def lab_lock(poll=20):
         import fcntl
         grab = lambda f: fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
     path = os.environ.get("GO_LAB_LOCK") or os.path.expanduser("~/.groundedops-lab.lock")
+    # Waiters take the lab in arrival order: each holds a lock on its own ticket in <lock>.queue and tries the lab only
+    # when no live ticket is older. Without it a job running pass after pass re-took the lab within a second of each
+    # release, and a gate polling every 20 s waited 3.5 hours behind R&D's three arms (2026-11-03).
+    queue = path + ".queue"
+    os.makedirs(queue, exist_ok=True)
+    mine = f"{time.time_ns():020d}-{os.getpid()}"
+    ticket = open(os.path.join(queue, mine), "a+")
+    ticket.seek(0)
+    grab(ticket)
     waited = 0
     while True:
-        f = open(path, "a+")   # a fresh handle each try: a failed msvcrt attempt never succeeds on retry
-        f.seek(0)
-        try:
-            grab(f)
-            break
-        except OSError:
-            f.close()
-            if not waited:
-                print("waiting for the lab: another measuring job holds the lab lock", flush=True)
-            time.sleep(poll)
-            waited += poll
+        if not any(_alive(os.path.join(queue, t), grab) for t in sorted(os.listdir(queue)) if t < mine):
+            f = open(path, "a+")   # a fresh handle each try: a failed msvcrt attempt never succeeds on retry
+            f.seek(0)
+            try:
+                grab(f)
+                break
+            except OSError:
+                f.close()
+        if not waited:
+            print("waiting for the lab: another measuring job holds the lab lock", flush=True)
+        time.sleep(poll)
+        waited += poll
+    ticket.close()
+    _remove(os.path.join(queue, mine))
     if waited:
         print(f"lab free after {waited // 60} min", flush=True)
     return f, waited
@@ -92,6 +128,23 @@ def selftest():
     assert check.returncode == 0, check
     assert "waiting for the lab" in check.stdout and "holder done" in check.stdout, check.stdout
     assert holder.wait() == 0
+    # arrival order: A queues first and polls slowly, B queues behind it polling fast; A still goes first.
+    # A crashed waiter's ticket (nobody holds it) is skipped and removed.
+    stale = os.path.join(env["GO_LAB_LOCK"] + ".queue", "0" * 19 + "1-1")
+    open(stale, "w").close()
+    order = os.path.join(tmp, "order")
+    job = lambda name, poll, hold: subprocess.Popen([sys.executable, "-c",
+        f"import sys, time; sys.path.insert(0, {here!r}); import lab_lock; h = lab_lock.lab_lock(poll={poll}); "
+        f"print('held', flush=True); open({order!r}, 'a').write({name!r}); time.sleep({hold})"],
+        env=env, stdout=subprocess.PIPE, text=True)
+    first = job("H", 1, 4)
+    assert first.stdout.readline().strip() == "held"
+    a = job("A", 1, 1)
+    assert "waiting" in a.stdout.readline()
+    b = job("B", 0.1, 0)
+    assert first.wait() == a.wait() == b.wait() == 0
+    assert open(order).read() == "HAB", open(order).read()
+    assert os.listdir(env["GO_LAB_LOCK"] + ".queue") == [], os.listdir(env["GO_LAB_LOCK"] + ".queue")
     print("lab_lock selftest ok")
 
 
