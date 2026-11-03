@@ -43,7 +43,10 @@ Always, in every phase:
   lab lock: `REPO/.venv/Scripts/python.exe OFFICE/tools/lab_lock.py <command...>`.
   It waits while the lab's blind run is timing answers, and makes the lab
   wait for you; on 2026-10-10 a full suite run beside the blind run doubled
-  its measured answer time. `blind_eval.py` takes the lock itself. A wait can
+  its measured answer time. `blind_eval.py` takes the lock itself, one repeat
+  at a time: run it (and any script of blind_eval runs) directly, never under
+  `lab_lock.py`, which would hold the lab for the whole script and stall a
+  gate behind it for hours (2026-11-03). A wait can
   last 15 minutes, so start the full suite in the background with a log.
 
 ## Phase PLAN
