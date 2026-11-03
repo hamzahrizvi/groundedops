@@ -698,7 +698,21 @@ def register(app, answer_query, draft_enquiry=None):
             })
 
         dkey = _deep_key(caller, payload)
-        deep_again = level == "deep" and not await run_in_threadpool(quota.deep_claim, dkey)
+        claim = (await run_in_threadpool(quota.deep_claim, dkey, caller)
+                 if level == "deep" else "ok")
+        if claim == "capped":
+            # Today's free deep runs are used: refused before the pipeline.
+            raise HTTPException(status_code=429, detail={
+                "error": "quota_exceeded",
+                "reason": "deep_daily",
+                "tier": tier,
+                "limit": quota.free_deep_limit(),
+                "remaining": gate["remaining"],
+                "reset_at": gate["reset_at"],
+                "message": ("You have used today's deeper searches. "
+                            "Normal questions still work."),
+            })
+        deep_again = claim == "again"
 
         started = time.time()
         try:
@@ -721,11 +735,11 @@ def register(app, answer_query, draft_enquiry=None):
                 )
         except HTTPException:
             if level == "deep" and not deep_again:
-                await run_in_threadpool(quota.deep_release, dkey)
+                await run_in_threadpool(quota.deep_release, dkey, caller)
             raise
         except Exception as e:
             if level == "deep" and not deep_again:
-                await run_in_threadpool(quota.deep_release, dkey)
+                await run_in_threadpool(quota.deep_release, dkey, caller)
             # Don't charge for our own failure, and don't leak internals.
             logger.exception(f"widget ask failed: {e}")
             raise HTTPException(status_code=503, detail={
@@ -742,7 +756,7 @@ def register(app, answer_query, draft_enquiry=None):
         no_more = deep_again
         if level == "deep" and not deep_again:
             if result.get("service_degraded"):
-                await run_in_threadpool(quota.deep_release, dkey)
+                await run_in_threadpool(quota.deep_release, dkey, caller)
             elif not _adds_detail(_STANDARD_ANSWERS.get(dkey), result):
                 result = {**result, "answer": NO_MORE_DETAILS, "sources": [],
                           "role": "no_more_details", "flagged": False,
@@ -754,12 +768,17 @@ def register(app, answer_query, draft_enquiry=None):
         charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
                         or result.get("service_degraded") or no_more) \
                   else spec["credits"]
+        if level == "deep" and not deep_again and charged:
+            await run_in_threadpool(quota.deep_paid, caller)
         state = quota.consume(caller, charged) if charged else quota.status(caller)
 
         # Count this turn against the conversation's own caps. Only when it
         # actually cost something: a curated FAQ answer involves no model and
         # should not use up a session that is limited to bound model spend.
-        if charged:
+        # A refunded deep run counts as well.
+        # A free deep run still ran the costliest pipeline, so the chat's caps
+        # count it too (Security, D-20261030-09 round 2).
+        if charged or (level == "deep" and no_more and not deep_again):
             quota.session_record(payload.session_id,
                                  tokens_used=int(result.get("total_tokens") or 0))
 
