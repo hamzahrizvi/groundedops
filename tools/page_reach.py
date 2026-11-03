@@ -14,22 +14,28 @@ still exists in the index at all ("stale" if not), and where the turn ended when
 the prompt (decline, clarify, FAQ).
 
   run     python -I page_reach.py run --out reading.json [--chroma DIR] [--products a,b] [--limit N]
-          saves every 25 questions and resumes from --out, so after a crash run the same command again
+          saves every 25 questions; a crash or a question stuck past 300 s restarts the reading from --out by itself
   report  python -I page_reach.py report reading.json [--diff older.json] [--fault fault.json] > readout.md
   index   python -I page_reach.py index --out DIR --drop-pdfs PRODUCT   (a TEST copy; never the live one)
 
 `pages_now` on a case is today's page for it (preferred over `pages`, which stays as the run's grader reads it);
 `gold_gone` skips the case. Both are set in OPS runs/*/cases.json.
+Gold names are resolved against today's index once, in resolve_name; OPS state/page_reach_renames.json holds renames it cannot see.
 
 Run `run` under the lab lock (tools/lab_lock.py). REPO and OPS default to this laptop's paths.
 """
-import argparse, ast, collections, glob, json, os, re, shutil, socket, sys, time, uuid
+import argparse, ast, collections, glob, json, os, re, shutil, socket, subprocess, sys, time, uuid
 
 REPO = os.environ.get("GO_REPO", "C:/Users/hrizvi/Downloads/Git/groundedops")
 OPS = os.environ.get("GO_OPS", "C:/Users/hrizvi/groundedops-ops")
 FLASH = re.compile(r"\b(flash\w*|blink\w*|led\b|leds\b)", re.I)
 TYPES_ANSWERED = ("lookup", "yes_no_documented", "table_condition", "procedure_or_troubleshoot",
                   "comparison", "multi_document", "followup")
+RENAMES = os.path.join(OPS, "state", "page_reach_renames.json")
+STALL_SECS = 300   # a question takes 2-3 s (p99 12 s); past this it is stuck or the laptop slept
+EXT = re.compile(r"\.(pdf|txt|docx?|md|html?)$", re.I)
+SUFFIX = re.compile(r"(-v\d+)?(-\d{6}-\d{6}|-\d{8}_\d{6}( \d+)?)?$")
+GOLD = re.compile(r"^(?:(?P<doc>.*?\S)\s+)?pp?\.?\s*(?P<pages>\d+(?:\s*(?:,|-|\u2013|and)\s*p?\d+)*)\s*(?:\(.*\))?$", re.I)
 
 
 def gold_pages(c):
@@ -37,11 +43,63 @@ def gold_pages(c):
     if isinstance(p, str):
         try: p = ast.literal_eval(p)
         except Exception: p = [p]
-    out = []
+    out, doc = [], None
     for s in p:
-        m = re.match(r"^(.*\S) p(\d+)$", str(s).strip())
-        if m: out.append((m.group(1), m.group(2)))
+        m = GOLD.match(str(s).strip())
+        if not m: continue
+        doc = m.group("doc") or doc          # a bare "p6" belongs to the document named before it
+        if not doc: continue
+        for part in re.split(r"\s*(?:,|and)\s*", m.group("pages")):
+            a, _, b = re.sub(r"[p\s]", "", part, flags=re.I).replace("\u2013", "-").partition("-")
+            for n in (range(int(a), int(b) + 1) if b and 0 < int(b) - int(a) <= 30 else [int(a)]):
+                out.append((doc, str(n)))
     return out
+
+
+def _norm(s, strip_suffix=False):
+    s = EXT.sub("", (s or "").replace("\u200e", "").replace("\u200f", ""))
+    s = re.sub(r"[\u2010-\u2015]", "-", s)
+    s = re.sub(r"\s*-\s*", "-", re.sub(r"\s+", " ", s).strip().casefold())
+    return SUFFIX.sub("", s) if strip_suffix else s
+
+
+def resolve_name(name, sources, renames=None, copy_of=None):
+    """Today's index source for a gold document name and how it was found: exact, rename table, the same
+    name ignoring dashes/spaces/case/extension ("name"), the same also ignoring a -vN or export-date suffix
+    ("suffix"), then the one source whose name starts with it ("prefix"). The first step that finds anything
+    decides: two hits = (None, "ambiguous: ..."), nothing = (None, None). An explicit extension never matches
+    another one (a .txt copy replaced by a PDF has other page numbers: that needs pages_now)."""
+    copy_of = copy_of or {}
+    if name in sources: return copy_of.get(name, name), "exact"
+    for k, v in (renames or {}).items():
+        if not k.startswith("_") and _norm(k) == _norm(name) and v in sources: return copy_of.get(v, v), "table"
+    m = EXT.search(name or ""); ext = m.group(0).lower() if m else None
+    pool = [s for s in sources if s and (ext is None or s.lower().endswith(ext))]
+    n = _norm(name, True)
+    for how, hit in (("name", [s for s in pool if _norm(s) == _norm(name)]),
+                     ("suffix", [s for s in pool if _norm(s, True) == n]),
+                     ("prefix", [s for s in pool if n and _norm(s, True).startswith((n + "-", n + " "))])):
+        if len(hit) == 1: return copy_of.get(hit[0], hit[0]), how
+        if hit: return None, "ambiguous: " + ", ".join(sorted(hit)[:3])
+    return None, None
+
+
+def supervise(cmd, out, max_restarts=20):
+    """Run the reading in a child and start it again after a crash or stall. The child writes the key it is
+    reading to <out>.current; a key that took the child down twice becomes an error row (see run)."""
+    crashes_f, cur_f = out + ".crashes.json", out + ".current"
+    crashes = json.load(open(crashes_f, encoding="utf-8")) if os.path.exists(crashes_f) else {}
+    for _ in range(max_restarts + 1):
+        if os.path.exists(cur_f): os.remove(cur_f)
+        rc = subprocess.call(cmd)
+        key = open(cur_f, encoding="utf-8").read().strip() if os.path.exists(cur_f) else ""
+        if os.path.exists(cur_f): os.remove(cur_f)
+        if rc == 0: return 0
+        if not key: return rc       # died before its first question: not a mid-reading crash
+        crashes[key] = crashes.get(key, 0) + 1
+        with open(crashes_f, "w", encoding="utf-8") as f: json.dump(crashes, f, indent=1, ensure_ascii=False)
+        print(f"page_reach: reading stopped (exit {rc}) on {key}; resuming", flush=True)
+    return 1
 
 
 def case_set(ops=OPS):
@@ -73,7 +131,12 @@ def block_network(counter):
 
 
 def run(args):
+    if not args.child:
+        sys.exit(supervise([sys.executable, "-I", os.path.abspath(__file__)] + sys.argv[1:] + ["--child"],
+                           os.path.abspath(args.out)))
     import faulthandler; faulthandler.enable()   # a native crash (seen once at case 690) leaves its stack in the log
+    if os.name == "nt":   # the 2 Nov reading lost 15 h to one question overnight; idle sleep is the likely cause
+        import ctypes; ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)   # ES_CONTINUOUS|ES_SYSTEM_REQUIRED, ends with the process
     args.out = os.path.abspath(args.out)   # run() chdirs to REPO/src below
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["PERFORMANCE_MODE"] = "0"
@@ -126,12 +189,13 @@ def run(args):
     in_index = {(m.get("source"), str(m.get("page"))) for m in meta}
     sources = {m.get("source") for m in meta}
     copy_of = retrieval_db.copies_of()
-    # Early runs' writers saw sources without their extension ("X p3" for "X.pdf"): map a unique stem match.
-    stems = collections.defaultdict(list)
-    for s_ in sources: stems[os.path.splitext(s_ or "")[0]].append(s_)
+    renames = json.load(open(RENAMES, encoding="utf-8")) if os.path.exists(RENAMES) else {}
+    found = {}
     def resolve(s_):
-        if s_ not in sources and len(stems.get(s_, ())) == 1: s_ = stems[s_][0]
-        return copy_of.get(s_, s_)
+        if s_ not in found: found[s_] = resolve_name(s_, sources, renames, copy_of)
+        return found[s_][0] or s_
+    for c in cases:
+        for s_, _p in c["gold"]: resolve(s_)
     print(f"{len(cases)} cases; index {len(meta)} chunks, {len(sources)} sources, chroma={db.CHROMA_DIR}", flush=True)
 
     prev = json.load(open(args.out, encoding="utf-8")) if os.path.exists(args.out) else {}
@@ -140,11 +204,13 @@ def run(args):
         rows = [r for r in rows if not r["stale_doc"]]
     done = {r["key"] for r in rows}
     if done: print(f"resuming: {len(done)} already read", flush=True)
+    crashes = json.load(open(args.out + ".crashes.json", encoding="utf-8")) if os.path.exists(args.out + ".crashes.json") else {}
     def save():
         json.dump({"at": time.strftime("%Y-%m-%d %H:%M"), "chroma": db.CHROMA_DIR, "chunks": len(meta),
                    "blocked_calls": dict(collections.Counter(prev.get("blocked_calls", {})) + blocked),
                    "restarts": prev.get("restarts", -1) + 1 if done else 0,
-                   "secs": round(time.time() - t_all), "rows": rows},
+                   "secs": round(time.time() - t_all), "rows": rows,
+                   "resolved": {k: list(v) for k, v in found.items() if v[1] != "exact"}},
                   open(args.out + ".tmp", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
         os.replace(args.out + ".tmp", args.out)
     for i, c in enumerate(cases):
@@ -155,13 +221,20 @@ def run(args):
             memory.add_to_memory(sid, c["turn1"], "(earlier answer)")
         gold = [(resolve(s), p) for s, p in c["gold"]]
         t = time.time(); exit_ = None
-        try:
-            res = main._traced_query(main.QueryRequest(q=c["q"], product=c["product"], session_id=sid), None, attach=True)
-            exit_ = ((res or {}).get("pipeline") or {}).get("exit", {}).get("id") or (res or {}).get("role")
-        except Reached:
-            exit_ = "prompt"
-        except Exception as e:  # a crash is reported, never hidden
-            exit_ = f"error: {type(e).__name__}: {e}"[:160]
+        if crashes.get(c["key"], 0) >= 2:
+            exit_ = "error: stopped the reading twice (native crash or stall); not read again"
+        else:
+            with open(args.out + ".current", "w", encoding="utf-8") as f: f.write(c["key"])
+            faulthandler.dump_traceback_later(STALL_SECS, exit=True)
+            try:
+                res = main._traced_query(main.QueryRequest(q=c["q"], product=c["product"], session_id=sid), None, attach=True)
+                exit_ = ((res or {}).get("pipeline") or {}).get("exit", {}).get("id") or (res or {}).get("role")
+            except Reached:
+                exit_ = "prompt"
+            except Exception as e:  # a crash is reported, never hidden
+                exit_ = f"error: {type(e).__name__}: {e}"[:160]
+            finally:
+                faulthandler.cancel_dump_traceback_later()
         ctx = [(x.get("source"), str(x.get("page"))) for x in turn.get("ctx", [])]
         best = {}
         for rk in turn.get("ranks", []):
@@ -188,6 +261,7 @@ def run(args):
         if i % 25 == 0 or i == len(cases) - 1:
             save()
             print(i + 1, round(time.time() - t_all), "s", c["key"], exit_, rows[-1]["reach_all"], flush=True)
+    if os.path.exists(args.out + ".current"): os.remove(args.out + ".current")   # past the questions: a later error is no question's crash
     save()
     print("wrote", args.out, len(rows), "rows; blocked model calls:", dict(blocked), flush=True)
 
@@ -235,7 +309,7 @@ def report(args):
     R = json.load(open(args.reading, encoding="utf-8")); rows = R["rows"]
     std = [r for r in rows if r["type"] != "followup"]
     print(f"# Page-reach reading {R['at']}\n\nIndex: {R['chroma']} ({R['chunks']} chunks). {len(rows)} questions, "
-          f"{R['secs'] // 60} min. Model calls attempted and blocked: {R['blocked_calls'] or 'none'}.\n")
+          f"{R['secs'] // 60} min (the questions alone: {round(sum(r['secs'] for r in rows) / 60)} min). Model calls attempted and blocked: {R['blocked_calls'] or 'none'}.\n")
     print(f"**Headline (standalone questions, n={len(std)}):** all answer pages reach the prompt "
           f"{pct([r['reach_all'] for r in std])}%; at least one page {pct([r['reach_any'] for r in std])}%; "
           f"counting only gold pages still in the index {pct([r['reach_all_live'] for r in std])}%.\n")
@@ -254,8 +328,18 @@ def report(args):
         print()
     ex = collections.Counter(r["exit"] for r in rows if r["exit"] != "prompt")
     print("## Turns that never reached the prompt\n\n" + (", ".join(f"{k}: {v}" for k, v in ex.most_common()) or "none") + "\n")
-    st = collections.Counter(s for r in rows for s in r["stale_doc"])
-    print("## Gold documents no longer in the index\n\n" + (", ".join(f"{k} ({v})" for k, v in st.most_common()) or "none") + "\n")
+    st = collections.defaultdict(list)
+    for r in rows:
+        for s in dict.fromkeys(r["stale_doc"]): st[s].append(r["key"])
+    print("## Gold documents no longer in the index\n\nNames that match no source today. Truly gone: mark the cases "
+          f"`gold_gone`. Renamed: add `\"old name\": \"index name\"` to {RENAMES}.\n")
+    print("\n".join(f"- {s} ({len(k)}): {', '.join(k[:5])}{' ...' if len(k) > 5 else ''}"
+                    for s, k in sorted(st.items(), key=lambda x: -len(x[1]))) or "none")
+    rs = R.get("resolved") or {}
+    if rs:
+        print("\n## Gold names read as another source\n\n| name in the case | read as | how |\n|---|---|---|")
+        for k, v in sorted(rs.items()): print(f"| {k} | {v[0] or '-'} | {v[1] or 'no match'} |")
+    print()
 
     # Validation 1: types rank as the weekly marks do.
     M = marks(); bytype = collections.defaultdict(list)
@@ -329,6 +413,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("run"); a.add_argument("--out", required=True); a.add_argument("--chroma")
+    a.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     a.add_argument("--products"); a.add_argument("--limit", type=int)
     a.add_argument("--redo-stale", action="store_true", help="read again the rows whose gold document was not found")
     b = sub.add_parser("report"); b.add_argument("reading"); b.add_argument("--diff"); b.add_argument("--fault")
