@@ -1490,8 +1490,96 @@ def _starts_new_table(text: str, body: str) -> bool:
                     for c in first))
 
 
+_FLASH_Q = re.compile(r"\b(?:flash\w*|blink\w*)\b", re.I)
+_COUNT_WORDS = {"once": 1, "twice": 2, "one": 1, "two": 2, "three": 3,
+                "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                "nine": 9, "ten": 10}
+_Q_COUNT = re.compile(r"\b(\d{1,2})x?\b|\b(" + "|".join(_COUNT_WORDS) + r")\b", re.I)
+_POINTER = (r"\b(?:as\s+per|refer\s+to|see|outlined\s+in|described\s+in|"
+            r"detailed\s+in|specified\s+in|specification\s+in)\s+(?:the\s+)?")
+SECTION_REFERENCE_CHARS = int(os.getenv("SECTION_REFERENCE_CHARS", "1600"))
+
+
+def _heading_parts(section: str) -> list[str]:
+    return [p.strip() for p in (section or "").split("›") if len(p.strip()) >= 5]
+
+
+def _referenced_sections(out: list[dict], query: str, all_chunks: list[dict],
+                         budget: int = SECTION_REFERENCE_CHARS) -> list[dict]:
+    """The section of the same manual that the ASKED flash-code row points at.
+
+    BV30 p32 "4 | 1 | PSU Voltage too Low | Check the power supply meets the
+    specification in Power Requirements" (p8); NV4000 p52 "4 | 1 | Power
+    Supply too Low | ... as outlined in Power Requirements" (p20). Ranking
+    cannot reach those pages: a supply-voltage table shares no words with
+    "4 red then 1 blue". A row is asked when its two leading counts occur
+    side by side in the question's counts; a row whose first cell is merged
+    (empty) takes the count of the last full row above it. Appended at the
+    end, retrieval_score 0.0, fetched_by="section_reference". D-20261030-14.
+    """
+    import tables as _tables
+    asked = [int(d) if d else _COUNT_WORDS[w.lower()]
+             for d, w in _Q_COUNT.findall(query)]
+    pairs = set(zip(asked, asked[1:]))
+    if not pairs:
+        return out
+    have = {c.get("id") for c in out}
+    heads_by_src: dict = {}
+    added, spent = [], 0
+    for c in list(out):
+        src = c.get("source")
+        if not src or "|" not in (c.get("text") or ""):
+            continue
+        if src not in heads_by_src:
+            heads_by_src[src] = sorted({h for a in all_chunks if a.get("source") == src
+                                        for h in _heading_parts(a.get("section"))},
+                                       key=len, reverse=True)
+        own = {h.lower() for h in _heading_parts(c.get("section"))}
+        heads = [h for h in heads_by_src[src] if h.lower() not in own]
+        last_first = None
+        for line in _tables.split_prefix(c.get("text") or "")[1].split("\n"):
+            if not _tables.is_row(line):
+                continue
+            cs = _tables.cells(line)
+            while cs and not cs[-1]:
+                cs.pop()
+            if len(cs) < 3:
+                continue
+            first = _tables._count(cs[0])
+            if cs[0]:
+                last_first = first
+            else:
+                first = last_first
+            if (first, _tables._count(cs[1])) not in pairs:
+                continue
+            row = " | ".join(cs[2:])
+            h = next((h for h in heads if re.search(
+                _POINTER + re.escape(h) + r"(?!\w)", row, re.I)), None)
+            if not h:
+                continue
+            for a in sorted((a for a in all_chunks if a.get("source") == src
+                             and h.lower() in {p.lower() for p in
+                                               _heading_parts(a.get("section"))}),
+                            key=lambda a: _order_key(a.get("id"))):
+                if a["id"] in have:
+                    continue
+                if spent + len(a.get("text") or "") > budget:
+                    break
+                spent += len(a.get("text") or "")
+                have.add(a["id"])
+                added.append({"id": a["id"], "text": a["text"], "source": src,
+                              "page": a.get("page"),
+                              "section": a.get("section", ""),
+                              "retrieval_score": 0.0,
+                              "fetched_by": "section_reference"})
+                logger.info("section reference: %s -> %s (%s)",
+                            c.get("id"), a["id"], h)
+    return out + added if added else out
+
+
 def complete_tables(chunks: list[dict],
-                    budget: int = TABLE_COMPLETION_CHARS) -> list[dict]:
+                    budget: int = TABLE_COMPLETION_CHARS,
+                    query: str | None = None) -> list[dict]:
     """Add the continuation of a table that a retrieved chunk begins.
 
     The BV30 flash-code table starts on page 31 and its last five rows are
@@ -1512,6 +1600,12 @@ def complete_tables(chunks: list[dict],
     the rows sit on the next page. Neighbours are found by _neighbour_id,
     which reads the live "<file>:<hash>:<n>" ids; until 2026-10-09 this
     looked for "_<n>" only and never fired on the live index.
+
+    When `query` asks about flashes or blinks (D-20261030-14), the table is
+    followed through every continuation, not one: the NV4000 bezel table runs
+    chunks 98 -> 99 -> 100 and "4 red then 1 blue" is on 100. And the section
+    the asked row points at ("...in Power Requirements") is appended
+    (_referenced_sections). Without `query`, behaviour is as before.
     """
     if not chunks:
         return chunks
@@ -1521,59 +1615,74 @@ def complete_tables(chunks: list[dict],
         _, all_chunks = _get_bm25_index(collection)
         by_id = {c["id"]: c for c in all_chunks}
         pos = {c.get("id"): i for i, c in enumerate(chunks)}
+        flash = bool(query) and bool(_FLASH_Q.search(query))
         after, taken, spent = {}, set(), 0   # source id -> chunk printed under it
+        stop = False
         for i, c in enumerate(chunks):
-            cid = c.get("id") or ""
-            text = c.get("text") or ""
-            nxt = by_id.get(_neighbour_id(cid, 1))
-            if not nxt or nxt["id"] in taken:
-                continue
-            _, body = _tables.split_prefix(nxt.get("text") or "")
-            same = ((nxt.get("section") or "") == (c.get("section") or "")
-                    or not (nxt.get("section") or ""))
-            if not same:
-                continue
-            lines = [l for l in _tables.split_prefix(text)[1].split("\n") if l.strip()]
-            continues = ("|" in text and _tables._starts_with_rows(body)
-                         and not _starts_new_table(text, body))
-            announced = bool(lines) and bool(_ANNOUNCES.search(lines[-1])) \
-                and _opens_like_table(body)
-            if not (continues or announced):
-                continue
-            j = pos.get(nxt["id"])
-            if j is not None:
-                # Already retrieved. An announced table ranked BELOW its
-                # announcement moves up under it (C-22: rows 4th, "...the
-                # following currencies:" 1st, not joined by the model). A
-                # continuation, or a table ranked above, stays where it is.
-                if announced and j > i:
-                    taken.add(nxt["id"])
-                    after[cid] = dict(chunks[j], with_previous=True)
-                    logger.info("table completion: moved %s under %s", nxt["id"], cid)
-                continue
-            if spent + len(nxt.get("text") or "") > budget:
+            cur = c
+            # A flash-code question follows the table on through every
+            # continuation (NV4000: p51 -> p51 -> p52, the asked row on the
+            # third); any other question takes one, as before.
+            while True:
+                cid = cur.get("id") or ""
+                text = cur.get("text") or ""
+                nxt = by_id.get(_neighbour_id(cid, 1))
+                if not nxt or nxt["id"] in taken:
+                    break
+                _, body = _tables.split_prefix(nxt.get("text") or "")
+                same = ((nxt.get("section") or "") == (cur.get("section") or "")
+                        or not (nxt.get("section") or ""))
+                if not same:
+                    break
+                lines = [l for l in _tables.split_prefix(text)[1].split("\n") if l.strip()]
+                continues = ("|" in text and _tables._starts_with_rows(body)
+                             and not _starts_new_table(text, body))
+                announced = bool(lines) and bool(_ANNOUNCES.search(lines[-1])) \
+                    and _opens_like_table(body)
+                if not (continues or announced):
+                    break
+                j = pos.get(nxt["id"])
+                if j is not None:
+                    # Already retrieved. An announced table ranked BELOW its
+                    # announcement moves up under it (C-22: rows 4th, "...the
+                    # following currencies:" 1st, not joined by the model). A
+                    # continuation, or a table ranked above, stays where it is.
+                    if announced and j > i:
+                        taken.add(nxt["id"])
+                        after[cid] = dict(chunks[j], with_previous=True)
+                        logger.info("table completion: moved %s under %s", nxt["id"], cid)
+                    break
+                if spent + len(nxt.get("text") or "") > budget:
+                    stop = True
+                    break
+                spent += len(nxt.get("text") or "")
+                taken.add(nxt["id"])
+                after[cid] = {"id": nxt["id"], "text": nxt["text"],
+                              "source": nxt.get("source"), "page": nxt.get("page"),
+                              "section": nxt.get("section", ""),
+                              "retrieval_score": 0.0,
+                              "fetched_by": "table_completion",
+                              "with_previous": True}
+                logger.info("table completion: %s -> %s (%s)", cid, nxt["id"],
+                            "announced" if announced else "continues")
+                if not flash:
+                    break
+                cur = after[cid]
+            if stop:
                 break
-            spent += len(nxt.get("text") or "")
-            taken.add(nxt["id"])
-            after[cid] = {"id": nxt["id"], "text": nxt["text"],
-                          "source": nxt.get("source"), "page": nxt.get("page"),
-                          "section": nxt.get("section", ""),
-                          "retrieval_score": 0.0,
-                          "fetched_by": "table_completion",
-                          "with_previous": True}
-            logger.info("table completion: %s -> %s (%s)", cid, nxt["id"],
-                        "announced" if announced else "continues")
-        if not after:
-            return chunks
-        out = []
+        out = chunks
+        if after:
+            out = []
 
-        def _emit(c):
-            out.append(c)
-            if c.get("id") in after:
-                _emit(after[c["id"]])
-        for c in chunks:
-            if c.get("id") not in taken:
-                _emit(c)
+            def _emit(c):
+                out.append(c)
+                if c.get("id") in after:
+                    _emit(after[c["id"]])
+            for c in chunks:
+                if c.get("id") not in taken:
+                    _emit(c)
+        if flash:
+            out = _referenced_sections(out, query, all_chunks)
         return out
     except Exception as exc:
         logger.warning(f"table completion skipped: {exc}")

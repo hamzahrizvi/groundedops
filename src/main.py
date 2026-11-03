@@ -4638,7 +4638,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         try:
             from retrieval_db import complete_tables
             import tables as _tables
-            chunks = complete_tables(chunks)
+            chunks = complete_tables(chunks, query=resolved_query)
             # Merged cells filled and matrices read out, for the model AND the
             # verifiers -- both read top_chunks. Idempotent, so an index already
             # migrated by backfill_table_context.py is left as it is.
