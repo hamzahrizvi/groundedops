@@ -4489,8 +4489,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # corpus plainly answers is the worse failure.
     _top = results[0].get("rerank_score", 0.0) if results else 0.0
     _floor = _top * CONTEXT_FLOOR_RATIO
-    _cands = [_strip_breadcrumb(r) for r in results[:CONTEXT_K]]
-    top_chunks = [r for r in _cands if r.get("rerank_score", 0.0) >= _floor]
+    _cands = [_strip_breadcrumb(r) for r in results[:_ctx_k]]
+    # D-20261030-09: an effort level that asked for more passages gets all of
+    # them; the relative floor would cut it back to the standard context.
+    _widened = bool(payload.top_k and payload.top_k > CONTEXT_K)
+    top_chunks = (list(_cands) if _widened else
+                  [r for r in _cands if r.get("rerank_score", 0.0) >= _floor])
     if len(top_chunks) < CONTEXT_MIN:
         top_chunks = _cands[:CONTEXT_MIN]
     # TWO PRODUCTS IN PLAY: EACH GETS ITS SHARE OF THE CONTEXT (S21, 10.4).

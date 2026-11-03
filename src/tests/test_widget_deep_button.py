@@ -144,6 +144,15 @@ def test_signed_in_refusal_offers_a_deep_search_once():
     assert _page.locator(DEEP).count() == 0, "not offered after the deep turn"
 
 
+def test_signed_in_refusal_after_a_deep_search_has_no_deep_search():
+    stream_body[0] = _sse(("meta", {"sources": [], "request_id": "rid-r", "role": "rejected",
+                                    "offer_support": True, "quota": MEMBER, "deep_done": True}),
+                          ("delta", {"text": "I could not find that in the documentation."}))
+    _ask("Can it make coffee?")
+    _page.wait_for_selector(EMAIL)
+    assert _page.locator(DEEP).count() == 0
+
+
 def test_a_guest_refusal_has_no_deep_search():
     stream_body[0] = _refusal(GUEST)
     _ask("Can it make coffee?")

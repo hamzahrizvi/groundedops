@@ -468,6 +468,8 @@ def test_deep_effort_in_api_mode_uses_the_advanced_role_not_online_provider():
             assert "anthropic" in llm.outside_providers()
         with roles({"default": "openai"}):
             assert llm.effort_model("ONLINE_DEEP_MODEL") == ("openai", "claude-opus-x")
-    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}):
-        assert llm.effort_model("ONLINE_DEEP_MODEL") is None
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}), \
+            roles({"default": "openai", "advanced": "anthropic"}):
+        assert llm.effort_model("ONLINE_DEEP_MODEL") == llm._online_provider_model("advanced")
+        assert llm.effort_model("ONLINE_DEEP_MODEL")[0] == "anthropic"
     assert llm.effort_model(None) is None

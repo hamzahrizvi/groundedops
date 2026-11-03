@@ -38,6 +38,7 @@ import faq_store
 import pipeline_trace
 import jsonstore
 import quota
+import text_utils
 from guards import client_ip as _client_ip, is_local_caller
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,60 @@ def _remember_answer(request_id, q, scope, session_id, answer="") -> None:
                                        "answer": (answer or "")[:4000]}
         while len(_RECENT_ANSWERS) > _RECENT_MAX:
             _RECENT_ANSWERS.popitem(last=False)
+
+
+# D-20261030-09: the deep search is compared with this chat's standard answer
+# to the same question. ponytail: in memory like _RECENT_ANSWERS; after a
+# restart a deep answer is charged only if it answers at all.
+NO_MORE_DETAILS = "I don't have more details on this."
+_STANDARD_ANSWERS: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
+_FACT = re.compile(r"\b\w*\d\w*\b")                       # numbers, codes, page and step numbers
+_STEP = re.compile(r"^\s*(?:\d+[.)]|[-*•]|step\s+\d+)", re.I | re.M)
+_WORD = re.compile(r"[a-z]{4,}")
+
+
+def _deep_key(caller: dict, payload) -> str:
+    q = " ".join(payload.q.lower().split())
+    return quota._h(f"{caller['identity']}|{payload.session_id or ''}|"
+                    f"{payload.product or payload.category or ''}|{q}")
+
+
+def _answered(r: dict) -> bool:
+    a = (r.get("answer") or "").strip()
+    return bool(a) and not (
+        r.get("offer_support") or r.get("flagged") or r.get("system_refusal")
+        or r.get("needs_clarification") or r.get("service_degraded")
+        or r.get("from_faq") or r.get("faq_candidates")
+        or r.get("role") in ("handoff", "clarify", "rejected")
+        or text_utils.is_refusal(a))
+
+
+def _remember_standard(key: str, r: dict) -> None:
+    with _recent_lock:
+        _STANDARD_ANSWERS[key] = {"answer": (r.get("answer") or "")[:4000],
+                                  "answered": _answered(r)}
+        while len(_STANDARD_ANSWERS) > _RECENT_MAX:
+            _STANDARD_ANSWERS.popitem(last=False)
+
+
+def _adds_detail(std: dict | None, deep: dict) -> bool:
+    """Strict: a new fact (number, code, page), more steps, or a sentence
+    mostly made of words the standard answer did not use. Rewording is not."""
+    if not _answered(deep):
+        return False
+    if not std or not std["answered"]:
+        return True
+    s, d = std["answer"].lower(), deep["answer"].lower()
+    if set(_FACT.findall(d)) - set(_FACT.findall(s)):
+        return True
+    if len(_STEP.findall(d)) > len(_STEP.findall(s)):
+        return True
+    known = set(_WORD.findall(s))
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", d):
+        words = set(_WORD.findall(sent))
+        if len(words) >= 4 and 2 * len(words - known) > len(words):
+            return True
+    return False
 
 
 def _save_vote(request_id: str, row: dict) -> None:
@@ -642,23 +697,49 @@ def register(app, answer_query, draft_enquiry=None):
                             "For help with your question, contact our team."),
             })
 
+        dkey = _deep_key(caller, payload)
+        claim = (await run_in_threadpool(quota.deep_claim, dkey, caller)
+                 if level == "deep" else "ok")
+        if claim == "capped":
+            # Today's free deep runs are used: refused before the pipeline.
+            raise HTTPException(status_code=429, detail={
+                "error": "quota_exceeded",
+                "reason": "deep_daily",
+                "tier": tier,
+                "limit": quota.free_deep_limit(),
+                "remaining": gate["remaining"],
+                "reset_at": gate["reset_at"],
+                "message": ("You have used today's deeper searches. "
+                            "Normal questions still work."),
+            })
+        deep_again = claim == "again"
+
         started = time.time()
         try:
-            result = await answer_query(
-                q=payload.q,
-                session_id=payload.session_id,
-                product=payload.product,
-                category=payload.category,
-                faq_id=payload.faq_id,
-                skip_faq=payload.skip_faq,
-                role=spec["role"],
-                top_k=spec["top_k"],
-                model_env=spec.get("model_env"),
-                user_id=caller.get("uid"),
-            )
+            if deep_again:
+                # Second press refused server-side: no pipeline, 0 credits.
+                result = {"answer": NO_MORE_DETAILS, "role": "no_more_details",
+                          "offer_support": True}
+            else:
+                result = await answer_query(
+                    q=payload.q,
+                    session_id=payload.session_id,
+                    product=payload.product,
+                    category=payload.category,
+                    faq_id=payload.faq_id,
+                    skip_faq=payload.skip_faq,
+                    role=spec["role"],
+                    top_k=spec["top_k"],
+                    model_env=spec.get("model_env"),
+                    user_id=caller.get("uid"),
+                )
         except HTTPException:
+            if level == "deep" and not deep_again:
+                await run_in_threadpool(quota.deep_release, dkey, caller)
             raise
         except Exception as e:
+            if level == "deep" and not deep_again:
+                await run_in_threadpool(quota.deep_release, dkey, caller)
             # Don't charge for our own failure, and don't leak internals.
             logger.exception(f"widget ask failed: {e}")
             raise HTTPException(status_code=503, detail={
@@ -672,15 +753,32 @@ def register(app, answer_query, draft_enquiry=None):
         # ...and neither is our own outage: service_degraded means no
         # provider answered, and quota.py promises a failed request does not
         # burn the visitor's allowance.
+        no_more = deep_again
+        if level == "deep" and not deep_again:
+            if result.get("service_degraded"):
+                await run_in_threadpool(quota.deep_release, dkey, caller)
+            elif not _adds_detail(_STANDARD_ANSWERS.get(dkey), result):
+                result = {**result, "answer": NO_MORE_DETAILS, "sources": [],
+                          "role": "no_more_details", "flagged": False,
+                          "more_context": None, "suggested_replies": [],
+                          "needs_clarification": False, "clarification_options": []}
+                no_more = True
+        elif level != "deep" and not (result.get("from_faq") or result.get("faq_candidates")):
+            _remember_standard(dkey, result)
         charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
-                        or result.get("service_degraded")) \
+                        or result.get("service_degraded") or no_more) \
                   else spec["credits"]
+        if level == "deep" and not deep_again and charged:
+            await run_in_threadpool(quota.deep_paid, caller)
         state = quota.consume(caller, charged) if charged else quota.status(caller)
 
         # Count this turn against the conversation's own caps. Only when it
         # actually cost something: a curated FAQ answer involves no model and
         # should not use up a session that is limited to bound model spend.
-        if charged:
+        # A refunded deep run counts as well.
+        # A free deep run still ran the costliest pipeline, so the chat's caps
+        # count it too (Security, D-20261030-09 round 2).
+        if charged or (level == "deep" and no_more and not deep_again):
             quota.session_record(payload.session_id,
                                  tokens_used=int(result.get("total_tokens") or 0))
 
@@ -751,6 +849,7 @@ def register(app, answer_query, draft_enquiry=None):
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
+            "deep_done": quota.deep_done(dkey),
             "quota": quota.status(caller),
             "session": quota.session_check(payload.session_id),
         }
@@ -875,7 +974,7 @@ def register(app, answer_query, draft_enquiry=None):
                                 "service_degraded", "more_context",
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "suggested_replies",
-                                "flagged", "quota", "session")})
+                                "flagged", "quota", "session", "deep_done")})
 
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would

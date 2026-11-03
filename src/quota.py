@@ -157,7 +157,7 @@ EFFORT = {
     "deep": {
         "credits": int(os.getenv("EFFORT_DEEP_CREDITS", "4")),
         "role": "reasoning",
-        "top_k": 10,
+        "top_k": 16,  # CONTEXT_K*2, the most main.query allows
         "min_tier": "member",
         # Optional explicit model, e.g. ONLINE_DEEP_MODEL=deepseek-v4; api mode only, on the Advanced role's provider (llm.effort_model)
         "model_env": "ONLINE_DEEP_MODEL",
@@ -447,6 +447,7 @@ def status(caller: dict) -> dict:
     with _lock, _conn() as c:
         used = _used(c, caller["identity"], win)
         faq_used = _used(c, caller["identity"] + ":faq", win)
+        deep_free = _used(c, caller["identity"] + ":deepfree", win)
 
     if tier == "anonymous":
         # Two shapes of anonymous, decided by the operator in the console.
@@ -495,7 +496,7 @@ def status(caller: dict) -> dict:
         "unit": "credits",
         "reset_at": win + WINDOW_SECONDS,
         "ai_available": True,
-        "deep_available": True,
+        "deep_available": tier == "staff" or deep_free < free_deep_limit(),
         "standard_cost": EFFORT["standard"]["credits"],
         "deep_cost": EFFORT["deep"]["credits"],
     }
@@ -581,7 +582,7 @@ def reset_uid(uid: str) -> None:
     usage, identified by the account id from their token."""
     identity = "u:" + _h(uid)
     with _lock, _conn() as c:
-        c.execute("DELETE FROM usage WHERE identity=?", (identity,))
+        c.execute("DELETE FROM usage WHERE identity IN (?, ?)", (identity, identity + ":deepfree"))
 
 
 def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
@@ -622,3 +623,52 @@ def session_record(session_id: str | None, tokens_used: int = 0) -> None:
         _add(c, _session_key(session_id, "q"), win, 1)
         if tokens_used > 0:
             _add(c, _session_key(session_id, "t"), win, int(tokens_used))
+
+
+# ── one deep search per question per chat (D-20261030-09) ─────────────
+# ponytail: kept in the current daily window, so a chat left open across the
+# reset may deep-search one question once more.
+# A deep run that adds nothing costs 0 credits (the CEO's rule), so those
+# free runs are counted per member per day and capped: without it a member
+# could run the costliest path without end (Security, round 2).
+def free_deep_limit() -> int:
+    return int(_policy("free_deep_daily", 3))
+
+
+def _free_key(caller: dict) -> str:
+    return caller["identity"] + ":deepfree"
+
+
+def deep_claim(key: str, caller: dict) -> str:
+    """'ok': first deep search of `key`; it also reserves one of today's free
+    deep runs, handed back by deep_paid or deep_release. 'again': `key` was
+    already deep-searched. 'capped': today's free deep runs are used (staff
+    are not capped). Atomic, so a double click or a burst cannot slip past."""
+    win = _window_start()
+    with _lock, _conn() as c:
+        if _used(c, "deep:" + key, win):
+            return "again"
+        if (caller["tier"] != "staff"
+                and _used(c, _free_key(caller), win) >= free_deep_limit()):
+            return "capped"
+        _add(c, "deep:" + key, win, 1)
+        _add(c, _free_key(caller), win, 1)
+    return "ok"
+
+
+def deep_done(key: str) -> bool:
+    with _lock, _conn() as c:
+        return bool(_used(c, "deep:" + key, _window_start()))
+
+
+def deep_paid(caller: dict) -> None:
+    """The deep run was charged in credits: give its free slot back."""
+    with _lock, _conn() as c:
+        _add(c, _free_key(caller), _window_start(), -1)
+
+
+def deep_release(key: str, caller: dict) -> None:
+    """Our own failure: give the search and its free slot back."""
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM usage WHERE identity=?", ("deep:" + key,))
+        _add(c, _free_key(caller), _window_start(), -1)
