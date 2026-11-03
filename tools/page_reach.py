@@ -35,7 +35,7 @@ RENAMES = os.path.join(OPS, "state", "page_reach_renames.json")
 STALL_SECS = 300   # a question takes 2-3 s (p99 12 s); past this it is stuck or the laptop slept
 EXT = re.compile(r"\.(pdf|txt|docx?|md|html?)$", re.I)
 SUFFIX = re.compile(r"(-v\d+)?(-\d{6}-\d{6}|-\d{8}_\d{6}( \d+)?)?$")
-GOLD = re.compile(r"^(?:(?P<doc>.*?\S)\s+)?pp?\.?\s*(?P<pages>\d+(?:\s*(?:,|-|–|and)\s*p?\d+)*)\s*(?:\(.*\))?$", re.I)
+GOLD = re.compile(r"^(?:(?P<doc>.*?\S)\s+)?pp?\.?\s*(?P<pages>\d+(?:\s*(?:,|-|\u2013|and)\s*p?\d+)*)\s*(?:\(.*\))?$", re.I)
 
 
 def gold_pages(c):
@@ -50,15 +50,15 @@ def gold_pages(c):
         doc = m.group("doc") or doc          # a bare "p6" belongs to the document named before it
         if not doc: continue
         for part in re.split(r"\s*(?:,|and)\s*", m.group("pages")):
-            a, _, b = re.sub(r"[p\s]", "", part, flags=re.I).replace("–", "-").partition("-")
+            a, _, b = re.sub(r"[p\s]", "", part, flags=re.I).replace("\u2013", "-").partition("-")
             for n in (range(int(a), int(b) + 1) if b and 0 < int(b) - int(a) <= 30 else [int(a)]):
                 out.append((doc, str(n)))
     return out
 
 
 def _norm(s, strip_suffix=False):
-    s = EXT.sub("", (s or "").replace("‎", "").replace("‏", ""))
-    s = re.sub(r"[‐-―]", "-", s)
+    s = EXT.sub("", (s or "").replace("\u200e", "").replace("\u200f", ""))
+    s = re.sub(r"[\u2010-\u2015]", "-", s)
     s = re.sub(r"\s*-\s*", "-", re.sub(r"\s+", " ", s).strip().casefold())
     return SUFFIX.sub("", s) if strip_suffix else s
 
@@ -261,6 +261,7 @@ def run(args):
         if i % 25 == 0 or i == len(cases) - 1:
             save()
             print(i + 1, round(time.time() - t_all), "s", c["key"], exit_, rows[-1]["reach_all"], flush=True)
+    if os.path.exists(args.out + ".current"): os.remove(args.out + ".current")   # past the questions: a later error is no question's crash
     save()
     print("wrote", args.out, len(rows), "rows; blocked model calls:", dict(blocked), flush=True)
 
