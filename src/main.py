@@ -5732,6 +5732,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # The sum over every model call of the turn, served or not.
         "total_tokens": sum(_turn_tokens),
         "fallback_used": output.get("fallback_used", False),
+        # Escalation goes to the configured escalation role, not DeepSeek.
+        "escalated": escalated,
+        # Deprecated alias of "escalated"; no known reader. Remove next release.
         "escalated_to_deepseek": escalated,
         "request_id": request_id,
         "verifier_unavailable": verifier_unavailable,

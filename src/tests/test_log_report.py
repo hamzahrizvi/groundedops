@@ -55,6 +55,9 @@ NEW = [
     {"timestamp": "2026-09-28T15:01:00", "session_id": "live-1", "origin": "live",
      "role": "fast", "outcome": "respond", "answer": "y",
      "query_normalized": "y", "timing": {"total_time": 9.0}},
+    {"timestamp": "2026-09-28T15:02:00", "session_id": "blind6-1", "origin": "script",
+     "role": "fast", "outcome": "respond", "answer": "z",
+     "query_normalized": "z", "timing": {"total_time": 9.0}},
     # votes
     {"timestamp": "2026-09-28T09:05:00", "event": "feedback", "request_id": "a",
      "session_id": "s1", "outcome": "voted_up"},
@@ -85,12 +88,12 @@ def test_resolved_only_clean_conversations():
 def test_origin_outcome_and_missing_buckets():
     r = log_report.summarise(OLD + NEW, LEADS)
     assert r["by_origin"] == {"missing": 2, "widget": 7, "console": 2,
-                              "eval": 1, "live": 1}
+                              "eval": 1, "live": 1, "script": 1}
     assert r["rows_missing_origin"] == 2
     assert r["by_outcome"] == {"missing": 3, "respond": 5, "faq.answer": 1,
                                "none.reject": 1, "none.vague": 1}
     everything = log_report.summarise(OLD + NEW, LEADS, include_tests=True)
-    assert everything["turns"] == 13
+    assert everything["turns"] == 14
 
 
 def test_speed_votes_leads_and_window():

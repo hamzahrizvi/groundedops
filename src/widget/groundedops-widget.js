@@ -1313,6 +1313,8 @@
 
   // The composer locks only while a form or continue-prompt is open.
   function lockComposer(reason) {
+    keepFocus($in);
+    keepFocus($send);
     $in.disabled = true;
     $send.disabled = true;
     $in.placeholder = reason || "Choose an option above to continue…";
@@ -1758,6 +1760,7 @@
         return;
       }
       err.textContent = "";
+      keepFocus(btn);
       btn.disabled = true;
       btn.textContent = "Sending…";
 
@@ -2120,6 +2123,7 @@
     }
 
     busy = true;
+    keepFocus($send, $in);
     $send.disabled = true;
     clearChips();
     heard(q);
@@ -2612,8 +2616,32 @@
     $launch.focus();
   }
   $min.addEventListener("click", close);
+  // aria-modal="true" tells a screen reader the page behind is inert, so Tab
+  // must not walk out of the panel into it: wrap at either end. Only while
+  // focus is already in the panel -- a visitor who clicked back into the
+  // host page keeps that page's own Tab order.
+  function trapTab(e) {
+    var a = document.activeElement;
+    if (!$panel.contains(a)) return;
+    var els = Array.prototype.filter.call(
+      $panel.querySelectorAll("a[href],button,input,select,textarea,[tabindex]"),
+      function (el) { return el.tabIndex >= 0 && !el.disabled && el.getClientRects().length; });
+    if (!els.length) return;
+    var first = els[0], last = els[els.length - 1];
+    if (e.shiftKey ? (a === first || a === $panel) : a === last) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  }
+  // Disabling the focused control drops focus to <body>, outside the panel
+  // and so outside the trap above: hand it to `to` (or the panel) first.
+  function keepFocus(el, to) {
+    if (document.activeElement === el) (to || $panel).focus();
+  }
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && root.classList.contains("go-open")) close();
+    if (!root.classList.contains("go-open")) return;
+    if (e.key === "Escape") close();
+    else if (e.key === "Tab") trapTab(e);
   });
 
   root.querySelector(".go-settings-btn").addEventListener("click", toggleSettings);

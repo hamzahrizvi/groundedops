@@ -170,7 +170,8 @@ your FAQ doesn't cover, prioritised by real demand. Each entry records how
 the turn then ended (answered from the documents, refused, or asked back)
 and what the assistant said, so the console can show "not answered",
 "answered, no FAQ yet" and "flagged by visitors" separately. Questions
-asked only by test runs (eval/live/preflight sessions) are hidden unless
+asked only by test runs (eval/live/preflight sessions, or scripts calling
+/query without a console session) are hidden unless
 "Include test runs" is ticked. `python -m log_report --since 7d` (or GET
 `/admin/report`, the Overview's "Last 7 days" row) gives the weekly
 resolved / refused / handed-off / speed counts.

@@ -169,6 +169,21 @@ def test_local_mode_escalates_to_the_default_role_and_api_mode_to_backup():
                 assert all(p == provider for p, _ in called), (role, called)
 
 
+def test_an_escalated_turn_reports_escalated():
+    """The response key names the fact, not a provider: escalation follows
+    the configured role, so "escalated_to_deepseek" is only a deprecated alias."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    with ExitStack() as st:
+        gen = _escalation_stack(st, {"default": "openai", "backup": "deepseek"})
+        gen.return_value = {"text": "Use a USB-B cable.", "provider": "openai",
+                            "model": "gpt-test"}
+        with patch.object(main, "escalation_role", return_value="default"):
+            r = main.query(main.QueryRequest(q="How do I connect the MyCheckr?"))
+        assert gen.called
+        assert r["escalated"] is True
+
+
 def test_no_escalation_when_the_mode_role_is_unassigned():
     from contextlib import ExitStack
     from unittest.mock import patch
