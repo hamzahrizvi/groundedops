@@ -598,8 +598,13 @@ def describe_image(png: bytes, prompt: str, model: str | None = None,
     (prompt and completion tokens) or None. DeepSeek V4 takes no images."""
     import base64
     b64 = base64.b64encode(png).decode("ascii")
+    import keystore
     model = model or FIGURE_DESCRIBE_MODEL or (
-        "claude-sonnet-5-5" if (os.getenv("ANTHROPIC_API_KEY") or "").strip() else "gpt-5-mini")
+        "claude-sonnet-5-5" if keystore.has_key("anthropic") and keystore.may("anthropic", "pictures")
+        else "gpt-5-mini")
+    if not keystore.may("anthropic" if model.startswith("claude") else "openai", "pictures"):
+        logger.warning(f"figure description skipped: no key is ticked for pictures ({model})")
+        return None
     if model.startswith("claude"):
         return _describe_image_anthropic(b64, prompt, model, timeout)
     key = (os.getenv("OPENAI_API_KEY") or "").strip()
@@ -677,6 +682,10 @@ def generate(
     keys = api_keys or {}
     if provider == "local":
         return _call_ollama(model, prompt)
+    import keystore
+    if not keystore.may(provider, "answers"):
+        logger.warning(f"{provider} key is not ticked for answering; not called")
+        return None
     if provider == "deepseek":
         return _call_deepseek(prompt, model=model,
                               api_key=keys.get("deepseek") or deepseek_api_key)

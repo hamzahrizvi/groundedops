@@ -60,7 +60,7 @@ def _available_providers() -> list[dict]:
         out.append({"key": "local", "label": _PROVIDER_LABEL["local"],
                     "default_model": _default_model_for("local")})
     for key in ("deepseek", "openai", "anthropic"):
-        if keystore.has_key(key):
+        if keystore.has_key(key) and keystore.may(key, "answers"):
             # The operator's name for the key (keystore.label_for), so the
             # Test chat picker says "Company keys", not "OpenAI".
             out.append({"key": key, "label": keystore.label_for(key),

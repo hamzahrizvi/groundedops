@@ -27,6 +27,44 @@ _PROVIDER_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
 }
 
+# What each key may be used for, ticked per key on the API keys page
+# (CEO, 2026-11-04: the Anthropic key costs a lot, so it describes manual
+# pictures and answers nothing unless ticked). Stored as KEY_USES_<PROVIDER>.
+USES = {"answers": "Answer questions",
+        "pictures": "Describe pictures in documents"}
+_CAN_USE = {"deepseek": ("answers",),          # no vision model
+            "openai": ("answers", "pictures"),
+            "anthropic": ("answers", "pictures")}
+_DEFAULT_USES = {"deepseek": {"answers"}, "openai": {"answers"},
+                 "anthropic": {"pictures"}}
+
+
+def can_use(provider: str) -> tuple:
+    return _CAN_USE.get(provider, ())
+
+
+def uses(provider: str) -> set:
+    raw = os.getenv(f"KEY_USES_{provider.upper()}")
+    if raw is None:
+        return set(_DEFAULT_USES.get(provider, ()))
+    return {u.strip() for u in raw.split(",")} & set(can_use(provider))
+
+
+def may(provider: str, use: str) -> bool:
+    return use in uses(provider)
+
+
+def set_uses(provider: str, wanted) -> set:
+    if provider not in _PROVIDER_KEY_ENV:
+        raise UnknownProviderError(provider)
+    val = ",".join(u for u in can_use(provider) if u in set(wanted or ()))
+    env = f"KEY_USES_{provider.upper()}"
+    _rewrite_env_line(env, val)
+    os.environ[env] = val
+    logger.info(f"key '{provider}' may now be used for: {val or 'nothing'} (via console)")
+    return uses(provider)
+
+
 _PROVIDER_LABEL = {
     "deepseek": "DeepSeek",
     "openai": "OpenAI",
@@ -309,7 +347,7 @@ def get_role_assignment(role: str) -> str | None:
     if not env:
         raise UnknownRoleError(role)
     val = (os.getenv(env) or "").strip().lower()
-    return val if val in _PROVIDER_KEY_ENV else None
+    return val if val in _PROVIDER_KEY_ENV and may(val, "answers") else None
 
 
 def get_role(role: str) -> str | None:
@@ -337,6 +375,8 @@ def set_role(role: str, provider: str | None) -> None:
     provider = str(provider).strip().lower()
     if provider not in _PROVIDER_KEY_ENV:
         raise UnknownProviderError(provider)
+    if not may(provider, "answers"):
+        raise ValueError(f"the {label_for(provider)} key is not ticked for answering questions")
     _rewrite_env_line(env, provider)
     os.environ[env] = provider
     logger.info(f"role '{role}' now served by provider '{provider}' (via console)")

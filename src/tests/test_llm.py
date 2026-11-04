@@ -180,7 +180,8 @@ def roles(assignments, keyed=True):
     """Assignments live in os.environ only, with every provider reporting a
     key (or none of them, for `keyed=False`)."""
     with patch.object(keystore, "_rewrite_env_line", lambda k, v: None), \
-         patch.object(keystore, "has_key", lambda p: keyed):
+         patch.object(keystore, "has_key", lambda p: keyed), \
+         patch.dict(os.environ, {"KEY_USES_ANTHROPIC": "answers,pictures"}):
         for role in keystore.roles():
             keystore.set_role(role, assignments.get(role))
         try:
@@ -471,3 +472,27 @@ def test_deep_effort_in_api_mode_uses_the_advanced_role_not_online_provider():
     with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}):
         assert llm.effort_model("ONLINE_DEEP_MODEL") is None
     assert llm.effort_model(None) is None
+
+
+def test_a_key_answers_only_when_ticked_for_it():
+    """CEO 2026-11-04: the Anthropic key describes pictures and answers
+    nothing unless ticked; an unticked key is never called, and a key can
+    only be ticked for what its API can do."""
+    from unittest.mock import Mock
+    with patch.dict(os.environ, {}), \
+         patch.object(keystore, "_rewrite_env_line", lambda k, v: None), \
+         patch.object(keystore, "has_key", lambda p: True):
+        os.environ.pop("KEY_USES_ANTHROPIC", None)
+        os.environ.pop("KEY_USES_DEEPSEEK", None)
+        assert keystore.uses("anthropic") == {"pictures"} and keystore.may("openai", "answers")
+        with patch.object(llm, "_call_anthropic", Mock()) as call:
+            assert llm.generate("anthropic", "q", "m") is None and not call.called
+        try:
+            keystore.set_role("default", "anthropic")
+            assert False, "an unticked key took a job"
+        except ValueError:
+            pass
+        keystore.set_uses("anthropic", ["answers", "nonsense"])
+        assert keystore.uses("anthropic") == {"answers"}
+        keystore.set_uses("deepseek", ["pictures"])
+        assert keystore.uses("deepseek") == set()

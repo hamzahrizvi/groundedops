@@ -3821,6 +3821,25 @@ function viewKeys() {
     nameBox.addEventListener("change", rename);
     nameBox.addEventListener("keydown", e => { if (e.key === "Enter") nameBox.blur(); });
 
+    // What this key may be used for. Ticks save at once; an unticked key is
+    // never called for that job (keystore.may).
+    const useBoxes = (p.can_use || []).map(u => {
+      const box = el("input", { type: "checkbox" });
+      box.checked = (p.uses || []).includes(u.key);
+      box.addEventListener("change", async () => {
+        const want = useBoxes.filter(([b]) => b.checked).map(([, k]) => k);
+        try {
+          await api("/admin/keys/" + p.key + "/uses", { method: "POST",
+            body: JSON.stringify({ uses: want }) });
+          toast(p.label + ": " + (box.checked ? "now used to " : "no longer used to ")
+            + u.label.charAt(0).toLowerCase() + u.label.slice(1));
+          keysCache = null;
+          await loadKeys();
+        } catch (e) { toast(e.message, true); box.checked = !box.checked; }
+      });
+      return [box, u.key, u.label];
+    });
+
     return el("div", { class: "card elev-sm",
                        style: "padding:14px 18px;gap:0;margin-bottom:10px" },
       el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" },
@@ -3839,7 +3858,11 @@ function viewKeys() {
           el("button", { class: "btn btn-primary", onclick: save }, "Save"),
           p.configured
             ? el("button", { class: "btn btn-ghost", onclick: clear }, "Remove")
-            : null)));
+            : null)),
+      useBoxes.length ? el("div", { style: "display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;font-size:13px" },
+        el("span", { style: "color:color-mix(in srgb,var(--color-text) 60%,transparent)" }, "Use this key to:"),
+        useBoxes.map(([box, , label]) => el("label", { style: "display:flex;gap:6px;align-items:center;cursor:pointer" },
+          box, label))) : null);
   });
 
   return [
@@ -5023,7 +5046,8 @@ function keyRolesCard() {
                             : "Follow " + (r.role === "default"
                                 ? "Settings (" + fallbackLabel + ")"
                                 : "the default")),
-      configured.map(p => el("option", { value: p.key }, p.label)));
+      // Only keys ticked "Answer questions" can take a job.
+      configured.filter(p => (p.uses || []).includes("answers")).map(p => el("option", { value: p.key }, p.label)));
     sel.value = r.assigned || "";
 
     sel.addEventListener("change", async () => {

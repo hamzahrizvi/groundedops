@@ -34,6 +34,10 @@ class KeyRoleReq(BaseModel):
     provider: str | None = None
 
 
+class UsesReq(BaseModel):
+    uses: list[str] = []
+
+
 class ModelReq(BaseModel):
     # null clears, with the same meaning as above: for a provider baseline
     # it means "fall back to the built-in default", and for a role it means
@@ -85,7 +89,9 @@ def admin_keys_list(x_admin_password: str | None = Header(default=None)):
         "providers": [
             {"key": p, "label": keystore.label_for(p),
              "kind": keystore.kind_label(p),
-             "configured": keystore.has_key(p), "masked": keystore.masked_key(p)}
+             "configured": keystore.has_key(p), "masked": keystore.masked_key(p),
+             "uses": sorted(keystore.uses(p)),
+             "can_use": [{"key": u, "label": keystore.USES[u]} for u in keystore.can_use(p)]}
             for p in keystore.providers()
         ],
         "roles": _key_roles(),
@@ -165,6 +171,20 @@ def admin_keys_set_model(provider: str, payload: ModelReq,
     return {"ok": True, "roles": _key_roles()}
 
 
+@router.post("/admin/keys/{provider}/uses")
+def admin_keys_set_uses(provider: str, payload: UsesReq,
+                        x_admin_password: str | None = Header(default=None)):
+    """Tick what one key may be used for. Unticking answers takes the key
+    off every answering job at once (keystore.get_role masks it)."""
+    me = _require_root(x_admin_password)
+    try:
+        got = keystore.set_uses(provider, payload.uses)
+    except keystore.UnknownProviderError:
+        raise HTTPException(status_code=404, detail="unknown provider")
+    logger.info(f"key '{provider}' uses set to {sorted(got)} by {me['email']}")
+    return {"ok": True, "uses": sorted(got), "roles": _key_roles()}
+
+
 @router.post("/admin/keys/roles/{role}/model")
 def admin_keys_set_role_model(role: str, payload: ModelReq,
                               x_admin_password: str | None = Header(default=None)):
@@ -203,6 +223,8 @@ def admin_keys_set_role(role: str, payload: KeyRoleReq,
         raise HTTPException(status_code=404, detail=f"unknown role '{role}'")
     except keystore.UnknownProviderError:
         raise HTTPException(status_code=404, detail=f"unknown provider '{provider}'")
+    except ValueError as e:              # key not ticked for answering
+        raise HTTPException(status_code=400, detail=str(e))
     if role == "default" and provider:
         try:
             set_online_provider(provider)

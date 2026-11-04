@@ -124,6 +124,13 @@ check(client.post("/admin/keys/roles/not-a-job", headers=ROOT,
 
 r = client.post("/admin/keys/roles/default", headers=ROOT,
                 json={"provider": "anthropic"})
+check(r.status_code == 400, f"a key not ticked for answering cannot take a job ({r.status_code})")
+r = client.post("/admin/keys/anthropic/uses", headers=ROOT, json={"uses": ["answers", "pictures"]})
+check(r.status_code == 200 and r.json()["uses"] == ["answers", "pictures"], "root ticks what a key is for")
+check(client.post("/admin/keys/anthropic/uses", headers=SUPPORT,
+                  json={"uses": []}).status_code == 403, "support cannot change what a key is for")
+r = client.post("/admin/keys/roles/default", headers=ROOT,
+                json={"provider": "anthropic"})
 check(r.status_code == 200, f"root can assign a job ({r.status_code})")
 check(keystore.get_role("default") == "anthropic",
       "the assignment is live immediately, no restart")
