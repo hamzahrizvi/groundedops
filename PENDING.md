@@ -339,7 +339,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
-| D-20261104-06 | A customer reporting a symptom gets the set-up steps instead of the fault page, because the set-up page now ranks higher | built, waiting for the check | the pre-ship check |
+| D-20261104-06 | A customer reporting a symptom gets the set-up steps instead of the fault page, because the set-up page now ranks higher | ready to merge | merges once Security clears it |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
