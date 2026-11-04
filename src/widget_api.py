@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 import faq_store
+import feedback_store
 import jsonstore
 import quota
 
@@ -76,6 +77,13 @@ class FeedbackRequest(BaseModel):
     visitor_id: str | None = None
     vote: Literal["up", "down"]
     note: str = Field("", max_length=280)
+
+
+class RatingRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=64)
+    visitor_id: str | None = None
+    stars: int = Field(..., ge=1, le=5)
+    comment: str = Field("", max_length=500)
 
 
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
@@ -770,6 +778,29 @@ def register(app, answer_query, draft_enquiry=None):
         import logger as interaction_log
         interaction_log.log_feedback(payload.request_id, payload.vote,
                                      payload.session_id)
+        return {"received": True}
+
+    @router.post("/rating")
+    def widget_rating(payload: RatingRequest, request: Request):
+        """PUBLIC -- 1 to 5 stars for a whole conversation, asked when the
+        visitor closes or restarts it, with an optional comment.
+
+        Not tied to a remembered answer like /feedback: a guest's chat is
+        curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
+        most visitors. The shared limiter is what bounds made-up sessions.
+        """
+        gate = quota.check_public_write("feedback", payload.visitor_id,
+                                        _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429,
+                                detail="Too many ratings today. Thank you, though.")
+        with _recent_lock:
+            asked = [v for v in _RECENT_ANSWERS.values()
+                     if v["session_id"] == payload.session_id]
+        feedback_store.save_rating(payload.session_id, payload.stars,
+                                   payload.comment,
+                                   asked[-1]["scope"] if asked else None,
+                                   [v["q"] for v in asked])
         return {"received": True}
 
     @router.post("/ask/stream")

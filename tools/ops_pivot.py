@@ -346,6 +346,7 @@ def export_real(run, src, days):
     """D-20261015-11 (b): counts only. RUN/real_counts.json = {"<ISO year>-W<week>": {outcome: n}} over
     the widget's questions of the last `days` days; no question or answer text leaves REPO."""
     print(copy_feedback(src, run, days), "widget votes from the last", days, "days (vote, scope and time only)")
+    print(copy_reports(src, run), "new tester reports")
     sys.path.insert(0, src)
     import log_report as L
     since = datetime.datetime.now() - datetime.timedelta(days=days)
@@ -433,6 +434,23 @@ def copy_feedback(src, run, days):
            for k, v in (data.items() if isinstance(data, dict) else []) if isinstance(v, dict)}
     out = _since(out, datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days))
     json.dump(out, open(os.path.join(run, "widget_feedback.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    return len(out)
+
+
+def copy_reports(src, run):
+    """Staff reports from the console's Test chat (src/feedback_store.py) that no earlier run
+    took, into RUN/tester_reports.json for Customer's job TESTER-REPORTS. Staff text, not
+    visitor text: D-20261015-11 does not apply. Returns how many."""
+    p = os.path.join(src, "tester_reports.json")
+    if not os.path.exists(p):
+        return 0
+    taken = set()
+    for f in glob.glob(os.path.join(os.path.dirname(os.path.abspath(run)), "*", "tester_reports.json")):
+        if os.path.dirname(os.path.abspath(f)) != os.path.abspath(run):
+            taken.update(r.get("id") for r in _load(f))
+    out = [r for r in _load(p) if isinstance(r, dict) and r.get("id") not in taken]
+    if out:
+        json.dump(out, open(os.path.join(run, "tester_reports.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return len(out)
 
 
@@ -560,6 +578,15 @@ def _selftest():
     assert real_counts(run2) == {wk: {"answered": 1, "refused": 1}}, real_counts(run2)
     assert _load(os.path.join(run2, "widget_feedback.json"))["v"]["vote"] == "down"
     assert set(_load(os.path.join(run2, "widget_feedback.json"))["v"]) == {"created_at", "scope", "vote"}   # allow-list: a new widget field never leaks
+    # tester reports: a run takes only the ones no earlier run took
+    runs3 = tempfile.mkdtemp()
+    r1, r2 = os.path.join(runs3, "20261101"), os.path.join(runs3, "20261108")
+    os.makedirs(r1); os.makedirs(r2)
+    json.dump([{"id": "a", "note": "wrong pin"}], open(os.path.join(src2, "tester_reports.json"), "w"))
+    assert copy_reports(src2, r1) == 1
+    json.dump([{"id": "a"}, {"id": "b", "note": "x"}], open(os.path.join(src2, "tester_reports.json"), "w"))
+    assert copy_reports(src2, r2) == 1 and [r["id"] for r in _load(os.path.join(r2, "tester_reports.json"))] == ["b"]
+    assert copy_reports(src2, r2) == 1                          # re-running the same run's export is stable
     saved = os.environ.pop("RETENTION_DAYS", None)
     try:
         repo = tempfile.mkdtemp(); os.makedirs(os.path.join(repo, "src"))
