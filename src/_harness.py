@@ -334,6 +334,7 @@ from text_utils import capability_target as _real_capability_target  # noqa: E40
 # make every several-ask test pass vacuously.
 from text_utils import split_asks as _real_split_asks  # noqa: E402
 from text_utils import keep_answered_part as _real_keep_answered  # noqa: E402
+from text_utils import answers_beyond_refusal as _real_answers_beyond  # noqa: E402
 from text_utils import ask_check_prompt as _real_ask_check_prompt  # noqa: E402
 from text_utils import unanswered_asks as _real_unanswered_asks  # noqa: E402
 from text_utils import _escape_prompt_boundaries as _real_escape  # noqa: E402
@@ -349,6 +350,7 @@ stub("text_utils",
      capability_target=_real_capability_target,
      normalize_markdown_tables=_real_normalize_markdown,
      split_asks=_real_split_asks, keep_answered_part=_real_keep_answered,
+     answers_beyond_refusal=_real_answers_beyond,
      ask_check_prompt=_real_ask_check_prompt, unanswered_asks=_real_unanswered_asks,
      _escape_prompt_boundaries=_real_escape)
 stub("conversations", init_db=lambda: None, resolve_user_id=lambda u: None,

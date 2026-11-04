@@ -93,6 +93,7 @@ from text_utils import (
     normalize_markdown_tables,
     split_asks,
     keep_answered_part,
+    answers_beyond_refusal,
     ask_check_prompt,
     unanswered_asks,
 )
@@ -4777,13 +4778,24 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # passages added for one more answer, served only if it does not refuse.
     # A whole refusal is left to the retries below (follow-up, library,
     # self_route).
+    # D-20261104-05: is_refusal is a substring test, so a draft that answers
+    # one ask and declines another in words other than the canonical
+    # refusal counted as a whole refusal and skipped this check
+    # (C20261102-26). Such a draft is checked too; when the check finds
+    # every ask unanswered it is left, like a whole decline, to the retries.
+    _part_refused = is_refusal(answer)
     if (_asks and top_chunks and role != "rethink" and not generation_failed
-            and not is_refusal(answer) and _policy_setting("ask_recheck", True)):
+            and (not _part_refused or answers_beyond_refusal(answer))
+            and _policy_setting("ask_recheck", True)):
         _chk = _billed(generate_with_fallback(
             "fast", ask_check_prompt(_asks, answer),
             deepseek_api_key=deepseek_api_key, api_keys=api_keys))
         _missed = unanswered_asks((_chk or {}).get("text") or "", len(_asks))
-        ptrace.mark("recheck", f"asks missed: {_missed or 'none'}")
+        if _part_refused and len(_missed) == len(_asks):
+            ptrace.mark("recheck", "every ask declined; left to the retries")
+            _missed = []
+        else:
+            ptrace.mark("recheck", f"asks missed: {_missed or 'none'}")
         if _missed:
             def _deeper(i: int) -> list[dict]:
                 # Searched as first (lead + ask) AND as the ask alone: the
@@ -4843,6 +4855,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                     ptrace.mark("recheck", "retry refused or failed; first answer kept")
             else:
                 ptrace.mark("recheck", "no new passages for the missed asks")
+    elif _asks and _part_refused and not generation_failed:
+        ptrace.mark("recheck", "draft declines every ask; left to the retries")
 
     # A REFUSAL ON A FOLLOW-UP, WITH CONFIDENT RETRIEVAL: ask once more
     # without the conversation block. Scenarios 11, 16 and 20 (2026-09-25):

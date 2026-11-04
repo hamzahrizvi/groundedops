@@ -1351,6 +1351,9 @@ _REFUSAL_SENTENCE_RE = re.compile(
 PARTIAL_REFUSAL = "I could not find the rest of that in the documentation."
 
 
+PARTIAL_MIN_LETTERS = 60
+
+
 def keep_answered_part(answer: str) -> str:
     """An answer to a several-ask message that answers some asks and writes
     the canonical refusal for the rest is a PARTIAL answer, not a refusal.
@@ -1361,9 +1364,20 @@ def keep_answered_part(answer: str) -> str:
     if not answer or not _REFUSAL_SENTENCE_RE.search(answer):
         return answer
     rest = _REFUSAL_SENTENCE_RE.sub("", answer)
-    if sum(c.isalpha() for c in rest) < 60:
+    if sum(c.isalpha() for c in rest) < PARTIAL_MIN_LETTERS:
         return answer
     return _REFUSAL_SENTENCE_RE.sub(PARTIAL_REFUSAL, answer)
+
+
+def answers_beyond_refusal(answer: str) -> bool:
+    """True when an answer that trips is_refusal still says something else:
+    at least PARTIAL_MIN_LETTERS letters outside the sentences that hold a
+    refusal phrase (the measure keep_answered_part uses). A several-ask
+    draft that answers one ask and writes "there is no information about"
+    for another is a partial answer; a decline with a preamble is not
+    (D-20261104-05). Pure."""
+    rest = " ".join(u for u in split_units(answer or "") if not is_refusal(u))
+    return sum(c.isalpha() for c in rest) >= PARTIAL_MIN_LETTERS
 
 
 _PROMPT_BOUNDARY_RE = re.compile(
