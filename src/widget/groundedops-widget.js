@@ -1313,6 +1313,8 @@
 
   // The composer locks only while a form or continue-prompt is open.
   function lockComposer(reason) {
+    keepFocus($in);
+    keepFocus($send);
     $in.disabled = true;
     $send.disabled = true;
     $in.placeholder = reason || "Choose an option above to continue…";
@@ -1758,6 +1760,7 @@
         return;
       }
       err.textContent = "";
+      keepFocus(btn);
       btn.disabled = true;
       btn.textContent = "Sending…";
 
@@ -2120,6 +2123,7 @@
     }
 
     busy = true;
+    keepFocus($send, $in);
     $send.disabled = true;
     clearChips();
     heard(q);
@@ -2628,6 +2632,11 @@
       e.preventDefault();
       (e.shiftKey ? last : first).focus();
     }
+  }
+  // Disabling the focused control drops focus to <body>, outside the panel
+  // and so outside the trap above: hand it to `to` (or the panel) first.
+  function keepFocus(el, to) {
+    if (document.activeElement === el) (to || $panel).focus();
   }
   document.addEventListener("keydown", function (e) {
     if (!root.classList.contains("go-open")) return;

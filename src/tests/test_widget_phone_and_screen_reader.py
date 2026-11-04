@@ -145,6 +145,14 @@ def test_tab_stays_inside_the_open_panel():
         _page.keyboard.press(key)
         assert _page.evaluate(inside), (key, _page.evaluate(
             "document.activeElement && document.activeElement.outerHTML.slice(0, 80)"))
+    # Send disables itself while it holds focus; focus must stay inside.
+    _page.fill(".go-in", "how do i clean it")
+    _page.focus(".go-send")
+    _page.keyboard.press("Enter")
+    for key in ["Tab"] * 10:
+        assert _page.evaluate(inside), "after Send"
+        _page.keyboard.press(key)
+    assert _page.evaluate(inside), "after Send"
 
 
 def test_phone_viewport_fills_the_screen_edge_to_edge():
