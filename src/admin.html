@@ -7792,6 +7792,20 @@ function viewTest() {
       // behaved. Both clients now type an answer out at the same rate.
       revealAnswerInto(bub, r.answer || "No answer",
                        !r.from_faq && !r.flagged && !r.service_degraded);
+      const ansFig = (r.sources || []).flatMap(s => s.figures || []).find(f => f.answer);
+      if (ansFig) {
+        // The picture the answer was read from, open under it, as the widget shows it.
+        bub.append(el("img", {
+          src: API + ansFig.url, alt: ansFig.caption || ("Figure, page " + ansFig.page),
+          title: (ansFig.caption ? ansFig.caption + " \u2014 " : "") + "page " + ansFig.page,
+          style: "display:block;max-height:220px;max-width:100%;margin:9px 0 0;border:1px solid var(--color-line);" +
+                 "border-radius:6px;background:#fff;object-fit:contain;cursor:zoom-in",
+          onclick: e => {
+            const big = e.target.style.maxHeight === "none";
+            e.target.style.maxHeight = big ? "220px" : "none";
+            e.target.style.cursor = big ? "zoom-in" : "zoom-out";
+          } }));
+      }
       if (r.sources && r.sources.length) {
         // Collapsed, to match the widget. Provenance is something you go and
         // look at, so it should not sit open under every answer -- and this

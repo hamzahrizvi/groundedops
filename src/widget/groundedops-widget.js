@@ -438,6 +438,7 @@
     ".go-fig{max-height:96px;max-width:46%;border:1px solid var(--line);border-radius:6px;" +
     "background:#fff;cursor:zoom-in;object-fit:contain}" +
     ".go-fig.big{max-height:none;max-width:100%;cursor:zoom-out}" +
+    ".go-ans-fig{display:block;max-height:220px;max-width:100%;margin:8px 0 2px}" +
     ".go-dl:hover{text-decoration:underline}" +
     ".go-badge{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;" +
     "color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:1px 5px;margin-top:7px}" +
@@ -802,6 +803,22 @@
         esc(pretty(one.source)) + (one.page_label ? ", " + esc(one.page_label) : "") +
         "</span>" + srcLink(one);
       b.appendChild(line);
+      // The picture the answer was read from (figure.answer, set server-side
+      // only when the model named it), shown open under the answer; the
+      // other pictures stay in Sources.
+      var pic = null;
+      msg.sources.forEach(function (x) {
+        (x.figures || []).forEach(function (f) { if (f.answer && !pic) pic = f; });
+      });
+      if (pic) {
+        var pim = document.createElement("img");
+        pim.className = "go-fig go-ans-fig";
+        pim.alt = pic.caption || ("Figure, page " + pic.page);
+        pim.title = (pic.caption ? pic.caption + " — " : "") + "page " + pic.page;
+        pim.setAttribute("data-fig", pic.url);
+        pim.addEventListener("click", function () { pim.classList.toggle("big"); });
+        b.appendChild(pim);
+      }
       var n = Math.min(msg.sources.length, 4);
       if (n > 1 || (one.figures || []).length) {
         // <details>/<summary> rather than a click handler: the open/closed

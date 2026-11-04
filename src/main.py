@@ -469,6 +469,25 @@ _PREAMBLE_RE = re.compile(
 )
 
 
+# The last line the model adds when it read its answer off a picture
+# description (_PICTURE_RULE). Never shown: _strip_preamble removes it.
+_PICTURE_LINE_RE = re.compile(r"(?:\A|\n)\s*PICTURE:\s*[\"'`]?([\w.-]+?)(?:\.png)?[\"'`]?\s*$", re.I)
+
+
+def _answer_picture(raw: str, chunks: list[dict]) -> tuple[str, str] | None:
+    """(source, crop name) of the picture the model said it answered from,
+    when that picture's description was one of the passages it was given.
+    A name it made up, or one from a passage it never saw, gives None."""
+    m = _PICTURE_LINE_RE.search(raw or "")
+    if not m:
+        return None
+    want = m.group(1).lower() + ".png"
+    for c in chunks:
+        if ":figtext:" in (c.get("id") or "") and (c.get("figures") or "").lower() == want:
+            return c.get("source"), c.get("figures")
+    return None
+
+
 def _strip_preamble(answer: str) -> str:
     """Remove 'Based solely on the provided context, ...' style preambles
     (v8.5). A prompt instruction forbidding them (v8.4.2) reduced but did
@@ -476,6 +495,7 @@ def _strip_preamble(answer: str) -> str:
     Deterministic post-processing is the only reliable fix. Applied to
     every generated answer regardless of provider; re-capitalizes the
     first character of what remains."""
+    answer = _PICTURE_LINE_RE.sub("", answer or "")
     stripped = _PREAMBLE_RE.sub("", answer.strip(), count=1)
     if stripped and stripped != answer.strip():
         return _agree_verdict(stripped[0].upper() + stripped[1:])
@@ -883,6 +903,12 @@ def _escape_prompt_boundaries(text: str) -> str:
         text or "")
 
 
+_PICTURE_RULE = ("A passage marked 'picture NAME' is a description of a picture in the "
+                 "manual. If your answer takes its fact from such a passage, end with one "
+                 "more line, exactly \"PICTURE: NAME\", naming the picture it came from; "
+                 "the customer is shown that picture. Otherwise do not write that line.\n\n")
+
+
 def _asks_block(asks: list[str] | None) -> str:
     """The separate asks of a several-ask message, listed right before the
     question (D-20261009-09). Empty for every other message: this is not a
@@ -937,7 +963,7 @@ def build_answer_prompt(hist: str, context: str, question: str,
     _lib = (f"<documentation>\n{_escape_prompt_boundaries(library)}\n"
             f"</documentation>\n\n") if library else ""
     _where = ("<documentation> and <context>" if library else "<context>")
-    _asks = _asks_block(asks)
+    _asks = _asks_block(asks) + (_PICTURE_RULE if ", picture '" in context else "")
     # D-20261020-12: arm B of the rule-block ablation. ANSWER_PROMPT=short
     # swaps the 49-rule block below for the eight rules something else
     # depends on (R&D 20261020-short-writer-prompt). Read per call so a lab
@@ -2202,6 +2228,15 @@ def _passage_product(chunk: dict, names: dict) -> str:
     return f", from the {names[tags[0]]} documentation"
 
 
+def _passage_picture(chunk: dict) -> str:
+    """", picture 'p19_1'" for a picture's description (ingest figure text),
+    so the model can say which picture it answered from (_PICTURE_RULE)."""
+    name = chunk.get("figures") or ""
+    if ":figtext:" not in (chunk.get("id") or "") or "," in name or not name:
+        return ""
+    return f", picture '{name.removesuffix('.png')}'"
+
+
 def _passage_heading(chunk: dict) -> str:
     """', under "Supply Currents › NV11+"' for a passage filed under a manual
     heading, else "". Look-alike tables (one per module, cassette or model) are
@@ -2659,7 +2694,7 @@ def _resolve_question_scope(selected_product: str | None,
     return None, None
 
 
-def _build_sources(results: list[dict]) -> list[dict]:
+def _build_sources(results: list[dict], picture: tuple[str, str] | None = None) -> list[dict]:
     """
     Build clickable source objects: one entry per unique source filename,
     with the chunk ids belonging to it (for /source_chunks lookup), a short
@@ -2710,10 +2745,17 @@ def _build_sources(results: list[dict]) -> list[dict]:
         # text, not the document's gallery. Served by /figure, which is
         # token-gated the same way /source_file is.
         names = sdict.pop("_fig_names", [])
+        # The picture the answer was read from (_answer_picture) goes first
+        # and is flagged, so the chat can show it under the answer itself.
+        mine = bool(picture) and picture[0] == sdict["source"]
+        if mine:
+            names = [picture[1]] + [n for n in names if n != picture[1]]
         try:
             import figures as _figures
             sdict["figures"] = _figures.describe(
                 sdict["source"], names[:4], f"/figure/{quote(sdict['source'])}")
+            if mine and sdict["figures"] and sdict["figures"][0]["name"] == picture[1]:
+                sdict["figures"][0]["answer"] = True
         except Exception as exc:
             logger.debug("figures for %r unavailable: %s", sdict["source"], exc)
             sdict["figures"] = []
@@ -4216,7 +4258,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                 start_total, tokens=sum(_turn_tokens))
     _names_now = _product_names()
     context = "\n\n".join(
-        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}{_passage_heading(r)}]\n"
+        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}"
+        f"{_passage_heading(r)}{_passage_picture(r)}]\n"
         + r["text"][:CHUNK_CHAR_CAP]
         for i, r in enumerate(top_chunks, 1))
 
@@ -4739,7 +4782,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # weight?" was refused with the weights table sitting at rank 1 in its
     # own context. That path sets no flag, so keying only on `flagged` missed
     # the most common case this feature exists for.
-    _model_refused = False
+    _model_refused = _verbatim_served = False
     try:
         from text_utils import is_refusal as _isref
         _model_refused = bool(_isref(answer))
@@ -4752,6 +4795,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if (template_leak or generation_failed or flagged or _model_refused) \
             and _verbatim:
         answer = _render_structures(_verbatim)
+        _verbatim_served = True
         ptrace.mark("verbatim", f"{len(_verbatim)} block(s) from the document")
         flagged = False
         template_leak = False
@@ -4853,7 +4897,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         add_to_memory(session_id, q, answer, refused=True)
     else:
         add_to_memory(session_id, q, answer)
-    sources = _build_sources(top_chunks)
+    # Only when the model's own words are served: a verbatim block or a
+    # refusal replaced them, and the picture it named went with them.
+    sources = _build_sources(top_chunks, picture=None if (
+        is_refusal(answer) or _not_mentioned or _verbatim_served)
+        else _answer_picture((output or {}).get("text"), top_chunks))
 
     # The oldest turn is silently discarded once the window is full, so the
     # assistant starts "forgetting" with nothing on screen to explain why.

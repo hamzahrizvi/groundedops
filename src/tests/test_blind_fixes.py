@@ -62,6 +62,25 @@ def test_a_passage_is_labelled_with_its_heading():
     assert "Take a figure only from a passage whose heading matches" in p
 
 
+def test_the_answer_shows_the_picture_the_model_read_it_from():
+    """CEO 2026-11-04: a picture description is labelled, the model names the
+    picture it answered from, and that line is never shown to the customer."""
+    fig = {"id": "M.pdf:abc:figtext:3", "source": "M.pdf", "figures": "p18_2.png"}
+    page = {"id": "M.pdf:abc:7", "source": "M.pdf", "figures": "p18_1.png,p18_2.png"}
+    assert main._passage_picture(fig) == ", picture 'p18_2'"
+    assert main._passage_picture(page) == ""
+    p = main.build_answer_prompt("", "[Passage 1 of 1, picture 'p18_2']\nx", "q")
+    assert "PICTURE: NAME" in p
+    assert "PICTURE: NAME" not in main.build_answer_prompt("", "[Passage 1 of 1]\nx", "q")
+    raw = "It is 285 mm tall.\n\nPICTURE: p18_2"
+    assert main._strip_preamble(raw) == "It is 285 mm tall."
+    assert main._answer_picture(raw, [page, fig]) == ("M.pdf", "p18_2.png")
+    # A made-up name, or a picture only on a page passage, shows nothing.
+    assert main._answer_picture("x\nPICTURE: p99_1", [page, fig]) is None
+    assert main._answer_picture("x\nPICTURE: p18_1", [page, fig]) is None
+    assert main._strip_preamble("see the PICTURE: label") == "see the PICTURE: label"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
