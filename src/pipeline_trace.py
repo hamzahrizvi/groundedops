@@ -154,13 +154,18 @@ def mark(stage: str, note: str | None = None) -> None:
 # Two separate facts. `surface` is the door the question came through
 # ("widget" or "query"). `origin` is who asked: a test harness, by session
 # id prefix (eval.py sends "eval-", run_live.py "live-", the eval preflight
-# "preflight-"), else a visitor on the widget or a person in the console on
-# /query. The prefix wins on the widget too, so run_live --path widget
-# (M12) is not counted as customers. The prefix counts on the widget only
+# "preflight-"), else a visitor on the widget. Off the widget, only the
+# console's chat (admin.html sends "console-<random>") is a person; any other
+# session id, or none ("default"), is a script: blind_eval, probes, curl.
+# /query is LAN-only, so nothing else calls it. The prefix wins on the
+# widget too, so run_live --path widget (M12) is not counted as customers. The prefix counts on the widget only
 # when the caller is on this box or the LAN (D-20261008-14): widget_api sets
 # that per request with set_local_caller, so a visitor cannot hide their own turns from the review views by naming their session eval-.
 _ORIGIN_PREFIXES = (("eval-", "eval"), ("live-", "live"),
                     ("preflight-", "preflight"))
+# Origins that are not real use: log_report, the gap review and the eval
+# batch summary all leave these out.
+TEST_ORIGINS = frozenset({"eval", "live", "preflight", "script"})
 _local_caller: ContextVar[bool] = ContextVar("pipeline_local_caller", default=False)
 
 
@@ -178,7 +183,9 @@ def origin_for(session_id: str | None, surface: str | None = None) -> str:
         for prefix, origin in _ORIGIN_PREFIXES:
             if sid.startswith(prefix):
                 return origin
-    return "widget" if surface == "widget" else "console"
+    if surface == "widget":
+        return "widget"
+    return "console" if sid.startswith("console-") else "script"
 
 
 def set_meta(**fields) -> None:

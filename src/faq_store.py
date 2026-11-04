@@ -51,6 +51,7 @@ import logging
 
 import jsonstore
 from logger import redact
+from pipeline_trace import TEST_ORIGINS
 
 logger = logging.getLogger(__name__)
 
@@ -765,7 +766,7 @@ def record_gap(question: str, scope_key: str | None,
     if not key:
         return
     now = __import__("time").time()
-    # 10.2: who asked (M2's origin: widget/console/eval/live/preflight), so
+    # 10.2: who asked (M2's origin: widget/console/script/eval/live/preflight), so
     # the console can hide harness asks, and the gap's id on the trace, so
     # main._traced_query can stamp it with how the turn then ended.
     origin = None
@@ -858,9 +859,6 @@ def stamp_gap(fields: dict, gap_id: str | None = None,
     except Exception as e:
         logger.warning(f"could not stamp FAQ gap (non-fatal): {e}")
     return False
-
-
-TEST_ORIGINS = {"eval", "live", "preflight"}
 
 
 def is_test_only(g: dict) -> bool:
