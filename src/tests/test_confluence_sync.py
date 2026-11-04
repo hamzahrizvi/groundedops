@@ -235,6 +235,15 @@ def test_synced_links_reach_only_allowlisted_hosts():
     assert "svc" not in t and "pw@" not in t and "creds" in t and "slash" in t
     assert "https://www.innovative-technology.com/dl." in t and "curl  or" in t, t
     assert "Secret plan.pdf" in t and "\nManual.pdf" in t       # file names, no address
+    # Other address shapes, and one split by markup (D-20261104-10).
+    t = cs.page_text("P", "<p>mail ops@corp.internal now</p><pre>ssh://git.corp.internal/repo</pre>"
+                     "<pre>build.corp.internal:8080/api</pre><pre>\\\\fs1.corp.internal\\share</pre>"
+                     "<p>https://corp.<b>internal</b>/x</p>", hosts=cs.link_hosts())
+    assert "internal" not in t, t
+    keep = "write to sales@innovative-technology.com, see 3.5:100 and v1.2.3 and config.yaml"
+    assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
+    assert "ssh://git.innovative-technology.com/r" in cs.page_text(
+        "P", "<p>ssh://git.innovative-technology.com/r</p>", hosts=cs.link_hosts())
     # The site listed (a public space): its attachments keep their address.
     t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
                      hosts=["innovative-technology.atlassian.net"])

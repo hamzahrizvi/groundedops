@@ -747,11 +747,24 @@ def _kept(url: str, hosts: list[str]) -> str:
     (?cc= and ?bcc= name more recipients, Security 2026-11-03)."""
     if url[:7].lower() == "mailto:":
         url = url.partition("?")[0]
+    if "://" not in url and url[:4].lower() != "www." and url[:7].lower() != "mailto:" and "@" in url and "\\" not in url:  # a bare e-mail
+        return url if _host_ok("mailto:" + url, hosts) else ""
     return url if _host_ok(url, hosts) else ""
 
 
 # An address typed as text (a code or pre block): no trailing punctuation.
-_URL = re.compile(r"""(?:https?://|mailto:|www\.)[^\s<>"'()\[\]{}]*[^\s<>"'()\[\]{}.,;:!?]""", re.I)
+# Any scheme, mailto, www., a bare e-mail, a UNC share, host:port. Not a bare host name.
+_TAIL = r"""[^\s<>"'()\[\]{}]*[^\s<>"'()\[\]{}.,;:!?]"""
+_URL = re.compile(
+    r"[a-z][a-z0-9+.-]*://" + _TAIL + r"|mailto:" + _TAIL + r"|www\." + _TAIL
+    + r"|[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
+    + r"|\\{2,}" + _TAIL
+    + r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}:\d{2,5}(?:/" + _TAIL + r")?", re.I)
+
+
+def _scrub(text: str, hosts: list[str]) -> str:
+    """An address in the text itself is held to the allowlist too."""
+    return _URL.sub(lambda m: _kept(m[0], hosts), text)
 
 
 class _Text(HTMLParser):
@@ -783,10 +796,6 @@ class _Text(HTMLParser):
         # Imported here: chunking pulls in text_utils, which the gate tests stub.
         from chunking import TABLE_CLOSE, TABLE_OPEN
         self.fence = (TABLE_OPEN, TABLE_CLOSE)
-
-    def _scrub(self, text: str) -> str:
-        """An address in the text itself is held to the allowlist too."""
-        return _URL.sub(lambda m: _kept(m[0], self.hosts), text)
 
     def _attachment(self, name: str) -> str:
         if not (self.site and self.page_id):
@@ -868,11 +877,11 @@ class _Text(HTMLParser):
 
     def handle_data(self, data):
         if not self.skip:
-            self.out.append(self._scrub(data))
+            self.out.append(data)
 
     def unknown_decl(self, data):       # code macros keep their body in CDATA
         if data.startswith("CDATA["):
-            self.out.append(self._scrub(data[6:]))
+            self.out.append(data[6:])
 
 
 def page_text(title: str, storage_html: str, page_id: str = "", site: str = "", hosts=None) -> str:
@@ -888,6 +897,7 @@ def page_text(title: str, storage_html: str, page_id: str = "", site: str = "", 
     # which the chunker joins into one long line (a guide lost its steps).
     body = re.sub(r"\n\s*\n", "\n", body)
     body = re.sub(r"\s*\x00[\s\x00]*", "\n\n", body).strip()
+    body = _scrub(body, p.hosts)       # once, whole: an address split by markup is one again
     return f"{title}\n\n{body}" if body else ""
 
 
