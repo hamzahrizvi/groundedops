@@ -713,12 +713,15 @@ def condense_query(current_query: str, history: list[dict], model: str = CONDENS
     # production config). v10.17: was hardcoded to DeepSeek — a leftover
     # from before Online mode became multi-provider, which meant an
     # openai/anthropic deployment still silently sent condensation prompts
-    # to DeepSeek. Now it follows the same provider _chain_for uses.
+    # to DeepSeek. Now it goes through the same chain as the answer, so an
+    # outage of the default provider falls over to the backup (and honours
+    # the cooldown) instead of dropping the follow-up's context. The chain's
+    # "unable to generate" sentinel (provider "none") is a failure, never a
+    # rewrite.
     from runtime_config import get_generation_mode
     if get_generation_mode() == "api":
-        provider, model = _online_provider_model()
-        result = generate(provider, prompt, model)
-        if not result or not result.get("text"):
+        result = generate_with_fallback("default", prompt)
+        if result.get("provider") == "none":
             logger.warning("API-mode condensation failed — using original query")
             return current_query
         return parse_condense_output(result["text"], fallback_query=current_query)
