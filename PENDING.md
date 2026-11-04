@@ -339,7 +339,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
-| D-20261104-06 | A customer reporting a symptom gets the set-up steps instead of the fault page, because the set-up page now ranks higher | waiting for CEO | your yes |
+| D-20261104-06 | A customer reporting a symptom gets the set-up steps instead of the fault page, because the set-up page now ranks higher | approved, queued | Dev builds it |
 | D-20261104-07 | A price question that also asks something else, or chats, is sent to sales although the manual prices it | approved, queued | Dev builds it |
 | D-20261104-08 | Security item D-20261104-08, details in the office | ready to merge | merges once Security clears it |
 | D-20261104-10 | Security item D-20261104-10, details in the office | approved, queued | Dev builds it |
