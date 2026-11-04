@@ -89,7 +89,7 @@ def main(argv) -> int:
         return 0
 
     docs = wanted(docindex.source_index(), lambda s: bool(figures.figures_for(s)),
-                  rdb.is_excluded, rdb.is_secondary)
+                  rdb.is_excluded, getattr(rdb, "is_secondary", lambda s: False))
     if "--apply" not in argv:
         total = 0
         for s in docs:
