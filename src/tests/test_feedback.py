@@ -50,5 +50,7 @@ def test_a_tester_report_reaches_the_feedback_page():
 def test_the_widget_asks_for_a_rating_and_the_console_reports():
     js = (SRC / "widget" / "groundedops-widget.js").read_text(encoding="utf-8")
     assert "askRating(close)" in js and "askRating(startFresh)" in js and "/widget/rating" in js
+    assert 'hasAttr("data-no-rating")' in js   # the Test chat never asks
+    assert 'data-no-rating' in (SRC / "widget" / "preview.html").read_text(encoding="utf-8")
     html = (SRC / "admin.html").read_text(encoding="utf-8")
     assert "/admin/feedback/report" in html and "viewFeedback()" in html

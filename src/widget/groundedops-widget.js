@@ -2494,10 +2494,11 @@
   }
   /** End-of-chat rating, asked once per conversation when the visitor
    *  minimises or starts over after asking something. Skip counts as asked,
-   *  so it never nags twice. `then` is what they were doing. */
+   *  so it never nags twice. `then` is what they were doing. The console's
+   *  Test chat sets data-no-rating, so staff tests never count as ratings. */
   function askRating(then) {
     var asked = state.messages.some(function (m) { return m.role === "user"; });
-    if (state.rated || !asked || root.querySelector(".go-rate")) return then();
+    if (hasAttr("data-no-rating") || state.rated || !asked || root.querySelector(".go-rate")) return then();
     var stars = 0;
     var box = document.createElement("div");
     box.className = "go-rate";

@@ -56,6 +56,8 @@
       var s = document.createElement("script");
       s.src = "/widget/groundedops-widget.js";
       s.setAttribute("data-api", window.location.origin);
+      // Staff testing here must not land in the customers' star ratings.
+      s.setAttribute("data-no-rating", "");
 
       // ?token=... previews the widget as a SIGNED-IN visitor. Without it
       // the preview is anonymous, which is what most real visitors are and
