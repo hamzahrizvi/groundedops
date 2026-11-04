@@ -197,6 +197,12 @@ stands:
   (8.12).
 - `15f148b` and `cfb762f`: `release.py` mirrors repo paths instead of
   refusing on two READMEs; /query reports "escalated".
+- Fixes from an independent review of the six: `405cdbb` drops only the
+  pronoun, so "anything over Bluetooth" still gets "not mentioned";
+  `7298b39` makes the route tests send console session ids (the origin
+  change had hidden their gaps); `c409cd1` keeps focus in the panel when
+  Send disables itself; `1ec79f7` gives the console the widget's gate on
+  clarify and refusal turns.
 
 Corrected (partly done; a note added in place): CF0 (decisions running,
 but no service account and no token-renewal note), catalogue drift (keys
