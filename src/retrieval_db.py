@@ -1266,11 +1266,14 @@ def _fault_title(source: str | None) -> bool:
 
 def fix_sections(ranked: list[dict], floor: float = FIX_STEPS_MIN_RERANK,
                  max_sections: int = 2,
-                 budget: int = PROCEDURE_COMPLETION_CHARS) -> list[dict]:
+                 budget: int = PROCEDURE_COMPLETION_CHARS,
+                 titles: bool = True) -> list[dict]:
     """The fault-clearing sections a ranking found, each whole and in document
     order, best-ranked section first. A section is picked from a reranked chunk
     (best first) whose leaf heading matches _FIX_HEADING, or, when it has no heading,
-    whose document title states a fault (_fault_title), scoring >= floor, not
+    whose document title states a fault (_fault_title,
+    only when `titles`: the message states the symptom, structure.reports_symptom; a how-to
+    keeps its set-up page first), scoring >= floor, not
     from a secondary document (test scripts, certificates). The section is the
     unbroken run of chunks around it in its document with the same `section`;
     a run longer than what is left of `budget` gives the retrieved chunk alone.
@@ -1283,7 +1286,7 @@ def fix_sections(ranked: list[dict], floor: float = FIX_STEPS_MIN_RERANK,
             sec = (c.get("section") or "").strip()
             leaf = sec.split("›")[-1].strip()
             src = c.get("source")
-            fault = bool(_FIX_HEADING.search(leaf)) if sec else _fault_title(src)
+            fault = bool(_FIX_HEADING.search(leaf)) if sec else (titles and _fault_title(src))
             if (not fault or (src, sec) in seen
                     or is_secondary(src) or c.get("rerank_score", 0.0) < floor):
                 continue

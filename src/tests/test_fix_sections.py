@@ -135,3 +135,8 @@ def test_symptom_titled_page_below_floor_or_secondary_is_not():
     ts = "NV200 Test Script - Software Error Handling.txt"
     retrieval_db.get_collection = lambda: FakeKB(ts)
     assert retrieval_db.fix_sections([kb_hit(ts, 0.9)]) == []
+
+
+def test_symptom_titled_page_needs_titles():
+    retrieval_db.get_collection = lambda: FakeKB(KB)
+    assert retrieval_db.fix_sections([kb_hit()], titles=False) == []

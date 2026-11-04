@@ -6,6 +6,7 @@ from structure import (
     is_meaningful_line,
     simple_similarity,
     reports_failure,
+    reports_symptom,
     asks_for_procedure,
     asks_to_fix,
     lists_on_topic,
@@ -276,3 +277,23 @@ def test_asks_to_fix():
               "how do I install the bezel?", None):
         assert not asks_to_fix(q), q
 
+
+
+def test_reports_symptom():
+    for q in ("plugged a new ICU Lite into the site PC by usb, blue led is on but IMS Local "
+              "search finds nothing. what do i do?",
+              "ICU Lite blue led on, IMS Local cannot see it",
+              "the icu lite is not showing up in ims local, why?",
+              "why won't my hopper pay out?",
+              "how do I fix a hopper that won't pay out?",
+              "note stuck in our bv30, how do i get it out?",
+              "after the update nothing works"):
+        assert reports_symptom(q), q
+    for q in ("how do I install IMS Local on a pc that is not on the network?",
+              "how do i set up the icu lite so it does not need IMS Local every time?",
+              "I want to know how to set it so it doesn't beep",
+              "what are the steps to configure a unit that is not yet on the network?",
+              "does the bv50 not accept polymer notes?",
+              "dips 1 and 3 up, 2 down on the bv50 - is that what i want?",
+              "how do i reset it to factory defaults?", "", None):
+        assert not reports_symptom(q), q

@@ -39,6 +39,7 @@ def test_scoped_fix_it_ask_puts_the_steps_first():
     gen, fs = _ask("note stuck in our bv30, how do i get it out?", True)
     prompt = gen.call_args_list[0][0][1]
     assert fs.called
+    assert fs.call_args.kwargs["titles"] is True
     assert 0 <= prompt.index("LOZENGE STEPS") < prompt.index("CASHBOX TEXT")
 
 
@@ -57,4 +58,11 @@ def test_scoped_bare_symptom_report_gets_the_fault_steps():
                    "nothing after 2 tries", True)
     prompt = gen.call_args_list[0][0][1]
     assert fs.called
+    assert fs.call_args.kwargs["titles"] is True
     assert 0 <= prompt.index("LOZENGE STEPS") < prompt.index("CASHBOX TEXT")
+
+
+def test_scoped_how_to_with_a_failure_word_keeps_title_pages_out():
+    _, fs = _ask("how do i set up the bv30 so it does not beep on every note?", True)
+    assert fs.called
+    assert fs.call_args.kwargs["titles"] is False
