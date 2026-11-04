@@ -19,9 +19,13 @@ Endpoints
     GET  /widget/config   branding + this caller's quota (no answer)
     GET  /widget/quota    remaining credits
     POST /widget/ask      ask a question (costs credits)
+    POST /widget/chat     start a chat: a new id and the token that can delete it
+    POST /widget/forget   delete this chat (needs that token)
 """
 import asyncio
 import collections
+import hashlib
+import hmac
 import re
 import threading
 import uuid
@@ -97,6 +101,7 @@ class FeedbackRequest(BaseModel):
 
 class ForgetRequest(BaseModel):
     session_id: str = Field(..., min_length=8, max_length=MAX_ID_CHARS)
+    delete_token: str = Field("", max_length=MAX_ID_CHARS)
     visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
 
 
@@ -220,6 +225,20 @@ def erase_sessions(session_ids) -> int:
         if len(kept) < len(data):
             jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
         return len(data) - len(kept)
+
+
+def delete_token(session_id: str) -> str:
+    """D-20261104-08: proof that the caller is the browser that started this
+    chat. An HMAC of the id under the server's session secret, handed out only
+    by /widget/chat for an id the server itself chose, so the id alone (which
+    a visitor quotes to support) deletes nothing. '' when no secret is set;
+    /widget/forget then refuses every visitor delete."""
+    import keystore
+    secret = keystore.get_session_secret()
+    if not (secret and session_id):
+        return ""
+    return hmac.new(secret.encode(), b"widget-forget|" + session_id.encode(),
+                    hashlib.sha256).hexdigest()
 
 
 # 8.11: what the visitor is told while the pipeline runs. A stage is marked
@@ -936,16 +955,31 @@ def register(app, answer_query, draft_enquiry=None):
                                      payload.session_id)
         return {"received": True}
 
+    @router.post("/chat")
+    def widget_chat():
+        """PUBLIC -- start a chat. The server picks the id, so the delete token
+        in this reply only ever reaches the browser that started the chat.
+        Nothing is stored."""
+        sid = str(uuid.uuid4())
+        return {"session_id": sid, "delete_token": delete_token(sid)}
+
     @router.post("/forget")
     def widget_forget(payload: ForgetRequest, request: Request):
         """A visitor deletes this conversation: its questions, answers and
-        votes, at once rather than after 90 days. The session id is a random
-        id only this visitor's browser holds."""
+        votes, at once rather than after 90 days. Needs the delete token
+        /widget/chat gave this browser; the bare id is refused (403), so a
+        quoted id cannot delete anything."""
         gate = quota.check_public_write("forget", payload.visitor_id, _client_ip(request))
         if not gate["allowed"]:
             raise HTTPException(status_code=429, detail="Too many requests today.")
+        expected = delete_token(payload.session_id)
+        if not expected or not hmac.compare_digest(expected.encode(),
+                                                   payload.delete_token.encode()):
+            raise HTTPException(status_code=403, detail=(
+                "This chat can only be deleted by our support team. "
+                "Quote its id when you contact them."))
         import retention
-        retention.erase(session_ids=[payload.session_id])
+        retention.erase(session_ids=[payload.session_id], source="visitor")
         return {"deleted": True}
 
     @router.post("/ask/stream")

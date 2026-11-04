@@ -352,7 +352,7 @@ def admin_erase_person(payload: EraseRequest,
     import retention
     sid = payload.session_id.strip()
     out = retention.erase(email=payload.email.strip(), session_ids=[sid] if sid else [],
-                          user_id=payload.user_id.strip())
+                          user_id=payload.user_id.strip(), source="console")
     logger.info(f"erasure request carried out by {me.get('email')}: {out}")
     return {"removed": out}
 

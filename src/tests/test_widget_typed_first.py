@@ -67,6 +67,8 @@ STREAM_429 = _sse(
 posted = []
 stream_body = [STREAM_OK]
 host_token = [""]
+CHAT_OK = {"session_id": "srv-chat-0001", "delete_token": "tok-0001"}
+chat_reply = [CHAT_OK]
 widget_cfg = [{}]
 
 
@@ -87,6 +89,8 @@ def _stub(route):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(widget_cfg[0]))
     if url.endswith("/widget/ask/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body=stream_body[0])
+    if url.endswith("/widget/chat"):
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(chat_reply[0]))
     if url.endswith("/widget/lead"):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(
             {"received": True, "id": "abcd1234-0000", "reference": "GO-ABCD1234"}))
@@ -118,6 +122,7 @@ def setup_function(func):
     posted.clear()
     stream_body[0] = STREAM_OK
     widget_cfg[0] = {}
+    chat_reply[0] = CHAT_OK
     host_token[0] = 'data-token="member-token"' if "signed_in" in func.__name__ else ""
     _page = _browser.new_page()
     _page.route("**/*", _stub)
@@ -155,6 +160,7 @@ def test_buttons_still_scope_the_question():
 def test_a_visitor_can_delete_this_chat():
     _send("How do I remove the bezel?")
     sid = [b for u, b in posted if u.endswith("/widget/ask/stream")][-1]["session_id"]
+    assert sid == "srv-chat-0001", "the server's id is used from the first question"
     _page.click(".go-settings-btn")
     _page.wait_for_selector(f".go-settings:has-text('{sid}')")
     _page.once("dialog", lambda d: d.accept())
@@ -162,7 +168,19 @@ def test_a_visitor_can_delete_this_chat():
     _page.wait_for_selector(".go-b.bot:has-text('Your previous chat has been deleted')")
     forget = [b for u, b in posted if u.endswith("/widget/forget")]
     assert forget and forget[0]["session_id"] == sid, forget
+    assert forget[0]["delete_token"] == "tok-0001", forget
     assert not _page.is_visible(f".go-b:has-text('{ANSWER[:20]}')"), "the old chat is gone from view"
+
+
+def test_a_chat_without_a_token_is_sent_to_support():
+    chat_reply[0] = {}
+    _send("How do I remove the bezel?")
+    sid = [b for u, b in posted if u.endswith("/widget/ask/stream")][-1]["session_id"]
+    assert sid != "srv-chat-0001"
+    _page.click(".go-settings-btn")
+    _page.wait_for_selector(f".go-settings:has-text('{sid}')")
+    assert _page.is_visible(".go-settings:has-text('Our support team deletes it')")
+    assert _page.locator(".go-set-del").count() == 0
 
 
 STREAM_WHICH = _sse(
