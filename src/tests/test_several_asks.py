@@ -17,7 +17,7 @@ from unittest.mock import patch
 # The real module, taken before _harness stubs it (its is_refusal is a
 # constant False there, which would make the refusal checks below vacuous).
 from text_utils import (split_asks, keep_answered_part, is_refusal, PARTIAL_REFUSAL,
-                        ask_check_prompt, unanswered_asks)
+                        ask_check_prompt, unanswered_asks, answers_beyond_refusal)
 import _harness  # noqa: F401 -- load main with lightweight test dependencies
 import main
 
@@ -344,6 +344,56 @@ def test_a_retry_that_refuses_keeps_the_first_answer():
     assert gen.call_count == 3
     assert "192.168.7.1" in out["answer"] and "60 minutes" not in out["answer"]
     assert not is_refusal(out["answer"]), out["answer"]
+
+
+_VARIANT = ("The API is reached at http://192.168.7.1 over the RNDIS link, on "
+            "port 80 for every call you make to it. There is no information "
+            "about how long the bearer token lasts.")
+_DECLINE = ("There is no information about the API address or the bearer "
+            "token. Please contact support.")
+_FULL = "The API is at 192.168.7.1 and a bearer token lasts 60 minutes."
+
+
+def _gen_drafting(draft, check):
+    def _gen(role, prompt, *a, **k):
+        if "Reply with the numbers" in prompt:
+            return {"text": check, "model": "m", "provider": "local"}
+        return {"text": _FULL if "60 minutes" in prompt else draft,
+                "model": "mistral", "provider": "local"}
+    return _gen
+
+
+def _checks(gen):
+    return sum("Reply with the numbers" in c[0][1] for c in gen.call_args_list)
+
+
+def test_answers_beyond_refusal_tells_a_partial_from_a_decline():
+    assert is_refusal(_VARIANT) and keep_answered_part(_VARIANT) == _VARIANT
+    assert answers_beyond_refusal(_VARIANT)
+    assert not answers_beyond_refusal(_DECLINE)
+    assert not answers_beyond_refusal("Sorry. I could not find that in the knowledge base.")
+
+
+def test_a_partial_draft_in_other_words_is_still_rechecked():
+    # D-20261104-05 (C20261102-26): the draft answers one ask and declines
+    # the other in a non-canonical refusal; the recheck must still run.
+    out, gen, _, rdb = _ask(_MSG, None, _keep_all, _gen_drafting(_VARIANT, "2"), _rdb)
+    assert _checks(gen) == 1, "the ask check ran"
+    deeper = [c for c in rdb.call_args_list if c[1].get("top_k", 0) > main.RETRIEVE_K]
+    assert len(deeper) == 1 and "bearer" in deeper[0][0][0], "only the missed ask"
+    assert "60 minutes" in out["answer"], out["answer"]
+
+
+def test_a_whole_decline_is_not_rechecked():
+    out, gen, _, _ = _ask(_MSG, None, _keep_all, _gen_drafting(_DECLINE, "1, 2"), _rdb)
+    assert _checks(gen) == 0, "a whole decline is left to the retries"
+    assert "60 minutes" not in out["answer"], out["answer"]
+
+
+def test_a_partial_draft_the_check_finds_empty_is_not_retried():
+    out, gen, _, _ = _ask(_MSG, None, _keep_all, _gen_drafting(_VARIANT, "1, 2"), _rdb)
+    assert _checks(gen) == 1
+    assert "60 minutes" not in out["answer"], out["answer"]
 
 
 if __name__ == "__main__":
