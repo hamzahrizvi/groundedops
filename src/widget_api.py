@@ -95,6 +95,11 @@ class FeedbackRequest(BaseModel):
     note: str = Field("", max_length=280)
 
 
+class ForgetRequest(BaseModel):
+    session_id: str = Field(..., min_length=8, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+
+
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
 # made-up ids. Filled when /ask returns a pipeline answer.
 # ponytail: in memory, so a restart forgets them and a vote on an answer
@@ -192,6 +197,26 @@ def prune_before(cutoff) -> int:
             return 0
         kept = {k: v for k, v in data.items()
                 if isinstance(v, dict) and (v.get("created_at") or "") >= key}
+        if len(kept) < len(data):
+            jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
+        return len(data) - len(kept)
+
+
+def erase_sessions(session_ids) -> int:
+    """Erasure on request: drop the votes of these conversations, and the
+    answers held in memory for voting on. Returns how many votes went."""
+    ids = {s for s in session_ids if s}
+    if not ids:
+        return 0
+    with _recent_lock:
+        for rid in [k for k, v in _RECENT_ANSWERS.items() if v.get("session_id") in ids]:
+            del _RECENT_ANSWERS[rid]
+    with _feedback_lock:
+        data = jsonstore.load(_FEEDBACK_PATH, {}, label="widget feedback")
+        if not isinstance(data, dict):
+            return 0
+        kept = {k: v for k, v in data.items()
+                if not (isinstance(v, dict) and v.get("session_id") in ids)}
         if len(kept) < len(data):
             jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
         return len(data) - len(kept)
@@ -900,6 +925,18 @@ def register(app, answer_query, draft_enquiry=None):
         interaction_log.log_feedback(payload.request_id, payload.vote,
                                      payload.session_id)
         return {"received": True}
+
+    @router.post("/forget")
+    def widget_forget(payload: ForgetRequest, request: Request):
+        """A visitor deletes this conversation: its questions, answers and
+        votes, at once rather than after 90 days. The session id is a random
+        id only this visitor's browser holds."""
+        gate = quota.check_public_write("forget", payload.visitor_id, _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429, detail="Too many requests today.")
+        import retention
+        retention.erase(session_ids=[payload.session_id])
+        return {"deleted": True}
 
     @router.post("/ask/stream")
     async def widget_ask_stream(payload: AskRequest, request: Request):

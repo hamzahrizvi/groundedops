@@ -159,3 +159,33 @@ def test_prune_every_store():
     assert retention.prune(days_=90, now=NOW) == {
         "logger": 0, "conversations": 0, "widget_api": 0,
         "widget_config": 0, "faq_store": 0}
+
+
+def test_erase_one_person():
+    """An erasure request removes that person's rows now, whatever their
+    age, and nobody else's."""
+    seed()
+    row = lambda sid, q: json.dumps({"timestamp": naive(NEW), "query": q,  # noqa: E731
+                                     "session_id": sid}) + "\n"
+    write("logs.jsonl", row("s-me", "my question") + row("s-other", "their question")
+          + "{torn line\n")
+    write("logs_20260801_000000_000000.jsonl", row("s-me", "my older question"))
+    write("widget_feedback.json", {
+        "r1": {"question": "mine", "session_id": "s-me", "created_at": NEW.isoformat()},
+        "r2": {"question": "theirs", "session_id": "s-other", "created_at": NEW.isoformat()}})
+    leads = json.loads(read("widget_leads.json"))
+    leads[1]["cc_email"] = "New@Example.org"
+    write("widget_leads.json", leads)
+
+    out = retention.erase(email=" new@example.ORG ", session_ids=["s-me"], user_id="u1")
+    assert out == {"widget_config": 1, "logger": 2, "widget_api": 1, "conversations": 10}, out
+
+    lines = read("logs.jsonl").decode().splitlines()
+    assert [json.loads(l)["query"] for l in lines[:-1]] == ["their question"]
+    assert lines[-1] == "{torn line", "erasure leaves rows it cannot read alone"
+    assert not os.path.exists(P("logs_20260801_000000_000000.jsonl"))
+    assert list(json.loads(read("widget_feedback.json"))) == ["r2"]
+    ids = [l["id"] for l in widget_config.list_leads(include_sent=True)]
+    assert sorted(ids) == ["old-lead", "old-stub"], ids
+    assert conversations.list_conversations("u1") == []
+    assert retention.erase() == {}

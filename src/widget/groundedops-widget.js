@@ -469,6 +469,8 @@
     ".go-set-row{font-size:13px;margin-top:6px}" +
     ".go-set-note{font-size:12.5px;color:var(--mut);margin-top:7px;line-height:1.45}" +
     ".go-set-note a{color:var(--a);font-weight:600}" +
+    ".go-set-del{margin-top:6px;background:none;border:1px solid var(--line);border-radius:8px;" +
+    "padding:5px 10px;font:inherit;font-size:12.5px;color:inherit;cursor:pointer}" +
     ".go-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}" +
     ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
@@ -961,7 +963,31 @@
     var box = document.createElement("div");
     box.className = "go-settings";
     box.setAttribute("data-go-settings", "");
-    box.innerHTML = '<div class="go-set-t">Your usage</div><div class="go-set-b">Loading...</div>';
+    box.innerHTML = '<div class="go-set-t">Your usage</div><div class="go-set-b">Loading...</div>' +
+      '<div class="go-set-t" style="margin-top:12px">Your data</div>' +
+      '<div class="go-set-note">This chat is kept for up to 90 days. Its id is <b>' +
+      esc(state.sessionId) + "</b>; quote it if you ask us to delete it.</div>" +
+      '<button type="button" class="go-set-del">Delete this chat now</button>';
+    box.querySelector(".go-set-del").addEventListener("click", function () {
+      if (!window.confirm("Delete this chat? Your questions and our answers are removed from our records.")) return;
+      var btn = this;
+      btn.disabled = true;
+      fetch(cfg.api + "/widget/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: state.sessionId, visitor_id: visitorId() }),
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error(r.status);
+          box.remove();
+          startFresh();
+          say("Your previous chat has been deleted.");
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = "Could not delete it. Try again";
+        });
+    });
     root.querySelector(".go-panel").insertBefore(box, $log);
     refreshQuota().then(function (d) {
       var body = box.querySelector(".go-set-b");

@@ -7497,7 +7497,37 @@ function viewLeads() {
       el("div", { class: s.unsent ? "warn" : "" },
         el("div", { class: "lbl" }, "Not emailed"), el("b", {}, String(s.unsent || 0)))),
     el("div", { "data-tour": "leads-list" }, rows),
+    eraseCard(),
   ];
+}
+
+// UK GDPR: someone asks for their data to be deleted. Their enquiries are
+// found by email; a chat by the id the widget shows under its settings; a
+// signed-in visitor's saved chats by the website's user id.
+function eraseCard() {
+  const f = { email: el("input", { type: "email", placeholder: "name@example.com" }),
+              session_id: el("input", { placeholder: "Chat id from the widget's settings" }),
+              user_id: el("input", { placeholder: "Website user id (signed-in visitors)" }) };
+  const go = async () => {
+    const body = Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value.trim()]));
+    if (!body.email && !body.session_id && !body.user_id) return toast("Fill in at least one field", true);
+    if (!confirm("Delete everything matching these details now? It cannot be recovered.")) return;
+    try {
+      const r = await api("/admin/privacy/erase", { method: "POST", body: JSON.stringify(body) });
+      const n = Object.values(r.removed || {}).filter(v => typeof v === "number").reduce((a, b) => a + b, 0);
+      toast(n ? "Deleted " + n + " record" + (n === 1 ? "" : "s") : "Nothing matched these details");
+      Object.values(f).forEach(i => { i.value = ""; });
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+  };
+  return el("div", { class: "card elev-sm", "data-sec": "Delete a person's data", style: "margin-top:18px" },
+    el("h2", {}, "Delete a person's data"),
+    el("p", { class: "lede", style: "margin-top:0" },
+      "For a request to erase someone's data. Their email removes their enquiries; the chat id "
+      + "removes that conversation's questions, answers and votes. Everything else is deleted "
+      + "after 90 days anyway. Questions on the unanswered list are not linked to who asked."),
+    el("div", { class: "row" }, f.email, f.session_id, f.user_id,
+      el("button", { class: "btn btn-secondary", onclick: go }, "Delete")));
 }
 
 /* ---------------- catalog ---------------- */

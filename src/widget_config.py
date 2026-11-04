@@ -485,6 +485,27 @@ def prune_before(cutoff) -> int:
         return len(items) - len(kept)
 
 
+def erase_email(email: str) -> int:
+    """Erasure on request: delete every enquiry that carries this address in
+    any field. Emailed stubs hold no address, so they never match. Returns
+    how many went."""
+    e = (email or "").strip().lower()
+    if not e:
+        return 0
+
+    def has(l):
+        vals = [l.get("cc_email")] + [v.get("value") for v in (l.get("values") or {}).values()
+                                      if isinstance(v, dict)]
+        return any(str(v or "").strip().lower() == e for v in vals)
+
+    with _leads_lock:
+        items = _load_leads()
+        kept = [l for l in items if not has(l)]
+        if len(kept) < len(items):
+            _save_leads(kept)
+        return len(items) - len(kept)
+
+
 def list_leads(kind: str | None = None, include_handled: bool = True,
                limit: int = 200, include_sent: bool = False) -> list[dict]:
     """The console's list: enquiries not yet emailed. `include_sent` adds the

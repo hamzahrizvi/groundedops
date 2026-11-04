@@ -358,6 +358,8 @@ PUBLIC_WRITE_LIMITS = {
              int(os.getenv("QUOTA_LEADS_PER_IP", "30"))),
     "feedback": (int(os.getenv("QUOTA_VOTES_PER_VISITOR", "50")),
                  int(os.getenv("QUOTA_VOTES_PER_IP", "300"))),
+    # A visitor deleting their own chat rewrites the logs, so it is capped too.
+    "forget": (10, 50),
 }
 
 
