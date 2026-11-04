@@ -4,7 +4,7 @@
 WHY THIS EXISTS
 
 The legacy drops (v13.0, v13.1, v14.0, v15.0) were assembled by hand: work out
-which files changed, copy them flat into a new folder, write a CHANGELOG with a
+which files changed, copy them into a new folder, write a CHANGELOG with a
 "what deploys" table, zip them. Done manually it gets skipped under pressure,
 and a drop that misses a file is worse than no drop — it looks complete.
 
@@ -113,9 +113,33 @@ def changed_files(base: str) -> list[str]:
     return keep
 
 
+def snapshot(files: list[str], root: str, dest: str) -> None:
+    """Copy each repo-relative path to the same relative path under dest.
+
+    The drop mirrors the repo, so README.md and tools/README.md both survive
+    (the old flat drop let one overwrite the other).
+    """
+    for f in files:
+        target = os.path.join(dest, f)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(os.path.join(root, f), target)
+
+
+def zip_drop(dest: str) -> str:
+    """Zip everything under dest into dest/files.zip, keeping relative paths."""
+    zpath = os.path.join(dest, "files.zip")
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        for dirpath, _dirs, names in os.walk(dest):
+            for name in sorted(names):
+                path = os.path.join(dirpath, name)
+                if path != zpath:
+                    z.write(path, os.path.relpath(path, dest))
+    return zpath
+
+
 def changelog(version: str, files: list[str], base: str) -> str:
     rows = "\n".join(
-        f"| `{os.path.basename(f)}` | replaces `{f}` | |" for f in files)
+        f"| `{f}` | replaces `{f}` | |" for f in files)
     log = sh("git", "log", "--oneline", f"{base}..HEAD") or "(nothing committed yet)"
     return f"""# GroundedOps v{version}
 
@@ -170,22 +194,6 @@ def main() -> int:
     for f in files:
         print(f"    {f}")
 
-    # Flat layout matches the existing drops, so two different paths sharing a
-    # basename would silently overwrite one another.
-    seen: dict[str, str] = {}
-    clashes = []
-    for f in files:
-        b = os.path.basename(f)
-        if b in seen:
-            clashes.append((seen[b], f))
-        seen[b] = f
-    if clashes:
-        print("\nREFUSING: two files share a basename and the drop is flat:")
-        for x, y in clashes:
-            print(f"    {x}  <->  {y}")
-        print("Rename one, or snapshot them into subfolders by hand.")
-        return 1
-
     if os.path.isdir(dest) and not a.dry_run:
         print(f"\nREFUSING: {os.path.relpath(dest, ROOT)} already exists.")
         return 1
@@ -195,18 +203,13 @@ def main() -> int:
         return 0
 
     os.makedirs(dest, exist_ok=True)
-    for f in files:
-        shutil.copy2(os.path.join(ROOT, f), os.path.join(dest, os.path.basename(f)))
+    snapshot(files, ROOT, dest)
 
     cl = os.path.join(dest, f"CHANGELOG_v{version}.md")
     with open(cl, "w", encoding="utf-8") as fh:
         fh.write(changelog(version, files, a.base))
 
-    zpath = os.path.join(dest, "files.zip")
-    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in sorted(os.listdir(dest)):
-            if name != "files.zip":
-                z.write(os.path.join(dest, name), name)
+    zip_drop(dest)
 
     with open(VERSION_FILE, "w", encoding="utf-8") as fh:
         fh.write(version + "\n")
