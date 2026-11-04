@@ -19,6 +19,7 @@ class SettingsReq(BaseModel):
     folder_url: str | None = None
     email: str | None = None
     token: str | None = None
+    link_hosts: str | None = None
     clear_token: bool | None = None
 
 
@@ -39,7 +40,8 @@ class RunReq(BaseModel):
 
 
 def _status() -> dict:
-    return {**confluence_sync.overview(), "settings": keystore.get_confluence_settings()}
+    return {**confluence_sync.overview(), "settings": {**keystore.get_confluence_settings(),
+                         "link_hosts_default": confluence_sync.LINK_HOSTS_DEFAULT}}
 
 
 @router.get("/admin/confluence")
