@@ -53,7 +53,8 @@ turns (`blind_eval.py` locks the lab for its "system" phase) so timings stay
 honest. The CEO's lab spending cap (`OPS/lab_cap.json`, set on the Costs
 tab) stops every paid lab call once the day's, week's or month's spend reaches
 it (`blind_eval.py` exits 3); no file means no cap. A branch that conflicts with a fix merged first is sent back to Dev for
-a rebase by `office_merge.py`, and the gate and Security run again on it.
+a rebase by `office_merge.py`, and so is one that adds a Python line where a lost
+backslash-newline joined two lines; the gate and Security run again on it.
 New lanes start with manual permissions: set them to Auto in the app before
 switching them on, or the first command waits forever.
 Usage comes from the app's own samples (`plan-usage-history.json`), so the
