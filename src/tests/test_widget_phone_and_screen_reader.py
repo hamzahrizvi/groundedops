@@ -41,6 +41,7 @@ HERE = Path(__file__).resolve().parent
 WIDGET_JS = (HERE.parent / "widget" / "groundedops-widget.js").read_text(encoding="utf-8")
 
 HOST_HTML = """<!doctype html><html><head><meta charset="utf-8"></head><body>
+<a href="#host">A host page link</a>
 <script src="/w.js" data-api="https://example.test" data-title="Support"
         data-agent-name="Assistant"></script>
 </body></html>"""
@@ -131,6 +132,19 @@ def test_escape_returns_focus_to_the_launcher():
     focused = _page.evaluate(
         "document.activeElement && document.activeElement.className")
     assert focused is not None and "go-launch" in focused
+
+
+def test_tab_stays_inside_the_open_panel():
+    """aria-modal="true" says the page behind is inert, so Tab and
+    Shift+Tab must wrap inside the panel rather than walk out of it into
+    the host page's own links."""
+    _open()
+    _page.wait_for_selector(".go-log button")
+    inside = "!!(document.activeElement && document.activeElement.closest('.go-panel'))"
+    for key in ["Tab"] * 20 + ["Shift+Tab"] * 20:
+        _page.keyboard.press(key)
+        assert _page.evaluate(inside), (key, _page.evaluate(
+            "document.activeElement && document.activeElement.outerHTML.slice(0, 80)"))
 
 
 def test_phone_viewport_fills_the_screen_edge_to_edge():
