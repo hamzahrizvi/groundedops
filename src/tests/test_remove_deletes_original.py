@@ -106,7 +106,8 @@ _INLINE = types.SimpleNamespace(
 
 
 def _upload(name, content, replace):
-    with patch.object(routes_documents, "capability", return_value=True),          patch.object(routes_documents, "threading", _INLINE):
+    with patch.object(routes_documents, "capability", return_value=True), \
+         patch.object(routes_documents, "threading", _INLINE):
         return client.post("/upload", files={"file": (name, content)},
                            headers={"replace-source": replace})
 

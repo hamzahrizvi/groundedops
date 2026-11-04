@@ -144,14 +144,17 @@ def test_product_context_must_not_be_what_makes_a_turn_a_follow_up():
 
     # An unrelated product: the added word is not in the history, so the
     # retrieval rewrite is correctly not mistaken for the conversation's.
-    assert is_followup_turn(q, HIST, f"{q} (NV9 Spectral)") is False,         "product context alone must not make a standalone turn a follow-up"
+    assert is_followup_turn(q, HIST, f"{q} (NV9 Spectral)") is False, \
+        "product context alone must not make a standalone turn a follow-up"
 
     # The product ALREADY under discussion: still indistinguishable, which
     # is why the caller must not pass this string at all.
     assert "NV9USB+" in HIST[0]["q"]
-    assert is_followup_turn(q, HIST, f"{q} (NV9USB+ validator)") is True,         "residual trap: the appended product is in the history"
+    assert is_followup_turn(q, HIST, f"{q} (NV9USB+ validator)") is True, \
+        "residual trap: the appended product is in the history"
 
-    assert is_followup_turn(q, HIST, q) is False,         "given the pre-retrieval query, the same turn is correctly standalone"
+    assert is_followup_turn(q, HIST, q) is False, \
+        "given the pre-retrieval query, the same turn is correctly standalone"
 
 
 def test_the_condensers_own_rewrite_still_counts():

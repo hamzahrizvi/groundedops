@@ -212,7 +212,8 @@ def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
     assert _page.locator("button:has-text('Open NV9 Manual, page 12')").count() == 1
     assert _page.locator("button:has-text('What voltage does it need?')").count() == 1
     assert _page.locator("button:has-text('How do I clean the sensor?')").count() == 1
-    assert _page.locator("button:has-text('How do I remove the bezel?')").count() == 0,         "the question just asked is not offered again"
+    assert _page.locator("button:has-text('How do I remove the bezel?')").count() == 0, \
+        "the question just asked is not offered again"
     n_msgs = _page.evaluate(SAVED_COUNT)
     _page.click("button:has-text('Show more from the manual')")
     _page.wait_for_selector("blockquote.go-quote:has-text('Clip B releases')")

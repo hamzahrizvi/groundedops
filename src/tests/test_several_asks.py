@@ -197,7 +197,9 @@ def _ask(msg, answer, rerank_fn, gen_fn=None, rdb_fn=None):
          patch.object(main, "check_grounding", return_value=(True, 0.97)), \
          patch.object(main, "_structures_for", return_value=[]), \
          patch.object(main.more_context, "build", return_value={"kind": "support"}), \
-         patch.object(main, "log_interaction"),          patch.object(main, "is_refusal", is_refusal),          patch.object(sys.modules["text_utils"], "is_refusal", is_refusal, create=True):
+         patch.object(main, "log_interaction"), \
+         patch.object(main, "is_refusal", is_refusal), \
+         patch.object(sys.modules["text_utils"], "is_refusal", is_refusal, create=True):
         out = main.query(main.QueryRequest(q=msg, skip_faq=True), None)
     return out, gen, rr, rdb
 
