@@ -88,22 +88,22 @@ def _ids(out, by=None):
 def test_bv30_asked_row_brings_power_requirements():
     out = _run(BV30, ["BV30.pdf:x:88"],
                "bv30 bezel keeps flashing red 4 times then blue 1")
-    assert _ids(out) == ["88", "89", "12", "13"]
-    assert _ids(out, "section_reference") == ["12", "13"]
+    assert _ids(out) == ["88", "89", "12"]
+    assert _ids(out, "section_reference") == ["12"]
     assert out[2]["retrieval_score"] == 0.0
 
 
 def test_nv4000_chain_reaches_page_52_and_its_section():
     out = _run(NV4000, ["NV4000.pdf:x:98"],
                "our nv4000 bezel keeps flashing 4 red then 1 blue, PSU?")
-    assert _ids(out) == ["98", "99", "100", "30", "31"]
+    assert _ids(out) == ["98", "99", "100", "30"]
     assert all(c["with_previous"] for c in out[1:3])
-    assert _ids(out, "section_reference") == ["30", "31"]
+    assert _ids(out, "section_reference") == ["30"]
 
 
 def test_merged_first_cell_row_is_matched():
     out = _run(NV4000, ["NV4000.pdf:x:98"], "nv4000 blinking red four blue two")
-    assert _ids(out, "section_reference") == ["30", "31"]
+    assert _ids(out, "section_reference") == ["30"]
 
 
 def test_without_flash_words_behaviour_is_unchanged():
@@ -123,9 +123,11 @@ def test_row_without_pointer_fetches_nothing():
     assert _ids(out) == ["40"]
 
 
-def test_section_cut_at_budget_in_document_order():
+def test_opening_chunk_only_and_within_budget():
     by = {c["id"]: c for c in BV30}
-    out = rdb._referenced_sections(
-        [dict(by["BV30.pdf:x:89"])], "flashing 4 red 1 blue", BV30,
-        budget=len(by["BV30.pdf:x:12"]["text"]) + 5)
-    assert _ids(out, "section_reference") == ["12"]
+    t = len(by["BV30.pdf:x:12"]["text"])
+    for budget, want in ((t + 5, ["12"]), (t - 1, [])):
+        out = rdb._referenced_sections(
+            [dict(by["BV30.pdf:x:89"])], "flashing 4 red 1 blue", BV30,
+            budget=budget)
+        assert _ids(out, "section_reference") == want

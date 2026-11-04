@@ -1515,7 +1515,10 @@ def _referenced_sections(out: list[dict], query: str, all_chunks: list[dict],
     "4 red then 1 blue". A row is asked when its two leading counts occur
     side by side in the question's counts; a row whose first cell is merged
     (empty) takes the count of the last full row above it. Appended at the
-    end, retrieval_score 0.0, fetched_by="section_reference". D-20261030-14.
+    end, retrieval_score 0.0, fetched_by="section_reference". Only the section's OPENING chunk (lowest
+    _order_key), not the whole section: the rest of NV4000's Power Requirements
+    carries an "NV200 Spectral ... 7A" line the verifier refused (round 2).
+    D-20261030-14.
     """
     import tables as _tables
     asked = [int(d) if d else _COUNT_WORDS[w.lower()]
@@ -1557,23 +1560,23 @@ def _referenced_sections(out: list[dict], query: str, all_chunks: list[dict],
                 _POINTER + re.escape(h) + r"(?!\w)", row, re.I)), None)
             if not h:
                 continue
-            for a in sorted((a for a in all_chunks if a.get("source") == src
-                             and h.lower() in {p.lower() for p in
-                                               _heading_parts(a.get("section"))}),
-                            key=lambda a: _order_key(a.get("id"))):
-                if a["id"] in have:
-                    continue
-                if spent + len(a.get("text") or "") > budget:
-                    break
-                spent += len(a.get("text") or "")
-                have.add(a["id"])
-                added.append({"id": a["id"], "text": a["text"], "source": src,
-                              "page": a.get("page"),
-                              "section": a.get("section", ""),
-                              "retrieval_score": 0.0,
-                              "fetched_by": "section_reference"})
-                logger.info("section reference: %s -> %s (%s)",
-                            c.get("id"), a["id"], h)
+            a = min((a for a in all_chunks if a.get("source") == src
+                     and h.lower() in {p.lower() for p in
+                                       _heading_parts(a.get("section"))}),
+                    key=lambda a: _order_key(a.get("id")), default=None)
+            if a is None or a["id"] in have:
+                continue
+            if spent + len(a.get("text") or "") > budget:
+                continue
+            spent += len(a.get("text") or "")
+            have.add(a["id"])
+            added.append({"id": a["id"], "text": a["text"], "source": src,
+                          "page": a.get("page"),
+                          "section": a.get("section", ""),
+                          "retrieval_score": 0.0,
+                          "fetched_by": "section_reference"})
+            logger.info("section reference: %s -> %s (%s)",
+                        c.get("id"), a["id"], h)
     return out + added if added else out
 
 
@@ -1603,7 +1606,7 @@ def complete_tables(chunks: list[dict],
 
     When `query` asks about flashes or blinks (D-20261030-14), the table is
     followed through every continuation, not one: the NV4000 bezel table runs
-    chunks 98 -> 99 -> 100 and "4 red then 1 blue" is on 100. And the section
+    chunks 98 -> 99 -> 100 and "4 red then 1 blue" is on 100. And the opening chunk of the section
     the asked row points at ("...in Power Requirements") is appended
     (_referenced_sections). Without `query`, behaviour is as before.
     """
