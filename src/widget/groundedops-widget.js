@@ -204,6 +204,7 @@
 
   var state = {
     sessionId: null,
+    deleteToken: null,     // D-20261104-08: from /widget/chat; only it can delete this chat
     stage: "intent",     // intent | category | product | chat
     intent: null,
     category: null,      // {key, name}
@@ -262,6 +263,25 @@
     try {
       localStorage.removeItem(STORE_KEY);
     } catch (e) {}
+  }
+
+  // D-20261104-08: just before a chat's first question the server names the
+  // chat and hands back the token that can delete it; the id alone, which
+  // the visitor may quote to support, cannot. A chat that has already asked
+  // (or a failed call) keeps its id and has no token: support deletes it.
+  function ensureChat() {
+    var asked = state.messages.some(function (m) { return m.role === "user"; });
+    if (state.deleteToken || asked) return Promise.resolve();
+    var s = state;
+    return fetch(cfg.api + "/widget/chat", { method: "POST" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (s !== state || !d || !d.session_id || !d.delete_token) return;
+        state.sessionId = d.session_id;
+        state.deleteToken = d.delete_token;
+        save();
+      })
+      .catch(function () {});
   }
 
   // ── sign-in round trip ────────────────────────────────────────────────
@@ -963,21 +983,26 @@
     var box = document.createElement("div");
     box.className = "go-settings";
     box.setAttribute("data-go-settings", "");
+    var canDelete = !!state.deleteToken;
     box.innerHTML = '<div class="go-set-t">Your usage</div><div class="go-set-b">Loading...</div>' +
       '<div class="go-set-t" style="margin-top:12px">Your data</div>' +
       '<div class="go-set-note">This chat is kept for up to 90 days. Its id is <b>' +
-      esc(state.sessionId) + "</b>; quote it if you ask us to delete it.</div>" +
-      '<button type="button" class="go-set-del">Delete this chat now</button>';
-    box.querySelector(".go-set-del").addEventListener("click", function () {
+      esc(state.sessionId) + "</b>. Our support team deletes it if you quote that id to them" +
+      (canDelete ? ", or you can delete it now.</div>" +
+                   '<button type="button" class="go-set-del">Delete this chat now</button>'
+                 : ".</div>");
+    if (canDelete) box.querySelector(".go-set-del").addEventListener("click", function () {
       if (!window.confirm("Delete this chat? Your questions and our answers are removed from our records.")) return;
       var btn = this;
       btn.disabled = true;
       fetch(cfg.api + "/widget/forget", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: state.sessionId, visitor_id: visitorId() }),
+        body: JSON.stringify({ session_id: state.sessionId, delete_token: state.deleteToken,
+                               visitor_id: visitorId() }),
       })
         .then(function (r) {
+          if (r.status === 403) { btn.textContent = "Please ask our support team to delete it"; return; }
           if (!r.ok) throw new Error(r.status);
           box.remove();
           startFresh();
@@ -1357,6 +1382,7 @@
     clearSaved();
     state = {
       sessionId: uuid(),
+      deleteToken: null,
       stage: "intent",
       intent: null,
       category: null,
@@ -2149,6 +2175,7 @@
     }
 
     busy = true;
+    var ready = ensureChat();   // before heard(q): it checks the chat has not asked yet
     keepFocus($send, $in);
     $send.disabled = true;
     clearChips();
@@ -2158,7 +2185,7 @@
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
 
-    fetch(cfg.api + "/widget/ask/stream", {
+    ready.then(function () { return fetch(cfg.api + "/widget/ask/stream", {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
@@ -2172,7 +2199,7 @@
         faq_id: opts.faqId || null,
         language: detectedLanguage(),
       }),
-    })
+    }); })
       .then(function (r) {
         if (!r.ok) {
           // A 429 quota_exceeded is not a connection failure - it is the

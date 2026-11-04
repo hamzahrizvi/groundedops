@@ -185,18 +185,43 @@ def erase_sessions(session_ids) -> int:
     ids = {s for s in session_ids if s}
     if not ids:
         return 0
+    # Rows are written with json.dumps, so an id appears in its escaped form.
+    if not _mentions([json.dumps(s)[1:-1] for s in ids]):
+        return 0
     return _drop_rows(lambda r: r is not None and r.get("session_id") in ids)
+
+
+def _log_files() -> list:
+    """logs_*.jsonl beside LOG_FILE, then LOG_FILE itself (may not exist)."""
+    import glob
+    folder = os.path.dirname(os.path.abspath(LOG_FILE))
+    return sorted(glob.glob(os.path.join(folder, "logs_*.jsonl"))) + [
+        os.path.abspath(LOG_FILE)]
+
+
+def _mentions(needles) -> bool:
+    """D-20261104-08: does any log file hold one of these strings? Read
+    without the lock, so an id with no rows (made up, or a chat that never
+    asked) makes live answers wait for nothing and rewrites no file."""
+    folder = os.path.dirname(os.path.abspath(LOG_FILE))
+    for path in _log_files() + [os.path.join(folder, "logs.json")]:
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    if any(n in line for n in needles):
+                        return True
+        except OSError:
+            continue
+    return False
 
 
 def _drop_rows(drop) -> int:
     """Rewrite every log file without the rows `drop(row)` is true for; a
     torn line from a crash mid-write is passed as None."""
-    import glob
     folder = os.path.dirname(os.path.abspath(LOG_FILE))
     removed = 0
     with _lock:
-        for path in sorted(glob.glob(os.path.join(folder, "logs_*.jsonl"))) + [
-                os.path.abspath(LOG_FILE)]:
+        for path in _log_files():
             if not os.path.exists(path):
                 continue
             with open(path, encoding="utf-8") as f:

@@ -6,7 +6,9 @@ vote puts the question on the console's FAQs-from-customers page.
 """
 import inspect
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -108,8 +110,15 @@ def test_erasure_routes():
     import _harness
     import retention
     with patch.object(retention, "erase", return_value={"logger": 2}) as er:
-        assert client.post("/widget/forget", json={"session_id": "s-forget-me"}).status_code == 200
-        er.assert_called_with(session_ids=["s-forget-me"])
+        tok = widget_api.delete_token("s-forget-me")
+        assert tok, "the harness sets SESSION_SECRET"
+        assert client.post("/widget/forget", json={"session_id": "s-forget-me"}).status_code == 403
+        assert client.post("/widget/forget", json={"session_id": "s-forget-me",
+                                                   "delete_token": "0" * 64}).status_code == 403
+        er.assert_not_called()
+        assert client.post("/widget/forget", json={"session_id": "s-forget-me",
+                                                   "delete_token": tok}).status_code == 200
+        er.assert_called_with(session_ids=["s-forget-me"], source="visitor")
         assert client.post("/widget/forget", json={"session_id": ""}).status_code == 422
         assert client.post("/admin/privacy/erase", json={"email": "a@b.c"}).status_code == 401
         sup = {"x-admin-password": _harness.SUPPORT_TOKEN}
@@ -117,5 +126,60 @@ def test_erasure_routes():
         r = client.post("/admin/privacy/erase", headers=sup,
                         json={"email": " a@b.c ", "session_id": "s1"})
         assert r.status_code == 200 and r.json()["removed"] == {"logger": 2}
-        er.assert_called_with(email="a@b.c", session_ids=["s1"], user_id="")
+        er.assert_called_with(email="a@b.c", session_ids=["s1"], user_id="", source="console")
     assert "/widget/forget" in WIDGET_JS and "Delete this chat now" in WIDGET_JS
+
+
+def test_a_chat_start_hands_out_the_token_for_a_new_id():
+    a = client.post("/widget/chat")
+    b = client.post("/widget/chat")
+    assert a.status_code == 200 and b.status_code == 200
+    a, b = a.json(), b.json()
+    assert a["session_id"] != b["session_id"]
+    for d in (a, b):
+        assert d["delete_token"] == widget_api.delete_token(d["session_id"])
+        assert len(d["delete_token"]) == 64 and int(d["delete_token"], 16) >= 0
+
+
+def test_forget_against_a_test_log_folder():
+    # The harness stubs `logger`; load the real one for this test only.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "real_logger", Path(widget_api.__file__).parent / "logger.py")
+    real_log = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real_log)
+    tmp = tempfile.mkdtemp(prefix="forget_")
+    logs = os.path.join(tmp, "logs.jsonl")
+    tomb = os.path.join(tmp, "erasures.jsonl")
+    with open(logs, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"timestamp": "2026-11-04T10:00:00", "session_id": "forget-sid-0001",
+                            "query": "my secret question"}) + "\n")
+        f.write(json.dumps({"timestamp": "2026-11-04T10:01:00", "session_id": "someone-else",
+                            "query": "their question"}) + "\n")
+    read = lambda p: open(p, encoding="utf-8").read()  # noqa: E731
+    post = lambda sid, tok: client.post("/widget/forget", json={  # noqa: E731
+        "session_id": sid, "delete_token": tok, "visitor_id": "fv-1"})
+    with patch.dict(sys.modules, {"logger": real_log}), \
+            patch.object(real_log, "LOG_FILE", logs), \
+            patch.object(widget_api, "_FEEDBACK_PATH", os.path.join(tmp, "widget_feedback.json")):
+        for tok in ("", "0" * 64, widget_api.delete_token("other-chat-0001")):
+            assert post("forget-sid-0001", tok).status_code == 403
+            assert "my secret question" in read(logs)
+            assert not os.path.exists(tomb)
+
+        assert post("forget-sid-0001", widget_api.delete_token("forget-sid-0001")).status_code == 200
+        assert "my secret question" not in read(logs) and "their question" in read(logs)
+        lines = read(tomb).splitlines()
+        assert len(lines) == 1
+        row = json.loads(lines[0])
+        assert row["source"] == "visitor" and row["removed"]["logger"] == 1
+        assert len(row["sessions"]) == 1
+        assert "forget-sid-0001" not in lines[0] and "secret" not in lines[0]
+
+        before = os.stat(logs).st_mtime_ns
+        with patch.object(real_log, "_drop_rows",
+                          side_effect=AssertionError("scanned under the lock")):
+            assert post("never-asked-0001", widget_api.delete_token("never-asked-0001")).status_code == 200
+        assert os.stat(logs).st_mtime_ns == before
+        lines = read(tomb).splitlines()
+        assert len(lines) == 2 and json.loads(lines[1])["removed"]["logger"] == 0

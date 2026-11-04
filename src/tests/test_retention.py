@@ -165,6 +165,8 @@ def test_erase_one_person():
     """An erasure request removes that person's rows now, whatever their
     age, and nobody else's."""
     seed()
+    if os.path.exists(P("erasures.jsonl")):
+        os.remove(P("erasures.jsonl"))
     row = lambda sid, q: json.dumps({"timestamp": naive(NEW), "query": q,  # noqa: E731
                                      "session_id": sid}) + "\n"
     write("logs.jsonl", row("s-me", "my question") + row("s-other", "their question")
@@ -179,6 +181,11 @@ def test_erase_one_person():
 
     out = retention.erase(email=" new@example.ORG ", session_ids=["s-me"], user_id="u1")
     assert out == {"widget_config": 1, "logger": 2, "widget_api": 1, "conversations": 10}, out
+    tomb = read("erasures.jsonl")
+    assert len(tomb.splitlines()) == 1
+    t = json.loads(tomb)
+    assert t["source"] == "console" and t["removed"] == out
+    assert b"s-me" not in tomb and b"xample" not in tomb
 
     lines = read("logs.jsonl").decode().splitlines()
     assert [json.loads(l)["query"] for l in lines[:-1]] == ["their question"]
