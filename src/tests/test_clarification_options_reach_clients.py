@@ -68,7 +68,7 @@ def test_the_console_renders_them_too():
     assert "clarification_options" in html, \
         ("the test chat must match what a customer sees -- that is the one "
          "thing this page is for")
-    block = html[html.index("r.clarification_options"):][:400]
+    block = html[html.index("(r.clarification_options || []).forEach"):][:400]
     assert "send(o)" in block
 
 

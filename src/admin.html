@@ -7890,10 +7890,13 @@ function viewTest() {
 
       // 8.12: what the widget offers after an answer (afterAnswer, docChip),
       // with its labels, so the test chat shows what a customer sees. Same
-      // gate as the widget: not on a flagged, outage or sign-in turn.
+      // gate as the widget: not on a flagged, outage or sign-in turn, nor
+      // when it offers replies or asks which one; a refusal gets the link only.
       const mc = r.more_context || {};
-      if (!r.flagged && !r.service_degraded && !r.needs_sign_in) {
-        if (mc.kind === "detail" && (mc.passages || []).length) {
+      const asksBack = (r.suggested_replies || []).length
+        || (r.needs_clarification && (r.clarification_options || []).length);
+      if (!r.flagged && !r.service_degraded && !r.needs_sign_in && !asksBack) {
+        if (!r.offer_support && mc.kind === "detail" && (mc.passages || []).length) {
           const det = el("details", { style: "margin-top:9px" });
           det.append(el("summary", { class: "lbl", style: "cursor:pointer;user-select:none" },
                         "Show more from the manual"));
