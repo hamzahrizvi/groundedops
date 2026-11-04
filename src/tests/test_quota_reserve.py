@@ -140,3 +140,24 @@ def test_one_at_a_time_is_charged_as_before():
         rem = [_post(uid)["quota"]["remaining"] for _ in range(3)]
     c = quota.EFFORT["standard"]["credits"]
     assert rem[0] - rem[1] == c and rem[1] - rem[2] == c
+
+
+def _draft(uid):
+    r = client.post("/widget/draft_enquiry",
+                    json={"kind": "support", "source": "written", "notes": "NV9 will not power on."},
+                    headers={"Authorization": "Bearer " + run_live.member_token(uid)})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_drafting_charges_one_only_when_written():
+    uid = _uid_new()
+    with patch.object(main, "generate_with_fallback", side_effect=RuntimeError("down")):
+        d = _draft(uid)
+    assert d["written_by"] == "assembled"
+    assert d["quota"]["remaining"] == d["quota"]["limit"]
+    with patch.object(main, "generate_with_fallback",
+                      return_value={"text": "Enquiry: NV9 has no power."}):
+        d = _draft(uid)
+    assert d["written_by"] == "model"
+    assert d["quota"]["remaining"] == d["quota"]["limit"] - 1
