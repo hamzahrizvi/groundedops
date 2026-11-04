@@ -855,10 +855,11 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
 
 # ── apply ───────────────────────────────────────────────────────────────
 
-def _ingest(content: bytes, source: str, cat: str | None, prod: str | None) -> None:
+def _ingest(content: bytes, source: str, cat: str | None, prod: str | None,
+            describe_pictures: bool = False) -> None:
     from ingest import ingest_file
     ingest_file(content, source, category_key=cat, product_key=prod,
-                replace_existing=True)
+                replace_existing=True, describe_pictures=describe_pictures)
 
 
 def _mark_internal(sources: list[str], on: bool) -> None:
@@ -895,7 +896,7 @@ def _bundle_text(api: _Api, it: dict) -> str:
     return "\n\n".join(parts)
 
 
-def _apply(api: _Api) -> dict:
+def _apply(api: _Api, describe_pictures: bool = False) -> dict:
     st = _load()
     res = {"at": _now(), "kind": "sync", "added": [], "updated": [], "removed": [],
            "errors": []}
@@ -959,7 +960,7 @@ def _apply(api: _Api) -> dict:
                 # Marked before it goes in, so not even a moment passes where
                 # an internal document can answer a customer.
                 _mark_internal([src], it.get("decision") == "internal")
-                _ingest(content, src, cat, prod or None)
+                _ingest(content, src, cat, prod or None, describe_pictures)
                 if prod and not _filed(src)[1]:
                     catalog.attach_source(cat, prod, src)
                 for upload in uploads:
@@ -1023,11 +1024,13 @@ class Busy(RuntimeError):
 RECHECK_AFTER = float(os.getenv("CONFLUENCE_RECHECK_HOURS", "6")) * 3600
 
 
-def run(apply: bool = True, check: bool | None = None) -> dict:
+def run(apply: bool = True, check: bool | None = None,
+        describe_pictures: bool = False) -> dict:
     """Check, then (unless apply=False) sync. check=None reads Confluence
     first only when the last check is older than RECHECK_AFTER; a sync
     always checks when check=True (the daily run). Returns and records the
-    result."""
+    result. describe_pictures: the admin said yes to paying for new or
+    changed pictures to be described (D-20261022-16); the daily run never does."""
     if check is None:
         check = not apply or _since_last_check() > RECHECK_AFTER
     if not _run_lock.acquire(blocking=False):
@@ -1040,7 +1043,7 @@ def run(apply: bool = True, check: bool | None = None) -> dict:
             api, root_kind, root_id = _connect()
             res = _check(api, root_kind, root_id) if check else {}
             if apply:
-                res = {**_apply(api), **{k: res[k] for k in ("found", "new", "changed", "gone") if k in res},
+                res = {**_apply(api, describe_pictures), **{k: res[k] for k in ("found", "new", "changed", "gone") if k in res},
                        "checked": check}
         except Cancelled:
             # Stopped during the check: it writes nothing until it finishes,
@@ -1067,10 +1070,11 @@ def run(apply: bool = True, check: bool | None = None) -> dict:
         _run_lock.release()
 
 
-def run_in_background(apply: bool = True, check: bool | None = None) -> None:
+def run_in_background(apply: bool = True, check: bool | None = None,
+                      describe_pictures: bool = False) -> None:
     def go():
         try:
-            run(apply, check)
+            run(apply, check, describe_pictures)
         except Busy:
             pass                     # a second click while one runs
     threading.Thread(target=go, name="confluence-sync", daemon=True).start()

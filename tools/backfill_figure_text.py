@@ -11,7 +11,7 @@ process writing Chroma leaves the server's handle stale. Run it under the lab
 lock (it loads the OCR and embedding models). New uploads get figure text
 only with FIGURE_TEXT_INDEX=1 in GO_DATA's .env.
 
-FIGURE_DESCRIBE=1 (env or GO_DATA .env) also describes each crop with the
+--describe also describes each crop with the
 vision model (FIGURE_DESCRIBE_MODEL; claude-* uses the Anthropic key); kept in the sidecar, so a
 re-run pays only for new crops.
 
@@ -21,6 +21,7 @@ re-run pays only for new crops.
 
   python tools/backfill_figure_text.py            # dry run: list documents
   python tools/backfill_figure_text.py --apply    # add the chunks
+  python tools/backfill_figure_text.py --apply --describe   # and pay to describe new crops
   python tools/backfill_figure_text.py --remove   # take every figure-text chunk out
   python tools/backfill_figure_text.py --selftest
 """
@@ -107,7 +108,7 @@ def main(argv) -> int:
         for s in docs:
             t = time.time()
             try:
-                n = ingest.index_figure_text(s)
+                n = ingest.index_figure_text(s, describe_pictures="--describe" in argv)
             except Exception as e:
                 failed += 1
                 print(f"FAILED {s}: {type(e).__name__}: {e}", flush=True)

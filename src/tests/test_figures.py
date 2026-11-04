@@ -174,3 +174,28 @@ def test_describe_image_uses_claude_when_an_anthropic_key_is_set():
     assert "anthropic.com" in post.call_args.args[0]
     block = post.call_args.kwargs["json"]["messages"][0]["content"][0]
     assert block["type"] == "image" and block["source"]["media_type"] == "image/png"
+
+
+def test_a_new_version_keeps_descriptions_only_for_unchanged_pictures():
+    """A re-sync or new revision must not pay again for a picture that did
+    not change, and must not keep a description for one that did."""
+    import json
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(docstore, "store_dir", return_value=tmp):
+        pdf = os.path.join(tmp, "m.pdf")
+        _pdf(pdf, [[(100, 500, 200, 150, RED)], [(100, 500, 200, 150, BLUE)]])
+        figures.extract_figures(pdf, "Manual.pdf")
+        side = os.path.join(figures.figures_dir("Manual.pdf"), figures.SIDECAR)
+        data = json.load(open(side, encoding="utf-8"))
+        for n in data["figures"]:
+            data["figures"][n].update(desc="was " + n, desc_model="m", desc_tokens=[1, 1])
+        json.dump(data, open(side, "w", encoding="utf-8"))
+        figures._sidecar_cache.clear()
+        _pdf(pdf, [[(100, 500, 200, 150, RED)], [(100, 500, 200, 150, RED)]])
+        figures.extract_figures(pdf, "Manual.pdf")
+        meta = figures.figures_for("Manual.pdf")
+        assert meta["p1_1.png"]["desc"] == "was p1_1.png"
+        assert meta["p2_1.png"]["desc"] == "was p1_1.png"   # same picture as p1's old one
+        _pdf(pdf, [[(100, 500, 200, 150, BLUE)]])
+        figures.extract_figures(pdf, "Manual.pdf")
+        assert "desc" not in figures.figures_for("Manual.pdf")["p1_1.png"]

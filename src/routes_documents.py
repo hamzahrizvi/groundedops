@@ -78,7 +78,8 @@ _INGEST_LOCK = threading.Lock()
 def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
                    category_key: str | None = None, product_key: str | None = None,
                    ingest_provider: str | None = None,
-                   replace_source: str | None = None):
+                   replace_source: str | None = None,
+                   describe_pictures: bool = False):
     def _progress(stage, done, total):
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id].update(
@@ -96,7 +97,7 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
             content, filename, api_keys=api_keys, progress=_progress,
             category_key=category_key, product_key=product_key,
             replace_existing=bool(replace_source and replace_source == filename),
-            report=report)
+            report=report, describe_pictures=describe_pictures)
         # A new version of a document already held. The old chunks go only
         # AFTER the new ones are in: if ingest fails we still have the
         # version we had, which is the whole point of replacing rather than
@@ -230,6 +231,8 @@ async def upload(request: Request,
     category_key = _h.get("category-key") or _h.get("category_key")
     product_key = _h.get("product-key") or _h.get("product_key")
     ingest_provider = _h.get("ingest-provider") or _h.get("ingest_provider")
+    # The console's "Describe pictures" tick: paid per picture, so off unless sent.
+    describe_pictures = (_h.get("describe-pictures") or _h.get("describe_pictures") or "") == "1"
 
     if not (category_key and product_key):
         # Loud, with the header names actually received — one upload tells
@@ -276,7 +279,7 @@ async def upload(request: Request,
                                 "pct": 0.0, "done": False}
     threading.Thread(target=_ingest_worker,
                      args=(job_id, content, filename, {}, category_key, product_key,
-                           ingest_provider, replace or None),
+                           ingest_provider, replace or None, describe_pictures),
                      daemon=True).start()
     return {"job_id": job_id, "file": filename, "status": "started"}
 

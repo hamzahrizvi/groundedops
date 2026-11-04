@@ -4362,10 +4362,20 @@ function cfSyncCard(c) {
   }, label);
   const busy = c.running;
   const pending = c.items.filter(i => CF_PENDING.includes(i.status)).length;
-  const run = apply => cfPost("/admin/confluence/run", { apply },
+  const run = (apply, describe_pictures = false) => cfPost("/admin/confluence/run", { apply, describe_pictures },
     apply ? "Sync started" : "Checking Confluence");
+  // D-20261022-16: describing pictures is paid per picture, so a sync asks
+  // first. Unchanged pictures keep their descriptions either way.
+  const syncAsk = async () => {
+    const a = await askConfirm({ title: "Have any pictures changed?",
+      body: "If a synced document has new or changed pictures (drawings, diagrams, photos), they can be sent "
+        + "to Claude (Anthropic) to be described, so the bot can answer from them. About 1p a picture. "
+        + "Pictures that have not changed keep their descriptions at no cost.",
+      alt: "Sync, no pictures", ok: "Sync and describe pictures" });
+    if (a) run(true, a === true);
+  };
   const checkBtn = el("button", { class: "btn btn-ghost", onclick: () => run(false) }, "Check for changes");
-  const syncBtn = el("button", { class: "btn btn-primary", onclick: () => run(true) },
+  const syncBtn = el("button", { class: "btn btn-primary", onclick: syncAsk },
     "Sync now" + (pending ? " (" + pending + ")" : ""));
   checkBtn.disabled = syncBtn.disabled = !c.configured || !!busy;
 
@@ -4475,7 +4485,8 @@ async function withBusy(title, fn) {
   try { return await fn(b); } finally { b.done(); }
 }
 
-function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
+// `alt` adds a second answer button; choosing it resolves "alt".
+function askConfirm({ title, body, ok = "Continue", snooze = "", alt = "" }) {
   if (snooze && snoozed(snooze)) return Promise.resolve(true);
   return new Promise(resolve => {
     const dlg = el("dialog", { class: "cf-dlg ask-dlg", "aria-label": title });
@@ -4499,7 +4510,8 @@ function askConfirm({ title, body, ok = "Continue", snooze = "" }) {
       el("p", { class: "ask-body" }, body),
       tick ? el("label", { class: "ask-snooze" }, tick, "Don't warn me about this for a week") : null,
       el("div", { class: "cf-dlg-foot" },
-        el("button", { class: "btn btn-ghost", onclick: () => done(false) }, "Cancel"), go));
+        el("button", { class: "btn btn-ghost", onclick: () => done(false) }, "Cancel"),
+        alt ? el("button", { class: "btn btn-ghost", onclick: () => done("alt") }, alt) : null, go));
     document.body.append(dlg);
     dlg.showModal();
     go.focus();
@@ -5356,6 +5368,19 @@ function viewDocuments() {
         el("span", {}, p.categoryName + " › " + p.name)))));
   const productKeys = p => [...new Set([p.key, ...also])].join(",");
 
+  // D-20261022-16: describing pictures is paid per picture (Claude), so it is
+  // off unless ticked for this upload. Unchanged pictures of a replaced
+  // version keep their descriptions for free either way.
+  const picBox = el("input", { type: "checkbox", style: "margin-top:3px" });
+  const picRow = el("label", { class: "row", style: "align-items:flex-start;margin-top:12px;cursor:pointer" },
+    picBox,
+    el("div", { style: "flex:1 1 220px;min-width:0" },
+      el("b", {}, "Describe the pictures in these documents"),
+      el("div", { style: "font-size:12.5px;margin-top:2px;"
+        + "color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
+        "Sends each new picture to Claude (Anthropic) so drawings and diagrams can answer questions. "
+        + "Costs about 1p a picture; a 100-page manual is usually under £1. Off: no pictures leave this machine.")));
+
   const drop = el("div", { class: "drop off" },
     el("b", {}, "Choose a product first"),
     "Then drop files here, or click to browse");
@@ -5379,7 +5404,8 @@ function viewDocuments() {
     const headers = { "x-admin-password": tok,
                       "category-key": p.category, "product-key": productKeys(p) };
     if (replaceSource) headers["replace-source"] = replaceSource;
-    const r = await fetch(API + "/upload", { method: "POST", body: fd, headers });
+    if (picBox.checked) headers["describe-pictures"] = "1";
+    const r = await fetch(API + "/upload",{ method: "POST", body: fd, headers });
     if (r.status === 409) {
       const body = await r.json().catch(() => null);
       const d = (body && body.detail) || {};
@@ -5920,6 +5946,7 @@ function viewDocuments() {
         el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
         el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel),
         el("div", {}, el("label", { class: "flabel" }, "Optional"), alsoPick)),
+      picRow,
       // Indexing a document needs the embedding model, so this is the one
       // control on the page that has to wait for it. POST /upload refuses
       // on the same capability, so the grey is never a lie.

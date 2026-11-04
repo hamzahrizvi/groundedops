@@ -67,6 +67,7 @@ class World:
         self.catalog = FakeCatalog()
         self.uploads = []                # documents uploaded by hand, by name
         self.internal = set()            # documents marked internal
+        self.described = []              # describe_pictures per ingest
 
     def _with(self, fn, api=None):
         saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
@@ -76,8 +77,9 @@ class World:
         cs._mark_internal = mark
         cs._connect = lambda: (api, "pages", "1")
         cs._uploads = lambda items: {cs._title_key(u): u for u in self.uploads}
-        def ingest(content, source, cat, prod):
+        def ingest(content, source, cat, prod, describe_pictures=False):
             self.ingested.append((source, prod))
+            self.described.append(describe_pictures)
             self.texts[source] = content.decode("utf-8", "replace")
         cs._ingest = ingest
         def remove(source):
@@ -94,8 +96,8 @@ class World:
             (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
              cs._mark_internal) = saved
 
-    def run(self, api, apply=True, check=True):
-        return self._with(lambda: cs.run(apply, check), api)
+    def run(self, api, apply=True, check=True, describe_pictures=False):
+        return self._with(lambda: cs.run(apply, check, describe_pictures), api)
 
     def items(self):
         return self._with(lambda: {i["title"]: i for i in cs.overview()["items"]})
@@ -147,6 +149,7 @@ def test_review_mode_excludes_until_approved():
         w.decide(["Installation"], decision="excluded")
         res = w.run(api)
         assert w.ingested == [("SH3 manual.pdf", "sh3")] and res["added"] == ["SH3 manual.pdf"], res
+        assert w.described == [False]        # pictures cost money: only when the admin says so
         items = w.items()
         assert items["SH3 manual.pdf"]["status"] == "synced" and items["Installation"]["status"] == "excluded"
 
@@ -581,3 +584,12 @@ def test_a_folder_named_after_a_product_and_more_suggests_it():
         assert sug(["SMART Hopper 3 Documentation", "SMART Hopper 3 User Manual"]) == "sh3"
         assert sug(["Smart Hopper 3"]) == "sh3"
         assert sug(["Products", "Other things"]) == ""
+
+
+def test_pictures_are_described_only_when_the_admin_says_so():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api)
+        w.decide(["SH3 manual.pdf"], decision="approved")
+        w.run(api, describe_pictures=True)
+        assert w.described == [True]

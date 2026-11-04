@@ -26,9 +26,6 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 # prose chunk that actually answers, and it is guessed text competing with
 # typed text. index_figure_text() adds them to a document already held.
 FIGURE_TEXT_INDEX = os.getenv("FIGURE_TEXT_INDEX", "0") == "1"
-# Describe each figure with a vision model (figures.figure_text vision=True) when its
-# labels are read; needs FIGURE_TEXT_INDEX=1 and an OpenAI or Anthropic key. D-20261022-16.
-FIGURE_DESCRIBE = os.getenv("FIGURE_DESCRIBE", "0") == "1"
 from embeddings import embed_texts
 from db import get_collection, invalidate_retrieval_cache
 
@@ -275,9 +272,15 @@ def ingest_file(content: bytes, filename: str,
                 category_key: str | None = None,
                 product_key: str | None = None,
                 replace_existing: bool = False,
-                report: dict | None = None) -> int:
+                report: dict | None = None,
+                describe_pictures: bool = False) -> int:
     """
     Parse, chunk, embed and store a file.
+
+    describe_pictures: describe each new or changed figure with the vision
+    model (D-20261022-16). It is paid per picture, so only an admin's tick
+    turns it on, never an env setting; a picture unchanged since the last
+    version keeps its description for free (figures.extract_figures).
 
     Returns the number of chunks added (0 if duplicate or empty).
 
@@ -394,14 +397,16 @@ def ingest_file(content: bytes, filename: str,
                 logger.warning("figure extraction failed for %r (answers will "
                                "show no pictures from it): %s", filename, exc)
         fig_read: dict = {}
-        if FIGURE_TEXT_INDEX and fig_by_page:
+        if (FIGURE_TEXT_INDEX or describe_pictures) and fig_by_page:
             _step("reading text in figures", 0, 1)
             try:
                 import figures as _figures
                 fig_read = _figures.figure_text(
                     tmp_path, filename,
                     progress=lambda d, t: _step("reading text in figures", d, t),
-                    vision=FIGURE_DESCRIBE)
+                    vision=describe_pictures)
+                if not FIGURE_TEXT_INDEX:
+                    fig_read = {}    # the labels alone stay off; descriptions carry their own
             except Exception as exc:
                 logger.warning("figure text skipped for %r: %s", filename, exc)
 
@@ -824,7 +829,7 @@ def figure_text_chunks_for(filename: str) -> list[str]:
             if (m or {}).get("figure_text")]
 
 
-def index_figure_text(filename: str, progress=None) -> int:
+def index_figure_text(filename: str, progress=None, describe_pictures: bool = False) -> int:
     """Read and index the text in the figures of a document already held.
 
     The backfill for a document ingested before figure text was on, and
@@ -855,7 +860,7 @@ def index_figure_text(filename: str, progress=None) -> int:
     _step("reading text in figures", 0, 1)
     read = _figures.figure_text(
         path, filename, progress=lambda d, t: _step("reading text in figures", d, t),
-        vision=FIGURE_DESCRIBE)
+        vision=describe_pictures)
     collection = get_collection()
     held = collection.get(where={"source": filename}, include=["metadatas"]) or {}
     chunks = _figure_chunks(filename, read, _page_headings(

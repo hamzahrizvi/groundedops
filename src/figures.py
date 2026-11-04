@@ -219,11 +219,24 @@ def extract_figures(pdf_path: str, source: str, progress=None) -> dict[int, list
     ingested, and a new version's figures are the new version's. Never
     raises for one bad page or image; a figure that cannot be cut is a
     figure that is not shown.
+
+    A crop byte-identical to one the previous version had keeps that one's
+    vision description (D-20261022-16): a re-sync or new revision pays only
+    for pictures that changed, and only if the admin asks for them.
     """
     try:
         import pdfplumber
     except Exception:
         return {}
+    kept_desc = {}
+    for n, m in figures_for(source).items():
+        if m.get("desc"):
+            try:
+                with open(os.path.join(figures_dir(source), n), "rb") as fh:
+                    kept_desc[hashlib.sha1(fh.read()).hexdigest()] = {
+                        k: m[k] for k in ("desc", "desc_model", "desc_tokens") if k in m}
+            except OSError:
+                pass
     remove_figures(source)
     out_dir = figures_dir(source)
     by_page: dict[int, list[str]] = {}
@@ -276,6 +289,10 @@ def extract_figures(pdf_path: str, source: str, progress=None) -> dict[int, list
                         "width": pil.size[0], "height": pil.size[1],
                         "caption": _caption(page, box),
                     }
+                    if kept_desc:
+                        with open(os.path.join(out_dir, name), "rb") as fh:
+                            sidecar[name].update(
+                                kept_desc.get(hashlib.sha1(fh.read()).hexdigest(), {}))
                 except Exception as exc:
                     logger.debug("figures: crop on page %d of %r failed: %s",
                                  pno, source, exc)
