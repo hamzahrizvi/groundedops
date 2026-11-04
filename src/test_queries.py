@@ -139,7 +139,7 @@ def run_tests():
             grounding     = data.get("grounding_score")
             flagged       = data.get("flagged", False)
             fallback_used = data.get("fallback_used", False)
-            escalated     = data.get("escalated_to_deepseek", False)
+            escalated     = data.get("escalated", data.get("escalated_to_deepseek", False))
             reason        = data.get("reason", "")
             needs_clarify = data.get("needs_clarification", False)
             resolved      = data.get("resolved_query")
