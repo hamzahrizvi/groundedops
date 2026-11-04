@@ -215,7 +215,13 @@ def test_synced_links_reach_only_allowlisted_hosts():
             '<a href="https://jira.internal/browse/DS-1">DS-1</a> '
             '<a href="https://jira.internal/browse/DS-2">https://jira.internal/browse/DS-2</a> '
             '<a href="https://innovative-technology.com@evil.example/x">trick</a> '
-            '<a href="mailto:ops@corp.internal">ops</a></p>'
+            '<a href="mailto:ops@corp.internal">ops</a> '
+            '<a href="mailto:sales@innovative-technology.com?cc=ops@corp.internal">sales</a> '
+            '<a href="https://svc:pw@innovative-technology.com/x">creds</a> '
+            '<a href="https://evil.example\\@innovative-technology.com/x">slash</a></p>'
+            '<pre>curl https://build.corp.internal/api or https://www.innovative-technology.com/dl.</pre>'
+            '<ac:structured-macro ac:name="code"><ac:plain-text-body>'
+            '<![CDATA[GET https://jira.internal/rest]]></ac:plain-text-body></ac:structured-macro>'
             '<p><ac:link><ri:attachment ri:filename="Secret plan.pdf" /></ac:link></p>'
             '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
             '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>')
@@ -225,6 +231,9 @@ def test_synced_links_reach_only_allowlisted_hosts():
     for leak in ("jira.internal", "evil.example", "corp.internal", "atlassian.net", "789"):
         assert leak not in t, (leak, t)
     assert "DS-1" in t and "trick" in t and "ops" in t          # the text stays
+    assert "sales (mailto:sales@innovative-technology.com)" in t, t   # no ?cc=
+    assert "svc" not in t and "pw@" not in t and "creds" in t and "slash" in t
+    assert "https://www.innovative-technology.com/dl." in t and "curl  or" in t, t
     assert "Secret plan.pdf" in t and "\nManual.pdf" in t       # file names, no address
     # The site listed (a public space): its attachments keep their address.
     t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
@@ -244,6 +253,16 @@ def test_link_hosts_setting():
         assert not cs._host_ok("http://[docs.example.com/p", cs.link_hosts())    # malformed
         assert not cs._host_ok("mailto:a@evil.example,b@docs.example.com", cs.link_hosts())
         assert cs._host_ok("mailto:a@docs.example.com?subject=x", cs.link_hosts())
+        assert not cs._host_ok("mailto:a@evil.example%2Cb@docs.example.com", cs.link_hosts())
+        assert not cs._host_ok("mailto:a@evil.example@docs.example.com", cs.link_hosts())
+        assert cs._host_ok("HTTPS://WWW.DOCS.EXAMPLE.COM/p", cs.link_hosts())
+        assert "evil" not in cs.page_text("P", "<pre>HTTPS://evil.example/x</pre>",
+                                          hosts=cs.link_hosts())
+        assert not cs._host_ok("https://u:p@docs.example.com/", cs.link_hosts())
+        assert not cs._host_ok("https://evil.example\\@docs.example.com/", cs.link_hosts())
+        assert not cs._host_ok("https://docs.example.com/a b", cs.link_hosts())
+        assert cs._host_ok("www.docs.example.com/p", cs.link_hosts())
+        assert cs._kept("mailto:a@docs.example.com?cc=b@evil.example", cs.link_hosts()) == "mailto:a@docs.example.com"
         assert "bad" in cs.page_text("P", '<a href="http://[x/y">bad</a>')       # no crash
     finally:
         os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
