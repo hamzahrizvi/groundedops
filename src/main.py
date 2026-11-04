@@ -1867,8 +1867,12 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
             # has it" on every repair-price question while this deflected
             # before looking. So look first, and deflect only when the
             # passages hold no price for the model to quote (2026-10-30).
+            # The raw and condensed questions on separate lines: joined by a
+            # space, "...our units are busy how much is..." reads as one
+            # price clause and the small talk must be on the price page.
             try:
-                if sales.documents_price(q, retrieve_from_db(q, top_k=CONTEXT_K, scope=scope),
+                if sales.documents_price(f"{raw_q}\n{resolved or ''}",
+                                         retrieve_from_db(q, top_k=CONTEXT_K, scope=scope),
                                          _product_names().values()):
                     logger.info("price question searched: the documents state a price")
                     return None

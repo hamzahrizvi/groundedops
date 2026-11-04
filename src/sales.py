@@ -280,14 +280,20 @@ _PRICE_WORD = re.compile(r"\b(?:pric|cost|charg|fee)\w*", re.I)
 _PRICE_LIST = re.compile(r"pric|tariff|rate.?card", re.I)
 _PRICE_FILLER = {"how", "much", "does", "what", "would", "will", "can", "get", "you", "your",
                  "they", "them", "one", "unit", "gbp", "eur", "usd", "pound", "euro", "dollar",
-                 "pric", "cost", "charg", "fee", "quot", "exact", "current", "today"}
+                 "pric", "cost", "charg", "fee", "quot", "exact", "current", "today",
+                 "our", "we", "us", "its", "are", "have", "has", "had", "this", "that", "the",
+                 "it", "is"}
 
 
 def documents_price(question: str, passages: list[dict], names=()) -> bool:
     """True when a retrieved passage states a price for what `question` asks
-    about. `names` are product names, which say whose price, not what."""
+    about. `names` are product names, which say whose price, not what.
+    Only the clause that asks the price is matched; a second ask or small talk
+    is left to the answer path."""
     drop = {_stem(w) for w in _PRICE_FILLER} | {t for n in names for t in _terms(n)}
-    item = {t for t in _terms(question) if not any(c.isdigit() for c in t)
+    clauses = [c for c in _CLAUSE_SPLIT.split(question or "") if _PRICE.search(c)]
+    ask = " ".join(clauses) or question
+    item = {t for t in _terms(ask) if not any(c.isdigit() for c in t)
             and not _PRICE_WORD.match(t) and t not in drop}
     for p in passages:
         text = p.get("text") or ""

@@ -144,6 +144,27 @@ def test_a_commercial_question_deflects_under_the_default_mode():
     assert code.index('mode == "documents"') < code.index('policy.value("sales_reply")')
 
 
+def test_a_price_question_with_a_second_ask_or_chat_is_still_matched_on_the_price_clause():
+    table = {"source": "CBA9 Range Repair Information.txt",
+             "text": "Level 3 Electronic Repair price:\n| Currency | Price |\n| GBP | 52 |\n| EUR | 60 |"}
+    names = ["CBA9"]
+    assert sales.documents_price("how much is a level 3 electronic repair on a cba9 in GBP? and what warranty cycles does it have, our units are busy", [table], names)
+    assert sales.documents_price("what does a level 3 electronic repair cost, we have a lot of units", [table], names)
+    assert sales.documents_price("how much is our level 3 electronic repair on a cba9", [table], names)
+    assert not sales.documents_price("how much does the CBA9 cost, and what warranty does it have", [table], names)
+    assert not sales.documents_price("how much is a level 3 electronic repair on a cba9? our units are busy",
+                                     [{"source": "x.txt", "text": "Clean the sensors weekly."}], names)
+    # _sales_answer hands over the raw and the condensed question together; a
+    # standalone question comes back as itself, so the line break between the
+    # two copies must keep the small talk out of the second copy's price clause.
+    q = "how much is a level 3 electronic repair on a cba9 in GBP? and what warranty cycles does it have, our units are busy"
+    assert sales.documents_price(q + "\n" + q, [table], names)
+    assert not sales.documents_price(q + " " + q, [table], names)   # why the caller needs the line break
+    import inspect
+    import main
+    assert 'documents_price(f"{raw_q}\\n{resolved' in inspect.getsource(main._sales_answer)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
