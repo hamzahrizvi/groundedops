@@ -492,8 +492,10 @@ def set_sso_settings(provider: str, changes: dict) -> None:
 # ── Confluence manuals sync (confluence_sync.py) ────────────────────────
 # The folder link and account email are configuration; the API token is a
 # secret, write-only from the console like the SMTP password.
+# link_hosts: hosts links in synced pages may point to (confluence_sync.link_hosts).
 _CONFLUENCE_ENV = {"folder_url": "CONFLUENCE_FOLDER_URL",
-                   "email": "CONFLUENCE_EMAIL"}
+                   "email": "CONFLUENCE_EMAIL",
+                   "link_hosts": "CONFLUENCE_LINK_HOSTS"}
 _CONFLUENCE_LEGACY_ENV = "CONFLUENCE_API_TOKEN"
 
 

@@ -193,7 +193,8 @@ def test_page_text_keeps_where_links_point():
                      '</ri:attachment></ac:link></p>'
                      '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
                      '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>',
-                     page_id="456", site="itl.atlassian.net")
+                     page_id="456", site="itl.atlassian.net",
+                     hosts=["itl.com", "dropbox.com", "itl.atlassian.net"])
     att = "https://itl.atlassian.net/wiki/download/attachments/456/"
     assert "Latest GBP SMART Update Package\nhttps://www.dropbox.com/scl/fo/cob/AFH?rlkey=1wo&dl=1\n" in t, t
     assert "download-zip-icon" not in t                      # a picture is not a link
@@ -205,6 +206,49 @@ def test_page_text_keeps_where_links_point():
     assert f"\nManual.pdf ({att}Manual.pdf)" in t
     assert cs.page_text("F", '<ac:structured-macro ac:name="view-file">'    # no site: name only
                         '<ri:attachment ri:filename="Manual.pdf" /></ac:structured-macro>') == "F\n\nManual.pdf"
+
+
+def test_synced_links_reach_only_allowlisted_hosts():
+    # Security 2026-11-03: internal hosts, page ids and attachment names reached the index.
+    os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
+    html = ('<p><a href="https://www.innovative-technology.com/support">Support</a> '
+            '<a href="https://jira.internal/browse/DS-1">DS-1</a> '
+            '<a href="https://jira.internal/browse/DS-2">https://jira.internal/browse/DS-2</a> '
+            '<a href="https://innovative-technology.com@evil.example/x">trick</a> '
+            '<a href="mailto:ops@corp.internal">ops</a></p>'
+            '<p><ac:link><ri:attachment ri:filename="Secret plan.pdf" /></ac:link></p>'
+            '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
+            '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>')
+    t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
+                     hosts=cs.link_hosts())
+    assert "Support (https://www.innovative-technology.com/support)" in t, t
+    for leak in ("jira.internal", "evil.example", "corp.internal", "atlassian.net", "789"):
+        assert leak not in t, (leak, t)
+    assert "DS-1" in t and "trick" in t and "ops" in t          # the text stays
+    assert "Secret plan.pdf" in t and "\nManual.pdf" in t       # file names, no address
+    # The site listed (a public space): its attachments keep their address.
+    t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
+                     hosts=["innovative-technology.atlassian.net"])
+    assert "https://innovative-technology.atlassian.net/wiki/download/attachments/789/Manual.pdf" in t, t
+    assert "jira.internal" not in t
+
+
+def test_link_hosts_setting():
+    old = os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
+    try:
+        assert cs.link_hosts() == ["innovative-technology.com", "dropbox.com"]
+        os.environ["CONFLUENCE_LINK_HOSTS"] = "https://Docs.Example.com/x, *.dropbox.com  itl.atlassian.net:443"
+        assert cs.link_hosts() == ["docs.example.com", "dropbox.com", "itl.atlassian.net"]
+        assert cs._host_ok("https://a.docs.example.com/p", cs.link_hosts())
+        assert not cs._host_ok("https://notdocs.example.com/p", cs.link_hosts())
+        assert not cs._host_ok("http://[docs.example.com/p", cs.link_hosts())    # malformed
+        assert not cs._host_ok("mailto:a@evil.example,b@docs.example.com", cs.link_hosts())
+        assert cs._host_ok("mailto:a@docs.example.com?subject=x", cs.link_hosts())
+        assert "bad" in cs.page_text("P", '<a href="http://[x/y">bad</a>')       # no crash
+    finally:
+        os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
+        if old is not None:
+            os.environ["CONFLUENCE_LINK_HOSTS"] = old
 
 
 def test_review_mode_excludes_until_approved():

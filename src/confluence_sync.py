@@ -54,7 +54,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -66,6 +66,12 @@ logger = logging.getLogger(__name__)
 
 _STATE = os.getenv("CONFLUENCE_SYNC_STATE", "confluence_sync.json")
 _FILE_TYPES = (".pdf", ".docx", ".txt")
+# Links in synced pages keep their address only when it points to one of
+# these hosts (or a subdomain); the rest keep their text alone, so internal
+# hosts, page ids and attachment names never reach a customer's answer.
+# Listing the Confluence site itself (x.atlassian.net) marks its space public:
+# links to its pages and attached files are then kept too.
+LINK_HOSTS_DEFAULT = "innovative-technology.com, dropbox.com"
 # A page with less text than this is a wrapper round its attachment or a
 # list of child pages, not a manual, and is not offered.
 _MIN_PAGE_TEXT = 200
@@ -707,13 +713,33 @@ def _walk(api: _Api, root_kind: str, root_id: str):
 _HARD = "\x00"        # a block boundary, made a blank line by page_text
 
 
+def link_hosts() -> list[str]:
+    """The operator's allowlist (Confluence settings), else the default."""
+    raw = os.getenv("CONFLUENCE_LINK_HOSTS") or LINK_HOSTS_DEFAULT
+    return [h for h in (urlsplit(p if "//" in p else "//" + p).hostname
+                        for p in re.split(r"[,\s]+", raw.replace("*.", "")) if p) if h]
+
+
+def _host_ok(url: str, hosts: list[str]) -> bool:
+    """Every host the url names is allowlisted (each recipient of a mailto)."""
+    try:
+        u = urlsplit(url)
+        names = ([a.rpartition("@")[2] for a in u.path.split(",")] if u.scheme == "mailto"
+                 else [u.hostname or ""])
+    except ValueError:                 # a malformed address (http://[x) is not kept
+        return False
+    names = [n.strip().lower() for n in names]
+    return all(n and any(n == h or n.endswith("." + h) for h in hosts) for n in names)
+
+
 class _Text(HTMLParser):
     """Confluence storage format to plain text: paragraphs on consecutive
     lines, a blank line only at a heading or a table, tables fenced as the PDF
     parser fences them, a table row on one line with its cells split by " | "
     (tables.cells), macro parameters dropped. A link keeps where it points,
     as "text (url)": the SMART Update FAQ's two download buttons came out as
-    nothing, and the chatbot refused a customer the link (2026-11-02)."""
+    nothing, and the chatbot refused a customer the link (2026-11-02). Only
+    for allowlisted hosts (link_hosts); other links keep their text alone."""
     _BLOCK = {"p", "div", "br", "li", "tr", "table", "pre", "blockquote",
               "h1", "h2", "h3", "h4", "h5", "h6"}
     # Parameters and ADF attributes are settings, not text: they put
@@ -723,10 +749,11 @@ class _Text(HTMLParser):
     _HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
     _FILE_MACROS = {"view-file", "viewpdf", "viewdoc", "viewxls", "viewppt"}
 
-    def __init__(self, page_id: str = "", site: str = ""):
+    def __init__(self, page_id: str = "", site: str = "", hosts=None):
         super().__init__()
         self.out, self.skip, self.cell, self.first = [], 0, 0, True
         self.page_id, self.site = page_id, site
+        self.hosts = link_hosts() if hosts is None else hosts
         self.links: list[list] = []      # open <a>/<ac:link>: [where its text starts, url, file name]
         self.macros: list[str] = []      # names of the open structured macros
         self.image = 0                   # inside <ac:image>: its attachment is a picture
@@ -737,7 +764,8 @@ class _Text(HTMLParser):
     def _attachment(self, name: str) -> str:
         if not (self.site and self.page_id):
             return ""
-        return f"https://{self.site}/wiki/download/attachments/{self.page_id}/{quote(name)}"
+        url = f"https://{self.site}/wiki/download/attachments/{self.page_id}/{quote(name)}"
+        return url if _host_ok(url, self.hosts) else ""
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -749,9 +777,11 @@ class _Text(HTMLParser):
             href = (a.get("href") or "").strip()
             # Not #anchors, not the page itself (SMART Hopper 4 Spare Parts
             # links its own sections 288 times), not a file share wrapped in
-            # an Outlook link (file://fs1/... in internal release notes).
+            # an Outlook link (file://fs1/... in internal release notes); and
+            # only to an allowlisted host (link_hosts).
             keep = (href.startswith(("http://", "https://", "mailto:")) and "file:" not in href
-                    and not (self.page_id and re.search(rf"/pages/{self.page_id}(?:[/#?]|$)", href)))
+                    and not (self.page_id and re.search(rf"/pages/{self.page_id}(?:[/#?]|$)", href))
+                    and _host_ok(href, self.hosts))
             self.links.append([len(self.out), href if keep else "", ""])
         elif tag == "ri:attachment" and not self.image:
             name = a.get("ri:filename") or ""
@@ -790,7 +820,9 @@ class _Text(HTMLParser):
         elif tag in ("a", "ac:link") and self.links and not self.skip:
             start, url, name = self.links.pop()
             text = "".join(self.out[start:]).strip()
-            if url and url not in text:         # a bare url is not said twice
+            if not url and re.fullmatch(r"(?:https?://|mailto:|www\.)\S+", text):
+                del self.out[start:]           # a dropped link that is its own address
+            elif url and url not in text:       # a bare url is not said twice
                 self.out.append(f" ({url})" if text else f"{name} ({url})" if name else url)
             elif name and not text:
                 self.out.append(name)
@@ -817,9 +849,10 @@ class _Text(HTMLParser):
             self.out.append(data[6:])
 
 
-def page_text(title: str, storage_html: str, page_id: str = "", site: str = "") -> str:
-    """page_id and site make links to the page's attached files whole URLs."""
-    p = _Text(page_id, site)
+def page_text(title: str, storage_html: str, page_id: str = "", site: str = "", hosts=None) -> str:
+    """page_id and site make links to the page's attached files whole URLs;
+    hosts: the link allowlist, default link_hosts()."""
+    p = _Text(page_id, site, hosts)
     p.feed(storage_html or "")
     body = re.sub(r"[ \t]+\n", "\n", "".join(p.out))
     body = "\n".join(re.sub(r"\s{2,}", " ", l).strip() if " | " in l else l

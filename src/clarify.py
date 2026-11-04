@@ -73,7 +73,7 @@ NEAR_TOP_MARGIN = 0.10
 MAX_PRODUCT_BUTTONS = 5
 
 _lock = threading.Lock()
-_cache: dict = {"count": None, "vocab": None}
+_cache: dict = {"count": None, "marks": None, "vocab": None}
 
 
 def _words(text: str) -> list[str]:
@@ -85,17 +85,23 @@ def product_vocabulary() -> dict[str, set[str]]:
 
     Rebuilt when the collection's size changes (an upload or a delete).
     "<category>_general" buckets are left out: they hold shared documents,
-    not something a visitor can pick."""
+    not something a visitor can pick. Documents customers are never answered
+    from (marked internal, or EXCLUDED_SOURCES) are left out, the same
+    is_excluded() check retrieval uses, so a code only they print stays unknown
+    (D-20261102-02); a mark change rebuilds the list too."""
     import db
     import retrieval_db
     col = db.get_collection()
     n = col.count()
+    marks = retrieval_db.internal_sources()
     with _lock:
-        if _cache["vocab"] is not None and _cache["count"] == n:
+        if _cache["vocab"] is not None and _cache["count"] == n and _cache["marks"] is marks:
             return _cache["vocab"]
     _, chunks = retrieval_db._get_bm25_index(col)
     vocab: dict[str, set[str]] = {}
     for c in chunks:
+        if retrieval_db.is_excluded(c.get("source")):
+            continue
         keys = [k.strip() for k in (c.get("product") or "").split(",")
                 if k.strip() and not k.strip().endswith("_general")]
         if not keys:
@@ -103,7 +109,7 @@ def product_vocabulary() -> dict[str, set[str]]:
         for w in set(_words(c.get("text"))):
             vocab.setdefault(w, set()).update(keys)
     with _lock:
-        _cache.update(count=n, vocab=vocab)
+        _cache.update(count=n, marks=marks, vocab=vocab)
     return vocab
 
 
