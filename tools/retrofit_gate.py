@@ -222,7 +222,8 @@ def _selftest():
     with tempfile.TemporaryDirectory() as d:
         for f in ("cases_state.json", "cases_state.r10.json", "cases_state.r2.json", "cases_state.graded-by-gpt-5.json"):
             open(os.path.join(d, f), "w").write("{}")
-        assert [os.path.basename(f) for f in repeat_paths(os.path.join(d, "cases_state.json"))] ==             ["cases_state.json", "cases_state.r2.json", "cases_state.r10.json"]
+        assert [os.path.basename(f) for f in repeat_paths(os.path.join(d, "cases_state.json"))] == \
+            ["cases_state.json", "cases_state.r2.json", "cases_state.r10.json"]
     sibs = [{"id": "h1", "q": 'What does the "amber" light on the reader mean?'},
             {"id": "h2", "turn1": "Which models accept polymer notes?", "q": "and that one?"}]
     with tempfile.TemporaryDirectory() as d:
