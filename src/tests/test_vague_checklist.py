@@ -124,6 +124,15 @@ def test_an_unknown_model_name_is_found():
     assert "NV4000, BV30 and MyCheckr" in text
 
 
+def test_a_plus_model_name_is_the_catalogue_product():
+    # D-20261030-14: the catalogue's forms drop "+", so the check must too.
+    pre = clarify.model_prefixes(["NV10USB+", "NV4000"])
+    find = lambda q: clarify.unknown_model_name(q, {"nv10usb", "nv4000"}, {}, pre)  # noqa: E731
+    assert find("nv10usb+ flashing 4 long 1 short") is None
+    assert find("my NV10USB+ bezel") is None
+    assert find("the nv11usb+ manual") == "NV11USB+"
+
+
 def test_a_close_model_name_is_offered():
     forms = {"nv9_spectral": ["NV9 Spectral", "NV9S", "NV22"], "nv9usb": ["NV9USB+", "NV9 USB"],
              "bv30": ["BV30"], "nv4000": ["NV4000"], "mycheckr": ["MyCheckr"]}
