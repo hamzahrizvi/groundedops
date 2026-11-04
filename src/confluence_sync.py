@@ -721,15 +721,36 @@ def link_hosts() -> list[str]:
 
 
 def _host_ok(url: str, hosts: list[str]) -> bool:
-    """Every host the url names is allowlisted (each recipient of a mailto)."""
+    """Every host the url names is allowlisted (each recipient of a mailto).
+    No whitespace, backslash or user:password@ (Security 2026-11-03): Python
+    and a browser read the host of https://evil.example\\@itl.com differently.
+    A bare www. address is read as a host."""
+    if re.search(r"[\s\\]", url):
+        return False
     try:
-        u = urlsplit(url)
-        names = ([a.rpartition("@")[2] for a in u.path.split(",")] if u.scheme == "mailto"
-                 else [u.hostname or ""])
+        u = urlsplit(url if "//" in url or url.startswith("mailto:") else "//" + url)
+        if u.scheme == "mailto":
+            names = [a.rpartition("@")[2] for a in u.path.split(",")]
+        elif re.fullmatch(r"[A-Za-z0-9.-]+(?::\d*)?", u.netloc):
+            names = [u.hostname or ""]
+        else:                          # userinfo, brackets, %-escapes: not kept
+            return False
     except ValueError:                 # a malformed address (http://[x) is not kept
         return False
     names = [n.strip().lower() for n in names]
     return all(n and any(n == h or n.endswith("." + h) for h in hosts) for n in names)
+
+
+def _kept(url: str, hosts: list[str]) -> str:
+    """url as it may stay in synced text, or "": a mailto loses its query
+    (?cc= and ?bcc= name more recipients, Security 2026-11-03)."""
+    if url.startswith("mailto:"):
+        url = url.partition("?")[0]
+    return url if _host_ok(url, hosts) else ""
+
+
+# An address typed as text (a code or pre block): no trailing punctuation.
+_URL = re.compile(r"""(?:https?://|mailto:|www\.)[^\s<>"'()\[\]{}]*[^\s<>"'()\[\]{}.,;:!?]""")
 
 
 class _Text(HTMLParser):
@@ -739,7 +760,8 @@ class _Text(HTMLParser):
     (tables.cells), macro parameters dropped. A link keeps where it points,
     as "text (url)": the SMART Update FAQ's two download buttons came out as
     nothing, and the chatbot refused a customer the link (2026-11-02). Only
-    for allowlisted hosts (link_hosts); other links keep their text alone."""
+    for allowlisted hosts (link_hosts); other links keep their text alone.
+    An address typed as text is held to the same list."""
     _BLOCK = {"p", "div", "br", "li", "tr", "table", "pre", "blockquote",
               "h1", "h2", "h3", "h4", "h5", "h6"}
     # Parameters and ADF attributes are settings, not text: they put
@@ -761,6 +783,10 @@ class _Text(HTMLParser):
         from chunking import TABLE_CLOSE, TABLE_OPEN
         self.fence = (TABLE_OPEN, TABLE_CLOSE)
 
+    def _scrub(self, text: str) -> str:
+        """An address in the text itself is held to the allowlist too."""
+        return _URL.sub(lambda m: _kept(m[0], self.hosts), text)
+
     def _attachment(self, name: str) -> str:
         if not (self.site and self.page_id):
             return ""
@@ -778,11 +804,10 @@ class _Text(HTMLParser):
             # Not #anchors, not the page itself (SMART Hopper 4 Spare Parts
             # links its own sections 288 times), not a file share wrapped in
             # an Outlook link (file://fs1/... in internal release notes); and
-            # only to an allowlisted host (link_hosts).
-            keep = (href.startswith(("http://", "https://", "mailto:")) and "file:" not in href
-                    and not (self.page_id and re.search(rf"/pages/{self.page_id}(?:[/#?]|$)", href))
-                    and _host_ok(href, self.hosts))
-            self.links.append([len(self.out), href if keep else "", ""])
+            # only to an allowlisted host (link_hosts); a mailto keeps no query.
+            ok = (href.startswith(("http://", "https://", "mailto:")) and "file:" not in href
+                  and not (self.page_id and re.search(rf"/pages/{self.page_id}(?:[/#?]|$)", href)))
+            self.links.append([len(self.out), _kept(href, self.hosts) if ok else "", ""])
         elif tag == "ri:attachment" and not self.image:
             name = a.get("ri:filename") or ""
             if self.links and not self.skip:          # <ac:link> to a file
@@ -842,11 +867,11 @@ class _Text(HTMLParser):
 
     def handle_data(self, data):
         if not self.skip:
-            self.out.append(data)
+            self.out.append(self._scrub(data))
 
     def unknown_decl(self, data):       # code macros keep their body in CDATA
         if data.startswith("CDATA["):
-            self.out.append(data[6:])
+            self.out.append(self._scrub(data[6:]))
 
 
 def page_text(title: str, storage_html: str, page_id: str = "", site: str = "", hosts=None) -> str:
