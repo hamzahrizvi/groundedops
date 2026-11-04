@@ -196,6 +196,29 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
   `<id>.md` to `<id>.md.<n>`), or `DEFER` / `REJECT` it with a reason. Tell
   the CEO in plain words what was found and what you chose.
 
+## Tick off changes made outside a work order
+`OPS/state/changes.md` (the prompt's "Changes to tick" line says how many are
+open) lists every change to the product and the office that skipped the work
+order path: a Claude session's commit or merge, or a scheduled task whose
+instructions were edited. Dev's merged work orders are already ticked: the gate
+tested them and you approved them. Nobody pushes while a change is open, so
+look at every open line, oldest first:
+- Tested? A change to `src/` or the widget is tested by a test run that ended
+  after it ("test runs since"): its score is not below the run before it by
+  more than the noise, and no answer that run marked wrong traces to the
+  change's files. An office change (`tools/`, `ops/`, `.claude/`, a task) is
+  tested when every touched tool's `--selftest` passes (run it) and the office
+  ran since without a FAILED or STUCK caused by it. No test run yet: leave it
+  open.
+- Approved? It belongs: not a patch for one question, not something on the
+  rejected list or against a decision, and its files match what its message says.
+- Both: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/change_list.py"
+  --ops "<OPS>" tick <key> "<the run or selftest that tested it>; <why it is
+  approved>"`. Tick only lines you checked yourself, never in bulk.
+- A change that broke something or does not belong: leave it open and file it
+  as a finding in the decisions file (`- From: product-owner`, `- Source:
+  state/changes.md`), with what is wrong and what would undo or fix it.
+
 ## Write
 1. A new decisions file for this pass: `OPS/decisions/<YYYYMMDD>.md` if there is
    none for today, else the next letter after today's latest (`<YYYYMMDD>b.md`,
@@ -239,6 +262,8 @@ For each Dev hand-back with a `gate.json` (tools/retrofit_gate.py output):
      in your words, with what you did about it; then one line counting the
      ones you read that were not ("2 more read, nothing that changes the plan").
    - **Got better** (merged or ready to merge).
+   - **Changes checked**: "X changes ticked, Y still open", and for each one
+     left open, why in a few plain words (no test run yet, broke something).
    - **Needs your yes**: each item in three lines: what changes for
      customers, why, cost and risk. Say how to approve: tick the box in the
      decisions file, or tell Claude "approve D-...".

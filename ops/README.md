@@ -260,6 +260,17 @@ not redo without new evidence", then commits PENDING.md alone. If PENDING.md
 has changes nobody committed, or other files are staged, it writes nothing
 and the next run catches up, so nobody else's edits are ever swept in.
 
+Changes that skip the work order path get the same check (the CEO,
+2026-11-04). Before each triage `tools/change_list.py` lists every commit on
+the product line and the office branch since the last run, plus every
+scheduled task whose instructions changed, in `OPS/state/changes.md`. A merged
+Dev branch comes in ticked: its gate and READY TO MERGE already covered it, Mo's
+sweeps included. A Claude session's commit or merge, or a hand-edited task,
+comes in open. The product owner ticks each one once a test run or selftest
+covers it and it belongs, and files a finding for one that broke something.
+The page shows "N changes not yet checked by the product owner" until the list
+is clear: push only then.
+
 ## Boards and rewards
 
 `tools/ops_ledger.py` builds three things from the files below and from git,

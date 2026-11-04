@@ -20,6 +20,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
+from change_list import open_count  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import (STUCK, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
                          MO_HOME, revisit, stuck, stuck_why, sweep, work_mode)
@@ -147,6 +148,14 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
                     "why": left[0].upper() + left[1:] + ". That is the handbook's point for another look at giving Mo more helpers.",
                     "suggest": "Ask Claude in any session to judge again whether Mo should get more helpers, with these figures.",
                     "actions": []})
+    # changes made outside a work order (Claude sessions, hand-edited tasks) wait for the product owner's tick
+    n = open_count(ops)
+    if n:
+        out.append({"id": f"changes-{n}", "title": f"{n} change{'s' if n > 1 else ''} not yet checked by the product owner",
+                    "why": "They were made in Claude sessions or by editing a scheduled task, not through a work order, so no"
+                           " test or decision has looked at them yet. The product owner ticks each one off at its next check.",
+                    "suggest": "Push only once this is clear. To have them checked sooner, press “Do it now” on the"
+                               " product owner's desk.", "actions": []})
     lab = cap_status(ops)
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",
