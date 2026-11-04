@@ -170,3 +170,28 @@ def test_figure_chunk_carries_the_description():
     assert body.index("What the figure shows:") < body.index("Text in the figure:")
     assert "Wiring drawing, red wire to pin 1" in out[1][2]
     assert "Text in the figure" not in out[1][2] and out[1][3] == 0.0
+
+
+def test_a_described_drawing_gets_lookup_tables_naming_the_product():
+    """CEO 2026-11-04: dimensions and labelled parts from a description
+    become table rows with the product on each, as their own chunks."""
+    desc = ("Dimension drawing of the BV30. Units are presumably mm.\n\n"
+            "Front view:\n- Overall width: 97.6\n- Overall height: 132\n"
+            "- Label: \"72mm\"\n\n"
+            "Labels and callouts, as written:\n"
+            "- Bezel release arm (red lever on the side)\n- \"Coin Feeder\": arrow to the chute\n\n"
+            "Other visible features (not labelled with text):\n- A logo")
+    t = ingest._lookup_tables(desc, "BV30", 7)
+    assert len(t) == 2 and "Values in mm." in t[0]
+    assert "| BV30 | Overall height (Front view) | 132 |" in t[0]
+    assert "| BV30 | Bezel release arm | red lever on the side |" in t[1]
+    assert "| BV30 | Coin Feeder | arrow to the chute |" in t[1]
+    assert "| BV30 | 72mm |" in t[1] and "logo" not in "".join(t)
+    assert ingest._lookup_tables("A photo of a cat on a validator.", "BV30", 7) == []
+    with tempfile.TemporaryDirectory() as tmp, \
+         patch.object(docstore, "store_dir", return_value=tmp), \
+         patch.object(ingest, "_product_label", return_value="BV30"):
+        _sidecar(tmp, "M.pdf", {"p7_1.png": {"page": 7, "caption": "", "desc": desc}})
+        out = ingest._figure_chunks("M.pdf", {})
+    assert [n for _, n, *_ in out] == ["p7_1.png"] * 3
+    assert "| BV30 | Overall height (Front view) | 132 |" in out[1][2]

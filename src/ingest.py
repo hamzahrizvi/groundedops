@@ -767,6 +767,81 @@ def _page_headings(page_sections) -> dict[int, str]:
     return {p: " / ".join(h) for p, h in out.items() if h}
 
 
+_NUMERIC_START = re.compile(r"^[\s(]*(?:\d+x\)\s*)?[(+\-±Ø⌀]?\s*\d")
+_NOT_ITEMS = re.compile(r"not\s+labell?ed|not\s+shown|visible\s+features|no\s+pin", re.I)
+_PART_HEAD = re.compile(r"label|callout", re.I)
+
+
+def _lookup_tables(desc: str, product: str, pno: int) -> list[str]:
+    """CEO 2026-11-04: a picture description's dimensions and labelled parts
+    as lookup tables with the product named on every row, so "how tall is
+    the BV30" or "what is the red lever on the NV9USB+ called" meets a row
+    that says so. Parsed from the description llm.describe_image wrote
+    (bullets under "Dimensions" / "<view>:" / "Labels and callouts"); no
+    model call. [] when the description lists neither.
+    ponytail: keyed on that prompt's layout; a picture described another way
+    keeps only its prose chunk."""
+    dims, parts = [], []
+    section, kind = "", None
+    for raw in (desc or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if not line.startswith(("-", "*", "•")):
+            if line.rstrip().endswith(":") or re.match(r"^[\w ,/()-]{0,60}:\s*$", line):
+                section = line.rstrip(": ").strip()
+                kind = (None if _NOT_ITEMS.search(section)
+                        else "part" if _PART_HEAD.search(section) else "dim")
+            elif _NOT_ITEMS.search(line):
+                kind = None
+            continue
+        if not kind:
+            continue
+        item = line.lstrip("-*• ").strip().replace("|", "/")
+        name, _, value = item.partition(": ") if ": " in item else ("", "", item)
+        if kind == "dim" and name and _NUMERIC_START.match(value):
+            view = "" if re.match(r"dimensions?\b", section, re.I) else section
+            dims.append((name + (f" ({view})" if view and view.lower() not in name.lower() else ""),
+                         value.strip()))
+            continue
+        q = re.search(r"[\"“']([^\"”']{2,80})[\"”']", item)
+        if q:
+            label, detail = q.group(1), item.replace(q.group(0), "").strip(" :-–—")
+        else:
+            label, _, detail = item.partition(" (")
+            detail = detail.rstrip(")")
+        if kind == "part" or q:
+            parts.append((label.strip(), detail.strip()))
+    mm = " Values in mm." if re.search(r"\bmm\b|millimet", desc or "", re.I) else ""
+    out = []
+    if dims:
+        out.append(f"{product} dimensions, from the drawing on page {pno}.{mm}\n"
+                   "| Product | Dimension | Value |\n|---|---|---|\n"
+                   + "\n".join(f"| {product} | {n} | {v} |" for n, v in dims))
+    if parts:
+        out.append(f"{product} parts and labels, as named in the picture on page {pno}.\n"
+                   "| Product | Part or label | Where / what it is |\n|---|---|---|\n"
+                   + "\n".join(f"| {product} | {n} | {d} |" for n, d in parts))
+    return out
+
+
+def _product_label(filename: str) -> str:
+    """The display name(s) of the products a document is filed under, else
+    the document's own name: what a lookup-table row calls the product."""
+    keys = [k.strip() for k in (catalog_scope_for(filename).get("product") or "").split(",")
+            if k.strip()]
+    names = {}
+    try:
+        import catalog
+        names = {p["key"]: p.get("name") or p["key"]
+                 for c in catalog.catalog().get("categories") or []
+                 for p in c.get("products") or []}
+    except Exception as exc:
+        logger.warning("product names unavailable for lookup tables: %s", exc)
+    got = [names.get(k, k) for k in keys]
+    return " / ".join(got) if got else os.path.splitext(filename)[0]
+
+
 def _figure_chunks(filename: str,
                    read: dict[str, tuple[str, float]],
                    headings: dict[int, str] | None = None,
@@ -791,6 +866,7 @@ def _figure_chunks(filename: str,
     import figures as _figures
     meta = _figures.figures_for(filename)
     out = []
+    product = None    # looked up once, on the first described figure
     names = list(read) + [n for n, x in meta.items() if x.get("desc") and n not in read]
     for name in names:
         text, conf = read.get(name, ("", 0.0))
@@ -814,7 +890,10 @@ def _figure_chunks(filename: str,
         crumb = f"Figure: {caption}" if caption else "Figure"
         if heading:
             crumb = f"{heading} — {crumb}"
-        for c in _enrich_chunks([body], filename, crumb):
+        if desc and product is None:
+            product = _product_label(filename)
+        tables = _lookup_tables(desc, product, pno) if desc else []
+        for c in _enrich_chunks([body] + tables, filename, crumb):
             c = strip_table_fences(strip_section_marks(c))
             if c.strip():
                 out.append((pno, name, c, conf, heading))
@@ -885,7 +964,10 @@ def index_figure_text(filename: str, progress=None, describe_pictures: bool = Fa
 
     _step("understanding the text", 0, len(texts))
     vectors = []
-    _batch = 16
+    # 4, not 16: a described figure's chunk runs to thousands of characters,
+    # and the embedder's memory grows with batch x length squared -- 16 of
+    # the SMART Coin manual's took one process past 7 GB (2026-11-04).
+    _batch = 4
     for _i in range(0, len(texts), _batch):
         vectors.extend(embed_texts(texts[_i:_i + _batch]))
         _step("understanding the text", min(_i + _batch, len(texts)), len(texts))

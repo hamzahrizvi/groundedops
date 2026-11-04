@@ -3990,7 +3990,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ── Structured extraction shortcut ───────
     if role != "rethink":
         t2 = time.time()
-        extracted = extract_structured_block(results[:5], query=resolved_query)
+        # Not from a picture's description: its bullets are a drawing's
+        # dimensions, and copying the first list served the BV30's depths for
+        # "what is its overall height" (2026-11-04). The model reads those.
+        extracted = extract_structured_block(
+            [r for r in results[:5] if ":figtext:" not in (r.get("id") or "")],
+            query=resolved_query)
         extraction_time = time.time() - t2
         ptrace.mark("route", role)
 
