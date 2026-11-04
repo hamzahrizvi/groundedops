@@ -132,6 +132,11 @@ _GENERIC = {
     "yes", "no", "not", "notes", "note",   # "coins as well as NOTES": the
                                            # thing it does take is not the
                                            # feature being denied
+    # "do i need to do ANYTHING", "has nothing EXTRA" name no feature
+    # (B6-45); "anything over BLUETOOTH" still names one.
+    "anything", "something", "nothing", "everything", "anyone", "someone",
+    "anybody", "somebody", "anywhere", "somewhere", "everywhere", "else",
+    "extra", "like",
 }
 
 _WORD = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -143,8 +148,6 @@ def _tokens(phrase: str) -> list[str]:
 
 _AUXILIARY_SUBJECT = re.compile(r"(?:i|you|we|they|he|she|it)\b", re.I)
 _PRONOUN_OBJECT = re.compile(r"(?:them|these|those|this|that|ones?)", re.I)
-# "do i need to do ANYTHING", "has nothing EXTRA": no feature named (B6-45).
-_INDEFINITE = re.compile(r"(?:any|some|no|every)(?:thing|one|body|where)\b", re.I)
 
 _CONFESSED = re.compile(r"\b(?:no mention|not mentioned|no information)\b", re.I)
 
@@ -200,12 +203,12 @@ def denied_feature(answer: str, question: str = "") -> str | None:
                       r"| [—–-]+ | ?\(",
                       phrase, maxsplit=1, flags=re.I)[0]
     phrase = re.sub(r"^(?:a|an|any|the|its)\s+", "", phrase, flags=re.I).strip(" ,")
-    if not phrase or _INDEFINITE.match(phrase):
+    if not phrase or not feature_words(phrase):
         return None
     # "connect to a phone over Bluetooth": the object alone is not the
     # feature, and "doesn't mention phone over Bluetooth" is not English.
-    c = re.search(r"\bconnect\b.*", lead, re.I)
-    return "connecting" + c.group(0)[7:] + phrase if c else phrase
+    c = re.search(r"\bconnect(?:ed)?\b(.*)", lead, re.I)
+    return "connecting" + c.group(1) + phrase if c else phrase
 
 
 def feature_words(phrase: str, product_words: set[str] | None = None) -> list[str]:
