@@ -63,7 +63,7 @@ from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root, 
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
-from structure import extract_structured_block, asks_for_procedure, asks_to_fix, lists_on_topic, MIN_COPY_RERANK
+from structure import extract_structured_block, asks_for_procedure, asks_to_fix, reports_failure, lists_on_topic, MIN_COPY_RERANK
 from logger import log_interaction, redact
 from router import route_model
 from grounding import check_grounding, _get_nli_model
@@ -4553,7 +4553,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # outside the context, so the answer explained free-fall and escrow. The
     # fault-clearing section the ranking found goes first, whole, in document
     # order. One product only: across products it could be a sibling's steps.
-    if (asks_to_fix(q) and (_scope or {}).get("product")
+    # D-20261104-06: a bare symptom report ("IMS Local search finds nothing") counts too, and a
+    # help article titled by its symptom is a fault section (retrieval_db._fault_title).
+    if ((asks_to_fix(q) or reports_failure(q)) and (_scope or {}).get("product")
             and len(_both_named) < 2 and not _comparing):
         _fix = fix_sections(_retrieved)
         if _fix:

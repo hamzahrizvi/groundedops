@@ -95,3 +95,43 @@ def test_budget_too_small_gives_retrieved_chunk_only():
 def test_collection_error_gives_empty():
     use(boom=True)
     assert retrieval_db.fix_sections([hit(3)]) == []
+
+
+KB = "I can not find my device on IMS Local-.txt"
+
+
+class FakeKB:
+    def __init__(self, source):
+        self.source = source
+
+    def get(self, where=None, **kw):
+        if (where or {}).get("source") != self.source:
+            return {"ids": [], "documents": [], "metadatas": []}
+        return {"ids": [f"{self.source}:h:{n}" for n in (1, 2)],
+                "documents": ["rndis a", "rndis b"],
+                "metadatas": [{"source": self.source, "page": 1, "section": ""}] * 2}
+
+
+def kb_hit(source=KB, score=0.21, n=2):
+    return {"id": f"{source}:h:{n}", "text": "x", "source": source, "page": 1,
+            "section": "", "rerank_score": score, "retrieval_score": 0.1}
+
+
+def test_symptom_titled_page_without_headings_is_a_fault_section():
+    retrieval_db.get_collection = lambda: FakeKB(KB)
+    out = retrieval_db.fix_sections([kb_hit()])
+    assert [c["text"] for c in out] == ["rndis a", "x"]
+
+
+def test_plain_titled_page_without_headings_is_not():
+    src = "ICU Range User Manual.txt"
+    retrieval_db.get_collection = lambda: FakeKB(src)
+    assert retrieval_db.fix_sections([kb_hit(src, 0.9)]) == []
+
+
+def test_symptom_titled_page_below_floor_or_secondary_is_not():
+    retrieval_db.get_collection = lambda: FakeKB(KB)
+    assert retrieval_db.fix_sections([kb_hit(score=0.1)]) == []
+    ts = "NV200 Test Script - Software Error Handling.txt"
+    retrieval_db.get_collection = lambda: FakeKB(ts)
+    assert retrieval_db.fix_sections([kb_hit(ts, 0.9)]) == []
