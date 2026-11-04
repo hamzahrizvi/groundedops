@@ -477,7 +477,9 @@ def unknown_model_name(query: str, known_words: set[str], vocab: dict,
         if m.group(1).lower() not in prefixes:
             continue
         tok = m.group(0).lower()
-        flat = tok.replace("-", "")
+        # Flattened the way the catalogue's own forms are (main._product_alias_tokens):
+        # "+" and "-" dropped, so "nv10usb+" is the NV10USB+ (D-20261030-14).
+        flat = re.sub(r"[^a-z0-9]", "", tok)
         if tok in known_words or flat in known_words:
             continue
         if _lookup(vocab, flat) or _lookup(vocab, tok):
