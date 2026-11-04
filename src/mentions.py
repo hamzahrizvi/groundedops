@@ -118,7 +118,8 @@ def _asked_object(text: str) -> str:
 # "Ethernet CONFIGURATION", "battery BACKUP OPTION": the feature is the
 # other word, and these are in every manual whatever it covers.
 _GENERIC = {
-    "connectivity", "connection", "connections", "configuration", "support",
+    "connectivity", "connection", "connections", "connecting",
+    "configuration", "support",
     "supported", "capability", "capabilities", "function", "functionality",
     "feature", "features", "option", "options", "mode", "modes", "port",
     "ports", "interface", "interfaces", "built", "in", "directly", "natively",
@@ -142,6 +143,8 @@ def _tokens(phrase: str) -> list[str]:
 
 _AUXILIARY_SUBJECT = re.compile(r"(?:i|you|we|they|he|she|it)\b", re.I)
 _PRONOUN_OBJECT = re.compile(r"(?:them|these|those|this|that|ones?)", re.I)
+# "do i need to do ANYTHING", "has nothing EXTRA": no feature named (B6-45).
+_INDEFINITE = re.compile(r"(?:any|some|no|every)(?:thing|one|body|where)\b", re.I)
 
 _CONFESSED = re.compile(r"\b(?:no mention|not mentioned|no information)\b", re.I)
 
@@ -165,6 +168,7 @@ def denied_feature(answer: str, question: str = "") -> str | None:
     # there is no mention of a touchscreen", gpt-5-mini, S26) may deny some
     # OTHER, documented thing first; the feature in doubt is the one asked.
     phrase = m.group(1) if m and not _CONFESSED.search(first) else None
+    lead = first[m.start():m.start(1)] if phrase else ""   # the verb before it
     if not phrase and question:
         # The LAST verb, which is the innermost: "Does the MyCheckr have a
         # backup battery" has a verb at "does" (whose object would be the
@@ -183,7 +187,7 @@ def denied_feature(answer: str, question: str = "") -> str | None:
             if _AUXILIARY_SUBJECT.match(o) or _PRONOUN_OBJECT.fullmatch(o.strip()):
                 break
             if o.strip():
-                phrase = o
+                phrase, lead = o, v.group(0)
                 break
     if not phrase:
         return None
@@ -195,8 +199,13 @@ def denied_feature(answer: str, question: str = "") -> str | None:
     phrase = re.split(r" (?:as well as|rather than|instead of|but) "
                       r"| [—–-]+ | ?\(",
                       phrase, maxsplit=1, flags=re.I)[0]
-    phrase = re.sub(r"^(?:a|an|any|the|its)\s+", "", phrase, flags=re.I)
-    return phrase.strip(" ,") or None
+    phrase = re.sub(r"^(?:a|an|any|the|its)\s+", "", phrase, flags=re.I).strip(" ,")
+    if not phrase or _INDEFINITE.match(phrase):
+        return None
+    # "connect to a phone over Bluetooth": the object alone is not the
+    # feature, and "doesn't mention phone over Bluetooth" is not English.
+    c = re.search(r"\bconnect\b.*", lead, re.I)
+    return "connecting" + c.group(0)[7:] + phrase if c else phrase
 
 
 def feature_words(phrase: str, product_words: set[str] | None = None) -> list[str]:
