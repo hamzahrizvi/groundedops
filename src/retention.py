@@ -48,6 +48,30 @@ def prune(days_: int | None = None, now: datetime | None = None) -> dict:
     return out
 
 
+def erase(email: str = "", session_ids=(), user_id: str = "") -> dict:
+    """UK GDPR erasure: delete one person's visitor text now instead of in
+    90 days. An email finds their enquiries; their chats and votes are found
+    by conversation (the widget's session id) or by the website's signed-in
+    user id. The unanswered-questions list keeps question text without who
+    asked it, so nothing there points back to a person; the 90-day rule
+    still clears it. Returns rows removed per store."""
+    jobs = (("widget_config", "erase_email", email),
+            ("logger", "erase_sessions", session_ids),
+            ("widget_api", "erase_sessions", session_ids),
+            ("conversations", "erase_user", user_id))
+    out = {}
+    for mod, fn, arg in jobs:
+        if not arg:
+            continue
+        try:
+            out[mod] = getattr(importlib.import_module(mod), fn)(arg)
+        except Exception as e:
+            logger.warning(f"erasure: {mod} failed: {e}")
+            out[mod] = f"error: {e}"
+    logger.info(f"erasure: removed {out}")
+    return out
+
+
 def _loop() -> None:
     time.sleep(300)   # let startup and warmup finish first
     while days() > 0:

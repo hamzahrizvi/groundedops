@@ -95,6 +95,11 @@ class FeedbackRequest(BaseModel):
     note: str = Field("", max_length=280)
 
 
+class ForgetRequest(BaseModel):
+    session_id: str = Field(..., min_length=8, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+
+
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
 # made-up ids. Filled when /ask returns a pipeline answer.
 # ponytail: in memory, so a restart forgets them and a vote on an answer
@@ -192,6 +197,26 @@ def prune_before(cutoff) -> int:
             return 0
         kept = {k: v for k, v in data.items()
                 if isinstance(v, dict) and (v.get("created_at") or "") >= key}
+        if len(kept) < len(data):
+            jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
+        return len(data) - len(kept)
+
+
+def erase_sessions(session_ids) -> int:
+    """Erasure on request: drop the votes of these conversations, and the
+    answers held in memory for voting on. Returns how many votes went."""
+    ids = {s for s in session_ids if s}
+    if not ids:
+        return 0
+    with _recent_lock:
+        for rid in [k for k, v in _RECENT_ANSWERS.items() if v.get("session_id") in ids]:
+            del _RECENT_ANSWERS[rid]
+    with _feedback_lock:
+        data = jsonstore.load(_FEEDBACK_PATH, {}, label="widget feedback")
+        if not isinstance(data, dict):
+            return 0
+        kept = {k: v for k, v in data.items()
+                if not (isinstance(v, dict) and v.get("session_id") in ids)}
         if len(kept) < len(data):
             jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
         return len(data) - len(kept)
@@ -342,6 +367,12 @@ def _public_sources(sources) -> list:
     } for s in (sources or [])]
 
 
+def _public_product_options(opts) -> list[dict]:
+    """Catalogue keys and their display names, at most six, nothing else."""
+    return [{"key": str(o["key"])[:80], "label": str(o.get("label") or o["key"])[:80]}
+            for o in (opts or [])[:6] if isinstance(o, dict) and o.get("key")]
+
+
 def _public_more_context(mc) -> dict | None:
     """The follow-up offer, minus the internals.
 
@@ -438,6 +469,7 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         # are the free-text options the generation path builds, and there
         # are none here.
         "clarification_options": [],
+        "product_options": [],
         "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
@@ -828,12 +860,12 @@ def register(app, answer_query, draft_enquiry=None):
             # dead-ending on a refusal. It was already computed by /query but
             # this endpoint builds its own response dict, so it never reached
             # the one surface customers actually use.
-            #
-            # product_options is deliberately NOT passed through: the widget
-            # requires a product before it will ask anything, and the backend
-            # only offers product choices when no product is set, so those
-            # options can never be populated here.
             "offer_support": bool(result.get("offer_support")),
+            # "Which product?" buttons. Dropped here until D-20261021-07 let a
+            # visitor type before picking a product; an unscoped question can
+            # now come back asking which product, and the widget shows the
+            # choices as chips that set the product and ask again.
+            "product_options": _public_product_options(result.get("product_options")),
             # Passed through for the same reason offer_support had to be: this
             # endpoint builds its own dict, so anything /query adds stops at
             # the console unless it is named here -- and the widget is the
@@ -903,6 +935,18 @@ def register(app, answer_query, draft_enquiry=None):
         interaction_log.log_feedback(payload.request_id, payload.vote,
                                      payload.session_id)
         return {"received": True}
+
+    @router.post("/forget")
+    def widget_forget(payload: ForgetRequest, request: Request):
+        """A visitor deletes this conversation: its questions, answers and
+        votes, at once rather than after 90 days. The session id is a random
+        id only this visitor's browser holds."""
+        gate = quota.check_public_write("forget", payload.visitor_id, _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429, detail="Too many requests today.")
+        import retention
+        retention.erase(session_ids=[payload.session_id])
+        return {"deleted": True}
 
     @router.post("/ask/stream")
     async def widget_ask_stream(payload: AskRequest, request: Request):
@@ -984,7 +1028,8 @@ def register(app, answer_query, draft_enquiry=None):
                                 "service_degraded", "more_context",
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "suggested_replies",
-                                "flagged", "quota", "session", "deep_done")})
+                                "flagged", "quota", "session", "deep_done")}
+                      | {"product_options": _public_product_options(result.get("product_options"))})
 
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would

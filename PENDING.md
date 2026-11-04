@@ -213,6 +213,20 @@ D-20261022-16). Found on the way, not filed: the nightly backup of
 2026-11-03 was terminated (result 0xC000013A), so that day's archive is
 missing. Still open: mostly items that wait on a person (keys, IT, the
 host, decisions), an outside service, a live backend run, or the office.
+The three small doable items the sweep left were built the same day on
+`claude/small-jobs-20261104`: product buttons in the widget, the `ready`
+line in `serve.ps1 -Status` (with STAGING.md step 4), and the console's
+Online/Local switch. Each is noted where its item stands.
+Also built there: **erasure on request** (UK GDPR), the gap left by the
+90-day rule. `retention.erase()` deletes one person's enquiries by email,
+a conversation's log rows and votes by its session id, and a signed-in
+visitor's saved chats by user id, at once. Staff use "Delete a person's
+data" on the console's Enquiries page (`POST /admin/privacy/erase`). A
+visitor uses "Delete this chat now" under the widget's settings, which
+also shows the chat id to quote (`POST /widget/forget`, capped per day).
+Not linked to a person, so not covered: question text on the unanswered
+list (the 90-day rule clears it). Still the owner's: a privacy link shows
+only when the website owner sets one.
 
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
@@ -2704,10 +2718,14 @@ see *Shipped — the four follow-ups* above; kept for the record.
   refusal offers "Ask our support team", which opens the configured support
   form (fields from the console, optional write-up of the conversation) and
   files a real enquiry. It previously threw the visitor at a `mailto:` with
-  no record kept. **`product_options` is still not rendered as buttons in
-  the widget** — the widget's own flow asks for a range/product up front via
-  `/widget/catalog`, so the mid-conversation disambiguation buttons the
-  console's chat shows have no equivalent there yet.
+  no record kept. ~~`product_options` is still not rendered as buttons in
+  the widget~~ — **DONE 2026-11-04** (branch `claude/small-jobs-20261104`).
+  Since D-20261021-07 a visitor can type before picking a product, so an
+  unscoped question can come back asking which product. `/widget/ask` and
+  the stream's meta event now forward `product_options` (key and label, at
+  most six), and the widget shows them as chips: a tap sets the product and
+  asks the same question again, as the console does. Checked in a browser
+  (`test_widget_typed_first.py`).
 
 - **The React SPA was retired in v15.2.** It was a third chat surface
   duplicating the admin console's test chat and the widget, so every fix had
@@ -2719,10 +2737,15 @@ see *Shipped — the four follow-ups* above; kept for the record.
     is unchanged. It previously depended on vite copying it into
     `frontend/dist/` and that being mounted at `/` — a customer asset
     depending on an internal dev app being built.
-  - **No UI remains for the generation mode / provider toggle.** The React
-    app's Settings page was the only one. The endpoints still exist
-    (`POST /settings/mode`, `POST /settings/online_provider`) but are
-    curl-only. Worth adding to the admin console.
+  - ~~**No UI remains for the generation mode / provider toggle.**~~ —
+    **DONE 2026-11-04.** The provider half came with the Keys page's
+    per-job pickers (`keyRolesCard`, 555f3704). The mode half: the Keys
+    page's "Which key does what" card now has an Answer mode select
+    (Online / Local) that posts to `/settings/mode`, confirms before Local
+    and names where flagged answers go (branch
+    `claude/small-jobs-20261104`; check in `test_keystore.py`). Left:
+    `/settings/mode` itself accepts a support-level session, while the
+    page and the escalation switch beside it are root-only.
   - Saved chat history (was browser localStorage in the React app) is gone.
   - Node/npm is no longer needed at all: no build step anywhere.
 
@@ -2796,13 +2819,15 @@ see *Shipped — the four follow-ups* above; kept for the record.
      every answer refuses — exactly the state a fresh deploy is in. A
      `?deep=1` variant that counts collection rows would make the runbook's
      check real.
-     **HALF DONE:** `/health?deep=1` exists (since `1365920`, 2026-09-01)
-     and returns 503 when the index is empty, no key is set or the models
-     are not loaded. But neither consumer uses it:
-     `docker/Dockerfile.backend:35` still probes plain `/health`, and so
-     does `STAGING.md:139`. Done looks like: the runbook step uses
-     `?deep=1`, and the container healthcheck either does too (with a
-     `start-period` longer than the ~30s model load) or says why not.
+     **DONE 2026-11-04** (branch `claude/small-jobs-20261104`).
+     `/health?deep=1` (since `1365920`) returns 503 when the index is
+     empty, the default provider has no key or does not answer, or warm-up
+     is not finished. `serve.ps1 -Status` now prints a `ready` line from
+     it, and STAGING.md step 4 says it must read yes and gives the on-box
+     curl. The tunnel check stays plain `/health`, because `?deep=1` is
+     refused from outside without a staff token. The container half went
+     with Docker (`0b6ebe6`), and the watchdog's plain-/health choice is
+     explained in `serve.ps1`.
 
   5. ~~**Worker scaling would silently corrupt every store.**~~ —
      **DONE (sweep 2026-11-04).** M11 put the warning in the compose file;

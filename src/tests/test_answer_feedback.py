@@ -101,3 +101,21 @@ def test_the_response_and_the_widget_carry_what_a_vote_needs():
     assert '"request_id"' in meta[:600], "stream meta"
     assert "/widget/feedback" in WIDGET_JS and "function voteRow" in WIDGET_JS
     assert "msg.vote" in WIDGET_JS, "the vote is kept on the message for a resumed chat"
+
+
+def test_erasure_routes():
+    """A visitor deletes their own chat; staff erase a person on request."""
+    import _harness
+    import retention
+    with patch.object(retention, "erase", return_value={"logger": 2}) as er:
+        assert client.post("/widget/forget", json={"session_id": "s-forget-me"}).status_code == 200
+        er.assert_called_with(session_ids=["s-forget-me"])
+        assert client.post("/widget/forget", json={"session_id": ""}).status_code == 422
+        assert client.post("/admin/privacy/erase", json={"email": "a@b.c"}).status_code == 401
+        sup = {"x-admin-password": _harness.SUPPORT_TOKEN}
+        assert client.post("/admin/privacy/erase", json={}, headers=sup).status_code == 400
+        r = client.post("/admin/privacy/erase", headers=sup,
+                        json={"email": " a@b.c ", "session_id": "s1"})
+        assert r.status_code == 200 and r.json()["removed"] == {"logger": 2}
+        er.assert_called_with(email="a@b.c", session_ids=["s1"], user_id="")
+    assert "/widget/forget" in WIDGET_JS and "Delete this chat now" in WIDGET_JS

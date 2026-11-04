@@ -61,6 +61,25 @@ def test_the_widget_renders_them_as_chips():
     assert "chips(" in block and "ask(opt)" in block
 
 
+def test_product_options_reach_the_widget():
+    """A question typed before picking a product (D-20261021-07) can come back
+    asking which product; the widget used to get the question with no buttons."""
+    src = _widget_api_source()
+    near = src[src.index('"offer_support": bool(result.get("offer_support"))'):][:800]
+    assert '"product_options": _public_product_options(' in near
+    meta = src[src.index('yield sse("meta"'):][:900]
+    assert '"product_options": _public_product_options(' in meta
+    assert widget_api._public_product_options(
+        [{"key": "nv9", "label": "NV9 Spectral"}, {"label": "no key"}, "junk"]
+    ) == [{"key": "nv9", "label": "NV9 Spectral"}]
+    import pathlib
+    js = (pathlib.Path(__file__).resolve().parent.parent
+          / "widget" / "groundedops-widget.js").read_text(encoding="utf-8")
+    block = js[js.index("var prodOpts"):][:900]
+    assert "state.product = { key: o.key, name: o.label }" in block
+    assert "silent: true" in block and '"Which product?"' in block
+
+
 def test_the_console_renders_them_too():
     import pathlib
     html = (pathlib.Path(__file__).resolve().parent.parent

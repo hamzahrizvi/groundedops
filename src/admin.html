@@ -5093,6 +5093,37 @@ function keyRolesCard() {
     } catch (e) { toast(e.message, true); escBox.checked = !escBox.checked; drawEsc(); }
   });
   drawEsc();
+
+  // Which mode answers, set from here instead of curl to /settings/mode.
+  const modeSel = el("select", { "aria-label": "Answer mode" },
+    el("option", { value: "api" }, "Online: the providers above"),
+    el("option", { value: "local" }, "Local: the on-prem models"));
+  modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+  modeSel.addEventListener("change", async () => {
+    const want = modeSel.value;
+    if (want === "local" && !confirm("Switch every answer to the on-prem models?\n\n"
+        + "Their answer quality has not been measured. Online mode can be switched back at any time.")) {
+      modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+      return;
+    }
+    try {
+      const res = await api("/settings/mode", { method: "POST", body: JSON.stringify({ mode: want }) });
+      keysCache.generation_mode = res.mode;
+      modeSel.value = res.mode === "local" ? "local" : "api";
+      drawEsc();
+      toast(res.mode === "local"
+        ? "Local mode on. " + ((res.outside_providers || []).length
+            ? "Flagged answers go to " + res.outside_providers.join(", ") + "."
+            : "Nothing is sent outside.")
+        : "Online mode on");
+    } catch (e) {
+      toast(e.message, true);
+      modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+    }
+  });
+  const modeRow = el("div", { class: "row", style: "align-items:center;margin:6px 0 10px" },
+    el("b", {}, "Answer mode"), modeSel);
+
   const escRow = el("div", { class: "row", style: "align-items:flex-start;margin-top:6px" },
     escBox,
     el("div", { style: "flex:1 1 220px;min-width:0" },
@@ -5107,6 +5138,7 @@ function keyRolesCard() {
       + "one only when you want deep questions answered elsewhere, or a "
       + "different provider to pick up when the first fails. Applies in "
       + "Online mode."),
+    modeRow,
     el("p", { class: "sec-hint", style: "margin-top:-4px" },
       "Each job also picks a model. Leave it on “follow default” and "
       + "the job uses whatever that provider is set to, so choosing a model "
@@ -7465,7 +7497,37 @@ function viewLeads() {
       el("div", { class: s.unsent ? "warn" : "" },
         el("div", { class: "lbl" }, "Not emailed"), el("b", {}, String(s.unsent || 0)))),
     el("div", { "data-tour": "leads-list" }, rows),
+    eraseCard(),
   ];
+}
+
+// UK GDPR: someone asks for their data to be deleted. Their enquiries are
+// found by email; a chat by the id the widget shows under its settings; a
+// signed-in visitor's saved chats by the website's user id.
+function eraseCard() {
+  const f = { email: el("input", { type: "email", placeholder: "name@example.com" }),
+              session_id: el("input", { placeholder: "Chat id from the widget's settings" }),
+              user_id: el("input", { placeholder: "Website user id (signed-in visitors)" }) };
+  const go = async () => {
+    const body = Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value.trim()]));
+    if (!body.email && !body.session_id && !body.user_id) return toast("Fill in at least one field", true);
+    if (!confirm("Delete everything matching these details now? It cannot be recovered.")) return;
+    try {
+      const r = await api("/admin/privacy/erase", { method: "POST", body: JSON.stringify(body) });
+      const n = Object.values(r.removed || {}).filter(v => typeof v === "number").reduce((a, b) => a + b, 0);
+      toast(n ? "Deleted " + n + " record" + (n === 1 ? "" : "s") : "Nothing matched these details");
+      Object.values(f).forEach(i => { i.value = ""; });
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+  };
+  return el("div", { class: "card elev-sm", "data-sec": "Delete a person's data", style: "margin-top:18px" },
+    el("h2", {}, "Delete a person's data"),
+    el("p", { class: "lede", style: "margin-top:0" },
+      "For a request to erase someone's data. Their email removes their enquiries; the chat id "
+      + "removes that conversation's questions, answers and votes. Everything else is deleted "
+      + "after 90 days anyway. Questions on the unanswered list are not linked to who asked."),
+    el("div", { class: "row" }, f.email, f.session_id, f.user_id,
+      el("button", { class: "btn btn-secondary", onclick: go }, "Delete")));
 }
 
 /* ---------------- catalog ---------------- */

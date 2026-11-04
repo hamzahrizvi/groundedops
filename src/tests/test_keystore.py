@@ -158,6 +158,15 @@ check(client.get("/admin/keys", headers=ROOT).json()["local_escalation"] is True
 client.post("/admin/keys/local_escalation", headers=ROOT, json={"allow": False})
 check(keystore.local_escalation_allowed() is False, "and off again")
 
+print(chr(10) + "== the console sets the answer mode ==")
+check("generation_mode" in client.get("/admin/keys", headers=ROOT).json(),
+      "the keys list reports the mode the switch starts from")
+_html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "admin.html"), encoding="utf-8").read()
+_card = _html[_html.index("function keyRolesCard"):][:9000]
+check('api("/settings/mode"' in _card and "keysCache.generation_mode = res.mode" in _card,
+      "the keys page posts the switch to /settings/mode, not curl only")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")

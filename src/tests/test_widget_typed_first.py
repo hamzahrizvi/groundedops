@@ -150,3 +150,39 @@ def test_buttons_still_scope_the_question():
     _page.wait_for_selector(".go-scope:has-text('NV9')")
     body = _send("How do I remove the bezel?")
     assert body["product"] == "nv9", body
+
+
+def test_a_visitor_can_delete_this_chat():
+    _send("How do I remove the bezel?")
+    sid = [b for u, b in posted if u.endswith("/widget/ask/stream")][-1]["session_id"]
+    _page.click(".go-settings-btn")
+    _page.wait_for_selector(f".go-settings:has-text('{sid}')")
+    _page.once("dialog", lambda d: d.accept())
+    _page.click(".go-set-del")
+    _page.wait_for_selector(".go-b.bot:has-text('Your previous chat has been deleted')")
+    forget = [b for u, b in posted if u.endswith("/widget/forget")]
+    assert forget and forget[0]["session_id"] == sid, forget
+    assert not _page.is_visible(f".go-b:has-text('{ANSWER[:20]}')"), "the old chat is gone from view"
+
+
+STREAM_WHICH = _sse(
+    ("meta", {"sources": [], "request_id": "rid-which", "role": "clarify",
+              "needs_clarification": True, "clarification_options": [],
+              "product_options": [{"key": "nv9", "label": "NV9 Spectral"},
+                                  {"key": "nv200", "label": "NV200"}]}),
+    ("delta", {"text": "That could apply to more than one product, which did you mean?"}))
+
+
+def test_a_which_product_question_offers_buttons_that_re_ask():
+    stream_body[0] = STREAM_WHICH
+    _page.wait_for_selector(".go-in:not([disabled])")
+    _page.fill(".go-in", "How do I remove the bezel?")
+    _page.keyboard.press("Enter")
+    _page.wait_for_selector("button:has-text('NV9 Spectral')")
+    stream_body[0] = STREAM_OK
+    _page.click("button:has-text('NV9 Spectral')")
+    _page.wait_for_selector(f".go-b.bot:has-text('{ANSWER[:20]}')")
+    asks = [b for u, b in posted if u.endswith("/widget/ask/stream")]
+    assert len(asks) == 2 and asks[0]["product"] is None, asks
+    assert asks[1]["product"] == "nv9" and asks[1]["q"] == "How do I remove the bezel?", asks[1]
+    assert _page.is_visible(".go-scope:has-text('NV9 Spectral')")

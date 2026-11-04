@@ -118,6 +118,21 @@ if ($Status) {
     try {
         $r = Invoke-WebRequest "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 5
         Write-Host "backend   : up ($($r.StatusCode)) on port $Port"
+        # Up is not ready: ?deep=1 answers 503 on an empty index, a missing or
+        # unreachable provider, or models still warming. It is served to the
+        # box only, so this is the readiness check STAGING.md step 4 uses.
+        try {
+            $body = (Invoke-WebRequest "http://127.0.0.1:$Port/health?deep=1" -UseBasicParsing -TimeoutSec 30).Content
+        } catch {
+            $body = $_.ErrorDetails.Message
+        }
+        try {
+            $d = $body | ConvertFrom-Json
+            $yn = if ($d.ready) { "yes" } else { "NO" }
+            Write-Host "ready     : $yn  (index_chunks $($d.index_chunks), provider $($d.provider) key $($d.provider_key) reachable $($d.provider_reachable), warm-up $($d.warmup.ready))"
+        } catch {
+            Write-Host "ready     : unknown (no readable answer from /health?deep=1)"
+        }
     } catch {
         Write-Host "backend   : NOT responding on port $Port"
     }

@@ -175,8 +175,23 @@ def prune_before(cutoff) -> int:
     logs.json array. A rotated file left empty is deleted. Rows carry naive
     UTC ISO timestamps, so a string compare is a time compare; a row with no
     timestamp is dropped. Returns how many rows went."""
-    import glob
     key = cutoff.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+    return _drop_rows(lambda r: ((r or {}).get("timestamp") or "") < key)
+
+
+def erase_sessions(session_ids) -> int:
+    """Erasure on request: drop every row (questions, answers, votes) of
+    these conversations. Returns how many rows went."""
+    ids = {s for s in session_ids if s}
+    if not ids:
+        return 0
+    return _drop_rows(lambda r: r is not None and r.get("session_id") in ids)
+
+
+def _drop_rows(drop) -> int:
+    """Rewrite every log file without the rows `drop(row)` is true for; a
+    torn line from a crash mid-write is passed as None."""
+    import glob
     folder = os.path.dirname(os.path.abspath(LOG_FILE))
     removed = 0
     with _lock:
@@ -189,10 +204,10 @@ def prune_before(cutoff) -> int:
             kept = []
             for line in lines:
                 try:
-                    ts = json.loads(line).get("timestamp") or ""
+                    row = json.loads(line)
                 except ValueError:
-                    ts = ""            # a torn line from a crash mid-write
-                if ts >= key:
+                    row = None
+                if not drop(row if isinstance(row, dict) else None):
                     kept.append(line)
             if len(kept) == len(lines):
                 continue
@@ -212,8 +227,7 @@ def prune_before(cutoff) -> int:
             except ValueError:
                 rows = None
             if isinstance(rows, list):
-                kept = [r for r in rows if isinstance(r, dict)
-                        and (r.get("timestamp") or "") >= key]
+                kept = [r for r in rows if isinstance(r, dict) and not drop(r)]
                 if len(kept) < len(rows):
                     removed += len(rows) - len(kept)
                     tmp = legacy + ".tmp"
