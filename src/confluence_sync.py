@@ -728,9 +728,10 @@ def _host_ok(url: str, hosts: list[str]) -> bool:
     if re.search(r"[\s\\]", url):
         return False
     try:
-        u = urlsplit(url if "//" in url or url.startswith("mailto:") else "//" + url)
-        if u.scheme == "mailto":
-            names = [a.rpartition("@")[2] for a in u.path.split(",")]
+        u = urlsplit(url if "//" in url or url[:7].lower() == "mailto:" else "//" + url)
+        if u.scheme == "mailto":       # %2C or a second @ hides one more recipient
+            names = [a.rpartition("@")[2] if a.count("@") == 1 and "%" not in a else ""
+                     for a in u.path.split(",")]
         elif re.fullmatch(r"[A-Za-z0-9.-]+(?::\d*)?", u.netloc):
             names = [u.hostname or ""]
         else:                          # userinfo, brackets, %-escapes: not kept
@@ -744,13 +745,13 @@ def _host_ok(url: str, hosts: list[str]) -> bool:
 def _kept(url: str, hosts: list[str]) -> str:
     """url as it may stay in synced text, or "": a mailto loses its query
     (?cc= and ?bcc= name more recipients, Security 2026-11-03)."""
-    if url.startswith("mailto:"):
+    if url[:7].lower() == "mailto:":
         url = url.partition("?")[0]
     return url if _host_ok(url, hosts) else ""
 
 
 # An address typed as text (a code or pre block): no trailing punctuation.
-_URL = re.compile(r"""(?:https?://|mailto:|www\.)[^\s<>"'()\[\]{}]*[^\s<>"'()\[\]{}.,;:!?]""")
+_URL = re.compile(r"""(?:https?://|mailto:|www\.)[^\s<>"'()\[\]{}]*[^\s<>"'()\[\]{}.,;:!?]""", re.I)
 
 
 class _Text(HTMLParser):

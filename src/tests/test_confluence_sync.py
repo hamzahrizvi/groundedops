@@ -253,6 +253,11 @@ def test_link_hosts_setting():
         assert not cs._host_ok("http://[docs.example.com/p", cs.link_hosts())    # malformed
         assert not cs._host_ok("mailto:a@evil.example,b@docs.example.com", cs.link_hosts())
         assert cs._host_ok("mailto:a@docs.example.com?subject=x", cs.link_hosts())
+        assert not cs._host_ok("mailto:a@evil.example%2Cb@docs.example.com", cs.link_hosts())
+        assert not cs._host_ok("mailto:a@evil.example@docs.example.com", cs.link_hosts())
+        assert cs._host_ok("HTTPS://WWW.DOCS.EXAMPLE.COM/p", cs.link_hosts())
+        assert "evil" not in cs.page_text("P", "<pre>HTTPS://evil.example/x</pre>",
+                                          hosts=cs.link_hosts())
         assert not cs._host_ok("https://u:p@docs.example.com/", cs.link_hosts())
         assert not cs._host_ok("https://evil.example\\@docs.example.com/", cs.link_hosts())
         assert not cs._host_ok("https://docs.example.com/a b", cs.link_hosts())
