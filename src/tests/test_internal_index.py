@@ -155,7 +155,8 @@ def test_h_an_unreadable_marks_file_stops_ingest_and_keeps_the_chunks():
 def test_i_an_unreadable_marks_file_stops_a_rebuild_before_the_reset():
     rdb._internal = rdb._Everything()
     try:
-        with patch.object(db, "reset_collection") as reset,              patch.object(reindex, "snapshot_collection") as snap:
+        with patch.object(db, "reset_collection") as reset, \
+             patch.object(reindex, "snapshot_collection") as snap:
             try:
                 reindex.rebuild([{"source": "Pricing.txt", "path": __file__,
                                   "chunks": 1}], dry_run=False)

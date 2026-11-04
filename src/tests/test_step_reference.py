@@ -63,7 +63,9 @@ def test_items_are_split_by_their_own_form():
 
 def _ask(q, sid="s-87"):
     from unittest import mock
-    with mock.patch.object(main, "capability", lambda name: True),             mock.patch.object(main, "log_interaction", lambda *a, **k: None),             mock.patch.object(main, "add_to_memory", lambda *a, **k: None):
+    with mock.patch.object(main, "capability", lambda name: True), \
+            mock.patch.object(main, "log_interaction", lambda *a, **k: None), \
+            mock.patch.object(main, "add_to_memory", lambda *a, **k: None):
         return main.query(main.QueryRequest(q=q, session_id=sid))
 
 
