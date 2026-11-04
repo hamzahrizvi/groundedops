@@ -2258,6 +2258,29 @@
         // they may not know. Tapping one sends it as the next message, which
         // is the same path as typing it: the backend resolves a short
         // fragment against the previous turn.
+        // A question typed before choosing a product can come back asking
+        // which one. Tapping a product scopes the chat to it and asks the
+        // same question again, as the console's Test chat does.
+        var prodOpts = d.needs_clarification ? (d.product_options || []) : [];
+        if (prodOpts.length) {
+          chips(
+            prodOpts.map(function (o) {
+              return {
+                label: o.label,
+                style: "alt",
+                onClick: function () {
+                  state.product = { key: o.key, name: o.label };
+                  renderScopeBar();
+                  save();
+                  ask(q, Object.assign({}, opts, { silent: true }));
+                },
+              };
+            }),
+            "Which product?"
+          );
+          return;
+        }
+
         var clarifyOpts = d.needs_clarification ? (d.clarification_options || []) : [];
         if (clarifyOpts.length) {
           chips(

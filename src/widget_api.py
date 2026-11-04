@@ -342,6 +342,12 @@ def _public_sources(sources) -> list:
     } for s in (sources or [])]
 
 
+def _public_product_options(opts) -> list[dict]:
+    """Catalogue keys and their display names, at most six, nothing else."""
+    return [{"key": str(o["key"])[:80], "label": str(o.get("label") or o["key"])[:80]}
+            for o in (opts or [])[:6] if isinstance(o, dict) and o.get("key")]
+
+
 def _public_more_context(mc) -> dict | None:
     """The follow-up offer, minus the internals.
 
@@ -438,6 +444,7 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         # are the free-text options the generation path builds, and there
         # are none here.
         "clarification_options": [],
+        "product_options": [],
         "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
@@ -818,12 +825,12 @@ def register(app, answer_query, draft_enquiry=None):
             # dead-ending on a refusal. It was already computed by /query but
             # this endpoint builds its own response dict, so it never reached
             # the one surface customers actually use.
-            #
-            # product_options is deliberately NOT passed through: the widget
-            # requires a product before it will ask anything, and the backend
-            # only offers product choices when no product is set, so those
-            # options can never be populated here.
             "offer_support": bool(result.get("offer_support")),
+            # "Which product?" buttons. Dropped here until D-20261021-07 let a
+            # visitor type before picking a product; an unscoped question can
+            # now come back asking which product, and the widget shows the
+            # choices as chips that set the product and ask again.
+            "product_options": _public_product_options(result.get("product_options")),
             # Passed through for the same reason offer_support had to be: this
             # endpoint builds its own dict, so anything /query adds stops at
             # the console unless it is named here -- and the widget is the
@@ -974,7 +981,8 @@ def register(app, answer_query, draft_enquiry=None):
                                 "service_degraded", "more_context",
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "suggested_replies",
-                                "flagged", "quota", "session", "deep_done")})
+                                "flagged", "quota", "session", "deep_done")}
+                      | {"product_options": _public_product_options(result.get("product_options"))})
 
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would

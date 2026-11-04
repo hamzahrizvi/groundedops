@@ -5093,6 +5093,37 @@ function keyRolesCard() {
     } catch (e) { toast(e.message, true); escBox.checked = !escBox.checked; drawEsc(); }
   });
   drawEsc();
+
+  // Which mode answers, set from here instead of curl to /settings/mode.
+  const modeSel = el("select", { "aria-label": "Answer mode" },
+    el("option", { value: "api" }, "Online: the providers above"),
+    el("option", { value: "local" }, "Local: the on-prem models"));
+  modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+  modeSel.addEventListener("change", async () => {
+    const want = modeSel.value;
+    if (want === "local" && !confirm("Switch every answer to the on-prem models?\n\n"
+        + "Their answer quality has not been measured. Online mode can be switched back at any time.")) {
+      modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+      return;
+    }
+    try {
+      const res = await api("/settings/mode", { method: "POST", body: JSON.stringify({ mode: want }) });
+      keysCache.generation_mode = res.mode;
+      modeSel.value = res.mode === "local" ? "local" : "api";
+      drawEsc();
+      toast(res.mode === "local"
+        ? "Local mode on. " + ((res.outside_providers || []).length
+            ? "Flagged answers go to " + res.outside_providers.join(", ") + "."
+            : "Nothing is sent outside.")
+        : "Online mode on");
+    } catch (e) {
+      toast(e.message, true);
+      modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+    }
+  });
+  const modeRow = el("div", { class: "row", style: "align-items:center;margin:6px 0 10px" },
+    el("b", {}, "Answer mode"), modeSel);
+
   const escRow = el("div", { class: "row", style: "align-items:flex-start;margin-top:6px" },
     escBox,
     el("div", { style: "flex:1 1 220px;min-width:0" },
@@ -5107,6 +5138,7 @@ function keyRolesCard() {
       + "one only when you want deep questions answered elsewhere, or a "
       + "different provider to pick up when the first fails. Applies in "
       + "Online mode."),
+    modeRow,
     el("p", { class: "sec-hint", style: "margin-top:-4px" },
       "Each job also picks a model. Leave it on “follow default” and "
       + "the job uses whatever that provider is set to, so choosing a model "

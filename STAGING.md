@@ -114,8 +114,16 @@ at boot. Then:
 
 ```powershell
 .\serve.ps1 -Status
+curl.exe -fsS "http://127.0.0.1:8000/health?deep=1"
 curl.exe -fsS https://staging.yourcompany.com/health
 ```
+
+`-Status` must show `ready     : yes`. "Up" only means the process answers;
+`/health?deep=1` (the second line, run on the box) answers 503 until the
+index has chunks, the default provider has a key and answers, and the models
+have warmed up (about 30 s after start). The third line checks the tunnel
+with plain `/health`, because `?deep=1` is refused from outside without a
+staff token.
 
 Then, from an allowlisted address, open `/admin`, sign in, and:
 
