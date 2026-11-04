@@ -159,7 +159,8 @@ def test_forget_against_a_test_log_folder():
     read = lambda p: open(p, encoding="utf-8").read()  # noqa: E731
     post = lambda sid, tok: client.post("/widget/forget", json={  # noqa: E731
         "session_id": sid, "delete_token": tok, "visitor_id": "fv-1"})
-    with patch.dict(sys.modules, {"logger": real_log}),             patch.object(real_log, "LOG_FILE", logs), \
+    with patch.dict(sys.modules, {"logger": real_log}), \
+            patch.object(real_log, "LOG_FILE", logs), \
             patch.object(widget_api, "_FEEDBACK_PATH", os.path.join(tmp, "widget_feedback.json")):
         for tok in ("", "0" * 64, widget_api.delete_token("other-chat-0001")):
             assert post("forget-sid-0001", tok).status_code == 403
