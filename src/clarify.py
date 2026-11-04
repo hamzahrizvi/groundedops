@@ -344,10 +344,13 @@ def fault_sections(product: str, results: list[dict], limit: int = 20,
     """The headings a checklist may offer: this turn's retrieved sections
     first (rank order), then every heading of the product's manuals that
     names a fault, error, LED or troubleshooting topic. One entry per
-    heading text, with the first page seen and its chunks."""
+    heading text, with the first page seen and its chunks. Chunks of
+    documents customers are never answered from (marked internal, or
+    EXCLUDED_SOURCES) are skipped, the is_excluded() check retrieval uses, so
+    neither a heading nor a source can name one (D-20261104-02)."""
+    import retrieval_db
     if chunks is None:
         import db
-        import retrieval_db
         _, chunks = retrieval_db._get_bm25_index(db.get_collection())
     out: dict[str, dict] = {}
 
@@ -356,6 +359,8 @@ def fault_sections(product: str, results: list[dict], limit: int = 20,
         if not sec or _COMMAND_HEADING.search(sec):
             return
         if fault_only and not FAULT_HEADING.search(sec):
+            return
+        if retrieval_db.is_excluded(c.get("source")):
             return
         h = _heading(sec)
         if not h:
