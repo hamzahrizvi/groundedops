@@ -340,8 +340,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261104-02 | Security item D-20261104-02, details in the office | ready to merge | merges once Security clears it |
-| D-20261104-05 | A question with several parts gets the wrong answer when the first draft says "not found" for one part, because the check that repairs missed parts is skipped | approved, queued | Dev builds it |
-| D-20261104-08 | Security item D-20261104-08, details in the office | approved, queued | Dev builds it |
+| D-20261104-05 | A question with several parts gets the wrong answer when the first draft says "not found" for one part, because the check that repairs missed parts is skipped | ready to merge | merges once Security clears it |
+| D-20261104-08 | Security item D-20261104-08, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261104-10 | Security item D-20261104-10, details in the office | waiting for CEO | your yes |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
