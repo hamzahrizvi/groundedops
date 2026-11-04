@@ -392,10 +392,14 @@ def consume_faq_lookup(caller: dict) -> None:
             _add(c, caller["ip_identity"] + ":faq", win, 1)
 
 
-def check(caller: dict, cost: int) -> dict:
-    """Would this request fit in the caller's budget? Does NOT consume.
+def check(caller: dict, cost: int, reserve: bool = False) -> dict:
+    """Would this request fit in the caller's budget?
 
-    Returns {allowed, remaining, limit, reset_at, reason}.
+    Default is read-only (the guest probe relies on that). reserve=True takes
+    the credits in the same step, so a burst cannot all pass; settle with
+    consume(caller, charged - cost, win=gate["window"]).
+
+    Returns {allowed, remaining, limit, reset_at, reason, window}.
     """
     limit = limit_for(caller["tier"])
     win = _window_start()
@@ -418,15 +422,23 @@ def check(caller: dict, cost: int) -> dict:
                 and _used(c, GLOBAL_IDENTITY, win) + cost > cap):
             return {"allowed": False, "remaining": 0, "limit": limit,
                     "reset_at": win + WINDOW_SECONDS, "reason": "global_quota"}
+        if reserve:
+            _add(c, caller["identity"], win, cost)
+            if caller.get("ip_identity"):
+                _add(c, caller["ip_identity"], win, cost)
+            if caller["tier"] != "staff":
+                _add(c, GLOBAL_IDENTITY, win, cost)
     return {"allowed": True, "remaining": remaining, "limit": limit,
-            "reset_at": win + WINDOW_SECONDS, "reason": None}
+            "reset_at": win + WINDOW_SECONDS, "reason": None, "window": win}
 
 
-def consume(caller: dict, cost: int) -> dict:
+def consume(caller: dict, cost: int, win=None) -> dict:
     """Deduct credits. Call AFTER a successful answer, so a failed or
     refused request doesn't burn the visitor's allowance - the common
-    complaint about naive rate limiting."""
-    win = _window_start()
+    complaint about naive rate limiting. A negative cost is a refund; pass
+    the reservation's window so a refund that lands after the daily reset
+    goes back to the day it was taken from."""
+    win = win or _window_start()
     with _lock, _conn() as c:
         _add(c, caller["identity"], win, cost)
         if caller.get("ip_identity"):

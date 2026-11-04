@@ -544,7 +544,7 @@ def register(app, answer_query, draft_enquiry=None):
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
 
-        gate = quota.check(caller, 1)
+        gate = quota.check(caller, 1, reserve=True)
         if not gate["allowed"]:
             # Not a 429: the visitor can still submit the assembled version,
             # and blocking a support request because a drafting allowance ran
@@ -552,21 +552,22 @@ def register(app, answer_query, draft_enquiry=None):
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
 
+        written = ""
         try:
             written = await draft_enquiry(
                 kind=payload.kind, product=payload.product or "",
                 notes=notes, transcript=transcript)
         except Exception as e:
             logger.warning(f"/widget/draft_enquiry: generation failed ({e})")
-            written = ""
+        finally:
+            if not (written or "").strip():
+                quota.consume(caller, -1, win=gate["window"])  # nothing written: give it back
 
         if not (written or "").strip():
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
-
-        state = quota.consume(caller, 1)
         return {"draft": written.strip()[:4000], "written_by": "model",
-                "quota": state}
+                "quota": quota.status(caller)}
 
     @router.post("/ask")
     async def widget_ask(payload: AskRequest, request: Request):
@@ -681,7 +682,7 @@ def register(app, answer_query, draft_enquiry=None):
                 caller, needs_sign_in=True, faq_language=lang)
 
         # ── Member / staff: full pipeline, charged in credits ─────────
-        gate = quota.check(caller, spec["credits"])
+        gate = quota.check(caller, spec["credits"], reserve=True)
         if not gate["allowed"]:
             raise HTTPException(status_code=429, detail={
                 "error": "quota_exceeded",
@@ -697,80 +698,89 @@ def register(app, answer_query, draft_enquiry=None):
                             "For help with your question, contact our team."),
             })
 
+        reserved, settled = spec["credits"], False
         dkey = _deep_key(caller, payload)
-        claim = (await run_in_threadpool(quota.deep_claim, dkey, caller)
-                 if level == "deep" else "ok")
-        if claim == "capped":
-            # Today's free deep runs are used: refused before the pipeline.
-            raise HTTPException(status_code=429, detail={
-                "error": "quota_exceeded",
-                "reason": "deep_daily",
-                "tier": tier,
-                "limit": quota.free_deep_limit(),
-                "remaining": gate["remaining"],
-                "reset_at": gate["reset_at"],
-                "message": ("You have used today's deeper searches. "
-                            "Normal questions still work."),
-            })
-        deep_again = claim == "again"
-
-        started = time.time()
         try:
-            if deep_again:
-                # Second press refused server-side: no pipeline, 0 credits.
-                result = {"answer": NO_MORE_DETAILS, "role": "no_more_details",
-                          "offer_support": True}
-            else:
-                result = await answer_query(
-                    q=payload.q,
-                    session_id=payload.session_id,
-                    product=payload.product,
-                    category=payload.category,
-                    faq_id=payload.faq_id,
-                    skip_faq=payload.skip_faq,
-                    role=spec["role"],
-                    top_k=spec["top_k"],
-                    model_env=spec.get("model_env"),
-                    user_id=caller.get("uid"),
-                )
-        except HTTPException:
-            if level == "deep" and not deep_again:
-                await run_in_threadpool(quota.deep_release, dkey, caller)
-            raise
-        except Exception as e:
-            if level == "deep" and not deep_again:
-                await run_in_threadpool(quota.deep_release, dkey, caller)
-            # Don't charge for our own failure, and don't leak internals.
-            logger.exception(f"widget ask failed: {e}")
-            raise HTTPException(status_code=503, detail={
-                "error": "unavailable",
-                "message": "Support is temporarily unavailable. Please try again shortly.",
-            })
+            claim = (await run_in_threadpool(quota.deep_claim, dkey, caller)
+                     if level == "deep" else "ok")
+            if claim == "capped":
+                # Today's free deep runs are used: refused before the pipeline.
+                raise HTTPException(status_code=429, detail={
+                    "error": "quota_exceeded",
+                    "reason": "deep_daily",
+                    "tier": tier,
+                    "limit": quota.free_deep_limit(),
+                    "remaining": gate["remaining"],
+                    "reset_at": gate["reset_at"],
+                    "message": ("You have used today's deeper searches. "
+                                "Normal questions still work."),
+                })
+            deep_again = claim == "again"
 
-        # Curated answers and disambiguation prompts involve no LLM call,
-        # so they cost nothing - cheap for us, and it steers people towards
-        # the reviewed answers.
-        # ...and neither is our own outage: service_degraded means no
-        # provider answered, and quota.py promises a failed request does not
-        # burn the visitor's allowance.
-        no_more = deep_again
-        if level == "deep" and not deep_again:
-            if result.get("service_degraded"):
-                await run_in_threadpool(quota.deep_release, dkey, caller)
-            elif not _adds_detail(_STANDARD_ANSWERS.get(dkey), result):
-                result = {**result, "answer": NO_MORE_DETAILS, "sources": [],
-                          "role": "no_more_details", "flagged": False,
-                          "more_context": None, "suggested_replies": [],
-                          "needs_clarification": False, "clarification_options": []}
-                no_more = True
-        elif level != "deep" and not (result.get("from_faq") or result.get("faq_candidates")):
-            _remember_standard(dkey, result)
-        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
-                        or result.get("service_degraded") or no_more) \
-                  else spec["credits"]
-        if level == "deep" and not deep_again and charged:
-            await run_in_threadpool(quota.deep_paid, caller)
-        state = quota.consume(caller, charged) if charged else quota.status(caller)
+            started = time.time()
+            try:
+                if deep_again:
+                    # Second press refused server-side: no pipeline, 0 credits.
+                    result = {"answer": NO_MORE_DETAILS, "role": "no_more_details",
+                              "offer_support": True}
+                else:
+                    result = await answer_query(
+                        q=payload.q,
+                        session_id=payload.session_id,
+                        product=payload.product,
+                        category=payload.category,
+                        faq_id=payload.faq_id,
+                        skip_faq=payload.skip_faq,
+                        role=spec["role"],
+                        top_k=spec["top_k"],
+                        model_env=spec.get("model_env"),
+                        user_id=caller.get("uid"),
+                    )
+            except HTTPException:
+                if level == "deep" and not deep_again:
+                    await run_in_threadpool(quota.deep_release, dkey, caller)
+                raise
+            except Exception as e:
+                if level == "deep" and not deep_again:
+                    await run_in_threadpool(quota.deep_release, dkey, caller)
+                # Don't charge for our own failure, and don't leak internals.
+                logger.exception(f"widget ask failed: {e}")
+                raise HTTPException(status_code=503, detail={
+                    "error": "unavailable",
+                    "message": "Support is temporarily unavailable. Please try again shortly.",
+                })
+
+            # Curated answers and disambiguation prompts involve no LLM call,
+            # so they cost nothing - cheap for us, and it steers people towards
+            # the reviewed answers.
+            # ...and neither is our own outage: service_degraded means no
+            # provider answered, and quota.py promises a failed request does not
+            # burn the visitor's allowance.
+            no_more = deep_again
+            if level == "deep" and not deep_again:
+                if result.get("service_degraded"):
+                    await run_in_threadpool(quota.deep_release, dkey, caller)
+                elif not _adds_detail(_STANDARD_ANSWERS.get(dkey), result):
+                    result = {**result, "answer": NO_MORE_DETAILS, "sources": [],
+                              "role": "no_more_details", "flagged": False,
+                              "more_context": None, "suggested_replies": [],
+                              "needs_clarification": False, "clarification_options": []}
+                    no_more = True
+            elif level != "deep" and not (result.get("from_faq") or result.get("faq_candidates")):
+                _remember_standard(dkey, result)
+            charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
+                            or result.get("service_degraded") or no_more) \
+                      else spec["credits"]
+            if level == "deep" and not deep_again and charged:
+                await run_in_threadpool(quota.deep_paid, caller)
+            state = quota.consume(caller, charged - reserved, win=gate["window"])
+            settled = True
+        finally:
+            if not settled:
+                # Our failure, a refused deep run or a cancelled request gives the
+                # reservation back. Called directly, not via run_in_threadpool: an
+                # await in a cancelled task's finally is itself cancelled.
+                quota.consume(caller, -reserved, win=gate["window"])
 
         # Count this turn against the conversation's own caps. Only when it
         # actually cost something: a curated FAQ answer involves no model and
