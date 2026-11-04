@@ -174,7 +174,7 @@ with sync_playwright() as p:
         req = urllib.request.Request(
             BASE + "/query", method="POST",
             data=json.dumps({"q": "Does the hopper support Bluetooth pairing?",
-                             "session_id": "ui", "product": "mycheckr"}).encode(),
+                             "session_id": "console-ui", "product": "mycheckr"}).encode(),
             headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req).read()
 

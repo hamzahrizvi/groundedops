@@ -76,7 +76,7 @@ for q in ["Does the hopper support Bluetooth pairing?",
           # a commercial question and reaches the sales deflect, which is
           # not a corpus miss and records no gap.
           "What is the maximum operating altitude?"]:
-    client.post("/query", json={"q": q, "session_id": "s1", "product": "mycheckr"})
+    client.post("/query", json={"q": q, "session_id": "console-s1", "product": "mycheckr"})
 
 g = client.get("/faq/gaps", headers=ADMIN).json()
 qs = {x["question"]: x["times_asked"] for x in g["gaps"]}
@@ -151,7 +151,7 @@ client.delete("/faq?confirm=true", headers=ADMIN)  # clean slate
 for q in ["Does the gadget support satellite uplink?",
           "Does the gadget support satellite uplink??",
           "Is there a spam question here"]:
-    client.post("/query", json={"q": q, "session_id": "s2"})
+    client.post("/query", json={"q": q, "session_id": "console-s2"})
 
 g = client.get("/faq/gaps", headers=ADMIN).json()["gaps"]
 check(len(g) == 2, f"2 distinct gaps recorded before bulk actions ({len(g)})")
@@ -170,11 +170,11 @@ check(r.status_code == 200 and r.json()["marked"] == 1,
 
 check(client.get("/faq/gaps", headers=ADMIN).json()["gaps"] == [], "both gone from the default list")
 
-client.post("/query", json={"q": spam_q, "session_id": "s3"})
+client.post("/query", json={"q": spam_q, "session_id": "console-s3"})
 check(client.get("/faq/gaps", headers=ADMIN).json()["gaps"] == [],
       "spam-flagged question does not resurface on a repeat ask")
 
-client.post("/query", json={"q": dismiss_q, "session_id": "s4"})
+client.post("/query", json={"q": dismiss_q, "session_id": "console-s4"})
 check(len(client.get("/faq/gaps", headers=ADMIN).json()["gaps"]) == 1,
       "dismissed question starts a fresh gap on a repeat ask (unlike spam)")
 
