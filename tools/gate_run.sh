@@ -45,7 +45,7 @@ mkdir -p "$OUT/after" && OUT="$(cd "$OUT" && pwd)"
 # gates, 2026-11-03). RUNNING names the live gate's shell; a gate killed with no EXIT trap leaves a stale one, so it
 # counts only while that pid is still a gate_run.sh on this <out_dir>. Exits without FAILED: the live gate's result stands.
 if [ -z "${GATE_IN_LAB:-}" ]; then
-  if p="$(cat "$OUT/RUNNING" 2>/dev/null)" && [ -n "$p" ] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -F gate_run.sh | grep -qF "$(basename "$OUT")"; then
+  if p="$(cat "$OUT/RUNNING" 2>/dev/null)" && [ -n "$p" ] && { tr '\0' ' ' < "/proc/$p/cmdline"; } 2>/dev/null | grep -F gate_run.sh | grep -qF "$(basename "$OUT")"; then
     echo "gate_run.sh: another gate on $OUT is running (pid $p); not starting a second" >&2; exit 1
   fi
   echo $$ > "$OUT/RUNNING"; trap 'rm -f "$OUT/RUNNING"' EXIT
