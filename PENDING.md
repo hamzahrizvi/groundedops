@@ -356,6 +356,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/D-20261023-02-reask-diagnosis | D-20261023-02: why the same 40 questions scored 18 points lower today | proposed | the product owner triages it |
 | customer/images-20261030f | Picture test 20261030f | proposed | the product owner triages it |
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
+| rnd/20261105-checker-thinks-at-low-effort | A third of checked answers wait a median 11.5 s for the AI checker to think at the provider's highest default effort: measure low effort before anything else is added to the check | proposed | the product owner triages it |
+| rnd/20261105-rerank-what-we-already-fetch | The search finds the answer page and throws it away before the reranker sees it: hand the reranker more of what the two searches already fetch | proposed | the product owner triages it |
+| rnd/20261105-search-again-for-the-named-gap | The writer says exactly what it could not find, and nothing searches for it: one more search for the named gap before the answer is served | proposed | the product owner triages it |
 | rnd/D-20261031-02-edits | D-20261031-02-edits | proposed | the product owner triages it |
 | security/20261019 | Security item security/20261019, details in the office | proposed | the product owner triages it |
 | D-20261008-10 | Security item D-20261008-10, details in the office | deferred | parked |
