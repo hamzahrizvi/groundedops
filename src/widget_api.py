@@ -287,6 +287,20 @@ def _public_sources(sources) -> list:
     } for s in (sources or [])]
 
 
+def _public_family_options(opts) -> list:
+    out = []
+    for o in (opts or [])[:8]:
+        pic = o.get("picture") or ""
+        out.append({
+            "label": str(o.get("label") or "")[:80],
+            "features": str(o.get("features") or "")[:600],
+            "note": str(o.get("note") or "")[:300],
+            "picture": pic if isinstance(pic, str) and pic.startswith("/figure/") else None,
+            "send": str(o.get("send") or "")[:600],
+        })
+    return out
+
+
 def _public_more_context(mc) -> dict | None:
     """The follow-up offer, minus the internals.
 
@@ -743,6 +757,10 @@ def register(app, answer_query, draft_enquiry=None):
             "clarification_options": [
                 str(o)[:120] for o in
                 (result.get("clarification_options") or [])[:5]],
+            # "Which SMART Hopper do you have?" (families.py): a card per
+            # member with its picture and what tells it apart. Strings only,
+            # bounded; the picture is a /figure URL like the sources' own.
+            "family_options": _public_family_options(result.get("family_options")),
             # Replies the answer asked for ("Would you like them?"), shown as
             # buttons and as the composer's right-arrow suggestion.
             "suggested_replies": [
@@ -874,7 +892,8 @@ def register(app, answer_query, draft_enquiry=None):
                                 "needs_sign_in", "sign_in_url",
                                 "service_degraded", "more_context",
                                 "offer_support", "needs_clarification",
-                                "clarification_options", "suggested_replies",
+                                "clarification_options", "family_options",
+                                "suggested_replies",
                                 "flagged", "quota", "session")})
 
             # Whole sentences, not tokens: a sentence is the unit the

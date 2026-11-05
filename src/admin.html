@@ -7526,7 +7526,103 @@ function viewCatalog() {
         : el("div", { class: "row-hint", style: "margin-top:10px" },
             "Add a range first — a product has to live in one.")),
     el("div", { "data-tour": "cat-list", "data-sec": "Your catalogue" }, rows),
+    familiesPanel(),
   ];
+}
+
+/** Product families (families.py): look-alike products customers mix up.
+ *  When a question names the family but not the model ("my smart hopper"),
+ *  the chat asks which one, with each member's picture and what tells it
+ *  apart. Found and filled in automatically after an upload; everything
+ *  here can be changed, and what is typed here is never overwritten. */
+let famDraft = null;
+function familiesPanel() {
+  const box = el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-top:16px",
+                          "data-sec": "Product families" });
+  const products = cache.catalog.flatMap(c => (c.products || [])
+    .filter(p => !p.key.endsWith("_general")).map(p => ({ key: p.key, label: c.name + " › " + p.name })));
+  const list = s => s.split(",").map(x => x.trim()).filter(Boolean);
+  const draw = () => {
+    box.replaceChildren(
+      el("div", { class: "sec-title" }, "Product families"),
+      el("div", { class: "sec-hint" },
+        "Products customers mix up. When someone names the family but not the model "
+        + "(“my smart hopper”, “the ICU”), the chat asks which one they have, "
+        + "showing each model's picture and how to tell it apart, before it answers. "
+        + "Each model answers from the product its documents are filed under; several models may share one."),
+      famDraft === null ? el("p", { class: "sec-hint" }, "Loading…") : famDraft.map(famCard),
+      el("div", { class: "row", style: "margin-top:12px;gap:8px;flex-wrap:wrap" },
+        el("button", { class: "btn btn-secondary", onclick: () => {
+          famDraft.push({ key: "", name: "New family", aliases: [], members: [] }); draw();
+        } }, "Add family"),
+        el("button", { class: "btn btn-secondary", title: "Groups products named alike, picks pictures and drafts the differences from the manuals. Runs by itself after each upload.",
+                       onclick: async ev => {
+          ev.target.disabled = true; ev.target.textContent = "Reading the manuals…";
+          try { famDraft = (await api("/admin/families/refresh", { method: "POST" })).families; toast("Families updated from the manuals"); }
+          catch (e) { toast(e.message, true); }
+          draw();
+        } }, "Fill in from the manuals"),
+        el("button", { class: "btn btn-primary", onclick: async () => {
+          try { famDraft = (await api("/admin/families", { method: "PUT",
+                  body: JSON.stringify({ families: famDraft }) })).families; toast("Families saved"); draw(); }
+          catch (e) { toast(e.message, true); }
+        } }, "Save families")));
+  };
+  const famCard = (f, fi) => el("div", { style: "border-top:1px solid var(--color-divider);padding:14px 0 6px;margin-top:10px" },
+    el("div", { class: "row", style: "align-items:flex-end;gap:8px" },
+      el("div", {}, el("label", { class: "flabel" }, "Family name"),
+        el("input", { class: "input", value: f.name, oninput: e => { f.name = e.target.value; } })),
+      el("div", { style: "flex:2" }, el("label", { class: "flabel" }, "Other names customers use (comma-separated)"),
+        el("input", { class: "input", value: (f.aliases || []).join(", "), oninput: e => { f.aliases = list(e.target.value); } })),
+      f.auto ? el("span", { class: "tag tag-outline" }, "found automatically") : null,
+      el("button", { class: "btn btn-ghost", style: BTN, onclick: () => {
+        if (!confirm("Delete the " + f.name + " family? The chat stops asking which one.")) return;
+        famDraft.splice(fi, 1); draw();
+      } }, "Delete")),
+    (f.members || []).map((m, mi) => memberRow(f, m, mi)),
+    el("button", { class: "btn btn-ghost", style: BTN + ";margin-top:6px", onclick: () => {
+      f.members.push({ name: "", aliases: [], product: "", features: "", note: "" }); draw();
+    } }, "+ Add model"));
+  const memberRow = (f, m, mi) => {
+    const pick = el("div", { style: "display:none;flex-wrap:wrap;gap:6px;margin-top:6px" });
+    const thumb = m.picture
+      ? el("img", { src: API + "/figure/" + encodeURIComponent(m.picture.source) + "/" + encodeURIComponent(m.picture.name),
+                    alt: m.name, style: "width:96px;height:72px;object-fit:contain;background:#fff;border:1px solid var(--color-line);border-radius:6px" })
+      : el("div", { style: "width:96px;height:72px;display:flex;align-items:center;justify-content:center;border:1px dashed var(--color-line);border-radius:6px;font-size:11px" }, "no picture");
+    return el("div", { style: "display:flex;gap:12px;align-items:flex-start;margin-top:10px" },
+      el("div", { style: "flex:0 0 auto;display:flex;flex-direction:column;gap:4px;align-items:center" }, thumb,
+        el("button", { class: "btn btn-ghost", style: "font-size:11.5px;padding:2px 6px", onclick: async () => {
+          if (!m.product) return toast("Pick the product first", true);
+          if (pick.style.display === "flex") { pick.style.display = "none"; return; }
+          pick.style.display = "flex"; pick.replaceChildren("Loading…");
+          try {
+            const pics = (await api("/admin/families/pictures?product=" + encodeURIComponent(m.product))).pictures;
+            pick.replaceChildren(...(pics.length ? pics.map(p => el("img", { src: API + p.url, title: (p.caption || "") + " page " + p.page,
+              style: "width:80px;height:60px;object-fit:contain;background:#fff;border:1px solid var(--color-line);border-radius:4px;cursor:pointer",
+              onclick: () => { m.picture = { source: p.source, name: p.name }; draw(); } })) : ["This product's documents have no pictures."]));
+          } catch (e) { pick.replaceChildren(e.message); }
+        } }, "Choose picture")),
+      el("div", { style: "flex:1;display:flex;flex-direction:column;gap:6px" },
+        el("div", { class: "row", style: "gap:8px" },
+          el("input", { class: "input", placeholder: "Model name, e.g. SMART Hopper 3", value: m.name, oninput: e => { m.name = e.target.value; } }),
+          el("input", { class: "input", placeholder: "Other names (comma-separated)", value: (m.aliases || []).join(", "), oninput: e => { m.aliases = list(e.target.value); } }),
+          el("select", { class: "input", onchange: e => { m.product = e.target.value; } },
+            el("option", { value: "" }, "Answers from…"),
+            products.map(p => el("option", { value: p.key, selected: p.key === m.product ? "selected" : null }, p.label))),
+          el("button", { class: "btn btn-ghost", style: BTN, onclick: () => { f.members.splice(mi, 1); draw(); } }, "Remove")),
+        el("textarea", { class: "input", rows: 2, placeholder: "How to tell it apart: what the customer can see or check, e.g. “has a coin feeder on top”",
+                         oninput: e => { m.features = e.target.value; delete m.features_auto; } }, m.features || ""),
+        m.features_auto ? el("div", { class: "row-hint" }, "Drafted from the manuals — check it, then save.") : null,
+        el("input", { class: "input", placeholder: "Note shown on its card, e.g. end of life and its replacement", value: m.note || "",
+                      oninput: e => { m.note = e.target.value; } }),
+        pick));
+  };
+  draw();
+  if (famDraft === null) {
+    api("/admin/families").then(d => { famDraft = d.families; draw(); })
+      .catch(e => { box.replaceChildren(el("p", { class: "sec-hint" }, "Families unavailable: " + e.message)); });
+  }
+  return box;
 }
 
 /* ---------------- test ---------------- */
@@ -7971,6 +8067,21 @@ function viewTest() {
           } }, o)));
       });
       setGhost(replies[0] || null);
+
+      // "Which SMART Hopper do you have?" (families.py): the widget's cards,
+      // so the test chat shows what a customer sees.
+      const fams = r.family_options || [];
+      if (fams.length) {
+        bub.append(el("div", { style: "display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:8px" },
+          fams.map(o => el("button", { class: "btn btn-secondary",
+            style: "display:flex;flex-direction:column;align-items:stretch;gap:4px;text-align:left;white-space:normal;padding:8px;height:auto",
+            onclick: () => send(o.send) },
+            o.picture ? el("img", { src: API + o.picture, alt: o.label,
+              style: "width:100%;height:96px;object-fit:contain;background:#fff;border-radius:6px" }) : null,
+            el("b", {}, o.label),
+            o.features ? el("span", { style: "font-size:12px;font-weight:400" }, o.features) : null,
+            o.note ? el("em", { style: "font-size:12px;font-weight:400;color:var(--color-warning, #8a5a00)" }, o.note) : null))));
+      }
 
       // Unscoped question spanning several products: let them pick, then
       // re-ask scoped rather than retyping.

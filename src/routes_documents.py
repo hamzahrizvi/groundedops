@@ -132,6 +132,12 @@ def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
                 "ocr_available": ocr_ok,
                 "ocr_unavailable_reason": ocr_why,
                 "done": True, "pct": 100.0}
+        # A new manual may bring a look-alike product or the picture a
+        # family card lacks (families.py). Background: drafting the
+        # differences is a model call per family.
+        if count:
+            import families
+            families.refresh_in_background()
     except Exception as e:
         logger.exception(f"Ingest job {job_id} failed")
         with _INGEST_LOCK:

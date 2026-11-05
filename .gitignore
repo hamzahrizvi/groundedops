@@ -60,6 +60,7 @@ faq_store.json
 faq_gaps.json
 gaps_store.json
 catalog_config.json
+product_families.json
 confluence_sync.json
 internal_sources.json
 # The spec index, rebuilt from the PDFs whenever they or their filing

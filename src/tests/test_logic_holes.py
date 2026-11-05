@@ -116,7 +116,7 @@ def test_the_picker_is_overridden_by_the_typed_question_only():
     import inspect
     src = inspect.getsource(main.query)
     assert "_named_typed if payload.product else _named" in src
-    assert "_named_typed = _products_named_in(_normalize_query(q), _keys)" in src
+    assert "_families.without_generic(_normalize_query(q)), _keys)" in src
 
 
 def test_a_curated_question_typed_in_a_product_chat_is_served():

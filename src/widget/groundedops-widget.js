@@ -435,6 +435,14 @@
     "white-space:pre-wrap;font-size:12.5px;line-height:1.45}" +
     ".go-dl{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--a);text-decoration:none}" +
     ".go-figs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}" +
+    ".go-fams{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:2px}" +
+    ".go-fam{display:flex;flex-direction:column;gap:4px;text-align:left;border:1.5px solid var(--line);" +
+    "background:var(--bg);color:var(--ink);border-radius:10px;padding:8px;cursor:pointer;font:inherit;font-size:12.5px}" +
+    ".go-fam:hover{border-color:var(--a);background:var(--pane)}" +
+    ".go-fam:focus-visible{outline:3px solid var(--a);outline-offset:2px}" +
+    ".go-fam img{width:100%;height:96px;object-fit:contain;background:#fff;border-radius:6px}" +
+    ".go-fam b{font-size:13.5px}.go-fam em{color:#8a5a00;font-size:12px}" +
+    ".go-fam.plain{justify-content:center;font-weight:600;color:var(--a)}" +
     ".go-fig{max-height:96px;max-width:46%;border:1px solid var(--line);border-radius:6px;" +
     "background:#fff;cursor:zoom-in;object-fit:contain}" +
     ".go-fig.big{max-height:none;max-width:100%;cursor:zoom-out}" +
@@ -1275,6 +1283,48 @@
       wrap.appendChild(b);
     });
     $log.appendChild(outer);
+    scrollDown();
+  }
+
+  function familyCards(opts) {
+    var wrap = document.createElement("div");
+    wrap.className = "go-fams";
+    wrap.setAttribute("data-chips", "");
+    opts.forEach(function (o) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "go-fam" + (o.picture ? "" : " plain");
+      if (o.picture) {
+        var im = document.createElement("img");
+        im.alt = o.label;
+        var headers = {};
+        if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
+        fetch(cfg.api + o.picture, { headers: headers })
+          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+          .then(function (blob) { im.src = URL.createObjectURL(blob); })
+          .catch(function () { im.remove(); });
+        b.appendChild(im);
+      }
+      var t = document.createElement("b");
+      t.textContent = o.label;
+      b.appendChild(t);
+      if (o.features) {
+        var f = document.createElement("span");
+        f.textContent = o.features;
+        b.appendChild(f);
+      }
+      if (o.note) {
+        var n = document.createElement("em");
+        n.textContent = o.note;
+        b.appendChild(n);
+      }
+      b.addEventListener("click", function () {
+        clearChips();
+        ask(o.send, { silent: true, shown: o.label });
+      });
+      wrap.appendChild(b);
+    });
+    $log.appendChild(wrap);
     scrollDown();
   }
 
@@ -2137,7 +2187,7 @@
     busy = true;
     $send.disabled = true;
     clearChips();
-    heard(q);
+    heard(opts.shown || q);
     var s = waiting();
 
     var headers = { "Content-Type": "application/json" };
@@ -2269,6 +2319,14 @@
         // they may not know. Tapping one sends it as the next message, which
         // is the same path as typing it: the backend resolves a short
         // fragment against the previous turn.
+        // "Which SMART Hopper do you have?": a card per model, its picture
+        // and what tells it apart. Tapping one asks the question again for
+        // that model.
+        if ((d.family_options || []).length) {
+          familyCards(d.family_options);
+          return;
+        }
+
         var clarifyOpts = d.needs_clarification ? (d.clarification_options || []) : [];
         if (clarifyOpts.length) {
           chips(

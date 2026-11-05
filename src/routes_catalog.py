@@ -217,3 +217,50 @@ def admin_attach_source(payload: AttachReq, x_admin_password: str | None = Heade
         return catalog_mod.attach_source(payload.category_key, payload.product_key, payload.source)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Product families (families.py): look-alikes the chat asks about ─────
+
+class FamiliesReq(BaseModel):
+    families: list[dict]
+
+
+@router.get("/admin/families")
+def admin_families(x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    import families
+    return {"families": families.families()}
+
+
+@router.put("/admin/families")
+def admin_save_families(payload: FamiliesReq, x_admin_password: str | None = Header(default=None)):
+    """The console's whole edit. A family found automatically and then
+    deleted here is remembered, so the next refresh does not bring it back."""
+    _require_admin(x_admin_password)
+    import families
+    try:
+        new = families.validate(payload.families)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    data = families.load()
+    kept = {f["key"] for f in new}
+    data["dismissed"] = sorted(set(data.get("dismissed") or []) | {
+        f["key"] for f in data["families"] if f.get("auto") and f["key"] not in kept})
+    data["families"] = new
+    return {"families": families.save(data)["families"]}
+
+
+@router.post("/admin/families/refresh")
+def admin_refresh_families(x_admin_password: str | None = Header(default=None)):
+    """Find families and fill in missing pictures and differences now,
+    as an upload does in the background."""
+    _require_admin(x_admin_password)
+    import families
+    return {"families": families.refresh_auto()["families"]}
+
+
+@router.get("/admin/families/pictures")
+def admin_family_pictures(product: str, x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    import families
+    return {"pictures": families.pictures_for(product)}

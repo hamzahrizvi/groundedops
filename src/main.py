@@ -1884,6 +1884,7 @@ _CLARIFY_MARKERS = (
     "could you say which one you're asking about",
     "could you clarify which part you mean",
     "not sure what is wrong from that message",     # clarify.checklist_reply
+    "pick yours below",                             # families.MARKER
 )
 
 
@@ -1981,6 +1982,65 @@ def _vague_fault_checklist(q: str, payload, results: list[dict],
         "resolved_query": resolved_query if resolved_query != q else None,
         "sources": sources,
         "retrieval_score": round(top_score, 4),
+        "response_time": round(total_time, 3),
+    }
+
+
+def _family_reply(q: str, payload, history, family: dict, session_id,
+                  request_id: str, started: float) -> dict | None:
+    """CEO 2026-11-05: "which SMART Hopper do you have?" before answering a
+    question that names a family but no member, the differences for "not
+    sure which I have", and a thank-you for a bare pick. Composed from
+    product_families.json; None to answer as usual."""
+    if payload.faq_id or (payload.force_provider and payload.force_model
+                          and not payload.forced_by_effort):
+        return None
+    try:
+        import families as _families
+        offer_q = None
+        answer = _families.picked_reply(q, history)
+        opts: list[dict] = []
+        reason = "product_family_picked"
+        if not answer and _families.confused(q):
+            fam = _families.family_for(q, history, payload.product)
+            if fam:
+                offer = _families._offered(fam, payload.product)
+                # The question we asked about, so a pick from the guide
+                # still answers it.
+                if _families.asked_last_turn(history):
+                    offer_q = history[-1].get("q")
+                answer = _families.guide_reply(fam, offer)
+                opts = _families.options(fam, offer, offer_q, general=False)[:-1]
+                reason = "product_family_guide"
+        if not answer and family.get("ask"):
+            fam, offer = family["ask"]["family"], family["ask"]["offer"]
+            answer = _families.question_reply(fam)
+            opts = _families.options(fam, offer, q)
+            reason = "product_family"
+    except Exception as _exc:
+        logger.warning(f"product family reply skipped: {_exc}")
+        return None
+    if not answer:
+        return None
+    total_time = time.time() - started
+    ptrace.mark("family.ask", reason)
+    log_interaction(q, answer, "clarify", "none", [], grounding_score=None,
+                    flagged=False, request_id=request_id,
+                    timing={"total_time": total_time})
+    add_to_memory(session_id, q, answer)
+    return {
+        "answer": answer,
+        "response_time_ms": round(total_time * 1000),
+        "model": "none",
+        "role": "clarify",
+        "reason": reason,
+        "offer_support": False,
+        "needs_clarification": bool(opts),
+        "clarification_options": [],
+        "product_options": [],
+        "family_options": opts,
+        "sources": [],
+        "request_id": request_id,
         "response_time": round(total_time, 3),
     }
 
@@ -3173,14 +3233,32 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # already in the right manual made the answer WORSE.
     # Which products the question itself names, aliases resolved. Computed
     # unconditionally now, because both jobs below need it.
+    # A FAMILY NAME NAMES NO PRODUCT (families.py). "smart hopper" was the
+    # SMART Coin System's alias, so it overrode a Smart Hopper 3 chat; a
+    # family name that settles nothing is left out of the matching, and a
+    # member it settles on ("ICU Pro", "NV11") stands for its product.
     _named: list[str] = []
     _named_typed: list[str] = []
+    _family = {"ask": None, "products": []}
     try:
+        import families as _families
         _keys = list(_product_names().keys())
-        _named = _products_named_in(resolved_query, _keys)
-        _named_typed = _products_named_in(_normalize_query(q), _keys)
+        _family = _families.resolve(
+            q, history, payload.product,
+            _products_named_in(_normalize_query(q), _keys))
+        _named = _products_named_in(_families.without_generic(resolved_query), _keys)
+        _named_typed = _products_named_in(
+            _families.without_generic(_normalize_query(q)), _keys)
+        for _k in _family["products"]:
+            for _lst in (_named, _named_typed):
+                if _k in _keys and _k not in _lst:
+                    _lst.append(_k)
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
+    _fam_reply = _family_reply(q, payload, history, _family, session_id,
+                               request_id, start_total)
+    if _fam_reply:
+        return _fam_reply
 
     # (1) SCOPE. The picker supplies the default product even on the first
     # question (no conversation-history rewrite is required). One product
