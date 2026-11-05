@@ -381,11 +381,14 @@ NOTICE = ("AI assistant: answers come from our manuals and can be wrong. Questio
           "for 90 days and may be processed by OpenAI (USA) and DeepSeek (China).")
 
 
-def test_a_guest_without_ai_sees_no_ai_notice():
-    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
+def test_a_guest_without_ai_sees_no_ai_notice_and_no_limits_message():
+    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": "", "sign_in_url": "https://example.test/login"}
+    quota[0] = {"tier": "anonymous", "ai_available": False}
     _reopen()
     _page.wait_for_selector(".go-chip")   # the opening menu: everything before it is on screen
     assert _page.locator(".go-notice").count() == 0
+    assert "account holders" not in _page.inner_text(".go-log")
+    assert _page.locator(".go-chip", has_text="Sign in").count() == 0
 
 
 def test_a_guest_given_ai_answers_still_sees_the_ai_notice():

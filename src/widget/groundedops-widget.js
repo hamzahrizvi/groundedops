@@ -1397,46 +1397,24 @@
     renderScopeBar();
     unlockComposer();
     say(cfg.welcome);
-    if (cfg.token) showNotice();   // a guest's comes with the quota (announceGuestLimits)
-    // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
-    // quota fetch that can resolve AFTER these two synchronous calls would
-    // already have put askIntent()'s menu on screen. The visible effect was
-    // a "you must sign in" notice appearing to have the last word, stacked
-    // UNDER a menu that already offered other ways to continue -- the menu
-    // still worked, since nothing removes it, but reading top-to-bottom it
-    // looked like signing in was the only option left. Waiting for it keeps
-    // the order a visitor actually reads in sane: limits stated first, then
-    // the real menu right below.
-    announceGuestLimits().then(function () {
+    if (cfg.token) showNotice();   // a guest's waits for the quota (guestNotice)
+    // Sequenced: the guest's notice depends on a quota fetch, and must land
+    // above the menu, not under it.
+    guestNotice().then(function () {
       say(cfg.prompt);
       askIntent();
     });
     save();
   }
 
-  /** Tell a signed-out visitor what they are and are not getting, at the
-   *  start rather than when they hit the wall. Someone who reads "reviewed
-   *  FAQs only" up front can decide to sign in; someone who finds out after
-   *  typing a real question has wasted their time.
-   *
-   *  Quota may not have loaded yet on a cold open, so this resolves against
-   *  the fetch rather than whatever happens to be cached. Returns a promise
-   *  either way so startFresh() can sequence what follows against it. */
-  function announceGuestLimits() {
+  /** The AI notice is hidden from signed-out visitors, unless guest AI is on:
+   *  someone getting AI answers is always told so. Guests hear about their
+   *  limits when a question needs an account ("Sign in for a full answer",
+   *  which replays the question) and in the settings panel, not up front.
+   *  Returns a promise so startFresh() can sequence what follows. */
+  function guestNotice() {
     var show = function (d) {
-      // The AI notice is hidden from signed-out visitors, unless guest AI is
-      // on: someone getting AI answers is always told so.
       if (!cfg.token && d && d.ai_available) showNotice();
-      if (!d || d.tier !== "anonymous" || d.ai_available) return;
-      say(d.account_notice ||
-          "Full AI support is for account holders. I can still answer from " +
-          "our reviewed FAQs, or put you in touch with our team.");
-      if (cfg.signInUrl) {
-        chips([{
-          label: "Sign in for full AI support",
-          onClick: function () { goSignIn(cfg.signInUrl); },
-        }], null);
-      }
     };
     if (quotaState) return Promise.resolve(show(quotaState));
     return refreshQuota().then(show);
