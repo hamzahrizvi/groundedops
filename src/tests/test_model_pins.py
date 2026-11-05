@@ -52,7 +52,6 @@ def test_loaders_use_the_pin():
         with mock.patch.dict(sys.modules, {"sentence_transformers": fake_st}), \
                 mock.patch.dict(os.environ), \
                 mock.patch.object(embeddings, "_OnnxEmbedder", side_effect=OSError("offline")):
-            os.environ.pop("NLI_BACKEND", None)
             os.environ.pop("EMBED_BACKEND", None)
             embeddings._get_model()
             reranker._get("BAAI/bge-reranker-base")
