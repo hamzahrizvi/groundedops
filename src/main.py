@@ -1,5 +1,6 @@
 import logging
 import os
+import contextvars
 import re
 import threading
 import time
@@ -904,6 +905,10 @@ def _escape_prompt_boundaries(text: str) -> str:
         text or "")
 
 
+# The families' "It's a general question" button (families.GENERAL).
+_GENERAL_RULE = ("The question is about every model it lists after 'general question "
+                 "for every'. Answer it as a table with one row per listed model, and "
+                 "write 'not in the documents' in a row the passages say nothing for.\n\n")
 _PICTURE_RULE = ("A passage marked 'picture NAME' is a description of a picture in the "
                  "manual. If your answer takes its fact from such a passage, end with one "
                  "more line, exactly \"PICTURE: NAME\", naming the picture it came from; "
@@ -964,7 +969,8 @@ def build_answer_prompt(hist: str, context: str, question: str,
     _lib = (f"<documentation>\n{_escape_prompt_boundaries(library)}\n"
             f"</documentation>\n\n") if library else ""
     _where = ("<documentation> and <context>" if library else "<context>")
-    _asks = _asks_block(asks) + (_PICTURE_RULE if ", picture '" in context else "")
+    _asks = (_asks_block(asks) + (_PICTURE_RULE if ", picture '" in context else "")
+             + (_GENERAL_RULE if "general question for every" in question else ""))
     # D-20261020-12: arm B of the rule-block ablation. ANSWER_PROMPT=short
     # swaps the 49-rule block below for the eight rules something else
     # depends on (R&D 20261020-short-writer-prompt). Read per call so a lab
@@ -1986,33 +1992,48 @@ def _vague_fault_checklist(q: str, payload, results: list[dict],
     }
 
 
-def _family_reply(q: str, payload, history, family: dict, session_id,
+def _family_reply(q: str, payload, history, family: dict | None, session_id,
                   request_id: str, started: float) -> dict | None:
     """CEO 2026-11-05: "which SMART Hopper do you have?" before answering a
-    question that names a family but no member, the differences for "not
-    sure which I have", and a thank-you for a bare pick. Composed from
-    product_families.json; None to answer as usual."""
+    question that names a family but no member (`family`, from
+    families.resolve). Called first with family=None, before the rewrite
+    runs a model on a bare "Yes": the next yes/no question of "not sure
+    which I have", every difference listed, a thank-you for a bare pick.
+    Composed from product_families.json; None to answer as usual."""
     if payload.faq_id or (payload.force_provider and payload.force_model
                           and not payload.forced_by_effort):
         return None
     try:
         import families as _families
-        offer_q = None
-        answer = _families.picked_reply(q, history)
-        opts: list[dict] = []
-        reason = "product_family_picked"
-        if not answer and _families.confused(q):
-            fam = _families.family_for(q, history, payload.product)
-            if fam:
-                offer = _families._offered(fam, payload.product)
-                # The question we asked about, so a pick from the guide
-                # still answers it.
-                if _families.asked_last_turn(history):
-                    offer_q = history[-1].get("q")
-                answer = _families.guide_reply(fam, offer)
-                opts = _families.options(fam, offer, offer_q, general=False)[:-1]
+        answer, opts, reason = None, [], ""
+        if family is None:
+            step = _families.guide_step(str(session_id), q)
+            every = None if step else _families.show_all(q)
+            if step:
+                answer, opts, reason = step["answer"], step["options"], "product_family_question"
+            elif every:
+                offer = list(range(len(every.get("members") or [])))
+                answer = _families.guide_reply(every, offer)
+                opts = _families.options(every, offer, None, general=False)[:-1]
                 reason = "product_family_guide"
-        if not answer and family.get("ask"):
+            else:
+                answer = _families.picked_reply(q, history)
+                reason = "product_family_picked"
+            if not answer and _families.confused(q):
+                fam = _families.family_for(q, history, payload.product)
+                if fam:
+                    offer = _families._offered(fam, payload.product)
+                    # The question we asked about, so a pick at the end
+                    # still answers it.
+                    offer_q = history[-1].get("q") if _families.asked_last_turn(history) else None
+                    if fam.get("questions"):
+                        step = _families.guide_start(str(session_id), fam, offer, offer_q)
+                        answer, opts, reason = step["answer"], step["options"], "product_family_question"
+                    else:
+                        answer = _families.guide_reply(fam, offer)
+                        opts = _families.options(fam, offer, offer_q, general=False)[:-1]
+                        reason = "product_family_guide"
+        elif family.get("ask"):
             fam, offer = family["ask"]["family"], family["ask"]["offer"]
             answer = _families.question_reply(fam)
             opts = _families.options(fam, offer, q)
@@ -2067,18 +2088,26 @@ def _drop_hidden(results: list[dict]) -> list[dict]:
     return out
 
 
+def _when(o: dict) -> str:
+    """"made obsolete in June 2021; service and repairs continue until
+    December 2027" (or "ended in", once that month has passed)."""
+    import catalog as _cat
+    text = f"made obsolete in {_cat.month_name(o['date'])}"
+    end = o.get("service_end") or ""
+    if end > _cat._this_month():
+        text += f"; service and repairs continue until {_cat.month_name(end)}"
+    elif end:
+        text += f"; service and repairs ended in {_cat.month_name(end)}"
+    return text
+
+
 def obsolete_text(infos: list[dict]) -> str:
     """"The BV20 was made obsolete in June 2021..." for each product, then
     the way to support. Dates as the console records them."""
-    import catalog as _cat
     parts = []
     for o in infos:
         who = o["name"] + (f" ({o['versions']})" if o.get("versions") else "")
-        line = f"The {who} was made obsolete in {_cat.month_name(o['date'])}"
-        if (o.get("service_end") or "") > _cat._this_month():
-            line += (f"; service and repairs continue until "
-                     f"{_cat.month_name(o['service_end'])}")
-        line += "."
+        line = f"The {who} was {_when(o)}."
         if o.get("replacement"):
             line += f" Its replacement is the {o['replacement']}."
         parts.append(line)
@@ -2087,43 +2116,148 @@ def obsolete_text(infos: list[dict]) -> str:
             "our support team for the information you need.")
 
 
-def _obsolete_reply(q: str, products: list[str], request_id: str,
-                    started: float, session_id) -> dict | None:
-    """The reply when every product this turn is about is obsolete with
-    its answers blocked; None otherwise (a comparison with a current
-    product is answered, from the current product's documents)."""
+# The note an answer about an obsolete product ends with, set by query()
+# once it knows the turn's products and added by _query_noted: after the
+# grounding check, which must not judge a sentence the passages never said.
+_OBS_NOTE: contextvars.ContextVar = contextvars.ContextVar("obsolete_note", default="")
+
+# Our "which version is yours?" reply says this, so a later turn knows it
+# was asked (_obsolete_version_reply).
+VERSION_ASK = "check the label on yours"
+
+
+def _current_said(name: str, q: str, history) -> bool:
+    """The visitor picked "mine is a current one" for this product."""
+    tag = f"(my {name} is a current one)".lower()
+    return any(tag in (t or "").lower()
+               for t in [q] + [(h or {}).get("q") for h in history or []])
+
+
+def _version_picked(name: str, q: str, history) -> str | None:
+    """The obsolete version the visitor picked for this product, latest."""
+    rx = re.compile(r"\(my " + re.escape(name) + r": (.+?)\)", re.I)
+    for t in [q] + [(h or {}).get("q") or "" for h in reversed(history or [])]:
+        m = rx.search(t or "")
+        if m:
+            return m.group(1)
+    return None
+
+
+def _obsolete_note(products: list[str], q: str, history) -> str:
+    """One line per obsolete product of the turn: a blocked one left out
+    of a comparison, or the units of a current one that are obsolete."""
     try:
         import catalog as _cat
         blocked = _cat.blocked_products()
-        if not products or not all(k in blocked for k in products):
-            return None
-        infos = [_cat.obsolete_of(k) for k in products]
-        if not all(infos):
-            return None
+        lines = []
+        for k in products:
+            o = _cat.obsolete_of(k)
+            if not o:
+                continue
+            if k in blocked:
+                # Not "this answer leaves it out": a current product's manual
+                # may still mention it (the SCS manual on replacing the SH3).
+                lines.append(f"The {o['name']} was {_when(o)}. For help with it, "
+                             "please contact our support team.")
+            elif not _current_said(o["name"], q, history):
+                who = (f"{o['name']} units ({o['versions']}) were" if o.get("versions")
+                       else f"The {o['name']} was")
+                lines.append(f"Note: {who} {_when(o)}.")
+        return " ".join(lines)
     except Exception as exc:
-        logger.warning(f"obsolete check skipped: {exc}")
-        return None
-    answer = obsolete_text(infos)
+        logger.warning(f"obsolete note skipped: {exc}")
+        return ""
+
+
+def _query_noted(payload, x_user_id=None):
+    """query(), with the obsolete note on an answer (_OBS_NOTE)."""
+    tok = _OBS_NOTE.set("")
+    try:
+        result = query(payload, x_user_id)
+        note = _OBS_NOTE.get()
+        # An answer, whatever route made it ("extract", "generate", a curated
+        # "answered"); not a refusal, a question back or a hand-over.
+        if (note and isinstance(result, dict) and result.get("answer")
+                and result.get("role") not in ("rejected", "clarify", "handoff")
+                and not result.get("offer_support") and not result.get("service_degraded")):
+            result["answer"] = result["answer"].rstrip() + "\n\n" + note
+        return result
+    finally:
+        _OBS_NOTE.reset(tok)
+
+
+def _obsolete_response(q: str, answer: str, products: list[str], request_id: str,
+                       started: float, session_id, options=None) -> dict:
     total_time = time.time() - started
     ptrace.mark("obsolete", ", ".join(products))
-    log_interaction(q, answer, "rejected", "none", [], grounding_score=None,
-                    flagged=False, request_id=request_id,
+    log_interaction(q, answer, "clarify" if options else "rejected", "none", [],
+                    grounding_score=None, flagged=False, request_id=request_id,
                     timing={"total_time": total_time})
     add_to_memory(session_id, q, answer)
     return {
         "answer": answer,
         "response_time_ms": round(total_time * 1000),
         "model": "none",
-        "role": "rejected",
-        "reason": "obsolete_product",
-        "offer_support": True,
-        "needs_clarification": False,
+        "role": "clarify" if options else "rejected",
+        "reason": "obsolete_version" if options else "obsolete_product",
+        "offer_support": not options,
+        "needs_clarification": bool(options),
         "clarification_options": [],
         "product_options": [],
+        "family_options": options or [],
         "sources": [],
         "request_id": request_id,
         "response_time": round(total_time, 3),
     }
+
+
+def _obsolete_reply(q: str, products: list[str], request_id: str,
+                    started: float, session_id, history=None,
+                    faq_pick: bool = False) -> dict | None:
+    """The reply when this turn is about obsolete products, else None.
+
+    Every product blocked: its dates and the way to support (a comparison
+    with a current product is answered, and noted, by _obsolete_note).
+    One product of which only some units are obsolete: "which is yours?",
+    a card per obsolete version and one for a current unit, asked once;
+    an obsolete version picked gets the dates and support, now and later."""
+    try:
+        import catalog as _cat
+        blocked = _cat.blocked_products()
+        if not products:
+            return None
+        if all(k in blocked for k in products):
+            infos = [_cat.obsolete_of(k) for k in products]
+            if all(infos):
+                return _obsolete_response(q, obsolete_text(infos), products,
+                                          request_id, started, session_id)
+            return None
+        o = _cat.obsolete_of(products[0]) if len(products) == 1 else None
+        if not o or not o.get("versions") or _current_said(o["name"], q, history):
+            return None
+        picked = _version_picked(o["name"], q, history)
+        if picked:
+            return _obsolete_response(q, obsolete_text([dict(o, versions=picked)]),
+                                      products, request_id, started, session_id)
+        if faq_pick or any(VERSION_ASK in ((h or {}).get("a") or "").lower()
+                           and o["name"].lower() in ((h or {}).get("a") or "").lower()
+                           for h in history or []):
+            return None           # asked already: answered, with the note
+        versions = [v.strip() for v in o["versions"].split(";") if v.strip()]
+        when = f"Obsolete since {_cat.month_name(o['date'])}"
+        options = [{"label": v, "features": "", "note": when, "picture": None,
+                    "product": products[0], "send": f"{q} (my {o['name']}: {v})"}
+                   for v in versions]
+        options.append({"label": "Mine is a newer one", "features": "", "note": "",
+                        "picture": None, "product": products[0],
+                        "send": f"{q} (my {o['name']} is a current one)"})
+        answer = (f"Some {o['name']} units were made obsolete, and I can't help with "
+                  f"those here. Which is yours? Please {VERSION_ASK} and pick below.")
+        return _obsolete_response(q, answer, products, request_id, started,
+                                  session_id, options)
+    except Exception as exc:
+        logger.warning(f"obsolete check skipped: {exc}")
+        return None
 
 
 def _unknown_product_text(q: str) -> str | None:
@@ -2644,11 +2778,15 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     aliases = _product_aliases()
     hits: list[tuple[int, str, str]] = []   # (len, product key, matched form)
     for key in candidates:
-        for form in _product_alias_tokens(key, names.get(key, ""),
-                                          aliases.get(key, ())):
-            if form and form in runs:
-                hits.append((len(form), key, form))
-                break
+        # The longest form the question uses: "compare the SMART Hopper 3 and
+        # the SMART Coin System" matched the SCS by its alias "smart hopper",
+        # which sits inside "smart hopper 3", so the SCS was dropped below.
+        found = [f for f in _product_alias_tokens(key, names.get(key, ""),
+                                                  aliases.get(key, ()))
+                 if f and f in runs]
+        if found:
+            form = max(found, key=len)
+            hits.append((len(form), key, form))
 
     # A SIBLING NAMED BY ITS DIFFERENCE. "How do you fix the mycheckr to a
     # wall vs the mini?" names two products, but "mini" alone is no form of
@@ -3025,7 +3163,7 @@ def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
     """
     q = payload.q or ""
     if not language.looks_foreign(q) or not capability("ask"):
-        return query(payload, x_user_id)
+        return _query_noted(payload, x_user_id)
 
     api_keys = {"deepseek": payload.deepseek_api_key,
                 "openai": payload.openai_api_key,
@@ -3034,14 +3172,14 @@ def query_any_language(payload: QueryRequest, x_user_id: str | None = None):
     got = language.to_english(q, api_keys)
     if not got:
         ptrace.mark("language", "looked foreign; no translation, asked as typed")
-        return query(payload, x_user_id)
+        return _query_noted(payload, x_user_id)
     lang, english = got
     ptrace.set_meta(language=lang)
     ptrace.mark("language", f"{lang} -> English ({time.time() - t0:.1f}s)")
     logger.info("question in %s translated for the pipeline: %s -> %s",
                 lang, redact(q), redact(english))
 
-    result = query(payload.model_copy(update={"q": english}),
+    result = _query_noted(payload.model_copy(update={"q": english}),
                              x_user_id)
     if not isinstance(result, dict):
         return result
@@ -3238,6 +3376,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # memory and logged, so future condensation prompts see the
     # conversation as the user actually typed it.
     history = get_history(session_id)
+    # "Not sure which SMART Hopper I have" and its yes/no questions, before
+    # the rewrite (families.py).
+    _fam_early = _family_reply(q, payload, history, None, session_id,
+                               request_id, start_total)
+    if _fam_early:
+        return _fam_early
     # Normalize BEFORE condensation/retrieval: all-caps, repeated
     # punctuation ("DEFAULT LOGIN???") retrieves fine (embeddings are
     # case-tolerant) but reliably derails the small local generator,
@@ -3340,6 +3484,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                                request_id, start_total)
     if _fam_reply:
         return _fam_reply
+    # "It's a general question" asks for a row per model (_GENERAL_RULE);
+    # the rewrite of a follow-up may drop the models it lists.
+    _gen = re.search(r"\(general question for every [^)]*\)", q)
+    if _gen and _gen.group(0) not in resolved_query:
+        resolved_query = f"{resolved_query} {_gen.group(0)}"
 
     # (1) SCOPE. The picker supplies the default product even on the first
     # question (no conversation-history rewrite is required). One product
@@ -3371,12 +3520,13 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                     f"{_scope or 'the whole corpus'}")
     # OBSOLETE (catalog.set_obsolete): a question about products whose
     # answers are blocked gets the dates and the way to support instead.
-    _obs_reply = _obsolete_reply(
-        q, _both_named if len(_both_named) >= 2 else
-        [_effective_product] if _effective_product else [],
-        request_id, start_total, session_id)
+    _turn_products = (_both_named if len(_both_named) >= 2 else
+                      [_effective_product] if _effective_product else [])
+    _obs_reply = _obsolete_reply(q, _turn_products, request_id, start_total,
+                                 session_id, history, bool(payload.faq_id))
     if _obs_reply:
         return _obs_reply
+    _OBS_NOTE.set(_obsolete_note(_turn_products, q, history))
     if _effective_product and _effective_product != payload.product:
         logger.info(f"Using question-named product {_effective_product!r} "
                     f"instead of selected product {payload.product!r}")

@@ -80,6 +80,8 @@ def test_the_family_card_says_it_is_obsolete():
     assert cards["SMART Hopper 3"]["note"] == \
         "Obsolete since December 2025; replaced by the SMART Hopper 4.", cards
     assert cards["SMART Hopper 4"]["note"] == ""
+    catalog.set_obsolete("smart_hopper_3", {"date": "2025-12", "versions": "Firmware SH0003"})
+    assert families.options(fam, [1], "q")[0]["note"] == "Some units obsolete since December 2025."
 
 
 def test_the_support_hub_list_is_read_as_suggestions():
@@ -98,6 +100,89 @@ def test_the_support_hub_list_is_read_as_suggestions():
     assert not got["smart_hopper_3"]["block_answers"]      # only some units
     assert got["bv20"] == dict(got["bv20"], date="2019-09", versions="", block_answers=True)
 
+
+def test_an_answer_carries_the_obsolete_note():
+    catalog.set_obsolete("sku_scs", {"date": "2021-06", "versions": "BR29 & Below label",
+                                     "block_answers": False})
+    catalog.set_obsolete("smart_hopper_3", {"date": "2025-12", "service_end": "2026-01"})
+    note = main._obsolete_note(["sku_scs"], "q", [])
+    assert note == "Note: SMART Coin System units (BR29 & Below label) were made obsolete in June 2021.", note
+    # A comparison with a blocked product says it was left out, and a
+    # service end that has passed says so.
+    note = main._obsolete_note(["smart_hopper_3", "sku_scs"], "q", [])
+    assert note.startswith("The Smart Hopper 3 was made obsolete in December 2025; service and "
+                           "repairs ended in January 2026. For help with it, please contact "
+                           "our support team."), note
+    # "Mine is a newer one" drops the note for the rest of the chat.
+    assert main._obsolete_note(["sku_scs"], "x", [{"q": "y (my SMART Coin System is a current one)"}]) == ""
+    tok = main._OBS_NOTE.set("")
+    real = main.query
+    try:
+        def fake(payload, x_user_id=None):
+            main._OBS_NOTE.set("Note: obsolete.")
+            return {"role": "answered", "answer": "It is 24V."}
+        main.query = fake
+        assert main._query_noted(main.QueryRequest(q="x"))["answer"] == "It is 24V.\n\nNote: obsolete."
+        # Any route's answer gets it; a refusal does not.
+        main.query = lambda payload, x_user_id=None: (
+            main._OBS_NOTE.set("N."), {"role": "extract", "answer": "A."})[1]
+        assert main._query_noted(main.QueryRequest(q="x"))["answer"] == "A.\n\nN."
+        main.query = lambda payload, x_user_id=None: (
+            main._OBS_NOTE.set("N."), {"role": "generate", "answer": "No.", "offer_support": True})[1]
+        assert main._query_noted(main.QueryRequest(q="x"))["answer"] == "No."
+    finally:
+        main.query = real
+        main._OBS_NOTE.reset(tok)
+    catalog.set_obsolete("sku_scs", None)
+
+
+def test_some_units_obsolete_asks_which_is_yours_once():
+    catalog.set_obsolete("sku_scs", {"date": "2021-06", "block_answers": False,
+                                     "versions": "BR29 & Below label; BR30 label"})
+    r = main._obsolete_reply("how do I reset it", ["sku_scs"], "rid", 0.0, "s2", [])
+    assert r["reason"] == "obsolete_version" and main.VERSION_ASK in r["answer"], r
+    labels = [o["label"] for o in r["family_options"]]
+    assert labels == ["BR29 & Below label", "BR30 label", "Mine is a newer one"], labels
+    picked = r["family_options"][0]["send"]
+    r2 = main._obsolete_reply(picked, ["sku_scs"], "rid", 0.0, "s2", [])
+    assert r2["reason"] == "obsolete_product" and "(BR29 & Below label)" in r2["answer"], r2
+    # Later in that chat, still the obsolete reply.
+    r3 = main._obsolete_reply("and the fuse?", ["sku_scs"], "rid", 0.0, "s2", [{"q": picked, "a": "x"}])
+    assert r3["reason"] == "obsolete_product"
+    # A current unit, or the question already asked once: answered.
+    assert main._obsolete_reply(r["family_options"][-1]["send"], ["sku_scs"], "rid", 0.0, "s2", []) is None
+    assert main._obsolete_reply("q", ["sku_scs"], "rid", 0.0, "s2", [{"q": "x", "a": r["answer"]}]) is None
+    catalog.set_obsolete("sku_scs", None)
+
+
+def test_a_suggestion_already_applied_or_dismissed_is_not_offered():
+    import obsolete_list
+    page = ("x.txt", "<<<GO_TABLE>>>\nProduct Name | Label Identifier | Dataset Code | "
+            "Manufactured Date | Obsolescence Date\nBV20 | All | All | All | Sept 2019\n<<</GO_TABLE>>>")
+    catalog.set_obsolete("bv20", None)
+    assert [s["product_key"] for s in obsolete_list.suggestions(catalog.catalog(), page)] == ["bv20"]
+    catalog.set_obsolete("bv20", {"date": "2019-09"})
+    assert obsolete_list.suggestions(catalog.catalog(), page) == []
+    catalog.set_obsolete("bv20", {"date": "2019-01"})        # the list now says otherwise
+    got = obsolete_list.suggestions(catalog.catalog(), page)
+    assert got and got[0]["changed"], got
+    catalog.set_obsolete("bv20", None)
+    catalog.dismiss_obsolete_suggestion("bv20", "2019-09")
+    assert obsolete_list.suggestions(catalog.catalog(), page) == []
+    catalog.dismiss_obsolete_suggestion("bv20", "")
+
+def test_a_product_is_named_by_its_longest_form():
+    """"SMART Hopper" (the SCS's alias) inside "SMART Hopper 3" no longer
+    hides the "SMART Coin System" the same question names."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    main._product_names = lambda: {"sku_scs": "SMART Coin System", "smart_hopper_3": "Smart Hopper 3"}
+    main._product_aliases = lambda: {"sku_scs": ["SMART Hopper", "SCS"], "smart_hopper_3": []}
+    try:
+        assert main._products_named_in("compare the SMART Hopper 3 and the SMART Coin System power",
+                                       ["sku_scs", "smart_hopper_3"]) == ["sku_scs", "smart_hopper_3"]
+        assert main._products_named_in("smart hopper 3 power", ["sku_scs", "smart_hopper_3"]) ==             ["smart_hopper_3"]
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

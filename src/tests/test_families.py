@@ -38,6 +38,8 @@ def test_the_chats_own_product_settles_it_unless_it_is_shared():
     assert not F.resolve("how tall is the smart hopper", product="smart_hopper_3")["ask"]
     assert "smart hopper" not in F.without_generic("how tall is the smart hopper")
     assert "smart hopper 3" in F.without_generic("how tall is the smart hopper 3")
+    # One product behind every model: its name still names it.
+    assert "smart coin system" in F.without_generic("compare the sh3 and the smart coin system")
     # ICU Lite and Pro share "icu": still asked, and only those offered.
     r = F.resolve("icu sizing", product="icu")
     assert _asked(r) == "ICU"
@@ -106,6 +108,29 @@ def test_the_console_edit_is_checked():
             continue
         raise AssertionError(bad)
 
+
+def test_not_sure_asks_one_question_at_a_time():
+    fam = next(f for f in F.families() if f["key"] == "nv9")
+    step = F.guide_start("g1", fam, list(range(5)), "nv9 power?")
+    # The question that best halves five, the first of equals: note float (2 of 5).
+    assert step["answer"].startswith("Is a note float"), step
+    assert [o["send"] for o in step["options"]] == ["Yes", "No", "Not sure"]
+    step = F.guide_step("g1", "No")
+    assert step["answer"] == "Is a multi-note float fitted on top?", step
+    step = F.guide_step("g1", "no")
+    assert step["answer"] == "Does its label say Spectral?", step
+    step = F.guide_step("g1", "yes")
+    assert step["answer"].startswith("That sounds like the NV9 Spectral.") and F.MARKER in step["answer"]
+    assert step["options"][0]["send"] == "nv9 power? (NV9 Spectral)", step["options"]
+    assert F.guide_step("g1", "yes") is None              # finished
+    # "Not sure" skips a question; anything else ends the questions.
+    F.guide_start("g2", fam, list(range(5)), None)
+    assert F.guide_step("g2", "not sure")["answer"] == "Does its label say Spectral?"
+    assert F.guide_step("g2", "how do I clean it") is None and "g2" not in F._guides
+    # No question tells the rest apart: every difference is listed.
+    icu = next(f for f in F.families() if f["key"] == "icu")
+    assert F.guide_start("g3", icu, [0, 1], None)["answer"].startswith("Here is how to tell")
+    assert F.show_all("Show me every NV9")["key"] == "nv9"
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

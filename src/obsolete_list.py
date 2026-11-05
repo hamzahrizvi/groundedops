@@ -104,4 +104,19 @@ def suggestions(catalog: dict, page: tuple[str, str] | None = None) -> list[dict
             o["block_answers"] = False
             own = r["versions"] if _flat(r["name"]) == _flat(p["name"]) else f"{r['name']}: {r['versions']}"
             o["versions"] = "; ".join(x for x in (o["versions"], own) if x)
-    return sorted(out.values(), key=lambda s: s["product_name"].lower())
+    # Only what is still to decide: a product not ticked, or ticked with
+    # other dates than the list now gives ("changed"); not one dismissed
+    # at the date the list gives.
+    keep = []
+    for s in out.values():
+        p = next(p for c in catalog.get("categories") or [] for p in c.get("products") or []
+                 if p["key"] == s["product_key"])
+        have = p.get("obsolete") or {}
+        want = s["obsolete"]
+        if have and have.get("date") == want["date"] and                 (have.get("service_end") or "") == want["service_end"]:
+            continue
+        if p.get("obsolete_dismissed") == want["date"]:
+            continue
+        s["changed"] = bool(have)
+        keep.append(s)
+    return sorted(keep, key=lambda s: s["product_name"].lower())

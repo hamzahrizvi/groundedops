@@ -1393,6 +1393,7 @@ async function api(path, opts = {}) {
 
 /* ---------------- data ---------------- */
 async function refresh() {
+  obsSuggest = null; loadObsSuggest();
   // All independent reads — run them together rather than in series, so
   // opening the console is one round trip's worth of latency, not six.
   const [cat, src, faq, gaps, widget, leads, prov, report] = await Promise.all([
@@ -1500,7 +1501,7 @@ function render() {
         // The rail now runs in the order the work actually happens -- set up
         // the products, add the documents, write the answers, read what
         // customers asked, then try it as a customer.
-        nav("catalog", "Products"),
+        nav("catalog", "Products", Object.keys(obsSuggest || {}).length),
         nav("documents", "Documents", unassigned().length),
         nav("confluence", "Confluence", confluenceCache && confluenceCache.items
           ? confluenceCache.items.filter(i => i.status === "error"
@@ -7540,10 +7541,12 @@ function viewCatalog() {
 let obsSuggest = null;
 function loadObsSuggest() {
   if (obsSuggest !== null) return;
-  obsSuggest = {};
+  obsSuggest = {};   // loading: asked once
   api("/admin/obsolete/suggestions").then(d => {
-    (d.suggestions || []).forEach(s => { obsSuggest[s.product_key] = s; });
-    if (Object.keys(obsSuggest).length) render();
+    const got = {};
+    (d.suggestions || []).forEach(s => { got[s.product_key] = s; });
+    obsSuggest = got;
+    if (Object.keys(got).length) render();
   }).catch(() => {});
 }
 const monthName = ym => {
@@ -7591,13 +7594,26 @@ function obsoleteRow(p) {
           toast(p.name + " is current again"); await refresh(); render(); }
     catch (err) { toast(err.message, true); }
   } });
+  const small = "font-size:11.5px;padding:2px 6px";
+  const dismiss = () => el("button", { class: "btn btn-ghost", style: small, onclick: async () => {
+    try { await api("/admin/obsolete/dismiss", { method: "POST", body: JSON.stringify({ product_key: p.key, date: sug.obsolete.date }) });
+          delete obsSuggest[p.key]; render(); } catch (e) { toast(e.message, true); }
+  } }, "Dismiss");
+  // The list's dates over what is set; a ticked product keeps its own settings.
+  const useIt = () => el("button", { class: "btn btn-ghost", style: small,
+    onclick: () => { box.checked = true; open(Object.assign({}, o || {}, sug.obsolete,
+      o ? { block_answers: o.block_answers, confluence_import: o.confluence_import } : {})); } }, "Use this");
+  const sugText = () => monthName(sug.obsolete.date)
+    + (sug.obsolete.service_end ? ", service and repairs until " + monthName(sug.obsolete.service_end) : "")
+    + (sug.obsolete.versions ? " (" + sug.obsolete.versions + ")" : "") + " ";
   const status = o
-    ? el("span", { class: "row-hint", style: "cursor:pointer;text-decoration:underline", onclick: () => open() },
-        "since " + monthName(o.date) + (o.block_answers ? " · chat does not answer" : " · chat still answers")
-        + (o.confluence_import ? "" : " · no Confluence import"))
-    : sug ? el("span", { class: "row-hint" }, "Support hub lists it obsolete since " + monthName(sug.obsolete.date)
-        + (sug.obsolete.versions ? " (" + sug.obsolete.versions + ")" : "") + " ",
-        el("button", { class: "btn btn-ghost", style: "font-size:11.5px;padding:2px 6px", onclick: () => { box.checked = true; open(sug.obsolete); } }, "Use this"))
+    ? el("span", { class: "row-hint" },
+        el("span", { style: "cursor:pointer;text-decoration:underline", onclick: () => open() },
+          "since " + monthName(o.date) + (o.block_answers ? " · chat does not answer" : " · chat still answers")
+          + (o.confluence_import ? "" : " · no Confluence import")),
+        sug ? el("span", { style: "color:var(--color-warning, #8a5a00)" }, " · support hub now says " + sugText()) : null,
+        sug ? useIt() : null, sug ? dismiss() : null)
+    : sug ? el("span", { class: "row-hint" }, "Support hub lists it obsolete since " + sugText(), useIt(), dismiss())
     : null;
   return [el("div", { style: "display:flex;gap:8px;align-items:center;margin:-4px 0 8px 0;font-size:12.5px" },
             el("label", { style: "display:flex;gap:6px;align-items:center" }, box, "Obsolete"), status),
@@ -7656,7 +7672,21 @@ function familiesPanel() {
     (f.members || []).map((m, mi) => memberRow(f, m, mi)),
     el("button", { class: "btn btn-ghost", style: BTN + ";margin-top:6px", onclick: () => {
       f.members.push({ name: "", aliases: [], product: "", features: "", note: "" }); draw();
-    } }, "+ Add model"));
+    } }, "+ Add model"),
+    el("div", { style: "margin-top:12px" },
+      el("label", { class: "flabel" }, "Questions for \u201cI'm not sure which I have\u201d, asked one at a time \u2014 tick the models that answer yes"),
+      (f.questions || []).map((qq, qi) => el("div", { class: "row", style: "gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap" },
+        el("input", { class: "input", style: "flex:2;min-width:240px", value: qq.q, placeholder: "e.g. Does a coin feeder sit on top?",
+                      oninput: e => { qq.q = e.target.value; delete qq.auto; } }),
+        (f.members || []).filter(m => m.name).map(m => el("label", { style: "display:flex;gap:4px;align-items:center;font-size:12.5px" },
+          el("input", { type: "checkbox", checked: (qq.yes || []).includes(m.name) ? "checked" : null, onchange: e => {
+            qq.yes = (qq.yes || []).filter(n => n !== m.name).concat(e.target.checked ? [m.name] : []); delete qq.auto; } }),
+          m.name)),
+        qq.auto ? el("span", { class: "tag tag-outline" }, "drafted") : null,
+        el("button", { class: "btn btn-ghost", style: BTN, onclick: () => { f.questions.splice(qi, 1); draw(); } }, "Remove"))),
+      el("button", { class: "btn btn-ghost", style: BTN + ";margin-top:6px", onclick: () => {
+        (f.questions = f.questions || []).push({ q: "", yes: [] }); draw();
+      } }, "+ Add question")));
   const memberRow = (f, m, mi) => {
     const pick = el("div", { style: "display:none;flex-wrap:wrap;gap:6px;margin-top:6px" });
     const thumb = m.picture

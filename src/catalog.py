@@ -138,7 +138,9 @@ def catalog() -> dict:
                        "digest": p.get("digest", "off"),
                        # Projected so the picker can label it and the
                        # console can show its settings (set_obsolete).
-                       **({"obsolete": p["obsolete"]} if p.get("obsolete") else {})}
+                       **({"obsolete": p["obsolete"]} if p.get("obsolete") else {}),
+                       **({"obsolete_dismissed": p["obsolete_dismissed"]}
+                          if p.get("obsolete_dismissed") else {})}
                       for p in c.get("products", [])]}
         for c in data["categories"]
     ]}
@@ -319,6 +321,18 @@ def set_obsolete(product_key: str, info: dict | None) -> dict:
             p["obsolete"] = out
         _save(data)
         return catalog()
+
+
+def dismiss_obsolete_suggestion(product_key: str, date: str) -> None:
+    """The support hub's list said this product went obsolete on `date`,
+    and someone decided otherwise: not offered again until the list changes."""
+    with _lock:
+        data = _load()
+        p = _product_by_key(data, product_key)
+        if not p:
+            raise ValueError(f"unknown product '{product_key}'")
+        p["obsolete_dismissed"] = str(date or "")[:7]
+        _save(data)
 
 
 def _this_month() -> str:

@@ -290,3 +290,19 @@ def admin_obsolete_suggestions(x_admin_password: str | None = Header(default=Non
     _require_admin(x_admin_password)
     import obsolete_list
     return {"suggestions": obsolete_list.suggestions(catalog_mod.catalog())}
+
+
+class DismissReq(BaseModel):
+    product_key: str
+    date: str
+
+
+@router.post("/admin/obsolete/dismiss")
+def admin_dismiss_obsolete(payload: DismissReq, x_admin_password: str | None = Header(default=None)):
+    """Not obsolete after all: stop offering the support hub's tick."""
+    _require_admin(x_admin_password)
+    try:
+        catalog_mod.dismiss_obsolete_suggestion(payload.product_key, payload.date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}

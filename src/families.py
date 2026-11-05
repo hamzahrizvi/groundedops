@@ -50,6 +50,9 @@ _SH_FEEDER = ("If a coin feeder sits on top of the hopper, it is a SMART "
 _SEED = {"families": [
     {"key": "smart_hopper", "name": "SMART Hopper",
      "aliases": ["smart hopper", "smart hoppers"],
+     "questions": [
+         {"q": "Is there an SD card slot on the front of the hopper?", "yes": ["SMART Hopper 4"]},
+         {"q": "Does a coin feeder sit on top of the hopper?", "yes": ["SMART Hopper 4"]}],
      "members": [
          {"name": "SMART Hopper 4", "aliases": ["SH4", "Smart Hopper 4", "hopper 4"],
           "product": "sku_scs",
@@ -62,12 +65,18 @@ _SEED = {"families": [
                       "cycles between SSP, CC2 and CC1."}]},
     {"key": "scs", "name": "SMART Coin System",
      "aliases": ["SCS", "coin system"],
+     "questions": [
+         {"q": "Are there two hoppers in it, side by side?", "yes": ["Twin SMART Coin System"]}],
      "members": [
          {"name": "SMART Coin System", "aliases": ["single SCS"],
           "product": "sku_scs", "features": ""},
          {"name": "Twin SMART Coin System", "aliases": ["Twin SCS", "TSCS"],
           "product": "sku_scs", "features": ""}]},
     {"key": "nv200", "name": "NV200", "aliases": [],
+     "questions": [
+         {"q": "Is the validator fitted to a payout module that stores notes and pays them out?",
+          "yes": ["SMART Payout", "Spectral Payout"]},
+         {"q": "Does its label say Spectral?", "yes": ["NV200 Spectral", "Spectral Payout"]}],
      "members": [
          {"name": "NV200", "aliases": [], "product": "nv200s",
           "features": "The note validator on its own, with no payout module."},
@@ -82,6 +91,12 @@ _SEED = {"families": [
           "product": "nv200s",
           "features": "An NV200 Spectral fitted to a payout module."}]},
     {"key": "nv9", "name": "NV9", "aliases": [],
+     "questions": [
+         {"q": "Is a note float (a round drum that stores notes) fitted on top?",
+          "yes": ["NV11", "NV11 Spectral"]},
+         {"q": "Is a multi-note float fitted on top?", "yes": ["NV22 Spectral"]},
+         {"q": "Does its label say Spectral?",
+          "yes": ["NV9 Spectral", "NV11 Spectral", "NV22 Spectral"]}],
      "members": [
          {"name": "NV9USB+", "aliases": ["NV9 USB", "NV9USB", "NV9 USB+"],
           "product": "nv9usb",
@@ -232,6 +247,10 @@ def without_generic(text: str) -> str:
     the SMART Coin System's alias, which overrode a Smart Hopper 3 chat."""
     t = f" {_flat(text)} "
     for fam in families():
+        # Models that all answer from one product leave its name standing:
+        # "SMART Coin System" is still the SMART Coin System.
+        if len({m.get("product") for m in fam.get("members") or []}) < 2:
+            continue
         for f, _i, g in mentions(text, fam):
             if g:
                 t = t.replace(f" {f} ", " ")
@@ -266,6 +285,97 @@ def family_for(text: str, history: list | None, product: str | None) -> dict | N
         if any(m.get("product") == product for m in fam.get("members") or []):
             return fam
     return None
+
+
+# ── telling them apart, one question at a time ──────────────────────────
+# "I'm not sure which I have" asks the family's yes/no questions one by one
+# ("Does a coin feeder sit on top?"), each the one that best halves the
+# models still possible, until one is left. Where the family has no
+# questions, or none tells the rest apart, every difference is listed.
+# A question's `yes` names the models that have the trait.
+_guides: dict = {}                 # session -> where its questions stand
+_GUIDES_MAX = 2000
+_YES = re.compile(r"\s*(?:yes|yeah|yep|y|it does|it is|there is)\b", re.I)
+_NO = re.compile(r"\s*(?:no|nope|n|it doesn'?t|it isn'?t|there isn'?t)\b", re.I)
+_UNSURE = re.compile(r"\s*(?:not sure|i'?m not sure|don'?t know|idk|no idea|can'?t tell)\s*[.!]?\s*$", re.I)
+
+
+def _best_question(fam: dict, left: list[int], asked: list[int]) -> int | None:
+    ms = fam.get("members") or []
+    best = None
+    for qi, qq in enumerate(fam.get("questions") or []):
+        if qi in asked:
+            continue
+        yes = [i for i in left if ms[i]["name"] in (qq.get("yes") or [])]
+        if 0 < len(yes) < len(left):
+            score = abs(len(left) - 2 * len(yes))
+            if best is None or score < best[0]:
+                best = (score, qi)
+    return None if best is None else best[1]
+
+
+_YES_NO = [{"label": t, "features": "", "note": "", "picture": None, "product": "",
+            "send": t} for t in ("Yes", "No", "Not sure")]
+
+
+def _guide_next(session: str, st: dict) -> dict:
+    fam, left = st["family"], st["left"]
+    if len(left) == 1:
+        _guides.pop(session, None)
+        m = fam["members"][left[0]]
+        return {"answer": f"That sounds like the {m['name']}. If that's yours, {MARKER}.",
+                "options": options(fam, left, st.get("question"), general=False)[:-1] + [
+                    {"label": "No, show me all of them", "features": "", "note": "",
+                     "picture": None, "product": "", "send": f"Show me every {fam['name']}"}]}
+    qi = _best_question(fam, left, st["asked"])
+    if qi is None:
+        _guides.pop(session, None)
+        return {"answer": guide_reply(fam, left),
+                "options": options(fam, left, st.get("question"), general=False)[:-1]}
+    st["at"] = qi
+    return {"answer": fam["questions"][qi]["q"], "options": _YES_NO}
+
+
+def guide_start(session: str, fam: dict, offer: list[int], question: str | None) -> dict:
+    """The first step for "not sure which I have"."""
+    if len(_guides) >= _GUIDES_MAX:      # ponytail: drop the oldest; a store if it matters
+        _guides.pop(next(iter(_guides)))
+    st = {"family": fam, "left": list(offer), "asked": [], "at": None, "question": question}
+    _guides[session] = st
+    return _guide_next(session, st)
+
+
+def guide_step(session: str, text: str) -> dict | None:
+    """The next step when this message answers our yes/no question; None
+    when no question is waiting or the message is not an answer (it ends
+    the questions: the visitor moved on)."""
+    st = _guides.get(session)
+    if not st or st.get("at") is None:
+        return None
+    if _UNSURE.match(text or ""):
+        verdict = None
+    elif _YES.match(text or ""):
+        verdict = True
+    elif _NO.match(text or ""):
+        verdict = False
+    else:
+        _guides.pop(session, None)
+        return None
+    qq = st["family"]["questions"][st["at"]]
+    st["asked"].append(st["at"])
+    if verdict is not None:
+        ms = st["family"]["members"]
+        st["left"] = [i for i in st["left"] if (ms[i]["name"] in (qq.get("yes") or [])) == verdict] \
+            or st["left"]
+    return _guide_next(session, st)
+
+
+def show_all(text: str) -> dict | None:
+    """The family a "Show me every SMART Hopper" message asks to list."""
+    m = re.fullmatch(r"\s*show me every (.+?)\s*", text or "", re.I)
+    if not m:
+        return None
+    return next((f for f in families() if _flat(f["name"]) == _flat(m.group(1))), None)
 
 
 # ── replies ─────────────────────────────────────────────────────────────
@@ -313,7 +423,8 @@ def _note(member: dict) -> str:
         return ""
     if not o:
         return ""
-    text = f"Obsolete since {catalog.month_name(o['date'])}"
+    text = (("Some units obsolete" if o.get("versions") else "Obsolete")
+            + f" since {catalog.month_name(o['date'])}")
     if o.get("replacement"):
         text += f"; replaced by the {o['replacement']}"
     return text + "."
@@ -470,6 +581,33 @@ def _draft_features(fam: dict, idxs: list[int]) -> dict[int, str]:
             for i in idxs if data.get(ms[i]["name"])}
 
 
+def _draft_questions(fam: dict) -> list[dict]:
+    """Yes/no questions that tell the members apart, from the differences
+    already written for them, by the fast model; [] when it gives none."""
+    import llm
+    ms = [m for m in fam["members"] if m.get("features")]
+    if len(ms) < 2:
+        return []
+    names = [m["name"] for m in fam["members"]]
+    prompt = (
+        f"Customers mix up these {fam['name']} products:\n"
+        + "\n".join(f"- {m['name']}: {m['features']}" for m in ms) + "\n\n"
+        "Write up to 3 yes/no questions a customer standing at the device can "
+        "answer, which together tell these products apart. Use only the "
+        "differences above. Reply with JSON only: a list of objects "
+        '{"q": question, "yes": [the product names for which the answer is yes]}.')
+    try:
+        out = llm.generate_with_fallback("fast", prompt)
+        raw = (out or {}).get("text") or ""
+        data = json.loads(raw[raw.find("["): raw.rfind("]") + 1])
+    except Exception as exc:
+        logger.warning("family questions for %r failed: %s", fam["name"], exc)
+        return []
+    return [{"q": str(d.get("q") or "").strip()[:200],
+             "yes": [n for n in d.get("yes") or [] if n in names], "auto": True}
+            for d in data if isinstance(d, dict) and d.get("q")][:3]
+
+
 def refresh_auto(draft: bool = True) -> dict:
     """Join new products to families, add families for new look-alike
     products, pick missing pictures and draft missing differences. Fields
@@ -524,6 +662,8 @@ def refresh_auto(draft: bool = True) -> dict:
                 for i, text in _draft_features(fam, missing).items():
                     fam["members"][i]["features"] = text
                     fam["members"][i]["features_auto"] = True
+            if draft and not fam.get("questions") and len(fam["members"]) > 1:
+                fam["questions"] = _draft_questions(fam)
         return save(data)
     finally:
         _refreshing.release()
@@ -587,7 +727,13 @@ def validate(fams: list) -> list[dict]:
                 **({"picture": {"source": str(pic.get("source")), "name": str(pic.get("name"))}}
                    if pic and pic.get("source") and pic.get("name") else {}),
             })
+        names = {m["name"] for m in members}
+        questions = [{"q": str(qq.get("q") or "").strip()[:200],
+                      "yes": [n for n in qq.get("yes") or [] if n in names],
+                      **({"auto": True} if qq.get("auto") else {})}
+                     for qq in f.get("questions") or [] if str(qq.get("q") or "").strip()]
         out.append({"key": key, "name": name[:60],
                     "aliases": [str(a).strip()[:60] for a in f.get("aliases") or [] if str(a).strip()],
-                    "members": members, **({"auto": True} if f.get("auto") else {})})
+                    "members": members, "questions": questions,
+                    **({"auto": True} if f.get("auto") else {})})
     return out
