@@ -13,6 +13,7 @@ import re
 from collections import Counter
 
 from text_utils import (
+    _ASK_OPEN,
     _ASK_STOP,
     LIST_LINE_RE,
     STEP_HEADER_RE,
@@ -377,6 +378,29 @@ def asks_to_fix(query: str | None) -> bool:
         return False
     asks = asks_for_procedure(query) or bool(_WHAT_TO_DO_RE.search(query))
     return asks and (reports_failure(query) or bool(_FIX_VERB_RE.search(query)))
+
+
+# D-20261104-06: a failure stated as a fact ("blue led is on but IMS Local search finds
+# nothing", "note stuck in our bv30", "why won't it pay out?"), or a fix asked for a
+# stated failure ("how do I fix a hopper that won't pay out"). A clause that asks how
+# or whether ("how do I set it so it doesn't beep", "does it not take polymer notes?")
+# sets a condition, not a report; "why" presumes the failure, so it reports.
+_CLAUSE_RE = re.compile(r"[?.!;,\n]+")
+_WHY_RE = re.compile(r"why\b", re.I)
+
+
+def reports_symptom(query: str | None) -> bool:
+    """True when the message states a failure, not only a how-to or yes/no
+    that mentions one."""
+    if not query:
+        return False
+    if _FIX_VERB_RE.search(query) and reports_failure(query):
+        return True
+    for c in (c.strip() for c in _CLAUSE_RE.split(query)):
+        asks = asks_for_procedure(c) or (_ASK_OPEN.match(c) and not _WHY_RE.match(c))
+        if reports_failure(c) and not asks:
+            return True
+    return False
 
 
 def _topic_stems(text: str | None, ignore=frozenset()) -> set[str]:

@@ -39,6 +39,7 @@ def test_scoped_fix_it_ask_puts_the_steps_first():
     gen, fs = _ask("note stuck in our bv30, how do i get it out?", True)
     prompt = gen.call_args_list[0][0][1]
     assert fs.called
+    assert fs.call_args.kwargs["titles"] is True
     assert 0 <= prompt.index("LOZENGE STEPS") < prompt.index("CASHBOX TEXT")
 
 
@@ -50,3 +51,18 @@ def test_unscoped_fix_it_ask_is_untouched():
 def test_scoped_non_fix_ask_is_untouched():
     _, fs = _ask("what does the escrow do on the bv30?", True)
     assert not fs.called
+
+
+def test_scoped_bare_symptom_report_gets_the_fault_steps():
+    gen, fs = _ask("plugged our bv30 in by usb, led is on but the pc search finds "
+                   "nothing after 2 tries", True)
+    prompt = gen.call_args_list[0][0][1]
+    assert fs.called
+    assert fs.call_args.kwargs["titles"] is True
+    assert 0 <= prompt.index("LOZENGE STEPS") < prompt.index("CASHBOX TEXT")
+
+
+def test_scoped_how_to_with_a_failure_word_keeps_title_pages_out():
+    _, fs = _ask("how do i set up the bv30 so it does not beep on every note?", True)
+    assert fs.called
+    assert fs.call_args.kwargs["titles"] is False

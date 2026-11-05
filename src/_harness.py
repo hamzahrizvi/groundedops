@@ -266,6 +266,7 @@ import structure as _real_structure  # the gate is pure; only the copier is pinn
 stub("structure", extract_structured_block=lambda r, query=None: None,
      asks_for_procedure=_real_structure.asks_for_procedure,
      asks_to_fix=_real_structure.asks_to_fix,
+     reports_symptom=_real_structure.reports_symptom,
      lists_on_topic=_real_structure.lists_on_topic,
      MIN_COPY_RERANK=_real_structure.MIN_COPY_RERANK)
 from logger import redact as _real_redact  # the real one: the stub below replaces the module

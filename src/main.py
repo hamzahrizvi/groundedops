@@ -63,7 +63,7 @@ from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root, 
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
-from structure import extract_structured_block, asks_for_procedure, asks_to_fix, lists_on_topic, MIN_COPY_RERANK
+from structure import extract_structured_block, asks_for_procedure, asks_to_fix, reports_symptom, lists_on_topic, MIN_COPY_RERANK
 from logger import log_interaction, redact
 from router import route_model
 from grounding import check_grounding, _get_nli_model
@@ -4553,9 +4553,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # outside the context, so the answer explained free-fall and escrow. The
     # fault-clearing section the ranking found goes first, whole, in document
     # order. One product only: across products it could be a sibling's steps.
-    if (asks_to_fix(q) and (_scope or {}).get("product")
+    # D-20261104-06: a stated symptom ("IMS Local search finds nothing") counts too, and only
+    # then does a help article titled by its symptom count as the fault's steps
+    # (retrieval_db._fault_title): a how-to that names a failure ("so it doesn't beep")
+    # keeps its set-up page first.
+    _symptom = reports_symptom(q)
+    if ((asks_to_fix(q) or _symptom) and (_scope or {}).get("product")
             and len(_both_named) < 2 and not _comparing):
-        _fix = fix_sections(_retrieved)
+        _fix = fix_sections(_retrieved, titles=_symptom)
         if _fix:
             _fix_ids = {c.get("id") for c in _fix}
             top_chunks = ([_strip_breadcrumb(dict(c)) for c in _fix]
