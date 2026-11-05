@@ -470,8 +470,9 @@ _PREAMBLE_RE = re.compile(
 
 
 # The last line the model adds when it read its answer off a picture
-# description (_PICTURE_RULE). Never shown: _strip_preamble removes it.
-_PICTURE_LINE_RE = re.compile(r"(?:\A|\n)\s*PICTURE:\s*[\"'`]?([\w.-]+?)(?:\.png)?[\"'`]?\s*$", re.I)
+# description (_PICTURE_RULE). Never shown: _strip_preamble removes it,
+# also when written after the last sentence with a name it never saw.
+_PICTURE_LINE_RE = re.compile(r"(?:\A|\n|(?<=[.!?]))\s*PICTURE:\s*[\"'`]?([^\n\"'`]*?)(?:\.png)?[\"'`]?\s*$", re.I)
 
 
 def _answer_picture(raw: str, chunks: list[dict]) -> tuple[str, str] | None:

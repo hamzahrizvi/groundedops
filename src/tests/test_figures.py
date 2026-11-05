@@ -199,3 +199,32 @@ def test_a_new_version_keeps_descriptions_only_for_unchanged_pictures():
         _pdf(pdf, [[(100, 500, 200, 150, BLUE)]])
         figures.extract_figures(pdf, "Manual.pdf")
         assert "desc" not in figures.figures_for("Manual.pdf")["p1_1.png"]
+
+
+class _TextPage:
+    """A page whose text is (y, line) pairs; crop() keeps the lines inside."""
+    width = 595
+
+    def __init__(self, lines):
+        self.lines = lines
+
+    def crop(self, box):
+        lines = [t for y, t in self.lines if box[1] <= y < box[3]]
+        return type("Crop", (), {"extract_text": lambda _self: "\n".join(lines)})()
+
+
+def test_a_picture_takes_the_line_above_it_as_its_title():
+    """CEO 2026-11-05: page 18 of the SMART Coin System manual stacks
+    "Twin SMART Coin System" over "SMART Hopper"; the line under the twin
+    unit is the hopper's title, not the twin unit's caption."""
+    page = _TextPage([(30, "Manual - 18"), (65, "Twin SMART Coin System"),
+                      (380, "SMART Hopper"), (700, "Figure 2: both units")])
+    twin = {"bbox": [56, 77, 538, 363], "caption": "SMART Hopper"}
+    hopper = {"bbox": [56, 434, 538, 684], "caption": "Figure 2: both units"}
+    figures._label_page(page, [hopper, twin])
+    assert twin == {"bbox": [56, 77, 538, 363], "caption": "", "title": "Twin SMART Coin System"}
+    assert hopper["title"] == "SMART Hopper" and hopper["caption"] == "Figure 2: both units"
+    # Nothing within the band above, or only the picture above: no title.
+    alone = {"bbox": [56, 300, 538, 400], "caption": ""}
+    figures._label_page(page, [alone])
+    assert alone["title"] == ""

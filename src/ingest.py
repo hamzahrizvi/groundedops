@@ -772,7 +772,7 @@ _NOT_ITEMS = re.compile(r"not\s+labell?ed|not\s+shown|visible\s+features|no\s+pi
 _PART_HEAD = re.compile(r"label|callout", re.I)
 
 
-def _lookup_tables(desc: str, product: str, pno: int) -> list[str]:
+def _lookup_tables(desc: str, product: str, pno: int, title: str = "") -> list[str]:
     """CEO 2026-11-04: a picture description's dimensions and labelled parts
     as lookup tables with the product named on every row, so "how tall is
     the BV30" or "what is the red lever on the NV9USB+ called" meets a row
@@ -813,15 +813,20 @@ def _lookup_tables(desc: str, product: str, pno: int) -> list[str]:
         if kind == "part" or q:
             parts.append((label.strip(), detail.strip()))
     mm = " Values in mm." if re.search(r"\bmm\b|millimet", desc or "", re.I) else ""
+    # CEO 2026-11-05: two drawings of one manual can give the same
+    # measurement for different units (NV9 Spectral 221.5 on page 21, NV11S
+    # 222 on page 24); every row names the drawing by its printed title.
+    title = (title or "").replace("|", "/")
+    drawing = f"\"{title}\", page {pno}" if title else f"page {pno}"
     out = []
     if dims:
-        out.append(f"{product} dimensions, from the drawing on page {pno}.{mm}\n"
-                   "| Product | Dimension | Value |\n|---|---|---|\n"
-                   + "\n".join(f"| {product} | {n} | {v} |" for n, v in dims))
+        out.append(f"{product} documentation: dimensions from the drawing {drawing}.{mm}\n"
+                   "| Manual | Drawing | Dimension | Value |\n|---|---|---|---|\n"
+                   + "\n".join(f"| {product} | {drawing} | {n} | {v} |" for n, v in dims))
     if parts:
-        out.append(f"{product} parts and labels, as named in the picture on page {pno}.\n"
-                   "| Product | Part or label | Where / what it is |\n|---|---|---|\n"
-                   + "\n".join(f"| {product} | {n} | {d} |" for n, d in parts))
+        out.append(f"{product} documentation: parts and labels named in the picture {drawing}.\n"
+                   "| Manual | Picture | Part or label | Where / what it is |\n|---|---|---|---|\n"
+                   + "\n".join(f"| {product} | {drawing} | {n} | {d} |" for n, d in parts))
     return out
 
 
@@ -881,18 +886,23 @@ def _figure_chunks(filename: str,
         if not pno:
             continue
         caption = (m.get("caption") or "").strip()
+        title = (m.get("title") or "").strip()
         heading = next((headings[p] for p in sorted(headings, reverse=True)
                         if p <= pno), "")
+        # The title printed over the picture names what it shows ("NV11S
+        # dimensions" in the NV9 Spectral manual); see figures._label_page.
+        label = title + (f" ({caption})" if caption and caption != title else "") if title else caption
         head = (f"Figure on page {pno}" + (f", {heading}" if heading else "")
-                + (f": {caption}" if caption else ""))
+                + (f", titled \"{title}\"" if title else "")
+                + (f": {caption}" if caption and caption != title else ""))
         body = (head + (f"\nWhat the figure shows:\n{desc}" if desc else "")
                 + (f"\nText in the figure:\n{text}" if text else ""))
-        crumb = f"Figure: {caption}" if caption else "Figure"
+        crumb = f"Figure: {label}" if label else "Figure"
         if heading:
             crumb = f"{heading} — {crumb}"
         if desc and product is None:
             product = _product_label(filename)
-        tables = _lookup_tables(desc, product, pno) if desc else []
+        tables = _lookup_tables(desc, product, pno, title) if desc else []
         for c in _enrich_chunks([body] + tables, filename, crumb):
             c = strip_table_fences(strip_section_marks(c))
             if c.strip():

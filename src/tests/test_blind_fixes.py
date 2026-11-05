@@ -79,6 +79,11 @@ def test_the_answer_shows_the_picture_the_model_read_it_from():
     assert main._answer_picture("x\nPICTURE: p99_1", [page, fig]) is None
     assert main._answer_picture("x\nPICTURE: p18_1", [page, fig]) is None
     assert main._strip_preamble("see the PICTURE: label") == "see the PICTURE: label"
+    # Lab 2026-11-05: written after the sentence, naming no picture it saw.
+    assert main._strip_preamble("It is the bezel release arm. PICTURE: NV9USB+") == \
+        "It is the bezel release arm."
+    assert main._answer_picture("x. PICTURE: NV9USB+", [page, fig]) is None
+    assert main._answer_picture("285 mm. PICTURE: p18_2", [page, fig]) == ("M.pdf", "p18_2.png")
 
 
 if __name__ == "__main__":

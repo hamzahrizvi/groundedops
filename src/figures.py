@@ -49,6 +49,7 @@ MERGE_GAP_PT = 6          # image tiles closer than this are one figure
 MAX_PER_PAGE = 8
 RENDER_DPI = 120
 CAPTION_BAND_PT = 30      # text this close under a figure is its caption
+TITLE_BAND_PT = 60        # text this close above a figure is its title
 BLANK_STDDEV = 4.0        # pixel spread below this is a flat colour
 
 _NAME_RE = re.compile(r"^p(\d+)_(\d+)\.png$")
@@ -202,6 +203,40 @@ def _caption(page, box) -> str:
     return lines[0] if len(lines[0]) <= 120 else ""
 
 
+def _label_page(page, entries: list[dict]) -> None:
+    """Give each figure on a page its title: the last text line directly
+    above it, no higher than the picture above it. CEO 2026-11-05: the
+    NV9 Spectral manual's page 24 drawing is titled "NV11S dimensions" and
+    page 18 of the SMART Coin System manual stacks "Twin SMART Coin
+    System" over "SMART Hopper"; the section heading names neither, so the
+    bot read the NV11S and the twin unit as the product asked about.
+
+    A caption that is the title of a picture lower on the page is that
+    picture's, not this one's ("SMART Hopper" sat 30pt under the twin
+    unit); one that names itself a figure ("Figure 3: ...") stays.
+    Sets entries' "title" in place, "" when there is none."""
+    W = float(page.width)
+    entries = sorted(entries, key=lambda m: m["bbox"][1])
+    ceil = 0.0
+    for m in entries:
+        top = m["bbox"][1]
+        lo = max(ceil, top - TITLE_BAND_PT)
+        lines = []
+        if top - lo >= 2:
+            try:
+                text = page.crop((0, lo, W, top)).extract_text() or ""
+                lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            except Exception:
+                pass
+        m["title"] = lines[-1] if lines and len(lines[-1]) <= 120 else ""
+        ceil = max(ceil, m["bbox"][3])
+    for i, m in enumerate(entries):
+        cap = m.get("caption") or ""
+        if cap and not _CAPTION_LEAD.match(cap) and any(
+                cap == o["title"] for o in entries[i + 1:]):
+            m["caption"] = ""
+
+
 def _is_blank(pil_image) -> bool:
     try:
         from PIL import ImageStat
@@ -297,6 +332,7 @@ def extract_figures(pdf_path: str, source: str, progress=None) -> dict[int, list
                     logger.debug("figures: crop on page %d of %r failed: %s",
                                  pno, source, exc)
                     continue
+            _label_page(page, [sidecar[n] for n in by_page.get(pno, [])])
 
     if sidecar:
         try:
@@ -364,7 +400,7 @@ def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
     import numpy as np
     import pdfplumber
 
-    meta = dict(figures_for(source))
+    meta = {n: dict(m) for n, m in figures_for(source).items()}
     wanted = [n for n in (names or sorted(meta, key=_name_key)) if n in meta]
     out: dict[str, tuple[str, float]] = {}
     if not wanted:
@@ -376,6 +412,10 @@ def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
     asked = {}
     doc = os.path.splitext(source)[0]
     with pdfplumber.open(pdf_path) as pdf:
+        # Crops cut before titles were read get theirs now.
+        for pno in sorted({int(meta[n]["page"]) for n in wanted if "title" not in meta[n]}):
+            _label_page(pdf.pages[pno - 1],
+                        [m for m in meta.values() if int(m.get("page") or 0) == pno])
         total = len(wanted)
         for done, name in enumerate(wanted, start=1):
             m = meta[name]
@@ -387,6 +427,7 @@ def figure_text(pdf_path: str, source: str, names: list[str] | None = None,
                 pil = page.crop(box).to_image(resolution=dpi).original
                 if pool and not m.get("desc"):
                     where = f"Manual: {doc}. Page {m.get('page')}." + (
+                        f" Title above it: {m['title']}." if m.get("title") else "") + (
                         f" Caption: {m['caption']}." if m.get("caption") else "")
                     asked[name] = pool.submit(llm.describe_image, _vision_png(pil),
                                               VISION_PROMPT + "\n\n" + where)

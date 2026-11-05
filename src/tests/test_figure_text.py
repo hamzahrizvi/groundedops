@@ -183,15 +183,18 @@ def test_a_described_drawing_gets_lookup_tables_naming_the_product():
             "Other visible features (not labelled with text):\n- A logo")
     t = ingest._lookup_tables(desc, "BV30", 7)
     assert len(t) == 2 and "Values in mm." in t[0]
-    assert "| BV30 | Overall height (Front view) | 132 |" in t[0]
-    assert "| BV30 | Bezel release arm | red lever on the side |" in t[1]
-    assert "| BV30 | Coin Feeder | arrow to the chute |" in t[1]
-    assert "| BV30 | 72mm |" in t[1] and "logo" not in "".join(t)
+    assert "| BV30 | page 7 | Overall height (Front view) | 132 |" in t[0]
+    assert "| BV30 | page 7 | Bezel release arm | red lever on the side |" in t[1]
+    assert "| BV30 | page 7 | Coin Feeder | arrow to the chute |" in t[1]
+    assert "| BV30 | page 7 | 72mm |" in t[1] and "logo" not in "".join(t)
     assert ingest._lookup_tables("A photo of a cat on a validator.", "BV30", 7) == []
     with tempfile.TemporaryDirectory() as tmp, \
          patch.object(docstore, "store_dir", return_value=tmp), \
          patch.object(ingest, "_product_label", return_value="BV30"):
-        _sidecar(tmp, "M.pdf", {"p7_1.png": {"page": 7, "caption": "", "desc": desc}})
+        _sidecar(tmp, "M.pdf", {"p7_1.png": {"page": 7, "caption": "", "desc": desc,
+                                              "title": "NV11S dimensions"}})
         out = ingest._figure_chunks("M.pdf", {})
     assert [n for _, n, *_ in out] == ["p7_1.png"] * 3
-    assert "| BV30 | Overall height (Front view) | 132 |" in out[1][2]
+    assert '| BV30 | "NV11S dimensions", page 7 | Overall height (Front view) | 132 |' in out[1][2]
+    # CEO 2026-11-05: the printed title names the drawing in its passage too.
+    assert 'Figure on page 7, titled "NV11S dimensions"' in out[0][2]
