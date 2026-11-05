@@ -1397,7 +1397,7 @@
     renderScopeBar();
     unlockComposer();
     say(cfg.welcome);
-    showNotice();
+    if (cfg.token) showNotice();   // a guest's comes with the quota (announceGuestLimits)
     // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
     // quota fetch that can resolve AFTER these two synchronous calls would
     // already have put askIntent()'s menu on screen. The visible effect was
@@ -1424,6 +1424,9 @@
    *  either way so startFresh() can sequence what follows against it. */
   function announceGuestLimits() {
     var show = function (d) {
+      // The AI notice is hidden from signed-out visitors, unless guest AI is
+      // on: someone getting AI answers is always told so.
+      if (!cfg.token && d && d.ai_available) showNotice();
       if (!d || d.tier !== "anonymous" || d.ai_available) return;
       say(d.account_notice ||
           "Full AI support is for account holders. I can still answer from " +
@@ -2050,7 +2053,7 @@
         (last ? ', and your last question was "' + last + '"' : "") +
         ". Would you like to carry on or start again?"
     );
-    showNotice();
+    if (cfg.token || (quotaState && quotaState.ai_available)) showNotice();
     lockComposer("Choose continue or start over…");
     chips(
       [

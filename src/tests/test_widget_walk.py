@@ -72,6 +72,7 @@ posted = []
 stream_body = [STREAM_OK]
 host_token = [""]
 widget_cfg = [{}]
+quota = [{}]
 
 
 def _stub(route):
@@ -91,6 +92,8 @@ def _stub(route):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(widget_cfg[0]))
     if url.endswith("/widget/ask/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body=stream_body[0])
+    if "/widget/quota" in url:
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(quota[0]))
     if url.endswith("/widget/lead"):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(
             {"received": True, "id": "abcd1234-0000", "reference": "GO-ABCD1234"}))
@@ -122,6 +125,7 @@ def setup_function(func):
     posted.clear()
     stream_body[0] = STREAM_OK
     widget_cfg[0] = {}
+    quota[0] = {}
     host_token[0] = 'data-token="member-token"' if "signed_in" in func.__name__ else ""
     _page = _browser.new_page()
     _page.route("**/*", _stub)
@@ -377,13 +381,19 @@ NOTICE = ("AI assistant: answers come from our manuals and can be wrong. Questio
           "for 90 days and may be processed by OpenAI (USA) and DeepSeek (China).")
 
 
-def test_the_ai_notice_sits_under_the_welcome_line_for_a_guest():
+def test_a_guest_without_ai_sees_no_ai_notice():
     widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
     _reopen()
-    _page.wait_for_selector(".go-notice")
-    assert _page.inner_text(".go-notice") == NOTICE
-    assert _page.locator(".go-notice a").count() == 0
-    assert _page.locator(".go-log > .go-notice").count() == 1
+    _page.wait_for_selector(".go-chip")   # the opening menu: everything before it is on screen
+    assert _page.locator(".go-notice").count() == 0
+
+
+def test_a_guest_given_ai_answers_still_sees_the_ai_notice():
+    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
+    quota[0] = {"tier": "anonymous", "ai_available": True}
+    _reopen()
+    _page.wait_for_selector(".go-chip")
+    assert _page.locator(".go-log > .go-notice").count() == 1 and _page.inner_text(".go-notice") == NOTICE
 
 
 def test_the_ai_notice_and_privacy_link_show_signed_in():
