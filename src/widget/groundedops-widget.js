@@ -1441,6 +1441,13 @@
     save();
     var items = [
       {
+        label: "Speak to sales",
+        onClick: function () {
+          heard("Speak to sales");
+          openContactForm("sales");
+        },
+      },
+      {
         label: "Request technical support",
         onClick: function () {
           heard("Request technical support");
@@ -1464,14 +1471,6 @@
           askCategory("I can look up parts and accessories referenced in the documentation. Which product is it for?");
         },
       },
-      {
-        label: "Speak to sales",
-        style: "alt",
-        onClick: function () {
-          heard("Speak to sales");
-          openContactForm("sales");
-        },
-      },
     ];
 
     // The console's configured opening options replace the built-in list
@@ -1481,7 +1480,6 @@
       items = serverCfg.intro_options.map(function (o) {
         return {
           label: o.label,
-          style: o.action === "sales" || o.action === "support" ? "alt" : null,
           onClick: function () {
             heard(o.label);
             runIntroAction(o.action, o.label);
