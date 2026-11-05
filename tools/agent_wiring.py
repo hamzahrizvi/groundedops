@@ -16,6 +16,7 @@ the subagent inherited the orchestrator's effort instead.
 
 Since 2026-10-13 a light model picks each job's model and effort (tools/model_pick.py), so a run is
 OK anywhere from the agent's lowest floor (any job) up to its file's model and effort.
+When the spawn's meta.json records the model and effort requested, what ran must equal it: a fallback model reads MISMATCH.
 """
 import argparse
 import glob
@@ -78,7 +79,13 @@ def check(session, office):
         model, effort = wanted(office, kind if kind != "general-purpose" else (task or ""))
         models, efforts = ran(meta_path[:-len(".meta.json")] + ".jsonl")
         ok = kind != "general-purpose" and model is not None and in_range(kind, model, effort, models, efforts)
-        rows.append((task or "?", kind, f"{model}/{effort}", f"{','.join(models)}/{','.join(efforts)}", ok))
+        asked_m, asked_e = meta.get("model"), meta.get("effort")
+        want = f"{model}/{effort}"
+        if asked_m and asked_e:
+            ok = ok and all(asked_m in x for x in models) and efforts == [asked_e]
+            if f"{asked_m}/{asked_e}" != want:
+                want += f" (asked {asked_m}/{asked_e})"
+        rows.append((task or "?", kind, want, f"{','.join(models)}/{','.join(efforts)}", ok))
     return rows
 
 
@@ -102,13 +109,19 @@ def selftest():
         os.makedirs(sub)
         line = lambda model, effort: json.dumps({"type": "assistant", "effort": effort, "message": {"model": model}},
                                                 separators=(",", ":")) + "\n"     # transcripts are compact
-        for name, kind, model, effort in (("a", "product-owner", "fable-5-1", "high"), ("b", "general-purpose", "fable-5-1", "high"),
+        for name, kind, model, effort, *asked in (("a", "product-owner", "fable-5-1", "high"), ("b", "general-purpose", "fable-5-1", "high"),
                                           ("c", "product-owner", "haiku-5-5", "low"), ("d", "Explore", "fable-5-1", "low"),
-                                          ("e", "product-owner", "sonnet-5-5", "medium"), ("f", "product-owner", "fable-5-1", "xhigh")):
-            json.dump({"agentType": kind, "spawnDepth": 1}, open(os.path.join(sub, name + ".meta.json"), "w"))
+                                          ("e", "product-owner", "sonnet-5-5", "medium"), ("f", "product-owner", "fable-5-1", "xhigh"),
+                                          ("g", "product-owner", "sonnet-5-5", "medium", ("sonnet", "medium")),
+                                          ("h", "product-owner", "sonnet-5-5", "medium", ("fable", "high")),
+                                          ("i", "product-owner", "fable-5-1", "high", ("fable", "high"))):
+            meta = {"agentType": kind, "spawnDepth": 1}
+            if asked:
+                meta["model"], meta["effort"] = asked[0]
+            json.dump(meta, open(os.path.join(sub, name + ".meta.json"), "w"))
             open(os.path.join(sub, name + ".jsonl"), "w").write(line("claude-" + model, effort))
         # haiku/low is the diary's floor; above the file's high is not
-        assert [r[4] for r in check(run, tmp)] == [True, False, True, True, False], check(run, tmp)
+        assert [r[4] for r in check(run, tmp)] == [True, False, True, True, False, True, False, True], check(run, tmp)
     print("selftest ok")
 
 
