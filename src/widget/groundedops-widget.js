@@ -134,6 +134,16 @@
     if (d.welcome && !hasAttr("data-welcome")) cfg.welcome = d.welcome;
     if (d.ai_notice) cfg.aiNotice = d.ai_notice;
     cfg.privacyUrl = /^https?:\/\//i.test(d.privacy_url || "") ? secureUrl(d.privacy_url) : "";
+    if (cfg.privacyUrl) {   // the consent line, always in sight under the composer
+      var foot = root.querySelector(".go-foot");
+      foot.textContent = "By chatting, you consent to our ";
+      var pa = document.createElement("a");
+      pa.href = cfg.privacyUrl;
+      pa.target = "_blank";
+      pa.rel = "noopener noreferrer";
+      pa.textContent = "Privacy Policy";
+      foot.appendChild(pa);
+    }
     if (d.color && !hasAttr("data-accent")) {
       cfg.accent = d.color;
       // The stylesheet bakes the accent in as `.go-w{--a:...}`; an inline
@@ -494,6 +504,7 @@
     ".go-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}" +
     ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
+    ".go-foot a{color:var(--a)}" +
     "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}" +
     // 8.13 phone layout: below this the 400x600 floating card left barely any
     // room either side, so the panel goes edge-to-edge like a native sheet
@@ -1153,20 +1164,12 @@
 
   // D-20261015-10: who answers, how long questions are kept, who processes
   // them. Not a message: kept out of state.messages so it is never sent back
-  // as conversation history, and not a .go-b bubble.
+  // as conversation history, and not a .go-b bubble. The privacy link is the
+  // footer's consent line (applyServerConfig).
   function showNotice() {
     var p = document.createElement("p");
     p.className = "go-notice";
     p.textContent = cfg.aiNotice;
-    if (cfg.privacyUrl) {
-      var a = document.createElement("a");
-      a.href = cfg.privacyUrl;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = "Privacy notice";
-      p.appendChild(document.createTextNode(" "));
-      p.appendChild(a);
-    }
     $log.appendChild(p);
   }
 

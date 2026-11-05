@@ -390,6 +390,7 @@ def test_the_ai_notice_and_privacy_link_show_signed_in():
     widget_cfg[0] = {"ai_notice": NOTICE, "privacy_url": "https://example.test/privacy",
                      "welcome": "Hello from the operator"}
     _reopen()
-    _page.wait_for_selector(".go-notice a")
-    assert _page.get_attribute(".go-notice a", "href") == "https://example.test/privacy"
-    assert NOTICE in _page.inner_text(".go-notice")
+    _page.wait_for_selector(".go-foot a")
+    assert _page.get_attribute(".go-foot a", "href") == "https://example.test/privacy"
+    assert _page.inner_text(".go-foot") == "By chatting, you consent to our Privacy Policy"
+    assert NOTICE in _page.inner_text(".go-notice") and _page.locator(".go-notice a").count() == 0
