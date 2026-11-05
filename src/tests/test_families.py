@@ -68,6 +68,8 @@ def test_a_pick_and_a_general_question_are_answered():
 def test_a_comparison_is_not_asked_about():
     assert not F.resolve("nv9 usb vs the nv9s", named=["nv9usb", "nv9_spectral"])["ask"]
     assert not F.resolve("nv9 or the spectral one?", named=["nv9usb", "nv9_spectral"])["ask"]
+    assert not F.resolve("compare the SH3 and the SMART Coin System",
+                         named=["smart_hopper_3", "sku_scs"])["ask"]
 
 
 def test_not_sure_gets_the_differences():
@@ -77,7 +79,7 @@ def test_not_sure_gets_the_differences():
     assert not F.confused("how do I clean the hopper")
     fam = F.family_for("not sure which smart hopper I have", None, None)
     text = F.guide_reply(fam, [0, 1])
-    assert "SD card slot" in text and "end of life" in text and F.MARKER[1:] in text
+    assert "SD card slot" in text and F.MARKER[1:] in text
     assert F.picked_reply("I have the SMART Hopper 3", [{"q": "x", "a": text}]).startswith(
         "Thanks, that's the SMART Hopper 3.")
     assert F.picked_reply("I have the SMART Hopper 3", None) is None

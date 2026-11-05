@@ -878,6 +878,21 @@ def _remove(source: str) -> None:
     catalog.refile_source(source, [])
 
 
+class _Skipped(Exception):
+    """A page left pending on purpose (import_blocked)."""
+
+
+def import_blocked(product_keys: str | None) -> bool:
+    """True when every product a page is filed under is ticked obsolete
+    with its Confluence import turned off (catalog.set_obsolete)."""
+    keys = [k.strip() for k in (product_keys or "").split(",") if k.strip()]
+    by_key = {p["key"]: p for c in catalog.load_catalog()["categories"]
+              for p in c.get("products", [])}
+    return bool(keys) and all(
+        ((by_key.get(k) or {}).get("obsolete") or {}).get("confluence_import") is False
+        for k in keys)
+
+
 def _bundle_text(api: _Api, it: dict) -> str:
     """A combined folder as one text: its title, then each page under its
     own section heading (the path below the folder), which the chunker keeps
@@ -957,6 +972,12 @@ def _apply(api: _Api, describe_pictures: bool = False) -> dict:
                     cat = category_of(prod) if prod else None
                     res["errors"].append(f"{src}: product {', '.join(gone_keys)} no longer exists; "
                                          "indexed without it")
+                # An obsolete product whose import is turned off in the
+                # console: the page waits, so ticking import on brings it in.
+                if prod and import_blocked(prod):
+                    res.setdefault("skipped", []).append(
+                        f"{src}: filed under an obsolete product, import is off")
+                    raise _Skipped()
                 # Marked before it goes in, so not even a moment passes where
                 # an internal document can answer a customer.
                 _mark_internal([src], it.get("decision") == "internal")
@@ -974,6 +995,8 @@ def _apply(api: _Api, describe_pictures: bool = False) -> dict:
                       "added" if what == "new" else "updated")
                 change = {"synced_version": version, "synced_at": _now(), "version": version}
             change["error"] = None
+        except _Skipped:
+            change = {"error": None}
         except Cancelled:
             # Stopped while building a combined document: nothing of it
             # was written, so it simply stays pending.

@@ -1968,9 +1968,12 @@
     }
 
     say("Which product specifically?");
+    // An obsolete product stays pickable, so its owner is told so and
+    // where to get help, but says what it is.
+    var month = new Date().toISOString().slice(0, 7);
     var items = prods.map(function (p) {
       return {
-        label: p.name,
+        label: p.name + (p.obsolete && p.obsolete.date <= month ? " (obsolete)" : ""),
         style: "alt",
         onClick: function () {
           heard(p.name);

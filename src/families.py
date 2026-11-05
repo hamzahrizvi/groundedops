@@ -59,10 +59,7 @@ _SEED = {"families": [
          {"name": "SMART Hopper 3", "aliases": ["SH3", "Smart Hopper 3", "hopper 3"],
           "product": "smart_hopper_3",
           "features": "No SD card slot on the front. The configuration button "
-                      "cycles between SSP, CC2 and CC1.",
-          "note": "The SMART Hopper 3 reached end of life in December 2022 "
-                  "and is no longer supported; its replacement is the SMART "
-                  "Hopper 4."}]},
+                      "cycles between SSP, CC2 and CC1."}]},
     {"key": "scs", "name": "SMART Coin System",
      "aliases": ["SCS", "coin system"],
      "members": [
@@ -206,7 +203,7 @@ def resolve(text: str, history: list | None = None, product: str | None = None,
     ask: the family to ask about, with `offer` (member indexes), when the
     message names it only generically, the chat's product is not exactly
     one of its members, no earlier turn chose, and the message is not a
-    comparison of two members (`named`: catalogue products it names).
+    comparison (`named`: catalogue products it names, two or more).
     products: the catalogue products the members it settles on stand for.
     """
     after = asked_last_turn(history)
@@ -219,8 +216,10 @@ def resolve(text: str, history: list | None = None, product: str | None = None,
         if not got and not after:
             got = _chosen_before(fam, history)
             member_products = [m.get("product") for m in ms]
+            # Two products named is a comparison ("SH3 vs the SMART Coin
+            # System"), answered for what it names.
             settled = (product and member_products.count(product) == 1) or \
-                len({k for k in named if k in member_products}) >= 2
+                len(set(named)) >= 2
             if not got and ask is None and not settled:
                 ask = {"family": fam, "offer": _offered(fam, product)}
         prods += [ms[i]["product"] for i in got if ms[i].get("product")]
@@ -289,7 +288,7 @@ def options(fam: dict, offer: list[int], question: str | None,
         m = ms[i]
         send = f"{question} ({m['name']})" if question else f"I have the {m['name']}"
         out.append({"label": m["name"], "features": m.get("features") or "",
-                    "note": m.get("note") or "", "picture": picture_url(m),
+                    "note": _note(m), "picture": picture_url(m),
                     "product": m.get("product") or "", "send": send})
     if question and general and len(offer) > 1:
         names = ", ".join(ms[i]["name"] for i in offer)
@@ -300,6 +299,24 @@ def options(fam: dict, offer: list[int], question: str | None,
                 "picture": None, "product": "",
                 "send": f"I'm not sure which {fam['name']} I have"})
     return out
+
+
+def _note(member: dict) -> str:
+    """The card's note: what the console typed, else "Obsolete since June
+    2021" when the member's product is ticked obsolete (catalog)."""
+    if member.get("note"):
+        return member["note"]
+    try:
+        import catalog
+        o = catalog.obsolete_of(member.get("product"))
+    except Exception:
+        return ""
+    if not o:
+        return ""
+    text = f"Obsolete since {catalog.month_name(o['date'])}"
+    if o.get("replacement"):
+        text += f"; replaced by the {o['replacement']}"
+    return text + "."
 
 
 def question_reply(fam: dict) -> str:
@@ -313,7 +330,7 @@ def guide_reply(fam: dict, offer: list[int]) -> str:
     lines = []
     for i in offer:
         m = ms[i]
-        bits = " ".join(x for x in (m.get("features"), m.get("note")) if x)
+        bits = " ".join(x for x in (m.get("features"), _note(m)) if x)
         lines.append(f"- **{m['name']}**: {bits or 'see the picture'}")
     return (f"Here is how to tell which {fam['name']} you have:\n"
             + "\n".join(lines)
@@ -328,7 +345,7 @@ def picked_reply(text: str, history: list | None) -> str | None:
     for fam in families():
         for mem in fam.get("members") or []:
             if _flat(mem["name"]) == _flat(m.group(1)):
-                note = f" {mem['note']}" if mem.get("note") else ""
+                note = f" {_note(mem)}" if _note(mem) else ""
                 return (f"Thanks, that's the {mem['name']}.{note} What would "
                         "you like to know about it?")
     return None

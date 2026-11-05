@@ -264,3 +264,29 @@ def admin_family_pictures(product: str, x_admin_password: str | None = Header(de
     _require_admin(x_admin_password)
     import families
     return {"pictures": families.pictures_for(product)}
+
+
+# ── Obsolete products (catalog.set_obsolete) ────────────────────────────
+
+class ObsoleteReq(BaseModel):
+    product_key: str
+    obsolete: dict | None = None
+
+
+@router.put("/admin/product/obsolete")
+def admin_set_obsolete(payload: ObsoleteReq, x_admin_password: str | None = Header(default=None)):
+    """Tick a product obsolete with its settings, or untick it (null)."""
+    _require_admin(x_admin_password)
+    try:
+        return catalog_mod.set_obsolete(payload.product_key, payload.obsolete)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/admin/obsolete/suggestions")
+def admin_obsolete_suggestions(x_admin_password: str | None = Header(default=None)):
+    """What the support hub's obsolete-product list says about the
+    catalogue's products, for the console to offer as ticks."""
+    _require_admin(x_admin_password)
+    import obsolete_list
+    return {"suggestions": obsolete_list.suggestions(catalog_mod.catalog())}

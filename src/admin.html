@@ -4829,7 +4829,8 @@ function cfHistoryCard(c) {
           el("div", { class: "grow" },
             el("b", {}, (r.kind === "check" ? "Check" : "Sync") + " · " + new Date(r.at).toLocaleString()),
             el("span", {}, line(r)),
-            (r.errors || []).map(e => el("div", { style: muted }, e)))))
+            (r.errors || []).map(e => el("div", { style: muted }, e)),
+            (r.skipped || []).length ? el("div", { style: muted }, (r.skipped.length) + " page(s) of obsolete products left out — their import is off on the Products page") : null)))
       : el("div", { style: muted + ";margin-top:6px" }, "Nothing has run yet."));
 }
 
@@ -7455,6 +7456,7 @@ function championPicker(p) {
 }
 
 function viewCatalog() {
+  loadObsSuggest();
   const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   const cName = el("input", { class: "input", type: "text", placeholder: "Coin hoppers" });
   const pCat = el("select", { class: "input" }, cache.catalog.map(c => el("option", { value: c.key }, c.name)));
@@ -7471,7 +7473,7 @@ function viewCatalog() {
                 toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
         } }, "Delete")),
       (c.products || []).length
-        ? (c.products || []).map(p => el("div", { class: "item" },
+        ? (c.products || []).map(p => [el("div", { class: "item" },
             el("div", { class: "grow" }, el("b", {}, p.name),
               el("span", {}, (n => n + (n === 1 ? " document" : " documents"))(
                    p.doc_count || (p.sources || []).length || 0)
@@ -7481,7 +7483,8 @@ function viewCatalog() {
             championPicker(p),
             el("span", { class: "tag tag-neutral mono" }, p.key),
             el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
-                           onclick: () => deleteProductFlow(c, p) }, "Delete")))
+                           onclick: () => deleteProductFlow(c, p) }, "Delete")),
+            p.key.endsWith("_general") ? null : obsoleteRow(p)])
         : el("p", { class: "sec-hint", style: "margin:10px 0 10px" }, "No products in this range yet.")))
     : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
         el("b", {}, "No ranges yet"),
@@ -7528,6 +7531,77 @@ function viewCatalog() {
     el("div", { "data-tour": "cat-list", "data-sec": "Your catalogue" }, rows),
     familiesPanel(),
   ];
+}
+
+/** Obsolete products (catalog.set_obsolete). A tick on the product row;
+ *  its settings open under it. By default, from its date the chat stops
+ *  answering from its documents and says it is obsolete, since when, and to
+ *  contact support. The support hub's obsolete list is offered as ticks. */
+let obsSuggest = null;
+function loadObsSuggest() {
+  if (obsSuggest !== null) return;
+  obsSuggest = {};
+  api("/admin/obsolete/suggestions").then(d => {
+    (d.suggestions || []).forEach(s => { obsSuggest[s.product_key] = s; });
+    if (Object.keys(obsSuggest).length) render();
+  }).catch(() => {});
+}
+const monthName = ym => {
+  if (!ym) return "";
+  const [y, m] = ym.split("-");
+  return new Date(+y, +m - 1, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
+};
+function obsoleteRow(p) {
+  const o = p.obsolete || null;
+  const sug = (obsSuggest || {})[p.key];
+  const panel = el("div", { style: "display:none;margin:0 0 10px 0;padding:12px 14px;border:1px solid var(--color-line);border-radius:8px" });
+  const open = preset => {
+    const v = Object.assign({ date: "", service_end: "", versions: "", replacement: "",
+                              block_answers: true, confluence_import: true }, preset || o || {});
+    const inp = (type, key, ph) => el("input", { class: "input", type, value: v[key] || "", placeholder: ph || "",
+                                                 oninput: e => { v[key] = e.target.value; } });
+    const tick = (key, label, hint) => el("label", { style: "display:flex;gap:8px;align-items:flex-start;margin-top:8px" },
+      el("input", { type: "checkbox", checked: v[key] ? "checked" : null, onchange: e => { v[key] = e.target.checked; } }),
+      el("span", {}, el("b", {}, label), el("div", { class: "row-hint" }, hint)));
+    panel.replaceChildren(
+      el("div", { class: "row", style: "gap:8px;align-items:flex-end;flex-wrap:wrap" },
+        el("div", {}, el("label", { class: "flabel" }, "Obsolete since"), inp("month", "date")),
+        el("div", {}, el("label", { class: "flabel" }, "Service and repairs until (optional)"), inp("month", "service_end")),
+        el("div", { style: "flex:2" }, el("label", { class: "flabel" }, "Which units, if not all"), inp("text", "versions", "e.g. Blue label, made before 2016")),
+        el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Replaced by (optional)"), inp("text", "replacement", "e.g. SMART Hopper 4"))),
+      el("details", { style: "margin-top:10px" }, el("summary", { style: "cursor:pointer;font-weight:600" }, "Advanced"),
+        tick("block_answers", "Stop the chatbot answering about it (internal only)",
+             "From the date above, its documents are left out of every answer and a question about it is told it is obsolete, since when, and to contact support. Documents it shares with a current product still answer for that product."),
+        tick("confluence_import", "Import its Confluence pages",
+             "Off: the Confluence sync leaves pages filed under it waiting, until this is ticked again.")),
+      el("div", { class: "row", style: "gap:8px;margin-top:10px" },
+        el("button", { class: "btn btn-primary", style: BTN, onclick: async () => {
+          try { await api("/admin/product/obsolete", { method: "PUT", body: JSON.stringify({ product_key: p.key, obsolete: v }) });
+                toast(p.name + " marked obsolete"); await refresh(); render(); }
+          catch (e) { toast(e.message, true); }
+        } }, "Save"),
+        el("button", { class: "btn btn-ghost", style: BTN, onclick: () => { render(); } }, "Cancel")));
+    panel.style.display = "block";
+  };
+  const box = el("input", { type: "checkbox", checked: o ? "checked" : null, onchange: async e => {
+    if (e.target.checked) { open(sug && sug.obsolete); return; }
+    if (!o) { panel.style.display = "none"; return; }
+    if (!confirm(p.name + " is current again: the chat answers about it from its documents.")) { e.target.checked = true; return; }
+    try { await api("/admin/product/obsolete", { method: "PUT", body: JSON.stringify({ product_key: p.key, obsolete: null }) });
+          toast(p.name + " is current again"); await refresh(); render(); }
+    catch (err) { toast(err.message, true); }
+  } });
+  const status = o
+    ? el("span", { class: "row-hint", style: "cursor:pointer;text-decoration:underline", onclick: () => open() },
+        "since " + monthName(o.date) + (o.block_answers ? " · chat does not answer" : " · chat still answers")
+        + (o.confluence_import ? "" : " · no Confluence import"))
+    : sug ? el("span", { class: "row-hint" }, "Support hub lists it obsolete since " + monthName(sug.obsolete.date)
+        + (sug.obsolete.versions ? " (" + sug.obsolete.versions + ")" : "") + " ",
+        el("button", { class: "btn btn-ghost", style: "font-size:11.5px;padding:2px 6px", onclick: () => { box.checked = true; open(sug.obsolete); } }, "Use this"))
+    : null;
+  return [el("div", { style: "display:flex;gap:8px;align-items:center;margin:-4px 0 8px 0;font-size:12.5px" },
+            el("label", { style: "display:flex;gap:6px;align-items:center" }, box, "Obsolete"), status),
+          panel];
 }
 
 /** Product families (families.py): look-alike products customers mix up.

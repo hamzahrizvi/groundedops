@@ -211,7 +211,10 @@ def widget_catalog():
     cats = []
     for c in (cat.get("categories") or []):
         prods = [{"key": p["key"], "name": p["name"],
-                  "doc_count": prod_counts.get(p["key"], 0)}
+                  "doc_count": prod_counts.get(p["key"], 0),
+                  # Its date only, for the picker's "(obsolete)" label.
+                  **({"obsolete": {"date": p["obsolete"].get("date", "")}}
+                     if p.get("obsolete") else {})}
                  for p in (c.get("products") or [])]
         # A range's shared-documents entry is a bucket, not something a
         # visitor owns (catalog.is_shared_product); its documents already
@@ -244,6 +247,11 @@ def widget_faq(product: str | None = None, limit: int = 4,
     """
     try:
         import faq_store
+        import catalog
+        # An obsolete product's answers are blocked: suggesting its FAQ
+        # would answer what the chat itself declines to.
+        if product and product in catalog.blocked_products():
+            return {"faq": []}
         # No question text to run the no-LLM detector on here (this is a
         # GET with no visitor input), so only the widget's own explicit
         # hint is honoured, and only once the feature is actually on --

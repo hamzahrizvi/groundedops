@@ -135,7 +135,10 @@ def catalog() -> dict:
                        # how often they hear about them. Projected because
                        # the console renders it on the product row.
                        "champion": p.get("champion", ""),
-                       "digest": p.get("digest", "off")}
+                       "digest": p.get("digest", "off"),
+                       # Projected so the picker can label it and the
+                       # console can show its settings (set_obsolete).
+                       **({"obsolete": p["obsolete"]} if p.get("obsolete") else {})}
                       for p in c.get("products", [])]}
         for c in data["categories"]
     ]}
@@ -277,6 +280,81 @@ def set_champion(product_key: str, email: str, digest: str = "weekly") -> dict:
                     _save(data)
                     return catalog()
         raise ValueError(f"unknown product '{product_key}'")
+
+
+# ── Obsolete products (CEO 2026-11-05) ─────────────────────────────────
+# A product ticked obsolete in the console carries:
+#   date          "YYYY-MM", when it was (or will be) made obsolete
+#   service_end   "YYYY-MM" or "", when service and repairs stop, if later
+#   versions      which units, when not all ("Blue label, made before 2016")
+#   replacement   what replaces it, said in the reply
+#   block_answers on by default: from `date`, its documents answer nobody
+#                 and a question about it gets the obsolete reply instead
+#   confluence_import  off: the Confluence sync skips pages filed under it
+#                 (confluence_sync.import_blocked)
+
+def set_obsolete(product_key: str, info: dict | None) -> dict:
+    """Tick (info) or untick (None) a product as obsolete."""
+    import re as _re
+    with _lock:
+        data = _load()
+        p = _product_by_key(data, product_key)
+        if not p:
+            raise ValueError(f"unknown product '{product_key}'")
+        if not info:
+            p.pop("obsolete", None)
+        else:
+            out = {}
+            for k in ("date", "service_end"):
+                v = str(info.get(k) or "").strip()
+                if v and not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", v):
+                    raise ValueError(f"{k} must be a month, YYYY-MM")
+                out[k] = v
+            if not out["date"]:
+                raise ValueError("say when it was made obsolete")
+            out["versions"] = str(info.get("versions") or "").strip()[:200]
+            out["replacement"] = str(info.get("replacement") or "").strip()[:120]
+            out["block_answers"] = bool(info.get("block_answers", True))
+            out["confluence_import"] = bool(info.get("confluence_import", True))
+            p["obsolete"] = out
+        _save(data)
+        return catalog()
+
+
+def _this_month() -> str:
+    import datetime
+    return datetime.date.today().strftime("%Y-%m")
+
+
+def obsolete_of(product_key: str | None) -> dict | None:
+    """The product's obsolete settings with its name, once its date has
+    come; None for a current product or one obsolete only from a later date."""
+    if not product_key:
+        return None
+    p = _product_by_key(_load(), product_key)
+    o = (p or {}).get("obsolete")
+    if not o or (o.get("date") or "9999") > _this_month():
+        return None
+    return dict(o, key=product_key, name=p["name"])
+
+
+def blocked_products() -> set[str]:
+    """Products whose documents may answer nobody: obsolete, date come,
+    answers blocked."""
+    now = _this_month()
+    return {p["key"] for c in _load()["categories"] for p in c.get("products", [])
+            if (p.get("obsolete") or {}).get("block_answers")
+            and (p["obsolete"].get("date") or "9999") <= now}
+
+
+def month_name(ym: str) -> str:
+    """"2021-06" -> "June 2021"."""
+    import calendar
+    try:
+        y, m = ym.split("-")
+        return f"{calendar.month_name[int(m)]} {y}"
+    except Exception:
+        return ym or ""
 
 
 def champions() -> list[dict]:

@@ -2045,6 +2045,87 @@ def _family_reply(q: str, payload, history, family: dict, session_id,
     }
 
 
+def _drop_hidden(results: list[dict]) -> list[dict]:
+    """The passages a customer may be answered from: no internal or
+    excluded document (is_excluded), and none filed only under obsolete
+    products whose answers are blocked (catalog.blocked_products). A
+    document shared with a current product stays."""
+    try:
+        import catalog as _cat
+        blocked = _cat.blocked_products()
+    except Exception as exc:
+        logger.warning(f"obsolete products unreadable: {exc}")
+        blocked = set()
+    out = []
+    for r in results:
+        if is_excluded(r.get("source")):
+            continue
+        keys = [k.strip() for k in (r.get("product") or "").split(",") if k.strip()]
+        if blocked and keys and all(k in blocked for k in keys):
+            continue
+        out.append(r)
+    return out
+
+
+def obsolete_text(infos: list[dict]) -> str:
+    """"The BV20 was made obsolete in June 2021..." for each product, then
+    the way to support. Dates as the console records them."""
+    import catalog as _cat
+    parts = []
+    for o in infos:
+        who = o["name"] + (f" ({o['versions']})" if o.get("versions") else "")
+        line = f"The {who} was made obsolete in {_cat.month_name(o['date'])}"
+        if (o.get("service_end") or "") > _cat._this_month():
+            line += (f"; service and repairs continue until "
+                     f"{_cat.month_name(o['service_end'])}")
+        line += "."
+        if o.get("replacement"):
+            line += f" Its replacement is the {o['replacement']}."
+        parts.append(line)
+    return (" ".join(parts) + " I can't answer questions about "
+            + ("it" if len(infos) == 1 else "them") + " here: please contact "
+            "our support team for the information you need.")
+
+
+def _obsolete_reply(q: str, products: list[str], request_id: str,
+                    started: float, session_id) -> dict | None:
+    """The reply when every product this turn is about is obsolete with
+    its answers blocked; None otherwise (a comparison with a current
+    product is answered, from the current product's documents)."""
+    try:
+        import catalog as _cat
+        blocked = _cat.blocked_products()
+        if not products or not all(k in blocked for k in products):
+            return None
+        infos = [_cat.obsolete_of(k) for k in products]
+        if not all(infos):
+            return None
+    except Exception as exc:
+        logger.warning(f"obsolete check skipped: {exc}")
+        return None
+    answer = obsolete_text(infos)
+    total_time = time.time() - started
+    ptrace.mark("obsolete", ", ".join(products))
+    log_interaction(q, answer, "rejected", "none", [], grounding_score=None,
+                    flagged=False, request_id=request_id,
+                    timing={"total_time": total_time})
+    add_to_memory(session_id, q, answer)
+    return {
+        "answer": answer,
+        "response_time_ms": round(total_time * 1000),
+        "model": "none",
+        "role": "rejected",
+        "reason": "obsolete_product",
+        "offer_support": True,
+        "needs_clarification": False,
+        "clarification_options": [],
+        "product_options": [],
+        "sources": [],
+        "request_id": request_id,
+        "response_time": round(total_time, 3),
+    }
+
+
 def _unknown_product_text(q: str) -> str | None:
     """"I have no documentation for a product called NV300..." when the question names a
     model shaped like ours that no product is and no manual prints."""
@@ -3288,6 +3369,14 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _effective_product = None
         logger.info(f"Question names {_both_named}; widening scope to "
                     f"{_scope or 'the whole corpus'}")
+    # OBSOLETE (catalog.set_obsolete): a question about products whose
+    # answers are blocked gets the dates and the way to support instead.
+    _obs_reply = _obsolete_reply(
+        q, _both_named if len(_both_named) >= 2 else
+        [_effective_product] if _effective_product else [],
+        request_id, start_total, session_id)
+    if _obs_reply:
+        return _obs_reply
     if _effective_product and _effective_product != payload.product:
         logger.info(f"Using question-named product {_effective_product!r} "
                     f"instead of selected product {payload.product!r}")
@@ -3665,7 +3754,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # Set EXCLUDED_SOURCES="" to disable, e.g. for internal deployments
     # or when running eval_cases_api.json.
     if not payload.source_filter:
-        results = [r for r in results if not is_excluded(r.get("source"))]
+        results = _drop_hidden(results)
     # Rerank the FULL set and truncate here, rather than letting rerank do
     # it. `results` ends up identical -- same model, same ordering, same
     # slice -- but the chunks ranked below CONTEXT_K keep their
@@ -5383,7 +5472,7 @@ def _expand_previous(prev_q: str, prev_a: str, scope: dict | None) -> dict | Non
         return None
 
     results = retrieve_from_db(prev_q, top_k=RETRIEVE_K, scope=scope)
-    results = [r for r in results if not is_excluded(r.get("source"))]
+    results = _drop_hidden(results)
     ranked = [_strip_breadcrumb(r) for r in
               rerank(prev_q, results, top_k=len(results))] if results else []
     used = ranked[:CONTEXT_K]
@@ -5603,7 +5692,7 @@ def query_stream(payload: StreamQueryRequest,
                 scope = {"category": payload.category}
 
             results = retrieve_from_db(payload.q, top_k=RETRIEVE_K, scope=scope)
-            results = [r for r in results if not is_excluded(r.get("source"))]
+            results = _drop_hidden(results)
             results = rerank(payload.q, results, top_k=CONTEXT_K)
 
             if not passes_retrieval_gate(results, RETRIEVAL_GATE_THRESHOLD):
