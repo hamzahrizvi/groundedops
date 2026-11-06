@@ -62,7 +62,10 @@ def _mid_band(q, product, names):
             ("NV200S Range User Manual-v1.pdf", 0.53), ("Calibration Media Type.txt", 0.40)]
     chunks = [dict(CHUNK, id=f"c{i}", source=s, product=product, rerank_score=sc)
               for i, (s, sc) in enumerate(srcs)]
-    with patch.object(main, "_product_names", return_value=names),          patch.object(main, "_product_aliases", return_value={}),          patch.object(clarify, "classify_unscoped", return_value="product"),          patch.object(main, "retrieval_confidence_band", return_value="ambiguous"):
+    with patch.object(main, "_product_names", return_value=names), \
+         patch.object(main, "_product_aliases", return_value={}), \
+         patch.object(clarify, "classify_unscoped", return_value="product"), \
+         patch.object(main, "retrieval_confidence_band", return_value="ambiguous"):
         return _ask(q=q, rerank=chunks, retrieve_from_db=chunks)
 
 
@@ -93,7 +96,10 @@ def test_a_two_product_answer_that_finds_one_half_keeps_it():
     names = {"nv200s": "NV200 Spectral", "nv9_spectral": "NV9 Spectral"}
     text = ("The NV9 Spectral has a minimum operating temperature of +5 C (37.4 F) "
             "and a maximum of +50 C. I could not find that in the knowledge base.")
-    with patch.object(main, "_product_names", return_value=names),          patch.object(main, "_product_aliases", return_value={}),          patch.object(main, "is_refusal", is_refusal),          patch.object(sys.modules["text_utils"], "is_refusal", is_refusal, create=True):
+    with patch.object(main, "_product_names", return_value=names), \
+         patch.object(main, "_product_aliases", return_value={}), \
+         patch.object(main, "is_refusal", is_refusal), \
+         patch.object(sys.modules["text_utils"], "is_refusal", is_refusal, create=True):
         out = _ask(q="which can go lower in temp, the nv200 spectral or the nv9 spectral?",
                    rerank=chunks, retrieve_from_db=chunks,
                    generate_with_fallback={"text": text, "model": "mistral",
