@@ -23,7 +23,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from run_tests import ISOLATED_RUNNER, needs_own_process  # noqa: E402
+from run_tests import ISOLATED_RUNNER, needs_own_process, own_process_env  # noqa: E402
 
 
 class SkipTest(pytest.skip.Exception):
@@ -76,8 +76,7 @@ class IsolatedFile(pytest.File):
 
 class IsolatedItem(pytest.Item):
     def runtest(self):
-        env = dict(os.environ)
-        env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+        env = own_process_env()
         proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
                                str(self.path)],
                               cwd=str(SRC_DIR), env=env,

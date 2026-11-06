@@ -84,6 +84,150 @@ item, re-measured. While this review ran, the office plan writer
 committed PENDING.md (`97c86c9`, 16:41, its own table only); the edits
 from this review are uncommitted on top of it.
 
+**Friday review 2026-10-23 (automated, not yet reviewed by hand).** About
+75 commits since 10-16, mostly the Confluence page (approval, folder tree,
+combine-a-manual, internal documents), console selection bars, the
+onnxruntime embedder (`7ecdaaf`) and office work orders (D-20261021-*).
+Ticked off: nothing. The office orders carry their own status in the office
+plan, and I did not re-verify them one by one. Obsolete: nothing.
+Corrected: the "real use" item below is still open, and the number is now
+**0**, not 0-2 (see its 10-23 note). Added: the `test_keyvault` failures
+(first item under **In progress**). Checked in this review: `run_tests.py`
+**367/373 passed, 1 skipped, 6 failed** (10-16: 339/339), all six in
+`test_keyvault`, see the new item. Retrieval baseline `--selfcheck` OK (35
+cases, armed). The LiteLLM gateway is **still NXDOMAIN**. `log_report
+--since 7d` (also with `--all`): 0 questions, 0 answered, 0 refused, 0
+handoffs, 0 votes, no latency (10-16: 269 / 164 / 98 / 0 / 0, p50 5.77s /
+p90 14.41s). `src/logs.jsonl` was last written 10-20 16:51. Nothing was
+committed; this file is modified in the tree.
+
+**Friday review 2026-10-30 (automated, not yet reviewed by hand).** About
+163 commits since 10-23, nearly all office work orders (D-20261024-* to
+D-20261030-*: Confluence shelves and internal marks, content-hash copies,
+two-product retrieval, several-asks checking, widget contrast, Docker
+removal, admin allowlist CIDR, the "Search more thoroughly" button), which
+carry their own status in the office plan. Ticked off: the `test_keyvault`
+failures (pass in the full run today) and the NV9 Spectral biometrics tag
+(0 stale flags in the live index, checked read-only). Obsolete: nothing
+deleted. Corrected: the staging item (Docker is gone; staging is now
+`serve.ps1` + Cloudflare tunnel). Added: no new item; the real-use item
+gained a 10-30 note, since a probe with **no** session id now logs as a
+person. Checked in this review: `run_tests.py` **380/381 passed, 1
+skipped, 0 failed** (10-23: 367/373, 6 failed). Retrieval baseline
+`--selfcheck` OK (35 cases, armed). The LiteLLM gateway is **still
+NXDOMAIN**. `log_report --since 7d`: 22 questions, 15 answered, 5 refused,
+2 asked back, 0 handoffs, 0 of 1 conversations resolved, 0 votes, p50
+0.62s / p90 5.61s (10-23: all zeros). All 22 are a sales-deflect probe
+logged as `console` with session `default`, not customers. Nothing was
+committed; this file is modified in the tree.
+
+**Sweep 2026-11-04 (Claude session, not yet reviewed by hand).** Every
+open item outside the office plan was checked against `experimental/v17.3`
+by one agent, then re-checked by a second agent whose job was to find
+holes in the first one's evidence. Only claims both agreed on were closed;
+where the second agent disagreed, the item stays open, with a short note
+where it is partly done. Done items inside the 7 -> 10 plan are ticked
+where they stand, as that section asks; done items elsewhere moved to
+**Resolved** under today's date. Ticked off: session rows S1-S8; the
+leftovers in rows S20, S21 and S29; M8's stray-"Yes." finding; the tails
+of 8.2, 8.6, 8.15 (baselines re-armed), 9.6 (the 39 rejects deleted) and
+9.7 (ceiling ruled, old index deleted); CF1 (the Confluence sync is live);
+code-scan finding 5. M5, M8 and 8.15 are ticked because what was left of
+them is obsolete (below). Moved to Resolved: the six items deferred from
+the stress test, password reset by email, the per-conversation caps note,
+`documents/` and the legacy source files, the leftover "talk to sales"
+noise, the running footers, the conversational eval layer, the
+0.0009-grounding answer, the `test_llm` watch note, and three of today's
+builds (the real-use report, `release.py`, `escalated_to_deepseek`).
+Obsolete (deleted, or struck in place inside a larger row):
+- 9.14's "picture-only questions" line under the 7/10 rating: the code is
+  in (`912239b`, recorded in S13); the rest went to the office
+  (D-20261022-14 and D-20261022-15 merged; the picture test is paused by
+  D-20261031-02 until vision captions, D-20261022-16, exist).
+- S23 / HC1, the health-check script, never written: the office's
+  page_reach check (D-20261030-10, D-20261102-03) and lab runs cover it;
+  per-document checks are office item D-20261017-12.
+- M5's "commission blind set 3, then repeat against v16.3": blind sets
+  3-6 and NV4000 were written and run against the whole-manual baseline,
+  and v16.3 no longer gates anything.
+- M8's second-vendor checker trial: since S24 the checker runs on OpenAI
+  gpt-5-mini, and the office has measured it directly (D-20261024-11,
+  D-20261024-15, D-20261030-11).
+- M8 finding 1, the 500-character log limit: 10.2 (`63496d2`) stores the
+  full answer in the gap entry.
+- 8.7's unfiled stray-bullets extract answer: D-20261023-04 (`c136573`)
+  copies a list only from a passage headed by the topic.
+- 8.9's "send one real enquiry and check Emailed to": since S24
+  (`b0a3b31`) a sent enquiry leaves the console; the real send is S25's
+  (IT's email API).
+- 8.15's unscoped fault-report case: its condition never held, because
+  clarify offers products for all three blind2 fault reports (M6,
+  re-checked on today's index).
+- 9.3's backup through the company gateway and the DeepSeek drill: S24
+  moved the OpenAI slot off the gateway and D-20261008-09 chose Anthropic
+  as the backup; the drill is S28's. S28 itself still offers "keep
+  DeepSeek or none", which D-20261008-09 has overtaken.
+- S29's whole-manual prototype ("You: accept that cost"): the owner
+  turned it down (D-20261018-04); D-20261010-17 reads the manual once when
+  the passages miss.
+- S29's "/query/stream does not use performance mode": that route is a
+  LAN-only hand test; customers stream through /widget/ask/stream, which
+  does. The ~40s tail is office item D-20261018-05.
+- S30 (c), a confident No for absent features (B6-41): the owner's scope
+  rule keeps it, and the same complaint was rejected twice since
+  (D-20261017-02, D-20261022-01).
+- S30 (d), the sales reply for "fed a £20": only price questions deflect
+  now, and a refusal no longer gives the sales reply (D-20261010-01).
+- Desktop shell for the console: the Windows installer (`049d44a`) runs
+  the whole backend, and staging took the Cloudflare tunnel (`73dbcc7`)
+  that the item had turned down.
+- A BV30 coverage miss (polymer notes): the BV30 manual never mentions
+  polymer, so "not documented" is the right answer.
+
+Built today on `claude/pending-sweep-20261104`, each noted where its item
+stands:
+- `d424f45`: "anything" is no longer read as the denied feature (S30
+  (e)), and "connect to a phone over Bluetooth" keeps its verb (8.3).
+- `40866c4`: follow-up condensation falls over to the backup provider
+  (9.3's open question).
+- `d205158`: /query turns without a console session log as "script", so
+  test runs stop counting as real use.
+- `543cf9f`: Tab stays inside the open widget panel (8.13).
+- `ce37709`: the console Test chat shows more_context like the widget
+  (8.12).
+- `15f148b` and `cfb762f`: `release.py` mirrors repo paths instead of
+  refusing on two READMEs; /query reports "escalated".
+- Fixes from an independent review of the six: `405cdbb` drops only the
+  pronoun, so "anything over Bluetooth" still gets "not mentioned";
+  `7298b39` makes the route tests send console session ids (the origin
+  change had hidden their gaps); `c409cd1` keeps focus in the panel when
+  Send disables itself; `1ec79f7` gives the console the widget's gate on
+  clarify and refusal turns.
+
+Corrected (partly done; a note added in place): CF0 (decisions running,
+but no service account and no token-renewal note), catalogue drift (keys
+clean, FAQ filing still drifts), the Accounts browser check (sign-in and
+bootstrap verified, the Accounts actions not), and image handling (OCR
+and picture labels in; understanding diagrams is office item
+D-20261022-16). Found on the way, not filed: the nightly backup of
+2026-11-03 was terminated (result 0xC000013A), so that day's archive is
+missing. Still open: mostly items that wait on a person (keys, IT, the
+host, decisions), an outside service, a live backend run, or the office.
+The three small doable items the sweep left were built the same day on
+`claude/small-jobs-20261104`: product buttons in the widget, the `ready`
+line in `serve.ps1 -Status` (with STAGING.md step 4), and the console's
+Online/Local switch. Each is noted where its item stands.
+Also built there: **erasure on request** (UK GDPR), the gap left by the
+90-day rule. `retention.erase()` deletes one person's enquiries by email,
+a conversation's log rows and votes by its session id, and a signed-in
+visitor's saved chats by user id, at once. Staff use "Delete a person's
+data" on the console's Enquiries page (`POST /admin/privacy/erase`). A
+visitor uses "Delete this chat now" under the widget's settings, which
+also shows the chat id to quote (`POST /widget/forget`, capped per day).
+Not linked to a person, so not covered: question text on the unanswered
+list (the 90-day rule clears it). Still the owner's: a privacy link shows
+only when the website owner sets one.
+
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
 independent planners (59 proposals) and an adversarial verdict on each of 37
@@ -194,56 +338,68 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261010-15 | Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" | approved, queued | Dev builds it |
-| D-20261010-32 | Security item D-20261010-32, details in the office | approved, queued | Dev builds it |
-| D-20261018-03 | When the checker faults one sentence, cut that sentence and keep the rest; a half answer is not a refusal | approved, queued | Dev builds it |
-| D-20261019-17 | Questions that need two products or two manuals get declined or answered from the wrong figure | approved, queued | Dev builds it |
-| D-20261022-03 | Security item D-20261022-03, details in the office | ready to merge | merges once Security clears it |
-| D-20261022-07 | Check the shared prompt text is byte-stable so hosted answers can hit the provider cache | check passed | Security's review |
-| D-20261022-09 | Security item D-20261022-09, details in the office | approved, queued | Dev builds it |
-| D-20261022-15 | Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it | waiting for CEO | your yes |
+| D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
+| D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | waiting for CEO | your yes |
+| D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
+| D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
+| D-20261105-05 | Security item D-20261105-05, details in the office | waiting for CEO | your yes |
+| D-20261105-08 | Flash codes: a count is read from the wrong product's table, so the customer is told the wrong fault | waiting for CEO | your yes |
+| D-20261105-11 | The search finds the answer page and throws it away before the reranker sees it | approved, queued | Dev builds it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
 | customer/20261015-multi-document | Questions needing two sections of a manual get a decline or a missed condition | proposed | the product owner triages it |
 | customer/20261021b-answerable-question-refused-as-not-in-manual | Answerable questions refused as "not in the documentation" when the manual's wording differs slightly from the question | proposed | the product owner triages it |
+| customer/20261030f-phantom-and-absent-affirmed | Products or features that are not documented get confirmed from similar material | proposed | the product owner triages it |
+| customer/20261030f-similar-item-swapped | The bot answers about a similar-named item instead of the one asked | proposed | the product owner triages it |
+| customer/20261102-comparison-declines-though-documented | Comparisons between two products: the bot declines or asks "which section?" although both manuals hold the facts | proposed | the product owner triages it |
+| customer/20261102-multi-document-asks-or-drops-part | Questions that need two documents: the bot asks "which section?" or leaves out part of the answer | proposed | the product owner triages it |
+| customer/20261102-vague-declines-instead-of-clarifying | Vague questions: the bot declines or guesses instead of asking what the customer means | proposed | the product owner triages it |
+| customer/D-20261023-02-reask-diagnosis | D-20261023-02: why the same 40 questions scored 18 points lower today | proposed | the product owner triages it |
+| customer/images-20261030f | Picture test 20261030f | proposed | the product owner triages it |
 | marketing/20261014-kapa-benchmark | Measured against Kapa: 82% vs 95% on 224 blind questions; no wrong answers from Kapa, 21 from us | proposed | the product owner triages it |
+| rnd/D-20261031-02-edits | D-20261031-02-edits | proposed | the product owner triages it |
 | security/20261019 | Security item security/20261019, details in the office | proposed | the product owner triages it |
-| security/20261020 | Security item security/20261020, details in the office | proposed | the product owner triages it |
-| D-20261008-04 | Limits printed in a table on the next page are not given | deferred | parked |
-| D-20261008-06 | Vague complaints get a checklist instead of one question | deferred | parked |
 | D-20261008-10 | Security item D-20261008-10, details in the office | deferred | parked |
-| D-20261008-12 | Security item D-20261008-12, details in the office | deferred | parked |
 | D-20261008-18 | One product's default address page never reaches the bot's reading list | deferred | parked |
 | D-20261009-07 | Security item D-20261009-07, details in the office | deferred | parked |
 | D-20261010-21 | Security item D-20261010-21, details in the office | deferred | parked |
-| D-20261012-02 | Security item D-20261012-02, details in the office | deferred | parked |
 | D-20261014-04 | Ask Kapa and Fin the same 88 hidden questions once their access works | deferred | parked |
-| D-20261015-01 | One "is this the LAN" rule instead of two copies | deferred | parked |
-| D-20261017-03 | A table lookup loses the numbers in the row | deferred | parked |
+| D-20261015-01 | Security item D-20261015-01, details in the office | deferred | parked |
 | D-20261017-10 | The source line cites every page the bot read, and "Download" fetches the whole manual instead of opening it at the page | deferred | parked |
 | D-20261017-12 | After a manual is uploaded, show the buyer a sample check on it: answered, refused, poor pages | deferred | parked |
+| D-20261018-03 | When the checker faults one sentence, cut that sentence and keep the rest; a half answer is not a refusal | deferred | parked |
 | D-20261018-05 | A few answers take 50-120 seconds because the checker thinks for that long | deferred | parked |
 | D-20261019-14 | Security item D-20261019-14, details in the office | deferred | parked |
-| D-20261019-18 | Table questions return the wrong column or say the value is "not stated" when the table has it | deferred | parked |
 | D-20261019-22 | Follow-up questions lose the thread: the bot declines, or answers the first turn again | deferred | parked |
 | D-20261020-03 | On a product with two devices, the answer gives the other device's steps or only one side | deferred | parked |
 | D-20261021-02 | Run the two answer checks at the same time, and switch the faster checker engine on (part B) | deferred | parked |
 | D-20261021-04 | Security item D-20261021-04, details in the office | deferred | parked |
-| D-20261021-07 | The first screen blocks typing until the visitor picks a button | deferred | parked |
 | D-20261021-09 | The website screenshots show a dummy phone number, a doubled greeting and an old refusal layout | deferred | parked |
-| D-20261021-14 | Thin messages and short follow-ups get a canned refusal plus a list of unrelated questions | deferred | parked |
-| D-20261021-15 | A two-part ask or a multi-step procedure comes back with one part missing or called "not found" | deferred | parked |
-| D-20261021-22 | A troubleshoot answer gives the wrong cause once in six tries on unchanged code (Spoof 3: "not stable" instead of "poor lighting") | deferred | parked |
 | D-20261021-24 | A customer's own email is refused when the installer offers to create the Owner account | deferred | parked |
 | D-20261022-02 | The website may say the bot answers in French, German and Spanish | deferred | parked |
 | D-20261022-05 | Delete the short answer prompt that was tried and turned down | deferred | parked |
 | D-20261022-08 | Send the fixed answer rules first on every call so a hosted answer costs about 40% less | deferred | parked |
 | D-20261022-16 | Describe each picture with a vision model at upload so questions can match what a drawing shows | deferred | parked |
+| D-20261024-12 | Measure the fully offline tier on a modern open model, and name the hardware it needs | deferred | parked |
+| D-20261024-13 | Build a test set of real customer questions from ITL's own support history | deferred | parked |
+| D-20261025-09 | Security item D-20261025-09, details in the office | deferred | parked |
+| D-20261025-14 | One screen of what the bot did this week: answered, from FAQ, refused, top unanswered | deferred | parked |
+| D-20261025-15 | A one-page cost comparison for finance: per-outcome billing against capped credits | deferred | parked |
+| D-20261030-15 | The widget footer says "Answers are generated from our product documentation"; say that answers are checked against the page cited | deferred | parked |
+| D-20261030-16 | Warn before a widget goes live with a default title or a placeholder contact | deferred | parked |
+| D-20261030-17 | A dated, honest results card for technical reviewers instead of certifications we do not have | deferred | parked |
+| D-20261102-04 | A question about two products, or with two asks across two manuals, gets "which section do you mean?" or a decline although both manuals hold the facts | deferred | parked |
+| D-20261102-05 | A vague one-line problem report in a product chat gets a decline or a guessed troubleshoot instead of one narrowing question | deferred | parked |
+| D-20261104-09 | Let every found passage into the prompt (the context floor at 0) | deferred | parked |
+| D-20261105-06 | Delete dead per-link address scrubbers in the Confluence sync | deferred | parked |
+| D-20261105-10 | Vague question marked 3, 0 and 1 for one identical decline | deferred | parked |
+| D-20261105-12 | The writer names exactly what it could not find, and nothing searches for it | deferred | parked |
+| D-20261105-13 | A third of checked answers wait a median 11.5 s for the checker to think at the provider's highest effort | deferred | parked |
 
-**Finished or turned down in the last 30 days:** D-20261008-01 Questions that name two products get a figure for each (rejected); D-20261008-02 A message with two or three asks gets every part answered (rejected); D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-05 How-to answers stop before the fix, the test or the warning (merged); D-20261008-08 Security item D-20261008-08, details in the office (merged); D-20261008-09 Security item D-20261008-09, details in the office (done); D-20261008-11 Security item D-20261008-11, details in the office (merged); D-20261008-13 Security item D-20261008-13, details in the office (merged); D-20261008-14 Security item D-20261008-14, details in the office (done); D-20261008-15 Security item D-20261008-15, details in the office (merged); D-20261008-16 Security item D-20261008-16, details in the office (merged); D-20261008-17 Security item D-20261008-17, details in the office (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-02 Fresh hidden test questions for the multi-ask type (done); D-20261009-03 Security item D-20261009-03, details in the office (done); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261009-05 A table from the next product's section is read as the asked product's (rejected); D-20261009-06 Security item D-20261009-06, details in the office (merged); D-20261009-08 Two products in one question are declined even when both figures are in the manuals (rejected); D-20261009-09 A message with several asks is declined whole or answers one part wrongly from silence (merged); D-20261009-10 Vague "it stopped working" messages get a checklist or a decline instead of one question (merged); D-20261009-11 Measure the whole-manual mode on the same 40 questions before the cost decision (done); D-20261010-01 Buying words turn an honest "not found" into a sales brush-off (merged); D-20261010-02 Security item D-20261010-02, details in the office (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-05 The pre-ship check skips its own flicker re-run when the one wrong case also tips the score (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done); D-20261010-07 Office-only fixes skip the bot gate; the gate runs only when product code changed (merged); D-20261010-08 A saved settings file can fail with "access denied" when something else has it open on Windows (merged); D-20261010-09 The pre-ship check compares answers from the old AI with answers from the new one (merged); D-20261010-10 On the new AI the bot gets two questions wrong that it answered right or declined safely before (done); D-20261010-11 The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" (merged); D-20261010-13 A refused question shows two bot messages and never says what was checked (merged); D-20261010-14 The page the answer came from is hidden behind a click (merged); D-20261010-16 The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about (rejected); D-20261010-17 When the passages miss, read the whole manual once before saying "not in the manual" (merged); D-20261010-18 Half answers that say "not stated" for a documented fact: search once more for the named gap (rejected); D-20261010-19 Security item D-20261010-19, details in the office (merged); D-20261010-20 Security item D-20261010-20, details in the office (merged); D-20261010-22 Security item D-20261010-22, details in the office (merged); D-20261010-23 The pre-ship check grades the "after" answers without the manual pages the "before" grader had (merged); D-20261010-24 Security item D-20261010-24, details in the office (merged); D-20261010-25 Security item D-20261010-25, details in the office (merged); D-20261010-26 Security item D-20261010-26, details in the office (merged); D-20261010-27 A two-product question gets an instant table of the wrong spec rows and "these are the same" (rejected); D-20261010-28 The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented (merged); D-20261010-29 Security item D-20261010-29, details in the office (merged); D-20261010-30 Two MyConnect Environment documents give opposite pins for the under-age beacon relay (done); D-20261010-31 An adjustable spending cap for the test lab, and a running cost report, on the office page (merged); D-20261010-33 Security item D-20261010-33, details in the office (merged); D-20261010-34 Yes/no questions get an answer from the page next to the right one (rejected); D-20261012-01 A monthly score out of 10 against the leading support chatbots (done); D-20261012-03 Security item D-20261012-03, details in the office (merged); D-20261012-04 Off-topic buying advice (a card reader for a cafe) gets an answer instead of a refusal (done); D-20261012-05 Several-asks and two-product messages are answered from the whole manual, not the ranked passages (rejected); D-20261012-06 A two-product question loses one product's best passage under the other's relevance floor (done); D-20261012-07 Security item D-20261012-07, details in the office (merged); D-20261012-08 Security item D-20261012-08, details in the office (rejected); D-20261013-01 The score trend counts Dev's working copies as test runs (done); D-20261014-01 Sign up the trial accounts for the competitor score (done); D-20261014-02 Ask the competitors the same 120 hidden questions and score the bot against them (merged); D-20261014-03 The competitor test's hidden questions sit in a folder Dev can read (merged); D-20261014-05 Security item D-20261014-05, details in the office (merged); D-20261014-06 A question about a model we do not make, or about nothing we make, gets a "here is what we make" product blurb (merged); D-20261014-07 The marker scores a true partial answer to a made-up model as 0, and calls a figure from the other manual invented (rejected); D-20261015-02 A well-found answer is thrown away by the grounding check (merged); D-20261015-03 Security item D-20261015-03, details in the office (merged); D-20261015-04 Why two-product and two-ask questions are declined with the right pages found: a probe, no code change (done); D-20261015-05 Count, across the last six runs, how many declines happened with the right pages in hand (done); D-20261015-06 Passages ranked past the prompt budget are dropped, so the model refuses a question the manual answers (rejected); D-20261015-07 Security item D-20261015-07, details in the office (merged); D-20261015-08 A yes/no question gets pasted manual lines and no yes or no (rejected); D-20261015-09 Security item D-20261015-09, details in the office (done); D-20261015-10 Security item D-20261015-10, details in the office (merged); D-20261015-11 Security item D-20261015-11, details in the office (merged); D-20261015-12 The "allowance used up" message tells the visitor to contact support (merged); D-20261015-13 Check that two hidden multi-document questions' expected answers match the manual (done); D-20261016-01 Comparison questions between sibling products are declined though both manuals answer (rejected); D-20261016-02 A two-part integration question is refused whole, or one part gets a false "not given" (rejected); D-20261016-03 A how-to asked by its symptom or tool is refused, though the steps are in the manual (rejected); D-20261016-04 Two reference answers in the open test set contradict the manuals, so a right conclusion loses marks (done); D-20261016-05 Security item D-20261016-05, details in the office (merged); D-20261016-06 Comparisons between two products are declined or come back the wrong way round (rejected); D-20261016-07 A message with two or three parts is declined or answered from one source, and "there is no way" is said where the manual gives one (rejected); D-20261016-08 A two-product comparison gives both figures right and picks the wrong winner (merged); D-20261016-09 Security item D-20261016-09, details in the office (merged); D-20261016-10 The test check scores a hidden question against what it scored before the fix, not against a fixed bar alone (merged); D-20261016-11 Comparison questions get "I don't have that" although both products' manuals hold the answer (rejected); D-20261016-12 Questions with two or more asks get a decline or only half answered (rejected); D-20261016-13 Security item D-20261016-13, details in the office (merged); D-20261016-14 A decline is scored as a correct refusal when the manual had the answer (merged); D-20261016-15 A single-number answer takes the figure from a look-alike table or test next to the right one (merged); D-20261016-16 Comparisons between two products are declined although both manuals answer (rejected); D-20261016-17 Questions needing two facts from different parts of a manual get "not in the documentation" (rejected); D-20261017-01 Security item D-20261017-01, details in the office (merged); D-20261017-02 A feature or product that is not in the manuals gets a firm "no" or "here is what fits" (rejected); D-20261017-04 A question that needs two documents is declined whole (rejected); D-20261017-05 A comparison answers with a trivial shared row or declines (rejected); D-20261017-06 Security item D-20261017-06, details in the office (merged); D-20261017-07 A number is taken from the neighbouring look-alike table in the same manual (rejected); D-20261017-08 The bot says "I don't have that" when the passages in hand state the limit, code or default that answers (merged); D-20261017-09 Questions with two or three asks get one ask answered, or the wrong thing answered (rejected); D-20261017-11 Measure how well the bot answers in other languages before the website claims any (merged); D-20261018-01 Find out whether the whole-manual read on refusals is what made answers dearer and slower (merged); D-20261018-02 Score each test question on three answers, not one, before a type score decides anything (merged); D-20261018-04 In a product chat, read the product's whole manual first, not only after a refusal (rejected); D-20261019-01 Research: answer from Confluence and the company website when the manuals are silent (done); D-20261019-02 A comparison gives one product's figure, calls the other's "not found", and sometimes works out a stand-in (rejected); D-20261019-03 A fault code or spec limit that is in the manual's table is refused as "not in the documentation" (rejected); D-20261019-04 A multi-part "how do I" question gets the headline fact and loses the steps and data for the other parts (rejected); D-20261019-05 The marker scored a correct "no, it does not pay out change" answer 0 for quoting the manual's own escrow wording (merged); D-20261019-06 Finish the three-answer reading: a gate drop bar the test can actually see, and the readers still on one answer (merged); D-20261019-07 Security item D-20261019-07, details in the office (done); D-20261019-08 Security item D-20261019-08, details in the office (merged); D-20261019-09 The bot quotes the right figures, then states the wrong winner or says two disagreeing manuals agree (rejected); D-20261019-10 Keep the manuals fresh: sync the manual pages from Confluence into the bot every week (rejected); D-20261019-11 Search the company website live (through DeepSeek) when the manuals are silent (rejected); D-20261019-12 A document marked "Private & Confidential" answers customers today (merged); D-20261019-13 The office page's whole-manual baseline still reads the first answer while every other reader reads the mean (merged); D-20261019-15 Add the CashGenic manual as a new, never-tested product (done); D-20261019-16 Point the next blind run at the CashGenic product (done); D-20261019-19 Comparison questions get an answer about the wrong spec, or only half of the two products (rejected); D-20261019-20 A partial rebuild command silently rebuilds the whole live index (merged); D-20261019-21 Security item D-20261019-21, details in the office (done); D-20261020-01 A CashGenic chat can read the coin unit's manual the kit manual points to (done); D-20261020-02 A technical yes/no with a price word in it gets the sales brush-off (merged); D-20261020-04 The marker gives a half answer full marks once and scores one clarifying answer three ways (merged); D-20261020-05 Security item D-20261020-05, details in the office (merged); D-20261020-06 Security item D-20261020-06, details in the office (merged); D-20261020-07 Security item D-20261020-07, details in the office (merged); D-20261020-08 A yes/no question with figures opens "No" when the figures say yes (rejected); D-20261020-09 A two-product question borrows one product's table for the other, or drops the second product's fact (rejected); D-20261020-10 Figure answers: the model fills a checked sheet of quoted figures, and code works out the Yes/No, the winner and the "within rating" (merged); D-20261020-11 Run the two answer checks at the same time, and the CPU checker on a faster engine: every answer about 1.4 s quicker, no answer changes (merged); D-20261020-12 Measure the 49-rule answer prompt against a short one before any more rules are added (merged); D-20261020-13 Security item D-20261020-13, details in the office (rejected); D-20261020-14 Questions that need two or more parts of the manual get a half answer, a wrong route, or a decline (rejected); D-20261021-01 Figure answers, part B: wire the checked sheet into the answer path (rejected); D-20261021-03 Security item D-20261021-03, details in the office (merged); D-20261021-05 The bot refuses when the page holds the figures but the answer needs one small step (rejected); D-20261021-06 Security item D-20261021-06, details in the office (merged); D-20261021-08 One forwardable page for the IT reviewer: where documents live, what runs where, what is logged (done); D-20261021-10 Security item D-20261021-10, details in the office (merged); D-20261021-11 Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts (merged); D-20261021-12 Cost and time per answer rose on the first run after the several-asks fix went live (done); D-20261021-13 A known-holes check on the packages that runs every week and lands in the office inbox (merged); D-20261021-16 Lab credit ran out: top up DeepSeek so checks and test runs can run again (done); D-20261021-17 README still says the admin pages have no accounts, only a shared password (rejected); D-20261021-18 Security item D-20261021-18, details in the office (merged); D-20261021-19 Security item D-20261021-19, details in the office (merged); D-20261021-20 Security item D-20261021-20, details in the office (merged); D-20261021-21 The gate's "ask again only what was missed" path does not work from the office's own shell, so every gate asks everything three times (merged); D-20261021-23 Security item D-20261021-23, details in the office (merged); D-20261022-01 A feature missing from a stated list is answered "No", and a wrong marked reading can pass the checker (rejected); D-20261022-04 Delete the figure-sheet module that nothing uses (merged); D-20261022-06 Run the weekly 40 twice on a quiet machine to see why the lab's cache misses (rejected); D-20261022-10 Measure wrong-product answers when the first message is typed with no product picked (merged); D-20261022-11 Test the bot on the new Smart Hopper 3 manual, which no fix was tuned on (merged); D-20261022-12 Security item D-20261022-12, details in the office (merged); D-20261022-13 Security item D-20261022-13, details in the office (merged); D-20261022-14 Test the bot on questions whose answer sits in a picture or diagram, scored on its own (merged).
+**Finished or turned down in the last 30 days:** D-20261008-01 Questions that name two products get a figure for each (rejected); D-20261008-02 A message with two or three asks gets every part answered (rejected); D-20261008-03 The weekly test's grader marks six answers wrongly (merged); D-20261008-04 Limits printed in a table on the next page are not given (merged); D-20261008-05 How-to answers stop before the fix, the test or the warning (merged); D-20261008-06 Vague complaints get a checklist instead of one question (rejected); D-20261008-08 Security item D-20261008-08, details in the office (merged); D-20261008-09 Security item D-20261008-09, details in the office (done); D-20261008-11 Security item D-20261008-11, details in the office (merged); D-20261008-12 Security item D-20261008-12, details in the office (merged); D-20261008-13 Security item D-20261008-13, details in the office (merged); D-20261008-14 Security item D-20261008-14, details in the office (rejected); D-20261008-15 Security item D-20261008-15, details in the office (merged); D-20261008-16 Security item D-20261008-16, details in the office (merged); D-20261008-17 Security item D-20261008-17, details in the office (merged); D-20261009-01 The hidden test questions leak into a log the builder can read (merged); D-20261009-02 Fresh hidden test questions for the multi-ask type (done); D-20261009-03 Security item D-20261009-03, details in the office (done); D-20261009-04 The pre-ship check fails on a question that flickers on its own; re-run it before failing (merged); D-20261009-05 A table from the next product's section is read as the asked product's (rejected); D-20261009-06 Security item D-20261009-06, details in the office (merged); D-20261009-08 Two products in one question are declined even when both figures are in the manuals (rejected); D-20261009-09 A message with several asks is declined whole or answers one part wrongly from silence (merged); D-20261009-10 Vague "it stopped working" messages get a checklist or a decline instead of one question (merged); D-20261009-11 Measure the whole-manual mode on the same 40 questions before the cost decision (done); D-20261010-01 Buying words turn an honest "not found" into a sales brush-off (merged); D-20261010-02 Security item D-20261010-02, details in the office (merged); D-20261010-03 A button on the office page that refreshes product status and the bot score on demand (merged); D-20261010-04 Dev's own test runs overlap the lab's blind run and double the measured answer time (merged); D-20261010-05 The pre-ship check skips its own flicker re-run when the one wrong case also tips the score (merged); D-20261010-06 The AI account has run out of credit; the bot cannot answer and nothing can be tested (done); D-20261010-07 Office-only fixes skip the bot gate; the gate runs only when product code changed (merged); D-20261010-08 A saved settings file can fail with "access denied" when something else has it open on Windows (merged); D-20261010-09 The pre-ship check compares answers from the old AI with answers from the new one (merged); D-20261010-10 On the new AI the bot gets two questions wrong that it answered right or declined safely before (done); D-20261010-11 The pre-ship check reads the mark number, not the verdict, so a "wrong" with one mark passes as "became wrong: none" (merged); D-20261010-13 A refused question shows two bot messages and never says what was checked (merged); D-20261010-14 The page the answer came from is hidden behind a click (merged); D-20261010-15 Out of the box the widget says "Assistant" with an "A" avatar and "Ask a question" (merged); D-20261010-16 The search never shows the model the passage that holds the fact; give every passage a sentence saying what it is about (rejected); D-20261010-17 When the passages miss, read the whole manual once before saying "not in the manual" (merged); D-20261010-18 Half answers that say "not stated" for a documented fact: search once more for the named gap (rejected); D-20261010-19 Security item D-20261010-19, details in the office (merged); D-20261010-20 Security item D-20261010-20, details in the office (merged); D-20261010-22 Security item D-20261010-22, details in the office (merged); D-20261010-23 The pre-ship check grades the "after" answers without the manual pages the "before" grader had (merged); D-20261010-24 Security item D-20261010-24, details in the office (merged); D-20261010-25 Security item D-20261010-25, details in the office (merged); D-20261010-26 Security item D-20261010-26, details in the office (merged); D-20261010-27 A two-product question gets an instant table of the wrong spec rows and "these are the same" (rejected); D-20261010-28 The marker gives the same refusal a 3 once and a 1 once, and marks a documented caveat as invented (merged); D-20261010-29 Security item D-20261010-29, details in the office (merged); D-20261010-30 Two MyConnect Environment documents give opposite pins for the under-age beacon relay (done); D-20261010-31 An adjustable spending cap for the test lab, and a running cost report, on the office page (merged); D-20261010-32 Security item D-20261010-32, details in the office (merged); D-20261010-33 Security item D-20261010-33, details in the office (merged); D-20261010-34 Yes/no questions get an answer from the page next to the right one (rejected); D-20261012-01 A monthly score out of 10 against the leading support chatbots (done); D-20261012-02 Security item D-20261012-02, details in the office (rejected); D-20261012-03 Security item D-20261012-03, details in the office (merged); D-20261012-04 Off-topic buying advice (a card reader for a cafe) gets an answer instead of a refusal (done); D-20261012-05 Several-asks and two-product messages are answered from the whole manual, not the ranked passages (rejected); D-20261012-06 A two-product question loses one product's best passage under the other's relevance floor (done); D-20261012-07 Security item D-20261012-07, details in the office (merged); D-20261012-08 Security item D-20261012-08, details in the office (rejected); D-20261013-01 The score trend counts Dev's working copies as test runs (done); D-20261014-01 Sign up the trial accounts for the competitor score (done); D-20261014-02 Ask the competitors the same 120 hidden questions and score the bot against them (merged); D-20261014-03 The competitor test's hidden questions sit in a folder Dev can read (merged); D-20261014-05 Security item D-20261014-05, details in the office (merged); D-20261014-06 A question about a model we do not make, or about nothing we make, gets a "here is what we make" product blurb (merged); D-20261014-07 The marker scores a true partial answer to a made-up model as 0, and calls a figure from the other manual invented (rejected); D-20261015-02 A well-found answer is thrown away by the grounding check (merged); D-20261015-03 Security item D-20261015-03, details in the office (merged); D-20261015-04 Why two-product and two-ask questions are declined with the right pages found: a probe, no code change (done); D-20261015-05 Count, across the last six runs, how many declines happened with the right pages in hand (done); D-20261015-06 Passages ranked past the prompt budget are dropped, so the model refuses a question the manual answers (rejected); D-20261015-07 Security item D-20261015-07, details in the office (merged); D-20261015-08 A yes/no question gets pasted manual lines and no yes or no (rejected); D-20261015-09 Security item D-20261015-09, details in the office (done); D-20261015-10 Security item D-20261015-10, details in the office (merged); D-20261015-11 Security item D-20261015-11, details in the office (merged); D-20261015-12 The "allowance used up" message tells the visitor to contact support (merged); D-20261015-13 Check that two hidden multi-document questions' expected answers match the manual (done); D-20261016-01 Comparison questions between sibling products are declined though both manuals answer (rejected); D-20261016-02 A two-part integration question is refused whole, or one part gets a false "not given" (rejected); D-20261016-03 A how-to asked by its symptom or tool is refused, though the steps are in the manual (rejected); D-20261016-04 Two reference answers in the open test set contradict the manuals, so a right conclusion loses marks (done); D-20261016-05 Security item D-20261016-05, details in the office (merged); D-20261016-06 Comparisons between two products are declined or come back the wrong way round (rejected); D-20261016-07 A message with two or three parts is declined or answered from one source, and "there is no way" is said where the manual gives one (rejected); D-20261016-08 A two-product comparison gives both figures right and picks the wrong winner (merged); D-20261016-09 Security item D-20261016-09, details in the office (merged); D-20261016-10 The test check scores a hidden question against what it scored before the fix, not against a fixed bar alone (merged); D-20261016-11 Comparison questions get "I don't have that" although both products' manuals hold the answer (rejected); D-20261016-12 Questions with two or more asks get a decline or only half answered (rejected); D-20261016-13 Security item D-20261016-13, details in the office (merged); D-20261016-14 A decline is scored as a correct refusal when the manual had the answer (merged); D-20261016-15 A single-number answer takes the figure from a look-alike table or test next to the right one (merged); D-20261016-16 Comparisons between two products are declined although both manuals answer (rejected); D-20261016-17 Questions needing two facts from different parts of a manual get "not in the documentation" (rejected); D-20261017-01 Security item D-20261017-01, details in the office (merged); D-20261017-02 A feature or product that is not in the manuals gets a firm "no" or "here is what fits" (rejected); D-20261017-03 A table lookup loses the numbers in the row (rejected); D-20261017-04 A question that needs two documents is declined whole (rejected); D-20261017-05 A comparison answers with a trivial shared row or declines (rejected); D-20261017-06 Security item D-20261017-06, details in the office (merged); D-20261017-07 A number is taken from the neighbouring look-alike table in the same manual (rejected); D-20261017-08 The bot says "I don't have that" when the passages in hand state the limit, code or default that answers (merged); D-20261017-09 Questions with two or three asks get one ask answered, or the wrong thing answered (rejected); D-20261017-11 Measure how well the bot answers in other languages before the website claims any (merged); D-20261018-01 Find out whether the whole-manual read on refusals is what made answers dearer and slower (merged); D-20261018-02 Score each test question on three answers, not one, before a type score decides anything (merged); D-20261018-04 In a product chat, read the product's whole manual first, not only after a refusal (rejected); D-20261019-01 Research: answer from Confluence and the company website when the manuals are silent (done); D-20261019-02 A comparison gives one product's figure, calls the other's "not found", and sometimes works out a stand-in (rejected); D-20261019-03 A fault code or spec limit that is in the manual's table is refused as "not in the documentation" (rejected); D-20261019-04 A multi-part "how do I" question gets the headline fact and loses the steps and data for the other parts (rejected); D-20261019-05 The marker scored a correct "no, it does not pay out change" answer 0 for quoting the manual's own escrow wording (merged); D-20261019-06 Finish the three-answer reading: a gate drop bar the test can actually see, and the readers still on one answer (merged); D-20261019-07 Security item D-20261019-07, details in the office (done); D-20261019-08 Security item D-20261019-08, details in the office (merged); D-20261019-09 The bot quotes the right figures, then states the wrong winner or says two disagreeing manuals agree (rejected); D-20261019-10 Keep the manuals fresh: sync the manual pages from Confluence into the bot every week (rejected); D-20261019-11 Search the company website live (through DeepSeek) when the manuals are silent (rejected); D-20261019-12 A document marked "Private & Confidential" answers customers today (merged); D-20261019-13 The office page's whole-manual baseline still reads the first answer while every other reader reads the mean (merged); D-20261019-15 Add the CashGenic manual as a new, never-tested product (done); D-20261019-16 Point the next blind run at the CashGenic product (done); D-20261019-17 Questions that need two products or two manuals get declined or answered from the wrong figure (merged); D-20261019-18 Table questions return the wrong column or say the value is "not stated" when the table has it (rejected); D-20261019-19 Comparison questions get an answer about the wrong spec, or only half of the two products (rejected); D-20261019-20 A partial rebuild command silently rebuilds the whole live index (merged); D-20261019-21 Security item D-20261019-21, details in the office (done); D-20261020-01 A CashGenic chat can read the coin unit's manual the kit manual points to (done); D-20261020-02 A technical yes/no with a price word in it gets the sales brush-off (merged); D-20261020-04 The marker gives a half answer full marks once and scores one clarifying answer three ways (merged); D-20261020-05 Security item D-20261020-05, details in the office (merged); D-20261020-06 Security item D-20261020-06, details in the office (merged); D-20261020-07 Security item D-20261020-07, details in the office (merged); D-20261020-08 A yes/no question with figures opens "No" when the figures say yes (rejected); D-20261020-09 A two-product question borrows one product's table for the other, or drops the second product's fact (rejected); D-20261020-10 Figure answers: the model fills a checked sheet of quoted figures, and code works out the Yes/No, the winner and the "within rating" (merged); D-20261020-11 Run the two answer checks at the same time, and the CPU checker on a faster engine: every answer about 1.4 s quicker, no answer changes (merged); D-20261020-12 Measure the 49-rule answer prompt against a short one before any more rules are added (merged); D-20261020-13 Security item D-20261020-13, details in the office (rejected); D-20261020-14 Questions that need two or more parts of the manual get a half answer, a wrong route, or a decline (rejected); D-20261021-01 Figure answers, part B: wire the checked sheet into the answer path (rejected); D-20261021-03 Security item D-20261021-03, details in the office (merged); D-20261021-05 The bot refuses when the page holds the figures but the answer needs one small step (rejected); D-20261021-06 Security item D-20261021-06, details in the office (merged); D-20261021-07 The first screen blocks typing until the visitor picks a button (merged); D-20261021-08 One forwardable page for the IT reviewer: where documents live, what runs where, what is logged (done); D-20261021-10 Security item D-20261021-10, details in the office (merged); D-20261021-11 Check every sentence of the IT reviewer sheet against the code, cut what is not true, and fix the README line it contradicts (merged); D-20261021-12 Cost and time per answer rose on the first run after the several-asks fix went live (done); D-20261021-13 A known-holes check on the packages that runs every week and lands in the office inbox (merged); D-20261021-14 Thin messages and short follow-ups get a canned refusal plus a list of unrelated questions (rejected); D-20261021-15 A two-part ask or a multi-step procedure comes back with one part missing or called "not found" (merged); D-20261021-16 Lab credit ran out: top up DeepSeek so checks and test runs can run again (done); D-20261021-17 README still says the admin pages have no accounts, only a shared password (rejected); D-20261021-18 Security item D-20261021-18, details in the office (merged); D-20261021-19 Security item D-20261021-19, details in the office (merged); D-20261021-20 Security item D-20261021-20, details in the office (merged); D-20261021-21 The gate's "ask again only what was missed" path does not work from the office's own shell, so every gate asks everything three times (merged); D-20261021-22 A troubleshoot answer gives the wrong cause once in six tries on unchanged code (Spoof 3: "not stable" instead of "poor lighting") (rejected); D-20261021-23 Security item D-20261021-23, details in the office (merged); D-20261022-01 A feature missing from a stated list is answered "No", and a wrong marked reading can pass the checker (rejected); D-20261022-03 Security item D-20261022-03, details in the office (merged); D-20261022-04 Delete the figure-sheet module that nothing uses (merged); D-20261022-06 Run the weekly 40 twice on a quiet machine to see why the lab's cache misses (rejected); D-20261022-07 Check the shared prompt text is byte-stable so hosted answers can hit the provider cache (done); D-20261022-09 Security item D-20261022-09, details in the office (rejected); D-20261022-10 Measure wrong-product answers when the first message is typed with no product picked (merged); D-20261022-11 Test the bot on the new Smart Hopper 3 manual, which no fix was tuned on (merged); D-20261022-12 Security item D-20261022-12, details in the office (merged); D-20261022-13 Security item D-20261022-13, details in the office (merged); D-20261022-14 Test the bot on questions whose answer sits in a picture or diagram, scored on its own (merged); D-20261022-15 Read the labels inside the manuals' pictures into the index so a question answered only by a drawing can find it (merged); D-20261023-01 Security item D-20261023-01, details in the office (rejected); D-20261023-02 The same 40 questions answered today score 18 points below yesterday (done); D-20261023-03 After the Confluence sync, test scripts, drawings and release notes outrank the manuals (done); D-20261023-04 A copied checklist, or a catalogue answer made without a search, comes back unrelated to the question (merged); D-20261023-05 Security item D-20261023-05, details in the office (merged); D-20261023-06 Check that the new text-encoder gives the same vectors as the old one (merged); D-20261024-01 Security item D-20261024-01, details in the office (merged); D-20261024-02 Security item D-20261024-02, details in the office (merged); D-20261024-03 Security item D-20261024-03, details in the office (merged); D-20261024-04 Scope a sturdier home for synced Confluence pages: label by kind, a second shelf, one copy, fault questions search both (merged); D-20261024-05 Find out why the weekly test fell from 31 right to 22 right (done); D-20261024-06 Security item D-20261024-06, details in the office (merged); D-20261024-07 Security item D-20261024-07, details in the office (done); D-20261024-08 Security item D-20261024-08, details in the office (merged); D-20261024-09 Security item D-20261024-09, details in the office (merged); D-20261024-10 Synced Confluence pages get their kind from title and folder, and a replaced upload keeps all its products (merged); D-20261024-11 Measure whether the check that reads the question would have caught the wrong answers the two cheap checks let through (done); D-20261024-14 The sync replaced nine products' clean PDF manuals with flattened text copies, and the weekly test fell (merged); D-20261024-15 Measure a narrow rule: the question-reading check decides only yes/no and absent-feature answers a cheap check passed (done); D-20261024-16 Security item D-20261024-16, details in the office (done); D-20261024-17 The test suite reads the real secrets file, and a browser test can hang it while it holds the lab (merged); D-20261024-18 Security item D-20261024-18, details in the office (merged); D-20261024-19 Security item D-20261024-19, details in the office (merged); D-20261025-01 Remove the Docker files and every setup-guide mention of Docker (merged); D-20261025-02 Security item D-20261025-02, details in the office (rejected); D-20261025-03 Security item D-20261025-03, details in the office (done); D-20261025-04 Security item D-20261025-04, details in the office (merged); D-20261025-05 Security item D-20261025-05, details in the office (merged); D-20261025-06 Security item D-20261025-06, details in the office (merged); D-20261025-07 A Confluence page that differs from an upload only in letter case can take out what it just replaced, on Windows (merged); D-20261025-08 A bare question about a documented repair or service price gets the sales brush-off (done); D-20261025-10 Two one-line helpers in the Confluence sync just call the index's own functions (rejected); D-20261025-11 A question that names a product's variant gets the base product's figures (merged); D-20261025-12 Comparisons answer about the wrong pair, drop one side, or get the sales brush-off (rejected); D-20261025-13 Measure the widget's text contrast at phone widths, light and dark, with hostile accent colours (done); D-20261025-91 Security item D-20261025-91, details in the office (done); D-20261025-92 Security item D-20261025-92, details in the office (done); D-20261025-93 Security item D-20261025-93, details in the office (done); D-20261026-01 Widget text and buttons fail the contrast check in the default look (merged); D-20261026-02 Security item D-20261026-02, details in the office (merged); D-20261026-03 Security item D-20261026-03, details in the office (merged); D-20261026-04 A right flash-code answer is thrown away by the answer check because the code table is shared or "not tied" to the named product (merged); D-20261026-91 The same document indexed many times over crowds the manuals out of the search (merged); D-20261026-92 A newer NV200 Spectral PDF outranks the SSP manual, so SSP questions on the NV200S are answered wrongly (rejected); D-20261026-93 After a refusal, offer signed-in visitors a "search more thoroughly" button that re-asks at the deep level (merged); D-20261029-01 Comparisons decline or get the wrong code when the facts sit in a shared table (rejected); D-20261029-02 Questions that need two documents get half an answer or a decline (rejected); D-20261029-03 A fix-it question gets background about the part instead of the clearing steps (merged); D-20261029-04 Security item D-20261029-04, details in the office (merged); D-20261029-05 The pre-ship check mistakes an old test question for a leaked hidden one when their first 40 characters match (merged); D-20261030-01 Security item D-20261030-01, details in the office (merged); D-20261030-02 The test question C20261029-26 expects the wrong flash-code row (done); D-20261030-03 Security item D-20261030-03, details in the office (merged); D-20261030-04 Security item D-20261030-04, details in the office (rejected); D-20261030-05 Delete the one-off flag repair script and its test (merged); D-20261030-07 Measure what one "Search more thoroughly" click costs in money (done); D-20261030-08 Security item D-20261030-08, details in the office (merged); D-20261030-09 The "Search more thoroughly" button costs customers 4 credits for the same answer as 1 (merged); D-20261030-10 An hour-long, $0 check that every past test question's answer pages still reach the bot (done); D-20261030-11 Measure a checker trained for grounding: today's first check fails most right answers, so the slow AI check throws away 8% of written answers (done); D-20261030-12 A newer reranker so the page the search found reaches the answer instead of being cut (done); D-20261030-13 The bot answers about a look-alike model, feature or command instead of the one the customer named, or confirms one that does not exist (merged); D-20261030-14 Flash-code questions still get "I don't have that" when the code sits in a shared table, and a vague "flashing red" gets no question back (merged); D-20261031-01 Security item D-20261031-01, details in the office (merged); D-20261031-02 Pause the weekly picture test until pictures are described by a vision model (merged); D-20261102-02 Security item D-20261102-02, details in the office (merged); D-20261102-03 Move the page-reach check into the office tools and re-point the 46 past questions whose answer document is gone (merged); D-20261103-01 The page-reach check still names old documents for new questions, takes 16 hours instead of 1 and crashed once (merged); D-20261103-02 Security item D-20261103-02, details in the office (merged); D-20261103-03 Security item D-20261103-03, details in the office (merged); D-20261103-04 A Dev branch's check can hang for hours while it copies the branch's old code (rejected); D-20261104-01 Security item D-20261104-01, details in the office (merged); D-20261104-02 Security item D-20261104-02, details in the office (merged); D-20261104-03 Measure whether today's reranker with a looser context floor and without the early exits reaches as many answer pages as the newer one did (done); D-20261104-04 Measure on the blind set whether letting every found passage into the prompt gives better answers for what it adds in cost (done); D-20261104-05 A question with several parts gets the wrong answer when the first draft says "not found" for one part, because the check that repairs missed parts is skipped (merged); D-20261104-06 A customer reporting a symptom gets the set-up steps instead of the fault page, because the set-up page now ranks higher (merged); D-20261104-07 A price question that also asks something else, or chats, is sent to sales although the manual prices it (merged); D-20261104-08 Security item D-20261104-08, details in the office (merged); D-20261104-10 Security item D-20261104-10, details in the office (merged); D-20261104-12 One test question's answer key is wrong, so a right answer was marked wrong (rejected); D-20261105-01 A documented fact on a short Compact or Global SMART Coin System page is declined (merged); D-20261105-02 Comparison of two products: priced comparison sent to sales, or the neighbour's figure used (rejected); D-20261105-03 The wiring check prints OK when a fallback model ran (merged); D-20261105-07 Table facts in the manual (end-of-life rows, flash rows) answered "I don't have that" or denied (rejected); D-20261105-09 A message with two asks: one answered, the other said to be missing (rejected).
 <!-- office-plan:end -->
 
-## 2026-09-27 - the 7 -> 10 plan, in plain English (all open)
+## 2026-09-27 - the 7 -> 10 plan, in plain English (mostly done; the unticked items are open)
 
 The full plan, with file:line anchors, tests to keep green and the exact
 commands, is `docs/upgrade-plan-7-to-10.md`. This section is the same list
@@ -356,25 +512,6 @@ New items are numbered P1, 8.16, 8.17 and 9.14 in the table below.
   someone who has not seen the set read those 7 failures, or write a second
   probe set.
 
-*Retrieval and images*
-- [ ] **Picture-only questions: 2/12 even with figure text.** OCR reads the
-  labels, but figure chunks carry no page heading, so search rarely finds
-  them. **Step 9.14**, a retrieval fix alongside plan steps 9.7 (reindex) and
-  10.6 (figures beside procedures). Done looks like figure chunks carrying
-  their page's section heading, and the 12 image cases re-run.
-  **Code done 2026-09-29** (`912239b`). The heading goes into the chunk's
-  breadcrumb, its body and its `section` metadata, on ingest and on
-  `index_figure_text`; a page with no heading takes the nearest earlier
-  page's. Measured on scratch copies of documents/ and chroma_db
-  (figures cut and OCR'd there, the live index untouched), with
-  `retrieve_from_db` scoped to the product: the case's figure chunk is
-  retrieved for **3/12 without headings and 4/12 with them** (SMART Hopper
-  height newly found at rank 4). That is retrieval only, not answers.
-  Headings are not the main barrier; the other 8 misses need
-  query-to-label matching (dimension words vs bare numbers) or 10.6. Live
-  only after the 9.7 rebuild with FIGURE_TEXT_INDEX=1 (currently 0
-  figure-text chunks in the live index).
-
 *Process*
 - [x] **Two sessions editing one working tree broke the repository twice
   this session.** The code is sound now. **Step P1.** Rule: one session
@@ -464,8 +601,8 @@ Only one session changes code at a time (step P1).
 | 53 | MCP2 | `search_docs` route, token auth, `get_source_excerpt`, HTTP transport, eval cases. | Opus |
 | 54 | MCP3 | Optional: Jira support history; generic open-source version with no ITL code or data. | Opus + you |
 | **Extra - Confluence sync (outside the 7 -> 10 plan)** | | | |
-| 55 | CF0 | Service account + read-only token; say pages or PDF attachments, which spaces map to which product, and what a deleted page does. | You |
-| 56 | CF1 | `confluence_sync.py`: weekly pull of changed manuals into the catalogue through `ingest_file`, plus a "Sync now" button. | Opus |
+| 55 | CF0 | Service account + read-only token; say pages or PDF attachments, which spaces map to which product, and what a deleted page does. Decisions made and running (2026-11-04 sweep); the service account and a note of who renews the token are still open, see CF0. | You |
+| 56 | CF1 | **Done** (`c4fa611`, `af614e3`, then office fixes; it runs daily and is live): `confluence_sync.py`: weekly pull of changed manuals into the catalogue through `ingest_file`, plus a "Sync now" button. | Opus |
 | **Extra - feedback and reporting (outside the 7 -> 10 plan)** | | | |
 | 57 | FB1 | Widget asks "Did this solve it?" and takes a note on a thumbs-down; console Feedback page lists every vote with its conversation. | Opus |
 | 58 | FB2 | Analytics per website and product: resolved, refused, handed off, voted down, week on week (builds on 10.1). | Opus |
@@ -498,24 +635,23 @@ wastes more than the per-step model choice saves.
 
 **Collect before starting (no Claude needed):** IT's email API details
 (replaces SMTP, S25), Hetzner account + Cloudflare access (S27), the
-backup-provider decision (S28), guest-AI decision (36), commission
-blind set 3 (13), time booked for the ~50 human labels (15), the MCP
+backup-provider decision (S28), guest-AI decision (36), the MCP
 access and data decision (51).
 
 | S | Model | Steps | Notes |
 |---|---|---|---|
-| 1 | Opus | 1, 2 | Attended. Confirm the other session has stopped first. P1 is a one-line CLAUDE.md edit. |
-| 2 | Sonnet | 3, 7, 8, 9, 10 | Edits the plan already spells out. M1 must land before any eval run. |
-| 3 | Opus | 4, 5, 6 | Also write the eval batch script used in S4. |
-| 4 | none (shell) | 11, runs for 13 and 14 | One overnight background job; writes summaries only. `nohup bash tools/overnight_eval.sh > /dev/null 2>&1 &` from the repo root (written in S3); S5 reads `eval_runs/<stamp>/summary.json`. |
-| 5 | Fable | 12, reading for 13 and 14 | Reads the summaries; resets the pass mark. |
-| 6 | Opus + you | 15 | |
-| 7 | Sonnet | 16, 30, 31 | Check they are independent before grouping. |
-| 8 | Opus | 17 | Tag repair. |
+| 1 | Opus | 1, 2 | Attended. Confirm the other session has stopped first. P1 is a one-line CLAUDE.md edit. **Done:** P1 is in CLAUDE.md, and the landing work was committed (`4945c45`; 9.7 gate 1 met). |
+| 2 | Sonnet | 3, 7, 8, 9, 10 | Edits the plan already spells out. M1 must land before any eval run. **Done 2026-09-27:** M1 (`21698b0`), M14 (`f703927`), M10, M11, M9 and M6, all ticked below. |
+| 3 | Opus | 4, 5, 6 | Also write the eval batch script used in S4. **Done 2026-09-27:** M3, M2 and M12, ticked below (`f465c02`). |
+| 4 | none (shell) | 11, runs for 13 and 14 | One overnight background job; writes summaries only. `nohup bash tools/overnight_eval.sh > /dev/null 2>&1 &` from the repo root (written in S3); S5 reads `eval_runs/<stamp>/summary.json`. **Done 2026-09-27:** the batch ran at `7c58720` into `eval_runs/20260927_1825/`. |
+| 5 | Fable | 12, reading for 13 and 14 | Reads the summaries; resets the pass mark. **Done 2026-09-28** (`9dcc419`): M4, M7 and M13 read and ticked below; the M5 reading is under M5. |
+| 6 | Opus + you | 15 | **Done 2026-09-28:** see M8. Its second-vendor trial was dropped in the 2026-11-04 sweep. |
+| 7 | Sonnet | 16, 30, 31 | Check they are independent before grouping. **Done 2026-09-28:** 8.1 (`a4ffbd1`), 8.13 (`9e39e8c`), 8.14 (`c6229f0`). |
+| 8 | Opus | 17 | Tag repair. **Done 2026-09-29** (`8a1a8e9`): see 8.2. |
 | 9 | Fable | 18, 19, 20, 21, 22 | Same conversation/answer code; 8.4 here avoids a second read. **Done 2026-09-29** (`dde62db`..`c4cc950` + two follow-ups); full suite 299/299 (1 skipped); retrieval 29/32 and tuned 33/34 unchanged. |
 | 10 | Opus | 23, 24, 25 | Conversation follow-ups. **Done 2026-09-29** (`8b9fe65`..`c858ab7`); full suite 305 passed (1 skipped); run_live 25 3/3 on both paths, 13 4/4 x3; routing 152/164 (same 12 fails); retrieval old 32 unchanged but one 1/3 noise flip; held-out unscoped 22/30 (was 19). 8.17 is only partly done: 7/10 held-out descriptions still fail. |
-| 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: SMTP settings + one real enquiry (8.9); the 8.15 baseline re-arm and a `run_live --path stream` N=3 run (both need a live backend). |
-| 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), backup via company gateway + drill ~10-01 (9.3), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
+| 11 | Opus | 26-29, then 32 | Features, then the Tier 8 tests. **Done 2026-09-29** (`872c394`..`a2125b0` + one follow-up); full suite 311/311 (1 skipped); run_scenarios 152/164 (same 12 fails). Left for you: a `run_live --path stream` N=3 run (needs a live backend). The 8.9 real-enquiry check moved to S25, and the 8.15 re-arm was done in `55f79ae`. |
+| 12 | Opus + you | 33-37 | Infrastructure; needs your inputs. **Code done 2026-09-29** (`4e8748a`..`73dbcc7` + this); full suite 311 passed (1 skipped); run_scenarios 156/168 (same 12 fails, 4 new probes pass). Restore drill 328s to ready, chunks match. Left for you: company server + tunnel (9.1), hang/outage acceptance + SMTP (9.2), 9.3 (replaced by S28), cap value + guest-AI flip (9.4), passphrase to password manager then drop BACKUP_ALLOW_PLAINTEXT (9.5). |
 | 13 | Opus | 38, 39 | **Done 2026-09-29** (`b2cb5dc`, `912239b`, `ca0d6e2` + this); full suite 312 passed (1 skipped). 9.6: the "Reviewed answer" badge now appears on 168/406 entries, down from all 406. The audit checked the 157 unedited generated entries: 110 verified 3/3, 8 unstable, 39 stable rejects (list in `eval_runs/faq_audit_9.6.log`). 9.14: figure chunks carry their page heading. On a scratch index, the case's figure chunk is retrieved for 4/12 image cases, up from 3/12. The new chunks reach the live index only through the 9.7 rebuild (S14). **Done 2026-10-02:** the 39 stable rejects deleted by id (`faq_store.delete_entry`, 408 -> 369 entries; copy in `eval_runs/faq_store.before-9.6-delete-*.json`). |
 | 14 | Fable, then shell | 40 (41 done) | Fable checks the rebuild is safe; a script runs it. Attended (your decisions gate it). **Gates for 9.7:** (1) figures.py/ocr.py committed: met; (2) `reindex.py --from-store --dry-run`, then you confirm the filing of the 5 documents whose catalogue entry differs from the live tags (the full MyCheckr manual must not drop out of Mini scope); (3) backend stopped, run on a copy of `src/chroma_db`; (4) M14's phrase-search and table tests pass; (5) decide whether to fix the 225 chunks under 80 chars and the 65 duplicate bodies in this pass; (6) new from 9.14: rebuild with `FIGURE_TEXT_INDEX=1` or not (4/12 image cases retrieved; figure chunks may outrank the prose that answers). **Done looks like:** `indexed_at` on 0 -> 1749 chunks; footer-tailed chunks 504 -> ~0; short/duplicate counts fixed or kept with a reason; `eval_retrieval.py --compare` unchanged or better; the NV200/SMART Payout footer case fixed; baselines re-armed. **9.8: done 2026-09-30** (`d7ab9f5`), ahead of this session: `crossrefs.missing()` 5 -> 0, since all five were sections of the citing manual. The MyCheckr dimensions are only in the drawing on p36/p29, so answering them rides on gate (6) and the image cases. **Collect first:** the 5-document filing decision, about an hour with the backend stopped. First prompt: dry run and report the 5 filing differences, the short/duplicate counts and a FIGURE_TEXT_INDEX recommendation, then stop for decisions. **Done 2026-09-30** (`b91a6a5`, `05fac34` + plan commits): decisions 1-4 taken and applied, index rebuilt 1749 -> 1668 chunks, footer-tailed 500 -> 0, retrieval R@1 up with no regression, full suite 315 passed (1 skipped); details under 9.7. Baselines re-armed from `eval_runs/20260930_2105` (tuned 45/49 x5, retrieval 32/35 x3). Left for you: rule on the one rebuild-caused flip ("how do I mount it" now answers instead of asking; keep `AMBIGUOUS_CEILING` 0.65 or raise it, see 9.7); delete `src/chroma_db.before-9.7-20260930_2100` when satisfied; try the upload form's new "Also file under" picker once. **Ruled 2026-10-02:** mount flip kept (`AMBIGUOUS_CEILING` stays 0.65); `chroma_db.before-9.7` deleted. |
 | 15 | Fable | 42, 43 | **Done 2026-10-01** (`c868dd6` + this). 9.9 was mostly built (8.14 found it); added the numeric translation check, the logged language, the 10-case es/de/fr parity suite (30/30 same document, 0.82 page overlap over 3 runs) and scenario 24 tightened. 9.10: 3 flips in 1,024 case-runs, all sampled-model (2 generation, 2 grader), none deterministic. |
@@ -523,15 +659,14 @@ access and data decision (51).
 | 17 | Opus + you | 45 | **Done 2026-10-02**: 2 FAQs added, 2 truncated ones repaired, refusals on the repeat phrasings 3 -> 1 (the one left is the intended litres absence refusal); table under 9.12. |
 | 18 | shell, then Fable | 46 | **Done 2026-10-02**: escalation on flag rejected. Rebuilt population (the 79 logged turns were lost): 3 of 196 replayed questions are still flagged; V4 Pro (thinking on) passed the verifier on all 3, but only 1 was right. The other 2 turned honest refusals into wrong answers. Detail under 9.13. |
 | 19 | Opus | 47, 48 | **Done 2026-10-02** (`a8adf82`, `63496d2`); full suite 321/322 (1 skipped; the 1 failure, test_reindex_safety numpy double-load, also fails at `a1a62f4`, so it predates S19). Left for you: see 10.1/10.2. |
-| 20 | Sonnet | 49 | **Done 2026-10-02**: `ci.yml` gains a nightly cron and a Docker start-up step; not yet run (see 10.3). |
-| 21 | Fable | 50 | **Done 2026-10-02**: measured, then the one deterministic miss (18 T3) fixed by a per-product context cut; 3/3 right. Full suite 323/323 (1 skipped), routing 150/148. One flip for you under 10.4. |
+| 20 | Sonnet | 49 | **Done 2026-10-02**: `ci.yml` gains a nightly cron and a Docker start-up step. It ran and passed on 2026-10-09 (run 37909500703, see 10.3); Docker has since been removed (D-20261025-01). |
+| 21 | Fable | 50 | **Done 2026-10-02**: measured, then the one deterministic miss (18 T3) fixed by a per-product context cut; 3/3 right. Full suite 323/323 (1 skipped), routing 150/148. The one flip under 10.4 was ruled 2026-10-02: keep. |
 | 22 | Opus + you | 51, 52, 53 (54 later) | Independent of S1-S21; run it any time in its own worktree (P1). Stop after MCP1 unless MCP0 is decided. |
-| 23 | Opus (medium) | HC1 | Recurring corpus + RAG health check. Independent of S1-S22. One attended session, no subagents. Opening prompt below. |
 | 24 | Opus | (ad hoc) | **Done 2026-10-06/07** (`b0a3b31`, `48eb66f`). (a) MyConnect iPad/iOS refusals: no code bug; the documents never say "Android only", so the model refused or inferred by phrasing. Fixed with a reviewed FAQ ("Does MyConnect support iOS, iPad or iPhone?"). (b) Enquiry email: customer's address as Reply-To, `Auto-Submitted: auto-generated` on every mail; a sent enquiry is cut to a contact-free stub (id/kind/date) and leaves the console, failed sends stay; report counts all leads (was capped at 200). (c) OpenAI slot repointed from the gateway to api.openai.com and renamed "OpenAI"; `llm._openai_sampling`: gpt-5/o-series get no temperature (400 otherwise) and minimal reasoning. (d) Model comparison, 51 eval cases x1 through the real pipeline: DeepSeek 47/51 (3.5s median), gpt-5-mini 46/51 (3.2s), gpt-5-nano 47/51 (20.8s median, rejected on speed). (e) **Main model switched to gpt-5-mini** (company OpenAI account); DeepSeek (personal key) stays backup for now. Tests: lead_handoff, credit_alerts, email_links, log_report, gap_review, llm pass. |
 | 25 | Opus + you | email API | **Waiting on IT.** IT replaces SMTP with an internal email API (per-email charge, flood detection). Swap `mailer.send`'s transport only; keep reply_to + Auto-Submitted as API fields; map their flood response (e.g. 429) to a logged "blocked" error. You: confirm the Jira support/sales channels accept mail from noreply@ and take the reporter from Reply-To; if not, create tickets through the Jira API instead. |
 | 26 | Opus | mini tuning | Prompt tuning, not fine-tuning. gpt-5-mini's two misses vs DeepSeek: a wrong-product answer ("NV9ST voltage" answered from the NV9USB+ manual, passed grounding) and a follow-up sent to clarify ("do they both use the same SSP interface"). Re-run the comparison x3 first (`scratchpad/modelcmp.py` pattern: in-process, main thread), fix the product-name and follow-up instructions, then re-arm the tuned/retrieval baselines on gpt-5-mini. **Done 2026-10-07** (`e077ae1`, `64bab88`). x3 comparison, 51 cases: mini 45/45/48 -> 48/48/49, DeepSeek 47/47/48. The SSP follow-up was a retrieval miss, not a clarify fault: mini's rewrite never fetched the NV9USB+ protocols page, and mini then inferred SSP support from a "fitting replacement" line. Fix: when a question names two products, each manual is also searched on its own. Prompt changes: a product named in the question but in no document gets a refusal, and the bracketed picker product does not override it; no fact is carried between products; a what/which question never opens with Yes/No; "No" only when the documents say so. mentions.py now checks the asked feature when an answer admits "no mention". The NV9ST eval case expects the refusal. Full suite 323 passed. The 2 test_widget_walk failures come from the uncommitted 10-02 widget edit, which folds Related questions behind a pill. Baselines re-armed from `eval_runs/20261007_1142`: tuned 46/51 x5, retrieval 32/35 x3, blind1 29/34, blind2 28/34. Open: the NV9USB+ protocol list is a separate short chunk, so SSP answers are sometimes thin. |
-| 29 | Opus + you | long context (performance mode) | **Built 2026-10-07 as an option, off by default:** Advanced -> "Performance mode" (policy `performance_mode`; switching it on asks for confirmation with the cost). In a product chat the 8 ranked passages come first, followed by the product's whole scope in document order (`retrieval_db.product_bundle`, budget `PERFORMANCE_BUDGET_CHARS` = 400k chars, about 100k tokens). Over the budget, it takes whole sections in ranked order. A comparison reads each named product's documents, with the budget split between them. Grounding, the verifier and the citations also get the bundle passages each answer sentence used (`bundle_evidence`). Also fixed: `_order_key` read only `_n` ids, so every current `:hash:n` id ranked 0. Spot check on blind3 misses: B3-33, 34 and 35 now right; B3-24 and 36 are answered by the FAQ/catalogue routes before retrieval, so the mode does not reach them. **Measured 2026-10-07 on blind set 4** (48 new questions, `src/blind4_ab_cases.json`, results in `eval_runs/20261007_blind4`; gpt-5 graded 3 answers per question blind; every role pinned to gpt-5-mini). Normal 68.1% (6 wrong), performance 73.6% (3 wrong, 9 declines), whole-manual baseline 86.1% (4 wrong). Multi-document questions: 7/18 -> 15/18 (baseline 13/18). Procedures: 14 -> 11/21. Median/p90 4.5/7.7s -> 5.4/13.5s. Cost $0.0006 -> $0.0056 median per answer, i.e. no prompt-cache hits. **Why the gap to the baseline:** (a) 6 of performance mode's 9 declines are answers the checks held back (flagged), where normal mode served a partial answer. The verifier only sees top_chunks plus the picked evidence; verify against the answer's whole sections instead. (b) Cost: build_answer_prompt puts the conversation and the ranked passages BEFORE the bundle, so the prefix differs on every question and is never cached. Put the bundle first, then ranked passages, history and question. (c) Both modes: the price-question filter deflects "part number so I can order one" and "$5 pool table" (B4-02, B4-17). (d) Run 1 (`blind4_state_run1.json`) went unpinned: gpt-5-mini timed out on the big prompts, the 60s cooldown sent ~40 calls to the DeepSeek backup. Performance mode needs a longer OpenAI timeout before it is switched on in production. **Fixes (a)-(d) done 2026-10-07** (`82f070f`). **Re-measured on blind set 5** (48 new questions, `src/blind5_ab_cases.json`, `eval_runs/20261007_blind5`, gpt-5-mini pinned): normal 70.8% (3 wrong), performance 70.1% (3 wrong), baseline 87.5% (2 wrong). The fixes worked: flagged declines 6 -> 1, 66% of prompt tokens cached, median cost $0.0056 -> $0.0018, median/p90 4.2/9.9s (faster than normal), no timeouts. Performance mode still does not beat normal overall: multi-document 7 -> 10/18 and comparisons 7 -> 9/15, but procedures 16 -> 12/21. **Largest remaining loss in both modes: the price-question filter.** 5 of 10 declines got the sales reply for "buy", "budgeting", "quoting", "£10s" and "stock". Bias: the writer was asked to include money-in-passing questions. Next: search first and deflect only when the manuals do not answer, instead of more regex. Still open: why performance mode loses procedures (B5-17, B5-19 declined; B5-44 follow-up asked to clarify). **NV4000 added 2026-10-07 and blind-tested** (new product `nv4000` under note_val, 145 chunks, no FAQs; backup in `eval_runs/backup-before-nv4000`; 36 questions in `src/blind_nv4000_ab_cases.json`, results in `eval_runs/20261007_blind_nv4000`): normal 63.0% (5 wrong), **performance 74.1% (2 wrong)**, baseline 84.3% (1 wrong). On a product with no tuning, performance mode clearly helps: table conditions 8 -> 14/18, lookups 17 -> 22/27, comparisons 2 -> 5/12; 72% cache hits, $0.0012 median per answer. **Gaps it showed:** (1) the NV4000 manual calls its head "NV200 Spectral" throughout, so NV4000-vs-NV200S comparisons retrieve NV200 Spectral text and refuse (N4-29, N4-30); (2) the catalogue route answers MCBF comparisons with a product-range list (N4-32, also B4-36/42); (3) a yes/no answer that opens "Yes" and then explains a No (N4-15, both modes); (4) performance mode mispaired a flash code (N4-21, "belt failed to move" for Belt Missing) and still declines some procedures (N4-19); (5) the price filter again: "order one off RS", "do we have to pay" (the manual says free). `/query/stream` does not use it; latency is up to ~40s when the first answer is rejected. **From the blind A/B (see "Market-relative rating" above).** Each product's whole manual is 11k-75k tokens. gpt-5-mini given the whole manual scored 93-95% with 0 wrong answers, against 75% and 4 wrong for this pipeline, at a 2.1s median. Prototype: for a product-scoped chat, send the product's full manual text (cached prompt prefix) in place of the retrieved passages; keep RAG for unscoped chats. Keep the switchboard, refusals, FAQ layer and sources (cite from page markers). Gate: blind3 A/B >= 90%, 0 wrong, tuned suite no regression, cost per answer measured. Cost measured 2026-10-07 on 12 blind3 questions, gpt-5-mini at $0.25 / $0.025 cached / $2.00 per 1M tokens. Now: ~$0.0003 per answer (~$3 per 10k answers). Whole manual: ~$0.0009 per answer with the prompt cache warm (~$9 per 10k answers), up to $0.006 cold (~$61 per 10k answers). The NV200S manual is the largest at 81k tokens: $0.020 cold, $0.002 warm. You: accept that cost. |
-| 30 | Opus | blind-test fixes | **From blind sets 3-5 and the NV4000 test (2026-10-07).** Numbers and per-question grades: `eval_runs/20261007_blind5`, `eval_runs/20261007_blind_nv4000` (runner `blind_eval.py`; run each mode in its own process with every PROVIDER_ROLE_*/MODEL_ROLE_* pinned to openai/gpt-5-mini, or the DeepSeek backup leaks in). In priority order: **(1) Price-question filter** (`sales.is_commercial_question`): misfired in every set. B4-02, B4-17, B5-05 "what do i need to buy", B5-15 "budgeting", B5-29 "quoting", B5-34 "£10s", B5-42 "stock", N4-05 "order one off RS", N4-25 "do we have to pay" (the manual says free). Fix: search the manuals first and give `sales_reply` only when retrieval finds nothing that answers, instead of more regex. Keep "price for 50 units" -> sales reply. Tests: `test_commercial_questions.py`, scenario 03. **(2) Catalogue route** (`sales.compare` / the spec-table answer): answers spec comparisons with the NV200 SSP manual p7 product-range list (B4-36, B4-42, N4-32 MCBF). Fall through to normal retrieval when the table has no row for the asked attribute. **(3) A manual naming another product throughout:** the NV4000 manual calls its head "NV200 Spectral", so NV4000-vs-NV200S questions retrieve NV200S text and refuse (N4-29 12V rail, N4-30 168mm notes). With two products named, the per-product arm should count a chunk by its document's product tag, not by the names in its text. **(4) "Yes" then an explained No** (N4-15 3.3V input, both modes). Prompt: decide the verdict after reading the threshold; or a post-check that a Yes/No opener agrees with "below/above the minimum/maximum" in the same answer. **(5) Performance mode:** mispaired flash code (N4-21 "belt failed to move" for Belt Missing; the thinking verifier passed it). Procedures declined (B5-17, B5-19, N4-19). Pull the verifier reasons from `n4_perf.log`/`b5_perf.log`-style logs first. **(6) Follow-ups:** B5-44 "it flashed 6 times" (ccTalk) asked to clarify; N4-33 missed "interrupting the download can leave the unit non-functional". **Measuring:** blind sets 3, 4, 5 and NV4000 have all been seen. Re-test on a new set written by a fresh agent that reads only the manual text (`scratchpad/manuals/<product>.txt` exported from Chroma with `retrieval_db._matches_scope`, internal-only sources dropped). **Done 2026-10-08** (`9773aec`, `429dc20`, `8fa8cd7`). (1) Only a price question (price/cost/quote/discount/how much, `sales.is_price_question`) deflects before the search; buy/order/stock/budget/pay search the manuals and `_friendly_refusal` gives the sales reply only on a refusal. (2) `sales.compare` falls through to retrieval when no table row holds the asked attribute (both shapes; the p7 range list and a junk "spectral" row had answered MCBF and capacity). B4-36 never reached the catalogue route; the plan was wrong there. (3) Each passage is labelled "from the X documentation" by its document's product tag, plus a prompt line that the label beats product names in the text. That alone did not fix N4-29/N4-30: both were retrieval misses (BM25 sees "12v"/"168mm" as tokens no chunk holds, dense ranked the rows 19th-62nd, the cross-encoder scores table rows ~0). Fix: a **quantity arm** (`retrieval_db._quantity_ranking`, `RETRIEVAL_QUANTITY_ARM`=3): a question with a number+unit also gets the in-scope min/max/nominal rows in that unit, which survive fusion and take a context slot past the rerank floor. Both now answer No with the limit. (4) `main._agree_verdict`: an opening Yes whose first two sentences state a failed limit becomes No (the prompt rule alone did not hold; N4-15 now right). (5) `tables._code_labels` finds the count-column pair after a state column (NV4000 conveyor) and the performance bundle is spelled out too (N4-21 now Belt Missing); a refusal with the bundle attached is retried once from the ranked passages (`regen.nolib`, B5-17 now answered). (6) mentions: an auxiliary verb ("have i put it") or a bare pronoun object ("accept them") names no feature (B5-19, N4-30 had right answers replaced). B5-44 answers ccTalk. Still missed: N4-33 ("pc crashes halfway" does not retrieve the cannot-be-halted line), N4-25 ("free of charge" chunk not retrieved; now gets the sales reply). Full suite 326 passed, 1 skipped (test_widget_walk fails on the uncommitted 10-02 widget edit). Retrieval suite identical with the arm on/off (none of its 35 questions has a unit); the 14 earlier blind questions with units: none worse, B5-11 better (ripple), N4-13 wrong -> decline. **Blind set 6** (48 new questions by a fresh agent from the manual text only, `eval_runs/20261008_blind6`, gpt-5-mini pinned, gpt-5 grader): normal **70.8%** (3 wrong, 9 declines), performance **72.9%** (6 wrong, 5 declines), whole-manual baseline 78.5% (6 wrong). Gap to baseline: normal -7.7, performance -5.6 points (blind5: -16.7/-17.4; NV4000: -21.3/-10.2). Performance now beats normal on procedures 19 vs 15/24 (blind5: 12 vs 16), multi-document 11 vs 9/15 and comparisons 9 vs 6/15, but loses table conditions 10 vs 14/18 and yes/no 10 vs 12/12. Median/p90 5.6/11.9s normal, 6.2/12.8s performance; $0.0008 / $0.0021 median per answer. **Open from blind set 6:** (a) table condition read from the wrong column: B6-23 gave the 12V max-load current for a 24V question (both modes); B6-22 performance said No to an NV9USB+ already behind an IF5. (b) Comparisons that need a figure from each manual still decline in normal mode (B6-30 "4 degrees": the quantity arm needs a unit symbol, "degrees" is not one; B6-32 Mini vs MyCheckr power; B6-33 168mm, performance right). (c) Absent features answered with a confident No (B6-41 PoE/battery on the Mini, both modes); mentions.py does not catch it because "USB only" is documented. (d) The sales reply on refusal fired for "fed a £20 into the nv4000" (B6-27, normal); "fed/feed a £N" should join `_TECHNICAL_ASK`. (e) mentions: "do i need to do ANYTHING" made "anything" the denied feature (B6-45, performance); add indefinite pronouns to `_PRONOUN_OBJECT`. (f) Vague "how do i reset it?" unscoped is not asked back (both modes, B6-48). (g) B6-12: both modes said No to loading float notes by SD card (the manual has a refill folder procedure). |
+| 29 | Opus + you | long context (performance mode) | **Built 2026-10-07 as an option, off by default:** Advanced -> "Performance mode" (policy `performance_mode`; switching it on asks for confirmation with the cost). In a product chat the 8 ranked passages come first, followed by the product's whole scope in document order (`retrieval_db.product_bundle`, budget `PERFORMANCE_BUDGET_CHARS` = 400k chars, about 100k tokens). Over the budget, it takes whole sections in ranked order. A comparison reads each named product's documents, with the budget split between them. Grounding, the verifier and the citations also get the bundle passages each answer sentence used (`bundle_evidence`). Also fixed: `_order_key` read only `_n` ids, so every current `:hash:n` id ranked 0. Spot check on blind3 misses: B3-33, 34 and 35 now right; B3-24 and 36 are answered by the FAQ/catalogue routes before retrieval, so the mode does not reach them. **Measured 2026-10-07 on blind set 4** (48 new questions, `src/blind4_ab_cases.json`, results in `eval_runs/20261007_blind4`; gpt-5 graded 3 answers per question blind; every role pinned to gpt-5-mini). Normal 68.1% (6 wrong), performance 73.6% (3 wrong, 9 declines), whole-manual baseline 86.1% (4 wrong). Multi-document questions: 7/18 -> 15/18 (baseline 13/18). Procedures: 14 -> 11/21. Median/p90 4.5/7.7s -> 5.4/13.5s. Cost $0.0006 -> $0.0056 median per answer, i.e. no prompt-cache hits. **Why the gap to the baseline:** (a) 6 of performance mode's 9 declines are answers the checks held back (flagged), where normal mode served a partial answer. The verifier only sees top_chunks plus the picked evidence; verify against the answer's whole sections instead. (b) Cost: build_answer_prompt puts the conversation and the ranked passages BEFORE the bundle, so the prefix differs on every question and is never cached. Put the bundle first, then ranked passages, history and question. (c) Both modes: the price-question filter deflects "part number so I can order one" and "$5 pool table" (B4-02, B4-17). (d) Run 1 (`blind4_state_run1.json`) went unpinned: gpt-5-mini timed out on the big prompts, the 60s cooldown sent ~40 calls to the DeepSeek backup. Performance mode needs a longer OpenAI timeout before it is switched on in production. **Fixes (a)-(d) done 2026-10-07** (`82f070f`). **Re-measured on blind set 5** (48 new questions, `src/blind5_ab_cases.json`, `eval_runs/20261007_blind5`, gpt-5-mini pinned): normal 70.8% (3 wrong), performance 70.1% (3 wrong), baseline 87.5% (2 wrong). The fixes worked: flagged declines 6 -> 1, 66% of prompt tokens cached, median cost $0.0056 -> $0.0018, median/p90 4.2/9.9s (faster than normal), no timeouts. Performance mode still does not beat normal overall: multi-document 7 -> 10/18 and comparisons 7 -> 9/15, but procedures 16 -> 12/21. **Largest remaining loss in both modes: the price-question filter.** 5 of 10 declines got the sales reply for "buy", "budgeting", "quoting", "£10s" and "stock". Bias: the writer was asked to include money-in-passing questions. Next: search first and deflect only when the manuals do not answer, instead of more regex. (Done in S30, `9773aec`.) ~~Still open: why performance mode loses procedures (B5-17, B5-19 declined; B5-44 follow-up asked to clarify).~~ Done in S30 (`429dc20`): B5-17 and B5-19 fixed, B5-44 answers ccTalk; on blind set 6 performance mode beats normal on procedures, 19 vs 15/24. **NV4000 added 2026-10-07 and blind-tested** (new product `nv4000` under note_val, 145 chunks, no FAQs; backup in `eval_runs/backup-before-nv4000`; 36 questions in `src/blind_nv4000_ab_cases.json`, results in `eval_runs/20261007_blind_nv4000`): normal 63.0% (5 wrong), **performance 74.1% (2 wrong)**, baseline 84.3% (1 wrong). On a product with no tuning, performance mode clearly helps: table conditions 8 -> 14/18, lookups 17 -> 22/27, comparisons 2 -> 5/12; 72% cache hits, $0.0012 median per answer. **Gaps it showed (all handled in S30: `9773aec`, `429dc20`, `8fa8cd7`):** (1) the NV4000 manual calls its head "NV200 Spectral" throughout, so NV4000-vs-NV200S comparisons retrieve NV200 Spectral text and refuse (N4-29, N4-30); (2) the catalogue route answers MCBF comparisons with a product-range list (N4-32, also B4-36/42); (3) a yes/no answer that opens "Yes" and then explains a No (N4-15, both modes); (4) performance mode mispaired a flash code (N4-21, "belt failed to move" for Belt Missing) and still declines some procedures (N4-19); (5) the price filter again: "order one off RS", "do we have to pay" (the manual says free). (`/query/stream` still does not use it, but that is a LAN-only hand-test route; customers stream through `/widget/ask/stream`, which does. The ~40s tail after a rejected first answer is office item D-20261018-05.) **From the blind A/B (see "Market-relative rating" above).** Each product's whole manual is 11k-75k tokens. gpt-5-mini given the whole manual scored 93-95% with 0 wrong answers, against 75% and 4 wrong for this pipeline, at a 2.1s median. The prototype this pointed to (send a product chat the whole manual in place of the passages) is dropped: the owner turned it down after measuring it (D-20261018-04, see Rejected below), and D-20261010-17 instead reads the whole manual once when the passages miss. Cost measured 2026-10-07 on 12 blind3 questions, gpt-5-mini at $0.25 / $0.025 cached / $2.00 per 1M tokens. Now: ~$0.0003 per answer (~$3 per 10k answers). Whole manual: ~$0.0009 per answer with the prompt cache warm (~$9 per 10k answers), up to $0.006 cold (~$61 per 10k answers). The NV200S manual is the largest at 81k tokens: $0.020 cold, $0.002 warm. |
+| 30 | Opus | blind-test fixes | **From blind sets 3-5 and the NV4000 test (2026-10-07).** Numbers and per-question grades: `eval_runs/20261007_blind5`, `eval_runs/20261007_blind_nv4000` (runner `blind_eval.py`; run each mode in its own process with every PROVIDER_ROLE_*/MODEL_ROLE_* pinned to openai/gpt-5-mini, or the DeepSeek backup leaks in). In priority order: **(1) Price-question filter** (`sales.is_commercial_question`): misfired in every set. B4-02, B4-17, B5-05 "what do i need to buy", B5-15 "budgeting", B5-29 "quoting", B5-34 "£10s", B5-42 "stock", N4-05 "order one off RS", N4-25 "do we have to pay" (the manual says free). Fix: search the manuals first and give `sales_reply` only when retrieval finds nothing that answers, instead of more regex. Keep "price for 50 units" -> sales reply. Tests: `test_commercial_questions.py`, scenario 03. **(2) Catalogue route** (`sales.compare` / the spec-table answer): answers spec comparisons with the NV200 SSP manual p7 product-range list (B4-36, B4-42, N4-32 MCBF). Fall through to normal retrieval when the table has no row for the asked attribute. **(3) A manual naming another product throughout:** the NV4000 manual calls its head "NV200 Spectral", so NV4000-vs-NV200S questions retrieve NV200S text and refuse (N4-29 12V rail, N4-30 168mm notes). With two products named, the per-product arm should count a chunk by its document's product tag, not by the names in its text. **(4) "Yes" then an explained No** (N4-15 3.3V input, both modes). Prompt: decide the verdict after reading the threshold; or a post-check that a Yes/No opener agrees with "below/above the minimum/maximum" in the same answer. **(5) Performance mode:** mispaired flash code (N4-21 "belt failed to move" for Belt Missing; the thinking verifier passed it). Procedures declined (B5-17, B5-19, N4-19). Pull the verifier reasons from `n4_perf.log`/`b5_perf.log`-style logs first. **(6) Follow-ups:** B5-44 "it flashed 6 times" (ccTalk) asked to clarify; N4-33 missed "interrupting the download can leave the unit non-functional". **Measuring:** blind sets 3, 4, 5 and NV4000 have all been seen. Re-test on a new set written by a fresh agent that reads only the manual text (`scratchpad/manuals/<product>.txt` exported from Chroma with `retrieval_db._matches_scope`, internal-only sources dropped). **Done 2026-10-08** (`9773aec`, `429dc20`, `8fa8cd7`). (1) Only a price question (price/cost/quote/discount/how much, `sales.is_price_question`) deflects before the search; buy/order/stock/budget/pay search the manuals and `_friendly_refusal` gives the sales reply only on a refusal. (2) `sales.compare` falls through to retrieval when no table row holds the asked attribute (both shapes; the p7 range list and a junk "spectral" row had answered MCBF and capacity). B4-36 never reached the catalogue route; the plan was wrong there. (3) Each passage is labelled "from the X documentation" by its document's product tag, plus a prompt line that the label beats product names in the text. That alone did not fix N4-29/N4-30: both were retrieval misses (BM25 sees "12v"/"168mm" as tokens no chunk holds, dense ranked the rows 19th-62nd, the cross-encoder scores table rows ~0). Fix: a **quantity arm** (`retrieval_db._quantity_ranking`, `RETRIEVAL_QUANTITY_ARM`=3): a question with a number+unit also gets the in-scope min/max/nominal rows in that unit, which survive fusion and take a context slot past the rerank floor. Both now answer No with the limit. (4) `main._agree_verdict`: an opening Yes whose first two sentences state a failed limit becomes No (the prompt rule alone did not hold; N4-15 now right). (5) `tables._code_labels` finds the count-column pair after a state column (NV4000 conveyor) and the performance bundle is spelled out too (N4-21 now Belt Missing); a refusal with the bundle attached is retried once from the ranked passages (`regen.nolib`, B5-17 now answered). (6) mentions: an auxiliary verb ("have i put it") or a bare pronoun object ("accept them") names no feature (B5-19, N4-30 had right answers replaced). B5-44 answers ccTalk. Still missed: N4-33 ("pc crashes halfway" does not retrieve the cannot-be-halted line), N4-25 ("free of charge" chunk not retrieved; now gets the sales reply). Full suite 326 passed, 1 skipped (test_widget_walk fails on the uncommitted 10-02 widget edit). Retrieval suite identical with the arm on/off (none of its 35 questions has a unit); the 14 earlier blind questions with units: none worse, B5-11 better (ripple), N4-13 wrong -> decline. **Blind set 6** (48 new questions by a fresh agent from the manual text only, `eval_runs/20261008_blind6`, gpt-5-mini pinned, gpt-5 grader): normal **70.8%** (3 wrong, 9 declines), performance **72.9%** (6 wrong, 5 declines), whole-manual baseline 78.5% (6 wrong). Gap to baseline: normal -7.7, performance -5.6 points (blind5: -16.7/-17.4; NV4000: -21.3/-10.2). Performance now beats normal on procedures 19 vs 15/24 (blind5: 12 vs 16), multi-document 11 vs 9/15 and comparisons 9 vs 6/15, but loses table conditions 10 vs 14/18 and yes/no 10 vs 12/12. Median/p90 5.6/11.9s normal, 6.2/12.8s performance; $0.0008 / $0.0021 median per answer. **Open from blind set 6:** (a) table condition read from the wrong column: B6-23 gave the 12V max-load current for a 24V question (both modes); B6-22 performance said No to an NV9USB+ already behind an IF5. (b) Comparisons that need a figure from each manual still decline in normal mode (B6-30 "4 degrees": the quantity arm needs a unit symbol, "degrees" is not one; B6-32 Mini vs MyCheckr power; B6-33 168mm, performance right). (c) ~~Absent features answered with a confident No (B6-41 PoE/battery on the Mini)~~ Obsolete: the owner's scope rule keeps a plain No when the manual lists the full set, and the same complaint was rejected twice since (D-20261017-02, D-20261022-01). (d) ~~The sales reply on refusal fired for "fed a £20 into the nv4000" (B6-27)~~ Obsolete: only a price question deflects now, and a refusal no longer gives the sales reply (D-20261010-01, `ba4ceaf`). (e) ~~mentions: "do i need to do ANYTHING" made "anything" the denied feature (B6-45, performance)~~ **Done 2026-11-04** (`d424f45` on `claude/pending-sweep-20261104`): an indefinite pronoun ("anything", "something", ...) no longer becomes the denied feature. Pinned by `test_an_indefinite_pronoun_names_no_feature` in `src/tests/test_not_mentioned.py`. B6-45's own answer was wrong, so that blind case will not start passing; the fix only stops the nonsense reply. (f) Vague "how do i reset it?" unscoped is not asked back (both modes, B6-48). (g) B6-12: both modes said No to loading float notes by SD card (the manual has a refill folder procedure). |
 | 27 | Opus + you | 9.1 (replaced) | **Hosting, replaces the internal-server plan.** IT will not host it (strictly internal network). Hetzner CX43 (8 vCPU, 16 GB, ~EUR16/mo, +~EUR3 backups) running the Docker setup; Cloudflare named tunnel on the box (no open web ports, keeps CF-Connecting-IP trustworthy); Cloudflare Access on `/admin`; one rate-limit rule on the contact form; Hetzner firewall SSH-only from the office IP; nightly `manage_backup.py` via cron (backup_daily.ps1 is Windows-only). Rent it for a day first and time some answers. You: Hetzner account, Cloudflare DNS access, office IP. |
 | 28 | Opus + you | 9.3 (redo) | Outage drill against the new main (OpenAI). You decide the backup: keep DeepSeek (personal key, a second company) or none. Then black-hole the main for 30 minutes with run_live; gate: 0 service_degraded. |
 
@@ -543,17 +678,6 @@ Per step: implement, run the targeted tests, commit, tick the box.
 Stop and report at anything marked "you", on a failing test you can't
 fix in two tries, or if git status shows files you didn't touch.
 Full test suite once at the end. Don't push.
-```
-
-**S23 opening prompt (HC1)**
-
-```
-Build tools/health_check.py: one recurring corpus + RAG health check.
-Reuse existing tools (eval_retrieval --compare, eval_battery, crossrefs.missing,
-chunk short/dup/footer counts from 9.7, FAQ audit 9.6). Add per-new-document
-checks (empty/OCR-poor pages, catalogue entry, self-answer probe).
-Output eval_runs/<stamp>/health.json + a short pass/fail summary. No LLM
-calls except the existing eval grader. One commit, don't push.
 ```
 
 **Auto mode:** fine for S2, S3, S7-S11, S13, S16, S19 and S20. Keep S1
@@ -673,7 +797,7 @@ exactly, we cannot tell whether a fix helped.
   passes a fast verifier that only thinks on flash, LED, colour and code
   answers. Whether "No"/"Yes" openers should also trigger thinking is
   the first thing to measure in 8.3.
-- [ ] **M5 Blind comparison against the last release (v16.3)**, three runs
+- [x] **M5 Blind comparison against the last release (v16.3)**, three runs
   each side. The first blind set is used up (we read it to fix things); a
   third one must be written fresh by someone who has not seen the fixes.
   **Runs and reading done on blind set 2 (S4/S5, 2026-09-28):** HEAD
@@ -699,9 +823,11 @@ exactly, we cannot tell whether a fix helped.
   for. Caveats: blind2 is only partly blind now (M1 corrected two of its
   keywords, M6 read three of its questions), both sides shared one box
   so the walls are advisory, and the grader was deepseek-v4-flash on both
-  sides. **Still open, needs you:** commission blind set 3 from someone
-  who has not seen the fixes; the comparison above is not repeated until
-  it exists.
+  sides. **Closed 2026-11-04 (sweep), not repeated:** blind set 3 was written and
+  run (`src/blind3_ab_cases.json`, `eval_runs/20261007_blind3`), then blind
+  sets 4-6 and NV4000, all against the whole-manual baseline rather than
+  v16.3. The backup-battery case was won back by 8.3 (`dde62db`). v16.3 is
+  several releases old and no longer gates anything.
 - [x] **M6 Root causes of the four named failures**, all four closed
   (2026-09-27): one was a wrong answer key (SD card class, fixed in M1),
   one was already fixed, two are the "confident No" problem. The fourth
@@ -742,10 +868,10 @@ exactly, we cannot tell whether a fix helped.
   p50 2.9s -> 3.1s (unchanged, the NLI itself did not move). Served
   answers under 0.1 on the NLI: 123/271 (45%). What it cost is in M4:
   one blind1 confident-No now passes the fast verifier.
-- [ ] **M8 Test the answer-checker itself** on known right and wrong
+- [x] **M8 Test the answer-checker itself** on known right and wrong
   answers, and try a second AI vendor as checker. Have a person label ~50
-  answers so we know whether the grader can be trusted. **Done except the
-  second vendor (2026-09-28, S6).**
+  answers so we know whether the grader can be trusted. **Done 2026-09-28 (S6);
+  the second vendor was dropped 2026-11-04, see below.**
   *Labels* (`src/eval_labels.json`, the 50 served answers S5 sampled from
   batch 20260928_0807): 18 by the product owner (the MyCheckr, MyConnect
   and ICU rows, all "right", some with "should say more" notes), 32 by
@@ -784,23 +910,24 @@ exactly, we cannot tell whether a fix helped.
   warning, which the owner marked right). **Decision: the grader stays
   thinking-off. The plan's "wrap llm_grade in judging()" is dropped on
   this A/B.**
-  *Still open, needs you:* the second vendor. There is no
-  ANTHROPIC_API_KEY in src/.env or the environment, and the ITL gateway
-  (OPENAI_BASE_URL) does not answer off the office network. With either
-  available: `python tools/verifier_probe.py --judge anthropic` (default
-  claude-sonnet-5, which thinks adaptively with no thinking field, so
-  `_call_anthropic` needs no change; its max_tokens 2048 includes the
-  thinking tokens) or `--judge openai --model itl-gpt-pro`, and
-  EVAL_GRADER_PROVIDER=anthropic for grader_ab.py.
+  *Second vendor: dropped 2026-11-04 (sweep).* Since S24 the checker runs on
+  the main model's role, now OpenAI gpt-5-mini, so it has in effect changed
+  vendor and the DeepSeek probe above is dated. The office has since
+  measured the checker directly (D-20261024-11, D-20261024-15,
+  D-20261030-11). An Anthropic key is now about the backup provider
+  (D-20261008-09), not a checker trial.
   *Found on the way:* (1) `logger.MAX_ANSWER_LEN = 500` cuts every logged
   answer, so any sheet or review built from logs.jsonl shows #13, #15
   and #32 trailing off; the owner asked why #13 stops mid-word. The
-  customer saw the full text. 10.2's review loop needs the full answer
-  stored. (2) The manuals disagree on the SCS supply: NV200S p.69 says
+  customer saw the full text. Obsolete (sweep 2026-11-04): 10.2
+  (`63496d2`) stores the full answer in the gap entry, so the limit no
+  longer needs raising. (2) The manuals disagree on the SCS supply: NV200S p.69 says
   24V/7.5A with the NV200 Spectral, the SCS manual p.20 says 24V/6.5A
   (#22 quoted the NV200S figure). A documentation fix for ITL, not code.
   (3) Two served answers open with a stray "Yes." (#20, #28), a
-  writer-prompt habit on non-yes/no questions.
+  writer-prompt habit on non-yes/no questions. **Done** (`e077ae1`, S26):
+  the answer prompt now says a what/which/how question never opens with
+  Yes or No.
 - [x] **M9 Pin spec-table test cases to the exact page**, and fix the
   reranker benchmark (2026-09-27). eval.py gets an `expected_page` check
   beside `sources_any`, checked against `_build_sources`'s `pages` list;
@@ -924,9 +1051,11 @@ exactly, we cannot tell whether a fix helped.
   probes (supply voltage x2, weight, operating temperature) return 0 NV9
   Spectral chunks in the dense 16 and the final 8. Tests:
   `test_product_flags.py` (real in-memory Chroma) and two dense-arm cases
-  in `test_shared_documents.py`. **Still to do:** re-arm
+  in `test_shared_documents.py`. ~~**Still to do:** re-arm
   `eval_baseline_retrieval.json` (graded eval.py run, live backend,
-  `--repeats 3`) on the repaired index, since M4 armed it before this.
+  `--repeats 3`) on the repaired index, since M4 armed it before this.~~
+  **Done:** re-armed on the rebuilt index on 2026-09-30 (`55f79ae`,
+  retrieval 32/35 x3) and again on gpt-5-mini on 2026-10-07 (`64bab88`).
 - [x] **8.3 Honest "not mentioned".** When the manual never mentions
   Bluetooth, say so, instead of answering "No". **Scope decided
   (2026-09-29, you):** say "not mentioned" only when X appears nowhere in
@@ -952,7 +1081,10 @@ exactly, we cannot tell whether a fix helped.
   `rejected` (answer-key change following the decision); tuned mark still
   33/34, retrieval 29/32, same always-fails. Known wording quirk: a bare
   "No." to "connect to a phone over Bluetooth" reads "doesn't mention
-  phone over Bluetooth". Also fixed here (M7 label gap): a suppressed
+  phone over Bluetooth". **Fixed 2026-11-04** (`d424f45` on
+  `claude/pending-sweep-20261104`): it now reads "doesn't mention
+  connecting to a phone over Bluetooth", with the same searched words.
+  Pinned by `test_a_connect_question_keeps_its_verb`. Also fixed here (M7 label gap): a suppressed
   answer logs `verified_by: llm` when the LLM verifier was the checker
   that said no.
 - [x] **8.4 Stop treating fresh questions as follow-ups** just because the
@@ -987,7 +1119,9 @@ exactly, we cannot tell whether a fix helped.
   install. With it the question answers from both manuals in an SCS chat
   (24VDC/3.5A for the NV200S, 24V/6.5A for the SCS; cites NV200S p.66-68
   and SCS p.20). The retrieval case pins p.69, so check it on the next
-  retrieval run rather than assuming.
+  retrieval run rather than assuming. **Checked:** the case passes with
+  p.69 and has been a stable pass since the 9.7 re-arm (`55f79ae`,
+  `64bab88`).
 - [x] **8.16 Keep table conditions** ("or 20 coins"): measure first, then
   fix. (2026-09-29, S9, `c4cc950`.) Six page-pinned cases in
   `eval_cases_tables.json`, each requiring the value AND its condition in
@@ -1026,8 +1160,10 @@ exactly, we cannot tell whether a fix helped.
   repeats, with the step turn in 0.01-0.03s. The first attempt used a model
   answer as turn 1 ("What are the steps to access my device in a Linux
   environment?"); the extract shortcut answered it with four stray bullets,
-  so there was nothing numbered to point into. That extract answer is its
-  own quality problem, not yet filed. Retrieval --repeats 3 on the old 32
+  so there was nothing numbered to point into. That extract answer was its
+  own quality problem. Obsolete (sweep 2026-11-04): since D-20261023-04
+  (`c136573`) a list is copied only from a passage headed by the topic, so
+  this question now goes to the model. Retrieval --repeats 3 on the old 32
   cases: the three known failures, plus "SSP programming mode" refused
   1/3 (product-scoped, which neither change touches, so noise).
 - [x] **8.8 Prove "want the steps?" -> "yes" -> steps works end to end** on
@@ -1053,9 +1189,10 @@ exactly, we cannot tell whether a fix helped.
   store (MAX_LEADS) refuses with 503 instead of evicting. Enquiries page
   gained "Not emailed" and a store-full warning. One warning per process
   when posts arrive from loopback with no CF header and TRUST_PROXY unset.
-  tests/test_lead_handoff.py (21 checks). **You:** fill in the mail server
-  under API keys, send one real enquiry, and check it arrives and shows
-  "Emailed to" in the console. The unsent count is on the Enquiries page,
+  tests/test_lead_handoff.py (21 checks). Obsolete (sweep 2026-11-04): the
+  real-send check moved to S25. Since S24 (`b0a3b31`) a sent enquiry leaves
+  the console, so "Emailed to" can no longer be the check, and IT's email
+  API replaces SMTP. The unsent count is on the Enquiries page,
   not on the nav badge.
 - [x] **8.10 Thumbs up/down under answers**, feeding a review list in the
   console. Done 2026-09-29 (S11). POST /widget/feedback {request_id,
@@ -1121,8 +1258,15 @@ exactly, we cannot tell whether a fix helped.
   is not ranked by similarity to the answer, only by edited-first. **Not
   done:** the section heading on refusals (optional in the plan), the
   more_context.kind histogram over the retrieval set (needs a live
-  backend), and the console's Test chat still does not render
-  more_context -- it diverges from the widget here (no shared build step).
+  backend), and ~~the console's Test chat still does not render
+  more_context -- it diverges from the widget here (no shared build step)~~.
+  **Test chat done 2026-11-04** (`ce37709` on
+  `claude/pending-sweep-20261104`): it now renders more_context like the
+  widget, a collapsed "Show more from the manual" block (passages labelled
+  "From <source>, page N") and an "Open <source>, page N" link, behind the
+  widget's gate (not on a flagged, outage or sign-in turn). Pinned by
+  `test_the_console_renders_more_context_like_the_widget`; not yet checked
+  in a live console.
   test_widget_walk.py gained 4 browser cases (detail, related by id,
   signed-in refusal page chip, guest gets none).
 - [x] **8.13 Phone layout and screen-reader fixes**, plus an automated
@@ -1145,9 +1289,14 @@ exactly, we cannot tell whether a fix helped.
   the widget already fails open on all three by design), skips rather than
   fails with no Chromium build installed. Verified against the pre-fix
   file (stashed, reran, restored): 5 of 7 cases fail without the fix, so
-  the test is pinning real behaviour, not tautologies. No focus trap: a
+  the test is pinning real behaviour, not tautologies. ~~No focus trap: a
   visitor can still Tab past the dialog into the host page behind it,
-  which is out of scope here -- flagged, not built.
+  which is out of scope here -- flagged, not built.~~ **Focus trap done
+  2026-11-04** (`543cf9f` on `claude/pending-sweep-20261104`): Tab and
+  Shift+Tab now wrap inside the open widget panel instead of escaping into
+  the host page (focus a visitor moved into the host page by clicking is
+  left alone). Pinned by `test_tab_stays_inside_the_open_panel`, which
+  fails without the fix.
 - [x] **8.14 First multilingual step**: spot French/Spanish/German price
   questions and refusals. (2026-09-28.) **Found already built and merged**
   (`f4c1399`, `language.py` + `main.query_any_language`, ahead of this
@@ -1175,7 +1324,7 @@ exactly, we cannot tell whether a fix helped.
   multilingual answers, behind a switch") looks substantially done by the
   same commit too (the `MULTILINGUAL` env var is the switch), but that is
   a separate step's box to tick, not read further here.
-- [ ] **8.15 Add test cases for all of the above**, so the test suite looks
+- [x] **8.15 Add test cases for all of the above**, so the test suite looks
   like real conversations and not just FAQ lookups. **Partly done
   2026-09-29 (S11): code and cases in, baseline NOT re-armed.** eval.py:
   `fine_outcome` (handoff / deflect / manual, mirroring
@@ -1194,13 +1343,12 @@ exactly, we cannot tell whether a fix helped.
   greeting triggers were checked against the real detectors. Items 10 and
   11 are UI and are covered by test_widget_walk.py (related questions,
   votes); item 2 is --repeats. So 8/11 items have an eval case, 10/11 have
-  a gating test. **Not done:** the unscoped fault-report case (needs
-  clarify.unscoped_clarify_products run with a live top_score), and the
-  re-arm itself, a shell job on a spare backend: `EVAL_URL=http://127.0.0.1:8004/query
-  python eval.py --repeats 3 --results eval_runs/815_all.json`, then the same
-  with `--layer faq --results eval_runs/815_faq.json`, then
-  `--baseline-from-results eval_runs/815_all.json`. Expect the tuned number
-  to FALL: the new cases were written to find failures, not to pass.
+  a gating test. **Closed 2026-11-04 (sweep).** The re-arm was done on 2026-09-30
+  (`55f79ae`, tuned 45/49 x5) and again on 2026-10-07 on 51 cases
+  (`64bab88`, 46/51 x5). The unscoped fault-report case is not needed: the
+  plan asks for one only if clarify offers no product for a blind2 fault
+  report, and M6 found several for each (re-checked on today's index: 4 to
+  15).
 
 ### Tier 8 -> 9 - reliable, reachable, safe
 
@@ -1220,19 +1368,24 @@ exactly, we cannot tell whether a fix helped.
   restart in logs/service.log within 2 min; black-holed provider 10 min ->
   zero restarts; 3/3 cold starts), SMTP credentials + test-email (you), and
   the external pinger (waits for 9.1).
-- [ ] **9.3 A backup AI provider from a different company**, tested by
+- [x] **9.3 A backup AI provider from a different company**, tested by
   deliberately cutting off DeepSeek. Code done 2026-09-29 (`f77fedc`):
   deep health now probes the DEFAULT role (what answers customers) instead
   of the Settings picker (the gateway), and reports `roles.{default,
   advanced,backup}` each with provider + reachable (report-only; backup
   None when unassigned); _call_openai/_call_anthropic return model and
   provider. The escalation-model drift (main.py) was already fixed.
-  **Waiting on you (~2026-10-01, at work):** no Anthropic key; plan is to
-  route the backup through the company OpenAI-compatible server instead --
-  assign it as backup in the console, check `roles.backup.reachable` on
-  /health?deep=1, then the 30-minute DeepSeek black-hole drill with
-  run_live. Open question from the plan: whether api-mode condensation
-  should go through generate_with_fallback.
+  **The rest is replaced by S28 (sweep 2026-11-04).** S24 moved the OpenAI
+  slot off the company gateway and made gpt-5-mini the main model, and
+  D-20261008-09 chose Anthropic as the backup before the hosted launch. So
+  routing the backup through the company server and cutting off DeepSeek are
+  both wrong now; the outage drill is S28's. **Open question settled
+  2026-11-04** (`40866c4` on `claude/pending-sweep-20261104`): in api mode,
+  condense_query goes through generate_with_fallback, so follow-ups keep
+  their context during an outage of the default provider. If the whole chain
+  fails, the original query comes back, never the "unable to generate"
+  sentinel. Pinned by
+  `tests/test_llm.py::test_api_mode_condensation_falls_over_to_the_backup`.
 - [ ] **9.4 A daily spending cap, then turn AI answers on for guests.** The
   switch is the operator's decision. Code done 2026-09-29 (`b63ef28`):
   policy `global_llm_daily` (0 = off; console "Site-wide daily cap" under
@@ -1274,8 +1427,10 @@ exactly, we cannot tell whether a fix helped.
   saved as "generated", where the verifier's top-3 chunks probably missed
   the table page: likely fine. (c) BV30/NV9USB+ overview blurbs.
   No serve gate was added (per the plan: only if the person finds real
-  wrong entries). **Left for you:** read the 39 rejects in
-  `eval_runs/faq_audit_9.6.log` against the PDFs, then edit or delete them.
+  wrong entries). ~~**Left for you:** read the 39 rejects in
+  `eval_runs/faq_audit_9.6.log` against the PDFs, then edit or delete them.~~
+  **Done 2026-10-02:** all 39 deleted by id (408 -> 369 entries; copy in
+  `eval_runs/faq_store.before-9.6-delete-20261002_1301.json`; see S13).
   Editing an entry makes it reviewed.
 - [x] **9.7 Rebuild the search index** (removes page footers, adds table
   context, stamps `indexed_at`). **Rebuilt 2026-09-30 21:00**, see the
@@ -1333,8 +1488,8 @@ exactly, we cannot tell whether a fix helped.
     longer than the last one (40 min).
   - **Result 2026-09-30:** rebuilt with the backend stopped into a copy,
     verified, then swapped in; the previous index is kept beside it as
-    `src/chroma_db.before-9.7-20260930_2100` (delete it once the M4
-    re-arm below has passed). 1749 -> **1668 chunks** across 14
+    `src/chroma_db.before-9.7-20260930_2100` (deleted 2026-10-02, after the
+    re-arm below passed). 1749 -> **1668 chunks** across 14
     documents (the 81 gone are footer-only chunks: BV30 123->112,
     ICU API 160->156, Mini 64->61, MyCheckr 70->67, MyConnect 97->89,
     NV200S 211->191, NV9 Spectral 119->113, NV9USB+ 133->125, SMART
@@ -1371,9 +1526,9 @@ exactly, we cannot tell whether a fix helped.
     one confident document and answered instead of asking. Measured
     across all 18 unscoped eval questions the top score moved by a
     median of 0.000 (mean +0.003), so this is one case, not a shift;
-    raising the ceiling to 0.70 would fix only it. **Your call:** keep
-    0.65 and accept the answer (it now describes the MyCheckr and Mini
-    mounts without asking), or raise the ceiling. Left at 0.65. The
+    raising the ceiling to 0.70 would fix only it. **Ruled 2026-10-02:**
+    keep 0.65 and accept the answer (it now describes the MyCheckr and Mini
+    mounts without asking). The
     other stable flips retrieve the same passages at the same scores on
     both indexes (checked), so they are answer/verifier-side, not the
     index: blind1 MyCheckr fingerprint and SMART Coin coins-per-second;
@@ -1632,8 +1787,8 @@ exactly, we cannot tell whether a fix helped.
   nothing fires nightly until this reaches `main`; test it first via Actions
   -> CI -> Run workflow on this branch; (2) the check's first real run may
   need `WAIT` raised on a cold runner. The eval suites are not in the
-  nightly (they need a corpus, a backend and a provider key; S23's
-  `health_check.py` is the place for that).
+  nightly (they need a corpus, a backend and a provider key; the office
+  lab runs them instead, since HC1 was dropped on 2026-11-04).
   **Corrected, Friday review 2026-10-09: now exercised.** The workflow
   reached `main`, and the scheduled run of 2026-10-09 (run 37909500703,
   started 09:09 UTC, not 02:17: GitHub delays cron) passed all three jobs,
@@ -1753,6 +1908,10 @@ Atlassian service account takes no paid seat (five free per organisation).
 Jira is not part of this; issues are not manuals (that is MCP3).
 
 - [ ] **CF0 Decisions and access (you).**
+  **Partly done (sweep 2026-11-04):** the decisions are made and running in
+  `confluence_sync.py` (`c4fa611`, `af614e3`; `bcff183` keeps an uploaded
+  PDF over its text copy), but the token belongs to a personal account, not
+  a read-only service account, and no one is named to renew it yearly.
   - Create a service account with read-only access to the manual spaces;
     put its email and API token in `.env`. The token lasts at most a year:
     note who renews it.
@@ -1769,7 +1928,12 @@ Jira is not part of this; issues are not manuals (that is MCP3).
   - The Atlassian MCP connector answers Confluence searches with 403 "The
     app is not installed on this instance"; an Atlassian admin approving
     it lets a session inspect the spaces before CF1 (optional).
-- [ ] **CF1 The sync.** Most of it exists already:
+- [x] **CF1 The sync.** **Done and live** (`c4fa611`, `af614e3`, then office
+  fixes): `src/confluence_sync.py` backs off on 429, runs daily by default
+  (`CONFLUENCE_SYNC_HOURS=24`, a deliberate change from weekly) and keeps a
+  document's name across renames; `src/tests/test_confluence_sync.py` has
+  the stubbed cases asked for below; the live state held 1,076 items on
+  2026-11-03. The plan as written, most of which existed already:
   - `ingest_file` skips unchanged content by sha256 and, with
     `replace_existing=True`, swaps a new version in before dropping the
     old chunks (`routes_documents._ingest_worker`).
@@ -1877,6 +2041,13 @@ Gaps, with the evidence:
 - Adopting the eight-rule answer prompt in place of the 49-rule one (ANSWER_PROMPT=short): measured 21 Oct on runs/20261021, 40 fresh questions x 3 repeats, same model and marker. Marks 92.8% -> 90.8% (level, inside the 4.0 noise, gate PASS); wrong answers 3 -> 2 of 120; safe declines 5 -> 11 of 120; cost per answer +19% as logged and +17% priced uncached, because each extra refusal triggers a whole-manual re-read that outweighs the 1,840 tokens the short block saves. The long prompt stays; a dropped rule may be re-tested one at a time with a measured case. (D-20261020-12, product owner)
 - wiring the checked figure sheet (answer_sheet.check) into the answer path as a once-only rewrite when the draft's opener, winner, borrowed figure or figure conflict disagrees with the sheet (ANSWER_SHEET=1, agents/dev-D-20261021-01, base 50a8e33). Measured on deepseek-v4-flash: the finding's 10 cases three times each, arm A (flag off) = arm B (flag on) on every case, every gain over the original run already in arm A; the weekly 40 three times each, A 87.8% vs B 88.6%, paired +0.8 [-1.6, 3.3], the one type that moved (comparison c-27) never ran the sheet; the sheet ran 78 times and corrected nothing (71 agree, 3 overrides all false, 4 rewrite-unusable all false, fixed on the branch and then zero effect); cost +39% per answer (0.000441 -> 0.000611 USD), median +1.3 s, p90 +1.1 s; the sheet never returns an empty sheet, so every extract or reasoning answer pays one extra call. 2026-10-21. (D-20261021-01, product owner) (D-20261021-01, product owner)
 - Explaining the lab's cost-per-answer swing (0.00042 to 0.00143 USD, 21-22 Oct) by a quiet-machine re-run: the swing is the provider's cache holding or dropping the run before's identical prompts (hit rate 97% against 58-71%, same tokens and calls, every type and step 3-5x), which a hosted customer never benefits from; the planning figure is the cost priced uncached, 22 Oct (D-20261022-06, product owner). (D-20261022-06, product owner)
+- taking synced test scripts out of reach of fault questions, measured 2026-10-24 on 29 new-set cases x3 plus 4 bank cases x3: loses nv4000-04 outright and does not beat keeping them on the second shelf. (D-20261024-04, product owner)
+- question-aware verifier deciding every written answer, replayed 24 Oct on 69 answers from four runs (3 calls each): it rejects 59% of the wrong answers but also 15.3% of the right ones (bar: 5%); blind to wrong-figure-from-the-right-page and multi-document answers (1 of 8 caught); false rejects cluster in table and follow-up questions. 24 Oct 2026. (D-20261024-11, product owner)
+- question-aware verifier deciding only yes/no and absent-feature answers a cheap check passed, replayed 24 Oct on 215 readings (30 wrong, 182 right) from every run since 10 Oct, 3 calls each: 83% of wrong caught but 8.8% of right rejected (bar 2%); the 9/9 and 0/18 of D-20261024-11 did not hold on the wider set; false rejects are right answers that add a true detail or sit next to a conflicting passage. 24 Oct 2026. (D-20261024-15, product owner)
+- removing the `_marked` / `_mark_internal` wrappers in src/confluence_sync.py (Audit weekly 2026-10-25); checked 2026-10-25: they are the seams src/tests/test_confluence_sync.py swaps for fakes (lines 79-119), and their lazy import keeps the index library (chromadb, via retrieval_db -> db) out of the sync's import; there is no circular import to remove and no customer effect (D-20261025-10, product owner)
+- grounding-trained DeBERTa-L checkers (MiniCheck, FactCG) replacing or backing the first check (NLI). Measured D-20261030-11, 2-3 Nov 2026, on 519 labelled readings in the production verify context: at the 0.5 bar they pass 48% / 55% of right answers alone against the NLI's 42%, but let 20 / 26 of 108 wrong answers through against the NLI's 6; at a bar that lets no more wrong through than the NLI they pass fewer right answers (30% / 7%). As a second opinion on the 33 drafts the AI verifier threw away they rescue 0 of the 5 right ones. 14x the NLI's CPU per answer; ONNX int8 breaks both. Reopen only with a checker that reads the question, or a GPU host. (D-20261030-11, product owner)
+- a newer reranker (gte-reranker-modernbert-base int8, alone and as a cascade over MiniLM's top 12) measured on 1033 anchored questions, page-reach by type: two-document +5.0 and +3.5 against the +10 bar, comparison +11.5 and +9.4, all types +5.8; 204 of MiniLM's 330 misses have an answer page in no ranking at all, so no reranker can reach them; 7x slower (turn p90 4.3 s -> 21.2 s); much of the gain is a threshold effect (prompts 6.1 -> 8.7 passages, early exits 54 -> 15), not better ranking; 4 Nov 2026 (D-20261030-12, product owner)
+- a looser CONTEXT_FLOOR_RATIO (0.0) and the none.follow / span.ask exits off, measured on 1033 anchored questions to lift two-document page-reach: two-document +1.4 against the +4 bar (38.3 -> 39.7), because only 20 of its 141 misses are found-but-cut and the rest have an answer page in no ranking; the same settings give followup +14.4, procedure +6.2, all types +5.7 with 0 losses, no turn-time change and 1.0% of should-refuse questions newly reaching the prompt; 4 Nov 2026 (D-20261104-03, R&D) (D-20261104-03, product owner)
 
 ### Waiting on things outside the code
 
@@ -2067,32 +2238,6 @@ the classifier calls standalone — left as the engineer wrote them).
 
 ### Deferred from the stress test, with the evidence
 
-- **Comparison synthesis.** With the gate fixed, "which validates notes
-  faster, the NV9 Spectral or the NV9USB+" and "do they both use the same
-  SSP interface" reach the model and are refused (18 T2/T3 after-run):
-  both manuals hold the figure, in different passages. A comparison prompt
-  presenting the two products' passages side by side is the next path.
-  *(Corrected 2026-10-02, S21: no validation-speed figure exists in either
-  manual, so T2's refusal is right; only T3 (SSP) is a real miss. See 10.4.)*
-- **"and step 3?"** re-serves the whole procedure (13 T2, before and
-  after). Wants the previous answer's numbered list, not retrieval —
-  `_expand_previous`-style on `is_more_request`.
-- **Non-English questions are refused at the retrieval gate** (24 T1/T2,
-  Spanish and German); French price question answered in French by the
-  model instead of deflecting (24 T3; `_COMMERCIAL` is English-only).
-  Route: condense-to-English on a non-English first turn, "answer in the
-  language of the question" in the answer prompt.
-- **"Does the MyCheckr support Bluetooth" -> "No."** at grounding 0.002,
-  unflagged (15 T2): inferred from the USB/Ethernet list; "bluetooth" has 0
-  corpus hits. Inference-contract territory; no path today produces "the
-  manual does not mention it".
-- **Answer consistency.** The same resolved question was refused in one run
-  and answered in the next (11 T5, 12 T1, 13 T4, 18 T1, 19 T2 each flipped
-  across four runs) at temperature 0. Single-turn deltas are within this
-  noise; the report only claims the reproducible ones.
-- **No per-answer feedback from the widget** (thumbs), so "answered but
-  wrong" is invisible unless a visitor writes in; no ticket ID shown on a
-  handoff; no push to an external desk.
 - **Freshly started backends crash after warm-up.** Four launches (nohup
   with `/status` polling, `Start-Process`, WMI, sandbox off) died seconds
   after "System warmup complete": WER logs `python.exe` APPCRASH in
@@ -2423,15 +2568,6 @@ see *Shipped — the four follow-ups* above; kept for the record.
      the cron job belongs in the staging deploy, next to a real destination.
      Tracked under the staging item below so it is not forgotten.
 
-- **Password reset via email is banked, not built.** The user will supply
-  SMTP credentials later. Until then the only reset path is a root using the
-  console's "Reset password" button (Accounts page) or
-  `manage_accounts.py passwd <email>` from the machine. Root-lockout
-  question is settled: **no single account is permanently protected** — the
-  existing "the only active root cannot be disabled/deleted/demoted" rule is
-  sufficient, because promoting a second person to root before someone
-  leaves is how root moves between people. Nothing to build there.
-
 - ~~No working provider key on the server~~ — **STALE, verified working
   2026-08-27.** The `DEEPSEEK_API_KEY` in `src/.env` returns HTTP 200 on
   both `GET /models` and `POST /chat/completions`, and
@@ -2504,44 +2640,6 @@ see *Shipped — the four follow-ups* above; kept for the record.
 
 ## In progress / known gaps
 
-- **The weekly "real use" report counts our own test runs as customers.**
-  Found in the Friday review 2026-10-09. `python -m log_report --since 7d`
-  (src/) reported 1963 questions, 1469 answered, 387 refused, 0 votes,
-  0 handoffs, p50 5.26s / p90 17.25s, "real use; tests excluded". Grouping
-  those 1963 rows by session-id prefix: `cases-` 1239, `blind4-` 384,
-  `blind6-` 102, `probe-` 93, `blind3-` 48, `probelat-` 36, `diag-` 18,
-  `perf-` 14, `cost-` 12, and **about 7 rows** with no harness-looking
-  prefix. So the real-use count is in single digits, and every number in
-  that report this week is a harness number. Cause:
-  `pipeline_trace.origin_for` treats only `eval-`, `live-` and
-  `preflight-` as tests; `blind_eval.py` (in `eval_runs/2026100*_blind*/`
-  and the office worktrees' `tools/`) and ad-hoc scratch runners call
-  `main._traced_query` in-process with their own prefixes, so they log as
-  `origin: console`. Why it matters: 10.1's weekly report, the gap review
-  and D-15's retention all key on origin, and the console shows these as
-  people. Done looks like: the blind/probe runners send an `eval-` prefixed
-  session id (smallest fix; `eval-blind6-...` keeps the set name), or
-  `origin_for` gains those prefixes; `log_report --since 7d` then shows
-  single digits for real use, with the harness rows under `--include-tests`.
-  Optional: relabel the existing rows offline so last week's report is
-  honest. No week-on-week comparison is possible: no earlier Friday review
-  recorded log_report numbers, and these are not a baseline.
-
-  **Still open, re-measured in the Friday review 2026-10-16.**
-  `origin_for` (`src/pipeline_trace.py:162`) still knows only `eval-`,
-  `live-`, `preflight-`; `cecd2d0` changed only when those count on the
-  widget. `log_report --since 7d`: 269 questions, 164 answered, 98 refused,
-  5 asked back, 0 handoffs, 116 of 187 conversations "resolved", 0 votes,
-  p50 5.77s / p90 14.41s. By session prefix: `cases-` 182, `replay-` 30,
-  `at-` 23, `probe-` 11, `e2e-ce…` 8, `map-` 7, `reg-` 4, `warm…` 2, and 2
-  rows with no session id (pre-M2). **Every row this week looks like a
-  harness run; real use is 0-2.** Not one row was labelled `eval`, so
-  `log_report` excluded nothing. The 10-09 numbers (1963 questions) were
-  the same kind of noise, so the drop to 269 says the lab ran less, not
-  that customers left. The prefix list has grown (`replay-`, `at-`, `map-`,
-  `reg-`, `e2e-` are new since 10-09), which argues for the runners
-  sending `eval-…`, not for a longer list in `origin_for`.
-
 - **The office's Dev builds lose backslash-newlines, and a person repairs
   them afterwards.** Found in the Friday review 2026-10-16. Three of this
   week's 28 code commits exist only to put a lost line continuation back:
@@ -2561,7 +2659,14 @@ see *Shipped — the four follow-ups* above; kept for the record.
   build stops writing files through a shell heredoc.
 
 - **Staging deploy is prepared but has never been run.** `STAGING.md` is the
-  runbook; `docker/.env.example` is the template. **Carries two deferred
+  runbook. **Corrected in the Friday review 2026-10-30:** the Docker stack
+  this item described is gone (`03f1913`, `0b6ebe6`, `7a0995e`,
+  D-20261025-01; there is no `docker/` folder any more). Staging is now the
+  backend run as on a desktop, kept up by `serve.ps1 -Install`, behind a
+  named Cloudflare tunnel (`TUNNEL_SETUP.md`); since `e5eec94` a tunnelled
+  host listens on 127.0.0.1 unless `-Lan`. Read the Docker sentences below
+  as history; "not exercised on a real host" is still unconfirmed either
+  way. **Carries two deferred
   decisions from 2026-08-27:** the nightly backup cron belongs here (see the
   backup item above), and backup encryption should be switched back on
   (`BACKUP_ALLOW_PLAINTEXT` removed, a passphrase chosen and stored) before
@@ -2593,26 +2698,6 @@ see *Shipped — the four follow-ups* above; kept for the record.
   prompt-injection surface attached, which is why it is not a default.
   `WIDGET_AI_DRAFT_ANONYMOUS=1` still works as the env-level initial value.
 
-- **Per-conversation caps are a cost guard, not a security boundary.** The
-  session id comes from the visitor's browser, so anyone can start a fresh
-  conversation. The daily per-visitor and per-IP ceilings are what actually
-  bound a determined caller; the session caps stop an honest runaway thread.
-  Worth knowing before relying on them for anything adversarial.
-
-  **2026-09-24: the per-IP ceiling did not exist in the default guest mode.**
-  Checking the claim above found it false for FAQ-only guests, the mode that
-  ships. `quota.consume_faq_lookup` counted every lookup against the IP, but
-  `check_faq_lookup` read only the per-visitor count, and the visitor id
-  comes from the browser too, so clearing site data reset everything. It now
-  enforces `anon_ip_daily` on FAQ lookups as well (reason `ip_faq_quota`;
-  the widget still shows its usual daily-limit message). `reset_visitor` also
-  missed the per-IP credit counter, so a guest blocked on `ip_quota` stayed
-  blocked after a console reset; fixed. Pinned by
-  `tests/test_quota_ceilings.py`. The session caps are still a cost guard by
-  design. No server-issued session id would change that, because a caller
-  can just ask for a new one. What bounds a caller is identity: the IP for
-  guests, the account for members.
-
 - ~~**~50s of a 113s answered query is unattributed.**~~ — **RESOLVED
   2026-09-25, and the figure was stale.** It came from v15.1, when the
   `timing` dict had four keys. Re-traced against the 52 timed entries in
@@ -2634,10 +2719,14 @@ see *Shipped — the four follow-ups* above; kept for the record.
   refusal offers "Ask our support team", which opens the configured support
   form (fields from the console, optional write-up of the conversation) and
   files a real enquiry. It previously threw the visitor at a `mailto:` with
-  no record kept. **`product_options` is still not rendered as buttons in
-  the widget** — the widget's own flow asks for a range/product up front via
-  `/widget/catalog`, so the mid-conversation disambiguation buttons the
-  console's chat shows have no equivalent there yet.
+  no record kept. ~~`product_options` is still not rendered as buttons in
+  the widget~~ — **DONE 2026-11-04** (branch `claude/small-jobs-20261104`).
+  Since D-20261021-07 a visitor can type before picking a product, so an
+  unscoped question can come back asking which product. `/widget/ask` and
+  the stream's meta event now forward `product_options` (key and label, at
+  most six), and the widget shows them as chips: a tap sets the product and
+  asks the same question again, as the console does. Checked in a browser
+  (`test_widget_typed_first.py`).
 
 - **The React SPA was retired in v15.2.** It was a third chat surface
   duplicating the admin console's test chat and the widget, so every fix had
@@ -2649,10 +2738,15 @@ see *Shipped — the four follow-ups* above; kept for the record.
     is unchanged. It previously depended on vite copying it into
     `frontend/dist/` and that being mounted at `/` — a customer asset
     depending on an internal dev app being built.
-  - **No UI remains for the generation mode / provider toggle.** The React
-    app's Settings page was the only one. The endpoints still exist
-    (`POST /settings/mode`, `POST /settings/online_provider`) but are
-    curl-only. Worth adding to the admin console.
+  - ~~**No UI remains for the generation mode / provider toggle.**~~ —
+    **DONE 2026-11-04.** The provider half came with the Keys page's
+    per-job pickers (`keyRolesCard`, 555f3704). The mode half: the Keys
+    page's "Which key does what" card now has an Answer mode select
+    (Online / Local) that posts to `/settings/mode`, confirms before Local
+    and names where flagged answers go (branch
+    `claude/small-jobs-20261104`; check in `test_keystore.py`). Left:
+    `/settings/mode` itself accepts a support-level session, while the
+    page and the escalation switch beside it are root-only.
   - Saved chat history (was browser localStorage in the React app) is gone.
   - Node/npm is no longer needed at all: no build step anywhere.
 
@@ -2668,63 +2762,17 @@ see *Shipped — the four follow-ups* above; kept for the record.
   product-scoped retrieval blindly. 37 FAQ entries were at one point tagged
   `myconnect`, a key absent from the catalogue — confirm resolved.
 
-- **`documents/` is untracked in git** and is the working document store
-  (`docstore.py`). It is the only copy of some source PDFs — three exist
-  solely under the legacy `C:\data\source_files` on the user's machine and
-  have not been consolidated. The backup feature now covers it (an archive
-  carries every document), which answers "how", but not "has anyone". The
-  three legacy files still need consolidating with
-  `reindex.py --migrate` before a backup can include them.
+  **Partly done (sweep 2026-11-04):** the product keys are clean now (no
+  `mini`, `myconnect` is a catalogue key, `coin_hoppers` is a category), but
+  the FAQ filing still drifts: 30 entries carry no product, 18 from the old
+  "MyCheckr User Manual-v7 (1).pdf" copy are filed only under the Mini, and
+  14 "temp-d07" entries look like test leftovers. Fix them through the
+  console, with a person confirming deletions.
 
-
-- ~~"talk to sales" and one-word replies on the customer-questions list~~ —
-  fixed 2026-08-27. `record_gap` now filters anything that is not a
-  curatable question (button text, "no", bare product names) at the single
-  choke point all six callers go through. Existing noise entries are still
-  in the log and will need dismissing by hand, or ignoring — the filter is
-  not retroactive.
-
-- **Desktop shell for the admin console — decided 2026-08-28, not started.**
-  The goal is a company admin (ITL, initially Hamzah) installing one thing,
-  uploading documents, curating FAQs, creating accounts and exporting the
-  WordPress widget, without meeting a terminal.
-
-  **The backend cannot move into the .exe.** The widget runs in a customer's
-  browser on the WordPress site and calls the backend directly for every
-  answer, so the backend needs a public, always-on address. An admin PC has
-  neither: laptop shut means the site's widget is dead, and a residential IP
-  moves. The direction chosen is therefore **hosted backend + a thin desktop
-  shell** — the .exe is a window onto the hosted console, not a copy of it.
-  (A Cloudflare Tunnel would let a local backend serve the public widget. It
-  works, and it was rejected: uptime of a customer-facing widget should not
-  depend on whether someone's laptop is open.)
-
-  Infrastructure this needs that does not exist yet:
-
-  1. **A permanent host.** Staging is the first one; production is a second.
-     Until there is a box with a stable hostname and TLS, the desktop shell
-     has nothing to point at.
-  2. **A packaging pipeline.** Tauri (small, needs Rust) or pywebview
-     (trivial, ships a Python runtime). Either way: an icon, a versioned
-     installer, and a place to host the download.
-  3. **Code signing.** Unsigned, Windows SmartScreen warns every ITL
-     colleague on first run. An OV/EV certificate is a purchase and a
-     renewal, so it wants deciding early rather than at ship time.
-  4. **An update path.** A shell that pins a URL is fine until the URL
-     changes. Decide now whether it self-updates or is simply re-downloaded.
-  5. **A server-address setup screen**, so the same build works against
-     staging and production without a rebuild.
-
-  Worth being honest about the value: over "open the console in a browser
-  and bookmark it", the shell buys an icon, a fixed window, and not having
-  to remember a URL. That is not nothing for a non-technical admin, but it
-  is packaging rather than capability — so it should come after the console
-  itself is proven in a browser (see the browser-verification gap above),
-  not before.
-
-- **Code scan 2026-08-28 — five findings: #1 fixed, #4 half done, #2,
-  #3 and #5 still open** (re-checked against the code in the Friday review
-  2026-09-25). A read-through of the live tree (`legacy/` excluded) for
+- **Code scan 2026-08-28 — five findings: #1, #2, #3 and #5 done, #4
+  half done** (re-checked against the code in the Friday review
+  2026-09-25; #2 and #3 were fixed in 8.9, #5 closed in the 2026-11-04
+  sweep). A read-through of the live tree (`legacy/` excluded) for
   gaps not already on this list.
 
   1. ~~**Non-atomic writes on the only copy of customer data.**~~ —
@@ -2772,15 +2820,22 @@ see *Shipped — the four follow-ups* above; kept for the record.
      every answer refuses — exactly the state a fresh deploy is in. A
      `?deep=1` variant that counts collection rows would make the runbook's
      check real.
-     **HALF DONE:** `/health?deep=1` exists (since `1365920`, 2026-09-01)
-     and returns 503 when the index is empty, no key is set or the models
-     are not loaded. But neither consumer uses it:
-     `docker/Dockerfile.backend:35` still probes plain `/health`, and so
-     does `STAGING.md:139`. Done looks like: the runbook step uses
-     `?deep=1`, and the container healthcheck either does too (with a
-     `start-period` longer than the ~30s model load) or says why not.
+     **DONE 2026-11-04** (branch `claude/small-jobs-20261104`).
+     `/health?deep=1` (since `1365920`) returns 503 when the index is
+     empty, the default provider has no key or does not answer, or warm-up
+     is not finished. `serve.ps1 -Status` now prints a `ready` line from
+     it, and STAGING.md step 4 says it must read yes and gives the on-box
+     curl. The tunnel check stays plain `/health`, because `?deep=1` is
+     refused from outside without a staff token. The container half went
+     with Docker (`0b6ebe6`), and the watchdog's plain-/health choice is
+     explained in `serve.ps1`.
 
-  5. **Worker scaling would silently corrupt every store.** All seven JSON
+  5. ~~**Worker scaling would silently corrupt every store.**~~ —
+     **DONE (sweep 2026-11-04).** M11 put the warning in the compose file;
+     that file went with Docker (`03f1913`, D-20261025-01), and the warning
+     now sits in the go-live checklist, `TUNNEL_SETUP.md:53` "Single uvicorn
+     worker only" (`73dbcc7`). `serve.ps1` starts uvicorn without
+     `--workers`. Original text: All seven JSON
      stores rely on `threading.Lock()`, which is process-local. Correct
      today (single-worker uvicorn), but the open ~50s latency item makes
      `--workers N` the obvious reach, and that breaks locking everywhere at
@@ -3181,17 +3236,6 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
 - **7 heading-list chunks.** Bodies that are a page's own table of contents
   ("Additional Features / Typical Applications / Component Overview").
   Small, and harder to detect than the footers fixed in `9c138d3`.
-- **A BV30 coverage miss.** "does the BV30 support polymer notes?" returns
-  cashbox and escrow text in the top 3 — nothing about note handling. BV30
-  also has the highest share of content-free chunks (15%), so this may be an
-  extraction gap rather than a ranking one.
-- **`nv9_spectral,biometrics_general` tagging.** Every chunk of the NV9
-  Spectral manual carries a biometrics tag. A note validator is not a
-  biometrics device; if this is wrong it widens retrieval into unrelated
-  material.
-- **Existing documents still carry running footers.** `9c138d3` strips them
-  at ingest, so this only takes effect on a reindex
-  (`python reindex.py --from-store`, ~40 min for 11 docs).
 
 **Measurement**
 
@@ -3230,35 +3274,6 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   baseline taken against it would have encoded the old BM25 tokenisation and
   no procedure completion as the reference, which is worse than no baseline
   because it looks authoritative.
-- **No conversational layer in the eval suite.** — **CASES ADDED
-  2026-09-22; still unarmed.** Every case was a well-formed standalone
-  question (`new_session: true` on all 19), so the failure this whole run
-  was about — a follow-up that dies — could not be caught. Wanted cases for
-  follow-ups, anaphora, and the refusal path; `eval_cases_retrieval.json`
-  now has 30 cases, six of them conversational follow-ups, added while
-  fixing the condensation item above:
-
-  | follow-up | what it pins |
-  |---|---|
-  | "what is the power required to run both at once" | set anaphora, PENDING's own example — matched no marker, so no rewrite ran |
-  | "how much does it weigh on its own?" | R2 pro-form onto a spec-table row (`1.05`) |
-  | "what are the pin assignments for that interface" | R3 deixis onto a near-all-numbers pin table |
-  | "ok and what about the full size one?" | R1 stacked openers + an entity SWITCH (graded: `sources_any` cannot separate the two MyCheckr manuals) |
-  | "how do I reset the password on my Cisco router" | the refusal path *inside* a conversation — an ungated rewriter must not drag it into the corpus, and fusion must not rescue enough junk to clear the gate |
-  | "...operating temperature range for the MyCheckr" | a self-contained question with history present: the new door onto the 2026-09-19 fault |
-
-  The runner already threaded a session across consecutive cases, so a
-  follow-up is a case with `new_session` omitted — which makes this list
-  **order-dependent**, noted in its `_README`. Every expectation is grounded
-  in a chunk read out of the corpus first, not guessed. `--selfcheck`
-  passes at 30 cases.
-
-  **Armed 2026-09-22** with the item above — all 30 cases, including the six
-  conversational follow-ups, are in the recorded baseline. Two of the four
-  unstable cases are follow-ups (`what are the pin assignments for that
-  interface`, `ok and what about the full size one?`), which is the
-  conversational layer doing exactly the job it was added for: it is the
-  part of the suite that does not yet hold still.
 - *(Removed 2026-10-16, Friday review: "the blind set trails v16.3 by
   2-3 cases" is superseded by M5, which ran blind2 three times per side on
   2026-09-28 (v16.3 22/34 stable, HEAD 30/34, one case lost); see M5 above.
@@ -3288,13 +3303,6 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   answer beats the merged-top-3 fallback on at least the case that motivated
   it ("can I use an nv9 spectral with note float?" — the disabling-firmware
   passage ranked #1 but the served answer came from passage #2).
-- **`escalated_to_deepseek` is now a misleading field name.** `f51727c`
-  moved escalation onto the assigned backup role; the response key still
-  says DeepSeek. Kept for client compatibility.
-- **A 0.0009-grounding answer was served.** `logs.jsonl:1970` — correct, and
-  rescued by lexical containment, which is the rescue working as designed.
-  Worth one look at how far that rescue can carry an answer the NLI model
-  scored at essentially zero.
 
 **Infrastructure**
 
@@ -3319,16 +3327,6 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   during the 25th's stress test; back that night; NXDOMAIN again now. Anything that depends on the gateway should
   re-check DNS on the day and not trust this file. The owner of the host
   has never been named here, and naming them is the useful next step.
-- **`release.py` cannot cut a drop while two READMEs share a basename.**
-  `python release.py --minor` refuses with `README.md <-> tools/README.md`,
-  because the legacy drop is FLAT and one would silently overwrite the
-  other. The refusal is right; the flatness is the bug. v16.3 was therefore
-  released by bumping `VERSION` by hand, with no `src/legacy/v16/v16.3`
-  snapshot. Fix by snapshotting into subfolders that mirror the repo, not
-  by renaming a README — the collision will recur for every `tools/` file
-  that shares a name with a root one. Nothing is lost meanwhile: the drop
-  is a convenience copy, and git holds the real history.
-
 - **`backup/pre-build-drop` still pins 290MB in `.git`.** The safety net for
   the `f33b22b` rebase. Once the rebase is trusted:
   `git branch -D backup/pre-build-drop && git reflog expire --expire=now
@@ -3344,7 +3342,11 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   are HMAC tokens signed with `SESSION_SECRET`, revocable via a per-account
   token epoch. **Not yet verified in a browser** — the sign-in form,
   first-run root bootstrap, and the Accounts page are DOM-driven and want a
-  real click-through. An SSO seam is documented in `accounts.py`: Entra/OIDC
+  real click-through. **Partly done (sweep 2026-11-04):** `20b75ee` ran
+  `test_ui.py` headless through the sign-in form, the root bootstrap and
+  the Accounts page with no errors; still not clicked through: the
+  Accounts actions (add, change level, reset password, disable or delete,
+  the last-root guard) and signing out and back in. An SSO seam is documented in `accounts.py`: Entra/OIDC
   would replace `verify_password` only.
 - ~~The browser can still hold a DeepSeek key in `localStorage` that
   overrides the server's own key (`api.js`)~~ — resolved as a side effect of
@@ -3359,13 +3361,296 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   change appearance; anything not set as an attribute is governed by the
   console. `data-api`/`data-token` stay attribute-only by necessity.
 - No image/diagram/OCR handling in ingestion — explicitly deferred, not
-  forgotten.
-- 4 pre-existing `test_llm.py`-adjacent issues were cleared in v15.0; if new
-  ones appear, check `run_tests.py`'s per-file `sys.modules` isolation is
-  still doing its job (it's what unskipped 5 files that were silently not
-  running before).
+  forgotten. **Partly done (sweep 2026-11-04):** OCR of unreadable pages
+  and figures (`4945c45`) and picture labels (D-20261022-15) are in;
+  understanding what a diagram shows is office item D-20261022-16
+  (parked).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-11-04 (sweep) — ticked off from the open list:**
+  - ~~**Comparison synthesis.**~~ — **Done in 10.4** (`c8a8353`, S21): when a
+    question names two products, each gets its own share of the context, and
+    18 T3 (SSP) went from refused to answered 3/3. T2's refusal is right, as
+    the correction below says.
+    Original text: With the gate fixed, "which validates notes
+    faster, the NV9 Spectral or the NV9USB+" and "do they both use the same
+    SSP interface" reach the model and are refused (18 T2/T3 after-run):
+    both manuals hold the figure, in different passages. A comparison prompt
+    presenting the two products' passages side by side is the next path.
+    *(Corrected 2026-10-02, S21: no validation-speed figure exists in either
+    manual, so T2's refusal is right; only T3 (SSP) is a real miss. See 10.4.)*
+  - ~~**"and step 3?"** re-serves the whole procedure~~ — **Done in 8.7**
+    (`8b9fe65`): a bare "step N" is served from the last answer's numbered
+    list with no model call, or the bot says there is no step N
+    (`src/tests/test_step_reference.py`).
+    Original text: (13 T2, before and
+    after). Wants the previous answer's numbered list, not retrieval —
+    `_expand_previous`-style on `is_more_request`.
+  - ~~**Non-English questions are refused at the retrieval gate**~~ — **Done**
+    (`f4c1399`, 8.14 and 9.9): questions are translated to English at the edge
+    and the answer translated back, so the price rule sees English, and the
+    French price question now gets the sales reply in French
+    (`src/tests/test_multilingual.py`). The German factory-reset question is
+    still refused, in English too: a gap in the manual, not this bug.
+    Original text: (24 T1/T2,
+    Spanish and German); French price question answered in French by the
+    model instead of deflecting (24 T3; `_COMMERCIAL` is English-only).
+    Route: condense-to-English on a non-English first turn, "answer in the
+    language of the question" in the answer prompt.
+  - ~~**"Does the MyCheckr support Bluetooth" -> "No."**~~ — **Done in 8.3**
+    (`dde62db`): a confident No about a feature the product's documents never
+    mention now reads "the <product> documentation doesn't mention <feature>"
+    (`src/mentions.py`, on by default; `src/tests/test_not_mentioned.py`).
+    Original text: at grounding 0.002,
+    unflagged (15 T2): inferred from the USB/Ethernet list; "bluetooth" has 0
+    corpus hits. Inference-contract territory; no path today produces "the
+    manual does not mention it".
+  - ~~**Answer consistency.**~~ — **Explained by 9.10** (`c868dd6`): 3
+    flipping cases in 1,024 case-runs, all from the sampled generator or the
+    sampled grader; retrieval and grounding repeat to four decimals, so there
+    is no fixed cause left to fix. The measured noise is 0-2 cases per suite
+    per 3 runs.
+    Original text: The same resolved question was refused in one run
+    and answered in the next (11 T5, 12 T1, 13 T4, 18 T1, 19 T2 each flipped
+    across four runs) at temperature 0. Single-turn deltas are within this
+    noise; the report only claims the reproducible ones.
+  - ~~**No per-answer feedback from the widget**~~ — **Done, all three
+    parts:** thumbs up/down (8.10, `25cdd5b`), a GO- reference on handoff
+    (8.9, `872c394`), and enquiries emailed to the sales and support inboxes,
+    which open Jira tickets (`b0a3b31`). Sending waits on IT's email API
+    (S25).
+    Original text: (thumbs), so "answered but
+    wrong" is invisible unless a visitor writes in; no ticket ID shown on a
+    handoff; no push to an external desk.
+  - ~~**Password reset via email is banked, not built.**~~ — **Built** in
+    `bd5e6b5`: emailed reset and sign-in links (`accounts.py`,
+    `routes_admin_auth.py`) and a "Forgot your password?" link on the console
+    sign-in, sent through `mailer.py` and covered by
+    `src/tests/test_email_links.py`. Only mail credentials are missing, which
+    the SMTP item tracks.
+    Original text: The user will supply
+    SMTP credentials later. Until then the only reset path is a root using the
+    console's "Reset password" button (Accounts page) or
+    `manage_accounts.py passwd <email>` from the machine. Root-lockout
+    question is settled: **no single account is permanently protected** — the
+    existing "the only active root cannot be disabled/deleted/demoted" rule is
+    sufficient, because promoting a second person to root before someone
+    leaves is how root moves between people. Nothing to build there.
+  - ~~**The weekly "real use" report counts our own test runs as
+    customers.**~~ — **Done 2026-11-04** (`d205158` on
+    `claude/pending-sweep-20261104`). Off the widget, `origin_for` now logs
+    "console" only for the console chat's `console-` session ids and "script"
+    for any other id or none. `TEST_ORIGINS` (with script) is defined once in
+    `pipeline_trace` and used by `log_report`, `faq_store` and
+    `eval_batch_summary`. Pinned by
+    `test_pipeline_trace.py::test_origin_is_who_asked_and_surface_is_the_door`
+    and the script row in `test_log_report.py`. Old rows are not relabelled,
+    so last week's report still shows harness turns as "console". Any future
+    /query client other than the console chat must send a `console-` session
+    id, or it is logged as a script.
+    Original text:
+    Found in the Friday review 2026-10-09. `python -m log_report --since 7d`
+    (src/) reported 1963 questions, 1469 answered, 387 refused, 0 votes,
+    0 handoffs, p50 5.26s / p90 17.25s, "real use; tests excluded". Grouping
+    those 1963 rows by session-id prefix: `cases-` 1239, `blind4-` 384,
+    `blind6-` 102, `probe-` 93, `blind3-` 48, `probelat-` 36, `diag-` 18,
+    `perf-` 14, `cost-` 12, and **about 7 rows** with no harness-looking
+    prefix. So the real-use count is in single digits, and every number in
+    that report this week is a harness number. Cause:
+    `pipeline_trace.origin_for` treats only `eval-`, `live-` and
+    `preflight-` as tests; `blind_eval.py` (in `eval_runs/2026100*_blind*/`
+    and the office worktrees' `tools/`) and ad-hoc scratch runners call
+    `main._traced_query` in-process with their own prefixes, so they log as
+    `origin: console`. Why it matters: 10.1's weekly report, the gap review
+    and D-15's retention all key on origin, and the console shows these as
+    people. Done looks like: the blind/probe runners send an `eval-` prefixed
+    session id (smallest fix; `eval-blind6-...` keeps the set name), or
+    `origin_for` gains those prefixes; `log_report --since 7d` then shows
+    single digits for real use, with the harness rows under `--include-tests`.
+    Optional: relabel the existing rows offline so last week's report is
+    honest. No week-on-week comparison is possible: no earlier Friday review
+    recorded log_report numbers, and these are not a baseline.
+
+    **Still open, re-measured in the Friday review 2026-10-16.**
+    `origin_for` (`src/pipeline_trace.py:162`) still knows only `eval-`,
+    `live-`, `preflight-`; `cecd2d0` changed only when those count on the
+    widget. `log_report --since 7d`: 269 questions, 164 answered, 98 refused,
+    5 asked back, 0 handoffs, 116 of 187 conversations "resolved", 0 votes,
+    p50 5.77s / p90 14.41s. By session prefix: `cases-` 182, `replay-` 30,
+    `at-` 23, `probe-` 11, `e2e-ce…` 8, `map-` 7, `reg-` 4, `warm…` 2, and 2
+    rows with no session id (pre-M2). **Every row this week looks like a
+    harness run; real use is 0-2.** Not one row was labelled `eval`, so
+    `log_report` excluded nothing. The 10-09 numbers (1963 questions) were
+    the same kind of noise, so the drop to 269 says the lab ran less, not
+    that customers left. The prefix list has grown (`replay-`, `at-`, `map-`,
+    `reg-`, `e2e-` are new since 10-09), which argues for the runners
+    sending `eval-…`, not for a longer list in `origin_for`.
+
+    **Real-use report, 2026-10-23 note.** Still open (`origin_for` unchanged,
+    `src/pipeline_trace.py:162`), but this week `log_report --since 7d --all`
+    shows 0 rows at all, and `src/logs.jsonl` has not been written since 10-20.
+    So there is no harness noise to measure this week, and also no customer
+    data. Whoever picks this up should not read the zeros as "real use is
+    zero": check that the lab and the backend were simply idle.
+
+    **Real-use report, 2026-10-30 note.** Still open (`_ORIGIN_PREFIXES` in
+    `src/pipeline_trace.py` still holds only `eval-`, `live-`, `preflight-`).
+    `log_report --since 7d`: 22 questions, 15 answered, 5 refused, 2 asked
+    back, 0 handoffs, 0 votes, p50 0.62s / p90 5.61s. All 22 are `origin:
+    console` with session id `default`, and they are not customers: one
+    NV4000 question at 10-24 01:08, then 21 in four bursts on 10-30 (10:06,
+    10:17-10:18, 14:17) that are all price/stock/repair-cost phrasings, i.e.
+    a probe of the sales-deflect fix `c3c9b8e`. So a harness that sends **no**
+    session id is now a third way to log as a person, and a prefix list in
+    `origin_for` cannot catch it. Done looks like (added): a probe without a
+    session id is either refused a `default` session in the console path or
+    logged under `--all` only.
+  - ~~**Per-conversation caps are a cost guard, not a security boundary.**~~ —
+    **Closed:** the one real gap, no per-IP ceiling on FAQ lookups, was fixed
+    in `bd5e6b5` (`quota.check_faq_lookup` enforces `anon_ip_daily`; pinned by
+    `tests/test_quota_ceilings.py`). What is left is a design note, not work.
+    Original text: The
+    session id comes from the visitor's browser, so anyone can start a fresh
+    conversation. The daily per-visitor and per-IP ceilings are what actually
+    bound a determined caller; the session caps stop an honest runaway thread.
+    Worth knowing before relying on them for anything adversarial.
+
+    **2026-09-24: the per-IP ceiling did not exist in the default guest mode.**
+    Checking the claim above found it false for FAQ-only guests, the mode that
+    ships. `quota.consume_faq_lookup` counted every lookup against the IP, but
+    `check_faq_lookup` read only the per-visitor count, and the visitor id
+    comes from the browser too, so clearing site data reset everything. It now
+    enforces `anon_ip_daily` on FAQ lookups as well (reason `ip_faq_quota`;
+    the widget still shows its usual daily-limit message). `reset_visitor` also
+    missed the per-IP credit counter, so a guest blocked on `ip_quota` stayed
+    blocked after a console reset; fixed. Pinned by
+    `tests/test_quota_ceilings.py`. The session caps are still a cost guard by
+    design. No server-issued session id would change that, because a caller
+    can just ask for a new one. What bounds a caller is identity: the IP for
+    guests, the account for members.
+  - ~~**`documents/` is untracked in git** and is the working document store~~
+    — **Closed:** every file in `C:\data\source_files` has a copy in
+    `documents/` (three byte-identical; the NV9USB+ copy is the same size and
+    `documents/` holds the working one), and the nightly "GroundedOps Daily
+    Backup" writes `.gobk` archives to `D:\GroundedOpsBackups` (latest
+    2026-11-02). Removing the legacy folder is your call; `docstore.py` still
+    reads it while it exists.
+    Original text:
+    (`docstore.py`). It is the only copy of some source PDFs — three exist
+    solely under the legacy `C:\data\source_files` on the user's machine and
+    have not been consolidated. The backup feature now covers it (an archive
+    carries every document), which answers "how", but not "has anyone". The
+    three legacy files still need consolidating with
+    `reindex.py --migrate` before a backup can include them.
+  - ~~"talk to sales" and one-word replies on the customer-questions list~~ —
+    fixed 2026-08-27. `record_gap` now filters anything that is not a
+    curatable question (button text, "no", bare product names) at the single
+    choke point all six callers go through. Existing noise entries are still
+    in the log and will need dismissing by hand, or ignoring — the filter is
+    not retroactive.
+    **Leftover closed (sweep 2026-11-04):** a read-only scan of
+    `src/faq_gaps.json` (500 entries) finds no button text or one-word noise
+    left to dismiss.
+  - ~~**Existing documents still carry running footers.**~~ — **Done in 9.7**
+    (`1890879`, the rebuild of 2026-09-30, footer-tailed chunks 500 -> 0). A
+    read-only scan of all 9,503 live chunks finds none with a running footer,
+    and the strip still runs at ingest.
+    Original text: `9c138d3` strips them
+    at ingest, so this only takes effect on a reindex
+    (`python reindex.py --from-store`, ~40 min for 11 docs).
+  - ~~**No conversational layer in the eval suite.**~~ — **Done:** armed
+    2026-09-22 (`8025a8a`), re-armed 2026-09-30 (`55f79ae`) and 2026-10-07
+    (`64bab88`); the retrieval suite now has 35 cases, 8 of them follow-ups.
+    Only the "still unarmed" heading was stale.
+    Original text: **CASES ADDED
+    2026-09-22; still unarmed.** Every case was a well-formed standalone
+    question (`new_session: true` on all 19), so the failure this whole run
+    was about — a follow-up that dies — could not be caught. Wanted cases for
+    follow-ups, anaphora, and the refusal path; `eval_cases_retrieval.json`
+    now has 30 cases, six of them conversational follow-ups, added while
+    fixing the condensation item above:
+
+    | follow-up | what it pins |
+    |---|---|
+    | "what is the power required to run both at once" | set anaphora, PENDING's own example — matched no marker, so no rewrite ran |
+    | "how much does it weigh on its own?" | R2 pro-form onto a spec-table row (`1.05`) |
+    | "what are the pin assignments for that interface" | R3 deixis onto a near-all-numbers pin table |
+    | "ok and what about the full size one?" | R1 stacked openers + an entity SWITCH (graded: `sources_any` cannot separate the two MyCheckr manuals) |
+    | "how do I reset the password on my Cisco router" | the refusal path *inside* a conversation — an ungated rewriter must not drag it into the corpus, and fusion must not rescue enough junk to clear the gate |
+    | "...operating temperature range for the MyCheckr" | a self-contained question with history present: the new door onto the 2026-09-19 fault |
+
+    The runner already threaded a session across consecutive cases, so a
+    follow-up is a case with `new_session` omitted — which makes this list
+    **order-dependent**, noted in its `_README`. Every expectation is grounded
+    in a chunk read out of the corpus first, not guessed. `--selfcheck`
+    passes at 30 cases.
+
+    **Armed 2026-09-22** with the item above — all 30 cases, including the six
+    conversational follow-ups, are in the recorded baseline. Two of the four
+    unstable cases are follow-ups (`what are the pin assignments for that
+    interface`, `ok and what about the full size one?`), which is the
+    conversational layer doing exactly the job it was added for: it is the
+    part of the suite that does not yet hold still.
+  - ~~**`escalated_to_deepseek` is now a misleading field name.**~~ — **Done
+    2026-11-04** (`cfb762f` on `claude/pending-sweep-20261104`): /query
+    returns "escalated" and keeps "escalated_to_deepseek" for one release as a
+    deprecated alias; `test_queries.py` reads the new key first. Pinned by
+    `test_provider_outage.py::test_an_escalated_turn_reports_escalated`.
+    Remove the old key in the next release.
+    Original text: `f51727c`
+    moved escalation onto the assigned backup role; the response key still
+    says DeepSeek. Kept for client compatibility.
+  - ~~**A 0.0009-grounding answer was served.**~~ — **Looked at** in M7 and
+    M13 (`9dcc419`): lexical rescue had 0/10 false accepts on labelled served
+    answers and rescued 37 of 365. It is now tightly bounded (numbers not
+    glued to product codes, at least one specific number, short answers only,
+    no tables, comparisons excluded), and the office measured what the cheap
+    checks let through (D-20261024-11, D-20261024-15).
+    Original text: `logs.jsonl:1970` — correct, and
+    rescued by lexical containment, which is the rescue working as designed.
+    Worth one look at how far that rescue can carry an answer the NLI model
+    scored at essentially zero.
+  - ~~**`release.py` cannot cut a drop while two READMEs share a basename.**~~
+    — **Done 2026-11-04** (`15f148b` on `claude/pending-sweep-20261104`):
+    `release.py` copies each drop at its repo-relative path (zip and changelog
+    too), so `README.md` and `tools/README.md` no longer clash and it does not
+    refuse any more (`tests/test_release.py`). Before the next cut, check
+    `VERSION`: it still says 17.0.
+    Original text:
+    `python release.py --minor` refuses with `README.md <-> tools/README.md`,
+    because the legacy drop is FLAT and one would silently overwrite the
+    other. The refusal is right; the flatness is the bug. v16.3 was therefore
+    released by bumping `VERSION` by hand, with no `src/legacy/v16/v16.3`
+    snapshot. Fix by snapshotting into subfolders that mirror the repo, not
+    by renaming a README — the collision will recur for every `tools/` file
+    that shares a name with a root one. Nothing is lost meanwhile: the drop
+    is a convenience copy, and git holds the real history.
+  - ~~4 pre-existing `test_llm.py`-adjacent issues were cleared in v15.0;~~ —
+    **Closed, a watch note with no work:** the per-file `sys.modules`
+    isolation is still in `src/run_tests.py`, and the 2026-10-30 review ran
+    380/381 passed, 0 failed.
+    Original text: if new
+    ones appear, check `run_tests.py`'s per-file `sys.modules` isolation is
+    still doing its job (it's what unskipped 5 files that were silently not
+    running before).
+
+- **2026-10-30 (Friday review) — ticked off from the open list:**
+  - ~~**Six `test_keyvault` tests fail in the full suite but pass
+    alone**~~ (added 10-23). Re-run 2026-10-30: `run_tests.py` **380/381
+    passed, 1 skipped, 0 failed**, all eight `test_keyvault` tests PASS in
+    the shared run. No commit names the fix; the likeliest is the runner
+    work in `4511778`/`b4e4bb1`/`663aa15` (scratch env and vault paths,
+    Playwright files and secret-free children in their own process), but
+    the 10-23 cause was never bisected. If the `Expected instance of
+    hashes.HashAlgorithm` error comes back, re-open with that note.
+  - ~~**`nv9_spectral,biometrics_general` tagging.**~~ Fixed by `8a1a8e9`
+    (8.2: stale `prod_*` flags deleted, dense arm held to the scope rule)
+    plus the one-off `repair_product_flags.py --apply`, whose script was
+    then removed in `0ad8a25` (D-20261030-05). Checked against the live
+    index today, read-only: 9435 chunks, **0** stale product flags
+    (`db.stale_product_flags`), and the NV9 Spectral manual's 361 main
+    chunks are tagged `nv9_spectral` with no `prod_biometrics_general`.
 
 - **2026-10-16 (Friday review) — ticked off from the open list:**
   - ~~**`eval.py` grades nothing unless `DEEPSEEK_API_KEY` is exported, and

@@ -10,6 +10,7 @@ chroma_db/
 # ── Logs ──────────────────────────────────
 logs.json
 logs.jsonl
+erasures.jsonl
 *.log
 *.log.err
 
@@ -30,9 +31,7 @@ __pycache__/
 .venv/
 
 # ── Node / build output ───────────────────
-# Both are regenerated: install.ps1/install.sh run `npm install && npm run build`,
-# and docker/Dockerfile.frontend builds its own copy. docker/.dockerignore skips
-# them too.
+# Both are regenerated: install.ps1/install.sh run `npm install && npm run build`.
 node_modules/
 dist/
 
@@ -63,6 +62,7 @@ catalog_config.json
 product_families.json
 confluence_sync.json
 internal_sources.json
+doc_kinds.json
 # The spec index, rebuilt from the PDFs whenever they or their filing
 # change (sales.get_index). Pure cache, and ~640KB of churn if tracked.
 spec_index.json
@@ -146,9 +146,7 @@ src/*.vectors.npz
 build/
 dist/
 # Per-developer editor/agent settings, not project configuration.
-# .claude/agents/ is project configuration: the agent departments (ops/README.md).
-.claude/*
-!.claude/agents/
+.claude/
 # Video/promo renders and demo media (hyperframes output, node_modules, mp4s).
 brag-output/
 promo-output/

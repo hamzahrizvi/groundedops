@@ -80,15 +80,9 @@ def rerank(query, chunks, top_k=3):
         pairs = [(query, c["text"]) for c in chunks]
         scores = model.predict(pairs, activation_fn=torch.nn.Sigmoid())
 
-        ranked = sorted(zip(scores, chunks), reverse=True, key=lambda x: x[0])
-
-        out = []
-        for s, c in ranked[:top_k]:
-            c = dict(c)
-            c["rerank_score"] = float(s)
-            out.append(c)
-
-        return out
+        from retrieval_db import rank_key   # manuals above test scripts etc.
+        out = [dict(c, rerank_score=float(s)) for s, c in zip(scores, chunks)]
+        return sorted(out, key=rank_key, reverse=True)[:top_k]
 
     except Exception as e:
         logger.error(f"Reranker failed: {e}")

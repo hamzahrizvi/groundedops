@@ -32,6 +32,13 @@ def test_cited_pages_adds_the_rest_of_each_cited_page_in_order_within_budget():
     assert all(c["fetched_by"] == "cited_page" for c in out)
     assert _with_index(lambda: r.cited_pages(cited, budget=3)) == []
     assert _with_index(lambda: r.cited_pages([_c("A.pdf", None, 9)], budget=10**6)) == []
+    # A .txt is all page 1: its "page" is the whole document, so none is added.
+    global INDEX
+    old, INDEX = INDEX, INDEX + [_c("T.txt", 1, 1), _c("T.txt", 1, 2)]
+    try:
+        assert _with_index(lambda: r.cited_pages([_c("T.txt", 1, 1)], budget=10**6)) == []
+    finally:
+        INDEX = old
 
 
 def test_cited_pages_never_raises():

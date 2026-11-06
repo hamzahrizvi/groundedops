@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,49 @@ def is_price_question(q: str) -> bool:
             and not _asks_something_else(q))
 
 
+# A price the documents themselves state (2026-10-30): the Repair
+# Information pages list Level 3 repair prices in GBP/EUR/USD, and an
+# uploaded price list would too, so a price question is deflected only when
+# the passages it retrieves hold no price. Both a currency AND a price word,
+# so the BV30's "$5 note" or a "£1 coin" is not read as a price.
+#
+# The passage must also price the THING asked about: "how much does the NV9
+# cost" retrieves the NV9 repair table, and quoting a repair price as the
+# unit price is worse than the sales reply. So the question's own words,
+# less product names, model codes and price/filler words ("level 3 repair"),
+# must appear in the passage. A question with nothing left ("how much is the
+# NV9") asks the product's own price, which only a price list states.
+# ponytail: price lists are recognised by file name; read the rows if an
+# operator's list is named otherwise.
+_CURRENCY = re.compile(r"\b(?:GBP|EUR|USD)\b|[£€$]\s?\d", re.I)
+_PRICE_WORD = re.compile(r"\b(?:pric|cost|charg|fee)\w*", re.I)
+_PRICE_LIST = re.compile(r"pric|tariff|rate.?card", re.I)
+_PRICE_FILLER = {"how", "much", "does", "what", "would", "will", "can", "get", "you", "your",
+                 "they", "them", "one", "unit", "gbp", "eur", "usd", "pound", "euro", "dollar",
+                 "pric", "cost", "charg", "fee", "quot", "exact", "current", "today",
+                 "our", "we", "us", "its", "are", "have", "has", "had", "this", "that", "the",
+                 "it", "is"}
+
+
+def documents_price(question: str, passages: list[dict], names=()) -> bool:
+    """True when a retrieved passage states a price for what `question` asks
+    about. `names` are product names, which say whose price, not what.
+    Only the clause that asks the price is matched; a second ask or small talk
+    is left to the answer path."""
+    drop = {_stem(w) for w in _PRICE_FILLER} | {t for n in names for t in _terms(n)}
+    clauses = [c for c in _CLAUSE_SPLIT.split(question or "") if _PRICE.search(c)]
+    ask = " ".join(clauses) or question
+    item = {t for t in _terms(ask) if not any(c.isdigit() for c in t)
+            and not _PRICE_WORD.match(t) and t not in drop}
+    for p in passages:
+        text = p.get("text") or ""
+        if not (_CURRENCY.search(text) and _PRICE_WORD.search(text)):
+            continue
+        if item <= _stems_in(text) if item else _PRICE_LIST.search(p.get("source") or ""):
+            return True
+    return False
+
+
 # ── spec index ────────────────────────────────────────────────────────────
 
 _INDEX: list[dict] | None = None
@@ -290,23 +334,62 @@ def _rows_from_markdown(md: str) -> list[tuple[str, list[str]]]:
     return out
 
 
-def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
+def _extract(path: str) -> list[dict]:
+    """The table rows of one PDF, before any product is attached.
+
+    The only expensive step of the index (618.7s for 543 PDFs on
+    2026-10-23), so its result is cached per file and nothing but the file
+    itself changing makes it run again.
+    """
+    import structures
+    # Opened ONCE for the whole document and handed to tables_on_page,
+    # which would otherwise reopen it for every page -- this used to be
+    # one open to count the pages plus one per page after it.
+    try:
+        import pdfplumber
+        pdf = pdfplumber.open(path)
+    except Exception:
+        return []
+    out = []
+    try:
+        for pno in range(1, len(pdf.pages) + 1):
+            for b in structures.tables_on_page(path, pno, pdf=pdf):
+                title = b.get("title") or ""
+                for label, cells in _rows_from_markdown(b.get("markdown", "")):
+                    out.append({"table": title, "attribute": label,
+                                "values": cells, "page": pno})
+    finally:
+        pdf.close()
+    return out
+
+
+def build_index(doc_dir: str, source_to_product: dict,
+                files: dict | None = None) -> list[dict]:
     """Flatten every extracted table into product/attribute/value rows.
 
     source_to_product maps a filename to (product_key, product_name). A
     document with no mapping is skipped rather than filed under a guess --
     an unattributed spec is worse than a missing one in a sales answer.
-    """
-    import structures
 
+    files is the per-file cache, {filename: {"mtime", "rows"}}, updated in
+    place: a document is re-read only when its mtime differs from the one
+    cached. Filing and the internal mark are applied over the cached rows, so
+    changing either costs no extraction. Entries for documents now unfiled
+    or internal are kept (changing that back is free again); entries for
+    documents no longer on disk are dropped.
+    """
+    files = {} if files is None else files
     rows: list[dict] = []
     # A fresh deploy has no documents folder until the first upload; that is
     # an empty index, not a failed warm-up (tools/docker_startup_check.sh).
     if not os.path.isdir(doc_dir):
+        files.clear()
         return rows
-    for fname in sorted(os.listdir(doc_dir)):
-        if not fname.lower().endswith(".pdf"):
-            continue
+    present = sorted(f for f in os.listdir(doc_dir) if f.lower().endswith(".pdf"))
+    for gone in set(files) - set(present):
+        del files[gone]
+    extracted = 0
+    for fname in present:
         key, name, cat = source_to_product.get(fname, ("", "", ""))
         if not key:
             continue
@@ -315,41 +398,37 @@ def build_index(doc_dir: str, source_to_product: dict) -> list[dict]:
         # being filed under a product while excluded everywhere else).
         if _excluded(fname):
             continue
-        path = os.path.join(doc_dir, fname)
-        # Opened ONCE for the whole document and handed to tables_on_page,
-        # which would otherwise reopen it for every page -- this used to be
-        # one open to count the pages plus one per page after it.
-        try:
-            import pdfplumber
-            pdf = pdfplumber.open(path)
-        except Exception:
+        # Nor a drawing's title block, a certificate or a test script:
+        # "Model Details" and "Note to Manufacturers" off a cable drawing were
+        # compared as the NV4000's and NV200S's specs (C20261022c-29).
+        if _secondary(fname):
             continue
+        path = os.path.join(doc_dir, fname)
         try:
-            for pno in range(1, len(pdf.pages) + 1):
-                for b in structures.tables_on_page(path, pno, pdf=pdf):
-                    title = b.get("title") or ""
-                    for label, cells in _rows_from_markdown(b.get("markdown", "")):
-                        rows.append({
-                            "product": key, "product_name": name,
-                            "category": cat,
-                            "table": title, "attribute": label,
-                            "values": cells, "source": fname, "page": pno,
-                        })
-        finally:
-            pdf.close()
-    logger.info("spec index: %d rows across %d products",
-                len(rows), len({r["product"] for r in rows}))
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        entry = files.get(fname)
+        if not entry or entry.get("mtime") != mtime:
+            entry = files[fname] = {"mtime": mtime, "rows": _extract(path)}
+            extracted += 1
+        for r in entry["rows"]:
+            rows.append({
+                "product": key, "product_name": name, "category": cat,
+                "table": r["table"], "attribute": r["attribute"],
+                "values": r["values"], "source": fname, "page": r["page"],
+            })
+    logger.info("spec index: %d rows across %d products (%d PDFs read)",
+                len(rows), len({r["product"] for r in rows}), extracted)
     return rows
 
 
 def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
     """What the index was built FROM, as one comparable string.
 
-    The document set, and also the filename -> product mapping: filing a
-    manual under a different product rewrites every row it contributed. The
-    in-process cache could ignore that and usually get away with it, since a
-    reassignment in the console was followed by a restart soon enough. A
-    cache that SURVIVES the restart cannot, so the mapping is in the key.
+    The document set, the filename -> product mapping and the internal
+    marks: any of them changing means the rows must be recomposed. It decides
+    only that; which PDFs are read again is per file (build_index).
     """
     import hashlib
     import json as _json
@@ -362,7 +441,7 @@ def _fingerprint(doc_dir: str, source_to_product: dict) -> str:
     # Which documents are internal is part of what the index was built from:
     # marking one must rebuild it without that document's rows.
     internal = sorted(f for f, _ in files if _excluded(f))
-    blob = _json.dumps({"v": 1, "files": files, "mapping": mapping, "internal": internal},
+    blob = _json.dumps({"v": 2, "files": files, "mapping": mapping, "internal": internal},
                        sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -375,45 +454,80 @@ def _excluded(fname: str) -> bool:
     return is_excluded(fname)
 
 
-def _load_index_from_disk(key: str) -> list[dict] | None:
-    """The cached index if it was built from exactly this input, else None.
+def _secondary(fname: str) -> bool:
+    try:
+        from retrieval_db import is_secondary
+    except Exception:
+        return False
+    return is_secondary(fname)
 
-    A missing, stale or unreadable cache is a miss, never an error: the
-    worst case is paying the build once, which is what happened every time
-    before this existed.
+
+def _load_files_from_disk(doc_dir: str, source_to_product: dict) -> dict:
+    """The per-file cache, {filename: {"mtime", "rows"}}.
+
+    A missing or unreadable cache is empty, never an error: the worst case is
+    paying the build once, which is what happened every time before this
+    existed. The old format (v1: one key over everything, all rows) is
+    converted when its key still matches the documents on disk, so the
+    upgrade itself does not cost a full rebuild.
     """
     import jsonstore
     data = jsonstore.load(_INDEX_CACHE, None, label="spec index cache")
-    if not isinstance(data, dict) or data.get("key") != key:
-        return None
-    rows = data.get("rows")
-    return rows if isinstance(rows, list) else None
+    if not isinstance(data, dict):
+        return {}
+    if data.get("v") == 2 and isinstance(data.get("files"), dict):
+        return data["files"]
+    if data.get("key") != _fingerprint(doc_dir, source_to_product) \
+            or not isinstance(data.get("rows"), list):
+        return {}
+    # Every filed, customer-facing PDF went into those rows at its current
+    # mtime -- including the ones with no tables, which get an empty entry.
+    files = {}
+    for fname, (key, _, _) in (source_to_product or {}).items():
+        path = os.path.join(doc_dir, fname)
+        if key and fname.lower().endswith(".pdf") and os.path.isfile(path) \
+                and not _excluded(fname):
+            files[fname] = {"mtime": os.path.getmtime(path), "rows": []}
+    for r in data["rows"]:
+        if r.get("source") in files:
+            files[r["source"]]["rows"].append(
+                {k: r[k] for k in ("table", "attribute", "values", "page")})
+    return files
 
 
-def _save_index_to_disk(key: str, rows: list[dict]) -> None:
+def _save_files_to_disk(files: dict) -> None:
     import jsonstore
     try:
-        jsonstore.save(_INDEX_CACHE, {"key": key, "rows": rows},
+        jsonstore.save(_INDEX_CACHE, {"v": 2, "files": files},
                        label="spec index cache", indent=None)
     except Exception as exc:
         # Non-fatal by design: without it the next start pays the build.
         logger.warning("could not write the spec index cache: %s", exc)
 
 
+_FILES: dict | None = None
+_INDEX_LOCK = threading.Lock()
+
+
 def get_index(doc_dir: str, source_to_product: dict) -> list[dict]:
-    """Cached index, rebuilt when the documents or their filing change."""
-    global _INDEX, _INDEX_KEY
+    """Cached index, recomposed when the documents or their filing change;
+    only a new or changed PDF is read again."""
+    global _INDEX, _INDEX_KEY, _FILES
     key = _fingerprint(doc_dir, source_to_product)
     if _INDEX is not None and key == _INDEX_KEY:
         return _INDEX
-
-    rows = _load_index_from_disk(key)
-    if rows is None:
-        rows = build_index(doc_dir, source_to_product)
-        _save_index_to_disk(key, rows)
-    else:
-        logger.info("spec index loaded from disk: %d rows", len(rows))
-    _INDEX, _INDEX_KEY = rows, key
+    # One rebuild at a time: the warm-up and a visitor's question can both
+    # get here, and two of them would read the same new PDF twice.
+    with _INDEX_LOCK:
+        if _INDEX is not None and key == _INDEX_KEY:
+            return _INDEX
+        if _FILES is None:
+            _FILES = _load_files_from_disk(doc_dir, source_to_product)
+        before = {f: e.get("mtime") for f, e in _FILES.items()}
+        rows = build_index(doc_dir, source_to_product, _FILES)
+        if {f: e.get("mtime") for f, e in _FILES.items()} != before:
+            _save_files_to_disk(_FILES)
+        _INDEX, _INDEX_KEY = rows, key
     return _INDEX
 
 

@@ -2,7 +2,7 @@
 handed off, and how fast -- read from logs.jsonl.
 
     python -m log_report --since 7d            # real use only (default)
-    python -m log_report --since 30d --all     # include eval/live/preflight
+    python -m log_report --since 30d --all     # include eval/live/preflight/script
 
 `summarise(rows)` is pure; `load_rows()` reads logs.jsonl plus the rotated
 logs_*.jsonl (logger._rotate_if_needed). GET /admin/report wraps both.
@@ -22,10 +22,10 @@ import statistics
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from pipeline_trace import TEST_ORIGINS
 from text_utils import is_refusal
 
 LOG_DIR = os.path.dirname(os.path.abspath(__file__))
-TEST_ORIGINS = {"eval", "live", "preflight"}
 
 # How a turn ended, from M2's outcome (pipeline_trace.OUTCOMES) or, when that
 # is missing, the role. The model saying no ends at "respond" like an answer
@@ -202,7 +202,7 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--since", default="7d", help="window, e.g. 7d")
     ap.add_argument("--all", action="store_true",
-                    help="include eval/live/preflight turns")
+                    help="include eval/live/preflight/script turns")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     r = report(int(a.since.rstrip("d")), include_tests=a.all)

@@ -12,6 +12,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import confluence_sync as cs  # noqa: E402
+import retrieval_db  # noqa: E402
 
 BODY = "<p>" + "Fit the hopper to the rail and tighten both screws. " * 6 + "</p>"
 
@@ -40,6 +41,9 @@ class FakeApi:
                 "version": {"number": self.page_version},
                 "body": {"storage": {"value": "<p>Hi</p>" if pid == "30" else BODY}}}
 
+    def attachment(self, att_id):
+        return next(a for atts in self.attachments.values() for a in atts if a["id"] == att_id)
+
     def download(self, page_id, att_id):
         return b"%PDF fake"
 
@@ -58,6 +62,8 @@ class FakeCatalog:
     def refile_source(self, source, keys):
         for p in self.data["categories"][0]["products"]:
             p["sources"] = [s for s in p["sources"] if s != source]
+            if p["key"] in keys:
+                p["sources"].append(source)
 
 
 class World:
@@ -68,22 +74,44 @@ class World:
         self.uploads = []                # documents uploaded by hand, by name
         self.internal = set()            # documents marked internal
         self.described = []              # describe_pictures per ingest
+        self.index, self.unindexed, self.retagged = set(), set(), []
 
     def _with(self, fn, api=None):
         saved = (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
-                 cs._mark_internal)
+                 cs._mark_internal, cs._indexed, cs._retag, cs._original, cs._marked, cs._stored)
+        cs._indexed = lambda s: s in self.index or (s in self.uploads and s not in self.unindexed)
+        cs._retag = lambda source, cat, prod: self.retagged.append((source, prod))
+        cs._original = lambda s: b"%PDF stored" if s in self.uploads else None
+        cs._marked = lambda s: s in self.internal
+        cs._stored = lambda s: s in self.uploads or s in self.texts
+        kinds_was = (retrieval_db._KINDS_PATH, retrieval_db._kinds)
+        retrieval_db._KINDS_PATH = os.path.join(os.path.dirname(self.state), "doc_kinds.json")
+        retrieval_db._kinds = None
         def mark(sources, on):
-            (self.internal.update if on else self.internal.difference_update)(sources)
+            # As retrieval_db.set_internal does since D-20261024-06: marking
+            # takes the chunks out; un-marking indexes it again from the original.
+            if on:
+                self.internal.update(sources)
+                self.index.difference_update(sources)
+                self.unindexed.update(s for s in sources if s in self.uploads)
+            else:
+                was = set(sources) & self.internal
+                self.internal.difference_update(sources)
+                self.unindexed.difference_update(was)
+                self.index.update(s for s in was if s in self.texts)
         cs._mark_internal = mark
         cs._connect = lambda: (api, "pages", "1")
         cs._uploads = lambda items: {cs._title_key(u): u for u in self.uploads}
         def ingest(content, source, cat, prod, describe_pictures=False):
             self.ingested.append((source, prod))
             self.described.append(describe_pictures)
+            if source not in self.internal:          # a marked document is stored, never indexed
+                self.index.add(source)
             self.texts[source] = content.decode("utf-8", "replace")
         cs._ingest = ingest
         def remove(source):
             self.removed.append(source)
+            self.index.discard(source)
             self.internal.discard(source)
             if source in self.uploads:
                 self.uploads.remove(source)
@@ -94,7 +122,8 @@ class World:
             return fn()
         finally:
             (cs._connect, cs._ingest, cs._remove, cs.catalog, cs._STATE, cs._uploads,
-             cs._mark_internal) = saved
+             cs._mark_internal, cs._indexed, cs._retag, cs._original, cs._marked, cs._stored) = saved
+            retrieval_db._KINDS_PATH, retrieval_db._kinds = kinds_was
 
     def run(self, api, apply=True, check=True, describe_pictures=False):
         return self._with(lambda: cs.run(apply, check, describe_pictures), api)
@@ -129,7 +158,127 @@ def test_page_text():
                      '<ac:rich-text-body><p>Note</p></ac:rich-text-body></ac:structured-macro>'
                      '<table><tr><td>A</td><td>B</td></tr></table>')
     assert t.startswith("Install\n\nSteps") and "One & two" in t and "info" not in t
-    assert "Note" in t and "| A | B" in t
+    assert "Note" in t and "\nA | B" in t
+
+
+def test_page_text_keeps_a_table_row_on_one_line():
+    # Confluence wraps every cell in <p>: rows came out one cell per line.
+    t = cs.page_text("T", '<table><tbody><tr><th><p>Supply Current</p></th><th><p>Maximum</p></th></tr>'
+                     '<tr><td><p>Peak</p></td><td><p>1.50A</p><p>at 12V</p></td></tr></tbody></table>'
+                     '<ac:adf-extension><ac:adf-node type="panel">'
+                     '<ac:adf-attribute key="panel-type">note</ac:adf-attribute>'
+                     '<ac:adf-attribute key="local-id">baad7fce-8302</ac:adf-attribute>'
+                     '<ac:adf-content><p>Check the PSU.</p></ac:adf-content></ac:adf-node>'
+                     '<ac:adf-fallback><p>Check the PSU.</p></ac:adf-fallback></ac:adf-extension>')
+    assert "Supply Current | Maximum\nPeak | 1.50A at 12V\n" in t
+    assert t.count("Check the PSU.") == 1 and "baad7fce" not in t and "note" not in t
+
+
+def test_page_text_keeps_where_links_point():
+    # The SMART Update FAQ's download buttons (real markup, 2026-11-03): a link
+    # around an icon came out as nothing, so the chatbot had no link to give.
+    box = "https://www.dropbox.com/scl/fo/cob/AFH?rlkey=1wo&amp;dl=1"
+    icon = ('<ac:image ac:alt="download-zip-icon.svg">'
+            '<ri:attachment ri:filename="download-zip-icon.svg" ri:version-at-save="1" /></ac:image>')
+    t = cs.page_text("FAQ", '<table><tbody><tr><th><p>Latest GBP SMART Update Package</p></th></tr>'
+                     f'<tr><td><a href="{box}">{icon}</a></td></tr></tbody></table>'
+                     '<ac:adf-extension><ac:adf-content><p>Visit the <a href="https://itl.com/hub/">'
+                     'Support Hub</a>.</p></ac:adf-content><ac:adf-fallback><p>Visit the '
+                     '<a href="https://itl.com/hub/">Support Hub</a>.</p></ac:adf-fallback></ac:adf-extension>'
+                     '<p><a href="https://itl.com/x">https://itl.com/x</a> <a href="#Steps">Steps</a> '
+                     '<a href="https://itl.atlassian.net/wiki/spaces/CS/pages/456#Sides">Sides</a> '
+                     '<a href="https://outlook.office.com/local/path/file://fs1/Shared">fs1</a> '
+                     '<a href="mailto:support@itl.com">Email us</a></p>'
+                     '<p><ac:link><ri:attachment ri:filename="Update V2.zip" /><ac:plain-text-link-body>'
+                     '<![CDATA[the update]]></ac:plain-text-link-body></ac:link></p>'
+                     '<p><ac:link><ri:attachment ri:filename="notes.pdf"><ri:page ri:content-title="Other" />'
+                     '</ri:attachment></ac:link></p>'
+                     '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
+                     '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>',
+                     page_id="456", site="itl.atlassian.net",
+                     hosts=["itl.com", "dropbox.com", "itl.atlassian.net"])
+    att = "https://itl.atlassian.net/wiki/download/attachments/456/"
+    assert "Latest GBP SMART Update Package\nhttps://www.dropbox.com/scl/fo/cob/AFH?rlkey=1wo&dl=1\n" in t, t
+    assert "download-zip-icon" not in t                      # a picture is not a link
+    assert t.count("Support Hub (https://itl.com/hub/)") == 1
+    # Not said twice, and no #anchor, link to the page itself or file share.
+    assert "https://itl.com/x Steps Sides fs1 Email us (mailto:support@itl.com)" in t, t
+    assert f"the update ({att}Update%20V2.zip)" in t
+    assert "\nnotes.pdf\n" in t                              # another page's file: no id, no url
+    assert f"\nManual.pdf ({att}Manual.pdf)" in t
+    assert cs.page_text("F", '<ac:structured-macro ac:name="view-file">'    # no site: name only
+                        '<ri:attachment ri:filename="Manual.pdf" /></ac:structured-macro>') == "F\n\nManual.pdf"
+
+
+def test_synced_links_reach_only_allowlisted_hosts():
+    # Security 2026-11-03: internal hosts, page ids and attachment names reached the index.
+    os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
+    html = ('<p><a href="https://www.innovative-technology.com/support">Support</a> '
+            '<a href="https://jira.internal/browse/DS-1">DS-1</a> '
+            '<a href="https://jira.internal/browse/DS-2">https://jira.internal/browse/DS-2</a> '
+            '<a href="https://innovative-technology.com@evil.example/x">trick</a> '
+            '<a href="mailto:ops@corp.internal">ops</a> '
+            '<a href="mailto:sales@innovative-technology.com?cc=ops@corp.internal">sales</a> '
+            '<a href="https://svc:pw@innovative-technology.com/x">creds</a> '
+            '<a href="https://evil.example\\@innovative-technology.com/x">slash</a></p>'
+            '<pre>curl https://build.corp.internal/api or https://www.innovative-technology.com/dl.</pre>'
+            '<ac:structured-macro ac:name="code"><ac:plain-text-body>'
+            '<![CDATA[GET https://jira.internal/rest]]></ac:plain-text-body></ac:structured-macro>'
+            '<p><ac:link><ri:attachment ri:filename="Secret plan.pdf" /></ac:link></p>'
+            '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
+            '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>')
+    t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
+                     hosts=cs.link_hosts())
+    assert "Support (https://www.innovative-technology.com/support)" in t, t
+    for leak in ("jira.internal", "evil.example", "corp.internal", "atlassian.net", "789"):
+        assert leak not in t, (leak, t)
+    assert "DS-1" in t and "trick" in t and "ops" in t          # the text stays
+    assert "sales (mailto:sales@innovative-technology.com)" in t, t   # no ?cc=
+    assert "svc" not in t and "pw@" not in t and "creds" in t and "slash" in t
+    assert "https://www.innovative-technology.com/dl." in t and "curl  or" in t, t
+    assert "Secret plan.pdf" in t and "\nManual.pdf" in t       # file names, no address
+    # Other address shapes, and one split by markup (D-20261104-10).
+    t = cs.page_text("P", "<p>mail ops@corp.internal now</p><pre>ssh://git.corp.internal/repo</pre>"
+                     "<pre>build.corp.internal:8080/api</pre><pre>\\\\fs1.corp.internal\\share</pre>"
+                     "<p>https://corp.<b>internal</b>/x</p>", hosts=cs.link_hosts())
+    assert "internal" not in t, t
+    keep = "write to sales@innovative-technology.com, see 3.5:100 and v1.2.3 and config.yaml"
+    assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
+    assert "ssh://git.innovative-technology.com/r" in cs.page_text(
+        "P", "<p>ssh://git.innovative-technology.com/r</p>", hosts=cs.link_hosts())
+    # The site listed (a public space): its attachments keep their address.
+    t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
+                     hosts=["innovative-technology.atlassian.net"])
+    assert "https://innovative-technology.atlassian.net/wiki/download/attachments/789/Manual.pdf" in t, t
+    assert "jira.internal" not in t
+
+
+def test_link_hosts_setting():
+    old = os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
+    try:
+        assert cs.link_hosts() == ["innovative-technology.com", "dropbox.com"]
+        os.environ["CONFLUENCE_LINK_HOSTS"] = "https://Docs.Example.com/x, *.dropbox.com  itl.atlassian.net:443"
+        assert cs.link_hosts() == ["docs.example.com", "dropbox.com", "itl.atlassian.net"]
+        assert cs._host_ok("https://a.docs.example.com/p", cs.link_hosts())
+        assert not cs._host_ok("https://notdocs.example.com/p", cs.link_hosts())
+        assert not cs._host_ok("http://[docs.example.com/p", cs.link_hosts())    # malformed
+        assert not cs._host_ok("mailto:a@evil.example,b@docs.example.com", cs.link_hosts())
+        assert cs._host_ok("mailto:a@docs.example.com?subject=x", cs.link_hosts())
+        assert not cs._host_ok("mailto:a@evil.example%2Cb@docs.example.com", cs.link_hosts())
+        assert not cs._host_ok("mailto:a@evil.example@docs.example.com", cs.link_hosts())
+        assert cs._host_ok("HTTPS://WWW.DOCS.EXAMPLE.COM/p", cs.link_hosts())
+        assert "evil" not in cs.page_text("P", "<pre>HTTPS://evil.example/x</pre>",
+                                          hosts=cs.link_hosts())
+        assert not cs._host_ok("https://u:p@docs.example.com/", cs.link_hosts())
+        assert not cs._host_ok("https://evil.example\\@docs.example.com/", cs.link_hosts())
+        assert not cs._host_ok("https://docs.example.com/a b", cs.link_hosts())
+        assert cs._host_ok("www.docs.example.com/p", cs.link_hosts())
+        assert cs._kept("mailto:a@docs.example.com?cc=b@evil.example", cs.link_hosts()) == "mailto:a@docs.example.com"
+        assert "bad" in cs.page_text("P", '<a href="http://[x/y">bad</a>')       # no crash
+    finally:
+        os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
+        if old is not None:
+            os.environ["CONFLUENCE_LINK_HOSTS"] = old
 
 
 def test_review_mode_excludes_until_approved():
@@ -386,50 +535,50 @@ def test_a_whole_manual_replaces_its_upload():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), FakeApi()
         # uploaded by hand and filed under another product than the folder suggests
-        w.uploads = ["Installation-v3-170925-134345.pdf"]
+        w.uploads = ["Installation-v3-170925-134345.docx"]
         w.catalog.data["categories"][0]["products"].append(
-            {"key": "nv9", "name": "NV9", "sources": ["Installation-v3-170925-134345.pdf"]})
+            {"key": "nv9", "name": "NV9", "sources": ["Installation-v3-170925-134345.docx"]})
         w.run(api, apply=False)
         inst = w.items()["Installation"]
-        assert inst["uploaded_as"] == "Installation-v3-170925-134345.pdf" and inst["replaces"], inst
+        assert inst["uploaded_as"] == "Installation-v3-170925-134345.docx" and inst["replaces"], inst
         assert inst["product"] == "nv9" and inst["suggested"]       # the upload's filing, not the folder's
 
         w.decide(["Installation"], decision="approved")
         res = w.run(api)
         assert ("Installation.txt", "nv9") in w.ingested, w.ingested
-        assert w.removed == ["Installation-v3-170925-134345.pdf"] and len(res["replaced"]) == 1, res
+        assert w.removed == ["Installation-v3-170925-134345.docx"] and len(res["replaced"]) == 1, res
 
         # uploaded again by hand after the first sync: the next sync removes it again
-        w.uploads = ["Installation-v4.pdf"]
+        w.uploads = ["Installation-v4.docx"]
         res = w.run(api)
-        assert w.removed[-1] == "Installation-v4.pdf" and len(res["replaced"]) == 1, res
+        assert w.removed[-1] == "Installation-v4.docx" and len(res["replaced"]) == 1, res
         assert w.ingested.count(("Installation.txt", "nv9")) == 1       # not re-indexed
 
 
 def test_a_manual_kept_as_chapters_replaces_nothing_until_combined():
     with tempfile.TemporaryDirectory() as d:
         w, api = World(os.path.join(d, "s.json")), ManualApi()
-        w.uploads = ["Manual-v1.pdf", "Cmd B.pdf"]
+        w.uploads = ["Manual-v1.docx", "Cmd B.docx"]
         w._with(lambda: cs.set_mode("auto"))
         w.run(api, apply=False)
         items = w.items()
         # the Manual page has chapters under it: it is only the cover
-        assert items["Manual"]["uploaded_as"] == "Manual-v1.pdf" and not items["Manual"]["replaces"]
+        assert items["Manual"]["uploaded_as"] == "Manual-v1.docx" and not items["Manual"]["replaces"]
         # Keep both: the upload stays even though Cmd B is a whole page
         w.decide(["Cmd B"], keep_upload=True)
         w.run(api)
         assert w.removed == [], w.removed
 
         # Cmd A is too short to be a document of its own: only a section
-        w.uploads.append("Cmd A-v2.pdf")
+        w.uploads.append("Cmd A-v2.docx")
         w._with(lambda: cs.set_bundle(["Manual"], True))
         w.run(api)
         items = w.items()
         assert items["Manual"]["kind"] == "bundle"
         # the combined manual replaces its own upload and its section's,
         # but not the one marked Keep both before it was combined
-        assert "Manual-v1.pdf" in w.removed and "Cmd A-v2.pdf" in w.removed, w.removed
-        assert "Cmd B.pdf" not in w.removed, w.removed
+        assert "Manual-v1.docx" in w.removed and "Cmd A-v2.docx" in w.removed, w.removed
+        assert "Cmd B.docx" not in w.removed, w.removed
 
 
 def test_internal_documents_sync_but_never_reach_customers():
@@ -487,6 +636,87 @@ def test_a_deleted_product_does_not_fail_the_sync():
         assert ("Installation.txt", None) in w.ingested, w.ingested
         assert w.items()["Installation"]["status"] == "synced"
         assert any("gone_product no longer exists" in e for e in res["errors"]), res
+
+
+class InternalTitlesApi(FakeApi):
+    attachments = {"20": [{"id": "a1", "title": "X (Internal).pdf", "version": {"number": 1}},
+                          {"id": "a2", "title": "INTERNAL - Y.pdf", "version": {"number": 1}},
+                          {"id": "a3", "title": "Z internals.pdf", "version": {"number": 1}},
+                          {"id": "a4", "title": "W_internal.pdf", "version": {"number": 1}}]}
+
+
+def test_a_title_that_says_internal_is_filed_internal_in_auto_mode():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), InternalTitlesApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        items = w.items()
+        got = {t: items[t]["decision"] for t in ("X (Internal).pdf", "INTERNAL - Y.pdf",
+                                                 "Z internals.pdf", "W_internal.pdf", "Installation")}
+        assert got == {"X (Internal).pdf": "internal", "INTERNAL - Y.pdf": "internal",
+                       "Z internals.pdf": "approved", "W_internal.pdf": "internal",
+                       "Installation": "approved"}, got
+        # synced, but marked before it went in, so customers never get it
+        assert {"X (Internal).pdf", "INTERNAL - Y.pdf", "W_internal.pdf"} <= {s for s, _ in w.ingested}
+        assert w.internal == {"X (Internal).pdf", "INTERNAL - Y.pdf", "W_internal.pdf"}, w.internal
+        # an admin's approval stands at the next check: the rule files a first sighting only
+        w.decide(["X (Internal).pdf"], decision="approved")
+        w.run(api)
+        assert w.items()["X (Internal).pdf"]["decision"] == "approved"
+        assert "X (Internal).pdf" not in w.internal
+
+    with tempfile.TemporaryDirectory() as d:     # review mode: still excluded until approved
+        w = World(os.path.join(d, "s.json"))
+        w.run(InternalTitlesApi(), apply=False)
+        assert w.items()["X (Internal).pdf"]["decision"] == "excluded"
+
+
+def test_kind_of_rules():
+    P = ["Products", "SMART Coin System Range"]
+    cases = [
+        ("General Instructions", P + ["SMART Coin System Integration Test Script"], "page", "test_script"),
+        ("NV201 Spectral - Revision 3.13", P + ["NV201 Spectral Product Change Notification"], "page", "change_notice"),
+        ("PA02265 - NV9USB+ Full Assembly V2", [], "page", "drawing"),
+        ("NV9USB+ Disassembly Guide", P + ["NV9USB+ Range Repair Information"], "page", "manual"),
+        ("CN214_1 USB A to USB B Cable Assembly (att644645101)", P + ["NV200 Range Disclaimer and Safety Information"], "file", "drawing"),
+        ("EU Declaration of Conformity RoHS NV4000 07May2025 GA02336_1", [], "file", "certificate"),
+        ("BV50 Firmware Release Notes", [], "page", "release_note"),
+        ("Accessing my device in Linux Environment", ["Products", "Biometrics", "Biometric Range FAQ's", "Technical FAQs"], "page", "manual"),
+        ("NV200S Range User Manual", [], "bundle", "manual"),
+        ("Get Device Status", ["Products", "Biometrics", "API Specifications"], "page", "manual"),
+        ("Get Vision Parameters", ["Products", "Biometrics", "Docs Due Release", "ICU Certificate Management"], "page", "manual"),
+    ]
+    for t, p, k, want in cases:
+        assert cs.kind_of(t, p, k) == want, (t, cs.kind_of(t, p, k), want)
+
+
+class NoticeFolderApi(FakeApi):
+    tree = {("pages", "1"): [{"type": "folder", "id": "10", "title": "Smart Hopper 3 Product Change Notification"},
+                             {"type": "page", "id": "30", "title": "Overview"}],
+            ("folders", "10"): [{"type": "page", "id": "20", "title": "Installation"}]}
+
+
+def test_a_sync_stores_each_documents_kind():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(NoticeFolderApi())
+        got = w._with(lambda: dict(retrieval_db.source_kinds()))
+        assert got["Installation.txt"] == "change_notice", got
+        assert got["SH3 manual.pdf"] == "change_notice", got
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(FakeApi())
+        assert w._with(lambda: dict(retrieval_db.source_kinds()))["Installation.txt"] == "manual"
+        # a hand edit stands: a later run never overwrites a stored kind
+        with open(os.path.join(d, "doc_kinds.json"), "w") as f:
+            json.dump({"Installation.txt": "test_script"}, f)
+        def reread():
+            retrieval_db._kinds = None
+        w._with(reread)
+        w.run(FakeApi())
+        assert w._with(lambda: dict(retrieval_db.source_kinds()))["Installation.txt"] == "test_script"
 
 
 if __name__ == "__main__":
@@ -593,3 +823,359 @@ def test_pictures_are_described_only_when_the_admin_says_so():
         w.decide(["SH3 manual.pdf"], decision="approved")
         w.run(api, describe_pictures=True)
         assert w.described == [True]
+def test_review_mode_holds_an_edited_document_until_approved():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert w.ingested == [("Installation.txt", "sh3")], w.ingested
+        api.page_version = 2                       # edited in Confluence
+        res = w.run(api)
+        it = w.items()["Installation"]
+        assert it["status"] == "held" and it["is_updated"], it
+        assert len(w.ingested) == 1 and w.removed == [], (w.ingested, w.removed)  # old version answers
+        assert res["held"] == ["Installation.txt"], res
+        w.run(api)
+        assert len(w.ingested) == 1                # still waiting
+        w.decide(["Installation"], decision="approved")
+        assert w.items()["Installation"]["status"] == "changed"
+        w.run(api)
+        assert len(w.ingested) == 2 and w.items()["Installation"]["status"] == "synced"
+        api.page_version = 3                       # auto mode: edits sync without a hold
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        assert len(w.ingested) == 3 and w.items()["Installation"]["status"] == "synced"
+
+
+def test_updates_found_before_holds_existed_wait_too():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.json")
+        json.dump({"mode": "review", "items": {"page:20": {
+            "kind": "page", "id": "20", "title": "Installation", "source": "Installation.txt",
+            "path": [], "present": True, "decision": "approved",
+            "version": 2, "synced_version": 1}}}, open(path, "w"))
+        assert World(path).items()["Installation"]["status"] == "held"
+
+
+class BigFileApi(FakeApi):
+    attachments = {"20": [{"id": "att8", "title": "Huge.pdf", "version": {"number": 1},
+                           "fileSize": 200 * 1024 * 1024}]}
+
+
+def test_an_oversized_attachment_is_skipped_and_named():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), BigFileApi()
+        w._with(lambda: cs.set_mode("auto"))
+        res = w.run(api)
+        assert ("Huge.pdf", "sh3") not in w.ingested, w.ingested
+        assert any(e.startswith("Huge.pdf:") and "limit" in e for e in res["errors"]), res
+        assert w.items()["Huge.pdf"]["status"] == "error"
+        saved, cs.MAX_FILE_BYTES = cs.MAX_FILE_BYTES, 4   # no listed size: checked after download
+        try:
+            res = w.run(FakeApi())
+        finally:
+            cs.MAX_FILE_BYTES = saved
+        assert any(e.startswith("SH3 manual.pdf:") for e in res["errors"]), res
+
+
+def test_only_root_switches_to_auto():
+    import routes_confluence as rc
+    from fastapi import HTTPException
+
+    def refuse(_):
+        raise HTTPException(status_code=403, detail="root only")
+    saved = rc._require_root, rc._require_admin, rc._status, cs.set_mode
+    modes = []
+    rc._require_root, rc._require_admin = refuse, lambda _: {"email": "a@x"}
+    rc._status, cs.set_mode = (lambda: {}), modes.append
+    try:
+        try:
+            rc.admin_confluence_mode(rc.ModeReq(mode="auto"), "pw")
+            assert False, "an admin switched to auto"
+        except HTTPException as e:
+            assert e.status_code == 403
+        rc.admin_confluence_mode(rc.ModeReq(mode="review"), "pw")
+        assert modes == ["review"], modes
+    finally:
+        rc._require_root, rc._require_admin, rc._status, cs.set_mode = saved
+
+
+def test_an_approval_covers_only_the_version_seen():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api)
+        w.decide(["Installation", "SH3 manual.pdf"], decision="approved")
+        # the file is edited after the approval, and Sync now reads no check
+        api.attachments = {"20": [{"id": "att5", "title": "SH3 manual.pdf", "version": {"number": 3}}]}
+        res = w.run(api, check=False)
+        assert w.ingested == [("Installation.txt", "sh3")], w.ingested
+        assert w.items()["SH3 manual.pdf"]["status"] == "held" and "SH3 manual.pdf" in res["held"], res
+        # a page edited after approval, found by the check
+        api.page_version = 2
+        w.run(api)
+        w.decide(["Installation"], decision="approved")
+        api.page_version = 3                       # edited again before the sync
+        res = w.run(api, check=False)
+        it = w.items()["Installation"]
+        assert len(w.ingested) == 1 and it["status"] == "held", (w.ingested, it)
+        assert it["version"] == 3 and it["prev_version"] == 2 and "Installation.txt" in res["held"], it
+        w.decide(["Installation"], decision="approved")
+        w.run(api, check=False)
+        assert len(w.ingested) == 2 and w.items()["Installation"]["status"] == "synced"
+
+
+def test_switching_to_review_holds_updates_found_in_auto():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(api)
+        n = len(w.ingested)
+        api.page_version = 2
+        w.run(api, apply=False)
+        assert w.items()["Installation"]["status"] == "changed"
+        w._with(lambda: cs.set_mode("review"))
+        w.run(api, check=False)
+        assert len(w.ingested) == n and w.items()["Installation"]["status"] == "held"
+
+
+class EditableManualApi(ManualApi):
+    v = 1
+
+    def page(self, pid):
+        return {**ManualApi.page(self, pid), "version": {"number": self.v}}
+
+
+def test_a_combined_folder_edited_after_approval_is_held_again():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), EditableManualApi()
+        w.run(api, apply=False)
+        w._with(lambda: cs.set_bundle(["Manual"], True))
+        w.run(api, apply=False)
+        w.decide(["Manual"], decision="approved")
+        api.v = 2
+        w.run(api, check=False)
+        assert "Manual.txt" not in w.texts and w.items()["Manual"]["status"] == "held"
+        w.decide(["Manual"], decision="approved")
+        w.run(api, check=False)
+        assert "Manual.txt" in w.texts and w.items()["Manual"]["status"] == "synced"
+
+
+def test_an_uploaded_pdf_stays_over_its_confluence_text_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = "Installation-v3-170925-134345.pdf"
+        w.uploads = [pdf]
+        w.catalog.data["categories"][0]["products"].append({"key": "nv9", "name": "NV9", "sources": [pdf]})
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved", product="sh3")
+        inst = w.items()["Installation"]
+        assert inst["pdf_kept"] and not inst["replaces"], inst
+        res = w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [], (w.texts, w.removed)
+        assert res["kept_pdf"] == [f"{pdf} kept over Installation.txt"], res
+        assert w.retagged == [(pdf, "nv9,sh3")], w.retagged          # both copies' products
+        assert w.items()["Installation"]["status"] == "synced"
+        res = w.run(api)                                             # nothing more to do
+        assert res["kept_pdf"] == [] and w.removed == [], res
+        w.uploads = []                                               # the PDF removed by hand
+        w.run(api)
+        assert "Installation.txt" in w.texts and not w.items()["Installation"].get("pdf_kept")
+
+
+def test_a_pdf_uploaded_again_by_hand_takes_over_from_the_synced_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert "Installation.txt" in w.index
+        w.uploads = ["Installation-v4.pdf"]
+        res = w.run(api)
+        assert w.removed == ["Installation.txt"] and res["replaced"] == [], (w.removed, res)
+        assert res["kept_pdf"] == ["Installation-v4.pdf kept over Installation.txt"], res
+        assert w.retagged == [("Installation-v4.pdf", "sh3")], w.retagged   # the copy's product carried over
+
+
+def test_restore_pdfs_brings_back_a_replaced_pdf_and_drops_its_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        # what the 22 Oct sync left: the PDF on disk, out of the index
+        w.uploads, w.unindexed = ["Installation-v3.pdf"], {"Installation-v3.pdf"}
+        res = w.run(api)
+        assert w.removed == [] and res["kept_pdf"] == [] and res["replaced"] == [], res
+        assert w._with(lambda: cs.restore_pdfs()) == ["Installation-v3.pdf <- Installation.txt"]
+        assert w.removed == [] and "Installation-v3.pdf" not in w.index          # dry run
+        w._with(lambda: cs.restore_pdfs(apply=True, products={"Installation-v3.pdf": "nv9"}))
+        assert ("Installation-v3.pdf", "sh3,nv9") in w.ingested, w.ingested
+        assert w.removed == ["Installation.txt"], w.removed
+        assert w.items()["Installation"]["pdf_kept"]
+        w.run(api)
+        assert w.removed == ["Installation.txt"]                                 # not again
+
+
+def test_page_text_fences_tables_and_keeps_a_guides_lines():
+    from chunking import TABLE_CLOSE, TABLE_OPEN, chunk_text, strip_table_fences
+    t = cs.page_text("Linux", "<h2>Step 1</h2><p>Open a terminal.</p><p>Run this command:</p>"
+                     "<p>sudo touch /etc/udev/rules.d/80-local.rules</p>"
+                     "<table><tbody><tr><th><p>Supply Current</p></th><th><p>Maximum</p></th></tr>"
+                     "<tr><td><p>Standby</p></td><td><p>0.15A</p></td></tr></tbody></table>")
+    assert t.startswith("Linux\n\nStep 1\n\nOpen a terminal.\nRun this command:\nsudo touch"), t
+    assert f"{TABLE_OPEN}\nSupply Current | Maximum\nStandby | 0.15A\n{TABLE_CLOSE}" in t, t
+    chunks = [strip_table_fences(c) for c in chunk_text(t, size=1200, overlap=200)]
+    assert any("Open a terminal.\nRun this command:\nsudo touch" in c for c in chunks), chunks
+    assert any("Supply Current | Maximum\nStandby | 0.15A" in c for c in chunks), chunks
+
+
+# One manual, one internal mark (D-20261024-14): the copy, the PDF kept over
+# it and the uploads of it are internal together.
+
+def _synced_with_pdf(w, api, pdf="Installation-v3.pdf"):
+    w.uploads = [pdf]
+    w.run(api, apply=False)
+    w.decide(["Installation"], decision="approved")
+    w.run(api)
+    assert w.items()["Installation"]["pdf_kept"] and "Installation.txt" not in w.texts
+    return pdf
+
+
+def test_deciding_internal_marks_the_pdf_kept_over_the_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = _synced_with_pdf(w, api)
+        key = w.items()["Installation"]["key"]
+        held = w._with(lambda: cs.items_holding([pdf]))
+        assert list(held) == [key] and pdf in held[key], held
+        w.decide(["Installation"], decision="internal")
+        assert w.internal == {pdf} and not w._with(lambda: cs._indexed(pdf))
+        w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [], (w.texts, w.removed)
+        w.decide(["Installation"], decision="approved")
+        assert w.internal == set() and w._with(lambda: cs._indexed(pdf))
+
+
+def test_a_pdf_marked_internal_keeps_its_copy_out_and_the_item_internal():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = _synced_with_pdf(w, api)
+        w._with(lambda: cs._mark_internal([pdf], True))
+        w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [], (w.texts, w.removed)
+        assert w.items()["Installation"]["decision"] == "internal"
+        w.run(api)
+        assert "Installation.txt" not in w.texts and w.removed == [] and w.internal == {pdf}
+
+
+def test_an_upload_marked_internal_makes_its_replacing_copy_internal():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        up = "Installation-v3.docx"
+        w.uploads = [up]
+        w._with(lambda: cs._mark_internal([up], True))
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert "Installation.txt" in w.internal and "Installation.txt" not in w.index, w.internal
+        assert up in w.removed and w.items()["Installation"]["decision"] == "internal"
+
+
+def test_an_item_decided_internal_marks_the_pdf_kept_in_its_place():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        pdf = "Installation-v3.pdf"
+        w.uploads = [pdf]
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="internal")
+        res = w.run(api)
+        assert res["kept_pdf"] and pdf in w.internal and not w._with(lambda: cs._indexed(pdf)), res
+        assert "Installation.txt" not in w.texts and w.removed == []
+
+
+def test_keep_both_keeps_each_documents_own_mark():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        up = "Installation-v3.docx"
+        w.uploads = [up]
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.decide(["Installation"], keep_upload=True)
+        w._with(lambda: cs._mark_internal([up], True))
+        w.run(api)
+        assert w.items()["Installation"]["decision"] == "approved"
+        assert "Installation.txt" in w.index and "Installation.txt" not in w.internal, w.internal
+        assert up in w.internal and w.removed == [] and up in w.uploads
+        w.decide(["Installation"], decision="approved")
+        assert up in w.internal and up in w.unindexed
+        held = w._with(lambda: cs.items_holding(["Installation.txt"]))
+        assert up not in [n for ns in held.values() for n in ns]
+        assert w._with(lambda: cs.items_holding([up])) == {}
+        w.decide(["Installation"], decision="internal")
+        assert "Installation.txt" in w.internal and up in w.internal
+
+
+def test_a_new_page_named_like_an_upload_is_not_removed_after_ingest():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.uploads = ["Installation.txt"]
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert w.removed == [] and "Installation.txt" in w.index, w.removed
+
+
+def test_a_pdf_only_on_disk_survives_a_change_to_its_copy():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        w.uploads, w.unindexed = ["Installation-v3.pdf"], {"Installation-v3.pdf"}
+        api.page_version = 2
+        w.run(api)                                   # review mode holds the edit
+        w.decide(["Installation"], decision="approved")
+        res = w.run(api)
+        assert res["updated"] == ["Installation.txt"] and w.removed == [], (res, w.removed)
+        assert w._with(lambda: cs.restore_pdfs()) == ["Installation-v3.pdf <- Installation.txt"]
+
+
+def test_an_unreadable_marks_file_flips_no_decision():
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+
+        class Everything(set):                    # retrieval_db's fail-closed set
+            def __contains__(self, item):
+                return True
+        w.internal = Everything()
+        w.run(api)
+        assert w.items()["Installation"]["decision"] == "approved"
+
+
+def test_a_case_twin_write_back_indexes_only_the_approved_version():
+    # D-20261026-02: review mode, a sync without a fresh check, the page
+    # edited in Confluence since, and an upload that is the copy's case twin.
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), FakeApi()
+        w.run(api, apply=False)
+        w.decide(["Installation"], decision="approved")
+        w.run(api)
+        assert w.items()["Installation"]["status"] == "synced"
+        w.uploads = ["installation.txt"]
+        del w.texts["Installation.txt"]          # on Windows the upload overwrote the original
+        api.page_version = 2                     # edited in Confluence, not checked yet
+        n = len(w.ingested)
+        res = w.run(api, check=False)
+        assert len(w.ingested) == n, w.ingested  # version 2 never indexed
+        assert w.uploads == ["installation.txt"] and "installation.txt" not in w.removed, w.removed
+        assert any(e.startswith("installation.txt: not removed:") and "approve" in e
+                   for e in res["errors"]), res
+        api.page_version = 1                     # versions equal: written back as before
+        res = w.run(api, check=False)
+        assert w.ingested[n:] == [("Installation.txt", "sh3")], w.ingested
+        assert "installation.txt" in w.removed, w.removed
+        assert res["replaced"] == ["installation.txt -> Installation.txt"], res

@@ -157,7 +157,7 @@ EFFORT = {
     "deep": {
         "credits": int(os.getenv("EFFORT_DEEP_CREDITS", "4")),
         "role": "reasoning",
-        "top_k": 10,
+        "top_k": 16,  # CONTEXT_K*2, the most main.query allows
         "min_tier": "member",
         # Optional explicit model, e.g. ONLINE_DEEP_MODEL=deepseek-v4; api mode only, on the Advanced role's provider (llm.effort_model)
         "model_env": "ONLINE_DEEP_MODEL",
@@ -358,6 +358,8 @@ PUBLIC_WRITE_LIMITS = {
              int(os.getenv("QUOTA_LEADS_PER_IP", "30"))),
     "feedback": (int(os.getenv("QUOTA_VOTES_PER_VISITOR", "50")),
                  int(os.getenv("QUOTA_VOTES_PER_IP", "300"))),
+    # A visitor deleting their own chat rewrites the logs, so it is capped too.
+    "forget": (10, 50),
 }
 
 
@@ -392,10 +394,14 @@ def consume_faq_lookup(caller: dict) -> None:
             _add(c, caller["ip_identity"] + ":faq", win, 1)
 
 
-def check(caller: dict, cost: int) -> dict:
-    """Would this request fit in the caller's budget? Does NOT consume.
+def check(caller: dict, cost: int, reserve: bool = False) -> dict:
+    """Would this request fit in the caller's budget?
 
-    Returns {allowed, remaining, limit, reset_at, reason}.
+    Default is read-only (the guest probe relies on that). reserve=True takes
+    the credits in the same step, so a burst cannot all pass; settle with
+    consume(caller, charged - cost, win=gate["window"]).
+
+    Returns {allowed, remaining, limit, reset_at, reason, window}.
     """
     limit = limit_for(caller["tier"])
     win = _window_start()
@@ -418,15 +424,23 @@ def check(caller: dict, cost: int) -> dict:
                 and _used(c, GLOBAL_IDENTITY, win) + cost > cap):
             return {"allowed": False, "remaining": 0, "limit": limit,
                     "reset_at": win + WINDOW_SECONDS, "reason": "global_quota"}
+        if reserve:
+            _add(c, caller["identity"], win, cost)
+            if caller.get("ip_identity"):
+                _add(c, caller["ip_identity"], win, cost)
+            if caller["tier"] != "staff":
+                _add(c, GLOBAL_IDENTITY, win, cost)
     return {"allowed": True, "remaining": remaining, "limit": limit,
-            "reset_at": win + WINDOW_SECONDS, "reason": None}
+            "reset_at": win + WINDOW_SECONDS, "reason": None, "window": win}
 
 
-def consume(caller: dict, cost: int) -> dict:
+def consume(caller: dict, cost: int, win=None) -> dict:
     """Deduct credits. Call AFTER a successful answer, so a failed or
     refused request doesn't burn the visitor's allowance - the common
-    complaint about naive rate limiting."""
-    win = _window_start()
+    complaint about naive rate limiting. A negative cost is a refund; pass
+    the reservation's window so a refund that lands after the daily reset
+    goes back to the day it was taken from."""
+    win = win or _window_start()
     with _lock, _conn() as c:
         _add(c, caller["identity"], win, cost)
         if caller.get("ip_identity"):
@@ -447,6 +461,7 @@ def status(caller: dict) -> dict:
     with _lock, _conn() as c:
         used = _used(c, caller["identity"], win)
         faq_used = _used(c, caller["identity"] + ":faq", win)
+        deep_free = _used(c, caller["identity"] + ":deepfree", win)
 
     if tier == "anonymous":
         # Two shapes of anonymous, decided by the operator in the console.
@@ -495,7 +510,7 @@ def status(caller: dict) -> dict:
         "unit": "credits",
         "reset_at": win + WINDOW_SECONDS,
         "ai_available": True,
-        "deep_available": True,
+        "deep_available": tier == "staff" or deep_free < free_deep_limit(),
         "standard_cost": EFFORT["standard"]["credits"],
         "deep_cost": EFFORT["deep"]["credits"],
     }
@@ -581,7 +596,7 @@ def reset_uid(uid: str) -> None:
     usage, identified by the account id from their token."""
     identity = "u:" + _h(uid)
     with _lock, _conn() as c:
-        c.execute("DELETE FROM usage WHERE identity=?", (identity,))
+        c.execute("DELETE FROM usage WHERE identity IN (?, ?)", (identity, identity + ":deepfree"))
 
 
 def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
@@ -622,3 +637,52 @@ def session_record(session_id: str | None, tokens_used: int = 0) -> None:
         _add(c, _session_key(session_id, "q"), win, 1)
         if tokens_used > 0:
             _add(c, _session_key(session_id, "t"), win, int(tokens_used))
+
+
+# ── one deep search per question per chat (D-20261030-09) ─────────────
+# ponytail: kept in the current daily window, so a chat left open across the
+# reset may deep-search one question once more.
+# A deep run that adds nothing costs 0 credits (the CEO's rule), so those
+# free runs are counted per member per day and capped: without it a member
+# could run the costliest path without end (Security, round 2).
+def free_deep_limit() -> int:
+    return int(_policy("free_deep_daily", 3))
+
+
+def _free_key(caller: dict) -> str:
+    return caller["identity"] + ":deepfree"
+
+
+def deep_claim(key: str, caller: dict) -> str:
+    """'ok': first deep search of `key`; it also reserves one of today's free
+    deep runs, handed back by deep_paid or deep_release. 'again': `key` was
+    already deep-searched. 'capped': today's free deep runs are used (staff
+    are not capped). Atomic, so a double click or a burst cannot slip past."""
+    win = _window_start()
+    with _lock, _conn() as c:
+        if _used(c, "deep:" + key, win):
+            return "again"
+        if (caller["tier"] != "staff"
+                and _used(c, _free_key(caller), win) >= free_deep_limit()):
+            return "capped"
+        _add(c, "deep:" + key, win, 1)
+        _add(c, _free_key(caller), win, 1)
+    return "ok"
+
+
+def deep_done(key: str) -> bool:
+    with _lock, _conn() as c:
+        return bool(_used(c, "deep:" + key, _window_start()))
+
+
+def deep_paid(caller: dict) -> None:
+    """The deep run was charged in credits: give its free slot back."""
+    with _lock, _conn() as c:
+        _add(c, _free_key(caller), _window_start(), -1)
+
+
+def deep_release(key: str, caller: dict) -> None:
+    """Our own failure: give the search and its free slot back."""
+    with _lock, _conn() as c:
+        c.execute("DELETE FROM usage WHERE identity=?", ("deep:" + key,))
+        _add(c, _free_key(caller), _window_start(), -1)

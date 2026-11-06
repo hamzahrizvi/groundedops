@@ -87,7 +87,7 @@ _DEFAULT = {
     "name": "Support",
     "welcome": "Hi — I can answer questions from our product documentation. "
                "What are you looking for?",
-    "color": "#9184d9",
+    "color": "#6a5acd",
     "icon_url": "",
     "privacy_url": "",
     "intro_options": [
@@ -202,7 +202,7 @@ def validate(payload: dict) -> dict:
 
     color = (payload.get("color") or _DEFAULT["color"]).strip()
     if not _HEX_RE.match(color):
-        raise ValueError(f"color must be a 6-digit hex value like #9184d9 (got '{color}')")
+        raise ValueError(f"color must be a 6-digit hex value like #6a5acd (got '{color}')")
 
     opts_in = payload.get("intro_options")
     if not isinstance(opts_in, list):
@@ -480,6 +480,27 @@ def prune_before(cutoff) -> int:
         items = _load_leads()
         kept = [l for l in items if l.get("notified")
                 or (l.get("created_at") or "") >= key]
+        if len(kept) < len(items):
+            _save_leads(kept)
+        return len(items) - len(kept)
+
+
+def erase_email(email: str) -> int:
+    """Erasure on request: delete every enquiry that carries this address in
+    any field. Emailed stubs hold no address, so they never match. Returns
+    how many went."""
+    e = (email or "").strip().lower()
+    if not e:
+        return 0
+
+    def has(l):
+        vals = [l.get("cc_email")] + [v.get("value") for v in (l.get("values") or {}).values()
+                                      if isinstance(v, dict)]
+        return any(str(v or "").strip().lower() == e for v in vals)
+
+    with _leads_lock:
+        items = _load_leads()
+        kept = [l for l in items if not has(l)]
         if len(kept) < len(items):
             _save_leads(kept)
         return len(items) - len(kept)

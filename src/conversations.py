@@ -132,6 +132,24 @@ def delete_conversation(user_id: str, convo_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def erase_user(user_id: str) -> int:
+    """Erasure on request: delete every saved chat of this signed-in user.
+    Returns how many messages and conversations went."""
+    if not user_id or not os.path.exists(DB_PATH):
+        return 0
+    c = _connect()
+    try:
+        with c:
+            n = c.execute("DELETE FROM messages WHERE conversation_id IN "
+                          "(SELECT id FROM conversations WHERE user_id = ?)",
+                          (user_id,)).rowcount
+            n += c.execute("DELETE FROM conversations WHERE user_id = ?",
+                           (user_id,)).rowcount
+    finally:
+        c.close()
+    return n
+
+
 def prune_before(cutoff) -> int:
     """D-15: delete messages written before `cutoff` (an aware datetime) and
     conversations idle since then. Foreign keys are off in SQLite by

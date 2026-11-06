@@ -186,6 +186,31 @@ check(r.status_code == 200 and parses["multipart"] == before["multipart"] + 1,
       f"support: /upload {r.status_code}, body parsed once (the counter sees parsing)")
 _fp.MultiPartParser.parse, _fp.FormParser.parse = _real_mp, _real_form
 
+print("\n== a chunked body is capped like a sized one (D-20261008-12) ==")
+JSON_CT = {"content-type": "application/json"}
+
+
+def chunked(total):
+    """A body with no content-length: httpx sends a generator chunked."""
+    step = 64 * 1024
+    return (b"x" * min(step, total - i) for i in range(0, total, step))
+
+
+OVER = main.MAX_BODY_BYTES + 1024
+r = client.post("/widget/lead", content=b"x" * OVER, headers=JSON_CT)
+check(r.status_code == 413, f"sized body over the cap: /widget/lead {r.status_code} == 413")
+for (method, path), route in sorted(TABLE.items()):
+    if method not in ("POST", "PUT", "PATCH") or path.startswith(main._LARGE_BODY_PATHS):
+        continue
+    url = re.sub(r"\{[^}]+\}", "x", path)
+    r = client.request(method, url, content=chunked(OVER), headers=JSON_CT)
+    check(r.status_code == 413 and r.json().get("detail") == "Request too large",
+          f"chunked body over the cap: {method} {path} {r.status_code} == 413")
+r = client.post("/admin/login", headers=JSON_CT, content=iter(
+    [b'{"email": "nobody@example.com",', b' "password": "wrong"}']))
+check(r.status_code == 401,
+      f"chunked body under the cap reaches the route: /admin/login {r.status_code} == 401 (422 = body lost)")
+
 print("\n" + "=" * 52)
 if fails:
     print(f"{len(fails)} CHECK(S) FAILED")

@@ -63,9 +63,9 @@ def test_widget_path_posts_to_the_widget_as_a_member_and_names_dropped_keys():
     row = rows[0]
     assert row["response"].get("role") != "error", row["response"]
     # 8.1 landed: role/reason/request_id/service_degraded now reach the
-    # widget. product_options stays dropped on purpose (K03; see
-    # widget_api.py's comment on why it can never be populated here).
-    assert set(row["missing_keys"]) == {"product_options"}
+    # widget, and product_options too since a visitor can type before
+    # picking a product (D-20261021-07).
+    assert row["missing_keys"] == []
     # And the role now reaches the customer: the widget sees the same
     # handoff /query decided, instead of a bare refusal.
     assert row["got"] == "handoff"

@@ -3892,6 +3892,7 @@ const CF_STATUS = {
   synced: ["Synced", "tag-neutral"],
   new: ["Will be added", "tag-accent"],
   changed: ["Will update", "tag-accent"],
+  held: ["Update waiting for approval", "tag-accent"],
   remove: ["Will be removed", "tag-accent"],
   combined: ["Now part of a combined document", "tag-accent"],
   gone: ["Deleted in Confluence", "tag-accent"],
@@ -3908,6 +3909,7 @@ const CF_FILTERS = [
   ["new", "New", i => i.is_new],
   ["updated", "Updated", i => i.is_updated],
   ["pending", "Changes at next sync", i => CF_PENDING.includes(i.status)],
+  ["held", "Updates to approve", i => i.status === "held"],
   ["unfiled", "Not filed", i => !cfFiled(i)],
   ["uploaded", "Uploaded before", i => !!i.uploaded_as],
   ["error", "Failed", i => i.status === "error"],
@@ -4258,7 +4260,7 @@ function cfReviewDialog(keys, mode) {
     const list = chosen();
     const unfiled = list.filter(i => !i.product), internal = list.filter(isInternal);
     const rep = list.filter(i => i.replaces && i.status !== "synced");
-    const part = list.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload);
+    const part = list.filter(i => i.uploaded_as && !i.replaces && !i.keep_upload && !i.pdf_kept);
     const warn = [];
     if (mode === "approve" && rep.length) warn.push(n(rep.length) + (rep.length === 1 ? " replaces a PDF" : " replace PDFs")
       + " you uploaded (" + rep.slice(0, 3).map(i => i.uploaded_as).join(", ") + (rep.length > 3 ? " and " + (rep.length - 3) + " more" : "")
@@ -4356,9 +4358,11 @@ function cfConnectionCard(c) {
       placeholder: "Email of the Atlassian account the token belongs to" }),
     token: el("input", { class: "input", type: "password", autocomplete: "new-password",
       placeholder: s.token_set ? "Token saved (leave blank to keep)" : "API token" }),
+    link_hosts: el("input", { class: "input", value: s.link_hosts || "",
+      placeholder: "Hosts links may point to, comma separated (default: " + (s.link_hosts_default || "") + ")" }),
   };
   const save = el("button", { class: "btn btn-primary", onclick: () => {
-    const body = { folder_url: f.folder_url.value, email: f.email.value };
+    const body = { folder_url: f.folder_url.value, email: f.email.value, link_hosts: f.link_hosts.value };
     if (f.token.value) body.token = f.token.value;
     cfPost("/admin/confluence", body, "Connection saved");
   } }, "Save");
@@ -4368,7 +4372,10 @@ function cfConnectionCard(c) {
       + "Everything under the folder or page below is offered here; nothing reaches the bot until it is approved."),
     el("div", { style: "display:flex;flex-direction:column;gap:6px" }, f.folder_url,
       el("div", { class: "row", style: "gap:6px;flex-wrap:wrap" },
-        el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token))),
+        el("div", { class: "grow" }, f.email), el("div", { class: "grow" }, f.token)),
+      f.link_hosts,
+      el("span", { style: "font-size:12px;color:color-mix(in srgb,var(--color-text) 55%,transparent)" },
+        "Links to any other host keep their text but not their address. Add your Confluence site to keep links to its pages and files (only if that space is public). Applies from the next sync of each page.")),
     el("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save,
       el("span", { class: "tag " + (c.configured ? "tag-accent" : "tag-neutral") },
         c.configured ? "connected" : "not connected")));
@@ -4381,6 +4388,7 @@ function cfSyncCard(c) {
     style: "padding:14px 18px;margin-bottom:18px" });
   const mode = (m, label, hint) => el("button", {
     class: "chip" + (c.mode === m ? " chip-on" : ""), title: hint,
+    disabled: m === "auto" && !isRoot() && c.mode !== "auto" ? "true" : null,
     onclick: () => c.mode !== m && cfPost("/admin/confluence/mode", { mode: m },
       m === "auto" ? "New documents will sync without approval" : "New documents will wait for approval"),
   }, label);
@@ -4452,11 +4460,13 @@ function cfSyncCard(c) {
       mode("review", "Approve new documents first",
         "New documents start excluded, marked New, until someone approves them"),
       mode("auto", "Sync everything",
-        "Every new document is approved as soon as it is found")),
-    el("p", { style: muted + ";margin:0 0 10px" }, c.mode === "auto"
-      ? "Every document found is synced. Exclude one to take it out of the bot."
+        "Every new document and every edit is synced without approval" + (isRoot() ? "" : ". Only a root admin can switch this on"))),
+    el("p", { style: muted + ";margin:0 0 10px" }, (c.mode === "auto"
+      ? "Every document found, and every edit to one, is synced. Exclude one to take it out of the bot."
       : "New documents start excluded and are marked New until someone approves them. "
-        + "Approved documents stay approved and update when they change."),
+        + "An approved document edited in Confluence keeps answering from its approved version "
+        + "until someone approves the update.")
+      + " Anyone who can edit these pages in Confluence is writing what the bot tells customers."),
     el("div", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, syncBtn, checkBtn, stopBtn,
       busy ? (cfStatusEl = cfRunBar(), cfStatusEl.update(busy),
               cfFeedCount = busy.log_total || 0, cfStatusEl)
@@ -4592,13 +4602,20 @@ const cfAgo = at => {
 
 // What happens to the copy of this manual someone uploaded by hand.
 function cfUploadLine(it) {
+  // An uploaded PDF beats a text copy (confluence_sync._pdf_first): undoing
+  // "Keep both" then drops the Confluence copy, not the PDF.
+  const pdfFirst = /\.pdf$/i.test(it.uploaded_as || "") && !/\.pdf$/i.test(it.source || "");
   const set = keep => cfPost("/admin/confluence/items", { keys: [it.key], keep_upload: keep },
-    keep ? "The uploaded copy stays alongside" : "The uploaded copy will be replaced");
+    keep ? "The uploaded copy stays alongside"
+      : pdfFirst ? "Only your PDF will answer" : "The uploaded copy will be replaced");
   // A combined manual can stand in for several uploads (its sections').
   const name = [it.uploaded_as, ...(it.also_uploaded || [])].map(u => "“" + u + "”").join(" and ");
   const [text, cls, btn] = it.keep_upload
     ? ["Kept alongside your upload " + name + ": the bot reads both", "keep",
-       el("button", { class: "cf-up-btn", onclick: () => set(false) }, "Replace it")]
+       el("button", { class: "cf-up-btn", onclick: () => set(false) }, pdfFirst ? "Use only the PDF" : "Replace it")]
+    : it.pdf_kept
+      ? ["Your PDF " + name + " answers; this Confluence copy is not indexed", "keep",
+         el("button", { class: "cf-up-btn", onclick: () => set(true) }, "Keep both")]
     : it.replaces
       ? [(it.status === "synced" ? "Replaced your upload " : "Replaces your upload ") + name
            + (it.status === "synced" ? "" : " when synced, keeping its product"), "rep",
@@ -4645,6 +4662,9 @@ function cfRow(it, onTick) {
         it.error ? el("div", { class: "cf-doc-err" }, it.error) : null,
         it.uploaded_as ? cfUploadLine(it) : null)),
     el("span", { class: "tag " + cls }, label),
+    it.status === "held" ? el("button", { class: "btn btn-secondary", style: "font-size:12.5px",
+      title: "Version " + it.prev_version + " to " + it.version + " in Confluence; customers get the last approved version until then",
+      onclick: () => set({ decision: it.decision || "approved" }) }, "Approve update") : null,
     cfProductButton(it),
     sw,
     it.kind === "bundle" ? el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
@@ -4822,7 +4842,7 @@ function cfHistoryCard(c) {
     : r.kind === "check"
       ? r.found + " found: " + n(r, "new") + " new, " + n(r, "changed") + " changed, " + n(r, "gone") + " deleted"
       : n(r, "added") + " added, " + n(r, "updated") + " updated, " + n(r, "removed") + " removed"
-        ;
+        + (n(r, "held") ? "; " + n(r, "held") + " updates waiting for approval" : "");
   return el("div", { class: "card elev-sm", "data-sec": "History", style: "padding:14px 18px" },
     el("b", {}, "History"),
     c.history.length
@@ -5111,6 +5131,37 @@ function keyRolesCard() {
     } catch (e) { toast(e.message, true); escBox.checked = !escBox.checked; drawEsc(); }
   });
   drawEsc();
+
+  // Which mode answers, set from here instead of curl to /settings/mode.
+  const modeSel = el("select", { "aria-label": "Answer mode" },
+    el("option", { value: "api" }, "Online: the providers above"),
+    el("option", { value: "local" }, "Local: the on-prem models"));
+  modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+  modeSel.addEventListener("change", async () => {
+    const want = modeSel.value;
+    if (want === "local" && !confirm("Switch every answer to the on-prem models?\n\n"
+        + "Their answer quality has not been measured. Online mode can be switched back at any time.")) {
+      modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+      return;
+    }
+    try {
+      const res = await api("/settings/mode", { method: "POST", body: JSON.stringify({ mode: want }) });
+      keysCache.generation_mode = res.mode;
+      modeSel.value = res.mode === "local" ? "local" : "api";
+      drawEsc();
+      toast(res.mode === "local"
+        ? "Local mode on. " + ((res.outside_providers || []).length
+            ? "Flagged answers go to " + res.outside_providers.join(", ") + "."
+            : "Nothing is sent outside.")
+        : "Online mode on");
+    } catch (e) {
+      toast(e.message, true);
+      modeSel.value = keysCache.generation_mode === "local" ? "local" : "api";
+    }
+  });
+  const modeRow = el("div", { class: "row", style: "align-items:center;margin:6px 0 10px" },
+    el("b", {}, "Answer mode"), modeSel);
+
   const escRow = el("div", { class: "row", style: "align-items:flex-start;margin-top:6px" },
     escBox,
     el("div", { style: "flex:1 1 220px;min-width:0" },
@@ -5125,6 +5176,7 @@ function keyRolesCard() {
       + "one only when you want deep questions answered elsewhere, or a "
       + "different provider to pick up when the first fails. Applies in "
       + "Online mode."),
+    modeRow,
     el("p", { class: "sec-hint", style: "margin-top:-4px" },
       "Each job also picks a model. Leave it on “follow default” and "
       + "the job uses whatever that provider is set to, so choosing a model "
@@ -5352,6 +5404,61 @@ let docFilter = { cat: "", prod: "" };
 // never leave a hidden document in a bulk Remove.
 let docSelected = new Set();
 
+// Products whose manuals keep naming another product: a CashGenic's manual
+// names the NV200 Spectral inside it, but the answers sit in the NV200's
+// manuals, which a CashGenic chat never searches until they are filed under
+// it too. The scan reads every section (seconds), so it runs again only when
+// the document list changes -- an upload finishing, a refile -- not on every
+// render. "Not related" is remembered in this browser only.
+let scopeScan = { sig: null, p: null };
+const SCOPE_GONE = "go-scope-not-related";
+const scopeGone = () => { try { return JSON.parse(localStorage.getItem(SCOPE_GONE) || "[]"); } catch (e) { return []; } };
+
+function scopePrompt() {
+  const box = el("div", {});
+  const sig = cache.sources.map(s => s.source + "|" + (s.product || "") + "|" + s.chunks).join("\n");
+  if (scopeScan.sig !== sig)
+    scopeScan = { sig, p: api("/admin/scope_suggestions").then(r => r.suggestions || []).catch(() => []) };
+  scopeScan.p.then(list => {
+    const gone = scopeGone();
+    list.filter(s => !gone.includes(s.product + ">" + s.other)).forEach(s => {
+      const docs = s.sources.length + (s.sources.length === 1 ? " document" : " documents");
+      const card = el("div", { class: "card elev-sm",
+          style: "padding:14px 20px;margin-bottom:12px;display:flex;"
+               + "flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap;"
+               + "box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--color-accent)" },
+        el("div", { style: "flex:1 1 320px" },
+          el("b", { style: "display:block;font-size:13.5px" },
+            s.product_name + "'s manual names " + s.other_name + " in " + s.hits
+            + " of " + s.chunks + " sections — also search " + s.other_name
+            + "'s manuals in " + s.product_name + " chats?"),
+          el("span", { class: "sec-hint", style: "margin:0" },
+            "Files " + s.other_name + "'s " + docs + " under " + s.product_name
+            + " as well; " + s.other_name + " keeps them.")),
+        el("div", { style: "display:flex;gap:6px;flex-wrap:wrap" },
+          el("button", { class: "btn btn-primary", style: BTN, onclick: async e => {
+            const b = e.target; b.disabled = true;
+            try {
+              // one call per document, so the count shows it moving (76 of them took minutes with no sign of life)
+              for (const [i, d] of s.sources.entries()) {
+                b.textContent = "Filing " + (i + 1) + " of " + s.sources.length + "…";
+                await api("/admin/reassign_source", { method: "POST", body: JSON.stringify({
+                  source: d.source, category_key: d.category, product_key: d.keys.join(",") }) });
+              }
+              toast(s.other_name + "'s manuals are now searched in " + s.product_name + " chats");
+            } catch (err) { toast(err.message, true); }
+            await refresh(); render();
+          } }, "Also search them"),
+          el("button", { class: "btn btn-ghost", style: BTN, onclick: () => {
+            try { localStorage.setItem(SCOPE_GONE, JSON.stringify(gone.concat([s.product + ">" + s.other]))); } catch (e) {}
+            card.remove();
+          } }, "Not related")));
+      box.append(card);
+    });
+  });
+  return box;
+}
+
 function viewDocuments() {
   const prods = products();
   let chosenCat = cache.catalog.length === 1 ? cache.catalog[0].key : "";
@@ -5393,6 +5500,12 @@ function viewDocuments() {
         } }),
         el("span", {}, p.categoryName + " › " + p.name)))));
   const productKeys = p => [...new Set([p.key, ...also])].join(",");
+  // Internal = never used to answer a customer, never downloadable. Sent only
+  // when ticked: a new version of an internal document keeps its mark
+  // server-side unless someone changes it on its row.
+  const internalBox = el("input", { type: "checkbox" });
+  const internalPick = el("label", { class: "tagpick-row" }, internalBox,
+    el("span", {}, "Internal — never shown to customers"));
 
   // D-20261022-16: describing pictures is paid per picture (Claude), so it is
   // off unless ticked for this upload. Unchanged pictures of a replaced
@@ -5431,7 +5544,8 @@ function viewDocuments() {
                       "category-key": p.category, "product-key": productKeys(p) };
     if (replaceSource) headers["replace-source"] = replaceSource;
     if (picBox.checked) headers["describe-pictures"] = "1";
-    const r = await fetch(API + "/upload",{ method: "POST", body: fd, headers });
+    if (internalBox.checked) headers["internal"] = "1";
+    const r = await fetch(API + "/upload", { method: "POST", body: fd, headers });
     if (r.status === 409) {
       const body = await r.json().catch(() => null);
       const d = (body && body.detail) || {};
@@ -5646,8 +5760,11 @@ function viewDocuments() {
 
   const removeDocs = async docs => {
     if (!await askConfirm({ title: "Remove " + label(docs) + "?", ok: "Remove",
-        body: "Answers already given stay, but " + (docs.length === 1 ? "it" : "they")
-          + " can no longer be searched. This cannot be undone." })) return;
+        body: (docs.length === 1 ? "Its original file is" : "Their original files are")
+          + " deleted too, so " + (docs.length === 1 ? "it" : "they")
+          + " can no longer be searched or downloaded, and a rebuild cannot bring "
+          + (docs.length === 1 ? "it" : "them") + " back. Answers already given stay."
+          + " This cannot be undone." })) return;
     runBulk("Removing " + label(docs), docs, d =>
       api("/delete_source", { method: "POST", body: JSON.stringify({ source: d.source }) }));
   };
@@ -5873,6 +5990,10 @@ function viewDocuments() {
                          ? "Version " + freshness.version.slice(0, 12) : "" }, "Current"),
       s.internal ? el("span", { class: "tag tag-accent",
         title: "Never used in public answers, downloads or pictures" }, "Internal") : null,
+      s.duplicate_of ? el("span", { class: "tag tag-neutral",
+        title: "Same file as " + s.duplicate_of + "; left out of answers so copies "
+             + "do not crowd the search. Removing " + s.duplicate_of
+             + " makes this one answer." }, "Duplicate of " + s.duplicate_of) : null,
       move,
       el("button", { class: "btn btn-ghost", style: "font-size:12.5px",
         title: s.internal ? "Let public answers use this document again"
@@ -5964,14 +6085,16 @@ function viewDocuments() {
     // Sits above the page when a document was just replaced, and stays put
     // across the re-render that follows the upload.
     replacePrompt(),
+    scopePrompt(),
     el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                 "data-tour": "doc-add", "data-sec": "Add documents" },
       el("div", { class: "sec-title" }, "Add documents"),
-      el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in."),
+      el("div", { class: "sec-hint" }, "Pick the category, then the product the document describes, then drop the files in. Documents indexed here can be quoted to anonymous widget visitors: tick Internal for service notes, customer-specific documents or anything holding a password."),
       el("div", { class: "row" },
         el("div", {}, el("label", { class: "flabel" }, "Category"), catSel),
         el("div", {}, el("label", { class: "flabel" }, "Product"), prodSel),
-        el("div", {}, el("label", { class: "flabel" }, "Optional"), alsoPick)),
+        el("div", {}, el("label", { class: "flabel" }, "Optional"), alsoPick),
+        el("div", {}, el("label", { class: "flabel" }, "Who may see it"), internalPick)),
       picRow,
       // Indexing a document needs the embedding model, so this is the one
       // control on the page that has to wait for it. POST /upload refuses
@@ -6844,7 +6967,7 @@ function viewGaps() {
       groupCb, "Group similar wordings"),
     el("label", { class: "flabel", style: "margin:0" }, "Show"), statusSel,
     el("label", { style: "display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer",
-                  title: "Questions asked only by the test harness (eval, live and preflight runs)" },
+                  title: "Questions asked only by the test harness (eval, live and preflight runs, and scripts)" },
       testsCb, "Include test runs"),
     langFilterSel ? el("label", { class: "flabel", style: "margin:0" }, "Language") : null,
     langFilterSel,
@@ -7027,13 +7150,31 @@ function viewWidget() {
   privacyIn.addEventListener("input", () => { d.privacy_url = privacyIn.value.trim(); });
   const colorIn = el("input", { type: "color", value: d.color,
       style: "width:34px;height:34px;padding:0;border:0;border-radius:8px;cursor:pointer;background:transparent" });
+  // White text sits on the accent (header name, launcher, send and form
+  // buttons), so warn when that pair is under WCAG's 4.5:1. Warn only:
+  // the colour is the customer's brand, never recoloured silently.
+  const whiteOn = hex => {
+    const ch = i => { const v = parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 1.05 / (0.2126 * ch(0) + 0.7152 * ch(1) + 0.0722 * ch(2) + 0.05);
+  };
+  const colorWarn = el("p", { class: "sec-hint",
+    style: "margin:6px 0 0;color:var(--color-warn,#c98a00)" });
+  const drawColorWarn = () => {
+    const r = /^#[0-9a-f]{6}$/i.test(d.color || "") ? whiteOn(d.color) : 21;
+    colorWarn.textContent = r < 4.5
+      ? "White text on this colour is " + r.toFixed(1) + ":1, under the 4.5:1 small text needs. "
+        + "Some visitors will struggle to read the widget's header, launcher and buttons; a darker shade fixes it."
+      : "";
+  };
   const swatchRow = el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" });
-  const setColor = hex => { d.color = hex; colorIn.value = hex; drawPreview(); };
-  ["#9184d9", "#2f7de1", "#0e7a54", "#b26a00", "#e4002b", "#12161c"].forEach(hex =>
+  const setColor = hex => { d.color = hex; colorIn.value = hex; drawPreview(); drawColorWarn(); };
+  ["#6a5acd", "#2368c4", "#0e7a54", "#935700", "#e4002b", "#12161c"].forEach(hex =>
     swatchRow.append(el("button", { title: hex, onclick: () => setColor(hex),
       style: "width:28px;height:28px;border-radius:50%;border:0;cursor:pointer;background:" + hex })));
   swatchRow.append(colorIn);
   colorIn.addEventListener("input", () => setColor(colorIn.value));
+  drawColorWarn();
 
   // ---- opening options ----
   const optBox = el("div", {});
@@ -7301,7 +7442,7 @@ function viewWidget() {
             el("label", { class: "flabel" }, "Privacy notice link (optional)"), privacyIn,
             el("div", { class: "sec-hint" }, "Shown as a \"Privacy notice\" link under the widget's fixed AI notice. The notice itself cannot be changed here.")),
           el("div", { style: "margin-top:12px" },
-            el("label", { class: "flabel" }, "Accent colour"), swatchRow)),
+            el("label", { class: "flabel" }, "Accent colour"), swatchRow, colorWarn)),
         el("div", { class: "card elev-sm", style: "padding:18px 20px;gap:0;margin-bottom:16px",
                     "data-tour": "wd-options", "data-sec": "Opening options" },
           el("div", { class: "sec-title" }, "Opening options"),
@@ -7409,7 +7550,37 @@ function viewLeads() {
       el("div", { class: s.unsent ? "warn" : "" },
         el("div", { class: "lbl" }, "Not emailed"), el("b", {}, String(s.unsent || 0)))),
     el("div", { "data-tour": "leads-list" }, rows),
+    eraseCard(),
   ];
+}
+
+// UK GDPR: someone asks for their data to be deleted. Their enquiries are
+// found by email; a chat by the id the widget shows under its settings; a
+// signed-in visitor's saved chats by the website's user id.
+function eraseCard() {
+  const f = { email: el("input", { type: "email", placeholder: "name@example.com" }),
+              session_id: el("input", { placeholder: "Chat id from the widget's settings" }),
+              user_id: el("input", { placeholder: "Website user id (signed-in visitors)" }) };
+  const go = async () => {
+    const body = Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value.trim()]));
+    if (!body.email && !body.session_id && !body.user_id) return toast("Fill in at least one field", true);
+    if (!confirm("Delete everything matching these details now? It cannot be recovered.")) return;
+    try {
+      const r = await api("/admin/privacy/erase", { method: "POST", body: JSON.stringify(body) });
+      const n = Object.values(r.removed || {}).filter(v => typeof v === "number").reduce((a, b) => a + b, 0);
+      toast(n ? "Deleted " + n + " record" + (n === 1 ? "" : "s") : "Nothing matched these details");
+      Object.values(f).forEach(i => { i.value = ""; });
+      await refresh(); render();
+    } catch (e) { toast(e.message, true); }
+  };
+  return el("div", { class: "card elev-sm", "data-sec": "Delete a person's data", style: "margin-top:18px" },
+    el("h2", {}, "Delete a person's data"),
+    el("p", { class: "lede", style: "margin-top:0" },
+      "For a request to erase someone's data. Their email removes their enquiries; the chat id "
+      + "removes that conversation's questions, answers and votes. Everything else is deleted "
+      + "after 90 days anyway. Questions on the unanswered list are not linked to who asked."),
+    el("div", { class: "row" }, f.email, f.session_id, f.user_id,
+      el("button", { class: "btn btn-secondary", onclick: go }, "Delete")));
 }
 
 /* ---------------- catalog ---------------- */
@@ -8047,6 +8218,35 @@ function viewTest() {
           det.append(row);
         });
         bub.append(det);
+      }
+
+      // 8.12: what the widget offers after an answer (afterAnswer, docChip),
+      // with its labels, so the test chat shows what a customer sees. Same
+      // gate as the widget: not on a flagged, outage or sign-in turn, nor
+      // when it offers replies or asks which one; a refusal gets the link only.
+      const mc = r.more_context || {};
+      const asksBack = (r.suggested_replies || []).length
+        || (r.needs_clarification && (r.clarification_options || []).length);
+      if (!r.flagged && !r.service_degraded && !r.needs_sign_in && !asksBack) {
+        if (!r.offer_support && mc.kind === "detail" && (mc.passages || []).length) {
+          const det = el("details", { style: "margin-top:9px" });
+          det.append(el("summary", { class: "lbl", style: "cursor:pointer;user-select:none" },
+                        "Show more from the manual"));
+          mc.passages.forEach(p => det.append(
+            el("div", { style: "font-size:12px;margin-top:6px;font-weight:600" },
+               "From " + p.source + (p.page ? ", page " + p.page : "")),
+            el("blockquote", { style: "font-size:12px;margin:3px 0 0;padding-left:8px;"
+               + "border-left:2px solid var(--color-line);white-space:pre-wrap" }, p.text)));
+          bub.append(det);
+        }
+        // Same-origin href, as the source rows above; the PDF viewer honours #page.
+        const doc = mc.document, pg = doc && (doc.pages || [])[0];
+        if (doc && doc.download_url) {
+          bub.append(el("div", { style: "font-size:12px;margin-top:6px" },
+            el("a", { href: doc.download_url + (pg ? "#page=" + pg : ""),
+                      target: "_blank", rel: "noopener" },
+               "Open " + doc.source + (pg ? ", page " + pg : ""))));
+        }
       }
 
       // WHERE THIS ANSWER CAME FROM, and where it stopped.

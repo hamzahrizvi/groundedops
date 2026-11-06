@@ -251,8 +251,12 @@ def without_generic(text: str) -> str:
         # "SMART Coin System" is still the SMART Coin System.
         if len({m.get("product") for m in fam.get("members") or []}) < 2:
             continue
+        # A member's own name stays: the auto family "MyCheckr" is also the
+        # MyCheckr's name, and taking it out left "the MyCheckr and the ICU
+        # Pro" naming one product, so the comparison lost its MyCheckr arm.
+        own = {f for f, i in _forms(fam) if i is not None}
         for f, _i, g in mentions(text, fam):
-            if g:
+            if g and f not in own:
                 t = t.replace(f" {f} ", " ")
     return t.strip()
 

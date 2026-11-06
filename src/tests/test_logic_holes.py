@@ -116,7 +116,7 @@ def test_the_picker_is_overridden_by_the_typed_question_only():
     import inspect
     src = inspect.getsource(main.query)
     assert "_named_typed if payload.product else _named" in src
-    assert "_families.without_generic(_normalize_query(q)), _keys)" in src
+    assert "_named_typed = _products_named_in(_families.without_generic(_normalize_query(q)), _keys," in src
 
 
 def test_a_curated_question_typed_in_a_product_chat_is_served():
@@ -198,6 +198,29 @@ def test_comparison_share_keeps_a_low_scored_table_and_no_third_product():
         main.CONTEXT_K, main.CONTEXT_MIN = k, m
 
 
+def test_a_part_of_the_selected_system_does_not_override_it():
+    """C20261022c-08: "the smart coin system" typed in a CashGenic chat moved
+    the search to the SCS pool and refused; CashGenic lists the SCS manual.
+    A product that only shares a manual named for the selected one (the
+    MyCheckr manual, in a MyCheckr chat asking about the Mini) still overrides."""
+    import catalog
+    real = (catalog.sources_for, main._product_names, main._product_aliases)
+    catalog.sources_for = {
+        "cashgenic": ["CashGenic User Manual-v1.pdf", "SMART Coin System Range User Manual-v1.pdf"],
+        "sku_scs": ["SMART Coin System Range User Manual-v1.pdf", "SCS Release Notes.txt"],
+        "mycheckr": ["MyCheckr User Manual-v7.pdf"],
+        "mycheckr_mini": ["MyCheckr User Manual-v7.pdf", "MyCheckr Mini User Manual-v5.pdf"]}.get
+    main._product_names = lambda: {"cashgenic": "CashGenic", "sku_scs": "SMART Coin System",
+                                   "mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr Mini"}
+    main._product_aliases = lambda: {}
+    try:
+        assert main._resolve_question_scope("cashgenic", None, ["sku_scs"]) == ({"product": "cashgenic"}, "cashgenic")
+        assert main._resolve_question_scope("sku_scs", None, ["cashgenic"]) == ({"product": "cashgenic"}, "cashgenic")
+        assert main._resolve_question_scope("mycheckr", None, ["mycheckr_mini"]) == ({"product": "mycheckr_mini"}, "mycheckr_mini")
+    finally:
+        catalog.sources_for, main._product_names, main._product_aliases = real
+
+
 def test_number_rescue_does_not_judge_a_comparison_verdict_or_absence():
     ctx = [{"text": "MCBF: 200,000 Cycles"}, {"text": "MCBI: 25,000 MCBF: 100,000"}]
     verdict = "The NV4000 is better: 100,000 cycles against 200,000 for the NV200 Spectral."
@@ -207,6 +230,140 @@ def test_number_rescue_does_not_judge_a_comparison_verdict_or_absence():
     assert not main._lexically_supported(verdict, ctx, comparing=True)
     assert not main._lexically_supported(absent, ctx, comparing=True)
     assert main._lexically_supported(plain, ctx, comparing=True)
+
+
+def test_comparison_share_counts_a_shared_document_for_each_product():
+    """D-20261019-17: C20261026-24's Android guide, tagged only
+    biometrics_general, holds both products' options."""
+    import retrieval_db
+    real = retrieval_db._category_of
+    retrieval_db._category_of = lambda k: {"icu": "biometrics", "mycheckr": "biometrics"}.get(k, "")
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "mycheckr", "rerank_score": s} for s in (0.97, 0.9, 0.8, 0.7, 0.6)]
+        ranked += [{"product": "biometrics_general", "rerank_score": 0.5},
+                   {"product": "note_val_general", "rerank_score": 0.4}]
+        assert main._comparison_picks(ranked, ["icu", "mycheckr"], 0.44) == [0, 1, 2, 3, 4, 5]
+        assert main._tagged_for({"product": "biometrics_general"}, "icu")
+        assert not main._tagged_for({"product": "biometrics_general"}, "nv200s")
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+        retrieval_db._category_of = real
+
+
+def test_a_shared_page_below_the_floor_takes_no_comparison_slot():
+    """D-20261019-17 round 2: a shared page earns a comparison slot on score,
+    or it pushes a product's own pages out (C20261010-35, C20261025e-05)."""
+    import retrieval_db
+    real = retrieval_db._category_of
+    retrieval_db._category_of = lambda k: {"icu": "biometrics", "mycheckr": "biometrics"}.get(k, "")
+    k, m = main.CONTEXT_K, main.CONTEXT_MIN
+    main.CONTEXT_K, main.CONTEXT_MIN = 8, 4
+    try:
+        ranked = [{"product": "mycheckr", "rerank_score": s} for s in (0.97, 0.9, 0.8, 0.7)]
+        ranked += [{"product": "biometrics_general", "rerank_score": 0.10},
+                   {"product": "icu", "rerank_score": 0.05}]
+        assert main._comparison_picks(ranked, ["icu", "mycheckr"], 0.44) == [0, 1, 2, 3, 5]
+        assert main._comparison_picks([{"product": "biometrics_general", "rerank_score": 0.01}],
+                                      ["icu", "mycheckr"], 0.44) == []
+    finally:
+        main.CONTEXT_K, main.CONTEXT_MIN = k, m
+        retrieval_db._category_of = real
+
+
+def test_a_sibling_named_by_its_difference_in_its_own_chat():
+    """D-20261019-17: C20261021e-15."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    main._product_names = lambda: {"mycheckr": "MyCheckr", "mycheckr_mini": "MyCheckr mini",
+                                   "myconnect": "MyConnect"}
+    main._product_aliases = lambda: {"mycheckr": [], "mycheckr_mini": ["MyCheckr Mini"],
+                                     "myconnect": []}
+    try:
+        keys = ["mycheckr", "mycheckr_mini", "myconnect"]
+        q = "adding a new mini to the myconnect app, what age threshold will the mini be on out of the box?"
+        assert main._products_named_in(q, keys, selected="mycheckr_mini") == ["mycheckr_mini", "myconnect"]
+        assert main._products_named_in(q, keys) == ["myconnect"]
+        assert main._products_named_in("is the myconnect minimal", keys,
+                                       selected="mycheckr_mini") == ["myconnect"]
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
+_D11_NAMES = {"sku_scs": "SMART Coin System", "compact_smart_coin_system": "Compact SMART Coin System",
+              "global_smart_coin_system": "Global SMART Coin System", "smart_hopper_3": "Smart Hopper 3",
+              "nv9usb": "NV9USB+", "nv9_spectral": "NV9 Spectral"}
+_D11_RAW = {"sku_scs": ["SMART Hopper", "SCS", "Twin SMART Coin System"],
+            "nv9usb": ["NV11+"], "nv9_spectral": ["NV11 Spectral"]}
+
+
+def test_a_variant_named_by_its_qualifier_or_short_form():
+    """D-20261025-11: C20261025e-11/-14/-16."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    names, raw = _D11_NAMES, _D11_RAW
+    aliases = main._variant_short_forms(names, raw)
+    main._product_names = lambda: names
+    main._product_aliases = lambda: aliases
+    keys = list(names)
+    C, G, S, H = "compact_smart_coin_system", "global_smart_coin_system", "sku_scs", "smart_hopper_3"
+    try:
+        assert "gSCS" in aliases[G] and "global SCS" in aliases[G]
+        assert "cSCS" in aliases[C]
+        assert aliases[S] == raw[S]
+        assert H not in aliases
+        assert main._products_named_in("whats the MCBF and MCBI on the G-SCS?", keys) == [G]
+        assert main._products_named_in("payout speed of the C-SCS", keys) == [C]
+        assert main._products_named_in("compact vs the normal smart coin system, which one pulls more current?",
+                                       keys, selected=C) == [C, S]
+        q11 = "we're swapping old SCS units for the compact one. does the compact still support payout by denomination?"
+        assert main._products_named_in(q11, keys, selected=C) == [C]
+        assert main._products_named_in(q11, keys) == [C, S]
+        assert main._products_named_in("G-SCS vs C-SCS, which has the higher MCBF?", keys) == [C, G]
+        assert main._products_named_in("does the compact one need 24V", keys) == []
+        assert main._products_named_in("what is the scs", keys) == [S]
+        assert main._is_family_parent(S, C) and not main._is_family_parent(C, S)
+        assert main._resolve_question_scope(C, None, [S])[1] == C
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
+
+
+def test_product_aliases_reads_the_catalogue_and_adds_the_short_forms():
+    """D-20261025-11: the live path, not the helper alone. The build passed
+    (aliases, names) the wrong way round and every question crashed."""
+    from unittest.mock import patch
+    import catalog
+    cat = {"categories": [{"key": "coin", "products": [
+        {"key": k, "name": n, "aliases": _D11_RAW.get(k, [])} for k, n in _D11_NAMES.items()]}]}
+    with patch.object(catalog, "catalog", lambda: cat):
+        aliases = main._product_aliases()
+    assert "gSCS" in aliases["global_smart_coin_system"], aliases
+    assert aliases["sku_scs"] == _D11_RAW["sku_scs"]
+
+
+def test_a_family_alias_shared_by_several_products_is_not_one_of_them():
+    """D-20261025-11: C20261029-37/-39."""
+    real_names, real_aliases = main._product_names, main._product_aliases
+    names = _D11_NAMES
+    aliases = main._variant_short_forms(names, _D11_RAW)
+    main._product_names = lambda: names
+    main._product_aliases = lambda: aliases
+    keys = list(names)
+    S, H = "sku_scs", "smart_hopper_3"
+    try:
+        q = "our smart hopper is flashing red 4 times and wont pay out"
+        assert main._products_named_in(q, keys, selected=H) == [H]
+        assert main._products_named_in(q, keys, selected=S) == [S]
+        assert main._products_named_in(q, keys) == []
+        assert main._products_named_in(q, keys, selected="nv9usb") == []
+        assert main._products_named_in("smart hopper 3 payout speed", keys) == [H]
+        assert main._products_named_in("scs smart hopper payout speed", keys) == [S]
+        assert main._products_named_in("note float capacity on the NV11+?", keys) == ["nv9usb"]
+        q2 = "how do i change the smart hopper over to ssp"
+        out = main._add_selected_product_context(
+            q2, main._products_named_in(q2, keys, selected=H), {"product": H})
+        assert out.endswith("(Smart Hopper 3)"), out
+    finally:
+        main._product_names, main._product_aliases = real_names, real_aliases
 
 
 def test_comparison_rules_reach_the_answer_and_verifier_prompts():

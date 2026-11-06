@@ -112,16 +112,25 @@ def test_a_forced_model_that_returns_nothing_is_not_a_documentation_gap():
              "product": "mycheckr", "category": "", "rerank_score": 0.97}
     main.APP_STATE["ready"] = True
 
-    with patch.object(main, "retrieve_from_db", return_value=[chunk]),          patch.object(main, "rerank", return_value=[chunk]),          patch.object(main.faq_store, "suggest_candidates",
-                      return_value={"mode": "none"}),          patch.object(main, "generate", return_value=None),          patch.object(main, "_structures_for", return_value=[]),          patch.object(main.more_context, "build", return_value={"kind": "support"}),          patch.object(main.faq_store, "record_gap") as gap,          patch.object(main, "log_interaction"):
+    with patch.object(main, "retrieve_from_db", return_value=[chunk]), \
+         patch.object(main, "rerank", return_value=[chunk]), \
+         patch.object(main.faq_store, "suggest_candidates",
+                      return_value={"mode": "none"}), \
+         patch.object(main, "generate", return_value=None), \
+         patch.object(main, "_structures_for", return_value=[]), \
+         patch.object(main.more_context, "build", return_value={"kind": "support"}), \
+         patch.object(main.faq_store, "record_gap") as gap, \
+         patch.object(main, "log_interaction"):
         r = main.query(main.QueryRequest(
             q="I can't see my MyCheckr on IMS local?",
             force_provider="openai", force_model="gpt-4o-mini"))
 
     low = r["answer"].lower()
-    assert "product documentation" not in low,         "a model that returned nothing must not be reported as a corpus gap"
+    assert "product documentation" not in low, \
+        "a model that returned nothing must not be reported as a corpus gap"
     assert "gpt-4o-mini" in r["answer"], "say WHICH model failed"
-    assert r["service_degraded"] is True,         "a failed generation is degraded service, not a missing answer"
+    assert r["service_degraded"] is True, \
+        "a failed generation is degraded service, not a missing answer"
     gap.assert_not_called()  # nobody failed to answer it; the model never ran
 
 
@@ -167,6 +176,21 @@ def test_local_mode_escalates_to_the_default_role_and_api_mode_to_backup():
                 called = [(c.args[0], c.args[2]) for c in gen.call_args_list]
                 assert (provider, model) in called, (role, called)
                 assert all(p == provider for p, _ in called), (role, called)
+
+
+def test_an_escalated_turn_reports_escalated():
+    """The response key names the fact, not a provider: escalation follows
+    the configured role, so "escalated_to_deepseek" is only a deprecated alias."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    with ExitStack() as st:
+        gen = _escalation_stack(st, {"default": "openai", "backup": "deepseek"})
+        gen.return_value = {"text": "Use a USB-B cable.", "provider": "openai",
+                            "model": "gpt-test"}
+        with patch.object(main, "escalation_role", return_value="default"):
+            r = main.query(main.QueryRequest(q="How do I connect the MyCheckr?"))
+        assert gen.called
+        assert r["escalated"] is True
 
 
 def test_no_escalation_when_the_mode_role_is_unassigned():

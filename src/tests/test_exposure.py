@@ -105,6 +105,39 @@ finally:
 check(main._admin_ip_allowed("10.1.2.3") is False,
       "with an empty allowlist nothing matches, whatever the address")
 
+print("\n== a bare address is that host, CIDR is a range (D-20261029-04) ==")
+main.ADMIN_ALLOWED_IPS = ["203.0.113.5"]
+try:
+    r = client.get("/admin/sources", headers={**ADMIN, "cf-connecting-ip": "203.0.113.50"})
+    check(r.status_code == 404,
+          f"203.0.113.5 does not admit 203.0.113.50 ({r.status_code})")
+    r = client.get("/admin/sources", headers={**ADMIN, "cf-connecting-ip": "203.0.113.5"})
+    check(r.status_code == 200,
+          f"203.0.113.5 admits exactly 203.0.113.5 ({r.status_code})")
+finally:
+    main.ADMIN_ALLOWED_IPS = []
+main.ADMIN_ALLOWED_IPS = ["203.0.113.0/24"]
+try:
+    check(main._admin_ip_allowed("203.0.113.77") is True, "203.0.113.0/24 admits .77")
+    check(main._admin_ip_allowed("203.0.114.1") is False, "and not 203.0.114.1")
+finally:
+    main.ADMIN_ALLOWED_IPS = []
+main.ADMIN_ALLOWED_IPS = ["2001:db8::1"]
+try:
+    check(main._admin_ip_allowed("2001:db8::1") is True, "an IPv6 address admits itself")
+    check(main._admin_ip_allowed("2001:db8::10") is False, "and not its text neighbour")
+finally:
+    main.ADMIN_ALLOWED_IPS = []
+main.ADMIN_ALLOWED_IPS = ["not-an-ip", "203.0.11", "198.51.100.42"]
+try:
+    check(main._admin_ip_allowed("203.0.113.9") is False,
+          "an unparsable entry admits nothing (203.0.11 is not a prefix any more)")
+    check(main._admin_ip_allowed("198.51.100.42") is True,
+          "and does not stop the good entries beside it")
+    check(main._admin_ip_allowed("garbage") is False, "a caller IP that is not an address never matches")
+finally:
+    main.ADMIN_ALLOWED_IPS = []
+
 print("\n== bootstrap cannot be grabbed from outside ==")
 # Two layers, and the order matters.
 #

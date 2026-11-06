@@ -15,6 +15,7 @@ For years the window was exactly top_k and this docstring's promise did not
 hold in practice.
 """
 
+import functools
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from rank_bm25 import BM25Okapi
 from embeddings import embed_query
 from db import get_collection
 from text_utils import rrf_merge
+from docstore import _safe_basename
 
 logger = logging.getLogger(__name__)
 
@@ -41,46 +43,242 @@ EXCLUDED_SOURCES = [
     if s.strip()
 ]
 
-# Documents marked Internal on the console's Confluence page, by EXACT name.
+# Documents marked Internal on the console's Confluence page, by name, compared case-folded on the
+# bare file name (see _name_key), still never as a substring.
 # Not added to EXCLUDED_SOURCES: those are substrings, and "manual.txt" is a
 # substring of "ssp manual.txt", so marking one document would have hidden
 # another. Kept in a file of their own so marking takes effect at once, with
 # no restart; is_excluded() is the one check every reader uses.
 _INTERNAL_PATH = os.getenv("INTERNAL_SOURCES_PATH", "internal_sources.json")
 _internal: frozenset | None = None
+_internal_good: frozenset | None = None   # last set read from a readable file
 _internal_lock = threading.Lock()
 
 
+class _Everything(frozenset):
+    """What an unreadable internal_sources.json means on a cold start: every
+    document counts as internal (`in` is always true), so nothing is answered
+    from the documents until the file is repaired. Fail closed."""
+    def __contains__(self, item):
+        return True
+
+
 def internal_sources() -> frozenset:
-    global _internal
+    """Names marked internal. An absent file means none. An unreadable one
+    keeps the last good set read in this process, or (cold start) holds every
+    document back; logged at error, cached so it is logged once."""
+    global _internal, _internal_good
     if _internal is None:
         import jsonstore
-        _internal = frozenset(jsonstore.load(_INTERNAL_PATH, [], label="internal documents") or [])
+        try:
+            data = jsonstore._parse(_INTERNAL_PATH) if os.path.exists(_INTERNAL_PATH) else []
+            if not isinstance(data, list):
+                raise ValueError(f"expected a list of names, got {type(data).__name__}")
+            _internal = _internal_good = frozenset(data)
+        except Exception as exc:
+            _internal = _internal_good if _internal_good is not None else _Everything()
+            logger.error(
+                "internal documents file %s is unreadable (%s); %s until it is "
+                "repaired and the backend restarted", _INTERNAL_PATH, exc,
+                "keeping the last good marks" if _internal_good is not None
+                else "every document is held back from answers")
     return _internal
 
 
-def set_internal(sources, on: bool) -> None:
-    """Mark documents internal (on) or customer-facing (off)."""
-    global _internal
+def set_internal(sources, on: bool, reindex: bool = True,
+                 copies: bool = True) -> None:
+    """Mark documents internal (on) or customer-facing (off).
+
+    Marking also marks every stored byte-identical copy (same_content): the
+    Confluence sync keeps one per page that attaches the file, and a copy left
+    public answered with the marked document's text (D-20261026-91). copies=
+    False only where the manifest does not hold the bytes being marked yet.
+
+    Marking takes a document's chunks out of the index; its original stays in
+    the document store (downloads stay refused by the mark). A document with
+    no retained original keeps its chunks, hidden at read time by
+    is_excluded(), since deleting them would lose it for good. Un-marking
+    indexes it again from the original, unless the caller indexes it itself
+    (reindex=False: an upload about to ingest, or Remove). Only names whose
+    mark really changed are touched, so un-marking a public document costs
+    nothing."""
+    global _internal, _internal_good
     import jsonstore
+    sources = list(sources)
+    if on and copies:
+        sources += same_content(sources)
     with _internal_lock:
+        _internal = None                    # re-read: never write back a stale or fail-closed set
         cur = set(internal_sources())
+        was = {_name_key(n) for n in cur}
         cur = cur | set(sources) if on else cur - set(sources)
-        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")
-        _internal = frozenset(cur)
+        jsonstore.save(_INTERNAL_PATH, sorted(cur), label="internal documents")  # refuses an unreadable file
+        _internal = _internal_good = frozenset(cur)
+        now = {_name_key(n) for n in cur}
     try:                                   # inventories and the BM25 index cache by source
         from db import invalidate_retrieval_cache
         invalidate_retrieval_cache()
     except Exception as exc:
         logger.warning(f"retrieval cache not invalidated after marking internal: {exc}")
+    if on:
+        _drop_marked_chunks({_name_key(s) for s in sources})
+    elif reindex:
+        for s in sources:
+            if _name_key(s) in was and _name_key(s) not in now:
+                try:
+                    import ingest
+                    ingest.reindex_source(s)
+                except Exception as exc:
+                    logger.error("%r is public again but was not re-indexed: %s", s, exc)
+
+
+def _drop_marked_chunks(keys: set) -> None:
+    """Delete the indexed chunks of every source whose _name_key is in `keys`
+    and whose original is retained. Never raises: the mark is saved, and
+    readers still hide whatever stays."""
+    try:
+        import docindex
+        import docstore
+        from db import delete_source
+        for row in list(docindex.source_index()):
+            src = row["source"]
+            if _name_key(src) not in keys:
+                continue
+            if docstore.find(src):
+                delete_source(src)
+            else:
+                logger.warning("%r marked internal with no retained original: its "
+                               "chunks are kept (still hidden at read time)", src)
+    except Exception as exc:
+        logger.error("marked internal, but its chunks were not taken out of the "
+                     "index (still hidden at read time): %s", exc)
+
+
+def same_content(sources) -> list[str]:
+    """Every other document in the store byte-identical to one of `sources`
+    (same sha256 in the docstore manifest), by its manifest name. Never
+    raises: [] when the manifest cannot be read."""
+    try:
+        import docstore
+        docs = docstore.load_manifest()["documents"]
+    except Exception as exc:
+        logger.warning("copies of %r not looked up: %s", list(sources), exc)
+        return []
+    by_key = {_name_key(n): (e or {}).get("sha256") for n, e in docs.items()}
+    given = {_name_key(s) for s in sources}
+    hashes = {by_key.get(k) for k in given} - {None}
+    return [n for n, e in docs.items()
+            if (e or {}).get("sha256") in hashes and _name_key(n) not in given]
+
+
+@functools.lru_cache(maxsize=4096)
+def _name_key(name: str) -> str:
+    """What a document name is compared on for the internal mark: the bare
+    file name (docstore's sanitiser), cut at the first ':' (an NTFS stream
+    suffix such as "::$INDEX_ALLOCATION" opens the plain folder), trailing
+    dots and spaces dropped, case folded. That is how Windows resolves the
+    documents and figures folders, so every spelling that opens a marked
+    document's folder meets its mark. Marks go through it too, so one kept
+    with a path ("x/Secret.pdf") still matches the name it is served under."""
+    return _safe_basename(name).split(":", 1)[0].rstrip(". ").casefold()
+
+
+_keys_of: tuple = (None, frozenset())   # (the internal_sources() set, its keys)
+
+
+def _internal_keys() -> frozenset:
+    """internal_sources() as _name_key keys, rebuilt when that set changes.
+    The fail-closed _Everything set passes through unchanged (holds all)."""
+    global _keys_of
+    cur = internal_sources()
+    if _keys_of[0] is not cur:
+        _keys_of = (cur, cur if isinstance(cur, _Everything)
+                    else frozenset(_name_key(n) for n in cur))
+    return _keys_of[1]
 
 
 def is_excluded(source: str | None) -> bool:
     """True for a document customers must never be answered from: one the
-    EXCLUDED_SOURCES substrings match, or one marked internal."""
+    EXCLUDED_SOURCES substrings match, or one marked internal, in any spelling that names the same file on Windows (_name_key)."""
     s = source or ""
     low = s.lower()
-    return any(ex in low for ex in EXCLUDED_SOURCES) or s in internal_sources()
+    return any(ex in low for ex in EXCLUDED_SOURCES) or is_marked_internal(s)
+
+
+def is_marked_internal(source: str | None) -> bool:
+    """True for a document marked internal (not the EXCLUDED_SOURCES
+    substrings, a read-time policy). Ingest checks this: a marked document is
+    stored, never indexed."""
+    return _name_key(source or "") in _internal_keys()
+
+
+# Documents that stand behind the manuals rather than answer customers: test
+# scripts and reports, certificates and declarations, change notices, release
+# notes, and numbered drawings (CN00392, WR02040_4, PA01083, ...). The
+# Confluence import of 2026-10-22 added ~3,600 such chunks to ~5,000, and on
+# the unchanged blind set they outranked the manuals: an NV4000 cassette-width
+# question was answered from a test-script checklist (C20261022c-28). They are
+# still answers when nothing else is ("which firmware added Dutch?"), so they
+# are ranked below the manuals, not removed: a chunk's ORDER is its rerank
+# score times SECONDARY_SOURCE_WEIGHT; rerank_score itself stays the model's,
+# so the gate and the confidence band read what they always read.
+# 1.0 turns it off.
+SECONDARY_SOURCE_WEIGHT = float(os.getenv("SECONDARY_SOURCE_WEIGHT", "0.5"))
+_SECONDARY = re.compile(
+    r"test\s*script|testing\s*procedure|test\s*report|intertek"
+    r"|certificat|declaration|conformity|compliance|-dec\b|-(?:ul|cb)\b"
+    r"|change\s*noti|release\s*(?:notes|documentation)"
+    r"|^(?:cn|wr|pa|ga)[\s_-]?\d{3}|^[a-z]{2}\d{5}", re.I)
+
+# A synced Confluence page's kind, from its title and folder (confluence_sync.kind_of), stored by the
+# sync in this file as {document name: kind} (D-20261024-10). A stored release note or certificate
+# goes on the second shelf whatever its name; a document not in the file (an upload) still goes by its name.
+# Read once per process; a hand edit takes effect at the next restart, and a check or sync never
+# overwrites a kind already stored.
+# Only these stored kinds move a page to the second shelf. Test scripts and drawings go by the name rule
+# (round 2: a test-script page moved there cost global_smart_coin_system-03). Change notices too (round 3):
+# accessory and build-revision notices hold the part numbers customers order from (nv200s-02 went wrong x3).
+SECONDARY_KINDS = frozenset({"certificate", "release_note"})
+_KINDS_PATH = os.getenv("DOC_KINDS_PATH", "doc_kinds.json")
+_kinds: dict | None = None
+
+
+def source_kinds() -> dict:
+    """{document name: kind} the Confluence sync stored. An absent file means none; an
+    unreadable one also means none (logged once): kinds then come from the names."""
+    global _kinds
+    if _kinds is None:
+        import jsonstore
+        try:
+            data = jsonstore._parse(_KINDS_PATH) if os.path.exists(_KINDS_PATH) else {}
+            if not isinstance(data, dict):
+                raise ValueError(f"expected names to kinds, got {type(data).__name__}")
+            _kinds = data
+        except Exception as exc:
+            logger.error("document kinds file %s is unreadable (%s); kinds come from the "
+                         "names until it is repaired and the backend restarted", _KINDS_PATH, exc)
+            _kinds = {}
+    return _kinds
+
+
+def set_kinds(kinds: dict) -> None:
+    """Store the whole {name: kind} map (jsonstore refuses to overwrite an unreadable file)."""
+    global _kinds
+    import jsonstore
+    jsonstore.save(_KINDS_PATH, dict(sorted(kinds.items())), label="document kinds")
+    _kinds = dict(kinds)
+
+
+def is_secondary(source: str | None) -> bool:
+    return (source_kinds().get(source or "") in SECONDARY_KINDS
+            or bool(_SECONDARY.search(source or "")))
+
+
+def rank_key(chunk: dict) -> float:
+    """The order a reranked chunk takes: its score, less for a secondary
+    document. Every sort of reranked chunks uses this."""
+    s = chunk.get("rerank_score", 0.0)
+    return s * SECONDARY_SOURCE_WEIGHT if is_secondary(chunk.get("source")) else s
 
 # How many candidates reach the reranker, as a multiple of top_k. 1.0 is the
 # pre-2026-08-28 behaviour (reranker saw only top_k); 2.0 hands it the full
@@ -201,7 +399,8 @@ def _phrase_ranking(query: str, collection, limit: int,
     return [cid for _, cid in hits[:limit]]
 
 _bm25_lock = threading.Lock()
-_bm25_cache = {"count": -1, "index": None, "chunks": None}
+_bm25_cache = {"count": -1, "index": None, "chunks": None, "copies": None}
+_NO_COPIES = {"of": {}, "others": {}}
 
 
 def _invalidate_bm25_cache():
@@ -209,6 +408,71 @@ def _invalidate_bm25_cache():
     where chunk COUNT is unchanged so the count-based cache wouldn't
     otherwise refresh the metadata it holds."""
     _bm25_cache["count"] = -1
+    _bm25_cache["copies_stale"] = True
+
+
+# ONE ANSWERING COPY PER FILE (D-20261026-91). The Confluence sync stores a
+# file once per page that attaches it, as "<stem> (<id>)<ext>"
+# (confluence_sync), and an upload under another name is a copy too: 74
+# files were indexed 2-18 times over, so one drawing filled every candidate
+# slot and its terms read as 5-18x commoner to BM25. Copies are found by the
+# content hash ingest writes on every chunk, whenever the chunk cache is
+# rebuilt: nothing is stored, so the choice is right after an ingest, after
+# Remove (the next copy answers) and on an index built before this.
+_COPY_SUFFIX = re.compile(r" \((?:att)?\d+\)(?=\.[^.]*$|$)")
+
+
+def _find_copies(first_meta: dict) -> dict:
+    """{"of": {copy: answering copy}, "others": {answering copy: [first
+    metadata of each of its copies]}} from each source's first chunk
+    metadata. The answering copy is the plain name (no sync suffix), else
+    the first indexed, else the first by name."""
+    groups: dict[str, list[str]] = {}
+    for src, m in first_meta.items():
+        h = m.get("content_sha256") or m.get("document_version")
+        if h:
+            groups.setdefault(h, []).append(src)
+    of, others = {}, {}
+    for srcs in groups.values():
+        if len(srcs) < 2:
+            continue
+        keep = min(srcs, key=lambda s: (bool(_COPY_SUFFIX.search(s)),
+                                        first_meta[s].get("indexed_at") or "", s))
+        others[keep] = [first_meta[s] for s in sorted(srcs) if s != keep]
+        for s in srcs:
+            if s != keep:
+                of[s] = keep
+    return {"of": of, "others": others}
+
+
+def _copies() -> dict:
+    """The copies map of the chunk cache. Built once when the cache was
+    never built or was invalidated; never calls count(), since this runs
+    once per chunk. A failed build reads as no copies and is not retried
+    per chunk."""
+    if _bm25_cache.get("copies_stale", True):
+        _bm25_cache["copies_stale"] = False
+        try:
+            _get_bm25_index(get_collection())
+        except Exception as exc:
+            logger.warning("copies of documents not worked out: %s", exc)
+    return _bm25_cache.get("copies") or _NO_COPIES
+
+
+def copies_of() -> dict:
+    """{copy: the copy answering in its place}, a fresh read for the
+    console and the tools. {} when the index cannot be read."""
+    try:
+        _get_bm25_index(get_collection())
+    except Exception as exc:
+        logger.warning("copies of documents unavailable: %s", exc)
+        return {}
+    return (_bm25_cache.get("copies") or _NO_COPIES)["of"]
+
+
+def duplicate_of(source: str | None) -> str | None:
+    """The copy answering in place of `source`, or None when it answers."""
+    return copies_of().get(source) if source else None
 
 
 
@@ -282,6 +546,11 @@ def _get_bm25_index(collection):
             return _bm25_cache["index"], _bm25_cache["chunks"]
 
         data = collection.get(include=["documents", "metadatas"])
+        first_meta: dict[str, dict] = {}
+        for m in data["metadatas"]:
+            if m and m.get("kind", "chunk") != "query":
+                first_meta.setdefault(m.get("source", "unknown"), m)
+        copies = _find_copies(first_meta)
         chunks = [
             {
                 "id": i,
@@ -309,7 +578,22 @@ def _get_bm25_index(collection):
             # synthetic questions never enter BM25 or surface as results;
             # a re-ingest clears them permanently.
             if m.get("kind", "chunk") != "query"
+            # A copy's chunks stay out of the corpus and every reader of
+            # this cache; its answering copy stands for it.
+            and m.get("source", "unknown") not in copies["of"]
         ]
+        # The answering copy carries the products its copies are filed
+        # under, for main.py's per-product picks and labels.
+        import docindex
+        union = {}
+        for keep, metas in copies["others"].items():
+            keys = docindex.product_keys(first_meta[keep])
+            for m in metas:
+                keys += [k for k in docindex.product_keys(m) if k not in keys]
+            union[keep] = ",".join(keys)
+        for c in chunks:
+            if c["source"] in union:
+                c["product"] = union[c["source"]]
 
         corpus = [_bm25_tokens(c["text"]) for c in chunks]
         index = BM25Okapi(corpus) if corpus else None
@@ -317,6 +601,8 @@ def _get_bm25_index(collection):
         _bm25_cache["count"] = count
         _bm25_cache["index"] = index
         _bm25_cache["chunks"] = chunks
+        _bm25_cache["copies"] = copies
+        _bm25_cache["copies_stale"] = False
 
         return index, chunks
 
@@ -361,6 +647,20 @@ def _matches_scope(meta: dict, source_filter: str | None,
     # internal document, as before; nothing else does.
     if not source_filter and is_excluded(meta.get("source")):
         return False
+    if not scope:
+        return bool(source_filter) or meta.get("source") not in _copies()["of"]
+    if source_filter:
+        return _scope_hit(meta, scope)
+    copies = _copies()
+    if meta.get("source") in copies["of"]:
+        return False                      # its answering copy stands for it
+    # The answering copy is filed wherever any of its copies is.
+    return _scope_hit(meta, scope) or any(
+        _scope_hit(m, scope) for m in copies["others"].get(meta.get("source"), ()))
+
+
+def _scope_hit(meta: dict, scope: dict) -> bool:
+    """Whether a chunk's own filing puts it in `scope`."""
     if scope:
         if "product" in scope:
             key = scope["product"]
@@ -457,6 +757,19 @@ def _dense_ranking(query: str, collection, limit: int, source_filter: str | None
         where = {"$or": _arms}
     elif scope and "category" in scope:
         where = {"category": scope["category"]}
+    if not source_filter:
+        # Copies never answer; an answering copy is in scope wherever one
+        # of its copies is filed (_matches_scope says the same).
+        copies = _copies()
+        if where and scope:
+            carriers = sorted(k for k, ms in copies["others"].items()
+                              if any(_scope_hit(m, scope) for m in ms))
+            if carriers:
+                arms = where["$or"] if "$or" in where else [where]
+                where = {"$or": arms + [{"source": {"$in": carriers}}]}
+        if copies["of"]:
+            nin = {"source": {"$nin": sorted(copies["of"])}}
+            where = {"$and": [where, nin]} if where else nin
     if where:
         res = collection.query(query_embeddings=[q_vec.tolist()],
                                n_results=max(1, min(limit * 2, collection.count())),
@@ -526,6 +839,9 @@ def retrieve_from_db(
     n = collection.count()
     if n == 0:
         return []
+    # "Ask about this document" on a copy reads the answering copy: the
+    # same bytes, and the copy's own chunks are not in the chunk cache.
+    source_filter = duplicate_of(source_filter) or source_filter
 
     fetch_n = min(max(top_k * 2, top_k), n)
 
@@ -927,6 +1243,90 @@ def complete_procedures(chunks: list[dict],
         return chunks
 
 
+# D-20261029-03: a fault-clearing section, by its own (leaf) heading: "Clearing a
+# Jam", "Coin Feeder Coin Jam", "Fault Finding Flow Chart", "Testing After an
+# Error Has Been Cleared". 48 of 1351 leaf headings in the live index.
+_FIX_HEADING = _re.compile(
+    r"\b(?:clear(?:ing|ed|ance)?|jam(?:s|med)?|unjam\w*|troubleshoot\w*|fault)\b", _re.I)
+# Lay words for a fault ("note stuck ... get it out") score the manual's term
+# ("Clearing a Jam") 0.24-0.50; every unrelated BV30 passage scored under 0.11.
+FIX_STEPS_MIN_RERANK = float(os.getenv("FIX_STEPS_MIN_RERANK", "0.2"))
+
+
+def _fault_title(source: str | None) -> bool:
+    """D-20261104-06: a document with no headings (a synced help article) is headed by its
+    title, and a title that states the symptom ("I can not find my device on IMS Local?",
+    "Global Error Codes and Potential Solutions") makes the whole page a fault section.
+    Titles only: on ordinary headings the failure words catch "Do not lubricate" and
+    "Issue Date" (measured, 32 of 1350)."""
+    from structure import reports_failure
+    title = os.path.splitext(source or "")[0]
+    return bool(title) and bool(_FIX_HEADING.search(title) or reports_failure(title))
+
+
+def fix_sections(ranked: list[dict], floor: float = FIX_STEPS_MIN_RERANK,
+                 max_sections: int = 2,
+                 budget: int = PROCEDURE_COMPLETION_CHARS,
+                 titles: bool = True) -> list[dict]:
+    """The fault-clearing sections a ranking found, each whole and in document
+    order, best-ranked section first. A section is picked from a reranked chunk
+    (best first) whose leaf heading matches _FIX_HEADING, or, when it has no heading,
+    whose document title states a fault (_fault_title,
+    only when `titles`: the message states the symptom, structure.reports_symptom; a how-to
+    keeps its set-up page first), scoring >= floor, not
+    from a secondary document (test scripts, certificates). The section is the
+    unbroken run of chunks around it in its document with the same `section`;
+    a run longer than what is left of `budget` gives the retrieved chunk alone.
+    The retrieved chunk keeps its dict; fetched ones are new dicts with
+    retrieval_score=0.0 and fetched_by="fix_section". [] when nothing matches;
+    never raises ([] and a warning)."""
+    try:
+        picks, seen = [], set()
+        for c in ranked:
+            sec = (c.get("section") or "").strip()
+            leaf = sec.split("›")[-1].strip()
+            src = c.get("source")
+            fault = bool(_FIX_HEADING.search(leaf)) if sec else (titles and _fault_title(src))
+            if (not fault or (src, sec) in seen
+                    or is_secondary(src) or c.get("rerank_score", 0.0) < floor):
+                continue
+            seen.add((src, sec))
+            picks.append((c, src, sec))
+            if len(picks) >= max_sections:
+                break
+        if not picks:
+            return []
+        collection = get_collection()
+        out, spent = [], 0
+        for c, src, sec in picks:
+            got = collection.get(where={"source": src})
+            rows = sorted(zip(got.get("ids") or [], got.get("documents") or [],
+                              got.get("metadatas") or []),
+                          key=lambda r: _order_key(r[0]))
+            at = next((i for i, r in enumerate(rows) if r[0] == c.get("id")), None)
+            run = [c]
+            if at is not None:
+                lo = hi = at
+                same = lambda i: (rows[i][2].get("section") or "").strip() == sec
+                while lo > 0 and same(lo - 1):
+                    lo -= 1
+                while hi < len(rows) - 1 and same(hi + 1):
+                    hi += 1
+                size = sum(len(r[1] or "") for r in rows[lo:hi + 1])
+                if spent + size <= budget:
+                    run = [c if r[0] == c.get("id") else {
+                        "id": r[0], "text": r[1], "source": src,
+                        "page": r[2].get("page"), "section": sec,
+                        "retrieval_score": 0.0, "fetched_by": "fix_section",
+                    } for r in rows[lo:hi + 1]]
+                    spent += size
+            out.extend(run)
+        return out
+    except Exception as exc:
+        logger.warning(f"fix sections skipped: {exc}")
+        return []
+
+
 # ── Performance mode: the product's own documents as context ─────────────
 #
 # Blind set 3 (2026-10-07, PENDING "Market-relative rating"): gpt-5-mini
@@ -1023,8 +1423,13 @@ def cited_pages(chunks: list[dict], budget: int) -> list[dict]:
         logger.warning(f"cited pages skipped: {exc}")
         return []
     have = {c.get("id") for c in chunks}
+    # Only a PDF has pages. A .txt or .docx is all "page 1" (parsing.py), so
+    # its "rest of the page" was the whole document up to the budget: ~3k
+    # tokens on every verifier call once the Confluence pages replaced the
+    # PDF manuals (median prompt 4.8k -> 8.2k, 2026-10-23).
     keys = list(dict.fromkeys((c.get("source"), c.get("page")) for c in chunks
-                              if c.get("source") and isinstance(c.get("page"), int)))
+                              if (c.get("source") or "").lower().endswith(".pdf")
+                              and isinstance(c.get("page"), int)))
     found = {k: [] for k in keys}
     for a in all_chunks:
         k = (a.get("source"), a.get("page"))
@@ -1055,15 +1460,145 @@ def chunks_before(chunks: list[dict]) -> list[str | None]:
     except Exception as exc:
         logger.warning(f"chunks_before skipped: {exc}")
         return [None] * len(chunks)
-    out = []
-    for c in chunks:
-        base, _, n = (c.get("id") or "").rpartition("_")
-        out.append(by_id.get(f"{base}_{int(n) - 1}") if n.isdigit() else None)
-    return out
+    return [by_id.get(_neighbour_id(c.get("id") or "", -1)) for c in chunks]
+
+
+def _neighbour_id(cid: str, step: int) -> str | None:
+    """The id `step` chunks away in the same document, or None. Live ids are
+    "<file>:<hash16>:<n>" (ingest.py); older ones and tests use "<doc>_<n>"."""
+    m = re.match(r"(.*[:_])(\d+)$", cid)
+    return f"{m.group(1)}{int(m.group(2)) + step}" if m else None
+
+
+# A chunk whose last line announces what follows: "...for the following
+# currencies:", "...as follows." The rows are then the next chunk.
+_ANNOUNCES = re.compile(r"(:|\bas follows\.?|\bthe following\b[^.!?|]*)\s*$", re.I)
+
+
+def _opens_like_table(body: str) -> bool:
+    """Pipe rows, or "label: value" lines (NV200S delay table) that are
+    short: a heading or a figure caption followed by prose is not."""
+    import tables as _tables
+    if _tables._starts_with_rows(body):
+        return True
+    lines = [l.strip() for l in body.split("\n") if l.strip()][:3]
+    return len(lines) == 3 and all(len(l) <= 80 and (": " in l or "|" in l)
+                                   for l in lines)
+
+
+def _starts_new_table(text: str, body: str) -> bool:
+    """The next chunk opens with a header row of its own ("Param name | Type |
+    Comment"): a new table, not the rest of this one. A first row equal to this
+    chunk's last table header is still a continuation: carry_table_context
+    repeats the header at the top of every continuation (C-11's button table)."""
+    import tables as _tables
+    def _row(line):
+        cs = _tables.cells(line)
+        while cs and not cs[-1]:
+            cs.pop()
+        return cs
+    first = _row(next((l for l in body.split("\n") if l.strip()), ""))
+    lines = _tables.split_prefix(text)[1].split("\n")
+    blocks = _tables._blocks(lines)
+    header = _row(lines[blocks[-1][0]]) if blocks else []
+    return (first != header and len(first) >= 2
+            and all(c and len(c) <= 30 and not any(ch.isdigit() for ch in c)
+                    for c in first))
+
+
+_FLASH_Q = re.compile(r"\b(?:flash\w*|blink\w*)\b", re.I)
+_COUNT_WORDS = {"once": 1, "twice": 2, "one": 1, "two": 2, "three": 3,
+                "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+                "nine": 9, "ten": 10}
+_Q_COUNT = re.compile(r"\b(\d{1,2})x?\b|\b(" + "|".join(_COUNT_WORDS) + r")\b", re.I)
+_POINTER = (r"\b(?:as\s+per|refer\s+to|see|outlined\s+in|described\s+in|"
+            r"detailed\s+in|specified\s+in|specification\s+in)\s+(?:the\s+)?")
+SECTION_REFERENCE_CHARS = int(os.getenv("SECTION_REFERENCE_CHARS", "1600"))
+
+
+def _heading_parts(section: str) -> list[str]:
+    return [p.strip() for p in (section or "").split("›") if len(p.strip()) >= 5]
+
+
+def _referenced_sections(out: list[dict], query: str, all_chunks: list[dict],
+                         budget: int = SECTION_REFERENCE_CHARS) -> list[dict]:
+    """The section of the same manual that the ASKED flash-code row points at.
+
+    BV30 p32 "4 | 1 | PSU Voltage too Low | Check the power supply meets the
+    specification in Power Requirements" (p8); NV4000 p52 "4 | 1 | Power
+    Supply too Low | ... as outlined in Power Requirements" (p20). Ranking
+    cannot reach those pages: a supply-voltage table shares no words with
+    "4 red then 1 blue". A row is asked when its two leading counts occur
+    side by side in the question's counts; a row whose first cell is merged
+    (empty) takes the count of the last full row above it. Appended at the
+    end, retrieval_score 0.0, fetched_by="section_reference". Only the section's OPENING chunk (lowest
+    _order_key), not the whole section: the rest of NV4000's Power Requirements
+    carries an "NV200 Spectral ... 7A" line the verifier refused (round 2).
+    D-20261030-14.
+    """
+    import tables as _tables
+    asked = [int(d) if d else _COUNT_WORDS[w.lower()]
+             for d, w in _Q_COUNT.findall(query)]
+    pairs = set(zip(asked, asked[1:]))
+    if not pairs:
+        return out
+    have = {c.get("id") for c in out}
+    heads_by_src: dict = {}
+    added, spent = [], 0
+    for c in list(out):
+        src = c.get("source")
+        if not src or "|" not in (c.get("text") or ""):
+            continue
+        if src not in heads_by_src:
+            heads_by_src[src] = sorted({h for a in all_chunks if a.get("source") == src
+                                        for h in _heading_parts(a.get("section"))},
+                                       key=len, reverse=True)
+        own = {h.lower() for h in _heading_parts(c.get("section"))}
+        heads = [h for h in heads_by_src[src] if h.lower() not in own]
+        last_first = None
+        for line in _tables.split_prefix(c.get("text") or "")[1].split("\n"):
+            if not _tables.is_row(line):
+                continue
+            cs = _tables.cells(line)
+            while cs and not cs[-1]:
+                cs.pop()
+            if len(cs) < 3:
+                continue
+            first = _tables._count(cs[0])
+            if cs[0]:
+                last_first = first
+            else:
+                first = last_first
+            if (first, _tables._count(cs[1])) not in pairs:
+                continue
+            row = " | ".join(cs[2:])
+            h = next((h for h in heads if re.search(
+                _POINTER + re.escape(h) + r"(?!\w)", row, re.I)), None)
+            if not h:
+                continue
+            a = min((a for a in all_chunks if a.get("source") == src
+                     and h.lower() in {p.lower() for p in
+                                       _heading_parts(a.get("section"))}),
+                    key=lambda a: _order_key(a.get("id")), default=None)
+            if a is None or a["id"] in have:
+                continue
+            if spent + len(a.get("text") or "") > budget:
+                continue
+            spent += len(a.get("text") or "")
+            have.add(a["id"])
+            added.append({"id": a["id"], "text": a["text"], "source": src,
+                          "page": a.get("page"),
+                          "section": a.get("section", ""),
+                          "retrieval_score": 0.0,
+                          "fetched_by": "section_reference"})
+            logger.info("section reference: %s -> %s (%s)",
+                        c.get("id"), a["id"], h)
+    return out + added if added else out
 
 
 def complete_tables(chunks: list[dict],
-                    budget: int = TABLE_COMPLETION_CHARS) -> list[dict]:
+                    budget: int = TABLE_COMPLETION_CHARS,
+                    query: str | None = None) -> list[dict]:
     """Add the continuation of a table that a retrieved chunk begins.
 
     The BV30 flash-code table starts on page 31 and its last five rows are
@@ -1071,8 +1606,25 @@ def complete_tables(chunks: list[dict],
     first part (0.995) and the answer is in the second. The next chunk of
     the same document is a continuation when its body opens with table
     rows under the same section (tables.carry_table_context sets that).
-    Appended after, like procedure completion, and marked
-    fetched_by="table_completion". Never raises.
+    Placed directly after the chunk that begins or announces it, marked
+    fetched_by="table_completion" and with_previous=True, so the prompt prints
+    both as ONE passage (main._numbered_passages); an announced table already
+    retrieved lower down is moved up under its announcement. A next chunk that
+    opens with a header row of its own is a new table and is left alone
+    (_starts_new_table). Never raises.
+
+    A prose chunk qualifies too when its last line announces a table
+    ("...counted for the previous 45 minutes:", "...the following
+    currencies:") and the next chunk opens like one (_opens_like_table):
+    the rows sit on the next page. Neighbours are found by _neighbour_id,
+    which reads the live "<file>:<hash>:<n>" ids; until 2026-10-09 this
+    looked for "_<n>" only and never fired on the live index.
+
+    When `query` asks about flashes or blinks (D-20261030-14), the table is
+    followed through every continuation, not one: the NV4000 bezel table runs
+    chunks 98 -> 99 -> 100 and "4 red then 1 blue" is on 100. And the opening chunk of the section
+    the asked row points at ("...in Power Requirements") is appended
+    (_referenced_sections). Without `query`, behaviour is as before.
     """
     if not chunks:
         return chunks
@@ -1081,34 +1633,75 @@ def complete_tables(chunks: list[dict],
         collection = get_collection()
         _, all_chunks = _get_bm25_index(collection)
         by_id = {c["id"]: c for c in all_chunks}
-        have = {c.get("id") for c in chunks}
-        out, spent = list(chunks), 0
-        for c in chunks:
-            cid, text = c.get("id") or "", c.get("text") or ""
-            if "|" not in text or "_" not in cid:
-                continue
-            base, _, n = cid.rpartition("_")
-            if not n.isdigit():
-                continue
-            nxt = by_id.get(f"{base}_{int(n) + 1}")
-            if not nxt or nxt["id"] in have:
-                continue
-            _, body = _tables.split_prefix(nxt.get("text") or "")
-            same = ((nxt.get("section") or "") == (c.get("section") or "")
-                    or not (nxt.get("section") or ""))
-            if not (same and _tables._starts_with_rows(body)):
-                continue
-            if spent + len(nxt.get("text") or "") > budget:
+        pos = {c.get("id"): i for i, c in enumerate(chunks)}
+        flash = bool(query) and bool(_FLASH_Q.search(query))
+        after, taken, spent = {}, set(), 0   # source id -> chunk printed under it
+        stop = False
+        for i, c in enumerate(chunks):
+            cur = c
+            # A flash-code question follows the table on through every
+            # continuation (NV4000: p51 -> p51 -> p52, the asked row on the
+            # third); any other question takes one, as before.
+            while True:
+                cid = cur.get("id") or ""
+                text = cur.get("text") or ""
+                nxt = by_id.get(_neighbour_id(cid, 1))
+                if not nxt or nxt["id"] in taken:
+                    break
+                _, body = _tables.split_prefix(nxt.get("text") or "")
+                same = ((nxt.get("section") or "") == (cur.get("section") or "")
+                        or not (nxt.get("section") or ""))
+                if not same:
+                    break
+                lines = [l for l in _tables.split_prefix(text)[1].split("\n") if l.strip()]
+                continues = ("|" in text and _tables._starts_with_rows(body)
+                             and not _starts_new_table(text, body))
+                announced = bool(lines) and bool(_ANNOUNCES.search(lines[-1])) \
+                    and _opens_like_table(body)
+                if not (continues or announced):
+                    break
+                j = pos.get(nxt["id"])
+                if j is not None:
+                    # Already retrieved. An announced table ranked BELOW its
+                    # announcement moves up under it (C-22: rows 4th, "...the
+                    # following currencies:" 1st, not joined by the model). A
+                    # continuation, or a table ranked above, stays where it is.
+                    if announced and j > i:
+                        taken.add(nxt["id"])
+                        after[cid] = dict(chunks[j], with_previous=True)
+                        logger.info("table completion: moved %s under %s", nxt["id"], cid)
+                    break
+                if spent + len(nxt.get("text") or "") > budget:
+                    stop = True
+                    break
+                spent += len(nxt.get("text") or "")
+                taken.add(nxt["id"])
+                after[cid] = {"id": nxt["id"], "text": nxt["text"],
+                              "source": nxt.get("source"), "page": nxt.get("page"),
+                              "section": nxt.get("section", ""),
+                              "retrieval_score": 0.0,
+                              "fetched_by": "table_completion",
+                              "with_previous": True}
+                logger.info("table completion: %s -> %s (%s)", cid, nxt["id"],
+                            "announced" if announced else "continues")
+                if not flash:
+                    break
+                cur = after[cid]
+            if stop:
                 break
-            have.add(nxt["id"])
-            spent += len(nxt.get("text") or "")
-            out.append({"id": nxt["id"], "text": nxt["text"],
-                        "source": nxt.get("source"), "page": nxt.get("page"),
-                        "section": nxt.get("section", ""),
-                        "retrieval_score": 0.0,
-                        "fetched_by": "table_completion"})
-        if spent:
-            logger.info("table completion added %d chunk(s)", len(out) - len(chunks))
+        out = chunks
+        if after:
+            out = []
+
+            def _emit(c):
+                out.append(c)
+                if c.get("id") in after:
+                    _emit(after[c["id"]])
+            for c in chunks:
+                if c.get("id") not in taken:
+                    _emit(c)
+        if flash:
+            out = _referenced_sections(out, query, all_chunks)
         return out
     except Exception as exc:
         logger.warning(f"table completion skipped: {exc}")

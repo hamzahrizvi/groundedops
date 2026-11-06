@@ -198,7 +198,7 @@ def faq_gaps(product: str | None = None,
     else:
         gaps = faq_store.list_gaps(product)
 
-    # 10.2: asks from eval/live/preflight sessions are not demand. Entries
+    # 10.2: asks from eval/live/preflight/script sessions are not demand. Entries
     # from before origins were stamped stay (faq_store.is_test_only).
     if not include_tests:
         gaps = [g for g in gaps if not faq_store.is_test_only(g)]

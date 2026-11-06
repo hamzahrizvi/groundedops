@@ -20,6 +20,8 @@ SAFETY
   * Refuses to run if any indexed source has no retained original, unless
     --allow-loss is given. Wiping first and discovering the gap afterwards is
     unrecoverable.
+  * Refuses to run while internal_sources.json is unreadable: every document
+    would read as internal and the rebuild would end empty.
   * --dry-run reports exactly what would happen and touches nothing.
   * Rebuilds into the live collection, so run it with the backend stopped.
 
@@ -206,6 +208,11 @@ def restore_collection(snapshot: dict) -> int:
 def rebuild(targets: list[dict], dry_run: bool) -> int:
     from db import reset_collection
     from ingest import ingest_file
+    import retrieval_db as rdb
+    if isinstance(rdb.internal_sources(), rdb._Everything):
+        # Every document would read as internal: the reset below would end
+        # with an empty index. Stop while it is intact (D-20261024-19).
+        raise RuntimeError("internal_sources.json is unreadable; repair it first")
 
     if dry_run:
         print(f"[dry run] would reset the collection and re-ingest "
@@ -237,9 +244,15 @@ def rebuild(targets: list[dict], dry_run: bool) -> int:
             ocr_done = docstore.ocr_state(e["source"])["done"]
             with open(e["path"], "rb") as fh:
                 content = fh.read()
+            report: dict = {}
             n = ingest_file(content, e["source"],
                             category_key=e.get("category") or None,
-                            product_key=e.get("product") or None)
+                            product_key=e.get("product") or None,
+                            report=report)
+            if report.get("internal"):
+                # Marked internal: the original is kept, never indexed.
+                print(f"  {e['source']}: internal, kept out of the index")
+                continue
             if n <= 0 and not ocr_done:
                 raise RuntimeError(
                     f"{e['source']} produced no chunks; rebuild aborted")

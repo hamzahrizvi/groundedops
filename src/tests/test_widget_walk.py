@@ -72,6 +72,7 @@ posted = []
 stream_body = [STREAM_OK]
 host_token = [""]
 widget_cfg = [{}]
+quota = [{}]
 
 
 def _stub(route):
@@ -91,6 +92,8 @@ def _stub(route):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(widget_cfg[0]))
     if url.endswith("/widget/ask/stream"):
         return route.fulfill(status=200, content_type="text/event-stream", body=stream_body[0])
+    if "/widget/quota" in url:
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(quota[0]))
     if url.endswith("/widget/lead"):
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(
             {"received": True, "id": "abcd1234-0000", "reference": "GO-ABCD1234"}))
@@ -122,6 +125,7 @@ def setup_function(func):
     posted.clear()
     stream_body[0] = STREAM_OK
     widget_cfg[0] = {}
+    quota[0] = {}
     host_token[0] = 'data-token="member-token"' if "signed_in" in func.__name__ else ""
     _page = _browser.new_page()
     _page.route("**/*", _stub)
@@ -212,7 +216,8 @@ def test_after_an_answer_signed_in_more_detail_the_page_and_related_questions():
     assert _page.locator("button:has-text('Open NV9 Manual, page 12')").count() == 1
     assert _page.locator("button:has-text('What voltage does it need?')").count() == 1
     assert _page.locator("button:has-text('How do I clean the sensor?')").count() == 1
-    assert _page.locator("button:has-text('How do I remove the bezel?')").count() == 0,         "the question just asked is not offered again"
+    assert _page.locator("button:has-text('How do I remove the bezel?')").count() == 0, \
+        "the question just asked is not offered again"
     n_msgs = _page.evaluate(SAVED_COUNT)
     _page.click("button:has-text('Show more from the manual')")
     _page.wait_for_selector("blockquote.go-quote:has-text('Clip B releases')")
@@ -376,19 +381,29 @@ NOTICE = ("AI assistant: answers come from our manuals and can be wrong. Questio
           "for 90 days and may be processed by OpenAI (USA) and DeepSeek (China).")
 
 
-def test_the_ai_notice_sits_under_the_welcome_line_for_a_guest():
-    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
+def test_a_guest_without_ai_sees_no_ai_notice_and_no_limits_message():
+    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": "", "sign_in_url": "https://example.test/login"}
+    quota[0] = {"tier": "anonymous", "ai_available": False}
     _reopen()
-    _page.wait_for_selector(".go-notice")
-    assert _page.inner_text(".go-notice") == NOTICE
-    assert _page.locator(".go-notice a").count() == 0
-    assert _page.locator(".go-log > .go-notice").count() == 1
+    _page.wait_for_selector(".go-chip")   # the opening menu: everything before it is on screen
+    assert _page.locator(".go-notice").count() == 0
+    assert "account holders" not in _page.inner_text(".go-log")
+    assert _page.locator(".go-chip", has_text="Sign in").count() == 0
+
+
+def test_a_guest_given_ai_answers_still_sees_the_ai_notice():
+    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": ""}
+    quota[0] = {"tier": "anonymous", "ai_available": True}
+    _reopen()
+    _page.wait_for_selector(".go-chip")
+    assert _page.locator(".go-log > .go-notice").count() == 1 and _page.inner_text(".go-notice") == NOTICE
 
 
 def test_the_ai_notice_and_privacy_link_show_signed_in():
     widget_cfg[0] = {"ai_notice": NOTICE, "privacy_url": "https://example.test/privacy",
                      "welcome": "Hello from the operator"}
     _reopen()
-    _page.wait_for_selector(".go-notice a")
-    assert _page.get_attribute(".go-notice a", "href") == "https://example.test/privacy"
-    assert NOTICE in _page.inner_text(".go-notice")
+    _page.wait_for_selector(".go-foot a")
+    assert _page.get_attribute(".go-foot a", "href") == "https://example.test/privacy"
+    assert _page.inner_text(".go-foot") == "By chatting, you consent to our Privacy Policy"
+    assert NOTICE in _page.inner_text(".go-notice") and _page.locator(".go-notice a").count() == 0

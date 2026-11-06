@@ -165,3 +165,45 @@ def test_a_bare_pronoun_object_names_no_feature():
     q = ("this takes our 168mm long notes fine. if we move to the NV4000 will it "
          "still accept them?")
     assert mentions.denied_feature("No. The NV4000 maximum note length is 165mm.", q) is None
+
+
+def test_an_indefinite_pronoun_names_no_feature():
+    """S30 (e), B6-45: "do i need to do ANYTHING" made "anything" the denied
+    feature: "The NV4000 documentation doesn't mention anything"."""
+    for a, q in (("No.", "after the update do i need to do anything?"),
+                 ("No - you should not leave it.",
+                  "do i need to do anything or just leave it?"),
+                 ("No, it does not have anything extra.", ""),
+                 ("No.", "does it have something to hold the notes?"),
+                 ("No.", "can it connect to anything?")):
+        assert mentions.denied_feature(a, q) is None, (a, q)
+        assert mentions.unmentioned_feature(a, q, "nv4000", {"nv4000"},
+                                            lookup=lambda w: False) is None
+    assert mentions.denied_feature("No.", "does it have a backup battery") == "backup battery"
+    # Only the pronoun names nothing: what follows it is still searched.
+    for a, q in (("No.", "Can the NV4000 connect to anything over Bluetooth?"),
+                 ("No.", "Does it have anything like a backup battery?")):
+        phrase = mentions.denied_feature(a, q)
+        assert phrase and mentions.feature_words(phrase)[-1] == ("battery" if "battery" in phrase else "bluetooth"), phrase
+        assert not {"anything", "like"} & set(mentions.feature_words(phrase)), phrase
+        assert mentions.unmentioned_feature(a, q, "nv4000", {"nv4000"},
+                                            lookup=lambda w: False) == phrase
+    assert mentions.feature_words(mentions.denied_feature(
+        "No.", "do i need to do anything after loading the firmware?")) == [
+        "after", "loading", "firmware"]
+
+
+def test_a_connect_question_keeps_its_verb():
+    """8.3 quirk: a bare "No." to "connect to a phone over Bluetooth" read
+    "doesn't mention phone over Bluetooth". The searched words stay the same."""
+    q = "Can the BV30 connect to a phone over Bluetooth?"
+    phrase = mentions.denied_feature("No.", q)
+    assert phrase == "connecting to a phone over Bluetooth"
+    assert mentions.feature_words(phrase, {"bv30"}) == ["phone", "bluetooth"]
+    assert ("BV30 documentation doesn't mention connecting to a phone over "
+            "Bluetooth,") in mentions.reply("BV30", phrase)
+    a = "No, the BV30 cannot connect to a phone over Bluetooth."
+    assert mentions.denied_feature(a, "") == "connecting to a phone over Bluetooth"
+    a = "No, the BV30 cannot be connected to a phone over Bluetooth."
+    assert mentions.denied_feature(a, "") == "connecting to a phone over Bluetooth"
+    assert mentions.denied_feature("No.", "Does the BV30 support Bluetooth?") == "Bluetooth"

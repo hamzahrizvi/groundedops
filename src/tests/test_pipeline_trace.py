@@ -153,9 +153,16 @@ def test_origin_is_who_asked_and_surface_is_the_door():
     assert _as_local(pipeline_trace.origin_for, "live-abc", "widget") == "live"
     assert pipeline_trace.origin_for("live-abc", "widget") == "widget"  # D-20261008-14
     assert pipeline_trace.origin_for("preflight-x") == "preflight"
-    assert pipeline_trace.origin_for("3f2a-uuid") == "console"
+    # Off the widget only the console's chat ("console-<random>") is a
+    # person; any other id, or none, is a script and not real use.
+    assert pipeline_trace.origin_for("console-x") == "console"
+    assert pipeline_trace.origin_for("3f2a-uuid") == "script"
+    assert pipeline_trace.origin_for("blind6-q1") == "script"
+    assert pipeline_trace.origin_for("default") == "script"
+    assert pipeline_trace.origin_for(None) == "script"
+    assert "script" in pipeline_trace.TEST_ORIGINS
     assert pipeline_trace.origin_for("3f2a-uuid", "widget") == "widget"
-    assert pipeline_trace.origin_for(None) == "console"
+    assert pipeline_trace.origin_for(None, "widget") == "widget"
     # A visitor on the widget is origin "widget"...
     rows, spy = _log_spy()
     _ask(log=spy, session_id="3f2a-visitor",
@@ -174,11 +181,11 @@ def test_origin_is_who_asked_and_surface_is_the_door():
     _ask(log=spy, session_id="live-11-abcd",
          entry=lambda req: main._traced_query(req, None, "widget"))
     assert rows[0]["meta"]["origin"] == "widget"
-    # /query is the "query" surface.
+    # /query is the "query" surface; with no session id it is a script.
     rows, spy = _log_spy()
     _ask(log=spy)
     assert rows[0]["meta"]["surface"] == "query"
-    assert rows[0]["meta"]["origin"] == "console"
+    assert rows[0]["meta"]["origin"] == "script"
 
 
 def test_a_curated_faq_answer_now_writes_a_log_row():

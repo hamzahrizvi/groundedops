@@ -73,7 +73,7 @@ NEAR_TOP_MARGIN = 0.10
 MAX_PRODUCT_BUTTONS = 5
 
 _lock = threading.Lock()
-_cache: dict = {"count": None, "vocab": None}
+_cache: dict = {"count": None, "marks": None, "vocab": None}
 
 
 def _words(text: str) -> list[str]:
@@ -85,17 +85,23 @@ def product_vocabulary() -> dict[str, set[str]]:
 
     Rebuilt when the collection's size changes (an upload or a delete).
     "<category>_general" buckets are left out: they hold shared documents,
-    not something a visitor can pick."""
+    not something a visitor can pick. Documents customers are never answered
+    from (marked internal, or EXCLUDED_SOURCES) are left out, the same
+    is_excluded() check retrieval uses, so a code only they print stays unknown
+    (D-20261102-02); a mark change rebuilds the list too."""
     import db
     import retrieval_db
     col = db.get_collection()
     n = col.count()
+    marks = retrieval_db.internal_sources()
     with _lock:
-        if _cache["vocab"] is not None and _cache["count"] == n:
+        if _cache["vocab"] is not None and _cache["count"] == n and _cache["marks"] is marks:
             return _cache["vocab"]
     _, chunks = retrieval_db._get_bm25_index(col)
     vocab: dict[str, set[str]] = {}
     for c in chunks:
+        if retrieval_db.is_excluded(c.get("source")):
+            continue
         keys = [k.strip() for k in (c.get("product") or "").split(",")
                 if k.strip() and not k.strip().endswith("_general")]
         if not keys:
@@ -103,7 +109,7 @@ def product_vocabulary() -> dict[str, set[str]]:
         for w in set(_words(c.get("text"))):
             vocab.setdefault(w, set()).update(keys)
     with _lock:
-        _cache.update(count=n, vocab=vocab)
+        _cache.update(count=n, marks=marks, vocab=vocab)
     return vocab
 
 
@@ -338,10 +344,13 @@ def fault_sections(product: str, results: list[dict], limit: int = 20,
     """The headings a checklist may offer: this turn's retrieved sections
     first (rank order), then every heading of the product's manuals that
     names a fault, error, LED or troubleshooting topic. One entry per
-    heading text, with the first page seen and its chunks."""
+    heading text, with the first page seen and its chunks. Chunks of
+    documents customers are never answered from (marked internal, or
+    EXCLUDED_SOURCES) are skipped, the is_excluded() check retrieval uses, so
+    neither a heading nor a source can name one (D-20261104-02)."""
+    import retrieval_db
     if chunks is None:
         import db
-        import retrieval_db
         _, chunks = retrieval_db._get_bm25_index(db.get_collection())
     out: dict[str, dict] = {}
 
@@ -350,6 +359,8 @@ def fault_sections(product: str, results: list[dict], limit: int = 20,
         if not sec or _COMMAND_HEADING.search(sec):
             return
         if fault_only and not FAULT_HEADING.search(sec):
+            return
+        if retrieval_db.is_excluded(c.get("source")):
             return
         h = _heading(sec)
         if not h:
@@ -441,14 +452,25 @@ def checklist_reply(product_name: str, chosen: list[dict]) -> str:
 
 
 # ── A model name no catalogue product has (D-20261009-10) ──────────────
-_MODEL_TOKEN = re.compile(r"\b([a-z]{2,4})-?(\d{2,5})([a-z+]*)", re.I)
+# Whole tokens only: "NV02004141498000" (a part number) is no model name.
+_MODEL_TOKEN = re.compile(r"\b([a-z]{2,4})-?(\d{2,5})([a-z+]*)(?![a-z0-9])", re.I)
+
+
+def _letters(name: str) -> str:
+    """A digit-free name's letters, flattened: "C-SCS" and "cSCS" -> "cscs";
+    "" for a name with a digit in it."""
+    n = (name or "").lower()
+    return "" if re.search(r"\d", n) else re.sub(r"[^a-z]", "", n)
 
 
 def model_prefixes(names) -> set[str]:
     """The letter prefixes the catalogue's own names put before digits
-    ("NV9 Spectral", "BV30" -> {"nv", "bv"})."""
-    return {m.group(1).lower() for n in names or []
-            for m in re.finditer(r"\b([a-z]{2,4})-?\d", n or "", re.I)}
+    ("NV9 Spectral", "BV30" -> {"nv", "bv"}), and every short letter-only
+    name, 2 to 4 letters once flattened ("SCS", the Compact's "cSCS"), so
+    "CSCS-9000" is shaped like ours too (D-20261030-13)."""
+    out = {m.group(1).lower() for n in names or []
+           for m in re.finditer(r"\b([a-z]{2,4})-?\d", n or "", re.I)}
+    return out | {f for n in names or [] if 2 <= len(f := _letters(n)) <= 4}
 
 
 def unknown_model_name(query: str, known_words: set[str], vocab: dict,
@@ -460,7 +482,9 @@ def unknown_model_name(query: str, known_words: set[str], vocab: dict,
         if m.group(1).lower() not in prefixes:
             continue
         tok = m.group(0).lower()
-        flat = tok.replace("-", "")
+        # Flattened the way the catalogue's own forms are (main._product_alias_tokens):
+        # "+" and "-" dropped, so "nv10usb+" is the NV10USB+ (D-20261030-14).
+        flat = re.sub(r"[^a-z0-9]", "", tok)
         if tok in known_words or flat in known_words:
             continue
         if _lookup(vocab, flat) or _lookup(vocab, tok):
@@ -474,13 +498,39 @@ def close_model_names(name: str, forms: dict[str, list[str]]) -> list[str]:
     first form (the display name): "NV99" -> NV9 Spectral, NV9USB+;
     "BV300" -> BV30. `forms` is product key -> [display name, *aliases]."""
     want = (name or "").lower().replace("-", "")
+    head = re.match(r"[a-z]*", want).group(0)
     out = []
     for names in forms.values():
         codes = {m.group(0).lower().replace("-", "") for n in names
                  for m in re.finditer(r"\b[a-z]{2,4}-?\d+[a-z+]*", n or "", re.I)}
-        if (names and difflib.get_close_matches(want, codes, n=1, cutoff=0.8)
+        # "CSCS-9000": its letters are the Compact's own short name "cSCS".
+        same_letters = bool(head) and head in {_letters(n) for n in names}
+        if (names and (same_letters
+                       or difflib.get_close_matches(want, codes, n=1, cutoff=0.8))
                 and names[0] not in out):
             out.append(names[0])
+    return out
+
+
+# One to five digits: a part number ("NV02004141498000") names no model.
+_DOC_MODEL = re.compile(r"\b([a-z]{2,4})-?(\d{1,5})([a-z+]*)(?![a-z0-9])", re.I)
+
+
+def documented_model_products(query: str, known_words: set[str], vocab: dict,
+                              prefixes: set[str]) -> list[str]:
+    """Products named by a model code no catalogue entry has but exactly one
+    product's own pages print (D-20261030-13): "cba9 or the nv9st" ->
+    ["nv9usb"], as only the NV9USB+ repair pages list the NV9ST. A code two
+    products print, or a catalogue name, adds nothing. Exact vocabulary key,
+    no plural forms."""
+    out: list[str] = []
+    for m in _DOC_MODEL.finditer(query or ""):
+        if m.group(1).lower() not in prefixes:
+            continue
+        flat = re.sub(r"[^a-z0-9]", "", m.group(0).lower())
+        keys = set() if flat in known_words else (vocab.get(flat) or set())
+        if len(keys) == 1 and (key := next(iter(keys))) not in out:
+            out.append(key)
     return out
 
 

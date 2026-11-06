@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import chromadb  # noqa: E402
 
 import db  # noqa: E402
-import repair_product_flags  # noqa: E402
 
 _client = chromadb.EphemeralClient()
 
@@ -104,25 +103,6 @@ def test_delete_by_product_on_a_shared_chunk_removes_only_that_flag():
     assert "prod_mycheckr" not in m
     assert m["prod_mycheckr_mini"] is True
     assert m["products"] == "mycheckr_mini"
-
-
-def test_repair_deletes_stale_flags_and_nothing_else():
-    stale = {"source": "NV9 Spectral Range User Manual-v1.pdf",
-             "products": "nv9_spectral", "product": "nv9_spectral",
-             "category": "note", "page": 19, "prod_nv9_spectral": True,
-             "prod_biometrics_general": True}
-    clean = dict(SHARED_ONCE)
-    col = _collection([("s", dict(stale)), ("c", clean)])
-    with _Using(col):
-        assert repair_product_flags.main([]) == 0
-        assert _meta(col, "s").get("prod_biometrics_general") is True, \
-            "the dry run wrote something"
-        assert repair_product_flags.main(["--apply"]) == 0
-    m = _meta(col, "s")
-    assert "prod_biometrics_general" not in m
-    expected = {k: v for k, v in stale.items() if k != "prod_biometrics_general"}
-    assert m == expected
-    assert _meta(col, "c") == clean
 
 
 if __name__ == "__main__":

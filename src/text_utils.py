@@ -459,7 +459,9 @@ def passes_retrieval_gate(results: list[dict], threshold: float = 0.5) -> bool:
     """
     if not results:
         return False
-    return results[0].get("rerank_score", 0.0) >= threshold
+    # The best score, not the first: secondary documents rank below the
+    # manuals by order only (retrieval_db.rank_key).
+    return max(r.get("rerank_score", 0.0) for r in results) >= threshold
 
 
 def retrieval_confidence_band(results: list[dict], gate_threshold: float = 0.5,
@@ -474,7 +476,7 @@ def retrieval_confidence_band(results: list[dict], gate_threshold: float = 0.5,
     if not results or not passes_retrieval_gate(results, gate_threshold):
         return "none"
 
-    top_score = results[0].get("rerank_score", 0.0)
+    top_score = max(r.get("rerank_score", 0.0) for r in results)
     if top_score >= ambiguous_ceiling:
         return "confident"
 
@@ -1349,6 +1351,9 @@ _REFUSAL_SENTENCE_RE = re.compile(
 PARTIAL_REFUSAL = "I could not find the rest of that in the documentation."
 
 
+PARTIAL_MIN_LETTERS = 60
+
+
 def keep_answered_part(answer: str) -> str:
     """An answer to a several-ask message that answers some asks and writes
     the canonical refusal for the rest is a PARTIAL answer, not a refusal.
@@ -1359,6 +1364,57 @@ def keep_answered_part(answer: str) -> str:
     if not answer or not _REFUSAL_SENTENCE_RE.search(answer):
         return answer
     rest = _REFUSAL_SENTENCE_RE.sub("", answer)
-    if sum(c.isalpha() for c in rest) < 60:
+    if sum(c.isalpha() for c in rest) < PARTIAL_MIN_LETTERS:
         return answer
     return _REFUSAL_SENTENCE_RE.sub(PARTIAL_REFUSAL, answer)
+
+
+def answers_beyond_refusal(answer: str) -> bool:
+    """True when an answer that trips is_refusal still says something else:
+    at least PARTIAL_MIN_LETTERS letters outside the sentences that hold a
+    refusal phrase (the measure keep_answered_part uses). A several-ask
+    draft that answers one ask and writes "there is no information about"
+    for another is a partial answer; a decline with a preamble is not
+    (D-20261104-05). Pure."""
+    rest = " ".join(u for u in split_units(answer or "") if not is_refusal(u))
+    return sum(c.isalpha() for c in rest) >= PARTIAL_MIN_LETTERS
+
+
+_PROMPT_BOUNDARY_RE = re.compile(
+    r"</?(?:context|conversation|documentation)>|-{3}\s*(?:BEGIN|END)\s+ANSWER\s*-{3}",
+    re.IGNORECASE)
+
+
+def _escape_prompt_boundaries(text: str) -> str:
+    """Keep untrusted text from manufacturing our prompt delimiter tags or
+    the answer markers of the ask check."""
+    return _PROMPT_BOUNDARY_RE.sub(
+        lambda m: (m.group(0).replace("<", "&lt;").replace(">", "&gt;")
+                   if m.group(0).startswith("<")
+                   else m.group(0).replace("---", "- - -")),
+        text or "")
+
+
+def ask_check_prompt(asks: list[str], answer: str) -> str:
+    """The one check a several-ask answer gets (D-20261021-15): which asks
+    did the written answer leave out? Parsed by unanswered_asks. Pure."""
+    listed = "\n".join(f"{i}. {_escape_prompt_boundaries(a)}" for i, a in enumerate(asks, 1))
+    return ("A customer's message asked these separate things:\n"
+            f"{listed}\n\n--- BEGIN ANSWER ---\n{_escape_prompt_boundaries(answer)}\n--- END ANSWER ---\n\n"
+            "Reply with the numbers of the asks the answer does not give a "
+            "concrete answer to, comma-separated, or NONE if it answers them "
+            "all. An answer saying it could not find the thing counts as not "
+            "answered. Reply with the numbers or NONE only.")
+
+
+_ASK_NUMBERS_RE = re.compile(r"\d+(?:\s*(?:,|and)\s*\d+)*")
+
+
+def unanswered_asks(check_reply: str, n: int) -> list[int]:
+    """The 1-based asks a check reply names, deduplicated, within 1..n. NONE,
+    an empty reply or anything that is not a bare list of numbers is []: a
+    check that cannot be read never causes a retry. Pure."""
+    text = (check_reply or "").strip().strip(".").strip()
+    if not _ASK_NUMBERS_RE.fullmatch(text):
+        return []
+    return sorted({k for k in map(int, re.findall(r"\d+", text)) if 1 <= k <= n})

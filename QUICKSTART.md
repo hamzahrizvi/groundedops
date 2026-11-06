@@ -190,12 +190,12 @@ error means your page's origin isn't in `WIDGET_ALLOWED_ORIGINS`.
 
 ---
 
-## Deploying this for real (Docker)
+## Deploying this for real
 
-The native setup above is for local use and development. For an actual
-deployment — a server, not your laptop — see `docker/` (Docker Compose
-files for backend + frontend + Ollama) and `README.md`'s "Run with
-Docker" section.
+The setup above is for local use and development. For an actual
+deployment — a server that stays on and serves a website, not your
+laptop — see `STAGING.md` (the steps, in order) and `TUNNEL_SETUP.md`
+(the fixed public address and the start-at-boot service).
 
 ---
 

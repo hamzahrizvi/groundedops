@@ -67,6 +67,39 @@ def test_selection_was_not_tightened():
     assert "ABS_FLOOR" not in code and "ABSOLUTE_FLOOR" not in code
 
 
+def test_a_table_completion_is_printed_inside_the_passage_before_it():
+    chunks = [{"text": "Limits for the following currencies:"},
+              {"text": "[Coin]\nEUR | 1 cent | 16.25", "with_previous": True},
+              {"text": "Other"}]
+    s = main._numbered_passages(chunks)
+    assert "[Passage 1 of 2]" in s
+    assert "[Passage 2 of 2]" in s
+    assert "currencies:\nEUR | 1 cent | 16.25" in s
+    assert "[Coin]" not in s
+
+
+def test_numbered_passages_keeps_the_label():
+    assert main._numbered_passages([{"text": "a"}], lambda r: ", from X") \
+        == "[Passage 1 of 1, from X]\na"
+
+
+def test_the_cap_keeps_a_table_read_out():
+    """D-20261026-04: the BV flash-code chunk is ~1,550 characters, so its
+    read-out was cut off by the plain cap before either model saw it."""
+    cap = main.CHUNK_CHAR_CAP
+    body = "x" * (cap - 50)
+    readout = '\nRead cell by cell under "BV Range":\nLong flashes 4 and Short flashes 2: PSU high'
+    text = body + readout
+    assert len(text[:cap]) == cap and "Long flashes 4" not in text[:cap]
+    assert main._capped(text) == text
+    assert "Long flashes 4" in main._numbered_passages([{"text": text}])
+    # an over-long body is still cut to the cap; the read-out is kept whole
+    long = "y" * (cap * 2) + readout
+    assert main._capped(long) == "y" * cap + readout
+    # no read-out: the plain cap, as before
+    assert main._capped("z" * (cap * 2)) == "z" * cap
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

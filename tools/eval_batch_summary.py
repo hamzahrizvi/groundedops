@@ -24,6 +24,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 import eval as rag_eval  # noqa: E402  (pure helpers only)
+from pipeline_trace import TEST_ORIGINS  # noqa: E402
 
 GRADER_FAILURES = ("grader returned nothing", "unparsed grader output",
                    "grader import failed")
@@ -129,7 +130,7 @@ def log_summary(log_dir, since):
                         rows.append(row)
         except OSError:
             continue
-    tests = [r for r in rows if r.get("origin") in ("eval", "live", "preflight")]
+    tests = [r for r in rows if r.get("origin") in TEST_ORIGINS]
     by_via = {}
     for r in tests:
         t = r.get("timing") or {}

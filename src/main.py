@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import os
 import contextvars
@@ -52,18 +53,18 @@ _ENV_COUNT = _load_env_file(
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import more_context
 import keystore
 import policy
 from app_state import APP_STATE, APP_STATE_LOCK, _run_stage, _set_app_state, capability
 from db import get_collection
-from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root
+from guards import _PROXY_HEADERS, _external_ip, _require_admin, _require_root, _trusted_networks
 from providers import _default_model_for
 from embeddings import _get_model as _get_embedding_model
 from reranker import rerank, _get as _get_reranker_model
-from structure import extract_structured_block
+from structure import extract_structured_block, asks_for_procedure, asks_to_fix, reports_symptom, lists_on_topic, MIN_COPY_RERANK
 from logger import log_interaction, redact
 from router import route_model
 from grounding import check_grounding, _get_nli_model
@@ -76,9 +77,10 @@ import mentions
 import conversations as convo_store
 from memory import add_to_memory, get_history
 from retrieval_db import (retrieve_from_db, retrieve_fused, complete_procedures,
-                          fuse_ranked_results)
+                          fuse_ranked_results, fix_sections)
 import pipeline_trace as ptrace
 from text_utils import (
+    _escape_prompt_boundaries,
     passes_retrieval_gate,
     retrieval_confidence_band,
     is_refusal,
@@ -92,6 +94,9 @@ from text_utils import (
     normalize_markdown_tables,
     split_asks,
     keep_answered_part,
+    answers_beyond_refusal,
+    ask_check_prompt,
+    unanswered_asks,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -100,15 +105,19 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # ── CORS (v10.17) ────────────────────────────────────────────────────
-# The embeddable website widget runs on a DIFFERENT origin (the customer's
-# site) and calls /query cross-origin, so the browser requires CORS. This
-# is deliberately wide-open for now to get the widget functional; lock
-# `allow_origins` down to the specific customer domains — and add auth /
-# rate limiting — before this faces real public traffic. Origins can be
-# supplied as a comma-separated WIDGET_ALLOWED_ORIGINS env var; default "*".
+# The widget runs on the customer's site and calls /widget/* cross-origin.
+# Origins come from the comma-separated WIDGET_ALLOWED_ORIGINS; "*" (the
+# default) lets any website embed the widget and spend the guest quota, so set
+# the customer domains before hosted launch. Visitor limits live in
+# widget_api/quota.py (500-char question, session caps, daily credits,
+# FAQ-only guests). No credentials are allowed, so "*" exposes no signed-in
+# session.
 from fastapi.middleware.cors import CORSMiddleware
 
 _cors_origins = [o.strip() for o in os.getenv("WIDGET_ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+if "*" in _cors_origins:
+    logger.warning("WIDGET_ALLOWED_ORIGINS is '*': any website can embed the widget. "
+                   "Set it to the customer domains before hosted launch.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -179,7 +188,9 @@ async def _limit_body_size(request, call_next):
         cl = request.headers.get("content-length")
         # Large-body paths skip the size cap; their sign-in was checked above.
         path_ = request.scope.get("path", "")
-        if cl and not path_.startswith(_LARGE_BODY_PATHS):
+        if path_.startswith(_LARGE_BODY_PATHS):
+            return await call_next(request)
+        if cl:
             try:
                 if int(cl) > MAX_BODY_BYTES:
                     return JSONResponse(status_code=413,
@@ -187,6 +198,18 @@ async def _limit_body_size(request, call_next):
             except ValueError:
                 return JSONResponse(status_code=400,
                                     content={"detail": "Bad Content-Length"})
+        else:
+            # No length (chunked upload): count the bytes as they arrive and
+            # stop at the same cap (D-20261008-12). Storing them in _body is
+            # what Request.body() does; BaseHTTPMiddleware replays it to the
+            # route (tests/test_route_guards.py checks the route gets it).
+            body = bytearray()
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > MAX_BODY_BYTES:
+                    return JSONResponse(status_code=413,
+                                        content={"detail": "Request too large"})
+            request._body = bytes(body)
     return await call_next(request)
 
 
@@ -219,28 +242,48 @@ _PUBLIC_PREFIXES = ("/widget", "/health")
 # exposing it for internal testing is a reasonable thing to want — but it
 # must stay a DELIBERATE act, not a side effect of putting a proxy in front.
 #
-# ADMIN_ALLOWED_IPS is that deliberate act: a comma-separated list of IP
-# prefixes permitted to reach the admin surface from outside. Empty (the
-# default) keeps the old behaviour exactly — nothing external gets in.
-# Prefix matching, not CIDR, to match PRIVATE_NETWORKS above and to avoid
-# pulling in ipaddress parsing for a list an operator hand-writes.
+# ADMIN_ALLOWED_IPS is that deliberate act: a comma-separated list of
+# addresses or ranges permitted to reach the admin surface from outside.
+# Empty (the default) keeps the old behaviour exactly: nothing external
+# gets in. D-20261029-04: entries are parsed, not matched as text, so a
+# bare address (203.0.113.5) is exactly that host and CIDR (203.0.113.0/24)
+# is a range. It used to be a text prefix, and 203.0.113.5 also let in
+# 203.0.113.50-59. An entry ending in a dot (203.0.113.) is the old prefix
+# form and still means its whole octet range (/24 here). An entry that
+# cannot be parsed admits nothing and is named in a warning at start-up.
 #
 # This is an allowlist in front of authentication, not instead of it: a
 # request from an allowed address still has to sign in.
 ADMIN_ALLOWED_IPS = [n.strip() for n in
                      os.getenv("ADMIN_ALLOWED_IPS", "").split(",") if n.strip()]
+
+
+def _admin_networks(entries) -> tuple:
+    """The allowlist as networks. "10.1." (the old prefix form) -> 10.1.0.0/16."""
+    def as_cidr(e: str) -> str:
+        if not e.endswith("."):
+            return e
+        octets = e.rstrip(".").split(".")
+        return ".".join(octets + ["0"] * (4 - len(octets))) + f"/{8 * len(octets)}"
+    return _trusted_networks(",".join(as_cidr(e) for e in entries), "ADMIN_ALLOWED_IPS")
+
+
 if ADMIN_ALLOWED_IPS:
     logger.warning(
         "ADMIN_ALLOWED_IPS is set: the admin console is reachable from "
-        f"{len(ADMIN_ALLOWED_IPS)} external prefix(es). Sign-in is still "
-        "required, but this surface is no longer LAN-only."
+        f"{', '.join(map(str, _admin_networks(ADMIN_ALLOWED_IPS))) or 'nothing (no entry parsed)'}. "
+        "Sign-in is still required, but this surface is no longer LAN-only."
     )
 
 
 def _admin_ip_allowed(ip: str | None) -> bool:
     if not ADMIN_ALLOWED_IPS or not ip:
         return False
-    return any(ip.startswith(p) for p in ADMIN_ALLOWED_IPS)
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in _admin_networks(ADMIN_ALLOWED_IPS))
 
 # /source_file is reachable externally only WITH a valid member token.
 # It was on the open allowlist, which meant every ingested document could
@@ -259,6 +302,20 @@ _TOKEN_GATED_PREFIXES = ("/source_file", "/figure")
 RETRIEVE_K = int(os.getenv("RETRIEVE_K", "16"))
 CONTEXT_K = int(os.getenv("CONTEXT_K", "8"))
 CHUNK_CHAR_CAP = int(os.getenv("CHUNK_CHAR_CAP", "1600"))
+
+
+def _capped(text: str) -> str:
+    """A passage cut to CHUNK_CHAR_CAP, keeping its table read-out.
+
+    tables.spell_out appends "Read cell by cell..." lines to a passage. A
+    flash-code chunk is often near the cap already (the BV range one is
+    ~1,550 characters), so a plain [:CHUNK_CHAR_CAP] cut the read-out off
+    before either model saw it (D-20261026-04). The text before the first
+    read-out and the read-out from there on each get up to the cap."""
+    i = text.find("\nRead cell by cell")
+    if i < 0:
+        return text[:CHUNK_CHAR_CAP]
+    return text[:min(i, CHUNK_CHAR_CAP)] + text[i:i + CHUNK_CHAR_CAP]
 # Never let the relative floor starve the prompt below this many chunks.
 CONTEXT_MIN = int(os.getenv("CONTEXT_MIN", "4"))
 
@@ -320,7 +377,12 @@ async def _restrict_private_surface(request, call_next):
 
     proxied_early = any(h in request.headers for h in _PROXY_HEADERS)
     if path.startswith(_TOKEN_GATED_PREFIXES):
-        if not proxied_early:
+        # D-20261010-32: no proxy header AND a private socket address (the
+        # box, the LAN, the docker bridge), the same rule as the deep probe
+        # above. A server bound straight to a public address must not hand
+        # out documents to a header-less caller.
+        host = request.client.host if request.client else ""
+        if not proxied_early and host and _is_private(host):
             return await call_next(request)          # local/LAN: allowed
         if _bearer_ok(request):
             return await call_next(request)
@@ -667,7 +729,7 @@ _VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send
 
 The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
 
-Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label. The product a passage's label names ("from the X documentation") is the product its facts belong to even when the passage text uses another product's name: manuals reuse sentences written for a sibling product.
+Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label. The product a passage's label names ("from the X documentation") is the product its facts belong to even when the passage text uses another product's name: manuals reuse sentences written for a sibling product. Inside a passage, rows read out under a heading that lists products (Read cell by cell under "BV Range (BV20, BV30, BV50 and BV100)":) belong to each product that heading lists, even when the passage's label names no product; they are not about a product the heading does not list.
 
 Judge two things separately.
 
@@ -796,7 +858,7 @@ def _llm_verified(answer: str, chunks: list[dict],
         if not any((c.get("text") or "").strip() for c in chunks):
             return False
         _names = _product_names()
-        ctx = "\n\n".join(_verify_label(c, _names) + c.get("text", "")[:CHUNK_CHAR_CAP]
+        ctx = "\n\n".join(_verify_label(c, _names) + _capped(c.get("text", ""))
                           for c in chunks)
         from contextlib import nullcontext
         from llm import judging
@@ -895,16 +957,6 @@ def _run_parallel(fn, items: list) -> list:
 DEFAULT_SESSION_ID = "default"
 
 
-_PROMPT_BOUNDARY_RE = re.compile(r"</?(?:context|conversation|documentation)>", re.IGNORECASE)
-
-
-def _escape_prompt_boundaries(text: str) -> str:
-    """Keep untrusted text from manufacturing our prompt delimiter tags."""
-    return _PROMPT_BOUNDARY_RE.sub(
-        lambda match: match.group(0).replace("<", "&lt;").replace(">", "&gt;"),
-        text or "")
-
-
 # The families' "It's a general question" button (families.GENERAL).
 _GENERAL_RULE = ("The question is about every model it lists after 'general question "
                  "for every'. Answer it as a table with one row per listed model, and "
@@ -941,7 +993,8 @@ def _asks_block(asks: list[str] | None) -> str:
 
 
 def build_answer_prompt(hist: str, context: str, question: str,
-                        library: str = "", asks: list[str] | None = None) -> str:
+                        library: str = "", asks: list[str] | None = None,
+                        note: str = "") -> str:
     """The answering prompt, shared by the normal and streaming paths.
 
     Extracted from answer_query v16.2 so /query/stream cannot drift from
@@ -971,6 +1024,8 @@ def build_answer_prompt(hist: str, context: str, question: str,
     _where = ("<documentation> and <context>" if library else "<context>")
     _asks = (_asks_block(asks) + (_PICTURE_RULE if ", picture '" in context else "")
              + (_GENERAL_RULE if "general question for every" in question else ""))
+    # D-20261030-13: what the passages give for the named item (_named_item_note).
+    _note = (_escape_prompt_boundaries(note.strip()) + "\n\n") if note.strip() else ""
     # D-20261020-12: arm B of the rule-block ablation. ANSWER_PROMPT=short
     # swaps the 49-rule block below for the eight rules something else
     # depends on (R&D 20261020-short-writer-prompt). Read per call so a lab
@@ -993,7 +1048,7 @@ A value read from a table goes with the condition its row or cell carries (an op
 A product name in brackets at the very end of the question is the customer's selected product, added automatically; when the question itself names a different product or model, the one it names is what they are asking about.
 Write a set of values (a pinout, a specification, a list of options) as a markdown list with one item per line, or as a markdown table with a header row when there are two or more columns.
 
-{_asks}Question: {resolved_query}
+{_note}{_asks}Question: {resolved_query}
 Answer:"""
     return f"""{_lib}{_hist}<context>
 {safe_context}
@@ -1010,6 +1065,7 @@ Answer directly and factually, then stop. No preamble, no meta-commentary.
 If the question asks whether something exists, is supported, or works with something else, begin with a plain Yes or No, then give the specifics. A question asking what, which, how or how much ("What voltage is supported?") is not a yes/no question; never open its answer with Yes or No. Answer No only when the context says the thing is absent or unsupported; when the context simply never mentions it, that is not a No, so respond with the exact sentence below. A passage that merely MENTIONS both things — a table listing them side by side, a specification they share — is not an answer to that question; keep looking for a passage that states whether it is supported.
 When the Yes or No turns on whether a value falls inside a documented range or limit (an input voltage against the logic-high minimum, a note length against the maximum), compare the two numbers before writing the first word, and make the Yes or No agree with that comparison: below a minimum or above a maximum is No.
 A passage that states a range, a limit, a default, or a table of codes or messages for the thing asked about answers the question even when the customer's own value, code or wording is not written in it: a 50 °C room against a stated 0 °C to 40 °C is a No with that range, a 25 °C room inside it is a Yes with that range, a flash pattern or status message found in a code table gets that row's meaning and its action, and a login asked for gets the default the passages give.
+When the customer reports a flashing, blinking or coloured light but gives no number or pattern of flashes, and the context has a flash-code table for their product, do not pick a row and do not say you could not find it: ask how many flashes of each kind they count (long and short, or each colour) and what the unit is doing, so the code can be read from the table.
 Support is often conditional. When the context qualifies it by firmware version, model variant, region or configuration, say so in the first sentence ("Yes, but only on firmware below 1.21"), because an unqualified Yes is wrong the moment the condition applies.
 A value read from a table is conditional in the same way. When its row or cell carries a condition — an operating mode or load, a product variant with its own column, a minimum or maximum, a tolerance, "if no other coins in device", "whichever is greater" — give the value together with that condition, in the manual's own words, even if the question did not ask about it. A figure quoted without the condition it depends on is a wrong answer, not a shorter one.
 The passages are numbered in the order a retrieval system ranked them, so [Passage 1] is the most likely to contain the answer. That is a hint, not a rule: use whichever passage actually answers the question, and prefer an earlier one when two say the same thing.
@@ -1067,12 +1123,18 @@ one", "which product was that for"), use <conversation> to work out what is
 being referred to — but every FACT in your answer must still come from
 <context>.
 
-{_asks}Question: {resolved_query}
+{_note}{_asks}Question: {resolved_query}
 Answer:"""
 
 
+# D-20261030-03: /query and /query/stream are LAN/admin only, but an
+# ADMIN_ALLOWED_IPS entry opens them; 4000 characters is far above any
+# real question (the widget's own cap is 500) and stops a 2 MB prompt.
+MAX_QUERY_CHARS = 4000
+
+
 class QueryRequest(BaseModel):
-    q: str
+    q: str = Field(..., max_length=MAX_QUERY_CHARS)
     session_id: str | None = None
     deepseek_api_key: str | None = None
     openai_api_key: str | None = None
@@ -1504,9 +1566,7 @@ def _inference_answer(query: str, chunks: list[dict],
         # Numbered the same way build_answer_prompt's caller numbers them,
         # so a passage the model is told is [Passage 1] here is the same
         # one it would have been on the ordinary path.
-        context = "\n\n".join(
-            f"[Passage {i} of {len(chunks)}]\n" + r["text"][:CHUNK_CHAR_CAP]
-            for i, r in enumerate(chunks, 1))
+        context = _numbered_passages(chunks)
         from llm import judging
         with judging():
             out = generate_with_fallback(
@@ -1559,7 +1619,8 @@ def _friendly_refusal(scope_key: str | None, product_label: str = "",
     """
     # No sales reply here (D-20261010-01, CEO 2026-10-10): a refusal says what
     # was not found and offers support, whatever buying words the message holds.
-    # Price questions are deflected before the search in _sales_answer.
+    # Price questions are deflected before the search in _sales_answer,
+    # unless the passages they retrieve state a price.
 
     what = f" about the {product_label}" if product_label else ""
     lines = [f"I don't have that in the product documentation{what}."]
@@ -1771,7 +1832,8 @@ def _is_product_scope(scope_key: str | None) -> bool:
         return False
 
 
-def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None):
+def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None,
+                  scope: dict | None = None):
     """A cross-product answer, or None to fall through to the pipeline.
 
     Reads the RAW question as well as the condensed one: condensation
@@ -1832,9 +1894,24 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
                 # sales.is_commercial_question about what the manuals
                 # actually say about pricing.
                 return None
-            # `answer` and `deflect` both deflect a commercial question: the
-            # catalogue answer is assembled from manuals that contain no
-            # prices, and no setting can put a price in a document.
+            # The documents can state a price: the Repair Information pages
+            # list repair prices, and an uploaded price list is searched like
+            # any manual. Blind runs scored "declines although the manual
+            # has it" on every repair-price question while this deflected
+            # before looking. So look first, and deflect only when the
+            # passages hold no price for the model to quote (2026-10-30).
+            # The raw and condensed questions on separate lines: joined by a
+            # space, "...our units are busy how much is..." reads as one
+            # price clause and the small talk must be on the price page.
+            try:
+                if sales.documents_price(f"{raw_q}\n{resolved or ''}",
+                                         retrieve_from_db(q, top_k=CONTEXT_K, scope=scope),
+                                         _product_names().values()):
+                    logger.info("price question searched: the documents state a price")
+                    return None
+            except Exception as _exc:
+                logger.debug(f"price lookup before deflect skipped: {_exc}")
+            # `answer` and `deflect` both deflect a price nothing documents.
             reply = (policy.value("sales_reply") or "").strip()
             if not reply:
                 return None
@@ -1860,7 +1937,7 @@ def _sales_answer(raw_q: str, resolved: str | None, scope_key: str | None = None
                            scoped=not unscoped,
                            named_products=_named,
                            product_names=_names,
-                           scope_product=None if unscoped else scope_key)
+                           scope_product=scope_key if _is_product_scope(scope_key) else None)
         # The overview needs one shared word, so "a good pub near your
         # office" matched MyCheckr on "good". It is given only when the
         # question is about something our products do; the model decides
@@ -2267,10 +2344,8 @@ def _unknown_product_text(q: str) -> str | None:
         import clarify as _clarify
         names = _product_names()
         shown = [n for k, n in names.items() if not k.endswith("_general")]
-        prefixes = _clarify.model_prefixes(
-            shown + [a for v in _product_aliases().values() for a in v])
         found = _clarify.unknown_model_name(
-            q, _product_words(), _clarify.product_vocabulary(), prefixes)
+            q, _product_words(), _clarify.product_vocabulary(), _model_prefix_set())
         if not found:
             return None
         aliases = _product_aliases()
@@ -2281,6 +2356,200 @@ def _unknown_product_text(q: str) -> str | None:
     except Exception as _exc:
         logger.warning(f"unknown-product check skipped: {_exc}")
         return None
+
+
+def _model_prefix_set() -> set[str]:
+    """The letter prefixes of the catalogue's model names ("nv", "bv",
+    "cscs"), from every product's display name and aliases."""
+    import clarify as _clarify
+    shown = [n for k, n in _product_names().items() if not k.endswith("_general")]
+    return _clarify.model_prefixes(
+        shown + [a for v in _product_aliases().values() for a in v])
+
+
+def _documented_model_keys(q: str) -> list[str]:
+    """Products a model code in the question names although no catalogue
+    entry has it, because exactly one product's own pages print it: "the
+    NV9ST" names the NV9USB+ (D-20261030-13). Named products like any
+    other, so scope and comparisons treat them the same."""
+    try:
+        import clarify as _clarify
+        return _clarify.documented_model_products(
+            q, _product_words(), _clarify.product_vocabulary(), _model_prefix_set())
+    except Exception as _exc:
+        logger.warning(f"documented-model check skipped: {_exc}")
+        return []
+
+
+def _named_item_note(question: str, chunks: list[dict], product_key: str | None,
+                     vocab: dict | None = None) -> str:
+    """A note for the answer prompt when the item the question names is not
+    what the passages give for the asked product (D-20261030-13), else "".
+
+    (a) The named item appears only on lines or passages about another
+    product, and the product's own pages never print it: the NV201's "bunch
+    note feeder" sits only on the NV200S row of a shared flash-code table.
+    (b) A look-alike: the question's phrase with one word swapped is in the
+    passages ("float by denomination" beside "payout by denomination").
+    Text matches on the passages in hand, no model call; the answer model
+    weighs it. At most two notes."""
+    try:
+        import clarify as _clarify
+        names, aliases = _product_names(), _product_aliases()
+        if not product_key or product_key not in names or product_key.endswith("_general"):
+            return ""
+        own = names[product_key]
+        # Real products' words only: "note" from "note_val_general" is no
+        # product name, and "bunch note feeder" must stay one item.
+        pwords = set()
+        for k, n in names.items():
+            if not k.endswith("_general"):
+                al = aliases.get(k, ())
+                pwords |= _product_alias_tokens(k, n, al) | set(
+                    re.findall(r"[a-z0-9]+", f"{k} {n} {' '.join(al)}".lower()))
+        vocab = _clarify.product_vocabulary() if vocab is None else vocab
+        words = lambda t: re.findall(r"[a-z][a-z0-9]*", (t or "").lower())  # noqa: E731
+
+        def content(w: str) -> bool:
+            return (bool(_clarify.content_words(w)) and w not in pwords
+                    and not re.search(r"\d", w))
+
+        def has(w: str, ws: set) -> bool:
+            return any(f in ws for f in (w, w.rstrip("s"), w + "s"))
+
+        # Each product's forms, plus the model codes in its names ("nv201"
+        # from "NV201 Spectral"), as a flash-code row writes them.
+        forms = {}
+        for k, n in names.items():
+            if k.endswith("_general"):
+                continue
+            al = aliases.get(k, ())
+            forms[k] = _product_alias_tokens(k, n, al) | {
+                t for x in (n, *al) for t in re.findall(r"[a-z0-9]+", x.lower())
+                if re.search(r"\d", t) and re.match(r"[a-z]", t)}
+
+        def named_on(line: str) -> set:
+            runs = _token_runs(line)
+            return {k for k, fs in forms.items() if fs & runs}
+
+        def stem(w: str) -> str:
+            return w if len(w) <= 4 else w[:max(4, len(w) - 3)]
+
+        def loose(ws) -> str:
+            """A phrase, each longer word by its stem: "clean" finds "cleaning"."""
+            return r"\b" + " ".join(re.escape(stem(w)) + r"[a-z0-9]*" if len(w) > 2
+                                    else re.escape(w) for w in ws) + r"\b"
+
+        def tags(c: dict) -> set:
+            return {t.strip() for t in (c.get("product") or "").split(",")}
+
+        lines = [(c, ln, set(words(ln))) for c in chunks or []
+                 for ln in (c.get("text") or "").splitlines()]
+        notes: list[str] = []
+        q_tokens = words(question)
+        covered: set = set()
+        for i, w in enumerate(q_tokens):
+            if len(notes) >= 2 or w in covered or not content(w):
+                continue
+            printers = _clarify._lookup(vocab, w) or set()
+            # Printed by the product's own pages, or by most products' (a
+            # word like "connected" is no one product's item).
+            if product_key in printers or 2 * len(printers) > len(forms):
+                continue
+            holding = [(c, ln) for c, ln, ws in lines if has(w, ws)]
+            if (not holding or any(product_key in tags(c) for c, _ in holding)
+                    or any(product_key in named_on(ln) for _, ln in holding)):
+                continue
+            others = set()
+            for c, ln in holding:
+                others |= named_on(ln) | (tags(c) & forms.keys())
+            others.discard(product_key)
+            if not others:
+                continue
+            # The item is the run of the question's words those lines print
+            # together: "bunch note feeder", not "... feeder connected".
+            held = [" ".join(re.findall(r"[a-z0-9]+", ln.lower())) for _, ln in holding]
+
+            def printed(ws) -> bool:
+                return any(re.search(loose(ws), h) for h in held)
+            a, b = i, i
+            while a > 0 and content(q_tokens[a - 1]) and printed(q_tokens[a - 1:b + 1]):
+                a -= 1
+            while (b + 1 < len(q_tokens) and content(q_tokens[b + 1])
+                   and printed(q_tokens[a:b + 2])):
+                b += 1
+            covered |= set(q_tokens[a:b + 1])
+            run = " ".join(q_tokens[a:b + 1])
+            where = " or the ".join(sorted(names[k] for k in others)[:3])
+            notes.append(
+                f'"{run}" appears in these passages only for the {where}, never '
+                f"for the {own}. Unless a passage states it for the {own}, say "
+                f"it is not documented for the {own}; you may name the product "
+                "it is documented for. Never answer from another product's row.")
+
+        # (b) look-alikes, on the passages' words with all punctuation gone.
+        otext = "\n".join(" ".join(re.findall(r"[A-Za-z0-9]+", c.get("text") or ""))
+                          for c in chunks or [])
+        text = otext.lower()
+        toks = re.findall(r"[a-z0-9]+", (question or "").lower())
+
+        def related(x: str, y: str) -> bool:
+            k = min(4, len(x), len(y))
+            return x[:k] == y[:k]
+
+        def titled(phrase: str) -> bool:
+            """Printed as an item's name: "Float By Denomination", not prose."""
+            return all(p[0].isupper() for p in phrase.split() if len(p) > 2)
+
+        seen: set = set()
+        for i in range(len(toks) - 2):
+            if len(notes) >= 2:
+                break
+            win = toks[i:i + 3]
+            # "clean the note" against "wipe the note" is a different action,
+            # not a look-alike item: names, not verb and object.
+            # The phrase ends the question's run of content words, and only its
+            # qualifier (first word) is swapped: "payout by denomination" vs
+            # "float by denomination". A fragment of a longer name ("note
+            # feeder lid" of "... lid sensor") would match unrelated rows.
+            if (not (content(win[0]) and content(win[2])) or " ".join(win) in seen
+                    or win[1] in ("the", "a", "an", "my", "our", "your", "this",
+                                  "that", "its", "their")
+                    or (i + 3 < len(toks) and content(toks[i + 3]))):
+                continue
+            for j in (0,):
+                pat = " ".join(r"([a-z][a-z0-9]*)" if k == j else re.escape(t)
+                               for k, t in enumerate(win))
+                alts: list[str] = []
+                for m in re.finditer(r"\b" + pat + r"\b", otext, re.I):
+                    alt = m.group(1).lower()
+                    if (content(alt) and not related(alt, win[j]) and alt not in alts
+                            and titled(m.group(0))):
+                        alts.append(alt)
+                if not alts:
+                    continue
+                W = " ".join(win)
+                L = '" or "'.join(" ".join(a if k == j else t for k, t in enumerate(win))
+                                  for a in alts[:3])
+                if re.search(loose(win), text):
+                    notes.append(f'The question asks about "{W}". The passages also '
+                                 f'mention "{L}", '
+                                 + ("a different item" if len(alts) == 1 else "different items")
+                                 + f': answer about "{W}" only.')
+                elif not re.search(r"\b" + re.escape(stem(win[j])), text):
+                    notes.append(f'The passages never mention "{W}"; they mention "{L}". '
+                                 f'Unless they show "{L}" is the same thing, say "{W}" is '
+                                 f'not documented for the {own}; you may mention "{L}".')
+                else:
+                    continue
+                seen.add(W)
+                break
+        if not notes:
+            return ""
+        return "Before you answer, note:\n" + "\n".join(f"- {n}" for n in notes[:2])
+    except Exception as _exc:
+        logger.warning(f"named-item note skipped: {_exc}")
+        return ""
 
 
 def _asked_to_clarify_last_turn(history: list[dict] | None) -> bool:
@@ -2524,6 +2793,25 @@ def _passage_heading(chunk: dict) -> str:
     return f', under "{sec}"' if sec else ""
 
 
+def _numbered_passages(chunks: list[dict], label=lambda r: "") -> str:
+    """The <context> passages, "[Passage i of N]" each. A chunk marked
+    with_previous (retrieval_db.complete_tables: the rows a passage announces
+    or begins) is printed INSIDE the passage before it, directly under that
+    text: as a separate "Passage 5 of 5" the SMART Coin limits reached the
+    model and were never joined to "...for the following currencies:" in
+    passage 1 (D-20261008-04)."""
+    import tables as _tables
+    groups: list[list] = []
+    for r in chunks:
+        text = _capped(r.get("text") or "")
+        if r.get("with_previous") and groups:
+            groups[-1][1] += "\n" + _tables.split_prefix(text)[1]
+        else:
+            groups.append([r, text])
+    return "\n\n".join(f"[Passage {i} of {len(groups)}{label(r)}]\n{t}"
+                       for i, (r, t) in enumerate(groups, 1))
+
+
 def _product_names() -> dict[str, str]:
     """product key -> display name, from the catalogue.
 
@@ -2543,6 +2831,31 @@ def _product_names() -> dict[str, str]:
                     out[key] = p.get("name") or key
     except Exception as exc:
         logger.warning(f"Could not read product names from the catalogue: {exc}")
+    return out
+
+
+def _variant_short_forms(names: dict[str, str],
+                         aliases: dict[str, list[str]]) -> dict[str, list[str]]:
+    """`aliases` plus the short forms of every variant named "<qualifier>
+    <family name>" (D-20261025-11). The Global SMART Coin System is "G-SCS"
+    and the Compact "C-SCS" in their own manuals; the catalogue has "SCS" for
+    the SMART Coin System only, so "G-SCS" scoped to the plain SCS and got its
+    MCBF. Each one-word alias of the family gives the variant "<qualifier>
+    <alias>" and "<initials><alias>"."""
+    words = lambda t: re.findall(r"[a-z0-9]+", (t or "").lower())  # noqa: E731
+    out = {k: list(v) for k, v in aliases.items()}
+    for v, vname in names.items():
+        wv = words(vname)
+        for f, fname in names.items():
+            wf = words(fname)
+            if (v == f or v.endswith("_general") or f.endswith("_general")
+                    or not wf or len(wv) <= len(wf) or wv[-len(wf):] != wf):
+                continue
+            q = wv[:-len(wf)]
+            for a in aliases.get(f, ()):
+                if len(words(a)) == 1:
+                    out.setdefault(v, []).extend(
+                        [f"{' '.join(q)} {a}", "".join(w[0] for w in q) + a])
     return out
 
 
@@ -2569,7 +2882,7 @@ def _product_aliases() -> dict[str, list[str]]:
                     out[key] = [str(a) for a in raw if str(a).strip()]
     except Exception as exc:
         logger.warning(f"Could not read product aliases: {exc}")
-    return out
+    return _variant_short_forms(_product_names(), out)
 
 
 def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:
@@ -2616,6 +2929,18 @@ def _is_comparison(query: str) -> bool:
     return bool(_COMPARISON.search(query or ""))
 
 
+def _tagged_for(c: dict, key: str) -> bool:
+    """True when passage `c` is filed under product `key`: tagged with it, or
+    with its category's shared "<category>_general" bucket, which retrieval
+    counts as every product's in that category (retrieval_db._matches_scope).
+    D-20261019-17: C20261026-24's Android access guide, tagged only
+    biometrics_general, holds both the MyCheckr's and the ICU's network
+    options and was left out of a MyCheckr-vs-ICU comparison."""
+    from retrieval_db import _category_of
+    t = {x.strip() for x in (c.get("product") or "").split(",")} - {""}
+    return key in t or f"{_category_of(key)}_general" in t
+
+
 def _comparison_picks(ranked: list[dict], named: list[str], floor: float,
                       k: int | None = None) -> list[int]:
     """Indexes into `ranked` (reranked, best first) for a question naming two
@@ -2627,21 +2952,30 @@ def _comparison_picks(ranked: list[dict], named: list[str], floor: float,
     in global order above `floor`, but never with a passage about another
     product (C20261017b-26 filled one with the NV9 Spectral's MCBF page, and
     the model worked a stand-in figure out of it). `k` is the size of the
-    whole pick, CONTEXT_K unless one ask's share is being picked."""
+    whole pick, CONTEXT_K unless one ask's share is being picked. A shared
+    `<category>_general` passage counts for each named product of that category
+    only at or above `floor`: the no-floor share is for a product's own pages,
+    and floor-free shared pages ("Central Bank Relationships", "ITL Device
+    Flash Codes" at 0.001-0.06) pushed the products' own pages out
+    (D-20261019-17 round 2)."""
     k = k or CONTEXT_K
 
     def tags(c):
         return {t.strip() for t in (c.get("product") or "").split(",")} - {""}
+
+    def counts_for(r, key):
+        return key in tags(r) or (_tagged_for(r, key)
+                                  and r.get("rerank_score", 0.0) >= floor)
     per = max(2, k // len(named))
     picked: list[int] = []
     for key in named:
         picked += [i for i, r in enumerate(ranked)
-                   if key in tags(r) and i not in picked][:per]
+                   if counts_for(r, key) and i not in picked][:per]
     for i, r in enumerate(ranked[:k]):
         if len(picked) >= k:
             break
         t = tags(r)
-        if i in picked or (t and not t & set(named)):
+        if i in picked or (t and not any(counts_for(r, key) for key in named)):
             continue
         if r.get("rerank_score", 0.0) >= floor or len(picked) < CONTEXT_MIN:
             picked.append(i)
@@ -2660,8 +2994,8 @@ def _merge_rankings(rankings: list[list[dict]]) -> list[dict]:
             if key not in best or (r.get("rerank_score", 0.0)
                                    > best[key].get("rerank_score", 0.0)):
                 best[key] = r
-    return sorted(best.values(), key=lambda r: r.get("rerank_score", 0.0),
-                  reverse=True)
+    from retrieval_db import rank_key
+    return sorted(best.values(), key=rank_key, reverse=True)
 
 
 def _ask_picks(ask_rankings: list[list[dict]], named: list[str],
@@ -2759,8 +3093,10 @@ def _described_among(query: str, results: list[dict], span: list[str],
     return [key] if key else []
 
 
-def _products_named_in(query: str, candidates: list[str]) -> list[str]:
+def _products_named_in(query: str, candidates: list[str],
+                       selected: str | None = None) -> list[str]:
     """Which of `candidates` the question wording actually picks out.
+    `selected` is the chat's product: its sibling's name may stand for the family.
 
     Returns every candidate whose key or display name appears in the query.
     A single hit means we can scope the question ourselves instead of asking.
@@ -2798,13 +3134,21 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     # mini USB cable as often as a product.
     hit_forms = [form for _len, _key, form in hits]
     hit_keys = {key for _len, key, _form in hits}
+    # In a sibling's own chat the chat's product stands in for the typed
+    # family name: "adding a new mini to the myconnect app" in a MyCheckr
+    # mini chat names the Mini (D-20261019-17, C20261021e-15).
+    family = [f for k in candidates if selected and k != selected
+              for f in _product_alias_tokens(k, names.get(k, ""), aliases.get(k, ()))]
     for key in candidates:
         if key in hit_keys:
             continue
+        prefixes = hit_forms + (family if key == selected else [])
         for form in _product_alias_tokens(key, names.get(key, ""),
                                           aliases.get(key, ())):
-            rest = next((form[len(p):] for p in hit_forms
-                         if form != p and form.startswith(p)), "")
+            # Either side: "MyCheckr mini" after the family, "Compact SMART Coin System" before it (D-20261025-11).
+            rest = next((form[len(p):] if form.startswith(p) else form[:-len(p)]
+                         for p in prefixes
+                         if form != p and (form.startswith(p) or form.endswith(p))), "")
             if len(rest) >= 3 and not rest.isdigit() and rest in runs:
                 hits.append((len(rest), key, rest))
                 break
@@ -2821,6 +3165,45 @@ def _products_named_in(query: str, candidates: list[str]) -> list[str]:
     kept = {key for key, form in forms.items()
             if not any(other != form and form in other
                        for other in forms.values())}
+    # A FAMILY NAME SHARED BY SEVERAL PRODUCTS (D-20261025-11). "SMART
+    # Hopper" is an alias of the SMART Coin System, but it is also the start
+    # of "Smart Hopper 3": "our smart hopper is flashing red 4 times" in a
+    # Hopper 3 chat was scoped to the Coin System and got its feeder row
+    # (C20261029-37). An alias whose words begin another product's display
+    # name names that whole family: the chat's product when it is one of
+    # them, otherwise no one product (an unscoped question then asks which).
+    def _words(t):
+        return re.findall(r"[a-z0-9]+", (t or "").lower())
+
+    def _sharers(key):
+        if any(f in runs for f in _product_alias_tokens(key, names.get(key, ""))):
+            return None
+        typed = [a for a in aliases.get(key, ())
+                 if re.sub(r"[^a-z0-9]+", "", a.lower()) in runs]
+        out = set()
+        for a in typed:
+            wa = _words(a)
+            s = {b for b, bn in names.items()
+                 if b != key and len(_words(bn)) > len(wa) and _words(bn)[:len(wa)] == wa}
+            if not s:
+                return None
+            out |= s
+        return out or None
+
+    for key in sorted(kept):
+        shared = _sharers(key)
+        if shared is not None:
+            kept.discard(key)
+            if selected and selected in shared | {key}:
+                kept.add(selected)
+    # In a variant's own chat its family's name is the variant, unless the
+    # question compares them: "swapping old SCS units for the compact one,
+    # does the compact still support payout by denomination" in a Compact
+    # chat is the Compact's question (C20261025e-11); "compact vs the normal
+    # smart coin system" stays two products (C20261025e-14).
+    if selected in kept and not _is_comparison(query):
+        kept = {k for k in kept
+                if k == selected or not _is_family_parent(k, selected)}
     return sorted(kept)
 
 
@@ -2906,17 +3289,37 @@ def _category_keys() -> set[str]:
 def _is_family_parent(named: str, selected: str) -> bool:
     """True when `named` is the family `selected` belongs to: its display
     name is a strict prefix of the selected product's name or an alias,
-    letter for letter ("MyCheckr" -> "MyCheckr mini")."""
+    letter for letter ("MyCheckr" -> "MyCheckr mini"), or a strict word-suffix
+    of it ("SMART Coin System" -> "Compact SMART Coin System", D-20261025-11)."""
     names = _product_names()
     flat = lambda t: re.sub(r"[^a-z0-9]+", "", (t or "").lower())  # noqa: E731
     parent = flat(names.get(named, ""))
     if not parent:
         return False
+    pw = re.findall(r"[a-z0-9]+", names.get(named, "").lower())
     for form in [names.get(selected, "")] + list(_product_aliases().get(selected) or []):
         f = flat(form)
-        if f != parent and f.startswith(parent):
+        w = re.findall(r"[a-z0-9]+", (form or "").lower())
+        if (f != parent and f.startswith(parent)) or (len(w) > len(pw) and w[-len(pw):] == pw):
             return True
     return False
+
+
+def _holds_manual_of(selected: str, named: str) -> bool:
+    """True when `selected` is a system built around `named`: the selected
+    product's catalogue sources include a manual whose filename names
+    `named` and not `selected` (CashGenic lists the SMART Coin System Range
+    User Manual and the NV200S Range User Manual)."""
+    try:
+        import catalog   # catalog() is the picker view, without sources
+        shared = (set(catalog.sources_for(selected) or [])
+                  & set(catalog.sources_for(named) or []))
+    except Exception as exc:
+        logger.debug(f"catalogue sources skipped: {exc}")
+        return False
+    return any("manual" in s.lower()
+               and _products_named_in(s, [selected, named]) == [named]
+               for s in shared)
 
 
 def _scope_for_products(keys: list[str]) -> dict | None:
@@ -2961,9 +3364,16 @@ def _resolve_question_scope(selected_product: str | None,
     # pool, where the Mini's curated answer is not, and the visitor got a
     # menu. The typed name overrides the picker only when it is not a
     # prefix of the selected product's own name or aliases.
+    # A PART IS NOT AN OVERRIDE either. "Is the supplied 24V PSU big enough
+    # for the Spectral Payout and the SMART Coin System?" in a CashGenic chat
+    # names a product CashGenic is built around; the override searched the
+    # SCS pool alone, best 0.06, and refused (C20261022c-08), while the
+    # CashGenic manual's power table (p.5) ranks near the top in CashGenic's
+    # own scope. The part's own documents are still searched (main.query).
     if (len(named_products) == 1 and selected_product
             and named_products[0] != selected_product
-            and _is_family_parent(named_products[0], selected_product)):
+            and (_is_family_parent(named_products[0], selected_product)
+                 or _holds_manual_of(selected_product, named_products[0]))):
         named_products = []
     effective_product = (named_products[0] if len(named_products) == 1
                          else selected_product)
@@ -3471,12 +3881,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _family = _families.resolve(
             q, history, payload.product,
             _products_named_in(_normalize_query(q), _keys))
-        _named = _products_named_in(_families.without_generic(resolved_query), _keys)
-        _named_typed = _products_named_in(
-            _families.without_generic(_normalize_query(q)), _keys)
+        _named = _products_named_in(_families.without_generic(resolved_query), _keys,
+                                    selected=payload.product)
+        _named_typed = _products_named_in(_families.without_generic(_normalize_query(q)), _keys,
+                                          selected=payload.product)
         for _k in _family["products"]:
             for _lst in (_named, _named_typed):
                 if _k in _keys and _k not in _lst:
+                    _lst.append(_k)
+        # A model code only one product's pages print names that product
+        # ("cba9 or the nv9st" -> CBA9 and NV9USB+), D-20261030-13.
+        for _k in _documented_model_keys(_normalize_query(q)):
+            for _lst in (_named, _named_typed):
+                if _k not in _lst:
                     _lst.append(_k)
     except Exception as _exc:
         logger.warning(f"Product-name resolution skipped: {_exc}")
@@ -3502,6 +3919,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # NV9USB+ while its scope bar said BV30. Without a picker there is no
     # selection to protect, and the rewrite is the only product signal a
     # follow-up has, so it still counts there.
+    # A part of the selected system typed in its chat keeps the chat's scope
+    # (_resolve_question_scope); its own pool is searched as well, below.
+    _part_named = [k for k in _named_typed
+                   if payload.product and len(_named_typed) == 1
+                   and k != payload.product
+                   and _holds_manual_of(payload.product, k)]
     _scope, _effective_product = _resolve_question_scope(
         payload.product, payload.category,
         _named_typed if payload.product else _named)
@@ -3741,7 +4164,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "response_time": round(total_time, 3),
         }
 
-    _sales = _sales_answer(payload.q, resolved_query, payload.product)
+    _sales = _sales_answer(payload.q, resolved_query, payload.product, _scope)
     # A spec-table answer covers one dimension at most, so several asks go to
     # retrieval instead (D-20261009-09): "bv30 vs nv9usb+ - which draws less
     # running current and which has better MCBF?" got one shared "Maximum
@@ -3751,6 +4174,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             "comparison_table", "comparison_specs", "spec_match"):
         ptrace.mark("sales", f"{_sales.get('kind')} skipped: {len(_asks)} asks")
         _sales = None
+    # A model we do not make, in any scope (D-20261030-13): a product chat
+    # asked about the "CSCS-9000 Ultra" got the Compact's pin table.
+    if not _sales:
+        _unknown = _unknown_product_text(q)
+        if _unknown:
+            _sales = {"answer": _unknown, "kind": "unknown_model"}
     if _sales:
         _role = {"deflected": "sales", "declined": "rejected",
                  "unknown_model": "clarify"}.get(_sales.get("kind"), "catalogue")
@@ -3796,8 +4225,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # difference between Ads mode and Bill mode" is one manual's question and
     # should still be offered its curated answer.
     _comparing = (_is_comparison(resolved_query)
-                  and len(_products_named_in(resolved_query,
-                                             list(_product_names().keys()))) >= 2)
+                  and len(set(_products_named_in(resolved_query,
+                                                 list(_product_names().keys())))
+                          | set(_both_named)) >= 2)
     # Several asks are never answered by one curated FAQ either, for the same
     # reason: it answers one of them at most (D-20261009-09).
     if not payload.skip_faq and not _comparing and not _asks:
@@ -3867,12 +4297,30 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # rewrite) fetched 16 candidates without the NV9USB+ protocols page
     # (p.37); DeepSeek's wording fetched it at #10. Scoped to the NV9USB+
     # alone it ranks #1. Additive: each product adds its top few.
+    # Each arm rescues passages the joint search LACKS: its top three were
+    # often pages the joint list already held, so they rescued nothing. The
+    # ICU's arm held "Accessing my device on Android" (the only page stating
+    # the ICU's network options) at #8-10 behind shared pages, and a
+    # MyCheckr-vs-ICU comparison never saw it; reranked it is #1, 0.993
+    # (D-20261019-17, C20261026-24).
     if len(_both_named) >= 2:
+        _have = {r.get("id") for r in results}
         results = fuse_ranked_results([results] + [
-            retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
-                             source_filter=payload.source_filter,
-                             scope={"product": _k})
+            [r for r in retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
+                                         source_filter=payload.source_filter,
+                                         scope={"product": _k})
+             if r.get("id") not in _have]
             for _k in _both_named])
+    # A PART OF THE SELECTED SYSTEM TYPED IN ITS CHAT (C20261022c-08): the
+    # chat keeps its scope, and the part's own manuals are searched too.
+    if _part_named:
+        _have = {r.get("id") for r in results}
+        results = fuse_ranked_results([results] + [
+            [r for r in retrieve_from_db(resolved_query, top_k=RETRIEVE_K,
+                                         source_filter=payload.source_filter,
+                                         scope={"product": _k})
+             if r.get("id") not in _have]
+            for _k in _part_named])
     # SEVERAL ASKS: EACH ONE SEARCHED ON ITS OWN (D-20261009-09). The whole
     # message finds the pages that match all of it at once, which for
     # "which draws less running current and which has better MCBF" was the
@@ -3964,9 +4412,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     results = _retrieved[:_ctx_k]
     retrieval_time = time.time() - t1
 
-    top_score = results[0].get("rerank_score", 0.0) if results else 0.0
+    top_score = max((r.get("rerank_score", 0.0) for r in results), default=0.0)
     confidence = retrieval_confidence_band(results, RETRIEVAL_GATE_THRESHOLD, AMBIGUOUS_CEILING)
-    ptrace.mark("band", f"{confidence} (best {top_score:.3f}, gate "
+    _band_label = ("weak match" if confidence == "confident"
+                   and top_score < MIN_COPY_RERANK else confidence)
+    ptrace.mark("band", f"{_band_label} (best {top_score:.3f}, gate "
             f"{RETRIEVAL_GATE_THRESHOLD}, clear at {AMBIGUOUS_CEILING})")
 
     # UNSCOPED AND WEAK: is this about one of our products at all? Asked
@@ -4199,8 +4649,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             # The asks were ranked over the unscoped candidates: keep only
             # the narrowed product's passages in their shares, or a share
             # brings back another device's page (D-20261009-09).
-            _ask_ranks = [[r for r in _rk if payload.product in
-                           {t.strip() for t in (r.get("product") or "").split(",")}]
+            _ask_ranks = [[r for r in _rk if _tagged_for(r, payload.product)]
                           for _rk in _ask_ranks]
             # Scoping pulls in the product's shared documents, so the top
             # four span more sources and a confident result read as
@@ -4246,9 +4695,17 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     _ask_product = (not payload.product and not payload.category
                     and len(_span) > 1
                     and confidence != "none"
-                    and len(_cmp_named) < 2)
+                    and len(_cmp_named) < 2
+                    and len(_both_named) < 2)
     if _ask_product:
         confidence = "ambiguous"
+    # TWO PRODUCTS NAMED ARE NEVER AMBIGUOUS (D-20261019-17). Their passages
+    # spread over two manuals because the question asked for both; the band's
+    # "several sources, middling score" asked "which part do you mean?" of
+    # "a smart coin system and an nv4000 ... which one pulls more max
+    # current?" (C20261021e-37, best 0.528).
+    if confidence == "ambiguous" and len(_both_named) >= 2:
+        confidence = "confident"
 
     # The product came from the wording ("my nv4000 is showing an error").
     if _symptom_open and payload.product and not _wm_none:
@@ -4308,12 +4765,26 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # ── Structured extraction shortcut ───────
     if role != "rethink":
         t2 = time.time()
+        # D-20261023-04: a list is copied only for a first-hand ask for a
+        # procedure or list (not a follow-up, a comparison or a message with
+        # several asks: one list answers one ask), and only from a passage
+        # the reranker calls relevant whose heading is what was asked.
         # Not from a picture's description: its bullets are a drawing's
         # dimensions, and copying the first list served the BV30's depths for
         # "what is its overall height" (2026-11-04). The model reads those.
-        extracted = extract_structured_block(
-            [r for r in results[:5] if ":figtext:" not in (r.get("id") or "")],
-            query=resolved_query)
+        _copyable = []
+        if (not _comparing and not _asks and asks_for_procedure(q)
+                and not _is_followup(q, history, condensed_query)):
+            try:
+                _ignore = _product_words()
+            except Exception as _exc:
+                logger.debug(f"product words for the list check skipped: {_exc}")
+                _ignore = set()
+            _copyable = lists_on_topic(
+                [r for r in results[:5] if ":figtext:" not in (r.get("id") or "")],
+                resolved_query, _ignore)
+        extracted = (extract_structured_block(_copyable, query=resolved_query)
+                     if _copyable else None)
         extraction_time = time.time() - t2
         ptrace.mark("route", role)
 
@@ -4387,8 +4858,12 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # corpus plainly answers is the worse failure.
     _top = results[0].get("rerank_score", 0.0) if results else 0.0
     _floor = _top * CONTEXT_FLOOR_RATIO
-    _cands = [_strip_breadcrumb(r) for r in results[:CONTEXT_K]]
-    top_chunks = [r for r in _cands if r.get("rerank_score", 0.0) >= _floor]
+    _cands = [_strip_breadcrumb(r) for r in results[:_ctx_k]]
+    # D-20261030-09: an effort level that asked for more passages gets all of
+    # them; the relative floor would cut it back to the standard context.
+    _widened = bool(payload.top_k and payload.top_k > CONTEXT_K)
+    top_chunks = (list(_cands) if _widened else
+                  [r for r in _cands if r.get("rerank_score", 0.0) >= _floor])
     if len(top_chunks) < CONTEXT_MIN:
         top_chunks = _cands[:CONTEXT_MIN]
     # TWO PRODUCTS IN PLAY: EACH GETS ITS SHARE OF THE CONTEXT (S21, 10.4).
@@ -4436,6 +4911,25 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _qty = _qty[:3 * max(1, len(_both_named))]
         top_chunks = top_chunks + [_strip_breadcrumb(r) for r in _qty]
         ptrace.mark("retrieve.quantity", f"{len(_qty)} limit row(s) for the value asked")
+    # A FIX-IT ASK GETS THE MANUAL'S STEPS FOR THE FAULT FIRST (D-20261029-03).
+    # "note stuck in our bv30, how do i get it out?" ranked Cashbox Options,
+    # Escrow Control and Low Power Mode 1-9 and Clearing a Jam 10th (0.50),
+    # outside the context, so the answer explained free-fall and escrow. The
+    # fault-clearing section the ranking found goes first, whole, in document
+    # order. One product only: across products it could be a sibling's steps.
+    # D-20261104-06: a stated symptom ("IMS Local search finds nothing") counts too, and only
+    # then does a help article titled by its symptom count as the fault's steps
+    # (retrieval_db._fault_title): a how-to that names a failure ("so it doesn't beep")
+    # keeps its set-up page first.
+    _symptom = reports_symptom(q)
+    if ((asks_to_fix(q) or _symptom) and (_scope or {}).get("product")
+            and len(_both_named) < 2 and not _comparing):
+        _fix = fix_sections(_retrieved, titles=_symptom)
+        if _fix:
+            _fix_ids = {c.get("id") for c in _fix}
+            top_chunks = ([_strip_breadcrumb(dict(c)) for c in _fix]
+                          + [c for c in top_chunks if c.get("id") not in _fix_ids])
+            ptrace.mark("retrieve.fix", f"{len(_fix)} passage(s) of the fault's steps, first")
     # Was a flat 1200, which silently clipped anything larger. Tied to the
     # chunk size now so a whole chunk always survives into the prompt.
     #
@@ -4513,22 +5007,25 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # top_chunks, not a separate list: the grounding check verifies
     # against top_chunks, and an answer built from steps the verifier
     # cannot see would be refused as ungrounded.
-    top_chunks = complete_procedures(top_chunks)
+    def _completed(chunks: list[dict]) -> list[dict]:
+        chunks = complete_procedures(chunks)
+        try:
+            from retrieval_db import complete_tables
+            import tables as _tables
+            chunks = complete_tables(chunks, query=resolved_query)
+            # Merged cells filled and matrices read out, for the model AND the
+            # verifiers -- both read top_chunks. Idempotent, so an index already
+            # migrated by backfill_table_context.py is left as it is.
+            # The chunk before each one lets a continuation borrow its table's
+            # labels and merged-cell values (tables.spell_out, 2026-09-27).
+            from retrieval_db import chunks_before
+            chunks = [dict(c, text=_tables.spell_out(c.get("text") or "", above=_above))
+                      for c, _above in zip(chunks, chunks_before(chunks))]
+        except Exception as _exc:
+            logger.warning(f"table completion skipped: {_exc}")
+        return chunks
+    top_chunks = _completed(top_chunks)
     ptrace.mark("procedures", f"{len(top_chunks)} passage(s) in hand")
-    try:
-        from retrieval_db import complete_tables
-        import tables as _tables
-        top_chunks = complete_tables(top_chunks)
-        # Merged cells filled and matrices read out, for the model AND the
-        # verifiers -- both read top_chunks. Idempotent, so an index already
-        # migrated by backfill_table_context.py is left as it is.
-        # The chunk before each one lets a continuation borrow its table's
-        # labels and merged-cell values (tables.spell_out, 2026-09-27).
-        from retrieval_db import chunks_before
-        top_chunks = [dict(c, text=_tables.spell_out(c.get("text") or "", above=_above))
-                      for c, _above in zip(top_chunks, chunks_before(top_chunks))]
-    except Exception as _exc:
-        logger.warning(f"table completion skipped: {_exc}")
 
     # PERFORMANCE MODE (S29): a product chat also reads the product's whole
     # documentation, as a <documentation> block ahead of everything else
@@ -4580,11 +5077,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         return _send_none_reply(_wm_none, q, _none_scope, request_id,
                                 start_total, tokens=sum(_turn_tokens))
     _names_now = _product_names()
-    context = "\n\n".join(
-        f"[Passage {i} of {len(top_chunks)}{_passage_product(r, _names_now)}"
-        f"{_passage_heading(r)}{_passage_picture(r)}]\n"
-        + r["text"][:CHUNK_CHAR_CAP]
-        for i, r in enumerate(top_chunks, 1))
+    context = _numbered_passages(top_chunks, lambda r: _passage_product(r, _names_now)
+                                 + _passage_heading(r) + _passage_picture(r))
 
     # v15: history reached the query REWRITER but never the answering prompt,
     # so the model could not see what it had just said. "is the pinout above
@@ -4602,8 +5096,15 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _turns.append(f"You: {(_h.get('a') or '')[:400] or _unanswered}")
         _hist = "<conversation>\n" + "\n".join(_turns) + "\n</conversation>\n\n"
 
+    # D-20261030-13: a one-product question whose named item the passages
+    # give only for another product, or beside a look-alike.
+    _note_on = bool(payload.product) and len(_both_named) < 2
+    _note = (_named_item_note(resolved_query, top_chunks + _bundle, payload.product)
+             if _note_on else "")
+    if _note:
+        ptrace.mark("named_item", _note[:200])
     prompt = build_answer_prompt(_hist, context, resolved_query, library=_library,
-                                 asks=_asks)
+                                 asks=_asks, note=_note)
 
     # ── LLM ──────────────────────────────────
     t3 = time.time()
@@ -4642,6 +5143,95 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         return keep_answered_part(text) if _asks else text
     answer = _kept(answer)
 
+    # SEVERAL ASKS: EACH ONE ANSWERED, OR SEARCHED AGAIN (D-20261021-15). The
+    # shares above give each ask its best passages, but nothing checked the
+    # WRITTEN answer: when an ask's page was not among them the model dropped
+    # that part or wrote "I could not find it" (C20261021c-28 warm-up time,
+    # -34 the lock's parts, -10 the udev rule). One check names the asks left
+    # unanswered; only those are searched again, deeper, and their best new
+    # passages added for one more answer, served only if it does not refuse.
+    # A whole refusal is left to the retries below (follow-up, library,
+    # self_route).
+    # D-20261104-05: is_refusal is a substring test, so a draft that answers
+    # one ask and declines another in words other than the canonical
+    # refusal counted as a whole refusal and skipped this check
+    # (C20261102-26). Such a draft is checked too; when the check finds
+    # every ask unanswered it is left, like a whole decline, to the retries.
+    _part_refused = is_refusal(answer)
+    if (_asks and top_chunks and role != "rethink" and not generation_failed
+            and (not _part_refused or answers_beyond_refusal(answer))
+            and _policy_setting("ask_recheck", True)):
+        _chk = _billed(generate_with_fallback(
+            "fast", ask_check_prompt(_asks, answer),
+            deepseek_api_key=deepseek_api_key, api_keys=api_keys))
+        _missed = unanswered_asks((_chk or {}).get("text") or "", len(_asks))
+        if _part_refused and len(_missed) == len(_asks):
+            ptrace.mark("recheck", "every ask declined; left to the retries")
+            _missed = []
+        else:
+            ptrace.mark("recheck", f"asks missed: {_missed or 'none'}")
+        if _missed:
+            def _deeper(i: int) -> list[dict]:
+                # Searched as first (lead + ask) AND as the ask alone: the
+                # lead names the setting and outweighs a short ask, so "how
+                # fast can we warm it up" after "shipping an nv4000 with a
+                # cashbox" ranked the cashbox weights first and the warm-up
+                # rate 21st; alone it ranks first (C20261021c-28). The lead
+                # stays for asks that lean on it ("what does that mean").
+                _qs = list(dict.fromkeys([_ask_queries[i - 1], _add_selected_product_context(
+                    _asks[i - 1], _named, _scope)]))   # no lead: one search
+                _pool = {}
+                for _q in _qs:
+                    try:
+                        _found = retrieve_from_db(_q, top_k=2 * RETRIEVE_K,
+                                                  source_filter=payload.source_filter,
+                                                  scope=_scope)
+                    except Exception as exc:
+                        logger.warning(f"ask recheck search skipped: {exc}")
+                        _found = []
+                    for r in _found:
+                        _pool.setdefault(r.get("id"), r)
+                for r in _ask_ranks[i - 1] if i - 1 < len(_ask_ranks) else []:
+                    _pool.setdefault(r.get("id"), r)
+                _pool = [r for r in _pool.values()
+                         if payload.source_filter or not is_excluded(r.get("source"))]
+                if not _pool:
+                    return []
+                _rks = [rerank(_q, _pool, top_k=len(_pool)) for _q in _qs]
+                return _merge_rankings([_rk for _rk in _rks
+                                        if not (_rk and _rk[0].get("rerank_failed"))])
+            _have = {c.get("id") for c in top_chunks}
+            _extra = []
+            for _rk in _run_parallel(_deeper, _missed):
+                _new = [r for r in _rk if r.get("id") not in _have][:3]
+                _have.update(r.get("id") for r in _new)
+                _extra += [_strip_breadcrumb(r) for r in _new]
+            if _extra:
+                _rc_chunks = _completed(top_chunks + _extra)
+                _rc_context = _numbered_passages(
+                    _rc_chunks,
+                    lambda r: _passage_product(r, _names_now) + _passage_heading(r))
+                _rc_prompt = build_answer_prompt(_hist, _rc_context, resolved_query,
+                                                 library=_library, asks=_asks,
+                                                 note=_note)
+                _rc = _billed(generate_with_fallback(role, _rc_prompt,
+                                                     deepseek_api_key=deepseek_api_key,
+                                                     api_keys=api_keys))
+                _rc_text = _kept(((_rc or {}).get("text") or "").strip())
+                if (_rc_text and (_rc or {}).get("model") != "none"
+                        and not is_refusal(_rc_text)):
+                    output, raw_text = _rc, _rc_text
+                    answer = normalize_markdown_tables(
+                        _strip_meta(_strip_preamble(raw_text)))
+                    top_chunks, context, prompt = _rc_chunks, _rc_context, _rc_prompt
+                    ptrace.mark("recheck", f"answered again with {len(_extra)} more passage(s)")
+                else:
+                    ptrace.mark("recheck", "retry refused or failed; first answer kept")
+            else:
+                ptrace.mark("recheck", "no new passages for the missed asks")
+    elif _asks and _part_refused and not generation_failed:
+        ptrace.mark("recheck", "draft declines every ask; left to the retries")
+
     # A REFUSAL ON A FOLLOW-UP, WITH CONFIDENT RETRIEVAL: ask once more
     # without the conversation block. Scenarios 11, 16 and 20 (2026-09-25):
     # "what interfaces does it support then" was refused with the NV9USB+
@@ -4654,7 +5244,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     if (_hist and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
         _bare = build_answer_prompt("", context, resolved_query, library=_library,
-                                    asks=_asks)
+                                    asks=_asks, note=_note)
         _again = _billed(generate_with_fallback(role, _bare, deepseek_api_key=deepseek_api_key,
                                                 api_keys=api_keys))
         _again_text = _kept(((_again or {}).get("text") or "").strip())
@@ -4672,7 +5262,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # the turn (checks, retries, citations) runs as normal mode.
     if (_library and top_chunks and role != "rethink" and not generation_failed
             and is_refusal(answer) and confidence != "none"):
-        _plain = build_answer_prompt(_hist, context, resolved_query, asks=_asks)
+        _plain = build_answer_prompt(_hist, context, resolved_query, asks=_asks,
+                                     note=_note)
         _again = _billed(generate_with_fallback(role, _plain, deepseek_api_key=deepseek_api_key,
                                                 api_keys=api_keys))
         _again_text = _kept(((_again or {}).get("text") or "").strip())
@@ -4696,8 +5287,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         if not _wb:
             _self_route_done("no_bundle")
         else:
+            # The note again, on the passages this prompt carries.
+            _wnote = (_named_item_note(resolved_query, top_chunks + _wb, payload.product)
+                      if _note_on else "")
             _wprompt = build_answer_prompt(_hist, context, resolved_query,
-                                           library=_wl, asks=_asks)
+                                           library=_wl, asks=_asks, note=_wnote)
             _wout = _billed(generate_with_fallback(role, _wprompt,
                                                    deepseek_api_key=deepseek_api_key,
                                                    api_keys=api_keys))
@@ -5531,6 +6125,9 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # The sum over every model call of the turn, served or not.
         "total_tokens": sum(_turn_tokens),
         "fallback_used": output.get("fallback_used", False),
+        # Escalation goes to the configured escalation role, not DeepSeek.
+        "escalated": escalated,
+        # Deprecated alias of "escalated"; no known reader. Remove next release.
         "escalated_to_deepseek": escalated,
         "request_id": request_id,
         "verifier_unavailable": verifier_unavailable,
@@ -5796,7 +6393,7 @@ _CANNED_REFUSAL = "I could not find that in the knowledge base."
 
 
 class StreamQueryRequest(BaseModel):
-    q: str
+    q: str = Field(..., max_length=MAX_QUERY_CHARS)
     session_id: str | None = None
     product: str | None = None
     category: str | None = None
@@ -5863,7 +6460,7 @@ def query_stream(payload: StreamQueryRequest,
                 "retrieval_score": round(_top, 4),
             })
 
-            context = "\n\n".join(r["text"][:CHUNK_CHAR_CAP] for r in top_chunks)
+            context = "\n\n".join(_capped(r["text"]) for r in top_chunks)
             prompt = build_answer_prompt("", context, payload.q)
 
             role, (provider, model) = route_model(payload.q)

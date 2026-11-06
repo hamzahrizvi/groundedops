@@ -52,7 +52,6 @@ def test_loaders_use_the_pin():
         with mock.patch.dict(sys.modules, {"sentence_transformers": fake_st}), \
                 mock.patch.dict(os.environ), \
                 mock.patch.object(embeddings, "_OnnxEmbedder", side_effect=OSError("offline")):
-            os.environ.pop("NLI_BACKEND", None)
             os.environ.pop("EMBED_BACKEND", None)
             embeddings._get_model()
             reranker._get("BAAI/bge-reranker-base")
@@ -66,15 +65,6 @@ def test_loaders_use_the_pin():
 
 def test_unknown_model_is_unpinned():
     assert model_pins.revision("someone/else") is None
-
-
-def test_dockerfile_bakes_what_the_code_loads():
-    d = (REPO / "docker" / "Dockerfile.backend").read_text(encoding="utf-8")
-    for n in model_pins.REVISIONS:
-        assert n in d, n
-    assert "all-MiniLM-L6-v2" not in d
-    assert "HF_HUB_OFFLINE=1" in d
-    assert "revision=R[" in d
 
 
 def test_installers_prefetch_what_the_code_loads():

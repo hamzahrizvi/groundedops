@@ -19,9 +19,13 @@ Endpoints
     GET  /widget/config   branding + this caller's quota (no answer)
     GET  /widget/quota    remaining credits
     POST /widget/ask      ask a question (costs credits)
+    POST /widget/chat     start a chat: a new id and the token that can delete it
+    POST /widget/forget   delete this chat (needs that token)
 """
 import asyncio
 import collections
+import hashlib
+import hmac
 import re
 import threading
 import uuid
@@ -38,6 +42,7 @@ import faq_store
 import pipeline_trace
 import jsonstore
 import quota
+import text_utils
 from guards import client_ip as _client_ip, is_local_caller
 
 logger = logging.getLogger(__name__)
@@ -94,6 +99,12 @@ class FeedbackRequest(BaseModel):
     note: str = Field("", max_length=280)
 
 
+class ForgetRequest(BaseModel):
+    session_id: str = Field(..., min_length=8, max_length=MAX_ID_CHARS)
+    delete_token: str = Field("", max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+
+
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
 # made-up ids. Filled when /ask returns a pipeline answer.
 # ponytail: in memory, so a restart forgets them and a vote on an answer
@@ -114,6 +125,60 @@ def _remember_answer(request_id, q, scope, session_id, answer="") -> None:
                                        "answer": (answer or "")[:4000]}
         while len(_RECENT_ANSWERS) > _RECENT_MAX:
             _RECENT_ANSWERS.popitem(last=False)
+
+
+# D-20261030-09: the deep search is compared with this chat's standard answer
+# to the same question. ponytail: in memory like _RECENT_ANSWERS; after a
+# restart a deep answer is charged only if it answers at all.
+NO_MORE_DETAILS = "I don't have more details on this."
+_STANDARD_ANSWERS: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
+_FACT = re.compile(r"\b\w*\d\w*\b")                       # numbers, codes, page and step numbers
+_STEP = re.compile(r"^\s*(?:\d+[.)]|[-*•]|step\s+\d+)", re.I | re.M)
+_WORD = re.compile(r"[a-z]{4,}")
+
+
+def _deep_key(caller: dict, payload) -> str:
+    q = " ".join(payload.q.lower().split())
+    return quota._h(f"{caller['identity']}|{payload.session_id or ''}|"
+                    f"{payload.product or payload.category or ''}|{q}")
+
+
+def _answered(r: dict) -> bool:
+    a = (r.get("answer") or "").strip()
+    return bool(a) and not (
+        r.get("offer_support") or r.get("flagged") or r.get("system_refusal")
+        or r.get("needs_clarification") or r.get("service_degraded")
+        or r.get("from_faq") or r.get("faq_candidates")
+        or r.get("role") in ("handoff", "clarify", "rejected")
+        or text_utils.is_refusal(a))
+
+
+def _remember_standard(key: str, r: dict) -> None:
+    with _recent_lock:
+        _STANDARD_ANSWERS[key] = {"answer": (r.get("answer") or "")[:4000],
+                                  "answered": _answered(r)}
+        while len(_STANDARD_ANSWERS) > _RECENT_MAX:
+            _STANDARD_ANSWERS.popitem(last=False)
+
+
+def _adds_detail(std: dict | None, deep: dict) -> bool:
+    """Strict: a new fact (number, code, page), more steps, or a sentence
+    mostly made of words the standard answer did not use. Rewording is not."""
+    if not _answered(deep):
+        return False
+    if not std or not std["answered"]:
+        return True
+    s, d = std["answer"].lower(), deep["answer"].lower()
+    if set(_FACT.findall(d)) - set(_FACT.findall(s)):
+        return True
+    if len(_STEP.findall(d)) > len(_STEP.findall(s)):
+        return True
+    known = set(_WORD.findall(s))
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", d):
+        words = set(_WORD.findall(sent))
+        if len(words) >= 4 and 2 * len(words - known) > len(words):
+            return True
+    return False
 
 
 def _save_vote(request_id: str, row: dict) -> None:
@@ -140,6 +205,40 @@ def prune_before(cutoff) -> int:
         if len(kept) < len(data):
             jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
         return len(data) - len(kept)
+
+
+def erase_sessions(session_ids) -> int:
+    """Erasure on request: drop the votes of these conversations, and the
+    answers held in memory for voting on. Returns how many votes went."""
+    ids = {s for s in session_ids if s}
+    if not ids:
+        return 0
+    with _recent_lock:
+        for rid in [k for k, v in _RECENT_ANSWERS.items() if v.get("session_id") in ids]:
+            del _RECENT_ANSWERS[rid]
+    with _feedback_lock:
+        data = jsonstore.load(_FEEDBACK_PATH, {}, label="widget feedback")
+        if not isinstance(data, dict):
+            return 0
+        kept = {k: v for k, v in data.items()
+                if not (isinstance(v, dict) and v.get("session_id") in ids)}
+        if len(kept) < len(data):
+            jsonstore.save(_FEEDBACK_PATH, kept, label="widget feedback")
+        return len(data) - len(kept)
+
+
+def delete_token(session_id: str) -> str:
+    """D-20261104-08: proof that the caller is the browser that started this
+    chat. An HMAC of the id under the server's session secret, handed out only
+    by /widget/chat for an id the server itself chose, so the id alone (which
+    a visitor quotes to support) deletes nothing. '' when no secret is set;
+    /widget/forget then refuses every visitor delete."""
+    import keystore
+    secret = keystore.get_session_secret()
+    if not (secret and session_id):
+        return ""
+    return hmac.new(secret.encode(), b"widget-forget|" + session_id.encode(),
+                    hashlib.sha256).hexdigest()
 
 
 # 8.11: what the visitor is told while the pipeline runs. A stage is marked
@@ -307,6 +406,10 @@ def _public_family_options(opts) -> list:
             "send": str(o.get("send") or "")[:600],
         })
     return out
+def _public_product_options(opts) -> list[dict]:
+    """Catalogue keys and their display names, at most six, nothing else."""
+    return [{"key": str(o["key"])[:80], "label": str(o.get("label") or o["key"])[:80]}
+            for o in (opts or [])[:6] if isinstance(o, dict) and o.get("key")]
 
 
 def _public_more_context(mc) -> dict | None:
@@ -405,6 +508,7 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         # are the free-text options the generation path builds, and there
         # are none here.
         "clarification_options": [],
+        "product_options": [],
         "suggested_replies": [],
         "needs_sign_in": needs_sign_in,
         "flagged": False,
@@ -511,7 +615,7 @@ def register(app, answer_query, draft_enquiry=None):
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
 
-        gate = quota.check(caller, 1)
+        gate = quota.check(caller, 1, reserve=True)
         if not gate["allowed"]:
             # Not a 429: the visitor can still submit the assembled version,
             # and blocking a support request because a drafting allowance ran
@@ -519,21 +623,22 @@ def register(app, answer_query, draft_enquiry=None):
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
 
+        written = ""
         try:
             written = await draft_enquiry(
                 kind=payload.kind, product=payload.product or "",
                 notes=notes, transcript=transcript)
         except Exception as e:
             logger.warning(f"/widget/draft_enquiry: generation failed ({e})")
-            written = ""
+        finally:
+            if not (written or "").strip():
+                quota.consume(caller, -1, win=gate["window"])  # nothing written: give it back
 
         if not (written or "").strip():
             return {"draft": assembled, "written_by": "assembled",
                     "quota": quota.status(caller)}
-
-        state = quota.consume(caller, 1)
         return {"draft": written.strip()[:4000], "written_by": "model",
-                "quota": state}
+                "quota": quota.status(caller)}
 
     @router.post("/ask")
     async def widget_ask(payload: AskRequest, request: Request):
@@ -648,7 +753,7 @@ def register(app, answer_query, draft_enquiry=None):
                 caller, needs_sign_in=True, faq_language=lang)
 
         # ── Member / staff: full pipeline, charged in credits ─────────
-        gate = quota.check(caller, spec["credits"])
+        gate = quota.check(caller, spec["credits"], reserve=True)
         if not gate["allowed"]:
             raise HTTPException(status_code=429, detail={
                 "error": "quota_exceeded",
@@ -664,45 +769,97 @@ def register(app, answer_query, draft_enquiry=None):
                             "For help with your question, contact our team."),
             })
 
-        started = time.time()
+        reserved, settled = spec["credits"], False
+        dkey = _deep_key(caller, payload)
         try:
-            result = await answer_query(
-                q=payload.q,
-                session_id=payload.session_id,
-                product=payload.product,
-                category=payload.category,
-                faq_id=payload.faq_id,
-                skip_faq=payload.skip_faq,
-                role=spec["role"],
-                top_k=spec["top_k"],
-                model_env=spec.get("model_env"),
-                user_id=caller.get("uid"),
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            # Don't charge for our own failure, and don't leak internals.
-            logger.exception(f"widget ask failed: {e}")
-            raise HTTPException(status_code=503, detail={
-                "error": "unavailable",
-                "message": "Support is temporarily unavailable. Please try again shortly.",
-            })
+            claim = (await run_in_threadpool(quota.deep_claim, dkey, caller)
+                     if level == "deep" else "ok")
+            if claim == "capped":
+                # Today's free deep runs are used: refused before the pipeline.
+                raise HTTPException(status_code=429, detail={
+                    "error": "quota_exceeded",
+                    "reason": "deep_daily",
+                    "tier": tier,
+                    "limit": quota.free_deep_limit(),
+                    "remaining": gate["remaining"],
+                    "reset_at": gate["reset_at"],
+                    "message": ("You have used today's deeper searches. "
+                                "Normal questions still work."),
+                })
+            deep_again = claim == "again"
 
-        # Curated answers and disambiguation prompts involve no LLM call,
-        # so they cost nothing - cheap for us, and it steers people towards
-        # the reviewed answers.
-        # ...and neither is our own outage: service_degraded means no
-        # provider answered, and quota.py promises a failed request does not
-        # burn the visitor's allowance.
-        charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
-                        or result.get("service_degraded")) \
-                  else spec["credits"]
-        state = quota.consume(caller, charged) if charged else quota.status(caller)
+            started = time.time()
+            try:
+                if deep_again:
+                    # Second press refused server-side: no pipeline, 0 credits.
+                    result = {"answer": NO_MORE_DETAILS, "role": "no_more_details",
+                              "offer_support": True}
+                else:
+                    result = await answer_query(
+                        q=payload.q,
+                        session_id=payload.session_id,
+                        product=payload.product,
+                        category=payload.category,
+                        faq_id=payload.faq_id,
+                        skip_faq=payload.skip_faq,
+                        role=spec["role"],
+                        top_k=spec["top_k"],
+                        model_env=spec.get("model_env"),
+                        user_id=caller.get("uid"),
+                    )
+            except HTTPException:
+                if level == "deep" and not deep_again:
+                    await run_in_threadpool(quota.deep_release, dkey, caller)
+                raise
+            except Exception as e:
+                if level == "deep" and not deep_again:
+                    await run_in_threadpool(quota.deep_release, dkey, caller)
+                # Don't charge for our own failure, and don't leak internals.
+                logger.exception(f"widget ask failed: {e}")
+                raise HTTPException(status_code=503, detail={
+                    "error": "unavailable",
+                    "message": "Support is temporarily unavailable. Please try again shortly.",
+                })
+
+            # Curated answers and disambiguation prompts involve no LLM call,
+            # so they cost nothing - cheap for us, and it steers people towards
+            # the reviewed answers.
+            # ...and neither is our own outage: service_degraded means no
+            # provider answered, and quota.py promises a failed request does not
+            # burn the visitor's allowance.
+            no_more = deep_again
+            if level == "deep" and not deep_again:
+                if result.get("service_degraded"):
+                    await run_in_threadpool(quota.deep_release, dkey, caller)
+                elif not _adds_detail(_STANDARD_ANSWERS.get(dkey), result):
+                    result = {**result, "answer": NO_MORE_DETAILS, "sources": [],
+                              "role": "no_more_details", "flagged": False,
+                              "more_context": None, "suggested_replies": [],
+                              "needs_clarification": False, "clarification_options": []}
+                    no_more = True
+            elif level != "deep" and not (result.get("from_faq") or result.get("faq_candidates")):
+                _remember_standard(dkey, result)
+            charged = 0 if (result.get("from_faq") or result.get("faq_candidates")
+                            or result.get("service_degraded") or no_more) \
+                      else spec["credits"]
+            if level == "deep" and not deep_again and charged:
+                await run_in_threadpool(quota.deep_paid, caller)
+            state = quota.consume(caller, charged - reserved, win=gate["window"])
+            settled = True
+        finally:
+            if not settled:
+                # Our failure, a refused deep run or a cancelled request gives the
+                # reservation back. Called directly, not via run_in_threadpool: an
+                # await in a cancelled task's finally is itself cancelled.
+                quota.consume(caller, -reserved, win=gate["window"])
 
         # Count this turn against the conversation's own caps. Only when it
         # actually cost something: a curated FAQ answer involves no model and
         # should not use up a session that is limited to bound model spend.
-        if charged:
+        # A refunded deep run counts as well.
+        # A free deep run still ran the costliest pipeline, so the chat's caps
+        # count it too (Security, D-20261030-09 round 2).
+        if charged or (level == "deep" and no_more and not deep_again):
             quota.session_record(payload.session_id,
                                  tokens_used=int(result.get("total_tokens") or 0))
 
@@ -742,12 +899,12 @@ def register(app, answer_query, draft_enquiry=None):
             # dead-ending on a refusal. It was already computed by /query but
             # this endpoint builds its own response dict, so it never reached
             # the one surface customers actually use.
-            #
-            # product_options is deliberately NOT passed through: the widget
-            # requires a product before it will ask anything, and the backend
-            # only offers product choices when no product is set, so those
-            # options can never be populated here.
             "offer_support": bool(result.get("offer_support")),
+            # "Which product?" buttons. Dropped here until D-20261021-07 let a
+            # visitor type before picking a product; an unscoped question can
+            # now come back asking which product, and the widget shows the
+            # choices as chips that set the product and ask again.
+            "product_options": _public_product_options(result.get("product_options")),
             # Passed through for the same reason offer_support had to be: this
             # endpoint builds its own dict, so anything /query adds stops at
             # the console unless it is named here -- and the widget is the
@@ -777,6 +934,7 @@ def register(app, answer_query, draft_enquiry=None):
             "flagged": bool(result.get("flagged")),
             "effort": level,
             "effort_downgraded": level != (payload.effort or "standard").lower(),
+            "deep_done": quota.deep_done(dkey),
             "quota": quota.status(caller),
             "session": quota.session_check(payload.session_id),
         }
@@ -820,6 +978,33 @@ def register(app, answer_query, draft_enquiry=None):
         interaction_log.log_feedback(payload.request_id, payload.vote,
                                      payload.session_id)
         return {"received": True}
+
+    @router.post("/chat")
+    def widget_chat():
+        """PUBLIC -- start a chat. The server picks the id, so the delete token
+        in this reply only ever reaches the browser that started the chat.
+        Nothing is stored."""
+        sid = str(uuid.uuid4())
+        return {"session_id": sid, "delete_token": delete_token(sid)}
+
+    @router.post("/forget")
+    def widget_forget(payload: ForgetRequest, request: Request):
+        """A visitor deletes this conversation: its questions, answers and
+        votes, at once rather than after 90 days. Needs the delete token
+        /widget/chat gave this browser; the bare id is refused (403), so a
+        quoted id cannot delete anything."""
+        gate = quota.check_public_write("forget", payload.visitor_id, _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429, detail="Too many requests today.")
+        expected = delete_token(payload.session_id)
+        if not expected or not hmac.compare_digest(expected.encode(),
+                                                   payload.delete_token.encode()):
+            raise HTTPException(status_code=403, detail=(
+                "This chat can only be deleted by our support team. "
+                "Quote its id when you contact them."))
+        import retention
+        retention.erase(session_ids=[payload.session_id], source="visitor")
+        return {"deleted": True}
 
     @router.post("/ask/stream")
     async def widget_ask_stream(payload: AskRequest, request: Request):
@@ -902,7 +1087,8 @@ def register(app, answer_query, draft_enquiry=None):
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "family_options",
                                 "suggested_replies",
-                                "flagged", "quota", "session")})
+                                "flagged", "quota", "session", "deep_done")}
+                      | {"product_options": _public_product_options(result.get("product_options"))})
 
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would

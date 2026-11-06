@@ -61,6 +61,25 @@ def test_the_widget_renders_them_as_chips():
     assert "chips(" in block and "ask(opt)" in block
 
 
+def test_product_options_reach_the_widget():
+    """A question typed before picking a product (D-20261021-07) can come back
+    asking which product; the widget used to get the question with no buttons."""
+    src = _widget_api_source()
+    near = src[src.index('"offer_support": bool(result.get("offer_support"))'):][:800]
+    assert '"product_options": _public_product_options(' in near
+    meta = src[src.index('yield sse("meta"'):][:900]
+    assert '"product_options": _public_product_options(' in meta
+    assert widget_api._public_product_options(
+        [{"key": "nv9", "label": "NV9 Spectral"}, {"label": "no key"}, "junk"]
+    ) == [{"key": "nv9", "label": "NV9 Spectral"}]
+    import pathlib
+    js = (pathlib.Path(__file__).resolve().parent.parent
+          / "widget" / "groundedops-widget.js").read_text(encoding="utf-8")
+    block = js[js.index("var prodOpts"):][:900]
+    assert "state.product = { key: o.key, name: o.label }" in block
+    assert "silent: true" in block and '"Which product?"' in block
+
+
 def test_the_console_renders_them_too():
     import pathlib
     html = (pathlib.Path(__file__).resolve().parent.parent
@@ -68,8 +87,25 @@ def test_the_console_renders_them_too():
     assert "clarification_options" in html, \
         ("the test chat must match what a customer sees -- that is the one "
          "thing this page is for")
-    block = html[html.index("r.clarification_options"):][:400]
+    block = html[html.index("(r.clarification_options || []).forEach"):][:400]
     assert "send(o)" in block
+
+
+def test_the_console_renders_more_context_like_the_widget():
+    """8.12: /query sends more_context and the widget shows it; the console
+    Test chat did not, so it differed from what a customer sees."""
+    import pathlib
+    html = (pathlib.Path(__file__).resolve().parent.parent
+            / "admin.html").read_text(encoding="utf-8")
+    assert "r.more_context" in html, "the test chat must read the field"
+    block = html[html.index("r.more_context"):][:2000]
+    # The widget's gate and labels (afterAnswer, showPassages, docChip).
+    assert '!r.flagged && !r.service_degraded && !r.needs_sign_in' in block
+    assert 'mc.kind === "detail"' in block
+    assert '"Show more from the manual"' in block
+    assert '"From " + p.source' in block and '", page " + p.page' in block
+    assert "doc.download_url" in block and '"#page=" + pg' in block
+    assert '"Open " + doc.source' in block
 
 
 def test_the_refusal_clarify_offers_product_labels_first():

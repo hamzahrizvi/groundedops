@@ -173,7 +173,7 @@ def build_plugin_zip(api_url: str, *, include_secret: bool,
         if not secret:
             raise ExportError(
                 "This server has no WIDGET_TOKEN_SECRET set, so there is no "
-                "secret to embed. Set it in docker/.env and restart, or export "
+                "secret to embed. Set it in src/.env and restart, or export "
                 "without the secret and add it to wp-config.php by hand.")
 
     try:

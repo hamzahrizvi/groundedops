@@ -1,2 +1,0 @@
-# NOT READ BY DOCKER. The backend's build context is src/, so the ignore
-# file that applies is src/.dockerignore -- edit that one.

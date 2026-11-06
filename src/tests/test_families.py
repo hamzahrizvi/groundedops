@@ -5,9 +5,13 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ["FAMILIES_CONFIG"] = os.path.join(tempfile.mkdtemp(), "none.json")
 
 import families as F  # noqa: E402
+
+# Not through os.environ: this file runs in pytest's own process, and every
+# own-process test file after it inherited the scratch families it saved
+# (test_two_products then lost its two-product turn).
+F._PATH = os.path.join(tempfile.mkdtemp(), "none.json")
 
 
 def _asked(r):
@@ -65,6 +69,20 @@ def test_a_pick_and_a_general_question_are_answered():
     assert not r["ask"] and r["products"] == ["nv9usb"], r
     # Never asked twice in a row.
     assert not F.resolve("the nv9", asked)["ask"]
+
+
+def test_a_family_named_like_its_member_keeps_that_name():
+    """The auto family "MyCheckr" is also the MyCheckr's own name: "the
+    MyCheckr and the ICU Pro" still names the MyCheckr."""
+    fam = {"key": "mycheckr", "name": "MyCheckr", "auto": True,
+           "members": [{"name": "MyCheckr", "product": "mycheckr"},
+                       {"name": "MyCheckr Mini", "product": "mycheckr_mini"}]}
+    real = F.families
+    F.families = lambda: [fam]
+    try:
+        assert "mycheckr" in F.without_generic("the MyCheckr and the ICU Pro")
+    finally:
+        F.families = real
 
 
 def test_a_comparison_is_not_asked_about():

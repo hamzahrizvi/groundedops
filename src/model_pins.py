@@ -17,7 +17,7 @@ REVISIONS = {
     # reranker profiles "fast" and "accurate" (reranker.PROFILES)
     "cross-encoder/ms-marco-MiniLM-L-6-v2": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
     "BAAI/bge-reranker-base": "2cfc18c9415c912f9d8155881c133215df768a70",
-    # answer checker, PyTorch and ONNX (grounding.NLI_MODEL_NAME)
+    # answer checker (grounding.NLI_MODEL_NAME)
     "cross-encoder/nli-deberta-v3-small": "fa2804872c3b4bd748f38c0185cc85775361e735",
 }
 

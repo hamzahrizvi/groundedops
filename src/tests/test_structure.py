@@ -6,6 +6,10 @@ from structure import (
     is_meaningful_line,
     simple_similarity,
     reports_failure,
+    reports_symptom,
+    asks_for_procedure,
+    asks_to_fix,
+    lists_on_topic,
 )
 
 
@@ -203,3 +207,93 @@ def test_failure_report_gets_no_verbatim_checklist():
     chunks = [{"text": checklist, "source": "manual.pdf", "rerank_score": 0.8}]
     assert extract_structured_block(chunks, query="how do I connect the tablet to the hub") is not None
     assert extract_structured_block(chunks, query="tablet won't find the hub when I search, what do I try") is None
+
+
+# -- D-20261023-04: when a copied list may be served ---------------------
+
+_LIST = chr(10).join([
+    "Check the power connection is stable",
+    "Verify the network cable is connected",
+    "Confirm the hub IP is reachable",
+    "Test the MyConnect app on tablet",
+    "Ensure device registration completed"])
+
+
+def test_asks_for_procedure():
+    for q in ("how do i swap the drive belts on a cba9?",
+              "how do we bench test an scs after repair? need the steps",
+              "give me the checklist before leaving site",
+              "walk me through configuring device rules",
+              "how to connect tablet to hub"):
+        assert asks_for_procedure(q), q
+    for q in ("how heavy is a bv100 with the 800 note cashbox when its full?",
+              "which wire colour is the RX line?",
+              "is there a cloning cable that works with the NV9?",
+              "ok its flashing red and green, can i pull the card out now?",
+              "g-scs earthing, what resistance should i see between chassis and earth?",
+              None):
+        assert not asks_for_procedure(q), q
+
+
+def test_lists_on_topic_needs_a_relevant_passage():
+    c = {"text": _LIST, "source": "SH3 Manual.pdf", "section": "Cycle test",
+         "rerank_score": 0.010}
+    q = "how do i run the cycle test"
+    assert lists_on_topic([c], q) == []
+    c = dict(c, rerank_score=0.9)
+    assert lists_on_topic([c], q) == [c]
+
+
+def test_lists_on_topic_needs_the_heading_asked_about():
+    q = "how do i swap the drive belts on a cba9?"
+    off = {"text": _LIST, "source": "m.pdf", "section": "Note Float error",
+           "rerank_score": 0.997}
+    on = dict(off, section="Replacing the drive belts")
+    assert lists_on_topic([off], q) == []
+    assert lists_on_topic([on], q) == [on]
+
+
+def test_lists_on_topic_ignores_product_words():
+    c = {"text": _LIST, "source": "m.pdf", "section": "CBA9 Troubleshooting",
+         "rerank_score": 0.9}
+    assert lists_on_topic([c], "how do i swap the drive belts on a cba9?",
+                          ignore={"cba9"}) == []
+
+
+def test_lists_on_topic_uses_the_title_when_there_is_no_section():
+    c = {"text": _LIST, "source": "SCS Bench Test Procedure.txt", "section": "",
+         "rerank_score": 0.9}
+    assert lists_on_topic([c], "how do we bench test an scs after repair?") == [c]
+
+
+def test_asks_to_fix():
+    for q in ("note stuck in our bv30 on the arcade machine, how do i get it out?",
+              "our smart hopper is flashing red 4 times and wont pay out, coins look stuck. how do i clear it without breaking anything",
+              "a note is jammed in my nv9usb+, how do i free it?",
+              "my nv10 usb+ keeps flashing 4 long and its stopped taking notes. what does that mean and what do I do?"):
+        assert asks_to_fix(q), q
+    for q in ("how do I clean the bv30?", "what is the escrow timeout on the bv30?",
+              "how do i change it over to ssp with the button on the front",
+              "how do I install the bezel?", None):
+        assert not asks_to_fix(q), q
+
+
+
+def test_reports_symptom():
+    for q in ("plugged a new ICU Lite into the site PC by usb, blue led is on but IMS Local "
+              "search finds nothing. what do i do?",
+              "ICU Lite blue led on, IMS Local cannot see it",
+              "the icu lite is not showing up in ims local, why?",
+              "why won't my hopper pay out?",
+              "how do I fix a hopper that won't pay out?",
+              "note stuck in our bv30, how do i get it out?",
+              "after the update nothing works"):
+        assert reports_symptom(q), q
+    for q in ("how do I install IMS Local on a pc that is not on the network?",
+              "how do i set up the icu lite so it does not need IMS Local every time?",
+              "I want to know how to set it so it doesn't beep",
+              "what are the steps to configure a unit that is not yet on the network?",
+              "does the bv50 not accept polymer notes?",
+              "dips 1 and 3 up, 2 down on the bv50 - is that what i want?",
+              "how do i reset it to factory defaults?", "", None):
+        assert not reports_symptom(q), q

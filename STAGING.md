@@ -3,6 +3,12 @@
 For putting GroundedOps on an internet-reachable staging host and testing it
 internally, with the widget embedded on a WordPress site.
 
+The host is a Windows machine that stays on: the app is installed there the
+normal way (QUICKSTART.md), `serve.ps1` keeps it running, and a named
+Cloudflare tunnel (TUNNEL_SETUP.md) makes it reachable. Commands below run
+from the checkout on that host; the `python` ones from `src\` with the
+install's `.venv` active (`..\.venv\Scripts\activate`).
+
 Read this in order. Steps 1–3 must happen **before** the host is reachable
 from the internet — step 3 in particular, because the first-run setup
 endpoint has to be unauthenticated and whoever reaches it first owns the
@@ -22,7 +28,7 @@ That default was written when the admin surface had one shared password and
 no accounts. It now has real accounts with levels, so opening it for internal
 testing is reasonable — but it stays a deliberate act:
 
-- `ADMIN_ALLOWED_IPS` — comma-separated IP **prefixes** allowed to reach the
+- `ADMIN_ALLOWED_IPS` — comma-separated addresses or CIDR ranges (`198.51.100.4` is that one host, `203.0.113.0/24` a range; an entry ending in a dot such as `203.0.113.` still works as a /24) allowed to reach the
   admin surface from outside. Empty (default) keeps it LAN-only.
 - It is an allowlist **in front of** authentication, not instead of it. A
   request from an allowed address still has to sign in.
@@ -33,46 +39,22 @@ Access, so it never has a public door at all.
 
 ---
 
-## 0. Disable the dev override — do this first
-
-`docker/docker-compose.override.yml` is a **development** file, and
-`docker compose` merges it automatically with no flag asked for. On a staging
-host it does three things you do not want:
-
-- bind-mounts `../src` over `/app`, so the container runs host source instead
-  of the image you built
-- forces `uvicorn --reload`
-- hard-sets `WIDGET_ALLOWED_ORIGINS: "*"`, **silently overriding** whatever
-  you set in `docker/.env` in step 1
-
-Rename it before anything else:
-
-```bash
-cd docker
-mv docker-compose.override.yml override.disabled
-```
-
-Everything below assumes this is done. If CORS stays wide open no matter what
-you put in `.env`, this is why.
-
 ## 1. Fill in the environment
 
-```bash
-cd docker
-cp .env.example .env
-```
+The installer writes `src\.env`. Add to it; `.env.example` at the repo root
+lists every setting with what it does.
 
 Generate the two secrets:
 
-```bash
-openssl rand -hex 32   # SESSION_SECRET
-openssl rand -hex 32   # WIDGET_TOKEN_SECRET
+```powershell
+python -c "import secrets; print(secrets.token_hex(32))"   # SESSION_SECRET
+python -c "import secrets; print(secrets.token_hex(32))"   # WIDGET_TOKEN_SECRET
 ```
 
-Minimum to boot: `SESSION_SECRET`, `WIDGET_TOKEN_SECRET`, and one provider
-key. Compose **refuses to start** without `SESSION_SECRET` rather than
-defaulting it — a shared default signing key would mean a token minted
-anywhere is valid here.
+Minimum to work: `SESSION_SECRET`, `WIDGET_TOKEN_SECRET`, and one provider
+key. Without `SESSION_SECRET` the console **refuses every sign-in** (and says
+so at start-up) rather than defaulting it — a shared default signing key
+would mean a token minted anywhere is valid here.
 
 Also set, for a proxied deployment:
 
@@ -87,38 +69,29 @@ Also set, for a proxied deployment:
 
 The vector index is derived and disposable; the documents are the durable
 asset. `documents/` is **not in git** and is the only copy of some source
-PDFs (see `PENDING.md`), so copy it to the staging host out of band:
+PDFs (see `PENDING.md`), so copy the whole folder to `<checkout>\documents\`
+on the staging host out of band, by any private route
+(`robocopy documents <destination> /E` to a share, or a disk).
 
-```bash
-rsync -av documents/ staging:/srv/groundedops/documents/
-```
-
-Compose bind-mounts it read-write at `/data/documents`, so the originals live
-on the host and survive the container.
-
-**The path is not arbitrary.** The mount is written `../documents`, relative
-to the `docker/` directory — so it resolves to `<checkout>/documents`. The
-command above is correct only if the repository is checked out at
-`/srv/groundedops`. Put the checkout somewhere else and you must rsync to
-`<checkout>/documents/` instead, or the container starts with an empty
-document store and every answer refuses.
+**The path is not arbitrary.** The backend reads its documents from
+`<checkout>\documents` (or `SOURCE_FILE_DIR`, if `src\.env` sets it). Copy
+them anywhere else and the server starts with an empty document store and
+every answer refuses.
 
 ## 3. Create the root account — before exposing the host
 
-Do this on the box. It needs no token and no exposed setup endpoint:
+Do this on the box, with the backend **not** running (the reindex rebuilds
+the live index). It needs no token and no exposed setup endpoint:
 
-```bash
-docker compose up -d --build backend
-docker compose exec backend python manage_accounts.py create you@company.com --level root
+```powershell
+cd src
+python manage_accounts.py create you@company.com --level root
 ```
-
-`--build` is needed on the first run, and after any code change — the image
-does not exist yet. Later steps can drop it.
 
 Then build the index from the documents:
 
-```bash
-docker compose exec backend python reindex.py --from-store
+```powershell
+python reindex.py --from-store
 ```
 
 `reindex.py --check` reports what it would do without writing.
@@ -134,10 +107,23 @@ bootstrap requests are refused without it. Clear it once the account exists.
 
 ## 4. Start everything and check
 
-```bash
-docker compose up -d
-curl -fsS https://staging.yourcompany.com/health
+Set up the named tunnel and install the service as TUNNEL_SETUP.md describes
+(`TUNNEL_HOSTNAME` in `src\.env`, then `.\serve.ps1 -Install` from the
+checkout). The service starts the backend and the tunnel, and restarts them
+at boot. Then:
+
+```powershell
+.\serve.ps1 -Status
+curl.exe -fsS "http://127.0.0.1:8000/health?deep=1"
+curl.exe -fsS https://staging.yourcompany.com/health
 ```
+
+`-Status` must show `ready     : yes`. "Up" only means the process answers;
+`/health?deep=1` (the second line, run on the box) answers 503 until the
+index has chunks, the default provider has a key and answers, and the models
+have warmed up (about 30 s after start). The third line checks the tunnel
+with plain `/health`, because `?deep=1` is refused from outside without a
+staff token.
 
 Then, from an allowlisted address, open `/admin`, sign in, and:
 
@@ -215,8 +201,8 @@ visitor's token, and the sign-in URL.
 To prove the backend independently of WordPress, mint a token on the server
 and paste it into a plain HTML page:
 
-```bash
-docker compose exec backend python mint_token.py --tier member
+```powershell
+python mint_token.py --tier member
 ```
 
 If that works and WordPress does not, the fault is in the plugin or the
@@ -228,14 +214,15 @@ secret, not the backend.
 
 Once the documents are indexed and the console is configured, take one:
 
-```bash
-docker compose exec backend python manage_backup.py export --out /data/first-good-state.gobk
+```powershell
+python manage_backup.py export --out D:\GroundedOpsBackups\first-good-state.gobk
 ```
 
 It prompts for a passphrase and encrypts the archive. Put that passphrase in
-your password manager **now** — not in `docker/.env` next to the backup, and
+your password manager **now** — not in `src\.env` next to the backup, and
 not in the same folder. There is no recovery path if it is lost, by design.
-For an unattended cron backup, set `BACKUP_PASSPHRASE` in the environment.
+For an unattended backup (`backup_daily.ps1`), set `BACKUP_PASSPHRASE` in the
+environment.
 
 Or from the console: **Backup → Download backup**. Support and above can
 export; only root can restore.
@@ -280,5 +267,5 @@ Known and deliberate, so nobody discovers them as surprises:
   a threshold problem.
 - **Backups are scheduled on the dev box only** (`backup_daily.ps1 -Install`,
   nightly 02:30 to `D:\GroundedOpsBackups`, encrypted). Step 6 is still a
-  manual command here: put it on cron on the host before this carries
-  anything you would miss.
+  manual command here: register `backup_daily.ps1 -Install` on the host
+  before this carries anything you would miss.

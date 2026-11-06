@@ -13,7 +13,7 @@ Also ships an **embeddable website widget** that puts the same grounded
 Q&A on any web page with a single `<script>` tag.
 
 > **Just want to run it?** See [QUICKSTART.md](QUICKSTART.md) — installs
-> with a double-click, no Docker required.
+> with a double-click.
 > New to the app once it's running? See [USER_GUIDE.md](USER_GUIDE.md).
 
 ## See it working
@@ -170,7 +170,8 @@ your FAQ doesn't cover, prioritised by real demand. Each entry records how
 the turn then ended (answered from the documents, refused, or asked back)
 and what the assistant said, so the console can show "not answered",
 "answered, no FAQ yet" and "flagged by visitors" separately. Questions
-asked only by test runs (eval/live/preflight sessions) are hidden unless
+asked only by test runs (eval/live/preflight sessions, or scripts calling
+/query without a console session) are hidden unless
 "Include test runs" is ticked. `python -m log_report --since 7d` (or GET
 `/admin/report`, the Overview's "Last 7 days" row) gives the weekly
 resolved / refused / handed-off / speed counts.
@@ -358,27 +359,6 @@ address `run.cmd` prints under "On the LAN".
 The admin console (manage documents, FAQ, gaps, categories/products) is
 at `/admin` on the same backend — `run.cmd`'s summary prints this too.
 
-### Run with Docker
-
-Docker Compose is for **deploying this as a real service**, not local
-day-to-day development — use `run.cmd` for that (faster to iterate on,
-and it's how this app is actually packaged for install). The Compose
-files live in `docker/`:
-
-```bash
-cd docker
-docker compose up -d --build      # first build downloads models
-# app on http://localhost:8080, API on http://localhost:8000
-```
-
-Brings up backend, frontend, and Ollama (for Free mode) together.
-`docker/docker-compose.override.yml` (auto-merged when present) switches
-this to a hot-reloading dev stack instead — see the comment at its top for
-how to disable it for a real production run.
-
-> Compose publishes the backend on port **8000**, the same port the
-> native launcher uses. Run `cd docker && docker compose down` before `run.cmd`.
-
 ### Manual / development
 
 ```bash
@@ -418,7 +398,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `BACKUP_ALLOW_PLAINTEXT` | *(unset)* | Permit an unencrypted export. Off: an archive holds password hashes and customer contact details. |
 | `BACKUP_MAX_BYTES` | `4294967296` | Ceiling on what an uploaded archive may expand to. |
 | `BACKUP_SNAPSHOT_DIR` | `backup_snapshots` | Where the automatic pre-restore snapshot is written. |
-| `ADMIN_ALLOWED_IPS` | *(empty)* | IP **prefixes** allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
+| `ADMIN_ALLOWED_IPS` | *(empty)* | Addresses or CIDR ranges (an entry ending in a dot, like `203.0.113.`, still works as a range) allowed to reach the admin console from outside the LAN. Empty keeps it LAN-only, which is the default and the safe answer. An allowlist in front of authentication, not instead of it. See [STAGING.md](STAGING.md). |
 | `ADMIN_NETWORK_URL` | *(auto-detected)* | Exact console origin to advertise in the sidebar, e.g. `http://192.168.1.50:8000`. Set this when VPNs, proxies, or multiple adapters make automatic LAN-address selection ambiguous. |
 | `BOOTSTRAP_TOKEN` | *(empty)* | Required in an `X-Bootstrap-Token` header for first-run root creation **over the network**. Unproxied/LAN setup needs no token. Clear it once the root account exists. |
 | `TRUST_PROXY` | *(unset)* | Honour `X-Forwarded-For`. Set only with a proxy you control in front — otherwise the header is forgeable and anonymous quotas can be bypassed. |
@@ -448,9 +428,9 @@ See [.env.example](.env.example) for the annotated full list.
 | `ONLINE_OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI answering model. Also the model the backup escalation and console generations send on this slot (set it to the gateway's name, e.g. `itl-gpt-flash`). |
 | `ONLINE_ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Override the Anthropic answering model |
 | `WIDGET_ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins for the widget |
-| `SOURCE_FILE_DIR` | `/data/source_files` | Where original documents are retained |
+| `SOURCE_FILE_DIR` | `<repo>/documents` | Where original documents are retained |
 | `CHROMA_DIR` | `./chroma_db` | Vector store location |
-| `CONVO_DB_PATH` | `conversations.db` | Keep on a persistent volume under Docker |
+| `CONVO_DB_PATH` | `conversations.db` | Keep on a persistent disk |
 | `FAQ_STORE_PATH` | `faq_store.json` | Curated FAQ |
 | `FAQ_GAP_PATH` | `faq_gaps.json` | Unanswered-question log |
 | `FAQ_ENABLED` | `on` | `off` sends every question through retrieval |

@@ -26,6 +26,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import retrieval_db as R  # noqa: E402
 
+# No index here, so no copies (D-20261026-91): without this _matches_scope
+# would build the copies map from ./chroma_db, the live index in src/.
+R._bm25_cache["copies_stale"] = False
+
 SHARED = {"source": "Biometrics_Shared_Install_Checklist.pdf",
           "product": "biometrics_general", "category": "biometrics",
           "prod_biometrics_general": True}

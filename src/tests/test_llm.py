@@ -469,8 +469,10 @@ def test_deep_effort_in_api_mode_uses_the_advanced_role_not_online_provider():
             assert "anthropic" in llm.outside_providers()
         with roles({"default": "openai"}):
             assert llm.effort_model("ONLINE_DEEP_MODEL") == ("openai", "claude-opus-x")
-    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}):
-        assert llm.effort_model("ONLINE_DEEP_MODEL") is None
+    with patch.dict(os.environ, {"ONLINE_DEEP_MODEL": ""}), \
+            roles({"default": "openai", "advanced": "anthropic"}):
+        assert llm.effort_model("ONLINE_DEEP_MODEL") == llm._online_provider_model("advanced")
+        assert llm.effort_model("ONLINE_DEEP_MODEL")[0] == "anthropic"
     assert llm.effort_model(None) is None
 
 
@@ -496,3 +498,26 @@ def test_a_key_answers_only_when_ticked_for_it():
         assert keystore.uses("anthropic") == {"answers"}
         keystore.set_uses("deepseek", ["pictures"])
         assert keystore.uses("deepseek") == set()
+def test_api_mode_condensation_falls_over_to_the_backup():
+    """PENDING 9.3: condense_query used to call generate() on the default
+    provider only, so in an outage every follow-up lost its context while
+    the answer itself fell over to the backup. And when the whole chain
+    fails, the "unable to generate" sentinel must not become the query."""
+    hist = [{"q": "what voltage does the NV9 Spectral need", "a": "12 V DC."}]
+    calls = []
+
+    def fake_generate(provider, prompt, model, deepseek_api_key=None, api_keys=None):
+        calls.append(provider)
+        return {"text": "what current does the NV9 Spectral draw"} if provider == "deepseek" else None
+
+    llm._provider_down.clear()
+    try:
+        with roles({"default": "openai", "backup": "deepseek"}), \
+                patch.object(llm, "generate", fake_generate):
+            assert llm.condense_query("and the current?", hist) == \
+                "what current does the NV9 Spectral draw"
+            assert calls == ["openai", "deepseek"]
+            with patch.object(llm, "generate", lambda *a, **k: None):
+                assert llm.condense_query("and the current?", hist) == "and the current?"
+    finally:
+        llm._provider_down.clear()

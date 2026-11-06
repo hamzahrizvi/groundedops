@@ -8,10 +8,13 @@ line length) and lexical query overlap.
 A message that reports a failure is never answered with a copied list (reports_failure).
 """
 
+import os
 import re
 from collections import Counter
 
 from text_utils import (
+    _ASK_OPEN,
+    _ASK_STOP,
     LIST_LINE_RE,
     STEP_HEADER_RE,
     TRAILING_STOPWORDS,
@@ -331,6 +334,100 @@ _FAILURE_RE = re.compile(
 def reports_failure(query: str | None) -> bool:
     """True when the message reports a step or device failing."""
     return bool(query and _FAILURE_RE.search(query.replace("\u2019", "'")))
+
+
+# D-20261023-04: the reranker's own relevant/not boundary (reranker.py
+# sigmoids its logits; 0.5 = logit 0), the same floor the band uses
+# (text_utils.retrieval_confidence_band ambiguous_floor). A passage below it
+# is never copied out verbatim.
+MIN_COPY_RERANK = 0.5
+
+# The user's own words ask for a procedure or a list. A lookup ("how heavy",
+# "which pins"), a yes/no ("is there", "can I") or a value ("what resistance")
+# is answered by the model from the same passages.
+_PROCEDURE_ASK_RE = re.compile(
+    r"\bhow\s+(?:do|can|could|should|would|to)\b"
+    r"|\b(?:steps?|procedures?|process|checklists?|instructions?)\b"
+    r"|\bwalk\s+(?:me|us|him|her|them)\s+through\b"
+    r"|\b(?:list|show|give)\s+(?:me\s+|us\s+)?(?:the|all|a)\b",
+    re.I)
+
+_REQUEST_WORDS = frozenset(
+    "step steps procedure procedures process checklist checklists instruction "
+    "instructions list show give tell walk through please need want".split())
+
+
+def asks_for_procedure(query: str | None) -> bool:
+    """True when the message asks for steps, a procedure or a list."""
+    return bool(query and _PROCEDURE_ASK_RE.search(query))
+
+
+# D-20261029-03: a fix-it ask -- how to clear, free, fix or reset, or what to do
+# about a fault -- is answered with the manual's steps for that fault first.
+# "stopped/stopping" ("its stopped taking notes") is a fault word _FAILURE_RE
+# leaves out; it is added here, not there, so the copy gate is unchanged.
+_FIX_VERB_RE = re.compile(
+    r"\b(?:clear|free|fix|reset|unjam|unblock|unstick|release|jam(?:s|med)?|stuck"
+    r"|stopp(?:ed|ing)|get\s+(?:\w+\s+){0,2}out)\b", re.I)
+_WHAT_TO_DO_RE = re.compile(r"\bwhat\s+(?:do|should|can|must)\s+(?:i|we)\s+do\b", re.I)
+
+
+def asks_to_fix(query: str | None) -> bool:
+    """True when the message asks how to clear, free, fix or reset a fault."""
+    if not query:
+        return False
+    asks = asks_for_procedure(query) or bool(_WHAT_TO_DO_RE.search(query))
+    return asks and (reports_failure(query) or bool(_FIX_VERB_RE.search(query)))
+
+
+# D-20261104-06: a failure stated as a fact ("blue led is on but IMS Local search finds
+# nothing", "note stuck in our bv30", "why won't it pay out?"), or a fix asked for a
+# stated failure ("how do I fix a hopper that won't pay out"). A clause that asks how
+# or whether ("how do I set it so it doesn't beep", "does it not take polymer notes?")
+# sets a condition, not a report; "why" presumes the failure, so it reports.
+_CLAUSE_RE = re.compile(r"[?.!;,\n]+")
+_WHY_RE = re.compile(r"why\b", re.I)
+
+
+def reports_symptom(query: str | None) -> bool:
+    """True when the message states a failure, not only a how-to or yes/no
+    that mentions one."""
+    if not query:
+        return False
+    if _FIX_VERB_RE.search(query) and reports_failure(query):
+        return True
+    for c in (c.strip() for c in _CLAUSE_RE.split(query)):
+        asks = asks_for_procedure(c) or (_ASK_OPEN.match(c) and not _WHY_RE.match(c))
+        if reports_failure(c) and not asks:
+            return True
+    return False
+
+
+def _topic_stems(text: str | None, ignore=frozenset()) -> set[str]:
+    # ponytail: 4-letter prefixes as stems ("belts"/"belt", "testing"/"test");
+    # a loose match only lets a list through, the floor and the ask still apply.
+    return {w[:4] for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+            if len(w) > 3 and w not in _ASK_STOP and w not in _REQUEST_WORDS
+            and w not in ignore}
+
+
+def lists_on_topic(chunks: list[dict], query: str | None,
+                   ignore=frozenset()) -> list[dict]:
+    """The passages a list may be copied from: ranked relevant by the
+    reranker itself, and headed by something the question asks about. The
+    heading is the chunk's section, else the document title (a synced page's
+    title is its heading). `ignore` = product words, which every heading of a
+    product's manual shares and so prove nothing."""
+    ask = _topic_stems(query, ignore)
+    out = []
+    for c in chunks:
+        if c.get("rerank_score", 0.0) < MIN_COPY_RERANK:
+            continue
+        heading = (c.get("section")
+                   or os.path.splitext(os.path.basename(c.get("source") or ""))[0])
+        if ask & _topic_stems(heading, ignore):
+            out.append(c)
+    return out
 
 
 def extract_structured_block(chunks: list[dict], query: str | None = None) -> str | None:

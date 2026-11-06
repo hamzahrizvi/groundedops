@@ -334,6 +334,29 @@ def admin_delete_lead(lead_id: str,
     return {"deleted": True}
 
 
+class EraseRequest(BaseModel):
+    email: str = Field(default="", max_length=320)
+    session_id: str = Field(default="", max_length=MAX_ID_CHARS)
+    user_id: str = Field(default="", max_length=MAX_ID_CHARS)
+
+
+@router.post("/admin/privacy/erase")
+def admin_erase_person(payload: EraseRequest,
+                       x_admin_password: str | None = Header(default=None)):
+    """UK GDPR erasure request: delete one person's enquiries (by email),
+    one conversation (by the session id the widget shows under Settings),
+    and a signed-in visitor's saved chats (by the website's user id)."""
+    me = _require_admin(x_admin_password)
+    if not (payload.email.strip() or payload.session_id.strip() or payload.user_id.strip()):
+        raise HTTPException(status_code=400, detail="Give an email, a chat id or a user id")
+    import retention
+    sid = payload.session_id.strip()
+    out = retention.erase(email=payload.email.strip(), session_ids=[sid] if sid else [],
+                          user_id=payload.user_id.strip(), source="console")
+    logger.info(f"erasure request carried out by {me.get('email')}: {out}")
+    return {"removed": out}
+
+
 @router.post("/admin/widget/preview_token")
 def admin_widget_preview_token(x_admin_password: str | None = Header(default=None)):
     """Mint a short-lived widget token so the console can preview the widget

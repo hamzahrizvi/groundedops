@@ -4,9 +4,8 @@
  * v2 adds:
  *   1. Guided onboarding — visitors pick an intent from suggested
  *      pointers before free text is available.
- *   2. Mandatory scope — a category AND product must be chosen before a
- *      question can be asked, so retrieval is always scoped and the
- *      backend never answers from the whole corpus by accident.
+ *   2. Optional scope: buttons set a product; a typed first message goes
+ *      unscoped and the backend asks which product if it needs to.
  *   3. Suggested questions — pulled live from the curated FAQ for the
  *      chosen product, so the first answer costs no LLM call.
  *   4. Session persistence — the conversation survives a page refresh,
@@ -82,17 +81,17 @@
   var cfg = {
     api: secureUrl(attr("data-api", "").replace(/\/+$/, "")),
     title: attr("data-title", "Support"),
-    agent: attr("data-agent-name", "Assistant"),
+    agent: attr("data-agent-name", "Support"),
     avatar: attr("data-avatar-url", ""),
     accent: attr("data-accent", "#E4002B"),
-    launcherLabel: attr("data-launcher-label", "Ask a question"),
+    launcherLabel: attr("data-launcher-label", "Ask about our products"),
     salesEmail: attr("data-sales-email", ""),
     // Signed by the website server-side for logged-in users. Absent for
     // anonymous visitors, who get curated FAQ answers only.
     token: attr("data-token", ""),
     signInUrl: secureUrl(attr("data-sign-in-url", "")),
     supportEmail: attr("data-support-email", ""),
-    welcome: attr("data-welcome", "Welcome to Innovative Technology, the home of transaction automation"),
+    welcome: attr("data-welcome", "Hi, I answer from our product manuals and show the page I used. If the answer is not there I will say so and get you a person. What are you looking for?"),
     prompt: attr("data-prompt", "How can I help today?"),
     // Explicit override for a single-locale embed (a dedicated /fr page, a
     // French subdomain). Falls back to the page's own declared language,
@@ -135,6 +134,16 @@
     if (d.welcome && !hasAttr("data-welcome")) cfg.welcome = d.welcome;
     if (d.ai_notice) cfg.aiNotice = d.ai_notice;
     cfg.privacyUrl = /^https?:\/\//i.test(d.privacy_url || "") ? secureUrl(d.privacy_url) : "";
+    if (cfg.privacyUrl) {   // the consent line, always in sight under the composer
+      var foot = root.querySelector(".go-foot");
+      foot.textContent = "By chatting, you consent to our ";
+      var pa = document.createElement("a");
+      pa.href = cfg.privacyUrl;
+      pa.target = "_blank";
+      pa.rel = "noopener noreferrer";
+      pa.textContent = "Privacy Policy";
+      foot.appendChild(pa);
+    }
     if (d.color && !hasAttr("data-accent")) {
       cfg.accent = d.color;
       // The stylesheet bakes the accent in as `.go-w{--a:...}`; an inline
@@ -148,6 +157,16 @@
       Array.prototype.forEach.call(root.querySelectorAll(".go-mav"), function (n) {
         n.innerHTML = avatarHtml;
       });
+    }
+    if (d.name && !hasAttr("data-agent-name")) {
+      var hn = root.querySelector(".go-hname");
+      if (hn) hn.textContent = cfg.agent;
+      if (!cfg.avatar) {
+        avatarHtml = esc(cfg.agent.charAt(0).toUpperCase());
+        Array.prototype.forEach.call(root.querySelectorAll(".go-av, .go-mav"), function (n) {
+          n.innerHTML = avatarHtml;
+        });
+      }
     }
     if (d.intro_options && d.intro_options.length)
       serverCfg.intro_options = d.intro_options;
@@ -195,6 +214,7 @@
 
   var state = {
     sessionId: null,
+    deleteToken: null,     // D-20261104-08: from /widget/chat; only it can delete this chat
     stage: "intent",     // intent | category | product | chat
     intent: null,
     category: null,      // {key, name}
@@ -255,6 +275,25 @@
     } catch (e) {}
   }
 
+  // D-20261104-08: just before a chat's first question the server names the
+  // chat and hands back the token that can delete it; the id alone, which
+  // the visitor may quote to support, cannot. A chat that has already asked
+  // (or a failed call) keeps its id and has no token: support deletes it.
+  function ensureChat() {
+    var asked = state.messages.some(function (m) { return m.role === "user"; });
+    if (state.deleteToken || asked) return Promise.resolve();
+    var s = state;
+    return fetch(cfg.api + "/widget/chat", { method: "POST" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (s !== state || !d || !d.session_id || !d.delete_token) return;
+        state.sessionId = d.session_id;
+        state.deleteToken = d.delete_token;
+        save();
+      })
+      .catch(function () {});
+  }
+
   // ── sign-in round trip ────────────────────────────────────────────────
   // Sign-in navigates this tab away (it used to open a new one, which left
   // the original tab holding a guest token forever). The question that hit
@@ -300,13 +339,13 @@
   // ── styles ────────────────────────────────────────────────────────────
   var css =
     ".go-w,.go-w *{box-sizing:border-box}" +
-    ".go-w{--a:" + cfg.accent + ";--ink:#16191c;--mut:#6b7480;--line:#e6e8eb;--bg:#fff;--pane:#f6f7f9;" +
+    ".go-w{--a:" + cfg.accent + ";--ink:#16191c;--mut:#5f6873;--line:#e6e8eb;--fld:#878f99;--bg:#fff;--pane:#f6f7f9;" +
     "position:fixed;bottom:20px;right:20px;z-index:2147483000;" +
     "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;" +
     "font-size:15px;line-height:1.5;color:var(--ink);text-align:left}" +
     ".go-launch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;border:0;background:var(--a);" +
     "color:#fff;padding:13px 20px;border-radius:999px;font-size:15px;font-weight:600;" +
-    "box-shadow:0 6px 24px rgba(0,0,0,.2);transition:transform .12s}" +
+    "box-shadow:0 0 0 2px #fff,0 6px 24px rgba(0,0,0,.2);transition:transform .12s}" +
     ".go-launch:hover{transform:translateY(-1px)}" +
     ".go-launch:focus-visible{outline:3px solid rgba(0,0,0,.3);outline-offset:2px}" +
     ".go-launch svg{width:18px;height:18px}" +
@@ -316,14 +355,14 @@
     ".go-open .go-panel{display:flex}.go-open .go-launch{display:none}" +
     // header
     ".go-head{background:var(--a);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:11px;flex:0 0 auto}" +
-    ".go-av{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.25);flex:0 0 auto;" +
+    ".go-av{width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.15);flex:0 0 auto;" +
     "display:flex;align-items:center;justify-content:center;font-weight:700;overflow:hidden}" +
     ".go-av img{width:100%;height:100%;object-fit:cover}" +
     ".go-hname{font-weight:700;font-size:16px;flex:1}" +
     ".go-hbtn{border:0;background:transparent;color:#fff;cursor:pointer;padding:5px;border-radius:7px;line-height:0;opacity:.9}" +
     ".go-hbtn:hover{background:rgba(255,255,255,.18)}.go-hbtn svg{width:17px;height:17px}" +
     // scope bar
-    ".go-scope{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#eef1f4;" +
+    ".go-scope{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--pane);" +
     "border-bottom:1px solid var(--line);font-size:12.5px;color:var(--mut);flex:0 0 auto}" +
     ".go-scope b{color:var(--ink);font-weight:600}" +
     ".go-scope button{margin-left:auto;border:0;background:transparent;color:var(--a);cursor:pointer;" +
@@ -371,7 +410,7 @@
     "@keyframes go-spin{to{transform:rotate(360deg)}}" +
     // The wait line fades in rather than snapping to the next string. An
     // instant swap of one short phrase for another reads as a flicker.
-    ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;opacity:.6;font-size:11.5px}" +
+    ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;font-size:11.5px}" +
     ".go-waitin{animation:go-waitfade .5s ease}" +
     "@keyframes go-waitfade{from{opacity:.25}to{opacity:1}}" +
     "@media (prefers-reduced-motion:reduce){.go-waitin{animation:none}}" +
@@ -399,7 +438,7 @@
     ".go-fhead{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:10px}" +
     ".go-flab{display:block;font-size:12px;color:var(--mut);margin:9px 0 4px}" +
     ".go-fin{width:100%;box-sizing:border-box;font:inherit;font-size:14px;color:var(--ink);" +
-    "background:var(--bg);border:1.5px solid var(--line);border-radius:9px;padding:9px 10px;resize:vertical}" +
+    "background:var(--bg);border:1.5px solid var(--fld);border-radius:9px;padding:9px 10px;resize:vertical}" +
     ".go-fin:focus{outline:none;border-color:var(--a)}" +
     ".go-fbtn{margin-top:12px;border:0;background:var(--a);color:#fff;font:inherit;font-size:14px;" +
     "font-weight:600;padding:11px 16px;border-radius:999px;cursor:pointer}" +
@@ -457,7 +496,7 @@
     ".go-vote button:disabled{cursor:default}" +
     // composer
     ".go-form{display:flex;gap:8px;padding:11px;border-top:1px solid var(--line);background:var(--bg);flex:0 0 auto}" +
-    ".go-in{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;" +
+    ".go-in{flex:1;resize:none;border:1px solid var(--fld);border-radius:10px;padding:10px 12px;font:inherit;" +
     "font-size:14px;max-height:110px;color:var(--ink);background:var(--bg)}" +
     ".go-in:focus{outline:2px solid var(--a);border-color:var(--a)}" +
     ".go-in:disabled{background:var(--pane);color:var(--mut);cursor:not-allowed}" +
@@ -469,9 +508,12 @@
     ".go-set-row{font-size:13px;margin-top:6px}" +
     ".go-set-note{font-size:12.5px;color:var(--mut);margin-top:7px;line-height:1.45}" +
     ".go-set-note a{color:var(--a);font-weight:600}" +
+    ".go-set-del{margin-top:6px;background:none;border:1px solid var(--line);border-radius:8px;" +
+    "padding:5px 10px;font:inherit;font-size:12.5px;color:inherit;cursor:pointer}" +
     ".go-bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}" +
     ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
+    ".go-foot a{color:var(--a)}" +
     "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}" +
     // 8.13 phone layout: below this the 400x600 floating card left barely any
     // room either side, so the panel goes edge-to-edge like a native sheet
@@ -518,7 +560,7 @@
     : esc(cfg.agent.charAt(0).toUpperCase());
   root.innerHTML =
     '<button class="go-launch" type="button" aria-haspopup="dialog" aria-expanded="false">' +
-      I_CHAT + "<span>" + esc(cfg.launcherLabel) + "</span></button>" +
+      I_CHAT + '<span class="go-launch-label">' + esc(cfg.launcherLabel) + "</span></button>" +
     '<section class="go-panel" role="dialog" aria-modal="true" tabindex="-1" ' +
       'aria-label="' + esc(cfg.title) + '">' +
       '<div class="go-head"><div class="go-av">' + avatarHtml + "</div>" +
@@ -977,7 +1019,36 @@
     var box = document.createElement("div");
     box.className = "go-settings";
     box.setAttribute("data-go-settings", "");
-    box.innerHTML = '<div class="go-set-t">Your usage</div><div class="go-set-b">Loading...</div>';
+    var canDelete = !!state.deleteToken;
+    box.innerHTML = '<div class="go-set-t">Your usage</div><div class="go-set-b">Loading...</div>' +
+      '<div class="go-set-t" style="margin-top:12px">Your data</div>' +
+      '<div class="go-set-note">This chat is kept for up to 90 days. Its id is <b>' +
+      esc(state.sessionId) + "</b>. Our support team deletes it if you quote that id to them" +
+      (canDelete ? ", or you can delete it now.</div>" +
+                   '<button type="button" class="go-set-del">Delete this chat now</button>'
+                 : ".</div>");
+    if (canDelete) box.querySelector(".go-set-del").addEventListener("click", function () {
+      if (!window.confirm("Delete this chat? Your questions and our answers are removed from our records.")) return;
+      var btn = this;
+      btn.disabled = true;
+      fetch(cfg.api + "/widget/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: state.sessionId, delete_token: state.deleteToken,
+                               visitor_id: visitorId() }),
+      })
+        .then(function (r) {
+          if (r.status === 403) { btn.textContent = "Please ask our support team to delete it"; return; }
+          if (!r.ok) throw new Error(r.status);
+          box.remove();
+          startFresh();
+          say("Your previous chat has been deleted.");
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = "Could not delete it. Try again";
+        });
+    });
     root.querySelector(".go-panel").insertBefore(box, $log);
     refreshQuota().then(function (d) {
       var body = box.querySelector(".go-set-b");
@@ -1118,20 +1189,12 @@
 
   // D-20261015-10: who answers, how long questions are kept, who processes
   // them. Not a message: kept out of state.messages so it is never sent back
-  // as conversation history, and not a .go-b bubble.
+  // as conversation history, and not a .go-b bubble. The privacy link is the
+  // footer's consent line (applyServerConfig).
   function showNotice() {
     var p = document.createElement("p");
     p.className = "go-notice";
     p.textContent = cfg.aiNotice;
-    if (cfg.privacyUrl) {
-      var a = document.createElement("a");
-      a.href = cfg.privacyUrl;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = "Privacy notice";
-      p.appendChild(document.createTextNode(" "));
-      p.appendChild(a);
-    }
     $log.appendChild(p);
   }
 
@@ -1364,14 +1427,15 @@
       state.category = null;
       state.stage = "category";
       renderScopeBar();
-      lockComposer();
+      unlockComposer();
       askCategory("No problem — which product range would you like to ask about?");
     });
   }
 
-  // The composer is the gate: free text is impossible until a product is
-  // chosen, which guarantees every /query call carries a scope.
+  // The composer locks only while a form or continue-prompt is open.
   function lockComposer(reason) {
+    keepFocus($in);
+    keepFocus($send);
     $in.disabled = true;
     $send.disabled = true;
     $in.placeholder = reason || "Choose an option above to continue…";
@@ -1379,7 +1443,7 @@
 
   function unlockComposer() {
     $in.disabled = false;
-    $in.placeholder = "Ask about " + (state.product ? state.product.name : "this product") + "…";
+    $in.placeholder = state.product ? "Ask about " + state.product.name + "…" : "Type your question, or pick an option above…";
     $send.disabled = !$in.value.trim();
   }
 
@@ -1388,6 +1452,7 @@
     clearSaved();
     state = {
       sessionId: uuid(),
+      deleteToken: null,
       stage: "intent",
       intent: null,
       category: null,
@@ -1397,45 +1462,26 @@
     };
     $log.innerHTML = "";
     renderScopeBar();
-    lockComposer();
+    unlockComposer();
     say(cfg.welcome);
-    showNotice();
-    // Sequenced, not fire-and-forget: announceGuestLimits() depends on a
-    // quota fetch that can resolve AFTER these two synchronous calls would
-    // already have put askIntent()'s menu on screen. The visible effect was
-    // a "you must sign in" notice appearing to have the last word, stacked
-    // UNDER a menu that already offered other ways to continue -- the menu
-    // still worked, since nothing removes it, but reading top-to-bottom it
-    // looked like signing in was the only option left. Waiting for it keeps
-    // the order a visitor actually reads in sane: limits stated first, then
-    // the real menu right below.
-    announceGuestLimits().then(function () {
+    if (cfg.token) showNotice();   // a guest's waits for the quota (guestNotice)
+    // Sequenced: the guest's notice depends on a quota fetch, and must land
+    // above the menu, not under it.
+    guestNotice().then(function () {
       say(cfg.prompt);
       askIntent();
     });
     save();
   }
 
-  /** Tell a signed-out visitor what they are and are not getting, at the
-   *  start rather than when they hit the wall. Someone who reads "reviewed
-   *  FAQs only" up front can decide to sign in; someone who finds out after
-   *  typing a real question has wasted their time.
-   *
-   *  Quota may not have loaded yet on a cold open, so this resolves against
-   *  the fetch rather than whatever happens to be cached. Returns a promise
-   *  either way so startFresh() can sequence what follows against it. */
-  function announceGuestLimits() {
+  /** The AI notice is hidden from signed-out visitors, unless guest AI is on:
+   *  someone getting AI answers is always told so. Guests hear about their
+   *  limits when a question needs an account ("Sign in for a full answer",
+   *  which replays the question) and in the settings panel, not up front.
+   *  Returns a promise so startFresh() can sequence what follows. */
+  function guestNotice() {
     var show = function (d) {
-      if (!d || d.tier !== "anonymous" || d.ai_available) return;
-      say(d.account_notice ||
-          "Full AI support is for account holders. I can still answer from " +
-          "our reviewed FAQs, or put you in touch with our team.");
-      if (cfg.signInUrl) {
-        chips([{
-          label: "Sign in for full AI support",
-          onClick: function () { goSignIn(cfg.signInUrl); },
-        }], null);
-      }
+      if (!cfg.token && d && d.ai_available) showNotice();
     };
     if (quotaState) return Promise.resolve(show(quotaState));
     return refreshQuota().then(show);
@@ -1445,6 +1491,13 @@
     state.stage = "intent";
     save();
     var items = [
+      {
+        label: "Speak to sales",
+        onClick: function () {
+          heard("Speak to sales");
+          openContactForm("sales");
+        },
+      },
       {
         label: "Request technical support",
         onClick: function () {
@@ -1469,14 +1522,6 @@
           askCategory("I can look up parts and accessories referenced in the documentation. Which product is it for?");
         },
       },
-      {
-        label: "Speak to sales",
-        style: "alt",
-        onClick: function () {
-          heard("Speak to sales");
-          openContactForm("sales");
-        },
-      },
     ];
 
     // The console's configured opening options replace the built-in list
@@ -1486,7 +1531,6 @@
       items = serverCfg.intro_options.map(function (o) {
         return {
           label: o.label,
-          style: o.action === "sales" || o.action === "support" ? "alt" : null,
           onClick: function () {
             heard(o.label);
             runIntroAction(o.action, o.label);
@@ -1817,6 +1861,7 @@
         return;
       }
       err.textContent = "";
+      keepFocus(btn);
       btn.disabled = true;
       btn.textContent = "Sending…";
 
@@ -1888,7 +1933,7 @@
   // already does the same for a range with one product).
   function askCategory(prompt) {
     state.stage = "category";
-    lockComposer();
+    unlockComposer();
     save();
     var s = status("Loading product ranges");
     fetchCatalog()
@@ -1946,7 +1991,7 @@
 
   function askProduct(cat) {
     state.stage = "product";
-    lockComposer();
+    unlockComposer();
     save();
     var prods = (cat.products || []).filter(function (p) {
       return (p.doc_count || 0) > 0;
@@ -2056,7 +2101,7 @@
         (last ? ', and your last question was "' + last + '"' : "") +
         ". Would you like to carry on or start again?"
     );
-    showNotice();
+    if (cfg.token || (quotaState && quotaState.ai_available)) showNotice();
     lockComposer("Choose continue or start over…");
     chips(
       [
@@ -2066,8 +2111,8 @@
             state = saved;
             renderLog();
             renderScopeBar();
-            // Only re-open the composer if a scope was actually chosen;
-            // otherwise resume the picker where they left off.
+            // With no scope chosen, resume the picker where they left off
+            // (the composer stays open there too).
             if (state.product) {
               state.stage = "chat";
               unlockComposer();
@@ -2159,7 +2204,7 @@
       style: "alt",
       onClick: function () {
         say("No problem — what would you like to know?");
-        if (state.product) unlockComposer();
+        unlockComposer();
       },
     });
     chips(items, "Contact us");
@@ -2181,13 +2226,9 @@
       }
     }
 
-    // Belt-and-braces: the composer is disabled without a scope, but a
-    // chip callback or a future code path could still get here.
-    if (!state.product) {
-      askCategory("Let me get the right documentation first — which product range?");
-      return;
-    }
     busy = true;
+    var ready = ensureChat();   // before heard(q): it checks the chat has not asked yet
+    keepFocus($send, $in);
     $send.disabled = true;
     clearChips();
     heard(opts.shown || q);
@@ -2196,7 +2237,7 @@
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
 
-    fetch(cfg.api + "/widget/ask/stream", {
+    ready.then(function () { return fetch(cfg.api + "/widget/ask/stream", {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
@@ -2204,13 +2245,13 @@
         session_id: state.sessionId,
         visitor_id: visitorId(),
         effort: opts.effort || (quotaState && quotaState.ai_available ? "standard" : "faq_only"),
-        product: state.product.key,
+        product: state.product ? state.product.key : null,
         category: state.category ? state.category.key : null,
         skip_faq: !!opts.skipFaq,
         faq_id: opts.faqId || null,
         language: detectedLanguage(),
       }),
-    })
+    }); })
       .then(function (r) {
         if (!r.ok) {
           // A 429 quota_exceeded is not a connection failure - it is the
@@ -2330,6 +2371,29 @@
           return;
         }
 
+        // A question typed before choosing a product can come back asking
+        // which one. Tapping a product scopes the chat to it and asks the
+        // same question again, as the console's Test chat does.
+        var prodOpts = d.needs_clarification ? (d.product_options || []) : [];
+        if (prodOpts.length) {
+          chips(
+            prodOpts.map(function (o) {
+              return {
+                label: o.label,
+                style: "alt",
+                onClick: function () {
+                  state.product = { key: o.key, name: o.label };
+                  renderScopeBar();
+                  save();
+                  ask(q, Object.assign({}, opts, { silent: true }));
+                },
+              };
+            }),
+            "Which product?"
+          );
+          return;
+        }
+
         var clarifyOpts = d.needs_clarification ? (d.clarification_options || []) : [];
         if (clarifyOpts.length) {
           chips(
@@ -2407,6 +2471,24 @@
               },
             });
           }
+          // D-20261026-93: one stronger re-ask after a refusal, for a member
+          // with the credits for it. Not after a deep ask (used once per
+          // turn), not on a handoff, a FAQ answer or an outage notice, or
+          // when this chat already searched this question deeply (server's
+          // deep_done, D-20261030-09).
+          // Guests get deep_available false from the server (quota.status).
+          var qs = quotaState;
+          if (opts.effort !== "deep" && !d.deep_done && d.role !== "handoff" && !d.from_faq
+              && !d.service_degraded && qs && qs.deep_available
+              && qs.remaining >= qs.deep_cost) {
+            chips([{
+              label: "Search more thoroughly",
+              onClick: function () {
+                ask(q, Object.assign({}, opts, { effort: "deep", silent: true }));
+              },
+            }], "Uses " + qs.deep_cost + " of your " + qs.remaining +
+                " credits today (a normal answer uses " + (qs.standard_cost || 1) + ")");
+          }
           chips(supportChips, "What would you like to do?");
         } else if (!d.flagged && !d.service_degraded && !d.needs_sign_in) {
           afterAnswer(d);
@@ -2453,7 +2535,7 @@
       })
       .then(function () {
         busy = false;
-        if (state.product) unlockComposer();
+        unlockComposer();
         $in.focus();
       });
   }
@@ -2670,8 +2752,32 @@
     $launch.focus();
   }
   $min.addEventListener("click", close);
+  // aria-modal="true" tells a screen reader the page behind is inert, so Tab
+  // must not walk out of the panel into it: wrap at either end. Only while
+  // focus is already in the panel -- a visitor who clicked back into the
+  // host page keeps that page's own Tab order.
+  function trapTab(e) {
+    var a = document.activeElement;
+    if (!$panel.contains(a)) return;
+    var els = Array.prototype.filter.call(
+      $panel.querySelectorAll("a[href],button,input,select,textarea,[tabindex]"),
+      function (el) { return el.tabIndex >= 0 && !el.disabled && el.getClientRects().length; });
+    if (!els.length) return;
+    var first = els[0], last = els[els.length - 1];
+    if (e.shiftKey ? (a === first || a === $panel) : a === last) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  }
+  // Disabling the focused control drops focus to <body>, outside the panel
+  // and so outside the trap above: hand it to `to` (or the panel) first.
+  function keepFocus(el, to) {
+    if (document.activeElement === el) (to || $panel).focus();
+  }
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && root.classList.contains("go-open")) close();
+    if (!root.classList.contains("go-open")) return;
+    if (e.key === "Escape") close();
+    else if (e.key === "Tab") trapTab(e);
   });
 
   root.querySelector(".go-settings-btn").addEventListener("click", toggleSettings);
@@ -2707,5 +2813,5 @@
     ask(q);
   });
 
-  lockComposer();
+  unlockComposer();
 })();
