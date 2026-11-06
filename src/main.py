@@ -4228,6 +4228,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                   and len(set(_products_named_in(resolved_query,
                                                  list(_product_names().keys())))
                           | set(_both_named)) >= 2)
+    # TWO HALVES (D-20261102-04): two products named, two asks, or comparative
+    # wording (NV200 vs NV200S is one catalogue product). Never sent to the
+    # section list, and a draft that answers one half keeps that half.
+    _halves = (bool(_asks) or len(_both_named) >= 2
+               or _is_comparison(resolved_query))
     # Several asks are never answered by one curated FAQ either, for the same
     # reason: it answers one of them at most (D-20261009-09).
     if not payload.skip_faq and not _comparing and not _asks:
@@ -4704,7 +4709,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # "several sources, middling score" asked "which part do you mean?" of
     # "a smart coin system and an nv4000 ... which one pulls more max
     # current?" (C20261021e-37, best 0.528).
-    if confidence == "ambiguous" and len(_both_named) >= 2:
+    # D-20261102-04: two asks or a comparison within one product are not ambiguous either (C20261030f-03, -40).
+    if confidence == "ambiguous" and _halves:
         confidence = "confident"
 
     # The product came from the wording ("my nv4000 is showing an error").
@@ -5138,9 +5144,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # SEVERAL ASKS: A PARTIAL ANSWER IS AN ANSWER (D-20261009-09). One that
     # answers the IP and writes the canonical refusal for the token lifetime
     # used to count as a refusal (is_refusal is a substring test), and the
-    # whole reply was replaced. Only on split turns; see keep_answered_part.
+    # whole reply was replaced. Split turns and two-product or comparison turns
+    # (D-20261102-04); see keep_answered_part.
     def _kept(text: str) -> str:
-        return keep_answered_part(text) if _asks else text
+        return keep_answered_part(text) if _halves else text
     answer = _kept(answer)
 
     # SEVERAL ASKS: EACH ONE ANSWERED, OR SEARCHED AGAIN (D-20261021-15). The
