@@ -1,4 +1,3 @@
-PAUSED by the CEO on 31 Oct until D-20261022-16 merges (D-20261031-02): the weekly run skips this file; do not run it.
 Picture test for the GroundedOps agent office (D-20261022-14): questions whose answer is only in a manual's
 picture, scored apart from the weekly 40. Nobody is present: never ask questions, never guess past a failure.
 
