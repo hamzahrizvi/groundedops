@@ -19,6 +19,7 @@ def test_widget_minted_values_pass_the_models():
                           effort="faq_only", language="en")
     widget_api.FeedbackRequest(request_id="r", vote="up", session_id=sid, visitor_id=vid)
     widget_api.DraftRequest(kind="sales", visitor_id=vid, product="biometrics_general", source="chat")
+    widget_api.RatingRequest(session_id=sid, visitor_id=vid, stars=4)
     edge = "y" * widget_api.MAX_ID_CHARS
     assert widget_api.AskRequest(q="hi", session_id=edge).session_id == edge
 
@@ -32,6 +33,9 @@ def test_over_long_ids_get_422_at_the_edge():
     for field in ("session_id", "visitor_id"):
         r = client.post("/widget/feedback", json={"request_id": "r", "vote": "up", field: LONG})
         assert r.status_code == 422, f"/widget/feedback {field}: {r.status_code}"
+    for field in ("session_id", "visitor_id"):
+        r = client.post("/widget/rating", json={"session_id": "s-cap", "stars": 3, field: LONG})
+        assert r.status_code == 422, f"/widget/rating {field}: {r.status_code}"
     r = client.post("/widget/draft_enquiry", json={"kind": "sales", "product": LONG})
     assert r.status_code == 422, f"/widget/draft_enquiry product: {r.status_code}"
     lead = {"kind": "sales", "values": {"f_name": "Ann", "f_email": "ann@example.com"}}

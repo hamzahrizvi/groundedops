@@ -46,6 +46,37 @@ def save_rating(session_id: str, stars: int, comment: str, scope, questions) -> 
         jsonstore.save(RATINGS_PATH, data, label="widget ratings")
 
 
+def prune_before(cutoff) -> int:
+    """D-15: drop ratings (stars, comment, questions) older than `cutoff`, an
+    aware datetime. Tester reports are staff text and are kept. Returns how
+    many went."""
+    key = cutoff.astimezone(timezone.utc).isoformat()
+    with _lock:
+        data = jsonstore.load(RATINGS_PATH, {}, label="widget ratings")
+        if not isinstance(data, dict):
+            return 0
+        kept = {k: v for k, v in data.items()
+                if isinstance(v, dict) and (v.get("created_at") or "") >= key}
+        if len(kept) < len(data):
+            jsonstore.save(RATINGS_PATH, kept, label="widget ratings")
+        return len(data) - len(kept)
+
+
+def erase_sessions(session_ids) -> int:
+    """Erasure on request: drop these conversations' ratings. Returns how many went."""
+    ids = {s for s in session_ids if s}
+    if not ids:
+        return 0
+    with _lock:
+        data = jsonstore.load(RATINGS_PATH, {}, label="widget ratings")
+        if not isinstance(data, dict):
+            return 0
+        kept = {k: v for k, v in data.items() if k not in ids}
+        if len(kept) < len(data):
+            jsonstore.save(RATINGS_PATH, kept, label="widget ratings")
+        return len(data) - len(kept)
+
+
 def add_report(note: str, conversation: list, product, reporter: str) -> dict:
     row = {"id": uuid.uuid4().hex[:12], "note": note.strip(),
            "conversation": conversation, "product": product,

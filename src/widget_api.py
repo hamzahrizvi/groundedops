@@ -997,8 +997,8 @@ def register(app, answer_query, draft_enquiry=None):
 
     @router.post("/forget")
     def widget_forget(payload: ForgetRequest, request: Request):
-        """A visitor deletes this conversation: its questions, answers and
-        votes, at once rather than after 90 days. Needs the delete token
+        """A visitor deletes this conversation: its questions, answers,
+        votes and rating, at once rather than after 90 days. Needs the delete token
         /widget/chat gave this browser; the bare id is refused (403), so a
         quoted id cannot delete anything."""
         gate = quota.check_public_write("forget", payload.visitor_id, _client_ip(request))
