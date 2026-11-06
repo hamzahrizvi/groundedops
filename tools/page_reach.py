@@ -38,6 +38,17 @@ SUFFIX = re.compile(r"(-v\d+)?(-\d{6}-\d{6}|-\d{8}_\d{6}( \d+)?)?$")
 GOLD = re.compile(r"^(?:(?P<doc>.*?\S)\s+)?pp?\.?\s*(?P<pages>\d+(?:\s*(?:,|-|\u2013|and)\s*p?\d+)*)\s*(?:\(.*\))?$", re.I)
 
 
+def internal_gold(gold_strs, is_excluded):
+    """Gold pages ("Source.pdf p3") of documents the bot never puts in a prompt."""
+    return [g for g in gold_strs if is_excluded(g.rsplit(" p", 1)[0])]
+
+
+def reach_flags(gold, live_gold, internal, ctx):
+    """(reach_all_live, reach_all_public); same "s pN" form or (s, p) tuples throughout."""
+    pub = [g for g in live_gold if g not in internal]
+    return (bool(live_gold) and all(g in ctx for g in live_gold), bool(pub) and all(g in ctx for g in pub))
+
+
 def gold_pages(c):
     p = c.get("pages_now") or c.get("pages") or []
     if isinstance(p, str):
@@ -243,6 +254,8 @@ def run(args):
                     best[(s, p)] = (j + 1, round(float(sc or 0), 4))
         live_gold = [g for g in gold if g in in_index]
         hit = [g for g in gold if g in ctx]
+        internal = [g for g in gold if retrieval_db.is_excluded(g[0])]
+        flags = reach_flags(gold, live_gold, internal, ctx)
         bnd = set(turn.get("bundle", []))
         rows.append({**{k: c[k] for k in ("key", "product", "type", "seen_in")},
                      "flash": bool(FLASH.search(c["q"] + " " + (c.get("turn1") or ""))),
@@ -252,7 +265,9 @@ def run(args):
                      "exit": exit_, "n_ctx": len(ctx),
                      "reach_all": bool(gold) and len(hit) == len(gold),
                      "reach_any": bool(hit),
-                     "reach_all_live": bool(live_gold) and all(g in ctx for g in live_gold),
+                     "reach_all_live": flags[0],
+                     "internal": [f"{s} p{p}" for s, p in internal],
+                     "reach_all_public": flags[1],
                      "in_bundle_all": bool(gold) and all(g in bnd for g in gold),
                      "ctx": [f"{s} p{p}" for s, p in ctx],
                      "ctx_rank": {f"{s} p{p}": ctx.index((s, p)) + 1 for s, p in hit},
@@ -307,12 +322,30 @@ def marks():
 def report(args):
     sys.stdout.reconfigure(encoding="utf-8")
     R = json.load(open(args.reading, encoding="utf-8")); rows = R["rows"]
+    old = [r for r in rows if "internal" not in r or "reach_all_public" not in r]
+    if old:
+        sys.path.insert(0, os.path.join(REPO, "src")); os.chdir(os.path.join(REPO, "src"))   # the internal-marked set is read relative to src/
+        try: import retrieval_db
+        except Exception as e:
+            retrieval_db = None; print(f"warning: retrieval_db not importable ({e}); internal pages not marked in old readings", file=sys.stderr)
+        for r in old:
+            if "internal" not in r:
+                r["internal"] = internal_gold(r["gold"], retrieval_db.is_excluded) if retrieval_db else []
+            if "reach_all_public" not in r:
+                pub = [g for g in r["gold"] if g not in r["stale"] and g not in r["internal"]]
+                r["reach_all_public"] = bool(pub) and all(g in r["ctx"] for g in pub)
     std = [r for r in rows if r["type"] != "followup"]
     print(f"# Page-reach reading {R['at']}\n\nIndex: {R['chroma']} ({R['chunks']} chunks). {len(rows)} questions, "
           f"{R['secs'] // 60} min (the questions alone: {round(sum(r['secs'] for r in rows) / 60)} min). Model calls attempted and blocked: {R['blocked_calls'] or 'none'}.\n")
     print(f"**Headline (standalone questions, n={len(std)}):** all answer pages reach the prompt "
           f"{pct([r['reach_all'] for r in std])}%; at least one page {pct([r['reach_any'] for r in std])}%; "
-          f"counting only gold pages still in the index {pct([r['reach_all_live'] for r in std])}%.\n")
+          f"counting only gold pages still in the index {pct([r['reach_all_live'] for r in std])}%; "
+          f"excluding internal answer pages (reach_all_public) {pct([r['reach_all_public'] for r in std])}%.\n")
+    io = [r for r in rows if r["internal"] and any(g not in r["ctx"] for g in r["gold"])
+          and all(g in r["internal"] for g in r["gold"] if g not in r["ctx"])]
+    print(f"## Internal-only questions (not counted as misses in reach_all_public)\n\n{len(io)} questions moved out of the public misses.\n")
+    for r in io: print(f"- {r['key']} ({r['type']}, {r['product']})")
+    print()
     print("## By type (followup = approximate: no condenser)\n\n" + table(rows, lambda r: r["type"], "type") + "\n")
     print("## By product\n\n" + table(rows, lambda r: r["product"], "product") + "\n")
     fl = [r for r in rows if r["flash"]]
