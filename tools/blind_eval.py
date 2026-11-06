@@ -243,9 +243,9 @@ if phase == "system":
         opts = d.get("family_options") or []
         if opts and want:
             pick = next((o for o in opts if o.get("product") == want), None)
-            if pick:   # what the widget does when a card is tapped: its `send` text, same session
+            if pick:   # what the widget does when a card is tapped: its `send` text, same session, the chat's product unchanged
                 fam_ask = {"answer": d.get("answer", ""), "options": [o.get("label") for o in opts], "tapped": pick.get("label")}
-                d = main._traced_query(main.QueryRequest(q=pick["send"], product=pick.get("product") or None, session_id=sid), None, attach=True)
+                d = main._traced_query(main.QueryRequest(q=pick["send"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),

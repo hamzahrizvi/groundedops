@@ -85,6 +85,12 @@ def main():
         assert rows["c"]["answer"] == "plain" and "family_ask" not in rows["c"]
         assert be(run, "grade")[0] == 0
         assert state(run)["summary"]["sys_normal"]["family_asked"] == 1
+        # typed first, no product picked: the tap sends no product either, as the widget does
+        run2 = os.path.join(tmp, "r2"); shutil.copytree(run, run2); os.remove(os.path.join(run2, "cases_state.json"))
+        del calls[:]
+        assert be(run2, "system", "normal", "--no-product")[0] == 0
+        assert calls[:2] == [("fam q", None), ("q (NV9 USB)", None)], calls
+        assert state(run2)["sys_normal"]["a"]["answer"] == "real answer"
         print("ok")
     finally:
         os.chdir(HERE)
