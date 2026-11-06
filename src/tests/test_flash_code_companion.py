@@ -131,3 +131,115 @@ def test_opening_chunk_only_and_within_budget():
             [dict(by["BV30.pdf:x:89"])], "flashing 4 red 1 blue", BV30,
             budget=budget)
         assert _ids(out, "section_reference") == want
+
+
+# D-20261105-08: a flash question that names a product and a count reads the
+# flash-code document's table for that product first, and the product's own
+# flash tables with that count last. Shapes from the live "ITL Device Flash
+# Codes" document, the BV50 Dipswitch guide (PDF text) and the BV50 manual.
+FD = "ITL Device Flash Codes.txt"
+
+
+def _p(src, n, body, product):
+    return dict(_c(src, n, 1, "", body), product=product)
+
+
+FLASH_DOC = [
+    _p(FD, 0, "Smart Hopper Range\n"
+              "LED Colour | Status (Flashes) | Description\n"
+              "RED | 3x | No Encryption Key set\nRED | 4x | Coin Jam\n"
+              "SMART Coin System Range\n"
+              "LED Colour | Status (Flashes) | Description | Recommended Action\n"
+              "RED | 4x | Feeder Calibration Error | Check the feeder", "coin_hoppers_general"),
+    _p(FD, 1, "BV Range (BV20, BV30, BV50 and BV100)\n"
+              "LED Colour Status (Flashes) | Description | Recommended Action\n"
+              "Long | Short |\n"
+              "1x | 3x | Unit not Initialised | Contact ITL\n"
+              "4x | BV50, BV100: Cashbox Jam | Check the cashbox\n"
+              "4x | 1x | Power Supply to Low | Check power supply", "note_val_general"),
+]
+BV50 = [
+    _p("BV50 User Manual.txt", 44, "Count the bezel flash sequence.\n"
+       "Flashes | Interface\n1 | SSP\n2 | Pulse\n3 | MDB\n4 | IF3", "bv50"),
+    _p("BV50 User Manual.txt", 60, "Cleaning the note path.\nUse a dry cloth.", "bv50"),
+    _p("BV50 Guide.pdf", 8, "Flash Error\n2 Invalid card read.\n"
+       "3 No interface selection was detected on card.\n"
+       "4 Multiple interface selection detected.\n"
+       "5 Invalid interface selected.", "bv50"),
+    _p("BV50 Guide.pdf", 7, "4 - Click Function button, the bezel LEDs flash.\n"
+       "5 - Enter card.\n6 - Card will be rejected.", "bv50"),
+]
+HOPPER = [_p("SMART Hopper 3 Manual.pdf", 30, "Clearing a jam: turn the disk.", "smart_hopper_3")]
+NAMES = {"bv50": ["BV50"], "smart_hopper_3": ["SMART Hopper 3"], "nv9usb": ["NV9USB+"]}
+ALL = FLASH_DOC + BV50 + HOPPER
+
+
+def _flash_run(top_ids, query, chunks=ALL, excluded=(), **kw):
+    rdb._flash_docs_cache.update(key=None, docs={})
+    with patch.object(rdb, "_catalog_names", lambda: NAMES), \
+         patch.object(rdb, "is_excluded", lambda s: s in excluded):
+        return _run(chunks, top_ids, query, **kw)
+
+
+def _src(out, by):
+    return [(c["source"], c["id"].rsplit(":", 1)[1]) for c in out if c.get("fetched_by") == by]
+
+
+def test_the_products_flash_code_table_comes_first():
+    out = _flash_run(["BV50 User Manual.txt:x:44"],
+                     "config card spat out of the bv50 and the bezel flashed 4 times")
+    assert out[0]["id"] == f"{FD}:x:1" and out[0]["fetched_by"] == "flash_code_document"
+    assert out[0]["retrieval_score"] == 0.0
+    assert out[1]["id"] == "BV50 User Manual.txt:x:44"
+    # the Smart Hopper / SCS chunk has a "4x" row too, for another product
+    assert f"{FD}:x:0" not in [c["id"] for c in out]
+    # the product's own second flash table, appended; not a numbered step list
+    assert _src(out, "flash_table") == [("BV50 Guide.pdf", "8")]
+    assert out[-1]["id"] == "BV50 Guide.pdf:x:8"
+
+
+def test_a_title_without_a_code_names_its_product():
+    q = "our smart hopper is flashing red 4 times, coins stuck (SMART Hopper 3)"
+    out = _flash_run(["SMART Hopper 3 Manual.pdf:x:30"], q)
+    assert _src(out, "flash_code_document") == [(FD, "0")]
+    # "(SMART Hopper 3)" names the product; it is not a count of 3
+    with patch.object(rdb, "_catalog_names", lambda: NAMES):
+        assert rdb._flash_tables([], "smart hopper (SMART Hopper 3) flashing",
+                                 ALL, {c["id"]: c for c in ALL}) == []
+
+
+def test_no_product_or_no_count_adds_nothing():
+    for ids, q in ((["BV50 User Manual.txt:x:44"], "the bezel flashed 4 times, what is it"),
+                   (["BV50 User Manual.txt:x:44"], "my bv50 bezel keeps flashing, why")):
+        with patch.object(rdb, "_flash_tables", lambda out, *a, **k: out):
+            want = _flash_run(ids, q)
+        assert _flash_run(ids, q) == want
+
+
+def test_excluded_sources_are_never_added():
+    q = "bv50 flashed 4 times"
+    out = _flash_run(["BV50 User Manual.txt:x:44"], q, excluded={FD, "BV50 Guide.pdf"})
+    assert [c["id"] for c in out] == ["BV50 User Manual.txt:x:44"]
+
+
+def test_the_budget_is_shared_document_first():
+    by = {c["id"]: c for c in ALL}
+    doc = len(by[f"{FD}:x:1"]["text"])
+    with patch.object(rdb, "_catalog_names", lambda: NAMES), \
+         patch.object(rdb, "is_excluded", lambda s: False):
+        rdb._flash_docs_cache.update(key=None, docs={})
+        out = rdb._flash_tables([dict(by["BV50 User Manual.txt:x:44"])],
+                                "bv50 flashed 4 times", ALL, by, budget=doc + 5)
+        assert [c.get("fetched_by") for c in out] == ["flash_code_document", None]
+        out = rdb._flash_tables([dict(by["BV50 User Manual.txt:x:44"])],
+                                "bv50 flashed 4 times", ALL, by, budget=doc - 1)
+        assert _src(out, "flash_table") == [("BV50 Guide.pdf", "8")]
+        assert not _src(out, "flash_code_document")
+
+
+def test_a_document_not_titled_for_flash_codes_is_not_the_flash_document():
+    renamed = [dict(c, source="Device Status Tables.txt",
+                    id=c["id"].replace(FD, "Device Status Tables.txt")) for c in FLASH_DOC]
+    out = _flash_run(["BV50 User Manual.txt:x:44"], "bv50 flashed 4 times",
+                     chunks=renamed + BV50)
+    assert not _src(out, "flash_code_document")

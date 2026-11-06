@@ -240,6 +240,105 @@ def test_a_spelled_chunk_above_still_carries_its_table():
         _readout(FC12, tables.spell_out(FC11))
 
 
+# D-20261105-08: shapes copied from the live index. The Confluence NV10USB+
+# manual writes the matrix's column labels unpadded, one cell short.
+NV10_MATRIX = """[NV10USB+ User Manual — NV10USB+ Service Guide]
+The combination and their meanings can be found in the table below:
+Number of Long Flashes | Number of Short Flashes
+1 | 2 | 3 | 4
+1 | N/A | Note Path Jam | Unit not Initialised | Sensor Covered
+2 | N/A | N/A | N/A | N/A
+3 | Firmware Checksum | Interface Checksum | EEPROM Checksum | Dataset Checksum
+4 | PSU too Low | PSU too High | N/A | N/A
+Configuration Button"""
+
+# "ITL Device Flash Codes" chunks 0 and 1 (trimmed): the Smart Hopper and
+# SMART Coin System tables share chunk 1, each under a title with no code.
+FC0 = """[ITL Device Flash Codes]
+Flashes | Interface | Interface Settings
+1 | SSP | |
+4 | IF3 | |
+Smart Hopper Range
+LED Colour | Status (Flashes) | Description
+GREEN | Flashing 1Hz | Enabled and ready to dispense
+RED | 1x | Hopper Disabled
+RED | 4x | Coin Jam
+RED | 6x | Hopper Empty
+RED | 7x | Memory Checksum Error
+RED | 8x | Hopper Sensors are not initialised
+SMART Coin System Range
+Error Flash Codes"""
+FC1 = """[ITL Device Flash Codes]
+Empty
+RED | 7x | Memory Checksum Error
+RED | 8x | Hopper Sensors are not initialised
+SMART Coin System Range
+Error Flash Codes
+LED Colour | Status (Flashes) | Description | Recommended Action
+GREEN | Flashing 1Hz | Enabled and ready to dispense | N/A
+RED | 4x | Feeder Calibration Error | Remove power and check the connection.
+RED | 6x
+RED | 7x | Dataset/Unit type mismatch | Re-download SCS Firmware."""
+
+
+def test_an_unpadded_matrix_is_read_cell_by_cell():
+    out = tables.spell_out(NV10_MATRIX)
+    assert "Number of Long Flashes 1 and Number of Short Flashes 4: Sensor Covered" in out
+    assert "Number of Long Flashes 4 and Number of Short Flashes 1: PSU too Low" in out
+    assert "Number of Long Flashes 4 and Number of Short Flashes 2: PSU too High" in out
+    assert "N/A" not in out.split(tables.READ_MARK)[1]
+    assert tables.spell_out(out) == out
+    # the padded form is read as before
+    assert "Number of Short Flashes 2: Note Path Jam" in tables.spell_out(NV9_MATRIX)
+
+
+def test_one_count_tables_are_read_under_their_own_title():
+    out = _readout(FC0, None)
+    assert 'Read cell by cell under "Smart Hopper Range":' in out
+    assert "RED 4 flashes: Coin Jam" in out
+    assert "RED 1 flash: Hopper Disabled" in out
+    assert "Enabled and ready" not in out[len(FC0):]   # "Flashing 1Hz" is no count
+    # "Flashes | Interface" is a settings table, not a code meaning
+    assert "flashes: IF3" not in out and "flashes: SSP" not in out
+    out = _readout(FC1, FC0)
+    smart = out.split('Read cell by cell under "SMART Coin System Range":')
+    assert len(smart) == 2
+    # the overlap rows stay with the Smart Hopper, the 4x row with the SCS
+    assert "RED 7 flashes: Memory Checksum Error" in smart[0]
+    assert 'under "Smart Hopper Range":' in smart[0]
+    assert "RED 4 flashes: Feeder Calibration Error" in smart[1]
+    assert "Coin Jam" not in out
+    assert "RED 6 flashes" not in out                  # no description, no line
+
+
+def test_cba9_one_count_table_without_colour():
+    out = _readout(FC11, None)
+    assert 'Read cell by cell under "CBA9":' in out
+    assert "4 flashes: PSU Error" in out.split("\n")
+    # the long/short table that follows keeps its two-count reading
+    assert "Long flashes 1 and Short flashes 4: NV9USB Range: Rear Sensor Covered" in out
+
+
+def test_matrix_headers_get_no_one_count_readout():
+    for t in (NV9_MATRIX, NV10_MATRIX):
+        assert " flashes: " not in tables.spell_out(t)
+
+
+def test_a_cut_off_long_short_table_is_not_read_as_one_count():
+    """FC12 without the chunk above: its repeated header has no Long | Short
+    under it, and "4x | 1x" shows it is a two-count table after all."""
+    out = tables.spell_out(FC12)
+    assert "4 flashes: 1x" not in out
+    assert "5 flashes:" not in out and "2 flashes: Power Supply" not in out
+
+
+def test_one_count_read_outs_are_idempotent():
+    for text, above in ((FC0, None), (FC1, FC0), (FC11, None), (FC13, FC12)):
+        once = _readout(text, above)
+        assert once != text and once.startswith(text)
+        assert _readout(once, above) == once
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

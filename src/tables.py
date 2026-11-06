@@ -179,7 +179,46 @@ _MODEL_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]{2,4}-?\d{1,4}[A-Z]*\+?(?![A-Za-z0
 _CODES_LINE = re.compile(r"\bcodes?\s*$", re.I)
 # A read-out line spell_out wrote (at ingest, or on an earlier pass): not
 # document text, so it neither ends a table nor names one.
-_READOUT = re.compile(r"^(Read cell by cell\b.*:|.*\b\d+ and .*\b\d+: .*)$")
+_READOUT = re.compile(r"^(Read cell by cell\b.*:|.*\b\d+ and .*\b\d+: .*"
+                      r"|(?:[^:|]{1,40} )?\d+ flash(?:es)?: .*)$")
+
+# ONE-COUNT TABLES AND THEIR TITLES (D-20261105-08). The same document also
+# writes tables with a single count column, under a title with no model code:
+#
+#     Smart Hopper Range                              <- a plain title line
+#     LED Colour | Status (Flashes) | Description
+#     RED | 4x | Coin Jam
+#     ...
+#     SMART Coin System Range
+#     LED Colour | Status (Flashes) | Description | Recommended Action
+#     RED | 4x | Feeder Calibration Error
+#
+# Nothing read them, and nothing said which product a "RED | 4x" row is for:
+# "red 4 flashes" on a SMART Hopper was answered with the SMART Coin System
+# row. Now a short title line names the table under it, and each row is read
+# out as "RED 4 flashes: Coin Jam" under that title. The header must name
+# flashes in exactly one cell (two is a long/short matrix) followed by a
+# column that says what they mean (not "Flashes | Interface", a settings
+# table read the same way the document already writes it).
+_FLASHES_CELL = re.compile(r"\bflashes\b", re.I)
+_MEANING = re.compile(r"descri|error|status|fault|meaning|indicat|cause", re.I)
+
+
+def _is_title(s: str) -> bool:
+    """A short heading line: "Smart Hopper Range", "Bunch Note Feeder"."""
+    return (len(s) <= 60 and s[:1].isupper()
+            and not s.endswith((".", ":", ",", ";")))
+
+
+def _single_col(cs: list[str]) -> int | None:
+    """The count column of a one-count table header, else None."""
+    if sum(1 for c in cs if c) < 2 or not cs[0] or _count(cs[0]) is not None:
+        return None
+    hits = [i for i, c in enumerate(cs) if _FLASHES_CELL.search(c)]
+    if (len(hits) == 1 and hits[0] + 1 < len(cs)
+            and _MEANING.search(cs[hits[0] + 1])):
+        return hits[0]
+    return None
 
 
 def _count(v: str) -> int | None:
@@ -213,7 +252,11 @@ def _code_rows(lines: list[str]) -> list:
             table = None
             if len(s) <= 80 and not s.endswith((".", ":")) and _MODEL_RE.search(s):
                 pending = s
-            elif not _CODES_LINE.search(s):
+            elif _CODES_LINE.search(s):
+                pass                  # "Error Flash Codes" keeps the title above
+            elif _is_title(s):
+                pending = s
+            else:
                 pending = None
             continue
         cs = cells(s)
@@ -227,6 +270,34 @@ def _code_rows(lines: list[str]) -> list:
                      "act": None, "sub": nxt, "labels": [l if "flash" in l.lower()
                                             else f"{l} flashes" for l in sub]}
             pending = None            # one heading feeds one table
+            continue
+        col = None if sub else _single_col(cs)
+        if col is not None:
+            no += 1
+            table = {"no": no, "heading": pending, "header": cs, "single": col,
+                     "lead": "", "recs": []}
+            pending = None
+            continue
+        if table and table.get("single") is not None:
+            k = table["single"]
+            n = _count(cs[k]) if len(cs) > k + 1 else None
+            if n is None:
+                continue
+            desc = cs[k + 1]
+            if _count(desc) is not None:
+                # Two counts side by side: a long/short table whose header
+                # was cut off, not this one. Unsay what it was read as.
+                for j in table["recs"]:
+                    recs[j] = None
+                table = None
+                continue
+            lead = " ".join(c for c in cs[:k] if c) or table["lead"]
+            table["lead"] = lead
+            if desc:
+                recs[i] = (table["no"], table["heading"],
+                           f"{lead + ' ' if lead else ''}{n} "
+                           f"flash{'' if n == 1 else 'es'}: {desc}")
+                table["recs"].append(i)
             continue
         if not table or s == table["sub"]:
             continue
@@ -337,6 +408,14 @@ def spell_out(text: str, above: str | None = None) -> str:
         rows = [cells(l) for l in lines[start:end]]
         header = rows[0]
         axes = _matrix_axes(header)
+        # The Confluence copies write the column labels unpadded, one cell
+        # short of the data rows: "1 | 2 | 3 | 4" (NV10USB+, BV50). Unread,
+        # "4 | PSU too Low | PSU too High" was taken as "4 flashes = PSU".
+        if (axes and len(rows) >= 3 and not _is_column_labels(rows[1])
+                and all(_CODE_AXIS.search(a) for a in axes)
+                and rows[1] and all(_is_int(c) for c in rows[1])
+                and len(rows[1]) == len(rows[2]) - 1):
+            rows = [header, [""] + rows[1]] + rows[2:]
         if axes and len(rows) >= 3 and _is_column_labels(rows[1]):
             # A matrix is never filled down: its column-label row starts
             # with a blank on purpose. Already read out -> leave it alone.
