@@ -1596,6 +1596,154 @@ def _referenced_sections(out: list[dict], query: str, all_chunks: list[dict],
     return out + added if added else out
 
 
+# FLASH TABLES FOR THE PRODUCT ASKED ABOUT (D-20261105-08). Ranking found the
+# wrong product's table, or the right product's wrong table, three ways:
+# "nv9usb and nv10usb, 4 flashes" got the manuals and never the shared "ITL
+# Device Flash Codes" row that names both; "smart hopper flashing red 4 times"
+# got the SMART Coin System table ("Feeder Calibration Error") that shares the
+# Smart Hopper's chunk, not the Smart Hopper's own ("Coin Jam"); a BV50 card
+# rejected with 4 flashes got the interface table ("4 | IF3"), not the card
+# error table in the Dipswitch guide. So a flash question that names a product
+# and a count reads the flash-code document's table headed for that product
+# first, and the product's own flash tables with a row for that count after
+# the ranked passages, inside one budget. Without a product or a count it adds
+# nothing.
+FLASH_TABLE_CHARS = int(os.getenv("FLASH_TABLE_CHARS", "3200"))
+_FLASH_DOC = re.compile(r"flash[\s_-]*codes?", re.I)
+_HEADING_STOP = {"range", "and", "the", "of", "codes", "code", "flash", "error",
+                 "status", "series", "module", "interface"}
+# A row that starts with a count: "4 | IF3", "4x | Coin Jam", "4 Multiple interface
+# selection detected" (PDF text). Not a numbered step ("4 - Click Function").
+_COUNT_LINE = re.compile(r"^\|?\s*(\d{1,2})\s*x?\s*(?:\||$|(?=[A-Za-z]))", re.I)
+_flash_docs_cache: dict = {"key": None, "docs": {}}
+
+
+def _flat(s: str) -> str:
+    return "".join(re.findall(r"[a-z0-9]+", (s or "").lower()))
+
+
+def _catalog_names() -> dict:
+    """product key -> [catalogue name and aliases]."""
+    try:
+        import catalog
+        return {p["key"]: [p.get("name") or ""] + list(p.get("aliases") or [])
+                for c in catalog.catalog().get("categories", [])
+                for p in c.get("products", []) if p.get("key")}
+    except Exception as exc:
+        logger.warning(f"catalogue names unavailable: {exc}")
+        return {}
+
+
+def _flash_code_docs(all_chunks: list[dict], by_id: dict) -> dict:
+    """{source: [(chunk, tables.code_groups of it)]} in document order, for
+    each document titled for flash codes whose tables sit under two or more
+    headings. Cached per chunk list (the BM25 cache replaces it on any index
+    change)."""
+    if _flash_docs_cache["key"] is all_chunks:   # the list itself: a freed id is reused
+        return _flash_docs_cache["docs"]
+    import tables as _tables
+    by_src: dict = {}
+    for c in all_chunks:
+        if _FLASH_DOC.search(os.path.splitext(c.get("source") or "")[0]):
+            by_src.setdefault(c["source"], []).append(c)
+    docs = {}
+    for src, cs in by_src.items():
+        rows = []
+        for c in sorted(cs, key=lambda c: _order_key(c["id"])):
+            above = by_id.get(_neighbour_id(c["id"], -1)) or {}
+            rows.append((c, _tables.code_groups(c.get("text") or "", above.get("text"))))
+        if len({h for _, gs in rows for h, _ in gs if h}) >= 2:
+            docs[src] = rows
+    _flash_docs_cache.update(key=all_chunks, docs=docs)
+    return docs
+
+
+def _heading_names(heading: str, forms: set, qwords: set) -> bool:
+    """Whether a table heading names a product the question names: by model
+    code ("BV Range (BV20, BV30, BV50 and BV100)" for "bv50"), or, with no
+    code, by every word of its name ("Smart Hopper Range")."""
+    import tables as _tables
+    codes = [_flat(m) for m in _tables._MODEL_RE.findall(heading)]
+    if codes:
+        return any(c in forms for c in codes)
+    words = set(re.findall(r"[a-z0-9]+", heading.lower())) - _HEADING_STOP
+    return bool(words) and words <= qwords
+
+
+def _flash_tables(out: list[dict], query: str, all_chunks: list[dict],
+                  by_id: dict, budget: int = FLASH_TABLE_CHARS) -> list[dict]:
+    import tables as _tables
+    names = _catalog_names()
+    q = query
+    for ns in names.values():          # "SMART Hopper 3" is not a count of 3
+        for n in ns:
+            if len(n) > 2:
+                q = re.sub(re.escape(n), " ", q, flags=re.I)
+    asked = {int(d) if d else _COUNT_WORDS[w.lower()] for d, w in _Q_COUNT.findall(q)}
+    if not asked:
+        return out
+    words = re.findall(r"[a-z0-9]+", query.lower())
+    qwords = set(words)
+    forms = {"".join(words[i:i + n]) for n in (1, 2, 3) for i in range(len(words))}
+    have = {c.get("id") for c in out}
+    spent = 0
+
+    # The flash-code document's tables headed for the asked product, first.
+    docs = _flash_code_docs(all_chunks, by_id)
+    front, seen = [], set()
+    for src, rows in docs.items():
+        if is_excluded(src):
+            continue
+        for c, groups in rows:
+            # A row is its heading and counts: the next chunk's overlap repeats
+            # it, sometimes with a word of the next line glued on.
+            new = [(h, ln.split(":")[0]) for h, lines in groups
+                   if h and _heading_names(h, forms, qwords) for ln in lines
+                   if (h, ln.split(":")[0]) not in seen
+                   and asked & {int(n) for n in re.findall(r"\d+", ln.split(":")[0])}]
+            seen.update(new)
+            n = len(c.get("text") or "")
+            if not new or c["id"] in have or spent + n > budget:
+                continue
+            spent += n
+            have.add(c["id"])
+            front.append(dict(c, retrieval_score=0.0, fetched_by="flash_code_document"))
+            logger.info("flash table: %s (flash-code document)", c["id"])
+
+    # The product's own flash tables with a row for the asked count, after.
+    keys = set()
+    for c in out:
+        tags = (by_id.get(c.get("id")) or c).get("product") or ""
+        for k in (t.strip() for t in tags.split(",")):
+            if k and not k.endswith("_general") and (
+                    _flat(k) in forms or any(_flat(n) in forms for n in names.get(k, ()))):
+                keys.add(k)
+    cands = []
+    for a in all_chunks if keys else ():
+        src = a.get("source")
+        if (a["id"] in have or src in docs or is_excluded(src)
+                or not keys & {t.strip() for t in (a.get("product") or "").split(",")}):
+            continue
+        lines = [l.strip() for l in _tables.split_prefix(a.get("text") or "")[1].split("\n")
+                 if l.strip() and not _tables._READOUT.match(l.strip())]
+        counted = [int(m.group(1)) for m in map(_COUNT_LINE.match, lines) if m]
+        if (len(counted) < 3 or not asked & set(counted)
+                or not any(_FLASH_Q.search(l) for l in lines if not _COUNT_LINE.match(l))):
+            continue
+        own = set(re.findall(r"[a-z0-9]+", (a.get("text") or "").lower()))
+        score = sum(1 for w in qwords if len(w) >= 4 and w in own)
+        cands.append((-score, src, _order_key(a["id"]), a))
+    back = []
+    for *_, a in sorted(cands, key=lambda t: t[:3]):
+        n = len(a.get("text") or "")
+        if spent + n > budget:
+            continue
+        spent += n
+        back.append(dict(a, retrieval_score=0.0, fetched_by="flash_table"))
+        logger.info("flash table: %s (product's own table)", a["id"])
+    return front + out + back if front or back else out
+
+
 def complete_tables(chunks: list[dict],
                     budget: int = TABLE_COMPLETION_CHARS,
                     query: str | None = None) -> list[dict]:
@@ -1624,7 +1772,10 @@ def complete_tables(chunks: list[dict],
     followed through every continuation, not one: the NV4000 bezel table runs
     chunks 98 -> 99 -> 100 and "4 red then 1 blue" is on 100. And the opening chunk of the section
     the asked row points at ("...in Power Requirements") is appended
-    (_referenced_sections). Without `query`, behaviour is as before.
+    (_referenced_sections). And when it names a product and a count, the
+    flash-code document's table for that product goes first and the
+    product's own flash tables with that count last (_flash_tables,
+    D-20261105-08). Without `query`, behaviour is as before.
     """
     if not chunks:
         return chunks
@@ -1702,6 +1853,7 @@ def complete_tables(chunks: list[dict],
                     _emit(c)
         if flash:
             out = _referenced_sections(out, query, all_chunks)
+            out = _flash_tables(out, query, all_chunks, by_id)
         return out
     except Exception as exc:
         logger.warning(f"table completion skipped: {exc}")
