@@ -37,6 +37,7 @@ Allowed, because the product does these today:
 - Certifications (SOC 2, ISO 27001, HIPAA) or uptime SLAs.
 - Final prices. Use `$XX` placeholders; the price *structure* is in section 5.
 - A domain. Use `groundedops.example` everywhere.
+- Language claim: only "answers in French, German and Spanish (tested within a few points of English)". Do not say "equally well", "any language", or name Polish, Arabic or any other language until measured.
 
 ---
 
@@ -113,7 +114,9 @@ Upload → parse page by page → chunk on step boundaries → **question comes 
 Highlight the two points where the system *stops* rather than guesses.
 
 ### 4.3 Features
-Grouped cards: **Answering** (scoped search, cross-product/spec-table answers, deep answers, clarifying questions, follow-up memory) · **Curation** (FAQ approval, gaps log, catalogue of categories → products → documents) · **Embedding** (script tag, WordPress plugin, branding, visitor tiers) · **Control** (credits, caps, provider alerts, model routing) · **Admin** (roles, SSO, audit).
+Grouped cards: **Answering** (scoped search, cross-product/spec-table answers, deep answers, clarifying questions, follow-up memory, multilingual answers) · **Curation** (FAQ approval, gaps log, catalogue of categories → products → documents) · **Embedding** (script tag, WordPress plugin, branding, visitor tiers) · **Control** (credits, caps, provider alerts, model routing) · **Admin** (roles, SSO, audit).
+
+Answers in French, German and Spanish (tested within a few points of English).
 
 ### 4.4 Security & deployment
 Use this copy as written (approved by the CEO 2026-10-08, decision D-20261008-09). Do not show certification badges. "On-premises control of keys and data" may be said of the two self-hosted modes only, never as a general claim.
