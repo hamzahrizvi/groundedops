@@ -162,7 +162,8 @@ def test_forget_against_a_test_log_folder():
         "session_id": sid, "delete_token": tok, "visitor_id": "fv-1"})
     with patch.dict(sys.modules, {"logger": real_log}), \
             patch.object(real_log, "LOG_FILE", logs), \
-            patch.object(widget_api, "_FEEDBACK_PATH", os.path.join(tmp, "widget_feedback.json")),             patch.object(feedback_store, "RATINGS_PATH", os.path.join(tmp, "widget_ratings.json")):
+            patch.object(widget_api, "_FEEDBACK_PATH", os.path.join(tmp, "widget_feedback.json")), \
+            patch.object(feedback_store, "RATINGS_PATH", os.path.join(tmp, "widget_ratings.json")):
         rate = {"stars": 4, "comment": "c", "questions": ["q"], "created_at": "2026-11-04T10:00:00+00:00"}
         with open(os.path.join(tmp, "widget_ratings.json"), "w", encoding="utf-8") as f:
             json.dump({"forget-sid-0001": rate, "someone-else": rate}, f)
