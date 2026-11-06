@@ -19,7 +19,8 @@ from the decisions file, and a note is quoted so it can never read as a decision
   sync     nothing on disk: the lane that applies it re-uploads the office page's brief, and starts no work for it
   run_now  OPS/state/run_now/<id> (id = a department): its next start skips the budget pace and a hold
            (office_next.py); for customer it also files a refresh request, so a held-back test run goes first;
-           with item (a Plan board card) for the product owner, also a note naming that item, so the run decides it
+           with item (a Plan board card) for the product owner, also a note naming that item, so the run decides it;
+           with item "outside-changes", a note asking it to tick the outside changes from the sessions' reported checks
   run_all  OPS/state/run_now/all: for one lane tick every department with work waiting skips the budget pace and holds
   reassign "- Reassigned: <note>" + approved: an approved or blocked item moves to another department
            (note = dev, customer, security, audit, rnd or marketing), e.g. a work order its department could not do
@@ -129,6 +130,19 @@ def apply(ops, folder, now=None):
                 open(os.path.join(ops, "state", "refresh_request"), "w", encoding="utf-8").write(f"{stamp} {doc_id}" + chr(10))
             item = str(d.get("item") or "")
             NL2 = chr(10) * 2
+            # the pop-up's "Sync outside changes" (the CEO, 2026-11-06); a page published before 6 Nov sends it as the note
+            if i == "product-owner" and "outside-changes" in (item, str(d.get("note") or "")):
+                os.makedirs(os.path.join(ops, "inbox", "ceo"), exist_ok=True)
+                path = os.path.join(ops, "inbox", "ceo", f"{now:%Y%m%d-%H%M%S}-{re.sub(r'[^A-Za-z0-9-]', '', doc_id)[:40]}.md")
+                open(path, "w", encoding="utf-8").write(
+                    "# A note from the CEO: sync the changes made outside the office" + NL2 + f"Sent from the office page, {stamp}:"
+                    " the CEO pressed \"Sync outside changes\". In this run, go through every open line of OPS/state/changes.md"
+                    " as \"Tick off changes made outside a work order\" says, using the checks the sessions reported"
+                    " (OPS/state/checks/) and their notes in OPS/inbox/ceo/, and order no test they already ran. For each change,"
+                    " also look in PENDING.md and the open decisions for an item it already does or one it conflicts with."
+                    " Report what you ticked, what stays open and the one thing that would close it, and every match you found." + chr(10))
+                out.append(f"APPLIED {doc_id} run_now {i} for outside changes")
+                continue
             if i == "product-owner" and item in items:   # a card's "Do it now": without its id the run saw nothing new (2026-10-16)
                 os.makedirs(os.path.join(ops, "inbox", "ceo"), exist_ok=True)
                 path = os.path.join(ops, "inbox", "ceo", f"{now:%Y%m%d-%H%M%S}-{re.sub(r'[^A-Za-z0-9-]', '', doc_id)[:40]}.md")
@@ -271,6 +285,11 @@ def selftest():
         row("24", id="product-owner", choice="run_now", item="D-20261008-01")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 24 run_now product-owner for D-20261008-01"]
         assert "D-20261008-01" in open(glob.glob(os.path.join(ops, "inbox", "ceo", "*-24.md"))[0], encoding="utf-8").read()
+        row("25", id="product-owner", choice="run_now", item="outside-changes")
+        row("26", id="product-owner", choice="run_now", note="outside-changes")
+        assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 25 run_now product-owner for outside changes",
+                                                         "APPLIED 26 run_now product-owner for outside changes"]
+        assert "OPS/state/checks/" in open(glob.glob(os.path.join(ops, "inbox", "ceo", "*-25.md"))[0], encoding="utf-8").read()
         row("16", id="security", choice="run_now")
         row("17", id="../x", choice="run_now")
         assert apply(ops, os.path.join(ops, "pull")) == ["APPLIED 16 run_now security", "SKIPPED 17 run_now: no such department '../x'"]

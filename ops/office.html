@@ -1684,7 +1684,7 @@ function alertAction(a, act){
   b.addEventListener("click", async () => {
     if(act.tab){ pop.close(); showTab(act.tab, true); return; }
     b.disabled = true; b.textContent = "Sending";
-    try { await decide(act.id, act.choice, act.note || `${act.label}: ${a.title}`, a.title); b.textContent = "Sent: applied at the next hourly check"; }
+    try { await decide(act.id, act.choice, act.note || `${act.label}: ${a.title}`, a.title, act.item ? {item: act.item} : {}); b.textContent = "Sent: applied at the next hourly check"; }
     catch(e){ b.disabled = false; b.textContent = act.label; b.title = writeError(e); }
   });
   return b;

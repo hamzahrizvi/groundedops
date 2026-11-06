@@ -271,6 +271,15 @@ covers it and it belongs, and files a finding for one that broke something.
 The page shows "N changes not yet checked by the product owner" until the list
 is clear: push only then.
 
+A session that tested its own change says so in `OPS/state/checks/<name>.md`
+("Covers: <commit keys>", then what it ran and the results); the list shows it
+beside each change it covers, and the product owner ticks on that evidence
+instead of waiting for a test run or ordering the same checks again. The
+pop-up's "Sync outside changes with the product owner" button starts the
+product owner at the next hourly check with a note to do exactly that, and to
+look in PENDING.md and the open decisions for items each change already does
+or conflicts with (the CEO, 2026-11-06).
+
 ## Boards and rewards
 
 `tools/ops_ledger.py` builds three things from the files below and from git,

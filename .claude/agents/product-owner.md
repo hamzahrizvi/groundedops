@@ -209,10 +209,19 @@ look at every open line, oldest first:
   change's files. An office change (`tools/`, `ops/`, `.claude/`, a task) is
   tested when every touched tool's `--selftest` passes (run it) and the office
   ran since without a FAILED or STUCK caused by it. No test run yet: leave it
-  open.
+  open, unless "checks reported" names a file: a session's own checks
+  (`OPS/state/checks/<name>.md`, the CEO, 2026-11-06). Read it and its note in
+  `OPS/inbox/ceo/` if any: the full unit suite passed on that commit or a later
+  one, plus, for a change to answers, lab or live questions on what it changed.
+  When that covers the change's files, it is tested: do not order those checks
+  again. Leave it open only for what the report does not cover, and say what.
+- Already planned, or in the way? Grep `REPO/PENDING.md` and the open items of
+  the decisions files for the change's subject. An open item it already does:
+  close it as done outside the office and name the change. One it conflicts
+  with, or that now needs its scope changed: say so in the report and decide it.
 - Approved? It belongs: not a patch for one question, not something on the
   rejected list or against a decision, and its files match what its message says.
-- Both: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/change_list.py"
+- Tested and approved: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/change_list.py"
   --ops "<OPS>" tick <key> "<the run or selftest that tested it>; <why it is
   approved>"`. Tick only lines you checked yourself, never in bulk.
 - A change that broke something or does not belong: leave it open and file it

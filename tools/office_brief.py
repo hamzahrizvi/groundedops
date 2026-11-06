@@ -154,8 +154,10 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
         out.append({"id": f"changes-{n}", "title": f"{n} change{'s' if n > 1 else ''} not yet checked by the product owner",
                     "why": "They were made in Claude sessions or by editing a scheduled task, not through a work order, so no"
                            " test or decision has looked at them yet. The product owner ticks each one off at its next check.",
-                    "suggest": "Push only once this is clear. To have them checked sooner, press “Do it now” on the"
-                               " product owner's desk.", "actions": []})
+                    "suggest": "Push only once this is clear. To have them checked sooner, sync them: the product owner"
+                               " ticks what the sessions' reported checks cover and looks for similar or conflicting plan items.",
+                    "actions": [{"label": "Sync outside changes with the product owner", "choice": "run_now",
+                                 "id": "product-owner", "item": "outside-changes", "note": "outside-changes"}]})
     lab = cap_status(ops)
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",

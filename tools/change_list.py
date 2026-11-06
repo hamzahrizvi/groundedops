@@ -14,6 +14,11 @@ so nobody pushes an unchecked change. The office's own PENDING.md commits are le
 
 State: OPS/state/changes.json. The list the product owner reads: OPS/state/changes.md. A branch
 or task seen for the first time is only recorded, so the list starts from that scan.
+
+A session that tested its own change reports it in OPS/state/checks/<name>.md: a line
+"Covers: <key> <key> ..." (the keys this list shows, or longer commit ids) and, below it, what
+it ran and what came out. The list shows "checks reported: <name>.md" beside each change a report
+covers, so the product owner weighs that evidence instead of ordering the same checks again.
 """
 import argparse
 import datetime
@@ -108,8 +113,25 @@ def runs_after(ops, when):
     return sorted(os.path.basename(os.path.dirname(p)) for p in done if os.path.exists(p) and os.path.getmtime(p) > when)
 
 
+def reported(ops):
+    """{covered key or commit id: [report file names]} from OPS/state/checks/*.md "Covers:" lines."""
+    out = {}
+    for p in sorted(glob.glob(os.path.join(ops, "state", "checks", "*.md"))):
+        try:
+            text = open(p, encoding="utf-8").read()
+        except OSError:
+            continue
+        for m in re.finditer(r"^Covers:(.*)$", text, re.M):
+            for k in m.group(1).replace(",", " ").split():
+                out.setdefault(k, []).append(os.path.basename(p))
+    return out
+
+
 def render(ops, st, now):
     day = lambda t: datetime.datetime.fromtimestamp(t).strftime("%d %b %H:%M")
+    rep = reported(ops)
+    # a report may name the list's 8-character key or a longer commit id
+    checked = lambda key: sorted({n for k, ns in rep.items() if k.startswith(key) or key.startswith(k) for n in ns})
     lines = ["# Changes to tick", "",
              "Written by tools/change_list.py. Tick a change once it is tested and you approve it:",
              '`python tools/change_list.py --ops <OPS> tick <key> "<what tested it, and why it is approved>"`.', "",
@@ -117,7 +139,8 @@ def render(ops, st, now):
     for i in (i for i in st["items"] if not i["ticked"]):
         r = runs_after(ops, i["when"])
         lines.append(f"- [ ] `{i['key']}` | {i['where']} ({i['branch']}) | {i['what']} | {day(i['when'])}"
-                     f" | files: {', '.join(i['files']) or 'none'} | test runs since: {', '.join(r[:3]) or 'none yet'}")
+                     f" | files: {', '.join(i['files']) or 'none'} | test runs since: {', '.join(r[:3]) or 'none yet'}"
+                     f" | checks reported: {', '.join(checked(i['key'])) or 'none'}")
     lines += ["", "## Ticked in the last 14 days", ""]
     lines += [f"- [x] `{i['key']}` | {i['where']} | {i['what']} | {i.get('note', '')}" for i in st["items"]
               if i["ticked"] and now - i.get("ticked_at", i["when"]) < RECENT]
@@ -190,6 +213,13 @@ def selftest():
         assert OWN not in md and "20261101-gate" not in md and "test runs since: 20261101" in md, md
         assert "Scheduled task groundedops-office-dev: its instructions changed" in md, md
         key = next(i["key"] for i in st["items"] if i["what"] == "fix: a session's own commit")
+        sha = git(product, "log", "--format=%H", "-1", "--", "b.txt")
+        os.makedirs(os.path.join(ops, "state", "checks"))
+        w(os.path.join(ops, "state", "checks", "s1.md"), f"# Session checks\nCovers: {sha}\nFull suite: 400 passed.\n")
+        scan(ops, repos, tdir)
+        md = open(os.path.join(ops, "state", "changes.md"), encoding="utf-8").read()
+        assert next(ln for ln in md.splitlines() if key in ln).endswith("checks reported: s1.md"), md
+        assert md.count("checks reported: none") == 3, "a report covers only the commits it names"
         assert tick(ops, key, "run 20261101 shows no drop; belongs") == f"TICKED {key}" and open_count(ops) == 3
         assert tick(ops, key, "again") == f"NO OPEN CHANGE {key}", "a change is ticked once"
         assert scan(ops, repos, tdir).startswith("CHANGES 3 open (0 new)"), "a second scan adds nothing"
