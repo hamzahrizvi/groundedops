@@ -338,13 +338,12 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261022-02 | The website may say the bot answers in French, German and Spanish | approved, queued | Dev builds it |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-04 | A question about two products, or with two asks across two manuals, gets "which section do you mean?" or a decline although both manuals hold the facts | approved, queued | Dev builds it |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
 | D-20261105-08 | Flash codes: a count is read from the wrong product's table, so the customer is told the wrong fault | ready to merge | merges once Security clears it |
-| D-20261106-02 | The test runner answers the new "Which model do you have?" question once, like a customer tapping a card | built, waiting for the check | the pre-ship check |
+| D-20261106-02 | The test runner answers the new "Which model do you have?" question once, like a customer tapping a card | ready to merge | merges once Security clears it |
 | D-20261106-04 | Hidden questions that name a product only by its family, say "not sure which", or ask about an obsolete product | approved, queued | Dev builds it |
 | D-20261106-05 | What describing the manuals' pictures costs, against what the picture test gains | approved, queued | Dev builds it |
 | D-20261106-06 | The office page shows an id's first-ever title, so a CEO tick or park can land on the wrong item | approved, queued | Dev builds it |
@@ -381,6 +380,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261021-04 | Security item D-20261021-04, details in the office | deferred | parked |
 | D-20261021-09 | The website screenshots show a dummy phone number, a doubled greeting and an old refusal layout | deferred | parked |
 | D-20261021-24 | A customer's own email is refused when the installer offers to create the Owner account | deferred | parked |
+| D-20261022-02 | The website may say the bot answers in French, German and Spanish | deferred | parked |
 | D-20261022-05 | Delete the short answer prompt that was tried and turned down | deferred | parked |
 | D-20261022-08 | Send the fixed answer rules first on every call so a hosted answer costs about 40% less | deferred | parked |
 | D-20261024-12 | Measure the fully offline tier on a modern open model, and name the hardware it needs | deferred | parked |
