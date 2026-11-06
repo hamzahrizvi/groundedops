@@ -72,16 +72,18 @@ def main():
                           DEEPSEEK_API_KEY="test-not-a-key", LAB_PROVIDER="deepseek")
         cases = [{"id": "a", "q": "fam q", "type": "fact", "expected": "answered", "reference": "r", "product": "nv9usb"},
                  {"id": "b", "q": "fam q2", "type": "fact", "expected": "answered", "reference": "r"},
+                 {"id": "d", "q": "fam q3", "type": "vague", "expected": "clarify", "reference": "r", "product": "nv9usb"},
                  {"id": "c", "q": "plain q", "type": "fact", "expected": "answered", "reference": "r", "product": "nv9usb"}]
         run = os.path.join(tmp, "r"); os.makedirs(os.path.join(run, "manuals"))
         open(os.path.join(run, "manuals", "nv9usb.txt"), "w").write("[m.pdf p1] text")
         json.dump({"cases": cases}, open(os.path.join(run, "cases.json"), "w"))
         assert be(run, "system", "normal")[0] == 0
         calls = sys.modules["main"].CALLS
-        assert calls == [("fam q", "nv9usb"), ("q (NV9 USB)", "nv9usb"), ("fam q2", None), ("plain q", "nv9usb")], calls
+        assert calls == [("fam q", "nv9usb"), ("q (NV9 USB)", "nv9usb"), ("fam q2", None), ("fam q3", "nv9usb"), ("plain q", "nv9usb")], calls
         rows = state(run)["sys_normal"]
         assert rows["a"]["answer"] == "real answer" and rows["a"]["family_ask"]["answer"] == "Which NV9?"
         assert rows["b"]["answer"] == "Which NV9?" and "family_ask" not in rows["b"]
+        assert rows["d"]["answer"] == "Which NV9?" and "family_ask" not in rows["d"]
         assert rows["c"]["answer"] == "plain" and "family_ask" not in rows["c"]
         assert be(run, "grade")[0] == 0
         assert state(run)["summary"]["sys_normal"]["family_asked"] == 1

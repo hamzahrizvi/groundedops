@@ -53,7 +53,8 @@ Env:
            A correct_refusal on a case not expected 'rejected' is stored as safe_decline, score <= 1 (D-20261016-14).
            A missing must_include fact caps an "answered" case at 2 (partial); a clarifying question scores 3 on any product (D-20261020-04).
            A case with "figure" (a crop name, or a list) and "source" (its document) also gets "figure_found": the crop is among the answer's shown figures for that document; summary.<sys_*>.images = {n, figure_found, explanation_right (score 3), found, right} (D-20261022-14, tools/image_set.py).
-           A reply with family_options (the "which model?" cards) is followed by a tap on the card matching the case's product, as the widget does; the row answer is the second reply, row.family_ask keeps the first; summary.<sys_*>.family_asked counts them (D-20261106-02).
+           A reply with family_options (the "which model?" cards) is followed by a tap on the card matching the case's product, as the widget does
+           (not on a case expected to "clarify": the families question is that clarification); the row answer is the second reply, row.family_ask keeps the first; summary.<sys_*>.family_asked counts them (D-20261106-02).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -241,7 +242,7 @@ if phase == "system":
         fam_ask = None
         want = c.get("product") or next(iter(c.get("compare_with") or []), None)
         opts = d.get("family_options") or []
-        if opts and want:
+        if opts and want and c.get("expected") != "clarify":   # a case expecting a clarification already has one
             pick = next((o for o in opts if o.get("product") == want), None)
             if pick:   # what the widget does when a card is tapped: its `send` text, same session, the chat's product unchanged
                 fam_ask = {"answer": d.get("answer", ""), "options": [o.get("label") for o in opts], "tapped": pick.get("label")}
