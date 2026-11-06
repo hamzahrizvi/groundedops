@@ -53,6 +53,7 @@ Env:
            A correct_refusal on a case not expected 'rejected' is stored as safe_decline, score <= 1 (D-20261016-14).
            A missing must_include fact caps an "answered" case at 2 (partial); a clarifying question scores 3 on any product (D-20261020-04).
            A case with "figure" (a crop name, or a list) and "source" (its document) also gets "figure_found": the crop is among the answer's shown figures for that document; summary.<sys_*>.images = {n, figure_found, explanation_right (score 3), found, right} (D-20261022-14, tools/image_set.py).
+           A reply with family_options (the "which model?" cards) is followed by a tap on the card matching the case's product, as the widget does; the row answer is the second reply, row.family_ask keeps the first; summary.<sys_*>.family_asked counts them (D-20261106-02).
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -237,6 +238,14 @@ if phase == "system":
             main._traced_query(main.QueryRequest(q=c["turn1"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
         usage.clear(); t = time.time()
         d = main._traced_query(main.QueryRequest(q=c["q"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
+        fam_ask = None
+        want = c.get("product") or next(iter(c.get("compare_with") or []), None)
+        opts = d.get("family_options") or []
+        if opts and want:
+            pick = next((o for o in opts if o.get("product") == want), None)
+            if pick:   # what the widget does when a card is tapped: its `send` text, same session
+                fam_ask = {"answer": d.get("answer", ""), "options": [o.get("label") for o in opts], "tapped": pick.get("label")}
+                d = main._traced_query(main.QueryRequest(q=pick["send"], product=pick.get("product") or None, session_id=sid), None, attach=True)
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
@@ -244,7 +253,8 @@ if phase == "system":
                          "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
                          "figures": {s["source"]: [f.get("name") for f in s.get("figures") or []] for s in d.get("sources") or []
                                      if isinstance(s, dict) and s.get("figures")},   # pictures shown beside the answer (D-20261022-14)
-                         "at": time.strftime("%Y-%m-%d")}   # the day it was spent (tools/ops_costs.py)
+                         "at": time.strftime("%Y-%m-%d"),   # the day it was spent (tools/ops_costs.py)
+                         **({"family_ask": fam_ask} if fam_ask else {})}
         spent += rows[c["id"]]["usd"]
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
 
@@ -422,6 +432,7 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
         walls, cost = [r["wall"] for r in real] or [0], [r["usd"] for r in real] or [0]
         summary[s] = {"pct_of_max": round(100 * sum(sc) / (3 * len(sc)), 1), "mean": round(st.mean(sc), 2),
                       "verdicts": {v: vd.count(v) for v in sorted(set(vd))},
+                      "family_asked": sum(1 for c in ok if state[s][c["id"]].get("family_ask")),
                       "median_s": st.median(walls), "p90_s": sorted(walls)[int(.9 * len(walls))],
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
