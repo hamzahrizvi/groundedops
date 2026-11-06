@@ -104,6 +104,8 @@ os.environ["FAQ_GAP_PATH"] = _scratch("faq_gaps.json")
 os.environ["WIDGET_CONFIG_PATH"] = _scratch("widget_config.json")
 os.environ["WIDGET_LEADS_PATH"] = _scratch("widget_leads.json")
 os.environ["WIDGET_FEEDBACK_PATH"] = _scratch("widget_feedback.json")
+os.environ["WIDGET_RATINGS_PATH"] = _scratch("widget_ratings.json")
+os.environ["TESTER_REPORTS_PATH"] = _scratch("tester_reports.json")
 os.environ["CATALOG_CONFIG"] = _scratch("catalog.json")
 # An ingest refreshes the families (families.refresh_in_background), which
 # wrote src/product_families.json and changed every later test's answers.

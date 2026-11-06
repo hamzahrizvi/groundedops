@@ -40,6 +40,7 @@ from typing import Annotated, Literal
 
 import faq_store
 import pipeline_trace
+import feedback_store
 import jsonstore
 import quota
 import text_utils
@@ -103,6 +104,13 @@ class ForgetRequest(BaseModel):
     session_id: str = Field(..., min_length=8, max_length=MAX_ID_CHARS)
     delete_token: str = Field("", max_length=MAX_ID_CHARS)
     visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+
+
+class RatingRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=MAX_ID_CHARS)
+    visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    stars: int = Field(..., ge=1, le=5)
+    comment: str = Field("", max_length=500)
 
 
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
@@ -1005,6 +1013,29 @@ def register(app, answer_query, draft_enquiry=None):
         import retention
         retention.erase(session_ids=[payload.session_id], source="visitor")
         return {"deleted": True}
+
+    @router.post("/rating")
+    def widget_rating(payload: RatingRequest, request: Request):
+        """PUBLIC -- 1 to 5 stars for a whole conversation, asked when the
+        visitor closes or restarts it, with an optional comment.
+
+        Not tied to a remembered answer like /feedback: a guest's chat is
+        curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
+        most visitors. The shared limiter is what bounds made-up sessions.
+        """
+        gate = quota.check_public_write("feedback", payload.visitor_id,
+                                        _client_ip(request))
+        if not gate["allowed"]:
+            raise HTTPException(status_code=429,
+                                detail="Too many ratings today. Thank you, though.")
+        with _recent_lock:
+            asked = [v for v in _RECENT_ANSWERS.values()
+                     if v["session_id"] == payload.session_id]
+        feedback_store.save_rating(payload.session_id, payload.stars,
+                                   payload.comment,
+                                   asked[-1]["scope"] if asked else None,
+                                   [v["q"] for v in asked])
+        return {"received": True}
 
     @router.post("/ask/stream")
     async def widget_ask_stream(payload: AskRequest, request: Request):

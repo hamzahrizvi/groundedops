@@ -82,6 +82,9 @@ widget_config.json
 widget_leads.json
 # widget_feedback.json holds visitor questions, answers, notes and session ids from the widget's thumbs up/down.
 widget_feedback.json
+# widget_ratings.json holds visitor stars, comments and questions; tester_reports.json staff notes from the Test chat.
+widget_ratings.json
+tester_reports.json
 # Admin accounts: password hashes and staff email addresses. Never commit
 # this, and note that it is NOT regenerated — losing it means losing every
 # account, so it needs a real backup (see accounts.py).

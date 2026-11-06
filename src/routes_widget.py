@@ -13,10 +13,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 import accounts
+import feedback_store
 import quota
 import widget_config
 import widget_export
-from guards import _require_admin
+from guards import _require_admin, _require_session
 from widget_api import MAX_ID_CHARS, MAX_WORD_CHARS, Transcript
 
 logger = logging.getLogger(__name__)
@@ -355,6 +356,45 @@ def admin_erase_person(payload: EraseRequest,
                           user_id=payload.user_id.strip(), source="console")
     logger.info(f"erasure request carried out by {me.get('email')}: {out}")
     return {"removed": out}
+
+
+class ReportTurn(BaseModel):
+    q: str = Field("", max_length=2000)
+    a: str = Field("", max_length=8000)
+
+
+class TesterReport(BaseModel):
+    note: str = Field(..., min_length=3, max_length=1000)
+    conversation: list[ReportTurn] = Field(..., min_length=1, max_length=30)
+    product: str | None = Field(None, max_length=120)
+
+
+@router.post("/admin/feedback/report")
+def admin_add_report(payload: TesterReport,
+                     x_admin_password: str | None = Header(default=None)):
+    """Any signed-in account, basic included: the Test chat is what a basic
+    account is for, so it is also where it finds the faults."""
+    me = _require_session(x_admin_password)
+    row = feedback_store.add_report(
+        payload.note, [t.model_dump() for t in payload.conversation],
+        payload.product, me.get("email") or me.get("id"))
+    return {"received": True, "id": row["id"]}
+
+
+@router.get("/admin/feedback")
+def admin_feedback(x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    return {"ratings": feedback_store.rating_summary(),
+            "reports": feedback_store.list_reports()}
+
+
+@router.delete("/admin/feedback/report/{report_id}")
+def admin_delete_report(report_id: str,
+                        x_admin_password: str | None = Header(default=None)):
+    _require_admin(x_admin_password)
+    if not feedback_store.delete_report(report_id):
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"deleted": True}
 
 
 @router.post("/admin/widget/preview_token")
