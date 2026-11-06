@@ -10,7 +10,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from page_reach import case_set, gold_pages, resolve_name, supervise  # noqa: E402
+from page_reach import case_set, gold_pages, internal_gold, reach_flags, resolve_name, supervise  # noqa: E402
 
 
 def case(i, q, **kw):
@@ -53,6 +53,10 @@ def main():
         assert supervise([sys.executable, "-c", code, out], out) == 0          # crashed on k1, restarted, finished
         assert json.load(open(out + ".crashes.json")) == {"k1": 1}
         assert supervise([sys.executable, "-c", "import sys; sys.exit(4)"], out) == 4   # died before a question: no restart
+    assert internal_gold(["A.pdf p1", "ICU_Age_Result_Quick_Guide_v1_1.pdf p2"], lambda s: "icu_age" in s.lower()) == ["ICU_Age_Result_Quick_Guide_v1_1.pdf p2"]
+    g = ["A p1", "I p2"]
+    assert reach_flags(g, g, ["I p2"], ["A p1"]) == (False, True)
+    assert reach_flags(g, g, [], ["A p1"]) == (False, False)
     print("ok")
 
 
