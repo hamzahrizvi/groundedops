@@ -1721,8 +1721,9 @@ def _flash_tables(out: list[dict], query: str, all_chunks: list[dict],
     cands = []
     for a in all_chunks if keys else ():
         src = a.get("source")
-        if (a["id"] in have or src in docs or is_excluded(src)
-                or not keys & {t.strip() for t in (a.get("product") or "").split(",")}):
+        if (a["id"] in have
+                or not keys & {t.strip() for t in (a.get("product") or "").split(",")}
+                or src in docs or is_excluded(src)):
             continue
         lines = [l.strip() for l in _tables.split_prefix(a.get("text") or "")[1].split("\n")
                  if l.strip() and not _tables._READOUT.match(l.strip())]
