@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS = 90
 # Module that owns each store, in the order they are pruned.
-STORES = ("logger", "conversations", "widget_api", "widget_config", "faq_store")
+STORES = ("logger", "conversations", "widget_api", "widget_config", "faq_store", "feedback_store")
 
 # D-20261104-08: one line per erasure, beside logs.jsonl. It holds no visitor
 # text (salted hashes and counts only), so prune() leaves it alone.
@@ -86,7 +86,7 @@ def prune(days_: int | None = None, now: datetime | None = None) -> dict:
 
 def erase(email: str = "", session_ids=(), user_id: str = "", source: str = "console") -> dict:
     """UK GDPR erasure: delete one person's visitor text now instead of in
-    90 days. An email finds their enquiries; their chats and votes are found
+    90 days. An email finds their enquiries; their chats, votes and ratings are found
     by conversation (the widget's session id) or by the website's signed-in
     user id. The unanswered-questions list keeps question text without who
     asked it, so nothing there points back to a person; the 90-day rule
@@ -98,6 +98,7 @@ def erase(email: str = "", session_ids=(), user_id: str = "", source: str = "con
     jobs = (("widget_config", "erase_email", email),
             ("logger", "erase_sessions", session_ids),
             ("widget_api", "erase_sessions", session_ids),
+            ("feedback_store", "erase_sessions", session_ids),
             ("conversations", "erase_user", user_id))
     out = {}
     for mod, fn, arg in jobs:

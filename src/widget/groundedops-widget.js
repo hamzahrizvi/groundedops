@@ -494,6 +494,17 @@
     "font-size:13px;line-height:1;padding:3px 7px;color:var(--mut)}" +
     ".go-vote button[aria-pressed=true]{border-color:var(--ink);color:var(--ink)}" +
     ".go-vote button:disabled{cursor:default}" +
+    ".go-rate{position:absolute;inset:0;z-index:5;background:var(--bg);display:flex;flex-direction:column;" +
+    "justify-content:center;gap:12px;padding:28px;text-align:center;color:var(--ink)}" +
+    ".go-stars button{border:0;background:none;cursor:pointer;font-size:30px;color:var(--line);padding:0 3px}" +
+    ".go-stars button[aria-pressed=true]{color:#f5a623}" +
+    ".go-rate textarea{resize:none;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font:inherit;" +
+    "font-size:13.5px;color:var(--ink);background:var(--bg)}" +
+    ".go-rate-btns{display:flex;gap:8px;justify-content:center}" +
+    ".go-rate-btns button{border:1px solid var(--line);background:none;border-radius:8px;padding:8px 16px;" +
+    "cursor:pointer;font:inherit;color:var(--ink)}" +
+    ".go-rate-btns .go-rate-send{background:var(--a);border-color:var(--a);color:#fff}" +
+    ".go-rate-btns button:disabled{opacity:.45;cursor:default}" +
     // composer
     ".go-form{display:flex;gap:8px;padding:11px;border-top:1px solid var(--line);background:var(--bg);flex:0 0 auto}" +
     ".go-in{flex:1;resize:none;border:1px solid var(--fld);border-radius:10px;padding:10px 12px;font:inherit;" +
@@ -2751,7 +2762,6 @@
     $launch.setAttribute("aria-expanded", "false");
     $launch.focus();
   }
-  $min.addEventListener("click", close);
   // aria-modal="true" tells a screen reader the page behind is inert, so Tab
   // must not walk out of the panel into it: wrap at either end. Only while
   // focus is already in the panel -- a visitor who clicked back into the
@@ -2774,6 +2784,58 @@
   function keepFocus(el, to) {
     if (document.activeElement === el) (to || $panel).focus();
   }
+  /** End-of-chat rating, asked once per conversation when the visitor
+   *  minimises or starts over after asking something. Skip counts as asked,
+   *  so it never nags twice. `then` is what they were doing. The console's
+   *  Test chat sets data-no-rating, so staff tests never count as ratings. */
+  function askRating(then) {
+    var asked = state.messages.some(function (m) { return m.role === "user"; });
+    if (hasAttr("data-no-rating") || state.rated || !asked || root.querySelector(".go-rate")) return then();
+    var stars = 0;
+    var box = document.createElement("div");
+    box.className = "go-rate";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", "Rate this chat");
+    box.innerHTML = "<b>How did we do?</b>" +
+      '<div class="go-stars" role="group" aria-label="Rating out of 5"></div>' +
+      '<textarea rows="3" maxlength="500" aria-label="Anything we could do better? (optional)" ' +
+        'placeholder="Anything we could do better? (optional)"></textarea>' +
+      '<div class="go-rate-btns"><button type="button" class="go-rate-skip">Skip</button>' +
+        '<button type="button" class="go-rate-send" disabled>Send</button></div>';
+    var $stars = box.querySelector(".go-stars");
+    var $rateSend = box.querySelector(".go-rate-send");
+    [1, 2, 3, 4, 5].forEach(function (n) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "★";
+      b.setAttribute("aria-label", n + (n === 1 ? " star" : " stars"));
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", function () {
+        stars = n;
+        $stars.querySelectorAll("button").forEach(function (x, i) {
+          x.setAttribute("aria-pressed", i < n ? "true" : "false");
+        });
+        $rateSend.disabled = false;
+      });
+      $stars.appendChild(b);
+    });
+    function done() { state.rated = true; save(); box.remove(); then(); }
+    box.querySelector(".go-rate-skip").addEventListener("click", done);
+    $rateSend.addEventListener("click", function () {
+      fetch(cfg.api + "/widget/rating", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ session_id: state.sessionId, visitor_id: visitorId(),
+                               stars: stars,
+                               comment: box.querySelector("textarea").value.trim() }),
+      }).catch(function () {});
+      done();
+    });
+    $panel.appendChild(box);
+    $stars.querySelector("button").focus();
+  }
+
+  $min.addEventListener("click", function () { askRating(close); });
   document.addEventListener("keydown", function (e) {
     if (!root.classList.contains("go-open")) return;
     if (e.key === "Escape") close();
@@ -2784,7 +2846,7 @@
 
   $restart.addEventListener("click", function () {
     if (state.messages.length > 2 && !window.confirm("Start a new conversation? This will clear the current chat.")) return;
-    startFresh();
+    askRating(startFresh);
   });
 
   $in.addEventListener("input", function () {

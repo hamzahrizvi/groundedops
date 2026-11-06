@@ -72,6 +72,8 @@ def configure_paths(root: str) -> None:
         "FAQ_GAP_PATH": os.path.join(cfg, "faq_gaps.json"),
         "WIDGET_CONFIG_PATH": os.path.join(cfg, "widget_config.json"),
         "WIDGET_LEADS_PATH": os.path.join(cfg, "widget_leads.json"),
+        "WIDGET_RATINGS_PATH": os.path.join(cfg, "widget_ratings.json"),
+        "TESTER_REPORTS_PATH": os.path.join(cfg, "tester_reports.json"),
         "CONVO_DB_PATH": os.path.join(root, "conversations.db"),
         "QUOTA_DB_PATH": os.path.join(root, "quota.db"),
         # Model cache: with these unset the weights land in the user profile,

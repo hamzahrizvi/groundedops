@@ -15,6 +15,7 @@ from unittest.mock import patch
 import _harness  # noqa: F401 -- stubs and the test token secret first
 import main
 import faq_store
+import feedback_store
 import logger as interaction_log
 import quota
 import widget_api
@@ -161,7 +162,11 @@ def test_forget_against_a_test_log_folder():
         "session_id": sid, "delete_token": tok, "visitor_id": "fv-1"})
     with patch.dict(sys.modules, {"logger": real_log}), \
             patch.object(real_log, "LOG_FILE", logs), \
-            patch.object(widget_api, "_FEEDBACK_PATH", os.path.join(tmp, "widget_feedback.json")):
+            patch.object(widget_api, "_FEEDBACK_PATH", os.path.join(tmp, "widget_feedback.json")), \
+            patch.object(feedback_store, "RATINGS_PATH", os.path.join(tmp, "widget_ratings.json")):
+        rate = {"stars": 4, "comment": "c", "questions": ["q"], "created_at": "2026-11-04T10:00:00+00:00"}
+        with open(os.path.join(tmp, "widget_ratings.json"), "w", encoding="utf-8") as f:
+            json.dump({"forget-sid-0001": rate, "someone-else": rate}, f)
         for tok in ("", "0" * 64, widget_api.delete_token("other-chat-0001")):
             assert post("forget-sid-0001", tok).status_code == 403
             assert "my secret question" in read(logs)
@@ -173,6 +178,8 @@ def test_forget_against_a_test_log_folder():
         assert len(lines) == 1
         row = json.loads(lines[0])
         assert row["source"] == "visitor" and row["removed"]["logger"] == 1
+        assert list(json.loads(read(os.path.join(tmp, "widget_ratings.json")))) == ["someone-else"]
+        assert row["removed"]["feedback_store"] == 1
         assert len(row["sessions"]) == 1
         assert "forget-sid-0001" not in lines[0] and "secret" not in lines[0]
 
@@ -183,3 +190,4 @@ def test_forget_against_a_test_log_folder():
         assert os.stat(logs).st_mtime_ns == before
         lines = read(tomb).splitlines()
         assert len(lines) == 2 and json.loads(lines[1])["removed"]["logger"] == 0
+        assert json.loads(lines[1])["removed"]["feedback_store"] == 0

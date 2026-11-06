@@ -24,6 +24,7 @@ os.environ.update({
     "FAQ_GAP_PATH": P("faq_gaps.json"),
     "FAQ_STORE_PATH": P("faq_store.json"),
     "QUOTA_DB_PATH": P("quota.db"),
+    "WIDGET_RATINGS_PATH": P("widget_ratings.json"),
 })
 os.environ.pop("FAQ_GAP_VECTOR_CACHE", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -83,6 +84,9 @@ def seed():
     write("widget_feedback.json", {
         "r-old": {"question": "old fb", "vote": "down", "created_at": OLD.isoformat()},
         "r-new": {"question": "new fb", "vote": "up", "created_at": NEW.isoformat()}})
+    write("widget_ratings.json", {
+        "s-old": {"stars": 2, "comment": "old c", "questions": ["old q"], "created_at": OLD.isoformat()},
+        "s-new": {"stars": 5, "comment": "new c", "questions": ["new q"], "created_at": NEW.isoformat()}})
     write("widget_leads.json", [
         {"id": "old-lead", "kind": "support", "values": {"e": {"label": "Email",
          "value": "old@example.org"}}, "created_at": OLD.isoformat(),
@@ -120,7 +124,7 @@ def test_prune_every_store():
                                        os.path.join("documents", "manual.pdf"))}
     out = retention.prune(days_=90, now=NOW)
     assert out == {"logger": 4, "conversations": 5, "widget_api": 1,
-                   "widget_config": 1, "faq_store": 1}, out
+                   "widget_config": 1, "faq_store": 1, "feedback_store": 1}, out
 
     # logs: old rows gone everywhere, an all-old rotated file deleted
     rows = log_report.load_rows(TMP)
@@ -140,6 +144,7 @@ def test_prune_every_store():
 
     # feedback
     assert list(json.loads(read("widget_feedback.json"))) == ["r-new"]
+    assert list(json.loads(read("widget_ratings.json"))) == ["s-new"]
 
     # leads: unsent old enquiry gone, emailed stub kept for counting
     ids = [l["id"] for l in widget_config.list_leads(include_sent=True)]
@@ -158,7 +163,7 @@ def test_prune_every_store():
     # a second run finds nothing more to delete
     assert retention.prune(days_=90, now=NOW) == {
         "logger": 0, "conversations": 0, "widget_api": 0,
-        "widget_config": 0, "faq_store": 0}
+        "widget_config": 0, "faq_store": 0, "feedback_store": 0}
 
 
 def test_erase_one_person():
@@ -175,12 +180,16 @@ def test_erase_one_person():
     write("widget_feedback.json", {
         "r1": {"question": "mine", "session_id": "s-me", "created_at": NEW.isoformat()},
         "r2": {"question": "theirs", "session_id": "s-other", "created_at": NEW.isoformat()}})
+    write("widget_ratings.json", {
+        "s-me": {"stars": 4, "comment": "mine", "questions": [], "created_at": NEW.isoformat()},
+        "s-other": {"stars": 1, "comment": "theirs", "questions": [], "created_at": NEW.isoformat()}})
     leads = json.loads(read("widget_leads.json"))
     leads[1]["cc_email"] = "New@Example.org"
     write("widget_leads.json", leads)
 
     out = retention.erase(email=" new@example.ORG ", session_ids=["s-me"], user_id="u1")
-    assert out == {"widget_config": 1, "logger": 2, "widget_api": 1, "conversations": 10}, out
+    assert out == {"widget_config": 1, "logger": 2, "widget_api": 1, "feedback_store": 1,
+                   "conversations": 10}, out
     tomb = read("erasures.jsonl")
     assert len(tomb.splitlines()) == 1
     t = json.loads(tomb)
@@ -192,6 +201,7 @@ def test_erase_one_person():
     assert lines[-1] == "{torn line", "erasure leaves rows it cannot read alone"
     assert not os.path.exists(P("logs_20260801_000000_000000.jsonl"))
     assert list(json.loads(read("widget_feedback.json"))) == ["r2"]
+    assert list(json.loads(read("widget_ratings.json"))) == ["s-other"]
     ids = [l["id"] for l in widget_config.list_leads(include_sent=True)]
     assert sorted(ids) == ["old-lead", "old-stub"], ids
     assert conversations.list_conversations("u1") == []

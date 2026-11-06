@@ -259,6 +259,8 @@ def _stores(include_accounts: bool) -> dict:
         "doc_kinds.json": os.getenv("DOC_KINDS_PATH", "doc_kinds.json"),
         "widget_config.json": os.getenv("WIDGET_CONFIG_PATH", "widget_config.json"),
         "widget_leads.json": os.getenv("WIDGET_LEADS_PATH", "widget_leads.json"),
+        "widget_ratings.json": os.getenv("WIDGET_RATINGS_PATH", "widget_ratings.json"),
+        "tester_reports.json": os.getenv("TESTER_REPORTS_PATH", "tester_reports.json"),
     }
     if include_accounts:
         # Root only. Password hashes and staff addresses.
