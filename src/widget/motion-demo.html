@@ -28,12 +28,13 @@
       }
       return [
         [0, "status", { stage: "Looking up the NV9USB+" }],
-        [5, "part", { title: "NV9USB+", answer: "The NV9USB+ runs from **12 V DC** (11-13.2 V) and draws up to 1.5 A while a note is being moved.", sources: [] }],
-        [5, "status", { stage: "Looking up the BV30" }],
-        [10, "part", { title: "BV30", answer: "The BV30 takes **12 V DC** too, but peaks lower at 1.2 A, and can also run from 24 V with the wide-range option.", sources: [] }],
-        [10, "status", { stage: "Comparing the two" }],
-        [15, "meta", { sources: [] }],
-        [15, "delta", { text: "### Comparison\n\n| | NV9USB+ | BV30 |\n|---|---|---|\n| Supply | 12 V DC | 12 V DC (24 V option) |\n| Peak current | 1.5 A | 1.2 A |\n\nBoth run from a standard 12 V supply; the BV30 draws less and is the only one with a 24 V option." }],
+        // Real answers from the live run on 2026-11-07, real pacing.
+        [8, "part", { title: "NV9USB+", answer: "The NV9USB+ requires a stable 12V DC power supply. A suitable unit is the TDK Lambda SWS50-12 (+12V DC / 4.3 A, RS stock code 466-5869, Farnell stock code 1184645), which suits the NV9USB+ and NV11+. Setup diagrams show the validator powered from a 12VDC / 3A supply, connected via cable CN0392 when wired directly to the host over USB, or via CN00345 to an IF17 interface when using that setup. A weak power supply can cause unexpected behaviour such as note rejects or missing credits.", sources: [] }],
+        [8, "status", { stage: "Looking up the BV30" }],
+        [16, "part", { title: "BV30", answer: "The BV30 requires a stable 12VDC/1.50A power supply. A suitable unit is the TDK Lambda RWS-50B-12 (+12V DC / 4.3A, RS Stock Code 839-9626, Farnell Stock Code 2452725). A weak power supply can cause malfunctioning such as note rejects or missing credits.", sources: [] }],
+        [16, "status", { stage: "Comparing the two" }],
+        [18, "meta", { sources: [] }],
+        [18, "delta", { text: "### Comparison\n\nThe two products differ in their specified supply requirements and in the recommended supply unit; the facts given don't state a difference in the supplies' own output (both recommended units are +12V DC / 4.3A).\n\n| | NV9USB+ | BV30 |\n|---|---|---|\n| Required supply | Stable 12V DC | Stable 12VDC / 1.50A |\n| Recommended unit | TDK Lambda SWS50-12 (+12V DC / 4.3A) | TDK Lambda RWS-50B-12 (+12V DC / 4.3A) |\n| Connection notes | Via CN0392 direct to host over USB, or CN00345 to an IF17 interface | Not stated |\n| Weak-supply symptom | Note rejects or missing credits | Note rejects or missing credits |\n\nNote: the recommended supply ratings above are not stated to be the products' actual draw." }],
       ];
     }
     window.fetch = function (url, init) {
