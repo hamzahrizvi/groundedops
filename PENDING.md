@@ -365,7 +365,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
-| D-20261106-11 | Security item D-20261106-11, details in the office | approved, queued | Dev builds it |
+| D-20261106-11 | Security item D-20261106-11, details in the office | built, waiting for the check | the pre-ship check |
 | D-20261106-15 | Security item D-20261106-15, details in the office | waiting for CEO | your yes |
 | D-20261107-08 | Security item D-20261107-08, details in the office | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
