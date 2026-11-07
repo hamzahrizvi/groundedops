@@ -1,9 +1,14 @@
 """End-of-chat star ratings from the widget, and staff issue reports from
 the console's Test chat (feedback_store.py)."""
+import os
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
 import main
+import feedback_store
+import quota
 import widget_api
 from fastapi.testclient import TestClient
 
@@ -54,3 +59,24 @@ def test_the_widget_asks_for_a_rating_and_the_console_reports():
     assert 'data-no-rating' in (SRC / "widget" / "preview.html").read_text(encoding="utf-8")
     html = (SRC / "admin.html").read_text(encoding="utf-8")
     assert "/admin/feedback/report" in html and "viewFeedback()" in html
+
+
+def test_the_ratings_store_keeps_only_the_newest_rows():
+    saved = (feedback_store.RATINGS_PATH, feedback_store.RATINGS_MAX)
+    feedback_store.RATINGS_PATH = os.path.join(tempfile.mkdtemp(prefix="ratings-cap-"), "r.json")
+    feedback_store.RATINGS_MAX = 3
+    try:
+        for n in range(5):
+            feedback_store.save_rating(f"cap-{n}", 4, "", None, [])
+        data = feedback_store.jsonstore.load(feedback_store.RATINGS_PATH, {})
+        assert set(data) == {"cap-2", "cap-3", "cap-4"}, sorted(data)
+    finally:
+        feedback_store.RATINGS_PATH, feedback_store.RATINGS_MAX = saved
+
+
+def test_ratings_have_their_own_daily_limit():
+    with patch.dict(quota.PUBLIC_WRITE_LIMITS, {"rating": (1, 100)}):
+        body = {"session_id": "own-1", "visitor_id": "rating-bucket-visitor", "stars": 4}
+        assert client.post("/widget/rating", json=body).status_code == 200
+        body["session_id"] = "own-2"
+        assert client.post("/widget/rating", json=body).status_code == 429
