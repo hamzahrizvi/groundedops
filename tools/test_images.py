@@ -107,6 +107,16 @@ def main():
         assert image_set.merge(r2, figs)[-1] == "OK 1"
         kept = json.load(open(os.path.join(r2, "cases.json")))["cases"]
         assert len(kept) == 1 and kept[0]["id"] == "Istamp-01" and kept[0]["src"] == "images" and kept[0]["pages"] == ["m.pdf p1"], kept
+        wk = os.path.join(tmp, "runs", "wk"); os.makedirs(os.path.join(wk, "manuals"))
+        open(os.path.join(wk, "manuals", "p.txt"), "w").write("[m.pdf p1] text")
+        json.dump({"cases": [{"id": "Cwk-01", "product": "p", "type": "lookup", "category": "simple", "expected": "answered", "q": "plain", "reference": "r"}]},
+                  open(os.path.join(wk, "cases.json"), "w"))
+        assert image_set.add(r2, wk) == ["ADDED 1"] and image_set.add(r2, wk) == ["ADDED 0"]
+        both = json.load(open(os.path.join(wk, "cases.json")))["cases"]
+        assert [c["id"] for c in both] == ["Cwk-01", "Cwk-02"] and "src" not in both[1] and both[1]["category"] == "technical", both
+        assert be(wk, "system", "normal")[0] == 0 and be(wk, "grade")[0] == 0   # asked with the weekly set, outside heldout
+        image_set.score(wk, os.path.join(tmp, "wkout"))
+        assert json.load(open(os.path.join(tmp, "wkout", "score.json")))["by_product"]["p"]["n"] == 1   # normal questions not counted
         json.dump({"cases": [{k: v for k, v in good.items() if k != "figure"} | {"id": "z3", "must_include": ["x"]}]},
                   open(os.path.join(r2, "parts", "p.json"), "w"))
         assert image_set.merge(r2, figs)[-1].startswith("FAIL")

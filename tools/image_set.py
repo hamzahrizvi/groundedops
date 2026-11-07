@@ -2,6 +2,7 @@
 
   python tools/image_set.py plan  <RUN> <FIGS>      one line per manuals file: "<stem> | <document>=<n> | ..."
   python tools/image_set.py merge <RUN> <FIGS>      RUN/parts/*.json -> RUN/cases.json; last line "OK <n>" or "FAIL <part>: <why>"
+  python tools/image_set.py add   <RUN> <WEEKLY>    RUN/cases.json appended to the weekly run's cases.json; "ADDED <n>"
   python tools/image_set.py score <RUN> <OUT_DIR>   RUN/cases_state.json summary -> OUT_DIR/score.json; prints the two counts
 
 RUN is OPS/heldout/images/<stamp>: merge stamps every case "src": "images", so blind_eval.py runs them only from a
@@ -72,10 +73,27 @@ def merge(run, figs):
     return ([f"dropped, answer in the page text: {', '.join(map(str, dropped))}"] if dropped else []) + [f"OK {len(cases)}"]
 
 
+def add(pics, run):
+    """The CEO, 2026-11-07: picture questions are asked with the weekly set, in its conversations, as simple or
+    technical questions. Appends pics/cases.json to run/cases.json, numbered on from the last C<stamp>-NN; dropping
+    "src" lets them run outside OPS/heldout. figure and source stay, so blind_eval.py still marks figure_found."""
+    path = os.path.join(run, "cases.json")
+    cases = json.load(open(path, encoding="utf-8"))["cases"]
+    new = [c for c in json.load(open(os.path.join(pics, "cases.json"), encoding="utf-8"))["cases"]
+           if c["q"] not in {x["q"] for x in cases}]   # a re-run of this step adds nothing twice
+    stamp = os.path.basename(os.path.normpath(run))
+    for i, c in enumerate(new, len(cases) + 1):
+        c.pop("src", None)
+        c.update(id=f"C{stamp}-{i:02d}", category=c.get("category") if c.get("category") in ("simple", "technical") else "technical")
+    json.dump({"cases": cases + new}, open(path, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    return [f"ADDED {len(new)}"]
+
+
 def score(run, out_dir):
     s = json.load(open(os.path.join(run, "cases_state.json"), encoding="utf-8"))["summary"]["sys_normal"]["images"]
     by = {}
     for c in json.load(open(os.path.join(run, "cases.json"), encoding="utf-8"))["cases"]:
+        if not c.get("figure"): continue   # a weekly run also holds its normal questions
         b = by.setdefault(c["product"], {"n": 0, "figure_found": 0, "explanation_right": 0})
         b["n"] += 1; b["figure_found"] += c["id"] in s["found"]; b["explanation_right"] += c["id"] in s["right"]
     os.makedirs(out_dir, exist_ok=True)
@@ -85,6 +103,6 @@ def score(run, out_dir):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
-    lines = {"plan": plan, "merge": merge, "score": score}[sys.argv[1]](*sys.argv[2:])
+    lines = {"plan": plan, "merge": merge, "add": add, "score": score}[sys.argv[1]](*sys.argv[2:])
     print("\n".join(lines))
     sys.exit(1 if lines and lines[-1].startswith("FAIL") else 0)

@@ -98,7 +98,8 @@ Each case:
 {"id": "<prefix>-01", "product": "<PRODUCT>", "source": "<document>", "figure": "p18_2.png",
  "q": "how tall is the hopper on its own? need to know if it fits under our counter",
  "reference": "Dimension drawing on page 18: overall height 285 mm (275 to the lid), width 134, depth 286.",
- "must_include": ["285"]}
+ "must_include": ["285"], "category": "technical"}
+- `category`: "simple" for one plain thing the customer could spot on the picture themselves (a label, which part is which), "technical" for a dimension, pin, wiring or set-up detail. The weekly run asks these with its normal questions (the CEO, 2026-11-07).
 - `q`: like a real customer, informal, with the job context; it never mentions a figure, picture, page or manual.
 - `reference`: what the picture shows, in words, and which picture it is (page and kind).
 - `must_include`: 1 to 3 short facts as the picture writes them (a number, a label, a pin name).
