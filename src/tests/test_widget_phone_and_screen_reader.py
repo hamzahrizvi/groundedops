@@ -183,8 +183,9 @@ def test_phone_composer_font_size_is_16px_or_more():
 def test_phone_header_buttons_meet_the_touch_target_minimum():
     _page.set_viewport_size({"width": 375, "height": 812})
     _open()
+    # Expand is hidden on a phone (the panel is already full screen).
     boxes = _page.eval_on_selector_all(".go-hbtn", """(els) =>
-        els.map(el => {
+        els.filter(el => el.getClientRects().length).map(el => {
             const r = el.getBoundingClientRect();
             return {w: r.width, h: r.height};
         })""")

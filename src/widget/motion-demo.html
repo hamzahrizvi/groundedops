@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Widget motion demo</title>
+<!--
+  Local look at the widget's expand button and animations with no backend:
+  fetch is stubbed, and every question gets the same canned answer after a
+  six-second wait so the waiting state can be seen. Open this file directly.
+-->
+<style>
+  body { margin: 0; min-height: 100vh; font: 15px/1.6 system-ui, sans-serif; background: #eef1f4; color: #333; }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 24px; }
+</style>
+<script>
+  (function () {
+    var answer = "The **NV200 Spectral** takes a 12 V DC supply.\n\n" +
+      "| Pin | Name | Use |\n|---|---|---|\n| 1 | +12V | Supply |\n| 2 | GND | Ground |\n| 3 | TX | Serial out |\n\n" +
+      "- Check the supply is within 11-13.2 V.\n- Use the supplied cable.";
+    function sse(ev, v) { return "event: " + ev + "\ndata: " + JSON.stringify(v) + "\n\n"; }
+    window.fetch = function (url) {
+      if (String(url).indexOf("/widget/ask") >= 0) {
+        return new Promise(function (ok) {
+          setTimeout(function () {
+            ok(new Response(sse("meta", { sources: [] }) + sse("delta", { text: answer }),
+              { headers: { "Content-Type": "text/event-stream" } }));
+          }, 6000);
+        });
+      }
+      return Promise.resolve(new Response("{}", { headers: { "Content-Type": "application/json" } }));
+    };
+  })();
+</script>
+</head>
+<body>
+<main>
+  <h1>A customer's page</h1>
+  <p>Open the chat bottom right, ask anything, then press the expand button in its header.</p>
+</main>
+<script src="groundedops-widget.js" data-api="https://stub.invalid"></script>
+</body>
+</html>
