@@ -36,6 +36,7 @@ in-memory dict would not.
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -251,6 +252,20 @@ def verify_token(token: str | None) -> dict | None:
 
 # ── identity ──────────────────────────────────────────────────────────
 
+def _ip_group(client_ip: str) -> str:
+    """The per-IP key's address. IPv6 is grouped by /64, the block one
+    subscriber or host is given, so one caller cannot take a fresh per-IP
+    allowance from every address in it. IPv4 and anything unparsable
+    ("unknown", "testclient") are used as they are."""
+    try:
+        ip = ipaddress.ip_address((client_ip or "").strip())
+    except ValueError:
+        return client_ip
+    if ip.version == 6 and ip.ipv4_mapped is None:
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return client_ip
+
+
 def identify(token: str | None, visitor_id: str | None, client_ip: str) -> dict:
     """Resolve a caller to {tier, identity, ip_identity}.
 
@@ -270,7 +285,7 @@ def identify(token: str | None, visitor_id: str | None, client_ip: str) -> dict:
     return {
         "tier": "anonymous",
         "identity": "v:" + _h(f"{vid}|{client_ip}"),
-        "ip_identity": "i:" + _h(client_ip),
+        "ip_identity": "i:" + _h(_ip_group(client_ip)),
         "uid": None,
     }
 
@@ -348,7 +363,7 @@ def check_faq_lookup(caller: dict) -> dict:
             "reason": None}
 
 
-# Daily caps on the public write routes (contact form, answer votes), as
+# Daily caps on the public write routes (contact form, answer votes, star ratings), as
 # (per visitor, per IP). One limiter for both. The visitor id comes from the
 # browser, so the per-IP count is the one a script cannot reset; it is kept
 # loose because behind a tunnel without CF-Connecting-IP or TRUST_PROXY every
@@ -358,6 +373,10 @@ PUBLIC_WRITE_LIMITS = {
              int(os.getenv("QUOTA_LEADS_PER_IP", "30"))),
     "feedback": (int(os.getenv("QUOTA_VOTES_PER_VISITOR", "50")),
                  int(os.getenv("QUOTA_VOTES_PER_IP", "300"))),
+    # End-of-chat star ratings (D-20261106-14): a real visitor rates a
+    # handful of chats a day, so far below the thumbs-vote bucket.
+    "rating": (int(os.getenv("QUOTA_RATINGS_PER_VISITOR", "5")),
+               int(os.getenv("QUOTA_RATINGS_PER_IP", "30"))),
     # A visitor deleting their own chat rewrites the logs, so it is capped too.
     "forget": (10, 50),
 }
@@ -605,7 +624,7 @@ def reset_visitor(visitor_id: str, client_ip: str = "") -> None:
     together, since that pair - not visitor_id alone - is the identity key;
     the per-IP ceiling is cleared too when an IP is given."""
     identity = "v:" + _h(f"{visitor_id}|{client_ip}")
-    ip_identity = "i:" + _h(client_ip) if client_ip else None
+    ip_identity = "i:" + _h(_ip_group(client_ip)) if client_ip else None
     with _lock, _conn() as c:
         suffixes = ["", ":faq"] + [":" + k for k in PUBLIC_WRITE_LIMITS]
         keys = [identity + s for s in suffixes]

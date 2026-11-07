@@ -7,6 +7,7 @@ come up again and again. Reports also go to the office's Customer department
 them against the manuals and files findings to the product owner. Reports
 are staff text, not visitor text, so D-20261015-11 does not keep them out.
 """
+import logging
 import os
 import re
 import threading
@@ -16,8 +17,11 @@ from datetime import datetime, timezone
 
 import jsonstore
 
+logger = logging.getLogger(__name__)
+
 RATINGS_PATH = os.getenv("WIDGET_RATINGS_PATH", "widget_ratings.json")
 REPORTS_PATH = os.getenv("TESTER_REPORTS_PATH", "tester_reports.json")
+RATINGS_MAX = int(os.getenv("WIDGET_RATINGS_MAX", "20000"))  # newest kept; D-20261106-14
 _lock = threading.Lock()
 
 # A rating at or under this counts as a complaint for the repeat themes.
@@ -35,7 +39,9 @@ def _now():
 
 
 def save_rating(session_id: str, stars: int, comment: str, scope, questions) -> None:
-    """One rating per conversation, so rating it again replaces the first."""
+    """One rating per conversation, so rating it again replaces the first.
+    Keeps at most RATINGS_MAX rows, dropping the oldest, so made-up chat ids
+    cannot grow the file without end."""
     with _lock:
         data = jsonstore.load(RATINGS_PATH, {}, label="widget ratings")
         if not isinstance(data, dict):
@@ -43,6 +49,14 @@ def save_rating(session_id: str, stars: int, comment: str, scope, questions) -> 
         data[session_id] = {"stars": stars, "comment": comment.strip(),
                             "scope": scope, "questions": questions[:10],
                             "created_at": _now()}
+        if len(data) > RATINGS_MAX:
+            # Oldest first; sorted() is stable, so equal timestamps keep insertion order.
+            rows = sorted(data.items(), key=lambda kv: (kv[1].get("created_at") or "")
+                          if isinstance(kv[1], dict) else "")
+            dropped = len(rows) - RATINGS_MAX
+            data = dict(rows[dropped:])
+            logger.warning(f"widget ratings: cap of {RATINGS_MAX} reached, "
+                           f"dropped the {dropped} oldest")
         jsonstore.save(RATINGS_PATH, data, label="widget ratings")
 
 

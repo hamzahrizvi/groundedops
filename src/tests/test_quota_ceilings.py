@@ -7,6 +7,7 @@ that it is enforced on every anonymous path, not just written.
 """
 import os
 import tempfile
+from unittest.mock import patch
 
 import quota
 
@@ -91,5 +92,25 @@ def test_reset_visitor_clears_both_per_ip_counters():
             assert quota._used(c, caller["ip_identity"], win) == 0
             assert quota._used(c, caller["ip_identity"] + ":faq", win) == 0
         assert quota.check_faq_lookup(_guest("visitor-other"))["allowed"]
+    finally:
+        restore()
+
+
+def test_ipv6_addresses_in_one_64_share_the_per_ip_count():
+    restore = _fresh_db(faq_cap=60, ip_cap=100)
+    try:
+        a = _guest("v-a", "2001:db8:1:2::1")
+        b = _guest("v-b", "2001:db8:1:2:ffff:ffff:ffff:9")
+        assert a["ip_identity"] == b["ip_identity"]
+        assert a["ip_identity"] != _guest("v-c", "2001:db8:1:3::1")["ip_identity"]
+        # IPv4 keys are unchanged, so today's counters carry on.
+        assert _guest("v-d")["ip_identity"] == "i:" + quota._h("203.0.113.7")
+        with patch.dict(quota.PUBLIC_WRITE_LIMITS, {"rating": (100, 2)}):
+            assert quota.check_public_write("rating", "v-a", "2001:db8:1:2::1")["allowed"]
+            assert quota.check_public_write("rating", "v-b", "2001:db8:1:2::2")["allowed"]
+            gate = quota.check_public_write("rating", "v-e", "2001:db8:1:2::3")
+            assert not gate["allowed"] and gate["reason"] == "ip_rating_quota"
+            quota.reset_visitor("v-e", "2001:db8:1:2::3")   # clears the /64's count
+            assert quota.check_public_write("rating", "v-e", "2001:db8:1:2::4")["allowed"]
     finally:
         restore()
