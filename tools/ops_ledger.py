@@ -56,6 +56,8 @@ def decisions(ops):
                 continue
             did, title = m.groups()
             it = items.setdefault(did, {"id": did, "title": title.strip(), "history": [], "decided": did[2:10]})
+            if title.strip().lower() != "priority":   # a later section's title replaces the earlier; "| priority" sections are rank-only notes
+                it["title"] = title.strip()
             for k, v in re.findall(r"(?m)^- (Source|From|Assigned|Reassigned|Verdict|Run|Siblings|Touches|Priority|Still broken):\s*(.+?)\s*$", body):
                 if k in ("Assigned", "Reassigned"):   # the CEO's move (tools/ceo_inbox.py reassign) or a later triage's: the latest wins
                     it["assigned"] = v.strip()
@@ -282,6 +284,11 @@ def _selftest():
     w("decisions/20261013d.md", "## D-20261013-05 | Security fixture title\n- Source: inbox/dev/D-20261013-01.md\n- From: dev\n- Assigned: security\n- Verdict: DEFER\n")
     assert {c["id"]: c["security"] for c in ledger(ops, today=day)["cards"]}["D-20261013-05"], "assigned to Security = Security's, whoever raised it"
     os.remove(os.path.join(ops, "decisions/20261013d.md"))
+    w("decisions/20261013e.md", "## D-20261013-06 | Old title\n- From: dev\n- Assigned: dev\n- Verdict: NEEDS CEO\n")
+    w("decisions/20261013f.md", "## D-20261013-06 | New title\n- Verdict: NEEDS CEO\n\n## D-20261013-06 | priority\n- Priority: 3\n")
+    assert {c["id"]: c["title"] for c in ledger(ops, today=day)["cards"]}["D-20261013-06"] == "New title", "a later title wins; | priority sections do not rename"
+    for p in ("decisions/20261013e.md", "decisions/20261013f.md"):
+        os.remove(os.path.join(ops, p))
     w("decisions/20261013b.md", "## D-20261013-04 | Audit\n- From: security\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n")
     w("inbox/dev/D-20261013-04.md", "Status: READY\nBranch: agents/dev-D-20261013-01\n")   # rode on 01's branch
     assert {c["id"]: c["stage"] for c in ledger(ops, merged={"D-20261013-01"}, today=day)["cards"]}["D-20261013-04"] == "merged"
