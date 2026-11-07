@@ -388,6 +388,9 @@ def picture_url(member: dict) -> str | None:
     pic = member.get("picture") or {}
     if not (pic.get("source") and pic.get("name")):
         return None
+    import visible
+    if not visible.may_show(pic["source"]):
+        return None
     return f"/figure/{quote(pic['source'])}/{quote(pic['name'])}"
 
 
@@ -532,11 +535,15 @@ def _pick_picture(fam: dict, member: dict, taken: set) -> dict | None:
     documents; None when nothing scores above zero."""
     import docindex
     import figures
+    import visible
+    b = visible.blocked()
     # Below 3 (a name match and a page bonus) it is no photo: no card
     # picture is better than a certificate or a QR code.
     best, best_score = None, 2.9
     for row in docindex.source_index():
         if member.get("product") not in (row.get("products") or []):
+            continue
+        if not visible.may_show(row["source"], row.get("products") or [], b):
             continue
         for name, f in (figures.figures_for(row["source"]) or {}).items():
             if (row["source"], name) in taken:
@@ -552,16 +559,20 @@ def _draft_features(fam: dict, idxs: list[int]) -> dict[int, str]:
     passages, by the fast model. Facts from the passages only."""
     import llm
     import retrieval_db
+    import visible
+    b = visible.blocked()
     ms = fam["members"]
     blocks = []
     for m in ms:
         try:
             got = retrieval_db.retrieve_from_db(
                 f"{m['name']} appearance features front panel what it looks like",
-                top_k=4, scope={"product": m["product"]} if m.get("product") else None)
+                top_k=12, scope={"product": m["product"]} if m.get("product") else None)
         except Exception as exc:
             logger.warning("family draft: retrieval for %r failed: %s", m["name"], exc)
             got = []
+        got = [r for r in got
+               if visible.may_show(r.get("source"), r.get("products") or r.get("product") or "", b)][:4]
         texts = [" ".join((r.get("text") or "").split())[:600] for r in got[:4]]
         blocks.append(f'Product "{m["name"]}":\n' + "\n".join(f"- {t}" for t in texts))
     want = [ms[i]["name"] for i in idxs]
@@ -621,6 +632,7 @@ def refresh_auto(draft: bool = True) -> dict:
         return load()
     try:
         import catalog
+        import visible
         data = load()
         products = {p["key"]: p["name"] for c in catalog.catalog()["categories"]
                     for p in c["products"] if not p["key"].endswith("_general")}
@@ -628,6 +640,18 @@ def refresh_auto(draft: bool = True) -> dict:
         new = set(products) - set(seen or products)
         data["seen_products"] = sorted(products)
         fams = data["families"]
+        # D-20261106-07: features and questions drafted before the hidden-
+        # document filter may hold hidden text; redraft them once.
+        if draft and not data.get("drafted_visible_only"):
+            for fam in fams:
+                for m in fam.get("members") or []:
+                    if m.get("features_auto"):
+                        m["features"] = ""
+                        m.pop("features_auto", None)
+                qs = fam.get("questions") or []
+                if qs and all(q.get("auto") for q in qs):
+                    fam["questions"] = []
+            data["drafted_visible_only"] = True
         in_family = {m.get("product") for f in fams for m in f.get("members") or []}
         # A new product whose name carries a family's name joins it.
         for k in sorted(new - in_family):
@@ -652,6 +676,8 @@ def refresh_auto(draft: bool = True) -> dict:
             taken = {(m["picture"]["source"], m["picture"]["name"])
                      for m in fam["members"] if m.get("picture")}
             for m in fam["members"]:
+                if m.get("picture") and not visible.may_show(m["picture"].get("source")):
+                    m.pop("picture")
                 if not m.get("picture"):
                     try:
                         pic = _pick_picture(fam, m, taken)
@@ -689,9 +715,13 @@ def pictures_for(product: str, limit: int = 60) -> list[dict]:
     """Every figure of a product's documents, for the console's picker."""
     import docindex
     import figures
+    import visible
+    b = visible.blocked()
     out = []
     for row in docindex.source_index():
         if product not in (row.get("products") or []):
+            continue
+        if not visible.may_show(row["source"], row.get("products") or [], b):
             continue
         for name, f in sorted((figures.figures_for(row["source"]) or {}).items(),
                               key=lambda kv: (kv[1].get("page") or 0, kv[0])):

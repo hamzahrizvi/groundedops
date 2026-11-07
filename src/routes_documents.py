@@ -543,7 +543,7 @@ def source_file(filename: str):
 
     SECURITY: the filename comes from the URL, so it is reduced to a bare
     basename — without that, "../../etc/passwd" escapes the directory.
-    Excluded (internal) sources are refused so they can't be downloaded.
+    Excluded (internal) or blocked obsolete (visible.py) sources are refused so they can't be downloaded.
 
     Gated in main.py (_TOKEN_GATED_PREFIXES): a caller needs a widget member token unless it sends no proxy header from a private address (D-20261010-32).
     """
@@ -556,8 +556,8 @@ def source_file(filename: str):
     safe = docstore._safe_basename(filename)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    from retrieval_db import is_excluded  # the corpus policy main.query applies
-    if is_excluded(safe):
+    import visible  # the rule answers use: internal, excluded, or blocked obsolete
+    if not visible.may_show(safe):
         raise HTTPException(status_code=404, detail="Not found")
     # v15: resolved via docstore, which checks <repo>/documents AND the legacy
     # /data/source_files. SOURCE_FILE_DIR alone 404'd any document retained in
@@ -570,6 +570,8 @@ def source_file(filename: str):
         raise HTTPException(
             status_code=404,
             detail="Source file not retained. Re-ingest to enable downloads.")
+    if not visible.may_show(os.path.basename(path)):
+        raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path, filename=safe)
 
 
@@ -581,23 +583,23 @@ def figure(source: str, name: str):
     Same shape as /source_file: the source is reduced to a bare basename
     and resolved by the module that wrote it, and the crop name must be
     exactly the form figures.py writes (p<page>_<n>.png), so nothing off
-    the URL ever becomes a path. Excluded sources are refused, as their
-    originals are. Token-gated externally alongside /source_file.
+    the URL ever becomes a path. Excluded or blocked obsolete (visible.py)
+    sources are refused, as their originals are. Token-gated externally alongside /source_file.
     """
     import docstore
     import figures as _figures
     safe = docstore._safe_basename(source)
     if not safe:
         raise HTTPException(status_code=404, detail="Not found")
-    from retrieval_db import is_excluded
-    if is_excluded(safe):
+    import visible
+    if not visible.may_show(safe):
         raise HTTPException(status_code=404, detail="Not found")
     path = _figures.figure_path(safe, docstore._safe_basename(name))
     if not path:
         raise HTTPException(status_code=404, detail="Not found")
     # figure_path realpaths the folder: a short name (INTERN~1.PDF) or alias
     # resolves to the long folder, so test the mark on the folder really opened.
-    if is_excluded(os.path.basename(os.path.dirname(path))):
+    if not visible.may_show(os.path.basename(os.path.dirname(path))):
         raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path, media_type="image/png")
 
