@@ -1021,7 +1021,9 @@ def register(app, answer_query, draft_enquiry=None):
 
         Not tied to a remembered answer like /feedback: a guest's chat is
         curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
-        most visitors. Its own daily limit (quota "rating") bounds the rate, and the store keeps at most RATINGS_MAX rows, so made-up chat ids cannot grow the file without end.
+        most visitors. Its own daily limit (quota "rating") bounds the rate,
+        and the store keeps at most RATINGS_MAX rows, so made-up chat ids
+        cannot grow the file without end.
         """
         gate = quota.check_public_write("rating", payload.visitor_id,
                                         _client_ip(request))
