@@ -2,11 +2,15 @@
 
 "Compare the NV9USB+ and the BV30 power supply" becomes three answers that
 reach the visitor one by one: the NV9USB+ on its own, the BV30 on its own,
-then the comparison from the normal pipeline. Each part is a full, grounded
-answer through /widget/ask (gates and credits included), so a comparison
-costs three answers. WIDGET_STEPWISE_COMPARE=0 turns it off.
+then the comparison. Each part is a full, grounded answer through
+/widget/ask (gates and credits included). The comparison is written from
+the two parts alone (compare()), one small model call, so it agrees with
+them and a comparison costs two answers. It is not re-checked against the
+manuals; the facts it may use already were. When a part is missing or the
+call fails, the normal pipeline answers the original question instead.
+WIDGET_STEPWISE_COMPARE=0 turns the whole thing off.
 
-plan() only decides and words the per-product questions; widget_api's
+plan() decides and words the per-product questions; widget_api's
 /ask/stream runs them.
 """
 
@@ -42,6 +46,53 @@ supply" asks about the power supply of A and of B). Each question names only
 its own product. Reply with exactly two lines and nothing else:
 1. <question about {a}>
 2. <question about {b}>"""
+
+
+COMPARE_PROMPT = """A customer asked: {q}
+
+Below is one answer per product, each already checked against that product's
+manual.
+
+### {a}
+{answer_a}
+
+### {b}
+{answer_b}
+
+Answer the customer's question by comparing the two products, using ONLY
+facts stated above. Never add a figure, feature or claim that is not there,
+and never draw a conclusion the facts do not state (a recommended supply
+rating is not how much a product draws). Start with the direct answer to
+exactly what was asked. A short markdown table helps when you compare
+figures. If the facts above are not enough to decide, say plainly what is
+missing. Keep it short and do not repeat everything above. Talk about the
+products, not about "the answers"."""
+
+
+def compare(q: str, parts: list[tuple[str, str]]) -> str | None:
+    """The comparison written from the two parts [(name, answer)] alone, so
+    it agrees with what the visitor has just read; None if no model answered
+    (the caller then runs the normal pipeline)."""
+    try:
+        import llm
+        (a, answer_a), (b, answer_b) = parts
+        out = llm.generate_with_fallback("default", COMPARE_PROMPT.format(
+            q=q, a=a, answer_a=answer_a, b=b, answer_b=answer_b))
+        text = (out.get("text") or "").strip()
+        return text if out.get("provider") != "none" and text else None
+    except Exception as exc:
+        logger.warning(f"stepwise: comparison not written ({exc})")
+        return None
+
+
+def record(session_id: str | None, q: str, answer: str, request_id: str) -> None:
+    """The comparison is the visitor's turn: remembered so a follow-up reads
+    against it, and logged like any answer."""
+    from logger import log_interaction
+    from memory import add_to_memory
+    if session_id:
+        add_to_memory(session_id, q, answer)
+    log_interaction(q, answer, "comparison", None, [], request_id=request_id)
 
 
 def enabled() -> bool:

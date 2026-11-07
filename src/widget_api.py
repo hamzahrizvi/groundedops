@@ -1128,6 +1128,7 @@ def register(app, answer_query, draft_enquiry=None):
                     and (await run_in_threadpool(
                         quota.session_check, payload.session_id))["allowed"]):
                 steps = await run_in_threadpool(stepwise.plan, payload.q)
+            shown = []   # (name, result) of each part sent, unflagged
             for i, (key, name, own_q) in enumerate(steps):
                 yield sse("status", {"stage": f"Looking up the {name}",
                                      "id": "step", "at_ms": None})
@@ -1152,16 +1153,39 @@ def register(app, answer_query, draft_enquiry=None):
                                    "answer": (r.get("answer") or "").strip(),
                                    "sources": r.get("sources"),
                                    "flagged": bool(r.get("flagged"))})
+                if not r.get("flagged"):
+                    shown.append((name, r))
             if steps:
                 yield sse("status", {"stage": "Comparing the two",
                                      "id": "step", "at_ms": None})
 
-            box = {}
-            async for line in answer_of(payload, box):
-                yield line
-            if "result" not in box:
-                return
-            result = box["result"]
+            # Both halves answered: the comparison is written from them, so
+            # it cannot contradict what the visitor just read. No sources of
+            # its own (each part shows its pages) and no credit: the parts
+            # paid. Anything less, and the pipeline answers as it always has.
+            result = None
+            if len(shown) == 2:
+                text = await run_in_threadpool(
+                    stepwise.compare, payload.q,
+                    [(n, (r.get("answer") or "").strip()) for n, r in shown])
+                if text:
+                    rid = uuid.uuid4().hex[:12]
+                    await run_in_threadpool(stepwise.record, payload.session_id,
+                                            payload.q, text, rid)
+                    await run_in_threadpool(quota.session_record, payload.session_id)
+                    _remember_answer(rid, payload.q, payload.product or payload.category,
+                                     payload.session_id, text)
+                    last = shown[-1][1]
+                    result = {"answer": text, "role": "comparison", "request_id": rid,
+                              "sources": [], "flagged": False, "quota": last.get("quota"),
+                              "session": last.get("session")}
+            if result is None:
+                box = {}
+                async for line in answer_of(payload, box):
+                    yield line
+                if "result" not in box:
+                    return
+                result = box["result"]
 
             answer = (result.get("answer") or "").strip()
             if steps and answer and not (result.get("flagged")
