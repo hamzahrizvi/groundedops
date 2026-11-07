@@ -1068,10 +1068,11 @@ def register(app, answer_query, draft_enquiry=None):
             return ("event: " + event + "\n"
                     + "data: " + _json.dumps(data) + "\n\n")
 
-        async def answer_of(p, box):
+        async def answer_of(p, box, part=False):
             """widget_ask(p), yielding its progress lines while it works. The
             result lands in box["result"]; a failure yields an "error" event
-            and leaves box empty."""
+            and leaves box empty. `part`: one product's step of a comparison
+            (stepwise.PART)."""
             # The pipeline reports each stage through pipeline_trace's
             # listener; the answer runs as a task so its progress can be
             # sent while it is still working.
@@ -1081,6 +1082,8 @@ def register(app, answer_query, draft_enquiry=None):
             progress: asyncio.Queue = asyncio.Queue()
             ctx = contextvars.copy_context()
             ctx.run(pipeline_trace.listen, loop, progress.put_nowait)
+            if part:
+                ctx.run(stepwise.PART.set, True)
             task = loop.create_task(widget_ask(p, request), context=ctx)
             sent = set()
             while not task.done():
@@ -1133,14 +1136,18 @@ def register(app, answer_query, draft_enquiry=None):
                 # ponytail: the parts count against their own chat caps, not
                 # this one's; the daily credit quota still sees all three.
                 part = payload.model_copy(update={
-                    "q": own_q, "product": key,
+                    "q": own_q, "product": key, "skip_faq": True,
                     "session_id": (payload.session_id or "w")[:MAX_ID_CHARS - 3] + f"~{i + 1}"})
                 box = {}
-                async for line in answer_of(part, box):
+                async for line in answer_of(part, box, part=True):
                     yield line
                 if "result" not in box:
                     return
                 r = box["result"]
+                # "Which ICU do you have?" is not this product's half of the
+                # answer; the comparison below asks it if it still needs to.
+                if not stepwise.is_answer(r):
+                    continue
                 yield sse("part", {"title": name,
                                    "answer": (r.get("answer") or "").strip(),
                                    "sources": r.get("sources"),

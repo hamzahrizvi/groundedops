@@ -21,7 +21,10 @@ asked = []
 
 
 def _fake_pipeline(payload, x_user_id=None):
-    asked.append((payload.q, payload.product, payload.session_id))
+    asked.append((payload.q, payload.product, payload.session_id, payload.skip_faq))
+    if "CLARIFY" in payload.q:
+        return {"answer": "Which BV30 do you have?", "sources": [], "role": "clarify",
+                "needs_clarification": True, "request_id": "rc"}
     return {"answer": "Answer to: " + payload.q, "sources": [], "role": "fast",
             "request_id": "r" + str(len(asked))}
 
@@ -56,9 +59,17 @@ def test_each_product_then_the_comparison():
     assert kinds.index("part") < kinds.index("meta")
     text = "".join(d["text"] for k, d in ev if k == "delta")
     assert text == "### Comparison\n\nAnswer to: NV9USB+ vs BV30 supply?"
-    # Each part asked its own question, scoped to its product, in its own chat.
+    # Each part asked its own question, scoped to its product, in its own
+    # chat, past the FAQ; the comparison itself is the visitor's own turn.
     assert [a[:2] for a in asked[:2]] == [(s[2], s[0]) for s in STEPS]
     assert asked[0][2] != asked[2][2] and asked[2][2] == "live-step-1"
+    assert [a[3] for a in asked] == [True, True, False]
+
+
+def test_a_question_back_is_not_shown_as_a_part():
+    ev = _events([STEPS[0], ("bv30", "BV30", "CLARIFY the BV30 supply?")])
+    assert [d["title"] for k, d in ev if k == "part"] == ["NV9USB+"]
+    assert "meta" in [k for k, _ in ev]
 
 
 def test_no_plan_is_one_plain_answer():
