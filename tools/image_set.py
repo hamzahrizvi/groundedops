@@ -1,6 +1,7 @@
 """The picture test (D-20261022-14): which manuals get questions, the merge with its fairness check, the score.
 
   python tools/image_set.py plan  <RUN> <FIGS>      one line per manuals file: "<stem> | <document>=<n> | ..."
+                                                    (first drops the figure-description chunks from RUN/manuals)
   python tools/image_set.py merge <RUN> <FIGS>      RUN/parts/*.json -> RUN/cases.json; last line "OK <n>" or "FAIL <part>: <why>"
   python tools/image_set.py add   <RUN> <WEEKLY>    RUN/cases.json appended to the weekly run's cases.json; "ADDED <n>"
   python tools/image_set.py score <RUN> <OUT_DIR>   RUN/cases_state.json summary -> OUT_DIR/score.json; prints the two counts
@@ -15,6 +16,7 @@ LABEL = re.compile(r"^\[(.+?) p\d+\]", re.M)
 NAME = re.compile(r"^p(\d+)_\d+\.png$")
 CERT = re.compile(r"certific|declaration|conformity|-UL", re.I)   # paperwork: logos and stamps, no product pictures
 BIG = 50   # a manual with this many crops gets 2 questions, else 1 (13 manuals -> 20 questions on 2026-10-22)
+FIG_CHUNK = re.compile(r" — Figure(: .*)?\]$")   # a figure chunk's crumb line ends "— Figure]" or "— Figure: <label>]"
 NEED = ("q", "reference", "product", "source", "figure", "must_include")
 
 
@@ -23,11 +25,21 @@ def docs_by_stem(run):
             for f in sorted(glob.glob(os.path.join(run, "manuals", "*.txt")))}
 
 
+def prose_only(run):
+    """Drops the figure-description chunks from RUN/manuals (the 2026-11-06 backfill indexed what 22 manuals' pictures
+    show). Left in, the writers find every picture fact "in the text" and only paperwork logos are left to ask about."""
+    for f in glob.glob(os.path.join(run, "manuals", "*.txt")):
+        chunks = open(f, encoding="utf-8").read().split("\n\n[")
+        keep = [c for c in chunks if not FIG_CHUNK.search((c.split("\n") + [""])[1])]
+        open(f, "w", encoding="utf-8").write("\n\n[".join(keep))
+
+
 def plan(run, figs, limit=None):
     """Each document with crops goes to the manuals file holding the fewest documents (its own manual), ties by name.
     limit (the weekly run's few picture questions): one question each for that many documents, those used least in
     earlier picture sets first, then those with the most pictures (a certificate has a logo or two), so the weeks
     rotate through the real manuals."""
+    prose_only(run)
     by, out, docs = docs_by_stem(run), {}, []
     for doc in sorted({d for ds in by.values() for d in ds}):
         side = os.path.join(figs, doc, "figures.json")

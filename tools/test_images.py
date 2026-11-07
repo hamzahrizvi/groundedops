@@ -98,9 +98,10 @@ def main():
         for f in ("p1_1.png", "p2_1.png"):
             open(os.path.join(figs, "m.pdf", f), "w").close()
         r2 = os.path.join(tmp, "r2", "stamp"); os.makedirs(os.path.join(r2, "manuals")); os.makedirs(os.path.join(r2, "parts"))
-        open(os.path.join(r2, "manuals", "a.txt"), "w").write("[m.pdf p1] text about 99 mm\n\n[n.pdf p1] x")
+        open(os.path.join(r2, "manuals", "a.txt"), "w", encoding="utf-8").write("[m.pdf p1] text about 99 mm\n\n[n.pdf p1] x\n\n[m.pdf p2]\n[M — Figure: pins]\nFigure on page 2\nSH4")
         open(os.path.join(r2, "manuals", "b.txt"), "w").write("[m.pdf p2] more")
         assert image_set.plan(r2, figs) == ["a | n.pdf=1", "b | m.pdf=2"], image_set.plan(r2, figs)
+        assert open(os.path.join(r2, "manuals", "a.txt"), encoding="utf-8").read() == "[m.pdf p1] text about 99 mm\n\n[n.pdf p1] x"   # figure chunk dropped, so z2 below stays a picture question
         good = {"product": "p", "source": "m.pdf", "figure": "p1_1.png", "q": "q", "reference": "r"}
         json.dump({"cases": [{**good, "id": "z1", "must_include": ["99 mm"]}, {**good, "id": "z2", "must_include": ["SH4"]}]},
                   open(os.path.join(r2, "parts", "p.json"), "w"))

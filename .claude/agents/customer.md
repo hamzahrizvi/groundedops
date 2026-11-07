@@ -162,6 +162,13 @@ the spec from the wrong product's manual", not "C-14 was wrong". A type needs
 at least two cases. A failure that is the grader's fault
 is reported as a grader finding, not a bot finding.
 
+Picture questions (cases with `"figure"`; the CEO, 2026-11-07: Dev fixes these too) are one type of their own,
+"answer only in a picture", filed even from one failing case. The answer only shows that the bot failed; say
+where it went wrong from its `sys_normal` entry: did `sources` hold the case's `source` document at all, and did
+`figures` hold the case's `figure`? Not found = search never reached that document or page; found but the answer
+still wrong = it had the picture's text and did not use it. Quote the question, `reference`, `source`, `figure`
+and those two facts. Write no siblings for this type: next week's new picture questions are its check.
+
 For each type write two things:
 1. A finding in `C:/Users/hrizvi/groundedops-ops/inbox/customer/<RUN name>-<type-slug>.md`
    using `OFFICE/ops/proposal_template.md`. Quote the failing lab questions and answers (cases.json). Say how many cases of this type passed too.
