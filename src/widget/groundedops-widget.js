@@ -215,6 +215,7 @@
   var state = {
     sessionId: null,
     deleteToken: null,     // D-20261104-08: from /widget/chat; only it can delete this chat
+    ratingTicket: null,   // D-20261106-11: from an answer; only it can rate this chat
     stage: "intent",     // intent | category | product | chat
     intent: null,
     category: null,      // {key, name}
@@ -1464,6 +1465,7 @@
     state = {
       sessionId: uuid(),
       deleteToken: null,
+      ratingTicket: null,
       stage: "intent",
       intent: null,
       category: null,
@@ -2291,6 +2293,7 @@
         // served with no re-matching. "Something else" logs a FAQ gap and
         // answers from the documents instead.
         if (d.quota) quotaState = d.quota;
+        if (d.rating_ticket) { state.ratingTicket = d.rating_ticket; save(); }
 
         // Backend says a full answer needs an account.
         if (d.needs_sign_in) {
@@ -2790,7 +2793,7 @@
    *  Test chat sets data-no-rating, so staff tests never count as ratings. */
   function askRating(then) {
     var asked = state.messages.some(function (m) { return m.role === "user"; });
-    if (hasAttr("data-no-rating") || state.rated || !asked || root.querySelector(".go-rate")) return then();
+    if (hasAttr("data-no-rating") || state.rated || !asked || !state.ratingTicket || root.querySelector(".go-rate")) return then();
     var stars = 0;
     var box = document.createElement("div");
     box.className = "go-rate";
@@ -2825,7 +2828,8 @@
       fetch(cfg.api + "/widget/rating", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ session_id: state.sessionId, visitor_id: visitorId(),
+        body: JSON.stringify({ session_id: state.sessionId, rating_ticket: state.ratingTicket,
+                               visitor_id: visitorId(),
                                stars: stars,
                                comment: box.querySelector("textarea").value.trim() }),
       }).catch(function () {});
