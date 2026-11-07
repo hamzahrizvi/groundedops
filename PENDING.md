@@ -366,7 +366,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
 | D-20261106-11 | Security item D-20261106-11, details in the office | waiting for CEO | your yes |
-| D-20261106-17 | A good answer is withheld whole because the checker faults one sentence; cut that sentence and serve the rest | sent back, rebuilding | Dev rebuilds it |
+| D-20261106-17 | A good answer is withheld whole because the checker faults one sentence; cut that sentence and serve the rest | built, waiting for the check | the pre-ship check |
 | D-20261107-08 | Security item D-20261107-08, details in the office | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
