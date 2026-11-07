@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Widget motion demo</title>
 <!--
-  Local look at the widget's expand button and animations with no backend:
-  fetch is stubbed, and every question gets the same canned answer after a
-  six-second wait so the waiting state can be seen. Open this file directly.
+  Local look at the widget's expand button, animations and typing with no
+  backend: fetch is stubbed. A question gets a canned answer after six
+  seconds; one with "vs", "compare" or "difference" plays the step-by-step
+  comparison (one product, the other, then the comparison). Serve this folder
+  over http (a file:// page cannot be driven by the preview browser).
 -->
 <style>
   body { margin: 0; min-height: 100vh; font: 15px/1.6 system-ui, sans-serif; background: #eef1f4; color: #333; }
@@ -19,14 +21,35 @@
       "| Pin | Name | Use |\n|---|---|---|\n| 1 | +12V | Supply |\n| 2 | GND | Ground |\n| 3 | TX | Serial out |\n\n" +
       "- Check the supply is within 11-13.2 V.\n- Use the supplied cable.";
     function sse(ev, v) { return "event: " + ev + "\ndata: " + JSON.stringify(v) + "\n\n"; }
-    window.fetch = function (url) {
+    // [seconds, event, data]: what the server sends, and when.
+    function script(q) {
+      if (!/\bvs\b|compare|difference/i.test(q)) {
+        return [[6, "meta", { sources: [] }], [6, "delta", { text: answer }]];
+      }
+      return [
+        [0, "status", { stage: "Looking up the NV9USB+" }],
+        [5, "part", { title: "NV9USB+", answer: "The NV9USB+ runs from **12 V DC** (11-13.2 V) and draws up to 1.5 A while a note is being moved.", sources: [] }],
+        [5, "status", { stage: "Looking up the BV30" }],
+        [10, "part", { title: "BV30", answer: "The BV30 takes **12 V DC** too, but peaks lower at 1.2 A, and can also run from 24 V with the wide-range option.", sources: [] }],
+        [10, "status", { stage: "Comparing the two" }],
+        [15, "meta", { sources: [] }],
+        [15, "delta", { text: "### Comparison\n\n| | NV9USB+ | BV30 |\n|---|---|---|\n| Supply | 12 V DC | 12 V DC (24 V option) |\n| Peak current | 1.5 A | 1.2 A |\n\nBoth run from a standard 12 V supply; the BV30 draws less and is the only one with a 24 V option." }],
+      ];
+    }
+    window.fetch = function (url, init) {
       if (String(url).indexOf("/widget/ask") >= 0) {
-        return new Promise(function (ok) {
-          setTimeout(function () {
-            ok(new Response(sse("meta", { sources: [] }) + sse("delta", { text: answer }),
-              { headers: { "Content-Type": "text/event-stream" } }));
-          }, 6000);
-        });
+        var steps = script(JSON.parse(init.body).q);
+        var enc = new TextEncoder();
+        return Promise.resolve(new Response(new ReadableStream({
+          start: function (c) {
+            steps.forEach(function (s, i) {
+              setTimeout(function () {
+                c.enqueue(enc.encode(sse(s[1], s[2])));
+                if (i === steps.length - 1) c.close();
+              }, s[0] * 1000 + i);
+            });
+          },
+        }), { headers: { "Content-Type": "text/event-stream" } }));
       }
       return Promise.resolve(new Response("{}", { headers: { "Content-Type": "application/json" } }));
     };

@@ -43,6 +43,7 @@ import pipeline_trace
 import feedback_store
 import jsonstore
 import quota
+import stepwise
 import text_utils
 from guards import client_ip as _client_ip, is_local_caller
 
@@ -1067,9 +1068,10 @@ def register(app, answer_query, draft_enquiry=None):
             return ("event: " + event + "\n"
                     + "data: " + _json.dumps(data) + "\n\n")
 
-        async def run():
-            yield sse("status", {"stage": "Searching the documentation",
-                                 "id": "entry", "at_ms": 0})
+        async def answer_of(p, box):
+            """widget_ask(p), yielding its progress lines while it works. The
+            result lands in box["result"]; a failure yields an "error" event
+            and leaves box empty."""
             # The pipeline reports each stage through pipeline_trace's
             # listener; the answer runs as a task so its progress can be
             # sent while it is still working.
@@ -1079,7 +1081,7 @@ def register(app, answer_query, draft_enquiry=None):
             progress: asyncio.Queue = asyncio.Queue()
             ctx = contextvars.copy_context()
             ctx.run(pipeline_trace.listen, loop, progress.put_nowait)
-            task = loop.create_task(widget_ask(payload, request), context=ctx)
+            task = loop.create_task(widget_ask(p, request), context=ctx)
             sent = set()
             while not task.done():
                 getter = asyncio.ensure_future(progress.get())
@@ -1094,11 +1096,10 @@ def register(app, answer_query, draft_enquiry=None):
                     yield sse("status", {"stage": line, "id": stage["id"],
                                          "at_ms": stage.get("at_ms")})
             try:
-                result = task.result()
+                box["result"] = task.result()
             except HTTPException as e:
                 yield sse("error", {"status": e.status_code,
                                     "detail": e.detail})
-                return
             except Exception:
                 # This one is the PUBLIC surface, so the rule matters most
                 # here: an anonymous visitor gets a status and nothing else.
@@ -1107,9 +1108,58 @@ def register(app, answer_query, draft_enquiry=None):
                 yield sse("error", {"status": 503, "detail":
                                     "The assistant is temporarily "
                                     "unavailable. Please try again."})
+
+        async def run():
+            yield sse("status", {"stage": "Searching the documentation",
+                                 "id": "entry", "at_ms": 0})
+
+            # v17.4 trial: a comparison of two products answers each product
+            # first, as its own part, then compares (stepwise.py). Only where
+            # the model is reachable and this chat is under its cap, so the
+            # split call is never made for a question that would be refused.
+            steps = []
+            if (stepwise.enabled() and not payload.faq_id and not payload.skip_faq
+                    and payload.effort in (None, "standard")
+                    and (_caller(request, payload.visitor_id)["tier"] != "anonymous"
+                         or quota.anon_llm_enabled())
+                    and (await run_in_threadpool(
+                        quota.session_check, payload.session_id))["allowed"]):
+                steps = await run_in_threadpool(stepwise.plan, payload.q)
+            for i, (key, name, own_q) in enumerate(steps):
+                yield sse("status", {"stage": f"Looking up the {name}",
+                                     "id": "step", "at_ms": None})
+                # Its own conversation id, so the part's question does not
+                # become the turn a follow-up is read against.
+                # ponytail: the parts count against their own chat caps, not
+                # this one's; the daily credit quota still sees all three.
+                part = payload.model_copy(update={
+                    "q": own_q, "product": key,
+                    "session_id": (payload.session_id or "w")[:MAX_ID_CHARS - 3] + f"~{i + 1}"})
+                box = {}
+                async for line in answer_of(part, box):
+                    yield line
+                if "result" not in box:
+                    return
+                r = box["result"]
+                yield sse("part", {"title": name,
+                                   "answer": (r.get("answer") or "").strip(),
+                                   "sources": r.get("sources"),
+                                   "flagged": bool(r.get("flagged"))})
+            if steps:
+                yield sse("status", {"stage": "Comparing the two",
+                                     "id": "step", "at_ms": None})
+
+            box = {}
+            async for line in answer_of(payload, box):
+                yield line
+            if "result" not in box:
                 return
+            result = box["result"]
 
             answer = (result.get("answer") or "").strip()
+            if steps and answer and not (result.get("flagged")
+                                         or result.get("needs_clarification")):
+                answer = "### Comparison\n\n" + answer
             yield sse("meta", {k: result.get(k) for k in
                                ("sources", "from_faq", "faq_reviewed", "faq_candidates",
                                 "request_id", "role", "reason",

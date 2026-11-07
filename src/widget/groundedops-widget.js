@@ -368,6 +368,10 @@
     ".go-row,.go-status,.go-chips,.go-chipfold,.go-fwrap,.go-fams,.go-src[open]>.go-srci" +
     "{animation:go-rise .3s cubic-bezier(.2,.8,.2,1) backwards}" +
     "@keyframes go-rise{from{opacity:0;transform:translateY(6px)}}" +
+    // While an answer types out, what hangs off it waits, then rises in.
+    ".go-typing .go-srcline,.go-typing .go-src,.go-typing .go-ans-fig,.go-typing .go-badge," +
+    ".go-typing .go-vote{display:none}" +
+    ".go-srcline,.go-src,.go-ans-fig,.go-badge,.go-vote{animation:go-rise .3s cubic-bezier(.2,.8,.2,1) backwards}" +
     // Expanded: a large reading window centred over a dimmed page, with bigger
     // text and pictures. The dim layer is the root's ::before, so a click on
     // it lands on the root and shrinks the window back (see setBig).
@@ -1173,31 +1177,43 @@
    * What this does buy: the answer lands the way a person reads it, and the
    * wait no longer ends with a wall of text appearing at once.
    */
+  /* Where typing may stop. A table arrives whole: a cut inside one moves to
+   * its end, since a half-typed pipe row renders as broken syntax. */
+  function revealEnd(text, n) {
+    var start = text.lastIndexOf("\n", n - 1) + 1;
+    if (!/^[ \t]*\|/.test(text.slice(start))) return n;
+    var re = /\n(?![ \t]*\|)/g;
+    re.lastIndex = n;
+    var r = re.exec(text);
+    return r ? r.index : text.length;
+  }
+
+  /* A cut can fall inside **bold** or `code`: close it so the half-typed
+   * text never shows bare asterisks. */
+  function revealText(text, n) {
+    var t = text.slice(0, n);
+    if ((t.split("**").length - 1) % 2) t += "**";
+    if ((t.split("`").length - 1) % 2) t += "`";
+    return t;
+  }
+
   function revealInto(row, text) {
     var el = row && row._txt;
-    if (!el) return;
-    var reduced = window.matchMedia
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // A markdown table revealed a character at a time renders as broken
-    // pipe syntax for most of its life. Tables arrive whole.
-    if (reduced || /\n\s*\|/.test(text) || text.length < 40) return;
+    if (!el || calm() || text.length < 40) return;
 
-    // textContent, NOT renderMd, for the growing text: renderMd APPENDS into
-    // the node (it is a sequence of into.appendChild calls) and never clears,
-    // so re-rendering each frame stacked every partial copy on top of the
-    // last -- the answer arrived as a staircase of itself, under a complete
-    // copy that bubble() had already rendered. textContent replaces, so each
-    // frame supersedes the one before.
-    //
-    // It also removes the partial-markdown problem entirely: raw syntax is
-    // never half-parsed, because nothing is parsed until the end.
+    // Each frame renders the typed part as markdown from scratch: renderMd
+    // APPENDS into the node and never clears, so it is cleared first (once
+    // skipped, the answer arrived as a staircase of itself). Sources,
+    // pictures and votes wait for the end (.go-typing).
     var shown = 0, last = 0, finished = false;
+    row.classList.add("go-typing");
     el.textContent = "";
 
     function finish() {
       if (finished) return;
       finished = true;
       clearTimeout(safety);
+      row.classList.remove("go-typing");
       el.textContent = "";
       renderMd(text, el);
       scrollDown();
@@ -1217,11 +1233,12 @@
       if (finished) return;
       if (!row.isConnected) { clearTimeout(safety); return; }  // removed mid-reveal
       if (!last) last = ts;
-      shown = Math.min(text.length,
-                       shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS)));
+      shown = revealEnd(text, Math.min(text.length,
+                       shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS))));
       last = ts;
       if (shown >= text.length) { finish(); return; }
-      el.textContent = text.slice(0, shown);
+      el.textContent = "";
+      renderMd(revealText(text, shown), el);
       scrollDown();
       requestAnimationFrame(step);
     }
@@ -2295,6 +2312,18 @@
     clearChips();
     heard(opts.shown || q);
     var s = waiting();
+    // v17.4: a comparison of two products arrives as one answer per product
+    // before the comparison itself; each shows as soon as it lands, and the
+    // wait line moves back below it.
+    s.onPart = function (v) {
+      say("### " + v.title + "\n\n" + v.answer, {
+        reveal: !v.flagged,
+        flagged: !!v.flagged,
+        sources: v.flagged ? null : v.sources,
+      });
+      $log.appendChild(s);
+      scrollDown();
+    };
 
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
@@ -2381,14 +2410,12 @@
           return;
         }
         say(d.answer || "No answer returned.", {
-          // Only a real answer types out.
-          //  - a curated FAQ answer returns in ~0.08s, so revealing it would
-          //    ADD delay to the one path that is genuinely instant;
-          //  - a refusal or a service-outage notice is not an answer being
-          //    composed, and typing out "the answering service isn't
-          //    reachable" one character at a time is a slow way to deliver
-          //    bad news.
-          reveal: !d.from_faq && !d.flagged && !d.service_degraded,
+          // Every answer types out, a curated FAQ one too (v17.4: answers
+          // that popped in whole read as abrupt). A refusal or a
+          // service-outage notice is not an answer being composed, and
+          // typing out "the answering service isn't reachable" one
+          // character at a time is a slow way to deliver bad news.
+          reveal: !d.flagged && !d.service_degraded,
           // D-20261010-14: a source line only under an answer. A refusal, a
           // clarify question or a service notice carries the pages it searched,
           // which are not where an answer came from.
@@ -2735,6 +2762,7 @@
       var v = JSON.parse(data);
       if (ev === "status") { if (wait.setStage) wait.setStage(v.stage); }
       else if (ev === "meta") d = v;
+      else if (ev === "part") { if (wait.onPart) wait.onPart(v); }
       else if (ev === "delta") text += v.text;
       else if (ev === "error") {
         fail = new Error("HTTP " + v.status);
