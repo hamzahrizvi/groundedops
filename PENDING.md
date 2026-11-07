@@ -365,7 +365,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
-| D-20261106-10 | Security item D-20261106-10, details in the office | approved, queued | Dev builds it |
+| D-20261106-10 | Security item D-20261106-10, details in the office | ready to merge | merges once Security clears it |
 | D-20261106-11 | Security item D-20261106-11, details in the office | waiting for CEO | your yes |
 | D-20261106-17 | A good answer is withheld whole because the checker faults one sentence; cut that sentence and serve the rest | sent back, rebuilding | Dev rebuilds it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
@@ -378,6 +378,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/20261102-comparison-declines-though-documented | Comparisons between two products: the bot declines or asks "which section?" although both manuals hold the facts | proposed | the product owner triages it |
 | customer/20261102-multi-document-asks-or-drops-part | Questions that need two documents: the bot asks "which section?" or leaves out part of the answer | proposed | the product owner triages it |
 | customer/20261102-vague-declines-instead-of-clarifying | Vague questions: the bot declines or guesses instead of asking what the customer means | proposed | the product owner triages it |
+| customer/20261107d-documented-fact-declined | The chatbot says "not in the documentation" or "the API cannot do that" when the manual states it | proposed | the product owner triages it |
+| customer/20261107d-short-appendix-docs-missed | Answers that sit in a short appendix document are declined or answered from the wrong section | proposed | the product owner triages it |
 | customer/D-20261023-02-reask-diagnosis | D-20261023-02: why the same 40 questions scored 18 points lower today | proposed | the product owner triages it |
 | customer/images-20261030f | Picture test 20261030f | proposed | the product owner triages it |
 | customer/images-20261107b | Picture test 20261107b | proposed | the product owner triages it |
