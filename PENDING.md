@@ -228,6 +228,30 @@ Not linked to a person, so not covered: question text on the unanswered
 list (the 90-day rule clears it). Still the owner's: a privacy link shows
 only when the website owner sets one.
 
+**Friday review 2026-11-06 (automated, not yet reviewed by hand).** About
+25 code commits since the 11-04 sweep (office merges D-20261104-06/-07/-08/-10,
+D-20261105-01/-05; look-alike family questions, obsolete products, widget
+opening and consent changes, picture lookup tables), plus the office
+plan's own commits. Ticked off: nothing outside the office plan, which
+carries its own status. Obsolete: nothing. Corrected: "the widget does not
+stream" (it streams stages and sentences since 8.11; time-to-first-token is
+still the open part). Updated with evidence: the lost-backslash item (four
+more repair commits, the latest today, `a012df2`). Added: nothing new with
+evidence behind it. The 11-04 sweep's unfiled note about the terminated
+11-03 backup has recovered: "GroundedOps Daily Backup" last ran 11-06 01:30
+with result 0. Checked in this review: `run_tests.py` **409/410 passed, 1
+skipped, 0 failed** (10-30: 380/381). Retrieval baseline `--selfcheck` OK
+(35 cases, armed). The LiteLLM gateway is **still NXDOMAIN**. `log_report
+--since 7d`: 70 questions, 44 answered, 22 refused, 4 asked back, 0
+handoffs, 34 of 62 conversations resolved, 0 votes, p50 13.63s / p90 35.67s
+(10-30: 22 / 15 / 5 / 2, p50 0.62s / p90 5.61s). **Do not read these as
+customers:** 68 of the 70 are R&D and probe runs (`rnd11-*` 60, `probe13*`
+8) logged as `console` on 10-31 and 11-02, before `d205158` (11-04) started
+labelling non-`console-` session ids as `script`; old rows are not
+relabelled. The only widget turns are one two-question conversation on
+11-02 about the SMART Update download. Next week's figure should be the
+first clean one. Nothing was committed; this file is modified in the tree.
+
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
 independent planners (59 proposals) and an adversarial verdict on each of 37
@@ -2648,7 +2672,13 @@ see *Shipped — the four follow-ups* above; kept for the record.
 ## In progress / known gaps
 
 - **The office's Dev builds lose backslash-newlines, and a person repairs
-  them afterwards.** Found in the Friday review 2026-10-16. Three of this
+  them afterwards.** **Still happening (Friday review 2026-11-06):** since
+  10-16 at least four more repair commits: `21bae9f` (D-20261019-20),
+  `09009c3` (D-20261030-09), `01a22d0` (11-04, twelve continuations
+  restored across `src/tests` by a one-off "joined_lines" scan that was
+  never committed as a tool), and `a012df2` (11-06, `test_answer_feedback.py`,
+  two `patch.object` calls joined by a run of spaces). No guard exists yet:
+  `git grep joined_lines` finds nothing. Found in the Friday review 2026-10-16. Three of this
   week's 28 code commits exist only to put a lost line continuation back:
   `fb83dbb` (`tests/test_provider_outage.py`, four context managers run
   together on one line), `c31e3ee` (`tests/test_llm.py`, same shape; its
@@ -3288,7 +3318,16 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
 
 **Serving**
 
-- **The widget does not stream.** `/query/stream` exists with sentence-level
+- **The widget does not stream tokens.** **Corrected in the Friday review
+  2026-11-06:** the sentence below about the widget posting to the blocking
+  `/widget/ask` is stale. Since 8.11 (`ab0f9943`) the widget posts to
+  `/widget/ask/stream` (`groundedops-widget.js:2251`), which sends real
+  stage lines ("searching", "checking") and then the answer sentence by
+  sentence. That route still calls `widget_ask()` and produces the whole
+  answer before the first character (its own docstring,
+  `widget_api.py:1042`), so time-to-first-token is unchanged; that part of
+  this item is still open, and the quota-gate refactor it needs is still
+  unverified. Original text: `/query/stream` exists with sentence-level
   `StreamGrounder` verification; `groundedops-widget.js:1939` (line re-checked 2026-09-25) posts to the
   blocking `/widget/ask`. The 260 chars/second reveal added in `152b960` is
   presentation only. Real token streaming needs the generation call pushed
