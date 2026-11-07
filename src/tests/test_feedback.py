@@ -77,7 +77,8 @@ def test_the_ratings_store_keeps_only_the_newest_rows():
 
 
 def _guest_ask(path, sid):
-    with patch.object(quota, "anon_llm_enabled", return_value=False),          patch.object(widget_api.faq_store, "suggest_candidates", return_value={"mode": "none"}):
+    with patch.object(quota, "anon_llm_enabled", return_value=False), \
+         patch.object(widget_api.faq_store, "suggest_candidates", return_value={"mode": "none"}):
         return client.post(path, json={"q": "How do I clear a coin jam?",
                                        "session_id": sid, "visitor_id": "ticket-guest"})
 
