@@ -5,10 +5,16 @@ reach the visitor one by one: the NV9USB+ on its own, the BV30 on its own,
 then the comparison. Each part is a full, grounded answer through
 /widget/ask (gates and credits included). The comparison is written from
 the two parts alone (compare()), one small model call, so it agrees with
-them and a comparison costs two answers. It is not re-checked against the
-manuals; the facts it may use already were. When a part is missing or the
-call fails, the normal pipeline answers the original question instead.
-WIDGET_STEPWISE_COMPARE=0 turns the whole thing off.
+them. It is not re-checked against the manuals; the facts it may use
+already were. WIDGET_STEPWISE_COMPARE=0 turns the whole thing off.
+
+Only where it pays (worth_it). The normal answer runs first and stands
+unless it asked "which product?" or answered a named attribute from one
+spec-table row. Measured 2026-11-07 on 13 comparisons: there the steps won
+(the kiosk temperature, idle current, power supply); against a full
+pipeline answer or an open "what's the difference" table they lost or tied,
+for 3.7x the tokens and 5x the wait. When a part is missing or the call
+fails, the normal answer stands.
 
 plan() decides and words the per-product questions; widget_api's
 /ask/stream runs them.
@@ -34,6 +40,24 @@ def is_answer(r: dict) -> bool:
         r.get(k) for k in ("needs_clarification", "faq_candidates", "family_options",
                            "product_options", "needs_sign_in", "service_degraded"))
 
+
+def worth_it(q: str, r: dict, names: list[str]) -> bool:
+    """Whether the steps should replace the normal answer `r` to comparison
+    `q` naming `names`: it asked which product, or answered a named
+    attribute from the spec table ("which draws less current when idle?"
+    got the one "Maximum Current Sink" row). An open "what's the
+    difference" table, a full answer, a FAQ menu or a sign-in wall stand.
+    Pure."""
+    if r.get("needs_sign_in") or r.get("service_degraded") or r.get("flagged"):
+        return False
+    if any(r.get(k) for k in ("needs_clarification", "product_options", "family_options")):
+        return True
+    if r.get("role") == "catalogue":
+        import sales
+        return bool(sales._asked(q, " ".join(names)))
+    return False
+
+
 SPLIT_PROMPT = """A customer asked a question comparing two products:
 
 {q}
@@ -43,7 +67,8 @@ what the customer wants to know. Both questions ask the SAME thing, just about
 a different product: whatever is being compared applies to both, wherever it
 appears in the sentence ("the difference between the A and the B power
 supply" asks about the power supply of A and of B). Each question names only
-its own product. Reply with exactly two lines and nothing else:
+its own product and never mentions other products.
+Reply with exactly two lines and nothing else:
 1. <question about {a}>
 2. <question about {b}>"""
 
@@ -87,11 +112,16 @@ def compare(q: str, parts: list[tuple[str, str]]) -> str | None:
 
 def record(session_id: str | None, q: str, answer: str, request_id: str) -> None:
     """The comparison is the visitor's turn: remembered so a follow-up reads
-    against it, and logged like any answer."""
+    against it (in place of the normal answer it replaces), and logged like
+    any answer."""
+    import memory
     from logger import log_interaction
-    from memory import add_to_memory
     if session_id:
-        add_to_memory(session_id, q, answer)
+        with memory._lock:
+            h = memory._sessions.get(session_id)
+            if h and h[-1].get("q") == q:
+                h.pop()
+        memory.add_to_memory(session_id, q, answer)
     log_interaction(q, answer, "comparison", None, [], request_id=request_id)
 
 
@@ -114,21 +144,26 @@ def products(q: str) -> list[str]:
     return sorted(named, key=lambda k: (low.find(names.get(k, k).lower()) % (len(low) + 1)))
 
 
-def parse_split(text: str, names: list[str]) -> list[str] | None:
-    """The two numbered lines of the model's reply, each naming only its own
-    product (by display name, case-insensitive); None if the reply is not
-    that shape. Pure."""
+_OTHERS = re.compile(r"\b(other|another)\s+(products?|models?|units?|devices?)\b", re.I)
+
+
+def parse_split(text: str, keys: list[str], named) -> list[str] | None:
+    """The two numbered lines of the model's reply, in `keys` order, each
+    naming exactly one of the two products by any of its names (`named(line)`
+    -> product keys; the replies came back in either order, and "NV200
+    Spectral" for the NV200S); None if the reply is not that shape. Pure
+    given `named`."""
     lines = [re.sub(r"^\s*\d[.)]\s*", "", ln).strip()
              for ln in (text or "").splitlines() if ln.strip()]
-    if len(lines) != 2:
+    if len(lines) != 2 or any(_OTHERS.search(ln) for ln in lines):
         return None
-    for line, own, other in ((lines[0], names[0], names[1]),
-                             (lines[1], names[1], names[0])):
-        low, own, other = line.lower(), own.lower(), other.lower()
-        # "NV200" sits inside "NV200 Spectral": not a mention of the other.
-        if own not in low or (other in low and other not in own):
+    by_key = {}
+    for line in lines:
+        hit = named(line)
+        if len(hit) != 1 or hit[0] not in keys or hit[0] in by_key:
             return None
-    return lines
+        by_key[hit[0]] = line
+    return [by_key[k] for k in keys]
 
 
 def plan(q: str) -> list[tuple[str, str, str]]:
@@ -140,14 +175,15 @@ def plan(q: str) -> list[tuple[str, str, str]]:
         keys = products(q)
         if not keys:
             return []
-        from main import _product_names
+        from main import _product_names, _products_named_in
         import llm
         names = [_product_names().get(k, k) for k in keys]
         out = llm.generate_with_fallback(
             "default", SPLIT_PROMPT.format(q=q, a=names[0], b=names[1]))
         if out.get("provider") == "none":
             return []
-        lines = parse_split(out.get("text", ""), names)
+        lines = parse_split(out.get("text", ""), keys,
+                            lambda line: _products_named_in(line, keys))
         if not lines:
             logger.info(f"stepwise: split not usable for {q!r}: {out.get('text')!r}")
             return []
@@ -159,13 +195,27 @@ def plan(q: str) -> list[tuple[str, str, str]]:
 
 
 if __name__ == "__main__":
-    n = ["NV9USB+", "BV30"]
+    forms = {"nv9usb": "nv9usb+", "bv30": "bv30", "nv200s": "nv200 spectral"}
+    named = lambda line: [k for k, f in forms.items() if f in line.lower()]  # noqa: E731
+    k = ["nv9usb", "bv30"]
     assert parse_split("1. What supply does the NV9USB+ need?\n"
-                       "2. What supply does the BV30 need?", n) == [
+                       "2. What supply does the BV30 need?", k, named) == [
         "What supply does the NV9USB+ need?", "What supply does the BV30 need?"]
-    assert parse_split("1. NV9USB+ vs BV30 supply?\n2. BV30 supply?", n) is None
-    assert parse_split("Only one line about the NV9USB+", n) is None
-    assert parse_split("1) Size of the NV200?\n2) Size of the NV200 Spectral?",
-                       ["NV200", "NV200 Spectral"]) == [
-        "Size of the NV200?", "Size of the NV200 Spectral?"]
+    # Either order; back in the order asked.
+    assert parse_split("1. BV30 supply?\n2. NV9USB+ supply?", k, named) == [
+        "NV9USB+ supply?", "BV30 supply?"]
+    assert parse_split("1. NV9USB+ vs BV30 supply?\n2. BV30 supply?", k, named) is None
+    assert parse_split("1. BV30 supply?\n2. BV30 size?", k, named) is None
+    assert parse_split("Only one line about the NV9USB+", k, named) is None
+    assert parse_split("1. NV9USB+ vs other products?\n2. BV30 vs other products?",
+                       k, named) is None
+    # Open "what's the difference" tables stand; a named attribute does not.
+    cat = {"role": "catalogue", "answer": "| table |"}
+    assert not worth_it("What is the difference between the NV9USB+ and the BV30?",
+                        cat, ["NV9USB+", "BV30", "nv9usb", "bv30"])
+    assert worth_it("NV9USB+ vs BV30 - which draws less current when idle?",
+                    cat, ["NV9USB+", "BV30", "nv9usb", "bv30"])
+    assert worth_it("x", {"role": "clarify", "needs_clarification": True}, [])
+    assert not worth_it("x", {"role": "fast", "answer": "a"}, [])
+    assert not worth_it("x", {"needs_clarification": True, "needs_sign_in": True}, [])
     print("ok")
