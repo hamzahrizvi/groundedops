@@ -214,7 +214,7 @@
 
   var state = {
     sessionId: null,
-    deleteToken: null,     // D-20261104-08: from /widget/chat; only it can delete this chat
+    deleteToken: null,     // D-20261104-08: from /widget/chat; only it can delete or rate this chat
     stage: "intent",     // intent | category | product | chat
     intent: null,
     category: null,      // {key, name}
@@ -2790,7 +2790,7 @@
    *  Test chat sets data-no-rating, so staff tests never count as ratings. */
   function askRating(then) {
     var asked = state.messages.some(function (m) { return m.role === "user"; });
-    if (hasAttr("data-no-rating") || state.rated || !asked || root.querySelector(".go-rate")) return then();
+    if (hasAttr("data-no-rating") || state.rated || !asked || !state.deleteToken || root.querySelector(".go-rate")) return then();
     var stars = 0;
     var box = document.createElement("div");
     box.className = "go-rate";
@@ -2825,7 +2825,7 @@
       fetch(cfg.api + "/widget/rating", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ session_id: state.sessionId, visitor_id: visitorId(),
+        body: JSON.stringify({ session_id: state.sessionId, visitor_id: visitorId(), delete_token: state.deleteToken,
                                stars: stars,
                                comment: box.querySelector("textarea").value.trim() }),
       }).catch(function () {});

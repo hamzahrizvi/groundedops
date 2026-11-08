@@ -111,6 +111,7 @@ class RatingRequest(BaseModel):
     visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     stars: int = Field(..., ge=1, le=5)
     comment: str = Field("", max_length=500)
+    delete_token: str = Field("", max_length=MAX_ID_CHARS)
 
 
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
@@ -237,9 +238,10 @@ def erase_sessions(session_ids) -> int:
 
 def delete_token(session_id: str) -> str:
     """D-20261104-08: proof that the caller is the browser that started this
-    chat. An HMAC of the id under the server's session secret, handed out only
-    by /widget/chat for an id the server itself chose, so the id alone (which
-    a visitor quotes to support) deletes nothing. '' when no secret is set;
+    chat: /widget/forget and /widget/rating (D-20261106-11) both require it.
+    An HMAC of the id under the server's session secret, handed out only by
+    /widget/chat for an id the server itself chose, so the id alone (which a
+    visitor quotes to support) deletes or rates nothing. '' when no secret is set;
     /widget/forget then refuses every visitor delete."""
     import keystore
     secret = keystore.get_session_secret()
@@ -990,8 +992,8 @@ def register(app, answer_query, draft_enquiry=None):
     @router.post("/chat")
     def widget_chat():
         """PUBLIC -- start a chat. The server picks the id, so the delete token
-        in this reply only ever reaches the browser that started the chat.
-        Nothing is stored."""
+        in this reply (which also rates the chat) only ever reaches the browser
+        that started the chat. Nothing is stored."""
         sid = str(uuid.uuid4())
         return {"session_id": sid, "delete_token": delete_token(sid)}
 
@@ -1021,10 +1023,18 @@ def register(app, answer_query, draft_enquiry=None):
 
         Not tied to a remembered answer like /feedback: a guest's chat is
         curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
-        most visitors. Its own daily limit (quota "rating") bounds the rate,
-        and the store keeps at most RATINGS_MAX rows, so made-up chat ids
-        cannot grow the file without end.
+        most visitors. A rating needs the delete token /widget/chat gave the
+        browser that started this chat (403 without it). No answer reply
+        carries a per-chat proof, because /widget/ask takes any chat id the
+        caller names; so a quoted or made-up id cannot replace a rating or
+        push real ones out. The daily limit (quota "rating") and RATINGS_MAX
+        stay as backstops.
         """
+        expected = delete_token(payload.session_id)
+        if not expected or not hmac.compare_digest(expected.encode(),
+                                                   payload.delete_token.encode()):
+            raise HTTPException(status_code=403,
+                                detail="This chat cannot be rated.")
         gate = quota.check_public_write("rating", payload.visitor_id,
                                         _client_ip(request))
         if not gate["allowed"]:
