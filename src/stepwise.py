@@ -38,7 +38,8 @@ def is_answer(r: dict) -> bool:
     which family member, which FAQ) or a sign-in wall. Pure."""
     return bool((r.get("answer") or "").strip()) and not any(
         r.get(k) for k in ("needs_clarification", "faq_candidates", "family_options",
-                           "product_options", "needs_sign_in", "service_degraded"))
+                           "product_options", "needs_sign_in", "service_degraded",
+                           "from_faq"))
 
 
 def worth_it(q: str, r: dict, names: list[str]) -> bool:
@@ -47,8 +48,14 @@ def worth_it(q: str, r: dict, names: list[str]) -> bool:
     attribute from the spec table ("which draws less current when idle?"
     got the one "Maximum Current Sink" row). An open "what's the
     difference" table, a full answer, a FAQ menu or a sign-in wall stand.
-    Pure."""
-    if r.get("needs_sign_in") or r.get("service_degraded") or r.get("flagged"):
+    Pure.
+
+    Only a model's answer: a FAQ-only turn (a guest at the site-wide cap,
+    whose "pick one" also asks back) must not reach the model through the
+    split and the comparison, uncharged."""
+    if (r.get("needs_sign_in") or r.get("service_degraded") or r.get("flagged")
+            or r.get("from_faq") or r.get("faq_candidates")
+            or r.get("effort") == "faq_only"):
         return False
     if any(r.get(k) for k in ("needs_clarification", "product_options", "family_options")):
         return True
@@ -110,11 +117,14 @@ def compare(q: str, parts: list[tuple[str, str]]) -> str | None:
         return None
 
 
-def record(session_id: str | None, q: str, answer: str, request_id: str) -> None:
+def record(session_id: str | None, q: str, answer: str, request_id: str,
+           origin: str | None = None) -> None:
     """The comparison is the visitor's turn: remembered so a follow-up reads
     against it (in place of the normal answer it replaces), and logged like
-    any answer."""
+    any answer, under the visitor's chat (so erasing the chat erases it) and
+    who asked (so test chats are not counted as visitors)."""
     import memory
+    import pipeline_trace as ptrace
     from logger import log_interaction
     if session_id:
         with memory._lock:
@@ -122,7 +132,25 @@ def record(session_id: str | None, q: str, answer: str, request_id: str) -> None
             if h and h[-1].get("q") == q:
                 h.pop()
         memory.add_to_memory(session_id, q, answer)
-    log_interaction(q, answer, "comparison", None, [], request_id=request_id)
+    tok = ptrace.start()
+    try:
+        ptrace.set_meta(surface="widget", session_id=session_id, origin=origin)
+        log_interaction(q, answer, "comparison", None, [], request_id=request_id)
+    finally:
+        ptrace.reset(tok)
+
+
+def part_session(session_id: str, i: int) -> str:
+    """Part i's own chat id: the visitor's, marked, within the 128-character
+    id cap (widget_api.MAX_ID_CHARS)."""
+    return session_id[:125] + f"~{i}"
+
+
+def with_parts(session_ids) -> list[str]:
+    """These chat ids and their parts' ids, so erasing a chat erases the
+    per-product questions and answers asked under it too."""
+    return [x for s in session_ids if s
+            for x in (s, part_session(s, 1), part_session(s, 2))]
 
 
 def enabled() -> bool:
@@ -184,10 +212,12 @@ def plan(q: str) -> list[tuple[str, str, str]]:
             return []
         lines = parse_split(out.get("text", ""), keys,
                             lambda line: _products_named_in(line, keys))
+        # Products only: the question and its split are visitor text, which
+        # the server log never prints (test_console_log_privacy).
         if not lines:
-            logger.info(f"stepwise: split not usable for {q!r}: {out.get('text')!r}")
+            logger.info(f"stepwise: split not usable for {keys}")
             return []
-        logger.info(f"stepwise: {q!r} -> {lines}")
+        logger.info(f"stepwise: split {keys}")
         return list(zip(keys, names, lines))
     except Exception as exc:
         logger.warning(f"stepwise: plan skipped ({exc})")
@@ -218,4 +248,10 @@ if __name__ == "__main__":
     assert worth_it("x", {"role": "clarify", "needs_clarification": True}, [])
     assert not worth_it("x", {"role": "fast", "answer": "a"}, [])
     assert not worth_it("x", {"needs_clarification": True, "needs_sign_in": True}, [])
+    # A capped guest's FAQ "pick one" asks back too, but never reaches a model.
+    assert not worth_it("x", {"needs_clarification": True, "from_faq": False,
+                              "effort": "faq_only"}, [])
+    assert not is_answer({"answer": "Curated.", "from_faq": True})
+    assert part_session("s" * 200, 2) == "s" * 125 + "~2"
+    assert with_parts(["a", ""]) == ["a", "a~1", "a~2"]
     print("ok")

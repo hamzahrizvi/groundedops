@@ -27,6 +27,9 @@ def _fake_pipeline(payload, x_user_id=None):
     asked.append((payload.q, payload.product, payload.session_id, payload.skip_faq))
     if payload.q == Q and normal:
         return dict(normal, request_id="r0")
+    if "CAPPED" in payload.q:
+        from fastapi import HTTPException
+        raise HTTPException(429, "This conversation has reached its limit")
     if "CLARIFY" in payload.q:
         return {"answer": "Which BV30 do you have?", "sources": [], "role": "clarify",
                 "needs_clarification": True, "request_id": "rc"}
@@ -107,6 +110,15 @@ def test_a_question_back_is_not_shown_as_a_part():
     assert [d["title"] for k, d in ev if k == "part"] == ["NV9USB+"]
     # One half missing: nothing is written from parts, no pipeline rerun.
     assert not compared and len(asked) == 3
+
+
+def test_a_refused_part_keeps_the_paid_normal_answer():
+    # Security 11-08: a part at its chat cap (or quota, or a 503) ended the
+    # stream with the part's error, and the normal answer was charged unseen.
+    ev = _events([("nv9usb", "NV9USB+", "CAPPED the NV9USB+ supply?"), STEPS[1]])
+    assert not [d for k, d in ev if k in ("error", "part")]
+    text = "".join(d["text"] for k, d in ev if k == "delta")
+    assert text == "Which product do you mean?" and len(asked) == 2 and not compared
 
 
 def test_a_full_answer_stands():

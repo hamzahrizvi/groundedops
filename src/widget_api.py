@@ -1101,16 +1101,20 @@ def register(app, answer_query, draft_enquiry=None):
             try:
                 box["result"] = task.result()
             except HTTPException as e:
-                yield sse("error", {"status": e.status_code,
-                                    "detail": e.detail})
+                # A part refused (its chat cap, the quota) is not the
+                # visitor's answer: the normal one, already paid for, stands.
+                if not part:
+                    yield sse("error", {"status": e.status_code,
+                                        "detail": e.detail})
             except Exception:
                 # This one is the PUBLIC surface, so the rule matters most
                 # here: an anonymous visitor gets a status and nothing else.
                 # The traceback is already in the log via logger.exception.
                 logger.exception("widget ask/stream failed")
-                yield sse("error", {"status": 503, "detail":
-                                    "The assistant is temporarily "
-                                    "unavailable. Please try again."})
+                if not part:
+                    yield sse("error", {"status": 503, "detail":
+                                        "The assistant is temporarily "
+                                        "unavailable. Please try again."})
 
         async def run():
             yield sse("status", {"stage": "Searching the documentation",
@@ -1130,7 +1134,8 @@ def register(app, answer_query, draft_enquiry=None):
             # and this chat is under its cap, so the split call is never made
             # for a question that would be refused.
             steps = []
-            if (stepwise.enabled() and not payload.faq_id and not payload.skip_faq
+            if (stepwise.enabled() and payload.session_id
+                    and not payload.faq_id and not payload.skip_faq
                     and payload.effort in (None, "standard")
                     and (_caller(request, payload.visitor_id)["tier"] != "anonymous"
                          or quota.anon_llm_enabled())):
@@ -1152,12 +1157,12 @@ def register(app, answer_query, draft_enquiry=None):
                 # and both parts (refunding the replaced one touches billing).
                 part = payload.model_copy(update={
                     "q": own_q, "product": key, "skip_faq": True,
-                    "session_id": (payload.session_id or "w")[:MAX_ID_CHARS - 3] + f"~{i + 1}"})
+                    "session_id": stepwise.part_session(payload.session_id, i + 1)})
                 box = {}
                 async for line in answer_of(part, box, part=True):
                     yield line
                 if "result" not in box:
-                    return
+                    break
                 r = box["result"]
                 # "Which ICU do you have?" is not this product's half of the
                 # answer; the comparison below asks it if it still needs to.
@@ -1183,9 +1188,12 @@ def register(app, answer_query, draft_enquiry=None):
                     stepwise.compare, payload.q,
                     [(n, (r.get("answer") or "").strip()) for n, r in shown])
                 if text:
+                    import pipeline_trace
+                    pipeline_trace.set_local_caller(is_local_caller(request))
+                    origin = pipeline_trace.origin_for(payload.session_id, "widget")
                     rid = uuid.uuid4().hex[:12]
                     await run_in_threadpool(stepwise.record, payload.session_id,
-                                            payload.q, text, rid)
+                                            payload.q, text, rid, origin)
                     _remember_answer(rid, payload.q, payload.product or payload.category,
                                      payload.session_id, text)
                     last = shown[-1][1]

@@ -95,10 +95,12 @@ def erase(email: str = "", session_ids=(), user_id: str = "", source: str = "con
     `source` is 'visitor' (the widget's own delete) or 'console'; every erasure
     leaves one tombstone line (see _tombstone). Legal hold is not applied:
     everything goes, until the CEO rules otherwise."""
+    import stepwise
+    chats = stepwise.with_parts(session_ids)
     jobs = (("widget_config", "erase_email", email),
-            ("logger", "erase_sessions", session_ids),
-            ("widget_api", "erase_sessions", session_ids),
-            ("feedback_store", "erase_sessions", session_ids),
+            ("logger", "erase_sessions", chats),
+            ("widget_api", "erase_sessions", chats),
+            ("feedback_store", "erase_sessions", chats),
             ("conversations", "erase_user", user_id))
     out = {}
     for mod, fn, arg in jobs:
