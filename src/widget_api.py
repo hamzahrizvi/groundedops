@@ -108,10 +108,10 @@ class ForgetRequest(BaseModel):
 
 class RatingRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=MAX_ID_CHARS)
-    rating_ticket: str = Field("", max_length=MAX_ID_CHARS)
     visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     stars: int = Field(..., ge=1, le=5)
     comment: str = Field("", max_length=500)
+    delete_token: str = Field("", max_length=MAX_ID_CHARS)
 
 
 # 8.10: answers a vote may refer to, so /widget/feedback cannot be fed
@@ -238,7 +238,7 @@ def erase_sessions(session_ids) -> int:
 
 def delete_token(session_id: str) -> str:
     """D-20261104-08: proof that the caller is the browser that started this
-    chat. An HMAC of the id under the server's session secret, handed out only
+    chat: /widget/forget and /widget/rating (D-20261106-11) both require it. An HMAC of the id under the server's session secret, handed out only
     by /widget/chat for an id the server itself chose, so the id alone (which
     a visitor quotes to support) deletes nothing. '' when no secret is set;
     /widget/forget then refuses every visitor delete."""
@@ -247,20 +247,6 @@ def delete_token(session_id: str) -> str:
     if not (secret and session_id):
         return ""
     return hmac.new(secret.encode(), b"widget-forget|" + session_id.encode(),
-                    hashlib.sha256).hexdigest()
-
-
-def rating_ticket(session_id: str) -> str:
-    """D-20261106-11: proof that the server answered this chat, sent with
-    every /widget/ask reply and required by /widget/rating, so a quoted or
-    made-up chat id can neither replace a rating nor push real ones out of
-    the capped store. Same secret as delete_token, its own label, so the two
-    are never the same value. '' when no secret is set: no rating is taken."""
-    import keystore
-    secret = keystore.get_session_secret()
-    if not (secret and session_id):
-        return ""
-    return hmac.new(secret.encode(), b"widget-rating|" + session_id.encode(),
                     hashlib.sha256).hexdigest()
 
 
@@ -485,7 +471,6 @@ def _faq_turn(payload, *args, **kwargs) -> dict:
     carries M2's field names (session_id, origin, outcome) so the guest
     funnel reads from logs.jsonl like every other turn."""
     resp = _faq_response(*args, **kwargs)
-    resp["rating_ticket"] = rating_ticket(payload.session_id or "")
     try:
         import pipeline_trace as ptrace
         from logger import log_interaction
@@ -961,7 +946,6 @@ def register(app, answer_query, draft_enquiry=None):
             "deep_done": quota.deep_done(dkey),
             "quota": quota.status(caller),
             "session": quota.session_check(payload.session_id),
-            "rating_ticket": rating_ticket(payload.session_id or ""),
         }
 
 
@@ -1007,8 +991,8 @@ def register(app, answer_query, draft_enquiry=None):
     @router.post("/chat")
     def widget_chat():
         """PUBLIC -- start a chat. The server picks the id, so the delete token
-        in this reply only ever reaches the browser that started the chat.
-        Nothing is stored."""
+        in this reply (which also rates the chat) only ever reaches the browser
+        that started the chat. Nothing is stored."""
         sid = str(uuid.uuid4())
         return {"session_id": sid, "delete_token": delete_token(sid)}
 
@@ -1038,14 +1022,16 @@ def register(app, answer_query, draft_enquiry=None):
 
         Not tied to a remembered answer like /feedback: a guest's chat is
         curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
-        most visitors. A rating needs the rating ticket an answer reply gave
-        this chat (403 without it), so a made-up or quoted id cannot replace
-        a rating or push real ones out; the daily limit (quota "rating") and
-        RATINGS_MAX stay as backstops.
+        most visitors. A rating needs the delete token /widget/chat gave the
+        browser that started this chat (403 without it). No answer reply
+        carries a per-chat proof, because /widget/ask takes any chat id the
+        caller names; so a quoted or made-up id cannot replace a rating or
+        push real ones out. The daily limit (quota "rating") and RATINGS_MAX
+        stay as backstops.
         """
-        expected = rating_ticket(payload.session_id)
+        expected = delete_token(payload.session_id)
         if not expected or not hmac.compare_digest(expected.encode(),
-                                                   payload.rating_ticket.encode()):
+                                                   payload.delete_token.encode()):
             raise HTTPException(status_code=403,
                                 detail="This chat cannot be rated.")
         gate = quota.check_public_write("rating", payload.visitor_id,
@@ -1143,8 +1129,7 @@ def register(app, answer_query, draft_enquiry=None):
                                 "offer_support", "needs_clarification",
                                 "clarification_options", "family_options",
                                 "suggested_replies",
-                                "flagged", "quota", "session", "deep_done",
-                                "rating_ticket")}
+                                "flagged", "quota", "session", "deep_done")}
                       | {"product_options": _public_product_options(result.get("product_options"))})
 
             # Whole sentences, not tokens: a sentence is the unit the
