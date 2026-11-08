@@ -25,7 +25,7 @@ from rank_bm25 import BM25Okapi
 from embeddings import embed_query
 from db import get_collection
 from text_utils import rrf_merge
-from docstore import _safe_basename
+import docstore
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ def _name_key(name: str) -> str:
     documents and figures folders, so every spelling that opens a marked
     document's folder meets its mark. Marks go through it too, so one kept
     with a path ("x/Secret.pdf") still matches the name it is served under."""
-    return _safe_basename(name).split(":", 1)[0].rstrip(". ").casefold()
+    return docstore.name_key(name)
 
 
 _keys_of: tuple = (None, frozenset())   # (the internal_sources() set, its keys)

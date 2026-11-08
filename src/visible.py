@@ -7,7 +7,6 @@ document shared with a current product stays. Every helper or route that
 hands out document text or pictures asks here. main._drop_hidden asks here too (D-20261106-15).
 """
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +21,9 @@ def blocked() -> set:
 
 
 def _key(name: str) -> str:
-    # retrieval_db._name_key's comparison, without importing a private name.
-    return os.path.basename(str(name or "")).split(":", 1)[0].rstrip(". ").casefold()
+    # The rule is docstore.name_key, shared with retrieval_db._name_key.
+    import docstore
+    return docstore.name_key(str(name or ""))
 
 
 def products_of(source: str) -> list:

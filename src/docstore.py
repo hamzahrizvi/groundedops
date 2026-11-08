@@ -81,6 +81,11 @@ def _safe_basename(filename: str) -> str:
     return os.path.basename(flat).lstrip(".") or ""
 
 
+def name_key(name: str) -> str:
+    """The one rule a document name is compared on (see retrieval_db._name_key for why)."""
+    return _safe_basename(name).split(":", 1)[0].rstrip(". ").casefold()
+
+
 def _store_file(base: str) -> bool:
     """The store's own files beside the documents: the manifest and the .tmp
     and .corrupt copies jsonstore writes next to it. Never a document, so
