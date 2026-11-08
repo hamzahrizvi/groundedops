@@ -2148,21 +2148,10 @@ def _drop_hidden(results: list[dict]) -> list[dict]:
     excluded document (is_excluded), and none filed only under obsolete
     products whose answers are blocked (catalog.blocked_products). A
     document shared with a current product stays."""
-    try:
-        import catalog as _cat
-        blocked = _cat.blocked_products()
-    except Exception as exc:
-        logger.warning(f"obsolete products unreadable: {exc}")
-        blocked = set()
-    out = []
-    for r in results:
-        if is_excluded(r.get("source")):
-            continue
-        keys = [k.strip() for k in (r.get("product") or "").split(",") if k.strip()]
-        if blocked and keys and all(k in blocked for k in keys):
-            continue
-        out.append(r)
-    return out
+    import visible
+    blocked = visible.blocked()
+    return [r for r in results
+            if visible.may_show(r.get("source"), r.get("product") or "", blocked)]
 
 
 def _when(o: dict) -> str:
@@ -5029,7 +5018,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                       for c, _above in zip(chunks, chunks_before(chunks))]
         except Exception as _exc:
             logger.warning(f"table completion skipped: {_exc}")
-        return chunks
+        # Every passage added after selection obeys the same rule as the
+        # retrieved ones (D-20261106-15): a flash table or a deeper-pool
+        # passage filed only under a blocked product is dropped here.
+        return chunks if payload.source_filter else _drop_hidden(chunks)
     top_chunks = _completed(top_chunks)
     ptrace.mark("procedures", f"{len(top_chunks)} passage(s) in hand")
 

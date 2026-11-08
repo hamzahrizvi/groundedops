@@ -4,8 +4,7 @@ The rule main._drop_hidden applies to answer passages: no internal or
 excluded document (retrieval_db.is_excluded), and none filed only under
 obsolete products whose answers are blocked (catalog.blocked_products). A
 document shared with a current product stays. Every helper or route that
-hands out document text or pictures asks here. main._drop_hidden keeps its
-own copy until main.py is free to change.
+hands out document text or pictures asks here. main._drop_hidden asks here too (D-20261106-15).
 """
 import logging
 import os
