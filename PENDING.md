@@ -367,8 +367,10 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
+| D-20261106-09 | Security item D-20261106-09, details in the office | waiting for CEO | your yes |
 | D-20261107-08 | Security item D-20261107-08, details in the office | waiting for CEO | your yes |
 | D-20261108-01 | Security item D-20261108-01, details in the office | waiting for CEO | your yes |
+| D-20261108-03 | The blocked-product check keeps its own copy of the document-name rule | approved, queued | Dev builds it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -412,7 +414,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261030-17 | A dated, honest results card for technical reviewers | deferred | parked |
 | D-20261104-09 | Let every found passage into the prompt (the context floor at 0) | deferred | parked |
 | D-20261105-06 | Delete dead per-link address scrubbers in the Confluence sync | deferred | parked |
-| D-20261106-09 | Security item D-20261106-09, details in the office | deferred | parked |
 | D-20261106-12 | A chat opened under one product that mentions another product's family in passing is shown "which model?" cards instead of an answer | deferred | parked |
 | D-20261106-16 | A fault question that names a different product updating an NV9 gets "Which NV9 do you have?" instead of the answer | deferred | parked |
 | D-20261107-01 | A variant name on a real product (MyCheckr "Max") is answered as the base product instead of saying the variant is not documented | deferred | parked |
@@ -422,7 +423,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261107-05 | A label or drawing in a bulletin or change notice cannot be found: new uploads index their described pictures only when a switch is on | deferred | parked |
 | D-20261107-07 | "Which SMART Coin System do you have?" is asked although the customer said which unit, or every variant has the same answer | deferred | parked |
 | D-20261108-02 | The admin report's speed figures for clarifying questions and refusals are nonsense | deferred | parked |
-| D-20261108-03 | One name-matching rule is kept in two copies for the blocked-product check | deferred | parked |
 | D-20261108-04 | "Not in the documentation", or "the API cannot do that", on a fact the manual states | deferred | parked |
 | D-20261108-05 | Answers in short filed documents are declined or taken from the wrong section | deferred | parked |
 | D-20261108-06 | A comparison of two products or models is declined although both values are in the manual | deferred | parked |
