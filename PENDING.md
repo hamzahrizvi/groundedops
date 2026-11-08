@@ -365,9 +365,10 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261105-04 | Security item D-20261105-04, details in the office | waiting for CEO | your yes |
-| D-20261106-11 | Security item D-20261106-11, details in the office | ready to merge | merges once Security clears it |
-| D-20261106-15 | Security item D-20261106-15, details in the office | waiting for CEO | your yes |
+| D-20261106-11 | Security item D-20261106-11, details in the office | sent back, rebuilding | Dev rebuilds it |
+| D-20261106-15 | Security item D-20261106-15, details in the office | approved, queued | Dev builds it |
 | D-20261107-08 | Security item D-20261107-08, details in the office | waiting for CEO | your yes |
+| D-20261108-01 | Security item D-20261108-01, details in the office | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
