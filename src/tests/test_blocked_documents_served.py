@@ -37,6 +37,11 @@ try:
         assert client.get(url).status_code == 404, url
     assert client.get("/figure/Shared.pdf/p1_1.png").status_code == 200
     assert client.get("/source_file/Shared.pdf").status_code == 200
+    import visible
+    for raw in ("sub\\Old.pdf", "Old.pdf.", "C:\\x\\Old.pdf"):
+        assert not visible.may_show(raw), raw
+    for raw in ("Shared.pdf", "sub\\Shared.pdf"):
+        assert visible.may_show(raw), raw
 finally:
     catalog.blocked_products = orig
 assert client.get("/figure/Old.pdf/p1_1.png").status_code == 200
