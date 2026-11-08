@@ -238,9 +238,10 @@ def erase_sessions(session_ids) -> int:
 
 def delete_token(session_id: str) -> str:
     """D-20261104-08: proof that the caller is the browser that started this
-    chat: /widget/forget and /widget/rating (D-20261106-11) both require it. An HMAC of the id under the server's session secret, handed out only
-    by /widget/chat for an id the server itself chose, so the id alone (which
-    a visitor quotes to support) deletes nothing. '' when no secret is set;
+    chat: /widget/forget and /widget/rating (D-20261106-11) both require it.
+    An HMAC of the id under the server's session secret, handed out only by
+    /widget/chat for an id the server itself chose, so the id alone (which a
+    visitor quotes to support) deletes or rates nothing. '' when no secret is set;
     /widget/forget then refuses every visitor delete."""
     import keystore
     secret = keystore.get_session_secret()
