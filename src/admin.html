@@ -3918,6 +3918,7 @@ const CF_FILTERS = [
   ["unfiled", "Not filed", i => !cfFiled(i)],
   ["uploaded", "Uploaded before", i => !!i.uploaded_as],
   ["error", "Failed", i => i.status === "error"],
+  ["flagged", "Title says not for customers", i => !!i.name_flag],
 ];
 
 // While a run is going only the run box changes: the bar, its line, and a
@@ -4634,6 +4635,20 @@ function cfUploadLine(it) {
   return el("div", { class: "cf-up " + cls }, text, btn);
 }
 
+// The title says it is unfinished or staff-only (confluence_sync.name_flag)
+// while it is filed for customers (or internal, where excluded is suggested).
+const CF_FLAG_WORD = { internal: "Internal", excluded: "Excluded" };
+function cfFlagLine(it) {
+  const f = it.name_flag, word = CF_FLAG_WORD[f.suggest];
+  return el("div", { class: "cf-up part" },
+    f.reason + ": suggest " + word + ".",
+    el("button", { class: "cf-up-btn", onclick: () => cfPost("/admin/confluence/items",
+      { keys: [it.key], decision: f.suggest }, "Marked " + word.toLowerCase()) }, "Make it " + word),
+    el("button", { class: "cf-up-btn", title: "Keep it as it is; this hint stays hidden for this title",
+      onclick: () => cfPost("/admin/confluence/items", { keys: [it.key], dismiss_flag: true },
+        "Dismissed") }, "Dismiss"));
+}
+
 function cfRow(it, onTick) {
   const [label, cls] = CF_STATUS[it.status] || [it.status, "tag-neutral"];
   const set = body => cfPost("/admin/confluence/items", { keys: [it.key], ...body });
@@ -4665,7 +4680,8 @@ function cfRow(it, onTick) {
         it.modified_at ? "edited " + cfAgo(it.modified_at) : "",
         it.version && it.kind !== "bundle" ? "v" + it.version : ""].filter(Boolean).join(" · "),
         it.error ? el("div", { class: "cf-doc-err" }, it.error) : null,
-        it.uploaded_as ? cfUploadLine(it) : null)),
+        it.uploaded_as ? cfUploadLine(it) : null,
+        it.name_flag ? cfFlagLine(it) : null)),
     el("span", { class: "tag " + cls }, label),
     it.status === "held" ? el("button", { class: "btn btn-secondary", style: "font-size:12.5px",
       title: "Version " + it.prev_version + " to " + it.version + " in Confluence; customers get the last approved version until then",
@@ -4831,8 +4847,22 @@ function cfDocumentsCard(c) {
       el("b", { style: "flex:1" }, "Documents"), viewSw),
     el("p", { style: "margin:4px 0 0;font-size:12.5px;color:color-mix(in srgb,var(--color-text) 60%,transparent)" },
       "Only approved documents reach the bot; everything else is excluded. Tick a folder to select everything in it."),
-    chips, search, tools, body, bulk);
+    ...[cfFlagBanner(c.items)].filter(Boolean), chips, search, tools, body, bulk);
   return card;
+}
+
+// One notice for every document whose title says it is not for customers.
+function cfFlagBanner(items) {
+  const flagged = items.filter(i => i.name_flag);
+  if (!flagged.length) return null;
+  const keys = flagged.map(i => i.key);
+  return el("div", { class: "cf-up part", style: "margin-top:10px;padding:6px 10px" },
+    flagged.length + (flagged.length === 1 ? " document's title says" : " documents' titles say")
+      + " unfinished or staff-only, but " + (flagged.length === 1 ? "it is" : "they are")
+      + " filed less strictly than that.",
+    el("button", { class: "cf-up-btn", onclick: () => { cfFilter = "flagged"; cfShown = 100; render(); } }, "Show"),
+    el("button", { class: "cf-up-btn", onclick: () => cfPost("/admin/confluence/items",
+      { keys, dismiss_flag: true }, "Dismissed") }, "Dismiss all"));
 }
 
 function cfHistoryCard(c) {

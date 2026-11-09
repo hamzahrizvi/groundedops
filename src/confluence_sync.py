@@ -81,11 +81,35 @@ MODES = ("review", "auto")
 # (retrieval_db.is_excluded): kept in the index, never used to answer a
 # customer, ready for a staff mode.
 DECISIONS = ("approved", "internal", "excluded")
-# A title that calls itself internal ("X (Internal)", "INTERNAL - Y",
-# "spec_internal.pdf") is filed internal, not approved, when auto mode
-# finds it; not "internals" or "international". An admin can still
-# approve it on the Confluence page; only a first sighting is filed this way.
-_INTERNAL_TITLE = re.compile(r"(?<![a-z])internal(?![a-z])", re.I)
+# A title that says it is not for customers. Unfinished ("DO NOT USE",
+# "Work in progress", "Draft", "Copy of") suggests excluded; staff-only
+# ("X (Internal)", "INTERNAL - Y", "spec_internal.pdf", "Confidential",
+# "Sales Guide") suggests internal. Not "internals", "international" or
+# "drafting". Auto mode files a first sighting as the suggestion; the console
+# shows it on any item filed less strictly, until someone dismisses it.
+_B, _E = r"(?<![a-z])", r"(?![a-z])"
+_NAME_FLAGS = [(d, re.compile(_B + p + _E, re.I)) for d, p in (
+    ("excluded", r"(?:do\s*n[o']?t\s*(?:use|publish)|due\s+release|"
+                 r"work[\s_-]*in[\s_-]*progress|wip|draft|"
+                 r"copy\s+of|template|superseded|deprecated|to\s+be\s+deleted)"),
+    # "Internal Database", "internal memory": a feature of the product, not the audience.
+    ("internal", r"(?:internal(?![\s_-]+(?:database|db|memory|storage|clock|battery|"
+                 r"fuse|sensor|power|temperature|network|server|cable|connector))|"
+                 r"confidential|staff[\s_-]*only|"
+                 r"not\s+for\s+(?:customers?|distribution|release|external|public)|"
+                 r"sales[\s_-]*(?:guide|training|playbook))"),
+)]
+_STRICT = {"approved": 0, "internal": 1, "excluded": 2}
+
+
+def name_flag(title: str | None) -> dict | None:
+    """{"suggest": "excluded"|"internal", "reason": ...} when a title says the
+    document is unfinished or staff-only, else None. Pure."""
+    for decision, rx in _NAME_FLAGS:
+        m = rx.search(title or "")
+        if m:
+            return {"suggest": decision, "reason": f"The title says “{m.group(0)}”"}
+    return None
 
 _KIND_TITLE = [
     ("test_script", r"test\s*scripts?|testing\s*procedure|test\s*report|test\s*plan|intertek|field\s*trials?"),
@@ -457,6 +481,12 @@ def overview() -> dict:
         row["is_updated"] = _recent(it.get("updated_at"))
         row["key"] = key
         row["status"] = status_of(it)
+        flag = name_flag(it.get("title"))
+        # Shown while the item is filed less strictly than the title suggests
+        # and nobody has dismissed this reason for it.
+        if flag and _STRICT[flag["suggest"]] > _STRICT.get(it.get("decision"), 2) \
+                and it.get("flag_dismissed") != flag["reason"]:
+            row["name_flag"] = flag
         if it.get("synced_version") is not None:
             row["product"] = filed.get(it["source"], "")   # the catalogue is the truth once synced
         else:
@@ -578,8 +608,11 @@ def exclude_removed(source: str) -> int:
 
 
 def set_items(keys: list[str], decision: str | None = None,
-              product: str | None = None, keep_upload: bool | None = None) -> None:
-    """Approve, mark internal, exclude or re-file items. Decisions take
+              product: str | None = None, keep_upload: bool | None = None,
+              dismiss_flag: bool = False) -> None:
+    """Approve, mark internal, exclude or re-file items, or dismiss the
+    name_flag hint on them (it returns only for a different reason, e.g. a
+    renamed page). Decisions take
     effect at the next sync, except between approved and internal for a
     document already synced, which is a flag and takes effect now; so does a
     new product for a synced document."""
@@ -593,6 +626,8 @@ def set_items(keys: list[str], decision: str | None = None,
             it = st["items"].get(k)
             if not it:
                 continue
+            if dismiss_flag:
+                it["flag_dismissed"] = (name_flag(it.get("title")) or {}).get("reason")
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
@@ -1036,7 +1071,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
                 decision = "excluded"
                 if st["mode"] == "auto":
-                    decision = "internal" if _INTERNAL_TITLE.search(f["title"] or "") else "approved"
+                    decision = (name_flag(f["title"]) or {}).get("suggest", "approved")
                 chosen = False
                 if f["kind"] == "bundle":
                     pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]

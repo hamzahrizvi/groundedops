@@ -664,11 +664,41 @@ def test_a_title_that_says_internal_is_filed_internal_in_auto_mode():
         w.run(api)
         assert w.items()["X (Internal).pdf"]["decision"] == "approved"
         assert "X (Internal).pdf" not in w.internal
+        # ...but the console keeps suggesting internal until it is dismissed
+        items = w.items()
+        assert items["X (Internal).pdf"]["name_flag"]["suggest"] == "internal"
+        assert "name_flag" not in items["INTERNAL - Y.pdf"]      # already internal
+        assert "name_flag" not in items["Installation"]
+        w.decide(["X (Internal).pdf"], dismiss_flag=True)
+        items = w.items()
+        assert "name_flag" not in items["X (Internal).pdf"]
+        assert items["X (Internal).pdf"]["decision"] == "approved"
 
     with tempfile.TemporaryDirectory() as d:     # review mode: still excluded until approved
         w = World(os.path.join(d, "s.json"))
         w.run(InternalTitlesApi(), apply=False)
         assert w.items()["X (Internal).pdf"]["decision"] == "excluded"
+
+
+def test_name_flag_rules():
+    want = {
+        "DO NOT USE Work IN Progress User Manual": "excluded",
+        "BV50 manual - Draft": "excluded",
+        "Copy of BV20 Firmware Release Notes": "excluded",
+        "NV9 WIP notes": "excluded",
+        "Internal draft": "excluded",                    # unfinished beats staff-only
+        "C-SCS  - Sales Guide": "internal",
+        "Calibration Media Type - INTERNAL": "internal",
+        "Pricing - Confidential": "internal",
+        "spec_internal.pdf": "internal",
+        "Z internals.pdf": None, "International sites": None,
+        "Drafting guide": None, "Obsolete Product Notification": None,
+        "MNF Test Procedure (External)": None, "BV50 User Manual": None,
+        "Connecting my devices to an Internal Database": None,   # a feature, not the audience
+    }
+    got = {t: (cs.name_flag(t) or {}).get("suggest") for t in want}
+    assert got == want, got
+    assert cs.name_flag("x DO NOT USE")["reason"] == "The title says “DO NOT USE”"
 
 
 def test_kind_of_rules():
