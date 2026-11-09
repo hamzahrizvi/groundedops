@@ -264,12 +264,18 @@ def reset() -> dict:
     return data
 
 
+def _kept() -> str:
+    """The retention half of the notice, without the full stop."""
+    import retention
+    days = retention.days()
+    return "Questions are kept" + (f" for {days} day{'s' if days != 1 else ''}" if days else "")
+
+
 def ai_notice() -> str:
     """D-20261015-10: the fixed line under the welcome line. Built from the
     live retention setting and the live provider roles on every request, so
     it stays true when either changes; the operator cannot edit or remove it."""
     import keystore
-    import retention
     try:
         import llm
         providers = llm.outside_providers()
@@ -279,8 +285,7 @@ def ai_notice() -> str:
         providers = [p for p in keystore.providers() if keystore.has_key(p)]
     names = [keystore.processor_label(p) for p in providers]
     who = (", ".join(names[:-1]) + " and " + names[-1]) if len(names) > 1 else "".join(names)
-    days = retention.days()
-    kept = "Questions are kept" + (f" for {days} day{'s' if days != 1 else ''}" if days else "")
+    kept = _kept()
     return ("AI assistant: answers come from our manuals and can be wrong. "
             + kept + (f" and may be processed by {who}." if who else "."))
 
@@ -316,6 +321,7 @@ def public_config() -> dict:
         "color": c.get("color", _DEFAULT["color"]),
         "icon_url": c.get("icon_url", ""),
         "ai_notice": ai_notice(),
+        "kept_notice": _kept() + ".",   # D-20261105-04: what a guest without AI answers is told
         "privacy_url": c.get("privacy_url", ""),
         "intro_options": c.get("intro_options", []),
         "sales_form": _pub_form(c.get("sales_form", _DEFAULT["sales_form"])),
