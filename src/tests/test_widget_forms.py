@@ -167,6 +167,8 @@ try:
     n = client.get("/widget/config").json()["ai_notice"]
     check("kept for 30 days and may be processed by OpenAI (USA)." in n and "DeepSeek" not in n,
           "the line follows the live providers and retention: " + n)
+    k = client.get("/widget/config").json()["kept_notice"]
+    check(k == "Questions are kept for 30 days.", "a guest without AI is told only the retention: " + k)
     os.environ["OPENAI_BASE_URL"] = "http://gateway.local/v1"
     n = client.get("/widget/config").json()["ai_notice"]
     check("processed by an OpenAI-compatible service." in n and "USA" not in n,

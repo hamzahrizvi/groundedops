@@ -379,14 +379,15 @@ def test_the_handoff_turn_is_unchanged():
 
 NOTICE = ("AI assistant: answers come from our manuals and can be wrong. Questions are kept "
           "for 90 days and may be processed by OpenAI (USA) and DeepSeek (China).")
+KEPT = "Questions are kept for 90 days."
 
 
-def test_a_guest_without_ai_sees_no_ai_notice_and_no_limits_message():
-    widget_cfg[0] = {"ai_notice": NOTICE, "welcome": "", "sign_in_url": "https://example.test/login"}
+def test_a_guest_without_ai_is_told_questions_are_kept_and_no_limits_message():
+    widget_cfg[0] = {"ai_notice": NOTICE, "kept_notice": KEPT, "welcome": "", "sign_in_url": "https://example.test/login"}
     quota[0] = {"tier": "anonymous", "ai_available": False}
     _reopen()
     _page.wait_for_selector(".go-chip")   # the opening menu: everything before it is on screen
-    assert _page.locator(".go-notice").count() == 0
+    assert _page.locator(".go-log > .go-notice").count() == 1 and _page.inner_text(".go-notice") == KEPT
     assert "account holders" not in _page.inner_text(".go-log")
     assert _page.locator(".go-chip", has_text="Sign in").count() == 0
 
@@ -397,6 +398,24 @@ def test_a_guest_given_ai_answers_still_sees_the_ai_notice():
     _reopen()
     _page.wait_for_selector(".go-chip")
     assert _page.locator(".go-log > .go-notice").count() == 1 and _page.inner_text(".go-notice") == NOTICE
+
+
+SAVED_CHAT = ("localStorage.setItem('groundedops_widget_v2', JSON.stringify({sessionId: 's1', "
+              "stage: 'chat', messages: [{role: 'user', text: 'How do I remove the bezel?'}], "
+              "updatedAt: Date.now()}))")
+
+
+def test_a_returning_guest_is_given_the_notice_their_quota_calls_for():
+    # On a reload quotaState is null until the quota fetch, which only starts after loadConfig.
+    for ai, expected in ((True, NOTICE), (False, KEPT)):
+        widget_cfg[0] = {"ai_notice": NOTICE, "kept_notice": KEPT, "welcome": ""}
+        quota[0] = {"tier": "anonymous", "ai_available": ai}
+        _page.evaluate(SAVED_CHAT)
+        _page.reload()
+        _page.click(".go-launch")
+        _page.wait_for_selector("button:has-text('Continue this conversation')")
+        assert _page.locator(".go-log > .go-notice").count() == 1, ai
+        assert _page.inner_text(".go-notice") == expected, ai
 
 
 def test_the_ai_notice_and_privacy_link_show_signed_in():

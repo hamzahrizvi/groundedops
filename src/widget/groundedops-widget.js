@@ -100,6 +100,7 @@
     // D-20261015-10: replaced by the server's live line from /widget/config.
     // Deliberately no data- attribute: the embed must not be able to change it.
     aiNotice: "AI assistant: answers come from our manuals and can be wrong.",
+    keptNotice: "Questions are kept.",
     privacyUrl: "",
   };
 
@@ -133,6 +134,7 @@
     if (d.name && !hasAttr("data-title")) cfg.title = d.name;
     if (d.welcome && !hasAttr("data-welcome")) cfg.welcome = d.welcome;
     if (d.ai_notice) cfg.aiNotice = d.ai_notice;
+    if (d.kept_notice) cfg.keptNotice = d.kept_notice;
     cfg.privacyUrl = /^https?:\/\//i.test(d.privacy_url || "") ? secureUrl(d.privacy_url) : "";
     if (cfg.privacyUrl) {   // the consent line, always in sight under the composer
       var foot = root.querySelector(".go-foot");
@@ -1270,10 +1272,11 @@
   // them. Not a message: kept out of state.messages so it is never sent back
   // as conversation history, and not a .go-b bubble. The privacy link is the
   // footer's consent line (applyServerConfig).
-  function showNotice() {
+  // text: the guest's line from guestNotice(); default the whole AI notice.
+  function showNotice(text) {
     var p = document.createElement("p");
     p.className = "go-notice";
-    p.textContent = cfg.aiNotice;
+    p.textContent = text || cfg.aiNotice;
     $log.appendChild(p);
   }
 
@@ -1553,14 +1556,16 @@
     save();
   }
 
-  /** The AI notice is hidden from signed-out visitors, unless guest AI is on:
-   *  someone getting AI answers is always told so. Guests hear about their
+  /** A signed-out visitor is always told their questions are kept; one whose
+   *  quota says ai_available gets the whole AI notice, which names who
+   *  processes them (D-20261105-04). Waits for the quota, so startFresh() and
+   *  offerResume() both call it. Guests hear about their
    *  limits when a question needs an account ("Sign in for a full answer",
    *  which replays the question) and in the settings panel, not up front.
    *  Returns a promise so startFresh() can sequence what follows. */
   function guestNotice() {
     var show = function (d) {
-      if (!cfg.token && d && d.ai_available) showNotice();
+      if (!cfg.token) showNotice(d && d.ai_available ? cfg.aiNotice : cfg.keptNotice);
     };
     if (quotaState) return Promise.resolve(show(quotaState));
     return refreshQuota().then(show);
@@ -2180,9 +2185,9 @@
         (last ? ', and your last question was "' + last + '"' : "") +
         ". Would you like to carry on or start again?"
     );
-    if (cfg.token || (quotaState && quotaState.ai_available)) showNotice();
+    if (cfg.token) showNotice();   // a guest's waits for the quota (guestNotice)
     lockComposer("Choose continue or start over…");
-    chips(
+    guestNotice().then(function () { chips(
       [
         {
           label: "Continue this conversation",
@@ -2205,7 +2210,7 @@
         { label: "Start a new conversation", style: "alt", onClick: startFresh },
       ],
       null
-    );
+    ); });
   }
 
   /** Back from sign-in with a question parked: restore the conversation
