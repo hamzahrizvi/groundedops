@@ -55,6 +55,7 @@ Env:
            A case with "figure" (a crop name, or a list) and "source" (its document) also gets "figure_found": the crop is among the answer's shown figures for that document; summary.<sys_*>.images = {n, figure_found, explanation_right (score 3), found, right} (D-20261022-14, tools/image_set.py).
            A reply with family_options (the "which model?" cards) is followed by a tap on the card matching the case's product, as the widget does
            (not on a case expected to "clarify": the families question is that clarification); the row answer is the second reply, row.family_ask keeps the first; summary.<sys_*>.family_asked counts them (D-20261106-02).
+  ... --path stream   (system phase: every turn is POSTed in-process to /widget/ask/stream as a signed-in member, the widget's path with the step-by-step comparison; the state records "path": "stream"; row.steps = {fired, parts, compared, unsupported_figures} where the step rule fired; grade adds summary.<sys_*>.stepwise, D-20261109-08)
 """
 import os, sys, json, time, uuid, random, re, statistics as st
 from concurrent.futures import ThreadPoolExecutor
@@ -75,6 +76,10 @@ if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own pr
     sys.exit(0)
 NO_PRODUCT = "--no-product" in sys.argv   # D-20261022-10: typed first, no product picked (the picker path sends the case's)
 if NO_PRODUCT: sys.argv.remove("--no-product")
+PATH = "query"   # D-20261109-08: --path stream asks through the widget's stream endpoint
+if "--path" in sys.argv:
+    _i = sys.argv.index("--path"); PATH = sys.argv[_i + 1]; del sys.argv[_i:_i + 2]
+    if PATH not in ("query", "stream"): sys.exit("--path is query or stream")
 REPEAT = int(os.environ.get("REPEAT", "1"))
 RUN = os.path.abspath(sys.argv[1])
 CODE = os.path.abspath(os.environ.get("GO_CODE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")))
@@ -155,7 +160,7 @@ if phase == "models":   # D-20261010-09: the bot model on this run's stored answ
     run = sorted({r.get("model") for r in state.get("sys_normal", {}).values()} - {None, "none", "structured", "faq-curated", "stub"})
     print(json.dumps({"run": run, "lab": MODELS["bot"], "same": run == [MODELS["bot"]]})); sys.exit(0)
 if phase == "reset":
-    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s", "no_product")]:
+    for k in [k for k in state if k.startswith("sys_") or k in ("grades", "summary", "lab_wait_s", "no_product", "path")]:
         del state[k]
     if "copied_from_r1" in state: state["copied_from_r1"] = [s for s in state["copied_from_r1"] if s in state]
     save(); print("reset", OUT, "kept:", list(state)); sys.exit(0)
@@ -190,6 +195,10 @@ if phase in ("system", "baseline"):
     # The app's own question log and FAQ-gap list stay in this run folder, not in GO_DATA's
     # production files (hidden gate questions were landing in REPO/src/logs.jsonl, D-20261009-01).
     os.environ.setdefault("FAQ_GAP_PATH", os.path.join(RUN, "app_faq_gaps.json"))
+    if phase == "system" and PATH == "stream":   # the widget's own stores stay in the run folder too
+        os.environ.setdefault("QUOTA_DB_PATH", os.path.join(RUN, "app_quota.db"))
+        os.environ.setdefault("CONVO_DB_PATH", os.path.join(RUN, "app_conversations.db"))
+        os.environ.setdefault("WIDGET_TOKEN_SECRET", uuid.uuid4().hex)   # minted and checked in this process only
     import torch  # noqa: F401  main thread first
     import main, llm, logger
     logger.LOG_FILE = os.path.join(RUN, "app_logs.jsonl")
@@ -210,6 +219,32 @@ def chat(model, messages, effort=None, timeout=300):
             if attempt == 2: return f"[ERROR {e}]", {}
             time.sleep(5)
 
+def read_sse(text):
+    """The /widget/ask/stream body as one reply: meta's fields, the answer rebuilt from the deltas, and
+    "steps" = {fired: a "step" status came, parts: [{title, answer}], compared: meta role "comparison"}.
+    An "error" event exits (no answer is saved, a rerun resumes)."""
+    ev, meta, text_, statuses, parts = None, {}, "", [], []
+    for line in text.splitlines():
+        if line.startswith("event: "): ev = line[7:].strip()
+        elif line.startswith("data: "):
+            d = json.loads(line[6:])
+            if ev == "status": statuses.append(d.get("id"))
+            elif ev == "part": parts.append({"title": d.get("title"), "answer": d.get("answer", "")})
+            elif ev == "meta": meta = d
+            elif ev == "delta": text_ += d.get("text", "")
+            elif ev == "error": sys.exit(f"stream error {d.get('status')}: {d.get('detail')}")
+    return {**meta, "answer": text_, "steps": {"fired": "step" in statuses, "parts": parts,
+                                                "compared": meta.get("role") == "comparison"}}
+
+def unsupported(text, known):
+    """Figures in a comparison that none of `known` (the question, the part titles and answers) states.
+    ponytail: figures only, the claim kind COMPARE_PROMPT forbids adding and the grader checks; a prose
+    claim with no number is not counted -- add a model check if the marks disagree with this count."""
+    def nums(s):
+        s = re.sub(r"(?m)^\s*\d+[.)]\s", "", re.sub(r"(?<=\d),(?=\d{3}\b)", "", s or ""))   # list numbers, 1,000
+        return set(re.findall(r"\d+(?:\.\d+)?", s))
+    return sorted(nums(text) - set().union(*map(nums, known)))
+
 if phase == "system":
     mode = sys.argv[3]
     assert bool(main._policy_setting("performance_mode", False)) == (mode == "perf"), "mode not applied"
@@ -226,6 +261,23 @@ if phase == "system":
     if NO_PRODUCT and rows and not state.get("no_product"): sys.exit("these answers were asked with the product picked; reset first")
     if state.get("no_product") and not NO_PRODUCT: sys.exit("this run is asked with --no-product; pass it again, or reset")
     if NO_PRODUCT: state["no_product"] = True
+    if PATH == "stream" and rows and state.get("path") != "stream": sys.exit("these answers were asked on the /query path; reset first")
+    if state.get("path") == "stream" and PATH != "stream": sys.exit("this run is asked with --path stream; pass it again, or reset")
+    if PATH == "stream":
+        state["path"] = "stream"
+        from fastapi.testclient import TestClient   # no `with`: the app's startup jobs (syncs) are not started
+        import quota
+        client = TestClient(main.app)
+        def ask(q, product, sid):
+            r = client.post("/widget/ask/stream", json={"q": q, "product": product, "session_id": sid},
+                            headers={"Authorization": "Bearer " + quota.issue_token(sid, "member", 3600)})   # one member per case
+            if r.status_code != 200: sys.exit(f"/widget/ask/stream HTTP {r.status_code}: {r.text[:300]}")
+            return read_sse(r.text)
+    else:
+        def ask(q, product, sid):
+            return main._traced_query(main.QueryRequest(q=q, product=product, session_id=sid), None, attach=True)
+    names = main._product_names()
+    def norm(s): return re.sub(r"[^a-z0-9]", "", (s or "").lower())
     r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
     src, arm = os.environ["ADAPTIVE_FROM"].rsplit(":", 1) if os.environ.get("ADAPTIVE_FROM") else (R1, "sys_normal")
     done = (right(json.load(open(src, encoding="utf-8")), arm) if r1 else set()) & set(r1.get(f"sys_{mode}", {}))
@@ -236,26 +288,32 @@ if phase == "system":
         if capped(): stop()
         sid = f"{SET}-{uuid.uuid4()}"
         if c.get("turn1"):
-            main._traced_query(main.QueryRequest(q=c["turn1"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
+            ask(c["turn1"], None if NO_PRODUCT else c.get("product"), sid)
         usage.clear(); t = time.time()
-        d = main._traced_query(main.QueryRequest(q=c["q"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
+        d = ask(c["q"], None if NO_PRODUCT else c.get("product"), sid)
         fam_ask = None
         want = c.get("product") or next(iter(c.get("compare_with") or []), None)
         opts = d.get("family_options") or []
         if opts and want and c.get("expected") != "clarify":   # a case expecting a clarification already has one
-            pick = next((o for o in opts if o.get("product") == want), None)
+            pick = next((o for o in opts if o.get("product") == want), None) or next(
+                (o for o in opts if norm(o.get("label")) and norm(o.get("label")) in (norm(want), norm(names.get(want)))), None)
             if pick:   # what the widget does when a card is tapped: its `send` text, same session, the chat's product unchanged
                 fam_ask = {"answer": d.get("answer", ""), "options": [o.get("label") for o in opts], "tapped": pick.get("label")}
-                d = main._traced_query(main.QueryRequest(q=pick["send"], product=None if NO_PRODUCT else c.get("product"), session_id=sid), None, attach=True)
+                d = ask(pick["send"], None if NO_PRODUCT else c.get("product"), sid)
+        st_ = d.get("steps") or {}
+        if st_.get("compared"):
+            st_["unsupported_figures"] = unsupported(d.get("answer", ""), [c["q"]] + [x for p in st_["parts"] for x in (p["title"], p["answer"])])
         rows[c["id"]] = {"answer": d.get("answer", ""), "wall": round(time.time() - t, 2),
                          "usd": round(sum(usd(u, MODELS["bot"]) for u in usage), 6), "calls": len(usage), "cached": sum(map(cached, usage)), "prompt_tokens": sum(u.get("prompt_tokens", 0) for u in usage),
+                         "completion_tokens": sum(u.get("completion_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
                          "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
                          "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
                          "figures": {s["source"]: [f.get("name") for f in s.get("figures") or []] for s in d.get("sources") or []
                                      if isinstance(s, dict) and s.get("figures")},   # pictures shown beside the answer (D-20261022-14)
                          "at": time.strftime("%Y-%m-%d"),   # the day it was spent (tools/ops_costs.py)
-                         **({"family_ask": fam_ask} if fam_ask else {})}
+                         **({"family_ask": fam_ask} if fam_ask else {}),
+                         **({"steps": steps} if (steps := d.get("steps")) and steps["fired"] else {})}
         spent += rows[c["id"]]["usd"]
         save(); print(mode, c["id"], rows[c["id"]]["wall"], rows[c["id"]]["usd"], repr(rows[c["id"]]["answer"][:60]), flush=True)
 
@@ -438,6 +496,11 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
                                   for t in sorted({c['type'] for c in ok})}}
+        stp = {c["id"]: state[s][c["id"]]["steps"] for c in ok if state[s][c["id"]].get("steps")}
+        if stp:   # D-20261109-08: the step rule on the stream path
+            summary[s]["stepwise"] = {"fired": len(stp), "compared": sum(1 for v in stp.values() if v["compared"]),
+                                      "unsupported_figures": sum(len(v.get("unsupported_figures") or []) for v in stp.values()),
+                                      "cases_unsupported": sorted(k for k, v in stp.items() if v.get("unsupported_figures"))}
     fig = [c for c in ok if c.get("figure")]   # D-20261022-14: picture cases get two marks, kept apart and never added up
     for s in [s for s in SYSTEMS if s.startswith("sys_")] if fig else []:
         for c in fig:
