@@ -4202,7 +4202,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         }
 
     # (b) The user rejected the suggestions: log the gap, answer from docs.
-    if payload.skip_faq:
+    # A comparison's per-product part skips the FAQ as the comparison itself
+    # does (below), but nobody rejected anything there: no gap.
+    import stepwise
+    if payload.skip_faq and not stepwise.PART.get():
         faq_store.record_gap(resolved_query, _faq_scope)
 
     # (c) Normal path.

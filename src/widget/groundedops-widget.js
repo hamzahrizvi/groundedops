@@ -353,6 +353,46 @@
     "max-height:calc(100vh - 40px);background:var(--bg);border-radius:14px;overflow:hidden;" +
     "box-shadow:0 24px 60px rgba(0,0,0,.25);display:none;flex-direction:column}" +
     ".go-open .go-panel{display:flex}.go-open .go-launch{display:none}" +
+    // Motion. The panel grows out of the launcher's corner and folds back into
+    // it on minimise. clip-path rather than scale: a transform would change
+    // the panel's measured size mid-animation, clip-path never does. The
+    // launcher springs back in each time it reappears (display:none -> shown
+    // restarts the animation for free).
+    ".go-launch{animation:go-spring .45s cubic-bezier(.3,1.5,.5,1) backwards}" +
+    "@keyframes go-spring{from{opacity:0;transform:scale(.6)}}" +
+    ".go-open .go-panel{animation:go-grow .34s cubic-bezier(.2,.9,.25,1)}" +
+    "@keyframes go-grow{from{opacity:0;transform:translateY(14px);clip-path:inset(45% 0 0 40% round 14px)}" +
+    "to{clip-path:inset(0 round 14px)}}" +
+    ".go-closing .go-panel{animation:go-fold .17s ease-in forwards}" +
+    "@keyframes go-fold{to{opacity:0;transform:translateY(10px);clip-path:inset(35% 0 0 30% round 14px)}}" +
+    ".go-row,.go-status,.go-chips,.go-chipfold,.go-fwrap,.go-fams,.go-src[open]>.go-srci" +
+    "{animation:go-rise .3s cubic-bezier(.2,.8,.2,1) backwards}" +
+    "@keyframes go-rise{from{opacity:0;transform:translateY(6px)}}" +
+    // While an answer types out, what hangs off it waits, then rises in.
+    ".go-typing .go-srcline,.go-typing .go-src,.go-typing .go-ans-fig,.go-typing .go-badge," +
+    ".go-typing .go-vote{display:none}" +
+    ".go-srcline,.go-src,.go-ans-fig,.go-badge,.go-vote{animation:go-rise .3s cubic-bezier(.2,.8,.2,1) backwards}" +
+    // Expanded: a large reading window centred over a dimmed page, with bigger
+    // text and pictures. The dim layer is the root's ::before, so a click on
+    // it lands on the root and shrinks the window back (see setBig).
+    ".go-big::before{content:'';position:fixed;inset:0;background:rgba(15,20,25,.45);animation:go-dim .25s ease}" +
+    "@keyframes go-dim{from{opacity:0}}" +
+    ".go-big .go-panel{position:fixed;inset:0;margin:auto;width:min(920px,calc(100vw - 48px));" +
+    "height:min(880px,calc(100vh - 48px));max-width:none;max-height:none;box-shadow:0 30px 90px rgba(0,0,0,.4)}" +
+    ".go-big .go-log{padding:24px 32px;gap:14px}" +
+    ".go-big .go-b{font-size:17px;line-height:1.6;max-width:82%}" +
+    ".go-big .go-md-heading.go-h3{font-size:18px}.go-big .go-md-heading.go-h4{font-size:16px}" +
+    ".go-big .go-md-table{font-size:14.5px}" +
+    ".go-big .go-srcline,.go-big .go-srci,.go-big .go-quote{font-size:14px}" +
+    ".go-big .go-in,.go-big .go-chip{font-size:16px}" +
+    ".go-big .go-fig{max-height:160px}.go-big .go-ans-fig{max-height:460px}" +
+    ".go-big .go-fig.big{max-height:none}" +
+    ".go-big .go-fam img{height:140px}" +
+    // The morph between the two sizes is a view transition where the browser
+    // has one; elsewhere the switch is instant.
+    ".go-vt .go-panel{view-transition-name:go-panel}" +
+    "::view-transition-group(go-panel){animation-duration:.32s;animation-timing-function:cubic-bezier(.2,.9,.25,1)}" +
+    "::view-transition-old(go-panel),::view-transition-new(go-panel){height:100%}" +
     // header
     ".go-head{background:var(--a);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:11px;flex:0 0 auto}" +
     ".go-av{width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.15);flex:0 0 auto;" +
@@ -405,9 +445,16 @@
     ".go-b.usr{background:#2f3a45;color:#fff;border-bottom-right-radius:5px}" +
     ".go-b.warn{background:#fdf6e7;border:1px solid #e8d9b0}" +
     ".go-status{font-size:12.5px;color:var(--mut);display:flex;align-items:center;gap:7px;padding:2px 0}" +
-    ".go-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--mut);" +
-    "border-radius:50%;animation:go-spin .7s linear infinite}" +
-    "@keyframes go-spin{to{transform:rotate(360deg)}}" +
+    // Waiting: three dots in the accent colour bob in turn, and a light sweep
+    // runs across the wait line, so a long answer still looks alive.
+    ".go-dots{display:inline-flex;gap:3px;padding:0 2px}" +
+    ".go-dots i{width:5px;height:5px;border-radius:50%;background:var(--a);animation:go-dot 1.2s ease-in-out infinite}" +
+    ".go-dots i:nth-child(2){animation-delay:.15s}.go-dots i:nth-child(3){animation-delay:.3s}" +
+    "@keyframes go-dot{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-4px);opacity:1}}" +
+    ".go-dots+span{background:linear-gradient(90deg,var(--mut) 40%,var(--ink) 50%,var(--mut) 60%) 0 0/250% 100%;" +
+    "-webkit-background-clip:text;background-clip:text;color:transparent;animation:go-shim 2.4s linear infinite}" +
+    ".go-dots+span.go-waitin{animation:go-shim 2.4s linear infinite,go-waitfade .5s ease}" +
+    "@keyframes go-shim{from{background-position:100% 0}to{background-position:0 0}}" +
     // The wait line fades in rather than snapping to the next string. An
     // instant swap of one short phrase for another reads as a flicker.
     ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;font-size:11.5px}" +
@@ -525,7 +572,9 @@
     ".go-bar span{display:block;height:100%;background:var(--a)}" +
     ".go-foot{text-align:center;font-size:11px;color:var(--mut);padding:0 10px 9px;background:var(--bg);flex:0 0 auto}" +
     ".go-foot a{color:var(--a)}" +
-    "@media (prefers-reduced-motion:reduce){.go-spin{animation:none}}" +
+    ".go-send{transition:transform .12s}.go-send:not(:disabled):active{transform:scale(.9)}" +
+    ".go-chip{transition:background .12s,transform .12s}.go-chip:active{transform:scale(.97)}" +
+    "@media (prefers-reduced-motion:reduce){.go-w,.go-w::before,.go-w *{animation:none!important;transition:none!important}}" +
     // 8.13 phone layout: below this the 400x600 floating card left barely any
     // room either side, so the panel goes edge-to-edge like a native sheet
     // instead. Fixed (not the base rule's absolute) so it fills the viewport
@@ -542,6 +591,8 @@
     // thumb.
     ".go-hbtn{min-width:44px;min-height:44px;display:inline-flex;" +
     "align-items:center;justify-content:center;padding:0}" +
+    // Already full screen here; Expand has nothing to add.
+    ".go-hbtn.go-big-btn{display:none}" +
     "}";
 
   var st = document.createElement("style");
@@ -551,6 +602,8 @@
   // ── icons ─────────────────────────────────────────────────────────────
   var I_CHAT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   var I_MIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12h14"/></svg>';
+  var I_EXPAND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+  var I_SHRINK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>';
   var I_GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
   var I_RESET = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 3v6h-6"/></svg>';
   var I_SEND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4 20-7z"/></svg>';
@@ -578,6 +631,7 @@
         '<div class="go-hname">' + esc(cfg.agent) + "</div>" +
         '<button class="go-hbtn go-settings-btn" type="button" aria-label="Usage and settings" title="Usage and settings">' + I_GEAR + "</button>" +
         '<button class="go-hbtn go-restart" type="button" aria-label="Start over" title="Start over">' + I_RESET + "</button>" +
+        '<button class="go-hbtn go-big-btn" type="button" aria-label="Expand" title="Expand">' + I_EXPAND + "</button>" +
         '<button class="go-hbtn go-min" type="button" aria-label="Minimise">' + I_MIN + "</button>" +
       "</div>" +
       '<div class="go-scope" hidden></div>' +
@@ -591,6 +645,7 @@
   var $launch = root.querySelector(".go-launch");
   var $panel = root.querySelector(".go-panel");
   var $min = root.querySelector(".go-min");
+  var $big = root.querySelector(".go-big-btn");
   var $restart = root.querySelector(".go-restart");
   var $scope = root.querySelector(".go-scope");
   var $log = root.querySelector(".go-log");
@@ -1122,31 +1177,43 @@
    * What this does buy: the answer lands the way a person reads it, and the
    * wait no longer ends with a wall of text appearing at once.
    */
+  /* Where typing may stop. A table arrives whole: a cut inside one moves to
+   * its end, since a half-typed pipe row renders as broken syntax. */
+  function revealEnd(text, n) {
+    var start = text.lastIndexOf("\n", n - 1) + 1;
+    if (!/^[ \t]*\|/.test(text.slice(start))) return n;
+    var re = /\n(?![ \t]*\|)/g;
+    re.lastIndex = n;
+    var r = re.exec(text);
+    return r ? r.index : text.length;
+  }
+
+  /* A cut can fall inside **bold** or `code`: close it so the half-typed
+   * text never shows bare asterisks. */
+  function revealText(text, n) {
+    var t = text.slice(0, n);
+    if ((t.split("**").length - 1) % 2) t += "**";
+    if ((t.split("`").length - 1) % 2) t += "`";
+    return t;
+  }
+
   function revealInto(row, text) {
     var el = row && row._txt;
-    if (!el) return;
-    var reduced = window.matchMedia
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // A markdown table revealed a character at a time renders as broken
-    // pipe syntax for most of its life. Tables arrive whole.
-    if (reduced || /\n\s*\|/.test(text) || text.length < 40) return;
+    if (!el || calm() || text.length < 40) return;
 
-    // textContent, NOT renderMd, for the growing text: renderMd APPENDS into
-    // the node (it is a sequence of into.appendChild calls) and never clears,
-    // so re-rendering each frame stacked every partial copy on top of the
-    // last -- the answer arrived as a staircase of itself, under a complete
-    // copy that bubble() had already rendered. textContent replaces, so each
-    // frame supersedes the one before.
-    //
-    // It also removes the partial-markdown problem entirely: raw syntax is
-    // never half-parsed, because nothing is parsed until the end.
+    // Each frame renders the typed part as markdown from scratch: renderMd
+    // APPENDS into the node and never clears, so it is cleared first (once
+    // skipped, the answer arrived as a staircase of itself). Sources,
+    // pictures and votes wait for the end (.go-typing).
     var shown = 0, last = 0, finished = false;
+    row.classList.add("go-typing");
     el.textContent = "";
 
     function finish() {
       if (finished) return;
       finished = true;
       clearTimeout(safety);
+      row.classList.remove("go-typing");
       el.textContent = "";
       renderMd(text, el);
       scrollDown();
@@ -1166,11 +1233,12 @@
       if (finished) return;
       if (!row.isConnected) { clearTimeout(safety); return; }  // removed mid-reveal
       if (!last) last = ts;
-      shown = Math.min(text.length,
-                       shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS)));
+      shown = revealEnd(text, Math.min(text.length,
+                       shown + Math.max(1, Math.round((ts - last) / 1000 * REVEAL_CPS))));
       last = ts;
       if (shown >= text.length) { finish(); return; }
-      el.textContent = text.slice(0, shown);
+      el.textContent = "";
+      renderMd(revealText(text, shown), el);
       scrollDown();
       requestAnimationFrame(step);
     }
@@ -1230,7 +1298,7 @@
   function status(text) {
     var d = document.createElement("div");
     d.className = "go-status";
-    d.innerHTML = '<span class="go-spin"></span><span>' + esc(text) + "</span>";
+    d.innerHTML = '<span class="go-dots"><i></i><i></i><i></i></span><span>' + esc(text) + "</span>";
     $log.appendChild(d);
     scrollDown();
     return d;
@@ -2244,6 +2312,18 @@
     clearChips();
     heard(opts.shown || q);
     var s = waiting();
+    // v17.4: a comparison of two products arrives as one answer per product
+    // before the comparison itself; each shows as soon as it lands, and the
+    // wait line moves back below it.
+    s.onPart = function (v) {
+      say("### " + v.title + "\n\n" + v.answer, {
+        reveal: !v.flagged,
+        flagged: !!v.flagged,
+        sources: v.flagged ? null : v.sources,
+      });
+      $log.appendChild(s);
+      scrollDown();
+    };
 
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
@@ -2330,14 +2410,12 @@
           return;
         }
         say(d.answer || "No answer returned.", {
-          // Only a real answer types out.
-          //  - a curated FAQ answer returns in ~0.08s, so revealing it would
-          //    ADD delay to the one path that is genuinely instant;
-          //  - a refusal or a service-outage notice is not an answer being
-          //    composed, and typing out "the answering service isn't
-          //    reachable" one character at a time is a slow way to deliver
-          //    bad news.
-          reveal: !d.from_faq && !d.flagged && !d.service_degraded,
+          // Every answer types out, a curated FAQ one too (v17.4: answers
+          // that popped in whole read as abrupt). A refusal or a
+          // service-outage notice is not an answer being composed, and
+          // typing out "the answering service isn't reachable" one
+          // character at a time is a slow way to deliver bad news.
+          reveal: !d.flagged && !d.service_degraded,
           // D-20261010-14: a source line only under an answer. A refusal, a
           // clarify question or a service notice carries the pages it searched,
           // which are not where an answer came from.
@@ -2684,6 +2762,7 @@
       var v = JSON.parse(data);
       if (ev === "status") { if (wait.setStage) wait.setStage(v.stage); }
       else if (ev === "meta") d = v;
+      else if (ev === "part") { if (wait.onPart) wait.onPart(v); }
       else if (ev === "delta") text += v.text;
       else if (ev === "error") {
         fail = new Error("HTTP " + v.status);
@@ -2721,7 +2800,14 @@
   }
 
   // ── events ────────────────────────────────────────────────────────────
+  function calm() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  var closing = 0;
   function openPanel(firstScreen) {
+    clearTimeout(closing);
+    root.classList.remove("go-closing");
     root.classList.add("go-open");
     $launch.setAttribute("aria-expanded", "true");
     // $launch (which held focus) becomes display:none the instant "go-open"
@@ -2757,11 +2843,38 @@
   // for a later signed-in page load until it expires.
   if (cfg.token && hasPendingAsk()) openPanel(resumeAfterSignIn);
 
+  /* The panel folds away first (.go-closing), then hides; the launcher can
+   * only take focus once it is displayed again. */
   function close() {
-    root.classList.remove("go-open");
-    $launch.setAttribute("aria-expanded", "false");
-    $launch.focus();
+    if (!root.classList.contains("go-open") || root.classList.contains("go-closing")) return;
+    root.classList.add("go-closing");
+    closing = setTimeout(function () {
+      root.classList.remove("go-open", "go-closing");
+      $launch.setAttribute("aria-expanded", "false");
+      $launch.focus();
+    }, calm() ? 0 : 170);
   }
+
+  /** Expanded reading window on/off. Morphs between the two sizes where the
+   *  browser has view transitions; switches instantly elsewhere. */
+  function setBig(on) {
+    function flip() {
+      root.classList.toggle("go-big", on);
+      $big.innerHTML = on ? I_SHRINK : I_EXPAND;
+      $big.setAttribute("aria-label", on ? "Shrink" : "Expand");
+      $big.title = on ? "Shrink" : "Expand";
+    }
+    if (!document.startViewTransition || calm()) return flip();
+    root.classList.add("go-vt");
+    document.startViewTransition(flip).finished.then(
+      function () { root.classList.remove("go-vt"); },
+      function () { root.classList.remove("go-vt"); });
+  }
+  $big.addEventListener("click", function () { setBig(!root.classList.contains("go-big")); });
+  // A click on the dimmed page (the root's ::before) shrinks the window back.
+  root.addEventListener("click", function (e) {
+    if (e.target === root && root.classList.contains("go-big")) setBig(false);
+  });
   // aria-modal="true" tells a screen reader the page behind is inert, so Tab
   // must not walk out of the panel into it: wrap at either end. Only while
   // focus is already in the panel -- a visitor who clicked back into the
@@ -2838,7 +2951,8 @@
   $min.addEventListener("click", function () { askRating(close); });
   document.addEventListener("keydown", function (e) {
     if (!root.classList.contains("go-open")) return;
-    if (e.key === "Escape") close();
+    // Escape steps back one level: out of the expanded window, then closed.
+    if (e.key === "Escape") root.classList.contains("go-big") ? setBig(false) : close();
     else if (e.key === "Tab") trapTab(e);
   });
 

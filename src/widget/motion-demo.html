@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Widget motion demo</title>
+<!--
+  Local look at the widget's expand button, animations and typing with no
+  backend: fetch is stubbed. A question gets a canned answer after six
+  seconds; one with "vs", "compare" or "difference" plays the step-by-step
+  comparison (one product, the other, then the comparison). Serve this folder
+  over http (a file:// page cannot be driven by the preview browser).
+-->
+<style>
+  body { margin: 0; min-height: 100vh; font: 15px/1.6 system-ui, sans-serif; background: #eef1f4; color: #333; }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 24px; }
+</style>
+<script>
+  (function () {
+    var answer = "The **NV200 Spectral** takes a 12 V DC supply.\n\n" +
+      "| Pin | Name | Use |\n|---|---|---|\n| 1 | +12V | Supply |\n| 2 | GND | Ground |\n| 3 | TX | Serial out |\n\n" +
+      "- Check the supply is within 11-13.2 V.\n- Use the supplied cable.";
+    function sse(ev, v) { return "event: " + ev + "\ndata: " + JSON.stringify(v) + "\n\n"; }
+    // [seconds, event, data]: what the server sends, and when.
+    function script(q) {
+      if (!/\bvs\b|compare|difference/i.test(q)) {
+        return [[6, "meta", { sources: [] }], [6, "delta", { text: answer }]];
+      }
+      return [
+        [0, "status", { stage: "Looking up the NV9USB+" }],
+        // Real answers from the live run on 2026-11-07, real pacing.
+        [8, "part", { title: "NV9USB+", answer: "The NV9USB+ requires a stable 12V DC power supply. A suitable unit is the TDK Lambda SWS50-12 (+12V DC / 4.3 A, RS stock code 466-5869, Farnell stock code 1184645), which suits the NV9USB+ and NV11+. Setup diagrams show the validator powered from a 12VDC / 3A supply, connected via cable CN0392 when wired directly to the host over USB, or via CN00345 to an IF17 interface when using that setup. A weak power supply can cause unexpected behaviour such as note rejects or missing credits.", sources: [] }],
+        [8, "status", { stage: "Looking up the BV30" }],
+        [16, "part", { title: "BV30", answer: "The BV30 requires a stable 12VDC/1.50A power supply. A suitable unit is the TDK Lambda RWS-50B-12 (+12V DC / 4.3A, RS Stock Code 839-9626, Farnell Stock Code 2452725). A weak power supply can cause malfunctioning such as note rejects or missing credits.", sources: [] }],
+        [16, "status", { stage: "Comparing the two" }],
+        [18, "meta", { sources: [] }],
+        [18, "delta", { text: "### Comparison\n\nThe two products differ in their specified supply requirements and in the recommended supply unit; the facts given don't state a difference in the supplies' own output (both recommended units are +12V DC / 4.3A).\n\n| | NV9USB+ | BV30 |\n|---|---|---|\n| Required supply | Stable 12V DC | Stable 12VDC / 1.50A |\n| Recommended unit | TDK Lambda SWS50-12 (+12V DC / 4.3A) | TDK Lambda RWS-50B-12 (+12V DC / 4.3A) |\n| Connection notes | Via CN0392 direct to host over USB, or CN00345 to an IF17 interface | Not stated |\n| Weak-supply symptom | Note rejects or missing credits | Note rejects or missing credits |\n\nNote: the recommended supply ratings above are not stated to be the products' actual draw." }],
+      ];
+    }
+    window.fetch = function (url, init) {
+      if (String(url).indexOf("/widget/ask") >= 0) {
+        var steps = script(JSON.parse(init.body).q);
+        var enc = new TextEncoder();
+        return Promise.resolve(new Response(new ReadableStream({
+          start: function (c) {
+            steps.forEach(function (s, i) {
+              setTimeout(function () {
+                c.enqueue(enc.encode(sse(s[1], s[2])));
+                if (i === steps.length - 1) c.close();
+              }, s[0] * 1000 + i);
+            });
+          },
+        }), { headers: { "Content-Type": "text/event-stream" } }));
+      }
+      return Promise.resolve(new Response("{}", { headers: { "Content-Type": "application/json" } }));
+    };
+  })();
+</script>
+</head>
+<body>
+<main>
+  <h1>A customer's page</h1>
+  <p>Open the chat bottom right, ask anything, then press the expand button in its header.</p>
+</main>
+<script src="groundedops-widget.js" data-api="https://stub.invalid"></script>
+</body>
+</html>

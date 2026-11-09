@@ -43,6 +43,7 @@ import pipeline_trace
 import feedback_store
 import jsonstore
 import quota
+import stepwise
 import text_utils
 from guards import client_ip as _client_ip, is_local_caller
 
@@ -1079,9 +1080,11 @@ def register(app, answer_query, draft_enquiry=None):
             return ("event: " + event + "\n"
                     + "data: " + _json.dumps(data) + "\n\n")
 
-        async def run():
-            yield sse("status", {"stage": "Searching the documentation",
-                                 "id": "entry", "at_ms": 0})
+        async def answer_of(p, box, part=False):
+            """widget_ask(p), yielding its progress lines while it works. The
+            result lands in box["result"]; a failure yields an "error" event
+            and leaves box empty. `part`: one product's step of a comparison
+            (stepwise.PART)."""
             # The pipeline reports each stage through pipeline_trace's
             # listener; the answer runs as a task so its progress can be
             # sent while it is still working.
@@ -1091,7 +1094,9 @@ def register(app, answer_query, draft_enquiry=None):
             progress: asyncio.Queue = asyncio.Queue()
             ctx = contextvars.copy_context()
             ctx.run(pipeline_trace.listen, loop, progress.put_nowait)
-            task = loop.create_task(widget_ask(payload, request), context=ctx)
+            if part:
+                ctx.run(stepwise.PART.set, True)
+            task = loop.create_task(widget_ask(p, request), context=ctx)
             sent = set()
             while not task.done():
                 getter = asyncio.ensure_future(progress.get())
@@ -1106,20 +1111,107 @@ def register(app, answer_query, draft_enquiry=None):
                     yield sse("status", {"stage": line, "id": stage["id"],
                                          "at_ms": stage.get("at_ms")})
             try:
-                result = task.result()
+                box["result"] = task.result()
             except HTTPException as e:
-                yield sse("error", {"status": e.status_code,
-                                    "detail": e.detail})
-                return
+                # A part refused (its chat cap, the quota) is not the
+                # visitor's answer: the normal one, already paid for, stands.
+                if not part:
+                    yield sse("error", {"status": e.status_code,
+                                        "detail": e.detail})
             except Exception:
                 # This one is the PUBLIC surface, so the rule matters most
                 # here: an anonymous visitor gets a status and nothing else.
                 # The traceback is already in the log via logger.exception.
                 logger.exception("widget ask/stream failed")
-                yield sse("error", {"status": 503, "detail":
-                                    "The assistant is temporarily "
-                                    "unavailable. Please try again."})
+                if not part:
+                    yield sse("error", {"status": 503, "detail":
+                                        "The assistant is temporarily "
+                                        "unavailable. Please try again."})
+
+        async def run():
+            yield sse("status", {"stage": "Searching the documentation",
+                                 "id": "entry", "at_ms": 0})
+
+            box = {}
+            async for line in answer_of(payload, box):
+                yield line
+            if "result" not in box:
                 return
+            result = box["result"]
+
+            # v17.4 trial: a comparison of two products whose normal answer
+            # asked "which product?" or gave one spec-table row for a named
+            # attribute is answered again per product, each as its own part,
+            # then compared (stepwise.py). Only where the model is reachable
+            # and this chat is under its cap, so the split call is never made
+            # for a question that would be refused.
+            steps = []
+            if (stepwise.enabled() and payload.session_id
+                    and not payload.faq_id and not payload.skip_faq
+                    and payload.effort in (None, "standard")
+                    and (_caller(request, payload.visitor_id)["tier"] != "anonymous"
+                         or quota.anon_llm_enabled())):
+                keys = await run_in_threadpool(stepwise.products, payload.q)
+                from main import _product_names
+                names = keys + [_product_names().get(k, k) for k in keys]
+                if (keys and stepwise.worth_it(payload.q, result, names)
+                        and (await run_in_threadpool(
+                            quota.session_check, payload.session_id))["allowed"]):
+                    steps = await run_in_threadpool(stepwise.plan, payload.q)
+            shown = []   # (name, result) of each part sent, unflagged
+            for i, (key, name, own_q) in enumerate(steps):
+                yield sse("status", {"stage": f"Looking up the {name}",
+                                     "id": "step", "at_ms": None})
+                # Its own conversation id, so the part's question does not
+                # become the turn a follow-up is read against.
+                # ponytail: the parts count against their own chat caps, not
+                # this one's; the daily credit quota sees the normal answer
+                # and both parts (refunding the replaced one touches billing).
+                part = payload.model_copy(update={
+                    "q": own_q, "product": key, "skip_faq": True,
+                    "session_id": stepwise.part_session(payload.session_id, i + 1)})
+                box = {}
+                async for line in answer_of(part, box, part=True):
+                    yield line
+                if "result" not in box:
+                    break
+                r = box["result"]
+                # "Which ICU do you have?" is not this product's half of the
+                # answer; the comparison below asks it if it still needs to.
+                if not stepwise.is_answer(r):
+                    continue
+                yield sse("part", {"title": name,
+                                   "answer": (r.get("answer") or "").strip(),
+                                   "sources": r.get("sources"),
+                                   "flagged": bool(r.get("flagged"))})
+                if not r.get("flagged"):
+                    shown.append((name, r))
+            if steps:
+                yield sse("status", {"stage": "Comparing the two",
+                                     "id": "step", "at_ms": None})
+
+            # Both halves answered: the comparison is written from them, so
+            # it cannot contradict what the visitor just read. No sources of
+            # its own (each part shows its pages) and no credit or chat turn:
+            # the normal answer it replaces counted both. Anything less, and
+            # the normal answer stands.
+            if len(shown) == 2:
+                text = await run_in_threadpool(
+                    stepwise.compare, payload.q,
+                    [(n, (r.get("answer") or "").strip()) for n, r in shown])
+                if text:
+                    import pipeline_trace
+                    pipeline_trace.set_local_caller(is_local_caller(request))
+                    origin = pipeline_trace.origin_for(payload.session_id, "widget")
+                    rid = uuid.uuid4().hex[:12]
+                    await run_in_threadpool(stepwise.record, payload.session_id,
+                                            payload.q, text, rid, origin)
+                    _remember_answer(rid, payload.q, payload.product or payload.category,
+                                     payload.session_id, text)
+                    last = shown[-1][1]
+                    result = {"answer": "### Comparison\n\n" + text, "role": "comparison",
+                              "request_id": rid, "sources": [], "flagged": False,
+                              "quota": last.get("quota"), "session": last.get("session")}
 
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
