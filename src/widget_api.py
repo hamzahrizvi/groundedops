@@ -243,7 +243,8 @@ def delete_token(session_id: str) -> str:
     """D-20261104-08: proof that the caller is the browser that started this
     chat: /widget/forget and /widget/rating (D-20261106-11) both require it.
     An HMAC of the id under the server's session secret, handed out by
-    /widget/chat, or by an ask that started a fresh chat (D-20261108-01), only for an id the server itself chose, so the id alone (which a
+    /widget/chat, or by an ask that started a fresh chat (D-20261108-01),
+    only for an id the server itself chose, so the id alone (which a
     visitor quotes to support) deletes or rates nothing. '' when no secret is set;
     /widget/forget then refuses every visitor delete."""
     import keystore
@@ -1062,8 +1063,8 @@ def register(app, answer_query, draft_enquiry=None):
         Not tied to a remembered answer like /feedback: a guest's chat is
         curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
         most visitors. A rating needs the delete token /widget/chat gave the
-        browser that started this chat (403 without it). So a quoted or made-up id cannot replace a rating or
-        push real ones out. The daily limit (quota "rating") and RATINGS_MAX
+        browser that started this chat (403 without it), so a quoted or
+        made-up id cannot replace a rating or push real ones out. The daily limit (quota "rating") and RATINGS_MAX
         stay as backstops.
         """
         expected = delete_token(payload.session_id)
