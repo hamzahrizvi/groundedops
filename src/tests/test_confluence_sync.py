@@ -701,6 +701,40 @@ def test_name_flag_rules():
     assert cs.name_flag("x DO NOT USE")["reason"] == "The title says “DO NOT USE”"
 
 
+LEVEL_TABLE = ('<table><tbody><tr><td><p>Part Number</p></td><td><p>PA02158</p></td></tr>'
+               '<tr><td><p>Service Level</p></td><td><p>Level {}</p></td></tr></tbody></table>')
+
+
+def test_service_level_rules():
+    assert cs.service_level(cs.page_text("Guide", LEVEL_TABLE.format(4) + BODY)) == 4
+    assert cs.service_level("Service Level: Level 2") == 2
+    assert cs.service_level(BODY) is None
+    assert cs.name_flag("Repair Guide", 1) is None              # field service: customers
+    assert cs.name_flag("Repair Guide", 2) == {"suggest": "internal",
+                                                "reason": "It says Service Level 2"}
+    assert cs.name_flag("Repair Guide DRAFT", 3)["suggest"] == "excluded"   # the title wins
+
+
+class LevelApi(FakeApi):
+    def page(self, pid):
+        p = super().page(pid)
+        if pid == "20":
+            p["body"]["storage"]["value"] = LEVEL_TABLE.format(3) + BODY
+        return p
+
+
+def test_a_page_above_service_level_1_is_filed_internal_in_auto_mode():
+    with tempfile.TemporaryDirectory() as d:
+        w = World(os.path.join(d, "s.json"))
+        w._with(lambda: cs.set_mode("auto"))
+        w.run(LevelApi())
+        items = w.items()
+        assert items["Installation"]["decision"] == "internal", items["Installation"]
+        assert items["SH3 manual.pdf"]["decision"] == "approved"   # files: title only
+        w.decide(["Installation"], decision="approved")
+        assert w.items()["Installation"]["name_flag"]["reason"] == "It says Service Level 3"
+
+
 def test_kind_of_rules():
     P = ["Products", "SMART Coin System Range"]
     cases = [

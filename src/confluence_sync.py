@@ -102,13 +102,28 @@ _NAME_FLAGS = [(d, re.compile(_B + p + _E, re.I)) for d, p in (
 _STRICT = {"approved": 0, "internal": 1, "excluded": 2}
 
 
-def name_flag(title: str | None) -> dict | None:
+# Repair guides state who may do the work in a table row, rendered by
+# page_text as "Service Level | Level 2". Level 1 is field service, for
+# customers; above that is workshop or repair-centre work (CEO, 2026-11-09).
+_SERVICE_LEVEL = re.compile(r"service\s*level\s*[|:]?\s*(?:level\s*)?(\d+)", re.I)
+
+
+def service_level(text: str | None) -> int | None:
+    """The service level a page's text states, else None. Pure."""
+    m = _SERVICE_LEVEL.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+def name_flag(title: str | None, level: int | None = None) -> dict | None:
     """{"suggest": "excluded"|"internal", "reason": ...} when a title says the
-    document is unfinished or staff-only, else None. Pure."""
+    document is unfinished or staff-only, or its text states a service level
+    above 1, else None. Pure."""
     for decision, rx in _NAME_FLAGS:
         m = rx.search(title or "")
         if m:
             return {"suggest": decision, "reason": f"The title says “{m.group(0)}”"}
+    if level and level > 1:
+        return {"suggest": "internal", "reason": f"It says Service Level {level}"}
     return None
 
 _KIND_TITLE = [
@@ -481,7 +496,7 @@ def overview() -> dict:
         row["is_updated"] = _recent(it.get("updated_at"))
         row["key"] = key
         row["status"] = status_of(it)
-        flag = name_flag(it.get("title"))
+        flag = name_flag(it.get("title"), it.get("level"))
         # Shown while the item is filed less strictly than the title suggests
         # and nobody has dismissed this reason for it.
         if flag and _STRICT[flag["suggest"]] > _STRICT.get(it.get("decision"), 2) \
@@ -627,7 +642,7 @@ def set_items(keys: list[str], decision: str | None = None,
             if not it:
                 continue
             if dismiss_flag:
-                it["flag_dismissed"] = (name_flag(it.get("title")) or {}).get("reason")
+                it["flag_dismissed"] = (name_flag(it.get("title"), it.get("level")) or {}).get("reason")
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
@@ -997,13 +1012,16 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 b = combined[key] = {
                     "kind": "bundle", "id": key, "title": inside[-1], "path": inside[:-1],
                     "name": _safe_name(inside[-1]) + ".txt", "members": [], "stamp": [],
-                    "modified_at": None, "url": None}
+                    "modified_at": None, "url": None, "level": None}
                 _note(inside[-1], "bundle", inside[:-1], "found")
             if here == inside:           # the folder is itself a page: link to it
                 b["url"] = _link(api, (full.get("_links") or {}).get("webui"))
             ver = (full.get("version") or {}).get("number")
             members_of.add(f"page:{pid}")
             if text:
+                lvl = service_level(text)
+                if lvl and lvl > (b["level"] or 0):
+                    b["level"] = lvl           # the strictest of its pages
                 b["members"].append([pid, " › ".join(here[len(inside):]) or title])
                 b["stamp"].append(f"{pid}:{ver}")
                 at = (full.get("version") or {}).get("createdAt")
@@ -1011,10 +1029,10 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                     b["modified_at"] = at
         # The root page's own text is the container's intro, not a manual;
         # files attached to it still count.
-        elif pid != root_id and len(page_text(title, _body(full))) >= _MIN_PAGE_TEXT:
+        elif pid != root_id and len(text := page_text(title, _body(full))) >= _MIN_PAGE_TEXT:
             found[f"page:{pid}"] = {
                 "kind": "page", "id": pid, "title": title, "path": trail,
-                "name": _safe_name(title) + ".txt",
+                "name": _safe_name(title) + ".txt", "level": service_level(text),
                 "version": (full.get("version") or {}).get("number"),
                 "modified_at": (full.get("version") or {}).get("createdAt"),
                 "url": _link(api, (full.get("_links") or {}).get("webui"))}
@@ -1071,7 +1089,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
                 decision = "excluded"
                 if st["mode"] == "auto":
-                    decision = (name_flag(f["title"]) or {}).get("suggest", "approved")
+                    decision = (name_flag(f["title"], f.get("level")) or {}).get("suggest", "approved")
                 chosen = False
                 if f["kind"] == "bundle":
                     pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]

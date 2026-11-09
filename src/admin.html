@@ -3918,7 +3918,7 @@ const CF_FILTERS = [
   ["unfiled", "Not filed", i => !cfFiled(i)],
   ["uploaded", "Uploaded before", i => !!i.uploaded_as],
   ["error", "Failed", i => i.status === "error"],
-  ["flagged", "Title says not for customers", i => !!i.name_flag],
+  ["flagged", "Looks not for customers", i => !!i.name_flag],
 ];
 
 // While a run is going only the run box changes: the bar, its line, and a
@@ -4857,9 +4857,9 @@ function cfFlagBanner(items) {
   if (!flagged.length) return null;
   const keys = flagged.map(i => i.key);
   return el("div", { class: "cf-up part", style: "margin-top:10px;padding:6px 10px" },
-    flagged.length + (flagged.length === 1 ? " document's title says" : " documents' titles say")
-      + " unfinished or staff-only, but " + (flagged.length === 1 ? "it is" : "they are")
-      + " filed less strictly than that.",
+    flagged.length + (flagged.length === 1 ? " document looks" : " documents look")
+      + " unfinished or staff-only (by title or service level), but "
+      + (flagged.length === 1 ? "it is" : "they are") + " filed less strictly than that.",
     el("button", { class: "cf-up-btn", onclick: () => { cfFilter = "flagged"; cfShown = 100; render(); } }, "Show"),
     el("button", { class: "cf-up-btn", onclick: () => cfPost("/admin/confluence/items",
       { keys, dismiss_flag: true }, "Dismissed") }, "Dismiss all"));
