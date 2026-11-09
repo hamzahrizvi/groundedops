@@ -8,6 +8,7 @@ _harness.py points POLICY_PATH at a scratch file, so nothing here can change
 the real install's limits.
 """
 import _harness
+import widget_api
 from fastapi.testclient import TestClient
 
 import policy
@@ -175,7 +176,8 @@ with patch.object(_logger, "log_interaction", side_effect=lambda *a, **k:
                   rows.append(pipeline_trace.snapshot())):
     r = client.post("/widget/ask", json={"q": "How do I clear a coin jam?",
                                          "visitor_id": "g4",
-                                         "session_id": "s-guest"})
+                                         "session_id": "s-guest",
+                                         "delete_token": widget_api.delete_token("s-guest")})
 check(r.status_code == 200 and r.json().get("effort") == "faq_only",
       f"a capped guest gets the FAQ path, not a 429 ({r.status_code})")
 check(len(rows) == 1 and rows[0]["meta"]["origin"] == "widget"
