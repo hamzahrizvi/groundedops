@@ -2,6 +2,7 @@
 
   python tools/change_list.py --ops <OPS> --repo <REPO> --office <OFFICE>     scan, then print the CHANGES line
   python tools/change_list.py --ops <OPS> tick <key> "<what tested it, and why it is approved>"
+  python tools/change_list.py --ops <OPS> wait <key> "<the one thing that would close it>"
   python tools/change_list.py --selftest
 
 A scan reads every commit on the branch checked out in REPO (the product line) and in OFFICE
@@ -140,7 +141,8 @@ def render(ops, st, now):
         r = runs_after(ops, i["when"])
         lines.append(f"- [ ] `{i['key']}` | {i['where']} ({i['branch']}) | {i['what']} | {day(i['when'])}"
                      f" | files: {', '.join(i['files']) or 'none'} | test runs since: {', '.join(r[:3]) or 'none yet'}"
-                     f" | checks reported: {', '.join(checked(i['key'])) or 'none'}")
+                     f" | checks reported: {', '.join(checked(i['key'])) or 'none'}"
+                     + (f" | waits for: {i['waits']}" if i.get("waits") else ""))
     lines += ["", "## Ticked in the last 14 days", ""]
     lines += [f"- [x] `{i['key']}` | {i['where']} | {i['what']} | {i.get('note', '')}" for i in st["items"]
               if i["ticked"] and now - i.get("ticked_at", i["when"]) < RECENT]
@@ -161,6 +163,24 @@ def scan(ops, repos, tasks_dir=TASKS, now=None):
 
 def open_count(ops):
     return sum(not i["ticked"] for i in load(ops)["items"])
+
+
+def open_items(ops):
+    """The open changes, for the office page: each says what it waits for once the product owner looked."""
+    return [i for i in load(ops)["items"] if not i["ticked"]]
+
+
+def wait(ops, key, why):
+    """The product owner looked and left it open: record the one thing that closes it, so the page can show it
+    (the CEO pressed Sync again and again on 9 Nov while the reasons sat only in a decisions file)."""
+    st = load(ops)
+    for i in st["items"]:
+        if i["key"] == key and not i["ticked"]:
+            i.update(waits=why, waits_at=int(time.time()))
+            save(ops, st)
+            render(ops, st, time.time())
+            return f"WAITS {key}"
+    return f"NO OPEN CHANGE {key}"
 
 
 def tick(ops, key, note):
@@ -220,6 +240,8 @@ def selftest():
         md = open(os.path.join(ops, "state", "changes.md"), encoding="utf-8").read()
         assert next(ln for ln in md.splitlines() if key in ln).endswith("checks reported: s1.md"), md
         assert md.count("checks reported: none") == 3, "a report covers only the commits it names"
+        assert wait(ops, key, "a full suite run") == f"WAITS {key}" and open_items(ops)[0]["waits"] == "a full suite run"
+        assert "waits for: a full suite run" in open(os.path.join(ops, "state", "changes.md"), encoding="utf-8").read()
         assert tick(ops, key, "run 20261101 shows no drop; belongs") == f"TICKED {key}" and open_count(ops) == 3
         assert tick(ops, key, "again") == f"NO OPEN CHANGE {key}", "a change is ticked once"
         assert scan(ops, repos, tdir).startswith("CHANGES 3 open (0 new)"), "a second scan adds nothing"
@@ -236,9 +258,9 @@ if __name__ == "__main__":
     ap.add_argument("--office", default="C:/Users/hrizvi/Downloads/Git/groundedops/.claude/worktrees/agent-org")
     ap.add_argument("cmd", nargs="*", help='tick <key> "<note>"; nothing = scan')
     o = ap.parse_args()
-    if o.cmd[:1] == ["tick"] and len(o.cmd) == 3:
-        print(tick(o.ops, o.cmd[1], o.cmd[2]))
+    if o.cmd[:1] in (["tick"], ["wait"]) and len(o.cmd) == 3:
+        print((tick if o.cmd[0] == "tick" else wait)(o.ops, o.cmd[1], o.cmd[2]))
     elif o.cmd:
-        sys.exit('usage: change_list.py [--ops OPS] tick <key> "<note>"')
+        sys.exit('usage: change_list.py [--ops OPS] tick|wait <key> "<note>"')
     else:
         print(scan(o.ops, [("product", o.repo), ("office", o.office)]))

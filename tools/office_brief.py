@@ -20,7 +20,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
-from change_list import open_count  # noqa: E402
+from change_list import open_items  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
 from office_next import (STUCK, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
                          MO_HOME, revisit, stuck, stuck_why, sweep, work_mode)
@@ -149,11 +149,13 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
                     "suggest": "Ask Claude in any session to judge again whether Mo should get more helpers, with these figures.",
                     "actions": []})
     # changes made outside a work order (Claude sessions, hand-edited tasks) wait for the product owner's tick
-    n = open_count(ops)
+    todo = open_items(ops)
+    n, waits = len(todo), [f"{i['key']} ({i['what'][:60]}) waits for {i['waits']}." for i in todo if i.get("waits")]
     if n:
-        out.append({"id": f"changes-{n}", "title": f"{n} change{'s' if n > 1 else ''} not yet checked by the product owner",
-                    "why": "They were made in Claude sessions or by editing a scheduled task, not through a work order, so no"
-                           " test or decision has looked at them yet. The product owner ticks each one off at its next check.",
+        out.append({"id": f"changes-{n}", "title": f"{n} change{'s' if n > 1 else ''} not yet ticked by the product owner",
+                    "why": "They were made in Claude sessions or by editing a scheduled task, not through a work order."
+                           + (" The product owner looked and left them open: " + " ".join(waits) if waits else
+                              " The product owner ticks each one off at its next check."),
                     "suggest": "Push only once this is clear. To have them checked sooner, sync them: the product owner"
                                " ticks what the sessions' reported checks cover and looks for similar or conflicting plan items.",
                     "actions": [{"label": "Sync outside changes with the product owner", "choice": "run_now",

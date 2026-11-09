@@ -268,7 +268,7 @@ Dev branch comes in ticked: its gate and READY TO MERGE already covered it, Mo's
 sweeps included. A Claude session's commit or merge, or a hand-edited task,
 comes in open. The product owner ticks each one once a test run or selftest
 covers it and it belongs, and files a finding for one that broke something.
-The page shows "N changes not yet checked by the product owner" until the list
+The page shows "N changes not yet ticked by the product owner" (with what each waits for, once the product owner has looked) until the list
 is clear: push only then.
 
 A session that tested its own change says so in `OPS/state/checks/<name>.md`

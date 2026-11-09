@@ -224,6 +224,10 @@ look at every open line, oldest first:
 - Tested and approved: run `"<REPO>/.venv/Scripts/python.exe" "<OFFICE>/tools/change_list.py"
   --ops "<OPS>" tick <key> "<the run or selftest that tested it>; <why it is
   approved>"`. Tick only lines you checked yourself, never in bulk.
+- Left open: run the same tool with `wait <key> "<the one thing that would close
+  it>"` (e.g. "D-20261105-04 merging", "a full unit suite run or checks file").
+  The office page shows it to the CEO; without it the CEO only sees "not yet
+  checked" and presses Sync again (9 Nov).
 - A change that broke something or does not belong: leave it open and file it
   as a finding in the decisions file (`- From: product-owner`, `- Source:
   state/changes.md`), with what is wrong and what would undo or fix it.
