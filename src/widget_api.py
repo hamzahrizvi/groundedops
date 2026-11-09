@@ -1064,8 +1064,8 @@ def register(app, answer_query, draft_enquiry=None):
         curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
         most visitors. A rating needs the delete token /widget/chat gave the
         browser that started this chat (403 without it), so a quoted or
-        made-up id cannot replace a rating or push real ones out. The daily limit (quota "rating") and RATINGS_MAX
-        stay as backstops.
+        made-up id cannot replace a rating or push real ones out. The daily
+        limit (quota "rating") and RATINGS_MAX stay as backstops.
         """
         expected = delete_token(payload.session_id)
         if not expected or not hmac.compare_digest(expected.encode(),

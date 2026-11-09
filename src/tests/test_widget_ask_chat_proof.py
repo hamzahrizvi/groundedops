@@ -68,7 +68,7 @@ def test_a_chat_id_without_its_token_gets_a_fresh_chat_on_ask():
         assert seen and seen[0] != sid
         assert reply["session_id"] != sid
         assert reply["delete_token"] == widget_api.delete_token(reply["session_id"])
-        assert sid not in checked
+        assert checked and sid not in checked
 
 
 def test_a_chat_id_with_its_token_is_answered_in_that_chat():
