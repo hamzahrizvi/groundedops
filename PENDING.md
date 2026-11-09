@@ -365,15 +365,16 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | waiting for CEO | your yes |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
-| D-20261105-04 | Security item D-20261105-04, details in the office | approved, queued | Dev builds it |
+| D-20261105-04 | Security item D-20261105-04, details in the office | ready to merge | merges once Security clears it |
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
 | D-20261106-09 | Security item D-20261106-09, details in the office | waiting for CEO | your yes |
 | D-20261107-02 | The "which model do you have?" cards appear when the customer already named or picked the model, so a simple question gets no answer | waiting for CEO | your yes |
 | D-20261107-08 | Security item D-20261107-08, details in the office | waiting for CEO | your yes |
 | D-20261108-01 | Security item D-20261108-01, details in the office | waiting for CEO | your yes |
-| D-20261108-12 | A flash-code question gets "not listed" because the flash-table step fills its space with a different module's table before the right row | waiting for CEO | your yes |
-| D-20261109-02 | Measure the step-by-step comparison on the widget path against the blind comparison questions | approved, queued | Dev builds it |
+| D-20261108-12 | A flash-code question gets "not listed" because the flash-table step fills its space with a different module's table before the right row | approved, queued | Dev builds it |
 | D-20261109-03 | The writer has the right page in front of it and still answers wrong: show the passages grouped by document, in page order | approved, queued | Dev builds it |
+| D-20261109-08 | Let the blind runner ask questions through the widget stream path and count unanswered comparison claims | approved, queued | Dev builds it |
+| D-20261109-09 | An answer first pays a failed OpenAI call when the account has no credit | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -424,6 +425,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261107-05 | A label or drawing in a bulletin or change notice cannot be found: new uploads index their described pictures only when a switch is on | deferred | parked |
 | D-20261108-02 | The admin report's speed figures for clarifying questions and refusals are nonsense | deferred | parked |
 | D-20261109-01 | The weekly table cannot say whether a failed answer's page was never found, found and cut, or found and misread | deferred | parked |
+| D-20261109-02 | Measure the step-by-step comparison on the widget path | deferred | parked |
 | D-20261109-04 | Questions that need two documents or sections search once and find one: a model picks the documents from the contents list, then each is searched | deferred | parked |
 | D-20261109-05 | While the bot works, show the pages it found, not only a clock | deferred | parked |
 | D-20261109-06 | After "Email support", tell the visitor what was sent and what happens next | deferred | parked |
