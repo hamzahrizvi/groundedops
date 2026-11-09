@@ -1607,7 +1607,9 @@ def _referenced_sections(out: list[dict], query: str, all_chunks: list[dict],
 # and a count reads the flash-code document's table headed for that product
 # first, and the product's own flash tables with a row for that count after
 # the ranked passages, inside one budget. Without a product or a count it adds
-# nothing.
+# nothing. The product's own tables are ordered: a table holding the asked count
+# pair first, word overlap next, a table titled for another module (Ticket
+# Module) last (D-20261108-12).
 FLASH_TABLE_CHARS = int(os.getenv("FLASH_TABLE_CHARS", "3200"))
 _FLASH_DOC = re.compile(r"flash[\s_-]*codes?", re.I)
 _HEADING_STOP = {"range", "and", "the", "of", "codes", "code", "flash", "error",
@@ -1670,6 +1672,56 @@ def _heading_names(heading: str, forms: set, qwords: set) -> bool:
     return bool(words) and words <= qwords
 
 
+# A flash table titled for a part of the product ("8.2.3 Ticket Module Flash
+# Codes", "TEBS Lock Flash Codes", "BNF Module Flash Codes"), not the product
+# itself ("Bezel/Status LED Flash Codes"). D-20261108-12.
+_FLASH_TITLE = re.compile(r"(?:[\d.]+\s+)?(.*?)\s*flash[\s_-]*codes?\s*", re.I)
+_TITLE_GENERIC = {"led", "status", "bezel", "error", "errors", "the", "and", "of",
+                  "range", "module"}
+
+
+def _other_module(section: str, qwords: set, own: set) -> bool:
+    """Whether the last heading of `section` is "<X> Flash Codes" where X names
+    something the question does not (and is not the product's own name)."""
+    m = _FLASH_TITLE.fullmatch((section or "").split("›")[-1].strip())
+    if not m:
+        return False
+    words = ({w for w in re.findall(r"[a-z0-9]+", m.group(1).lower()) if not w.isdigit()}
+             - _TITLE_GENERIC - own)
+    return bool(words) and not words & qwords
+
+
+def _count_pairs(text: str, above: str | None = None) -> set:
+    """(first count, second count) of each table row of `text`. A row whose
+    first count is merged away takes the first count of the last full row
+    above it, in this chunk or the chunk before: the NV200 manual prints
+    "4 | 1 | Power Supply too Low" then "2 | Power Supply too High" (red 4,
+    blue 2); PDF text keeps the empty cell ("| 2 | ..."). D-20261108-12."""
+    import tables as _tables
+    last, got = None, set()
+    for mine, t in ((False, above or ""), (True, text or "")):
+        for line in _tables.split_prefix(t)[1].split("\n"):
+            if not _tables.is_row(line):
+                continue
+            cs = _tables.cells(line)
+            while cs and not cs[-1]:
+                cs.pop()
+            if len(cs) < 2:
+                continue
+            a, b = _tables._count(cs[0]), _tables._count(cs[1])
+            if a is not None and b is not None:
+                pair, last = (a, b), a
+            elif not cs[0] and b is not None and last is not None:
+                pair = (last, b)
+            elif a is not None and b is None and cs[1] and last is not None:
+                pair = (last, a)
+            else:
+                continue
+            if mine:
+                got.add(pair)
+    return got
+
+
 def _flash_tables(out: list[dict], query: str, all_chunks: list[dict],
                   by_id: dict, budget: int = FLASH_TABLE_CHARS) -> list[dict]:
     import tables as _tables
@@ -1679,9 +1731,11 @@ def _flash_tables(out: list[dict], query: str, all_chunks: list[dict],
         for n in ns:
             if len(n) > 2:
                 q = re.sub(re.escape(n), " ", q, flags=re.I)
-    asked = {int(d) if d else _COUNT_WORDS[w.lower()] for d, w in _Q_COUNT.findall(q)}
+    seq = [int(d) if d else _COUNT_WORDS[w.lower()] for d, w in _Q_COUNT.findall(q)]
+    asked = set(seq)
     if not asked:
         return out
+    pairs = set(zip(seq, seq[1:]))      # "red 4x blue 2x" -> (4, 2)
     words = re.findall(r"[a-z0-9]+", query.lower())
     qwords = set(words)
     forms = {"".join(words[i:i + n]) for n in (1, 2, 3) for i in range(len(words))}
@@ -1718,6 +1772,8 @@ def _flash_tables(out: list[dict], query: str, all_chunks: list[dict],
             if k and not k.endswith("_general") and (
                     _flat(k) in forms or any(_flat(n) in forms for n in names.get(k, ()))):
                 keys.add(k)
+    own_words = {w for k in keys for n in [k, *names.get(k, ())]
+                 for w in re.findall(r"[a-z0-9]+", n.lower())}
     cands = []
     for a in all_chunks if keys else ():
         src = a.get("source")
@@ -1733,9 +1789,14 @@ def _flash_tables(out: list[dict], query: str, all_chunks: list[dict],
             continue
         own = set(re.findall(r"[a-z0-9]+", (a.get("text") or "").lower()))
         score = sum(1 for w in qwords if len(w) >= 4 and w in own)
-        cands.append((-score, src, _order_key(a["id"]), a))
+        above = (by_id.get(_neighbour_id(a["id"], -1)) or {}).get("text")
+        hit = bool(pairs & _count_pairs(a.get("text") or "", above))
+        other = _other_module(a.get("section"), qwords, own_words)
+        # Another module's table last; then a table holding the asked pair;
+        # then word overlap (a table of counts shares no words with "red 4x").
+        cands.append((other, not hit, -score, src, _order_key(a["id"]), a))
     back = []
-    for *_, a in sorted(cands, key=lambda t: t[:3]):
+    for *_, a in sorted(cands, key=lambda t: t[:5]):
         n = len(a.get("text") or "")
         if spent + n > budget:
             continue

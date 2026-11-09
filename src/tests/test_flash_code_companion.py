@@ -243,3 +243,75 @@ def test_a_document_not_titled_for_flash_codes_is_not_the_flash_document():
     out = _flash_run(["BV50 User Manual.txt:x:44"], "bv50 flashed 4 times",
                      chunks=renamed + BV50)
     assert not _src(out, "flash_code_document")
+
+
+NVM, NVP, NVT = "NV200 Range User Manual.txt", "NV200S Manual.pdf", "NV200 Spectral Manual.pdf"
+NV_NAMES = {"nv200s": ["NV200S", "NV200 Spectral", "NV200"]}
+
+
+def _s(src, n, section, body):
+    return dict(_c(src, n, 1, section, body), product="nv200s")
+
+
+NV200 = [
+    _s("NV200S Quick Guide.txt", 1, "", "The NV200S is a note validator."),
+    _s(NVM, 46, "NV200 Range Service Guide",
+       "Flashes | Indicated Status / Error | Recommended Action\n"
+       "3 | 1 | Firmware Checksum Error | Retry the download\n"
+       "4 | Dataset Checksum Error\n"
+       "4 | 1 | Power Supply too Low | Check the voltage"),
+    _s(NVM, 47, "NV200 Range Service Guide",
+       "Flashes | Indicated Status / Error | Recommended Action\n"
+       "2 | Power Supply too High | Check the voltage varies under 10%\n"
+       "3 | Card Format | Format the card\n4 | Payout Reset | Wait"),
+    _s(NVP, 144, "Bezel/Status LED Flash Codes",
+       "The bezel is flashing red and blue in a sequence.\n"
+       "Flashes |  | Indicated Status / Error | Recommended Action\nRed | Blue |  |\n"
+       "1 | 1 | Note Path Open | Close the lid\n1 | 2 | Note Path Jam | Clear it\n"
+       "2 | 1 | Cashbox Removed | Insert it\n2 | 2 | Cashbox Jam | Clear it"),
+    _s(NVT, 213, "User Manual NV200 Spectral Range \u203a 8.2.3 Ticket Module Flash Codes",
+       "The SMART Ticket button can flash error codes, red and blue.\n"
+       "Flashes |  | Indicated Error\n1 | 1 | No Connection\n1 | 2 | Initialisation Fail\n"
+       "2 | 2 | Tab not found\n4 | 2 | Ticket Jam"),
+]
+
+
+def _nv(query, budget=100000):
+    by = {c["id"]: c for c in NV200}
+    rdb._flash_docs_cache.update(key=None, docs={})
+    with patch.object(rdb, "_catalog_names", lambda: NV_NAMES), \
+         patch.object(rdb, "is_excluded", lambda s: False):
+        return rdb._flash_tables([dict(NV200[0])], query, NV200, by, budget=budget)
+
+
+def test_the_table_holding_the_asked_pair_comes_first_other_module_last():
+    out = _nv("nv200s flashing red 4x blue 2x, whats that")
+    assert _src(out, "flash_table") == [(NVM, "47"), (NVP, "144"), (NVM, "46"), (NVT, "213")]
+    # under a budget for two tables the asked row is kept, the Ticket Module's dropped
+    n = len(NV200[2]["text"]) + len(NV200[3]["text"])
+    assert _src(_nv("nv200s flashing red 4x blue 2x, whats that", n),
+                "flash_table") == [(NVM, "47"), (NVP, "144")]
+
+
+def test_a_module_the_question_names_is_not_demoted():
+    out = _nv("nv200s ticket module flashing red 4 blue 2")
+    assert _src(out, "flash_table")[0] == (NVT, "213")
+
+
+def test_count_pairs_carry_the_first_count_down():
+    assert rdb._count_pairs("2 | High | x\n3 | Card Format | y",
+                            "4 | 1 | Low | z") == {(4, 2), (4, 3)}
+    assert rdb._count_pairs("4 | 1 | Low\n| 2 | High") == {(4, 1), (4, 2)}
+    assert rdb._count_pairs("Flashes | Interface\n4 | IF3\n5 | MDB") == set()
+
+
+def test_other_module_reads_only_a_flash_code_title():
+    own = {"nv200s", "nv200", "spectral"}
+    q = {"nv200s", "flashing", "red"}
+    sec = "User Manual NV200 Spectral Range \u203a 8.2.3 Ticket Module Flash Codes"
+    assert rdb._other_module(sec, q, own)
+    assert not rdb._other_module(sec, q | {"ticket"}, own)
+    for s in ("Bezel/Status LED Flash Codes", "8.1 Bezel/Status LED Flash Codes",
+              "NV200 Range Service Guide", "",
+              "3 - Monitor bezel led and check flash codes on table below"):
+        assert not rdb._other_module(s, q, own), s
