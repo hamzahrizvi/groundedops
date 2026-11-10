@@ -502,7 +502,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
                 and os.path.getmtime(p) > _mtime(os.path.join(ops, "decisions", "*.md"))]
     lab = cap_status(ops)
     capped = lab["stopped"] and (f"lab stopped at the cap (${lab['spent']:.2f} of ${lab['usd']:.2f} this {lab['per']})"
-                                 "; raise it on the Costs tab")
+                                 "; raise it with the DeepSeek slider at the top right")
     if capped and check:   # a gate check spends lab money: it waits with the lab
         out.append(("product-owner", f"check {', '.join(check)} waits: {capped}", None))
         check = []

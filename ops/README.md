@@ -50,9 +50,12 @@ build or check does not hold everything else up, and most of their wake-ups used
 branch, so no commits collide; merges and every other department run one at a
 time; work running in other lanes counts against the budget. Test runs take
 turns (`blind_eval.py` locks the lab for its "system" phase) so timings stay
-honest. The CEO's lab spending cap (`OPS/lab_cap.json`, set on the Costs
-tab) stops every paid lab call once the day's, week's or month's spend reaches
-it (`blind_eval.py` exits 3); no file means no cap. A branch that conflicts with a fix merged first is sent back to Dev for
+honest. The CEO's lab spending cap (`OPS/lab_cap.json`, set with the
+DeepSeek slider at the top right of the office page, $0-3 per day) stops every
+paid lab call once the day's spend reaches it (`blind_eval.py` exits 3); no
+file means no cap. It counts test runs, gate checks and R&D's lab trials (their
+`%TEMP%/groundedops-lab/<id>/` folders and `OPS/inbox/rnd/<id>/usage.jsonl`;
+the CEO, 2026-11-10). A branch that conflicts with a fix merged first is sent back to Dev for
 a rebase by `office_merge.py`, and so is one that adds a Python line where a lost
 backslash-newline joined two lines; the gate and Security run again on it.
 New lanes start with manual permissions: set them to Auto in the app before

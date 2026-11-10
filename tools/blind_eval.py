@@ -98,12 +98,7 @@ MODELS = {"openai": {"bot": "gpt-5-mini", "baseline": "gpt-5-mini", "grader": "g
           "deepseek": {"bot": "deepseek-v4-flash", "baseline": "deepseek-v4-flash", "grader": "deepseek-v4-flash"}}[PROV]
 REMARK = None   # the backup file while a "remark" phase re-grades this run
 URL = {"openai": "https://api.openai.com/v1/chat/completions", "deepseek": "https://api.deepseek.com/v1/chat/completions"}[PROV]
-# $ per 1M tokens: input, cached input, output. ponytail: DeepSeek at its peak rate; off-peak (most hours) is half
-PRICE = {"gpt-5-mini": (0.25, 0.025, 2.00), "gpt-5": (1.25, 0.125, 10.00), "deepseek-v4-flash": (0.30, 0.006, 1.20)}
-def cached(u): return (u.get("prompt_tokens_details") or {}).get("cached_tokens") or u.get("prompt_cache_hit_tokens", 0)
-def usd(u, model):
-    i, c_, o = PRICE[model]; p, c = u.get("prompt_tokens", 0), cached(u)
-    return ((p - c) * i + c * c_ + u.get("completion_tokens", 0) * o) / 1e6
+from ops_costs import LAB_PRICE as PRICE, lab_cached as cached, lab_usd as usd  # noqa: E402  one price table for the lab
 
 def load_env(path):
     """GO_DATA's .env, same rules as main._load_env_file. main.py reads the .env

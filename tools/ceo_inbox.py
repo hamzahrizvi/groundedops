@@ -169,7 +169,7 @@ def apply(ops, folder, now=None):
                 open(path, "w", encoding="utf-8").write(note + "\n")
             out.append(f"APPLIED {doc_id} {choice} {note}")
             continue
-        if choice == "cap":   # the CEO's lab spending cap, from the Costs tab
+        if choice == "cap":   # the CEO's lab spending cap, from the top-right DeepSeek slider (per day, 2026-11-10)
             m = CAP_NOTE.match(str(d.get("note") or ""))
             if not m or float(m[1]) > 1000:
                 out.append(f"SKIPPED {doc_id} cap: not a number of dollars from 0 to 1000")

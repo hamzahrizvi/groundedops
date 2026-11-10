@@ -68,6 +68,24 @@ def claude_rows(root):
 
 
 GATE_ID = re.compile(r"D-\d{8}-\d+")
+# $ per 1M tokens: input, cached input, output (tools/blind_eval.py prices every lab call with these).
+# ponytail: DeepSeek at its peak rate; off-peak (most hours) is half
+LAB_PRICE = {"gpt-5-mini": (0.25, 0.025, 2.00), "gpt-5": (1.25, 0.125, 10.00), "deepseek-v4-flash": (0.30, 0.006, 1.20)}
+# The cap covers R&D's lab trials too (the CEO, 2026-11-10): their blind_eval folders under TEMP/groundedops-lab/<id>/,
+# and the calls R&D's own scripts make, one line each in OPS/inbox/rnd/<id>/usage.jsonl:
+# {"at": "YYYY-MM-DD", "model": "deepseek-v4-flash", "usage": <the provider's usage object>}
+# A TEMP folder counts only for the office holding OPS/inbox/rnd/<id>/, so a test's stand-in office never sees this machine's.
+LAB_TEMP = os.path.join(tempfile.gettempdir(), "groundedops-lab")
+
+
+def lab_cached(u):
+    return (u.get("prompt_tokens_details") or {}).get("cached_tokens") or u.get("prompt_cache_hit_tokens", 0)
+
+
+def lab_usd(u, model):
+    i, c_, o = LAB_PRICE.get(model, LAB_PRICE["deepseek-v4-flash"])
+    p, c = u.get("prompt_tokens", 0), lab_cached(u)
+    return ((p - c) * i + c * c_ + u.get("completion_tokens", 0) * o) / 1e6
 NOT_MODEL = {None, "none", "structured", "faq-curated", "stub"}   # answers the bot gave without a model call
 # Where blind_eval.py leaves its answers: (kind, glob under OPS). A gate's after/ and before/ and
 # gate_rerun.py's copies carry the run's baseline answers along, and siblings ask no baseline, so a
@@ -138,13 +156,16 @@ def lab_rows(ops):
     folder, else by the file's time: a gate re-marks its run and re-saves that file, which would move
     the whole run's spend to the day of the gate."""
     agg = defaultdict(float)
-    for kind, parts in LAB_FILES:
-        for p in glob.glob(os.path.join(ops, *parts)):
+    found = [(kind, p) for kind, parts in LAB_FILES for p in glob.glob(os.path.join(ops, *parts))]
+    found += [("trial", p) for p in glob.glob(os.path.join(LAB_TEMP, "D-*", "**", "cases_state*.json"), recursive=True)
+              if GATE_STATE.fullmatch(os.path.basename(p))
+              and os.path.isdir(os.path.join(ops, "inbox", "rnd", os.path.relpath(p, LAB_TEMP).split(os.sep)[0]))]
+    for kind, p in found:
             try:
                 s = json.load(open(p, encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            rel = os.path.relpath(p, ops).replace(os.sep, "/")
+            rel = p.replace(os.sep, "/") if kind == "trial" else os.path.relpath(p, ops).replace(os.sep, "/")
             if kind == "run":
                 name = rel.split("/")[-2]
                 m = re.match(r"(\d{4})(\d{2})(\d{2})", name)
@@ -155,6 +176,15 @@ def lab_rows(ops):
             day = day or datetime.date.fromtimestamp(os.path.getmtime(p)).isoformat()
             for d, model, what, usd in state_rows(s, kind, day):
                 agg[(d, model, what, name, kind)] += usd
+    for p in glob.glob(os.path.join(ops, "inbox", "rnd", "D-*", "usage.jsonl")):
+        name, day = os.path.basename(os.path.dirname(p)), datetime.date.fromtimestamp(os.path.getmtime(p)).isoformat()
+        for line in open(p, encoding="utf-8"):
+            try:
+                c = json.loads(line)
+            except ValueError:
+                continue
+            m = c.get("model") or "deepseek-v4-flash"
+            agg[(c.get("at") or day, m, "bot", name, "trial")] += lab_usd(c.get("usage") or {}, m)
     return [(d, m, w, usd, n, k) for (d, m, w, n, k), usd in agg.items()]
 
 
@@ -224,6 +254,8 @@ def build(ops, claude_root, today=None):
 
 
 def selftest():
+    global LAB_TEMP
+    real, LAB_TEMP = LAB_TEMP, os.path.join(tempfile.mkdtemp(), "groundedops-lab")   # never this machine's trials
     with tempfile.TemporaryDirectory() as t:
         ops, cl = os.path.join(t, "ops"), os.path.join(t, "claude", "C--groundedops", "s1", "subagents")
         os.makedirs(os.path.join(ops, "runs", "r1"))
@@ -261,6 +293,7 @@ def selftest():
         json.dump({"verdict": "PASS"}, open(gp, "w"))
         add_gate_cost(gp, "12", os.path.join(t, "out"))
         assert json.load(open(gp)) == {"verdict": "PASS", "cost_usd": 0.4375, "wall_s": 12}, json.load(open(gp))
+    LAB_TEMP = real
     print("selftest ok")
 
 
@@ -314,6 +347,17 @@ def lab_selftest():
         json.dump({"usd": 1.6, "per": "day"}, open(cap, "w"))
         assert cap_status(ops, today)["stopped"], "cap reached"
         assert cap_status(ops, datetime.date(2026, 10, 13))["spent"] == 0, "a new day starts at 0"
+        # R&D trials (the CEO, 2026-11-10): their blind_eval folders in TEMP and their own calls' usage.jsonl
+        tp = os.path.join(LAB_TEMP, "D-20261012-09", "runB", "cases_state.r2.json")
+        os.makedirs(os.path.dirname(tp))
+        json.dump({"sys_normal": {"c1": {"usd": 0.25, "at": "2026-10-12"}}}, open(tp, "w"))
+        os.makedirs(os.path.join(ops, "inbox", "rnd", "D-20261012-09"))
+        with open(os.path.join(ops, "inbox", "rnd", "D-20261012-09", "usage.jsonl"), "w") as f:
+            f.write(json.dumps({"at": "2026-10-12", "model": "deepseek-v4-flash",
+                                "usage": {"prompt_tokens": 1_000_000, "prompt_cache_hit_tokens": 0, "completion_tokens": 0}}) + chr(10) + "not json" + chr(10))
+        assert [r for r in lab_table(lab_rows(ops)) if r["name"] == "D-20261012-09"] == [
+            {"date": "2026-10-12", "name": "D-20261012-09", "kind": "trial", "bot": 0.55, "baseline": 0.0, "grader": 0.0, "total": 0.55}]
+        assert cap_status(ops, today)["spent"] == 2.175, "a trial counts against the cap"
         open(cap, "w").write("{not json")
         c = cap_status(ops, today)
         assert c["stopped"] and c["usd"] == 0 and "error" in c, "an unreadable cap stops the lab"

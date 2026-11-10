@@ -164,7 +164,7 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
     if lab["stopped"]:
         out.append({"id": f"cap-{lab.get('since')}", "title": "The test lab stopped at its spending cap",
                     "why": "Test runs and fix checks wait until the cap is raised.",
-                    "suggest": "Raise the cap on the Costs tab if the spend is expected.",
+                    "suggest": "Raise the DeepSeek cap slider at the top right if the spend is expected.",
                     "actions": [{"label": "Open the Costs tab", "tab": "costs"}]})
     runs = sorted(d for d in glob.glob(os.path.join(ops, "runs", "*")) if TEST_RUN.match(os.path.basename(d)))
     if runs and os.path.exists(os.path.join(runs[-1], "FAILED")):
