@@ -694,7 +694,12 @@ def test_name_flag_rules():
         "Z internals.pdf": None, "International sites": None,
         "Drafting guide": None, "Obsolete Product Notification": None,
         "MNF Test Procedure (External)": None, "BV50 User Manual": None,
-        "Connecting my devices to an Internal Database": None,   # a feature, not the audience
+        "Connecting my devices to an Internal Database": "internal",   # one click to approve
+        "Internal Network Configuration": "internal",
+        "Internal Server Access": "internal",
+        "Internal Database Admin Guide": "internal",
+        "Internal memory card slot": None,               # product hardware
+        "Internal battery replacement": None,
     }
     got = {t: (cs.name_flag(t) or {}).get("suggest") for t in want}
     assert got == want, got

@@ -92,9 +92,10 @@ _NAME_FLAGS = [(d, re.compile(_B + p + _E, re.I)) for d, p in (
     ("excluded", r"(?:do\s*n[o']?t\s*(?:use|publish)|due\s+release|"
                  r"work[\s_-]*in[\s_-]*progress|wip|draft|"
                  r"copy\s+of|template|superseded|deprecated|to\s+be\s+deleted)"),
-    # "Internal Database", "internal memory": a feature of the product, not the audience.
-    ("internal", r"(?:internal(?![\s_-]+(?:database|db|memory|storage|clock|battery|"
-                 r"fuse|sensor|power|temperature|network|server|cable|connector))|"
+    # "internal memory", "internal battery": product hardware, not the audience.
+    # Not network/server/database: staff IT pages are titled that way (D-20261109-12).
+    ("internal", r"(?:internal(?![\s_-]+(?:memory|storage|clock|battery|"
+                 r"fuse|sensor|power|temperature|cable|connector))|"
                  r"confidential|staff[\s_-]*only|"
                  r"not\s+for\s+(?:customers?|distribution|release|external|public)|"
                  r"sales[\s_-]*(?:guide|training|playbook))"),
