@@ -159,13 +159,19 @@ def _note_credit_failure(provider: str, res) -> None:
     """Tell credit_watch when a provider refuses for lack of credit, so a
     root admin hears about it now rather than at the next periodic check.
     DeepSeek says 402 Insufficient Balance; LiteLLM says budget exceeded,
-    on a 400 or 429 depending on version. Never raises into the answer."""
+    on a 400 or 429 depending on version; OpenAI says 429 insufficient_quota;
+    Anthropic says "credit balance is too low". Also starts the provider's
+    outage cooldown so the chain uses the backup straight away.
+    Never raises into the answer."""
     try:
         exhausted = res.status_code == 402
         if not exhausted and res.status_code in (400, 429):
             text = (res.text or "")[:2000].lower()
-            exhausted = "budget" in text and "exceed" in text
+            exhausted = (("budget" in text and "exceed" in text)
+                         or "insufficient_quota" in text
+                         or "credit balance is too low" in text)
         if exhausted:
+            _note_unreachable(provider)
             import credit_watch
             credit_watch.report_exhausted(provider)
     except Exception as e:
