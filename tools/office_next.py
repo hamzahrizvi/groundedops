@@ -91,7 +91,14 @@ STALE = 14 * 3600     # a claim older than this belongs to a lane that stopped r
 # security 9, merge 2, diary 3, marketing 2, audit 5, rnd 20, customer 39, product-owner 160, dev 313. Shown and told
 # once, never dropped: other lanes take other work meanwhile, and dropping a live claim caused double work (D-20261020-05).
 STUCK = {"security": 45, "merge": 30, "diary": 30, "marketing": 30, "audit": 30, "rnd": 60, "customer": 120,
-         "product-owner": 240, "dev": 420}
+         "product-owner": 240, "dev": 420, "rnd-trial": 480}
+# an R&D work order (claim rnd-D-...) is a lab trial, not desk research: D-20261109-03 ran 373 minutes with every
+# arm writing as it went, and the 60-minute R&D limit called it stuck twice (the CEO, 2026-11-10)
+
+
+def limit(key):
+    """Minutes the claim `key` may be held before its lane counts as stuck."""
+    return STUCK["rnd-trial"] if key.startswith("rnd-D-") else STUCK.get(key.split("-D-")[0], 120)
 TOLD = ("state", "stuck_told")   # the stuck claims already told to the CEO, {key: its "at"}
 
 
@@ -166,7 +173,7 @@ def stuck(held, now):
             at = datetime.datetime.fromisoformat(c["at"])
         except (KeyError, TypeError, ValueError):
             continue
-        if c.get("lane") != "hand" and now - at > datetime.timedelta(minutes=STUCK.get(k.split("-D-")[0], 120)):
+        if c.get("lane") != "hand" and now - at > datetime.timedelta(minutes=limit(k)):
             out[k] = at
     return out
 
@@ -964,6 +971,7 @@ def selftest():
         ago = lambda m: (now - datetime.timedelta(minutes=m)).isoformat()   # 2026-10-23: a Security run waited on a prompt for 2 hours
         w("state/claims/security.json", json.dumps({"lane": 1, "at": ago(118), "line": "RUN  groundedops-office-security  review D-1"}))
         w("state/claims/dev-D-3.json", json.dumps({"lane": 2, "at": ago(118), "line": "RUN  groundedops-office-dev  build D-3"}))
+        assert limit("rnd-D-4") == 480 and limit("rnd") == 60, "an R&D lab trial is not desk research"
         assert (tell_stuck(ops, now)[0].startswith("STUCK lane 1 on security review D-1: stuck since") and len(tell_stuck(ops, now) + tell_stuck(ops, now)) == 0
                 and set(claims(ops)) == {"security", "dev-D-3"}), "a claim past its limit is told once and never dropped; a long build is not stuck"
         release(ops, 1); release(ops, 2)

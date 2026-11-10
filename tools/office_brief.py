@@ -22,7 +22,7 @@ from ops_ledger import PAST, answered, decisions, git_sets, stage_of  # noqa: E4
 from ops_costs import cap_status  # noqa: E402
 from change_list import open_items  # noqa: E402
 from ops_pivot import TEST_RUN, agg, run_facts, test_runs  # noqa: E402
-from office_next import (STUCK, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
+from office_next import (limit, blocking, claims, every, holds, is_off, lane_cron, latest_usage, next_reset, plan,  # noqa: E402
                          MO_HOME, revisit, stuck, stuck_why, sweep, work_mode)
 
 DEPT = {"product-owner": "Product owner", "dev": "Dev", "customer": "Customer", "security": "Security",
@@ -136,7 +136,7 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
     for k, since in stuck(held, now or datetime.datetime.now(datetime.timezone.utc)).items():
         dept = DEPT.get(k.split("-D-")[0], k)
         out.append({"id": f"stuck-{k}-{since:%Y%m%d%H%M}", "title": f"Lane {held[k].get('lane')} looks stuck on {dept}",
-                    "why": f"It has held {dept}'s work for more than {STUCK.get(k.split('-D-')[0], 120)} minutes, far longer than"
+                    "why": f"It has held {dept}'s work for more than {limit(k)} minutes, far longer than"
                            f" its runs take ({stuck_why(since)}). A scheduled run that hits a permission prompt waits for a"
                            " person who is not there.",
                     "suggest": "Open that lane's latest run in the Claude app and answer the prompt or stop the run. The other"
