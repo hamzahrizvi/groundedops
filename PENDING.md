@@ -365,7 +365,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | waiting for CEO | your yes |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
-| D-20261108-01 | Security item D-20261108-01, details in the office | approved, queued | Dev builds it |
+| D-20261108-01 | Security item D-20261108-01, details in the office | ready to merge | merges once Security clears it |
 | D-20261109-05 | While the bot works, show the pages it found, not only a clock | approved, queued | Dev builds it |
 | D-20261109-11 | Security item D-20261109-11, details in the office | approved, queued | Dev builds it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
