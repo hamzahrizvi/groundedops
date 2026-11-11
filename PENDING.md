@@ -367,7 +367,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261107-02 | The "which model do you have?" cards appear when the customer already named or picked the model, so a simple question gets no answer | approved, queued | Dev builds it |
 | D-20261109-05 | While the bot works, show the pages it found, not only a clock | approved, queued | Dev builds it |
-| D-20261109-11 | Security item D-20261109-11, details in the office | approved, queued | Dev builds it |
+| D-20261109-11 | Security item D-20261109-11, details in the office | ready to merge | merges once Security clears it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -378,6 +378,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | customer/20261102-comparison-declines-though-documented | Comparisons between two products: the bot declines or asks "which section?" although both manuals hold the facts | proposed | the product owner triages it |
 | customer/20261102-multi-document-asks-or-drops-part | Questions that need two documents: the bot asks "which section?" or leaves out part of the answer | proposed | the product owner triages it |
 | customer/20261102-vague-declines-instead-of-clarifying | Vague questions: the bot declines or guesses instead of asking what the customer means | proposed | the product owner triages it |
+| customer/20261111b-asks-which-product-instead-of-answering | The bot asks "which product?" when the question already names it, or when it should just say "not documented" | proposed | the product owner triages it |
+| customer/20261111b-declines-when-manual-has-answer | The bot says "I don't have that" for facts the manual holds (comparisons, API procedures, follow-ups, multi-document) | proposed | the product owner triages it |
 | customer/D-20261023-02-reask-diagnosis | D-20261023-02: why the same 40 questions scored 18 points lower today | proposed | the product owner triages it |
 | customer/images-20261030f | Picture test 20261030f | proposed | the product owner triages it |
 | customer/images-20261107b | Picture test 20261107b | proposed | the product owner triages it |
