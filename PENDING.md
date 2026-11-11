@@ -366,7 +366,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | waiting for CEO | your yes |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261106-09 | Security item D-20261106-09, details in the office | approved, queued | Dev builds it |
-| D-20261109-05 | While the bot works, show the pages it found, not only a clock | built, waiting for the check | the pre-ship check |
+| D-20261107-08 | Security item D-20261107-08, details in the office | approved, queued | Dev builds it |
+| D-20261109-05 | While the bot works, show the pages it found, not only a clock | ready to merge | merges once Security clears it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
@@ -416,7 +417,6 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261107-01 | A made-up variant of a real product (e.g. "MyCheckr Max") is answered as if it existed | deferred | parked |
 | D-20261107-03 | A comparison of two products answers for one side only, or declines, although both manuals hold the facts | deferred | parked |
 | D-20261107-05 | A label or drawing in a bulletin or change notice cannot be found: new uploads index their described pictures only when a switch is on | deferred | parked |
-| D-20261107-08 | Security item D-20261107-08, details in the office | deferred | parked |
 | D-20261108-02 | The admin report's speed figures for clarifying questions and refusals are nonsense | deferred | parked |
 | D-20261109-01 | The weekly table cannot say whether a failed answer's page was never found, found and cut, or found and misread | deferred | parked |
 | D-20261109-06 | After "Email support", tell the visitor what was sent and what happens next | deferred | parked |
