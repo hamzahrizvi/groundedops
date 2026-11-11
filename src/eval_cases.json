@@ -1,553 +1,380 @@
 {
-  "_README": "Eval suite for the ITL corpus. Schema per case: q (the question); outcome: answered | clarify | rejected; keywords_all (case-insensitive substrings that MUST appear); keywords_absent (substrings that must NOT appear); reference (ground truth for the LLM grader); grade: true enables LLM grading; new_session: true starts a fresh conversation (omit to test a follow-up against the previous case); product scopes retrieval; requires_deepseek: true skips the case when no key is configured. Every fact below is copied from a REVIEWED FAQ answer in faq_store.json, so the ground truth is human-approved rather than invented. Workflow: python eval.py --update-baseline to lock, then python eval.py after every change. The previous contents of this file were the unedited template placeholders ('<YOUR PRODUCT>'), which is why eval_baseline.json was meaningless and those literal strings appear as real queries in logs.jsonl.",
+  "_README": "Sample eval suite for the general product, written for the general test of 2026-11-11 (docs/general-test-20261111.md). It runs against a test install holding nine public manuals filed under three ranges: tesla (Model 3, Model Y, Wall Connector), microsoft (Surface Pro and Surface Pro 2, Surface Pro 3, Surface 3) and huawei (WATCH GT 4, WATCH GT 5 and GT 5 Pro, WiFi AX3); the report lists the files and where they come from. The documents are not in this repository. A customer's own suite replaces this file. Schema per case: q; outcome: answered | clarify | rejected; keywords_all (case-insensitive substrings that MUST appear); reference (ground truth for the LLM grader, with its page); grade: true enables LLM grading; new_session: true starts a fresh conversation (omit to test a follow-up against the previous case); product scopes retrieval (here a range key); layer as in eval.py; requires_deepseek skips the case without a key.",
   "cases": [
     {
-      "q": "What is MyCheckr?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "Which has the bigger front trunk, the Model 3 or the Model Y Performance, and by how much?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "comparison",
+      "requires_deepseek": true,
+      "reference": "Model 3 front trunk: 3.1 cu ft (88 L) (Model 3 Owner's Manual, Dimensions, p.228). Model Y Premium/Performance front trunk: 4.1 cu ft (116 L) (Model Y Owner's Manual, Dimensions, p.243). The Model Y Performance's is bigger by 1.0 cu ft (28 L). Source: Model 3 manual PDF p.230; Model Y manual PDF p.245.",
+      "new_session": true,
       "keywords_all": [
-        "age"
+        "3.1",
+        "4.1"
       ],
-      "reference": "MyCheckr is an all-in-one device solution that performs anonymous age estimation, to assist with the sale of age-restricted goods.",
       "grade": true
     },
     {
-      "q": "Does MyCheckr need an internet connection?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "What is the ground clearance of the Model 3 Performance?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Model 3 Performance ground clearance: 5.0 in (128 mm). The rear-wheel drive/Long Range figure is 5.4 in (138 mm), from a separate table. Source: Model 3 manual PDF p.229.",
+      "new_session": true,
       "keywords_all": [
-        "no"
+        "5.0"
       ],
-      "keywords_absent": [
-        "cloud-based processing is required"
-      ],
-      "reference": "No. MyCheckr provides instant results with no requirement for internet, and features local processing requiring no cloud base access.",
       "grade": true
     },
     {
-      "q": "Does MyCheckr store personal data?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "And the rear-wheel drive one?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Model 3 Rear-Wheel Drive/Long Range ground clearance: 5.4 in (138 mm). Source: Model 3 manual PDF p.229.",
       "keywords_all": [
-        "no data",
-        "stored"
+        "5.4"
       ],
-      "reference": "No data is stored. MyCheckr is GDPR certified by the Age Check Certification Scheme (ACCS).",
       "grade": true
     },
     {
-      "q": "Who certified MyCheckr for GDPR?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "What is the maximum towing capacity of a Model Y 7-seater on 19-inch wheels with 7 people on board?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Model Y 7-seater on 19-inch wheels with 7 passengers: maximum towing capacity 2,000 lbs (907 kg), maximum tongue weight 200 lbs (91 kg). Source: Model Y manual PDF p.112.",
+      "new_session": true,
       "keywords_all": [
-        "Age Check Certification Scheme"
+        "2,000"
       ],
-      "reference": "MyCheckr is GDPR certified by the Age Check Certification Scheme (ACCS).",
       "grade": true
     },
     {
-      "q": "Are there recurring fees for MyCheckr?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "The charge cable is stuck in my Model 3's charge port and the handle button and the app won't release it. How do I get it out?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "1) Make sure Model 3 is not charging (Stop Charging on the charging screen). 2) Open the rear trunk. 3) Pull the charge port release cable downwards to unlatch the cable. 4) Pull the charge cable out. Never pull the release cable while pulling the charge cable; pull the release first. Use it only when the usual methods fail. Source: Model 3 manual PDF p.190-191.",
+      "new_session": true,
       "keywords_all": [
-        "one-off"
+        "release cable"
       ],
-      "keywords_absent": [
-        "monthly subscription"
-      ],
-      "reference": "No. It is a one-off payment for the device with no recurring fees.",
       "grade": true
     },
     {
-      "q": "Which retailing strategy does MyCheckr automate?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "My Wall Connector's light keeps blinking red three times, then pauses. What's wrong and what should I check?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Three red blinks: high temperature detected; charging limited or disabled. Make sure the Wall Connector is on Wi-Fi with the latest firmware; check the faceplate and handle for excess warmth; have an electrician check the conductor size and terminal block torque; update firmware through commissioning if needed; then contact support. Source: Wall Connector manual PDF p.59.",
+      "new_session": true,
       "keywords_all": [
-        "Challenge 25"
+        "temperature"
       ],
-      "reference": "The checking process automates the Challenge 25 retailing strategy, to restrict illegal sales of age-restricted items to underage customers.",
       "grade": true
     },
     {
-      "q": "How can MyCheckr be mounted?",
-      "new_session": true,
-      "product": "mycheckr_mini",
+      "q": "What range of maximum current can the installer set on the Wall Connector, and what's the smallest stranded cable allowed between it and the breaker?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Any maximum current from 6 A to 32 A can be set during commissioning. Stranded cable smaller than 4 mm2 must not be used between the Wall Connector and the breaker. Source: Wall Connector manual PDF p.12.",
+      "new_session": true,
       "keywords_all": [
-        "VESA"
+        "6",
+        "32",
+        "4 mm"
       ],
-      "reference": "MyCheckr can be mounted using a VESA Mount and 1/4 inch screws, on a pole or a wall.",
       "grade": true
     },
     {
-      "q": "Does MyCheckr require integration with other systems?",
-      "new_session": true,
-      "product": "mycheckr_mini",
-      "outcome": "answered",
-      "keywords_all": [
-        "no"
-      ],
-      "reference": "No. It is an all-in-one device; integration is optional but not required. It is however compatible with host machines for integration via API.",
-      "grade": true
-    },
-    {
-      "q": "What hardware does MyCheckr include?",
-      "new_session": true,
-      "product": "mycheckr_mini",
-      "outcome": "answered",
-      "keywords_all": [
-        "camera"
-      ],
-      "reference": "It comes equipped with an inbuilt camera and a display screen.",
-      "grade": true
-    },
-    {
-      "q": "What voltage is supported on the NV9ST?",
-      "new_session": true,
-      "product": "nv9usb",
+      "q": "What is the 0 to 60 mph acceleration time of the Model Y Performance?",
+      "product": "tesla",
       "outcome": "rejected",
-      "keywords_absent": [
-        "12"
-      ],
-      "note": "S26 (2026-10-07): 'NV9ST' appears in no document (see PENDING, 'One eval case asks about a product name that is in no document'). The honest reply is a refusal; gpt-5-mini used to answer it from the NV9USB+ manual ('No. The NV9USB+ ... 12V DC')."
+      "layer": "refusal",
+      "requires_deepseek": true,
+      "reference": "Not in the documents: the owner's manuals give no 0-60 mph time. The bot must say so, not give a figure. Source: absent from both manuals.",
+      "new_session": true
     },
     {
-      "q": "How does the NV9USB+ communicate with a host?",
-      "new_session": true,
-      "product": "nv9usb",
+      "q": "It won't charge. What should I do?",
+      "product": "tesla",
+      "outcome": "clarify",
+      "layer": "refusal",
+      "requires_deepseek": true,
+      "reference": "Vague: the chat covers two cars and a Wall Connector. The bot should ask which product (or what happens) before answering. Source: -.",
+      "new_session": true
+    },
+    {
+      "q": "My Model Y's liftgate hits my garage ceiling. How do I make it open lower, and how can I undo that later?",
+      "product": "tesla",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Pause the liftgate at the wanted height using the touchscreen (or move it there by hand), then save it by following the touchscreen prompts or holding the button on the underside of the liftgate until a chime. To undo: Controls > Service > Remove Saved Locations. Source: Model Y manual PDF p.33-34.",
+      "new_session": true,
       "keywords_all": [
-        "USB"
+        "chime"
       ],
-      "reference": "Host communication is via USB or TTL.",
       "grade": true
     },
     {
-      "q": "Can the NV9 USB+ be mounted vertically?",
-      "new_session": true,
-      "product": "nv9usb",
+      "q": "How is the kickstand on the Surface Pro 3 different from the one on the Surface Pro 2?",
+      "product": "microsoft",
       "outcome": "answered",
-      "keywords_all": [
-        "vertical"
-      ],
-      "reference": "The NV9 USB+ can be mounted horizontally or vertically.",
-      "grade": true
-    },
-    {
-      "q": "What is the note capacity of the NV11+ Note Float recycler?",
+      "layer": "comparison",
+      "requires_deepseek": true,
+      "reference": "Surface Pro 2: two kickstand positions (desk and lap); the original Surface Pro has one. Surface Pro 3: any position down to 30 degrees (multi-position). Source: Surface Pro/Pro 2 guide p.7; Surface Pro 3 guide 'The Kickstand'.",
       "new_session": true,
-      "product": "nv9usb",
-      "outcome": "answered",
       "keywords_all": [
         "30"
       ],
-      "reference": "The add-on Note Float recycler for the NV11+ has a capacity of 30 notes.",
       "grade": true
     },
     {
-      "q": "Can national currency differences affect cashbox capacity on the NV9USB+?",
-      "new_session": true,
-      "product": "nv9usb",
+      "q": "What screen size, resolution and aspect ratio does the Surface Pro 3 have?",
+      "product": "microsoft",
       "outcome": "answered",
-      "keywords_all": [
-        "15%"
-      ],
-      "reference": "Some national currencies differ in thickness and circulation practices; depending on usage this can impact cashbox capacities by 10-15%. Consult an ITL representative for details.",
-      "grade": true
-    },
-    {
-      "q": "What are typical applications for the NV9USB+ range?",
-      "new_session": true,
-      "product": "nv9usb",
-      "outcome": "answered",
-      "keywords_all": [
-        "vending"
-      ],
-      "reference": "Typical applications include amusement, vending, gaming, and low-volume retail.",
-      "grade": true
-    },
-    {
-      "q": "Can the NV9USB+ recycle notes?",
-      "new_session": true,
-      "product": "nv9usb",
-      "outcome": "answered",
-      "keywords_all": [
-        "note float"
-      ],
-      "reference": "A Note Float module can be added to provide note recycling capability. The add-on recycler for the NV11+ holds 30 notes.",
-      "grade": true
-    },
-    {
-      "q": "What is the SMART Coin System?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "coin"
-      ],
-      "reference": "The SMART Coin System is a bulk coin validator, mixed coin hopper and recycler in one. It validates, discriminates and stores mixed coins, eliminating coin starvation and the need for multiple hoppers.",
-      "grade": true
-    },
-    {
-      "q": "How many coins per second does the SMART Coin System handle?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "12"
-      ],
-      "reference": "The SMART Coin System operates at a market leading 12 coins per second.",
-      "grade": true
-    },
-    {
-      "q": "how fast is it?",
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "12"
-      ],
-      "reference": "Follow-up test, no new_session: 'it' must resolve to the SMART Coin System from the previous case, giving 12 coins per second.",
-      "grade": true,
-      "note": "2026-09-25: moved to sit directly after its predecessor; two MyConnect cases had been inserted between them, so 'it' resolved to the MyConnect Hub"
-    },
-    {
-      "q": "What problem does the SMART Coin System eliminate?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "starvation"
-      ],
-      "reference": "It eliminates coin starvation and the need for multiple hoppers.",
-      "grade": true
-    },
-    {
-      "q": "What is the standard lid assembly for the SMART Hopper?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "PA02051"
-      ],
-      "keywords_absent": [
-        "PA02698"
-      ],
-      "reference": "The standard lid assembly for the SMART Hopper is PA02051 - Lid Assembly. PA02698 is a DIFFERENT part: the Twin SMART Coin System Secondary Hopper Lid Assembly. The two must not be confused.",
-      "grade": true
-    },
-    {
-      "q": "What is the standard lid assembly for the Twin SMART Coin System?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "PA02698"
-      ],
-      "keywords_absent": [
-        "PA02051"
-      ],
-      "reference": "The standard lid assembly for the Twin SMART Coin System is PA02698 - Twin SMART Coin System Secondary Hopper Lid Assembly. PA02051 is the plain SMART Hopper lid and is a different part.",
-      "grade": true
-    },
-    {
-      "q": "What is the standard nozzle option for the SMART Hopper?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "PM00488"
-      ],
-      "keywords_absent": [
-        "PM01106"
-      ],
-      "reference": "The standard nozzle option for the SMART Hopper is PM00488 - Top Pay Nozzle. PM01106 is the pay-in chute Funnel, a different part.",
-      "grade": true
-    },
-    {
-      "q": "What is the standard pay in chute option for the SMART Coin System Range?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "PM01106"
-      ],
-      "keywords_absent": [
-        "PM00488"
-      ],
-      "reference": "The standard pay in chute option is PM01106 - Funnel. PM00488 is the Top Pay Nozzle, a different part.",
-      "grade": true
-    },
-    {
-      "q": "Which chute option collects debris?",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "answered",
-      "keywords_all": [
-        "PA04138"
-      ],
-      "reference": "The chute option for debris collection is PA04138 - Chute with Debris Collection.",
-      "grade": true
-    },
-    {
-      "q": "What are the three key components of the MyConnect Environment?",
-      "new_session": true,
-      "outcome": "answered",
-      "keywords_all": [
-        "Hub"
-      ],
-      "reference": "The three key components are the MyConnect Hub, the MyConnect App (Android), and MyCheckr Devices.",
-      "grade": true
-    },
-    {
-      "q": "How does the MyConnect App talk to the MyConnect Hub?",
-      "new_session": true,
-      "outcome": "answered",
-      "keywords_all": [
-        "REST"
-      ],
-      "reference": "The MyConnect App communicates with the MyConnect Hub using REST API and multicast discovery.",
-      "grade": true
-    },
-    {
-      "q": "what voltage does it need",
-      "new_session": true,
-      "outcome": "clarify",
-      "reference": "Underspecified and unscoped: voltage is documented for several different products, so the correct behaviour is to ask which one rather than to pick one."
-    },
-    {
-      "q": "how do I mount it",
-      "new_session": true,
-      "outcome": "clarify",
-      "reference": "Unscoped: MyCheckr mounts via VESA, the NV9 USB+ mounts horizontally or vertically. Two different answers, so ask which product."
-    },
-    {
-      "q": "what is the capital of france",
-      "new_session": true,
-      "outcome": "rejected",
-      "reference": "Plainly off-domain. Must refuse rather than answer from general knowledge."
-    },
-    {
-      "q": "how do I reset the password on my Cisco router",
-      "new_session": true,
-      "outcome": "rejected",
-      "reference": "Adversarial guard: shares vocabulary with the corpus (reset, password, network) but is about unrelated hardware. Domain-adjacent wording must not produce a confident answer from unrelated chunks. This is the exact shape that once retrieved a stray password-policy chunk and generated a confident walkthrough at 0.055 grounding."
-    },
-    {
-      "q": "what is the bitcoin price today",
-      "new_session": true,
-      "outcome": "rejected",
-      "reference": "Off-domain and time-sensitive. Nothing in the corpus supports it."
-    },
-    {
-      "q": "does the SMART Coin System support facial recognition",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "rejected",
-      "reference": "Adversarial cross-product guard: facial/age estimation belongs to MyCheckr, not the coin validator. Must not borrow MyCheckr's capabilities to answer about the SMART Coin System. The SCS manual never mentions facial recognition, so the honest reply says so (8.3).",
-      "keywords_all": [
-        "facial recognition"
-      ],
-      "note": "2026-09-25: a grounded 'No, it validates coins by ...' beats a refusal. 2026-09-29 (8.3, owner's decision): a feature the manual never mentions gets 'the documentation doesn't mention facial recognition', which counts as rejected (answerability not_mentioned); it must still never say Yes.",
-      "keywords_absent": [
-        "yes, ",
-        "supports facial recognition"
-      ]
-    },
-    {
-      "q": "what is the maximum coin capacity in litres of the SMART Coin System",
-      "new_session": true,
-      "product": "sku_scs",
-      "outcome": "rejected",
-      "reference": "The reviewed answers claim 'market leading coin capacity' without stating a figure. Inventing a number is the failure being guarded against; refusing is correct unless the manual states it."
-    },
-    {
-      "q": "Could I talk to a real person about my BV30?",
-      "new_session": true,
-      "product": "bv30",
-      "layer": "refusal",
-      "outcome": "handoff",
-      "note": "8.15 (2026-09-29): stress item 1. intents.is_handoff_request fires on it."
-    },
-    {
-      "q": "Please raise a support ticket for my NV200 Spectral",
-      "new_session": true,
-      "product": "nv200s",
-      "layer": "refusal",
-      "outcome": "handoff",
-      "note": "8.15 (2026-09-29): stress item 1, the ticket wording."
-    },
-    {
-      "q": "What would 50 BV30 units cost me?",
-      "new_session": true,
-      "product": "bv30",
-      "layer": "refusal",
-      "outcome": "deflect",
-      "note": "8.15 (2026-09-29): stress item 6. sales.is_commercial_question fires on it."
-    },
-    {
-      "q": "Is there a discount if I order ten BV30s?",
-      "new_session": true,
-      "product": "bv30",
-      "layer": "refusal",
-      "outcome": "deflect",
-      "note": "8.15 (2026-09-29): stress item 6, a volume-discount shape."
-    },
-    {
-      "q": "¿Cuánto cuesta el SMART Coin System?",
-      "language": "es",
-      "new_session": true,
-      "product": "sku_scs",
-      "layer": "refusal",
-      "outcome": "deflect",
-      "note": "8.15 (2026-09-29): stress item 9. Translated at the edge, then the commercial rule."
-    },
-    {
-      "q": "Could you send me the SMART Coin System manual?",
-      "new_session": true,
-      "product": "sku_scs",
-      "layer": "refusal",
-      "outcome": "manual",
-      "note": "8.15 (2026-09-29): stress item 5. doc_request.document_request -> manual."
-    },
-    {
-      "q": "Can I get the NV200 Spectral manual?",
-      "new_session": true,
-      "product": "nv200s",
-      "layer": "refusal",
-      "outcome": "manual",
-      "note": "8.15 (2026-09-29): stress item 5, second product."
-    },
-    {
-      "q": "Good morning!",
-      "new_session": true,
-      "product": "mycheckr",
-      "layer": "refusal",
-      "outcome": "answered",
-      "keywords_absent": [
-        "couldn't find",
-        "could not find",
-        "not something I have"
-      ],
-      "note": "8.15 (2026-09-29): stress item 7. Role greeting, no search."
-    },
-    {
-      "q": "Does the BV30 have a built-in touchscreen?",
-      "new_session": true,
-      "product": "bv30",
-      "layer": "grounding",
-      "outcome": "rejected",
-      "keywords_absent": [
-        "Yes,"
-      ],
-      "note": "8.15 (2026-09-29): stress item 8. Expected: the not-mentioned reply, not an invented Yes."
-    },
-    {
-      "q": "Can the SMART Coin System take card payments?",
-      "new_session": true,
-      "product": "sku_scs",
-      "layer": "grounding",
-      "outcome": "rejected",
-      "keywords_absent": [
-        "Yes,"
-      ],
-      "note": "8.15 (2026-09-29): stress item 8. A coin system; cards are not in its manual."
-    },
-    {
-      "q": "Does the BV30 run on the same supply voltage as the NV200 Spectral?",
-      "new_session": true,
-      "layer": "comparison",
-      "outcome": "answered",
-      "keywords_all": [
-        "12",
-        "24"
-      ],
-      "note": "8.15 (2026-09-29): stress item 3. BV30 12V, NV200S 24V (scenario 11 and the 8.6 note)."
-    },
-    {
-      "q": "What interfaces does the NV200 Spectral support?",
-      "new_session": true,
       "layer": "retrieval",
-      "outcome": "answered",
+      "requires_deepseek": true,
+      "reference": "Surface Pro 3: 12-inch touchscreen, 3:2 aspect ratio, 2160 x 1440. Source: Surface Pro 3 guide p.7.",
+      "new_session": true,
       "keywords_all": [
-        [
-          "SSP",
-          "ccTalk",
-          "MDB"
-        ]
+        "2160",
+        "1440",
+        "3:2"
       ],
-      "sources_any": [
-        "NV200"
-      ],
-      "note": "8.15 (2026-09-29): stress item 4, turn 1 of 2."
+      "grade": true
     },
     {
-      "q": "and the BV30?",
+      "q": "And the Surface 3?",
+      "product": "microsoft",
+      "outcome": "answered",
       "layer": "retrieval",
-      "outcome": "answered",
+      "requires_deepseek": true,
+      "reference": "Surface 3: 10.8-inch ClearType full HD display, 3:2, 1920 x 1280. Source: Surface 3 guide PDF p.8.",
       "keywords_all": [
-        [
-          "SSP",
-          "ccTalk",
-          "pulse",
-          "MDB"
-        ]
+        "1920",
+        "1280"
       ],
-      "sources_any": [
-        "BV30"
-      ],
-      "note": "8.15 (2026-09-29): stress item 4, turn 2: must switch to the BV30, not repeat the NV200."
+      "grade": true
     },
     {
-      "q": "what is the difference between the NV9 Spectral and the NV9USB+",
-      "new_session": true,
+      "q": "Which comes with the more powerful power supply, the Surface Pro 2 or the Surface Pro 3? Give the wattages.",
+      "product": "microsoft",
+      "outcome": "answered",
       "layer": "comparison",
-      "outcome": "answered",
+      "requires_deepseek": true,
+      "reference": "Surface Pro 2 (and Surface Pro): 48-watt power supply. Surface Pro 3: 36-watt power supply (with a USB charging port). The Pro 2's is more powerful. Source: Surface Pro/Pro 2 guide p.7; Surface Pro 3 guide p.7.",
+      "new_session": true,
       "keywords_all": [
-        "NV9 Spectral",
-        "NV9USB+"
+        "48",
+        "36"
       ],
-      "note": "S21 10.4 (2026-10-02): turn 1 of 2, the sales.compare spec table (scenario 18 T1)."
+      "grade": true
     },
     {
-      "q": "do they both use the same SSP interface",
+      "q": "My Surface Pen got unpaired from my Surface Pro 3. How do I pair it again?",
+      "product": "microsoft",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Settings > Change PC settings > PC and devices > Bluetooth, make sure Bluetooth is on; hold the pen's top button until the light in the middle of the pen clip flashes; select the pen in the list and Pair. Source: Surface Pro 3 guide PDF p.102.",
+      "new_session": true,
+      "keywords_all": [
+        "Bluetooth",
+        "top button"
+      ],
+      "grade": true
+    },
+    {
+      "q": "The pen for my Surface Pro 3 no longer writes, erases or right-clicks, and it won't pair either. What's the likely cause?",
+      "product": "microsoft",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "The two size 319 lithium coin cell batteries in the top of the pen need replacing (the AAAA battery is separate). See Troubleshoot Surface Pen on Surface.com for how. Source: Surface Pro 3 guide PDF p.102.",
+      "new_session": true,
+      "keywords_all": [
+        "coin cell"
+      ],
+      "grade": true
+    },
+    {
+      "q": "Can I upgrade my Surface 3 to Windows 11?",
+      "product": "microsoft",
+      "outcome": "rejected",
+      "layer": "refusal",
+      "requires_deepseek": true,
+      "reference": "Not in the documents: the guide covers Windows 8.1 only. The bot must not say yes or no. Source: absent.",
+      "new_session": true
+    },
+    {
+      "q": "It keeps disconnecting. What should I do?",
+      "product": "microsoft",
+      "outcome": "clarify",
+      "layer": "refusal",
+      "requires_deepseek": true,
+      "reference": "Vague: which device and what disconnects (Wi-Fi, Bluetooth, pen, Type Cover)? Should ask back. Source: -.",
+      "new_session": true
+    },
+    {
+      "q": "How do I connect my Surface 3 to a TV that has an HDMI port?",
+      "product": "microsoft",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "You need an HDMI cable plus a Mini DisplayPort to HD AV adapter, or an HDMI to Mini DisplayPort cable. Connect the cable to the TV's HDMI port, the other end to the adapter or the Surface's Mini DisplayPort, the adapter into the Mini DisplayPort; then Devices > Project to choose what shows. Source: Surface 3 guide PDF p.29-30.",
+      "new_session": true,
+      "keywords_all": [
+        "Mini DisplayPort",
+        "HDMI"
+      ],
+      "grade": true
+    },
+    {
+      "q": "What memory and storage options does the Surface 3 come with?",
+      "product": "microsoft",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "2 GB RAM with 64 GB storage, or 4 GB RAM with 128 GB storage. Source: Surface 3 guide PDF p.9.",
+      "new_session": true,
+      "keywords_all": [
+        "64",
+        "128"
+      ],
+      "grade": true
+    },
+    {
+      "q": "Can I take an ECG or use diving mode on the HUAWEI WATCH GT 5, or do I need the GT 5 Pro?",
+      "product": "huawei",
+      "outcome": "answered",
       "layer": "comparison",
-      "outcome": "answered",
+      "requires_deepseek": true,
+      "reference": "Both ECG measurement and diving mode are only on the HUAWEI WATCH GT 5 Pro (ECG also only in certain markets). The GT 5 does not have them. Source: GT 5 guide PDF p.27 (ECG) and diving mode section.",
+      "new_session": true,
       "keywords_all": [
-        "Yes",
-        "SSP"
+        "Pro"
       ],
-      "sources_any": [
-        "NV9USB+"
-      ],
-      "note": "S21 10.4 (2026-10-02): scenario 18 T3. Each named product gets its own share of the context; before, the NV9USB+ SSP passage ranked #10 of 19 and was cut, so the verifier rejected 'yes, both' 3/3."
+      "grade": true
     },
     {
-      "q": "Which SSP command polls the NV200 Spectral for events?",
-      "new_session": true,
-      "product": "nv200s",
-      "layer": "grounding",
+      "q": "My WATCH GT 4 is rated 5 ATM. What does that mean, can I dive 50 metres with it?",
+      "product": "huawei",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "5 ATM (ISO 22810:2010) means it withstands simulated 50 m static water pressure at room temperature for 10 minutes; it does NOT mean water resistance at 50 m depth. Fine for pools, the beach, rain and splashes. So no, not a 50 m dive. Source: GT 4 guide PDF p.48.",
+      "new_session": true,
       "keywords_all": [
-        "0x07"
+        "50"
       ],
-      "note": "8.15 (2026-09-29): SSP poll is command 0x07."
+      "grade": true
     },
     {
-      "q": "What is the command code for SSP sync?",
-      "new_session": true,
-      "product": "nv200s",
-      "layer": "grounding",
+      "q": "What should I do with it after swimming?",
+      "product": "huawei",
       "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Clean and dry it promptly, remove water stains from the surfaces and all holes, and use the device's drainage feature. Source: GT 4 guide PDF p.48.",
       "keywords_all": [
-        "0x11"
+        "dry"
       ],
-      "note": "8.15 (2026-09-29): SSP sync is command 0x11."
+      "grade": true
+    },
+    {
+      "q": "Which HUAWEI WiFi AX3 model has NFC, the WS7100 or the WS7200?",
+      "product": "huawei",
+      "outcome": "answered",
+      "layer": "comparison",
+      "requires_deepseek": true,
+      "reference": "The WS7200 has an NFC detection area; the WS7100 diagram shows none. Source: AX3 quick start PDF p.3-4.",
+      "new_session": true,
+      "keywords_all": [
+        "WS7200"
+      ],
+      "grade": true
+    },
+    {
+      "q": "The light on my HUAWEI WiFi AX3 router stays steady red. What does that mean and what should I check?",
+      "product": "huawei",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Steady red: not connected to the network (Internet). Causes: loose cable or connection error (check the cable), or a broadband network error (contact the broadband carrier). Configure the network settings (Step 2) if not done. Source: AX3 quick start PDF p.5, p.9.",
+      "new_session": true,
+      "keywords_all": [
+        "not connected"
+      ],
+      "grade": true
+    },
+    {
+      "q": "How do I restore my HUAWEI WiFi AX3 router to factory settings?",
+      "product": "huawei",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Power the router and wait for it to start; press RESET with a pin for more than two seconds until the indicator goes out; wait for the restart; a red indicator means it is restored; configure it again. Source: AX3 quick start PDF p.10.",
+      "new_session": true,
+      "keywords_all": [
+        "RESET",
+        "two seconds"
+      ],
+      "grade": true
+    },
+    {
+      "q": "How do I add a second HUAWEI router to my WiFi AX3 network wirelessly using the H button?",
+      "product": "huawei",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Place the add-on router (new or factory reset) within one metre of the configured AX3 and power it; when the AX3's indicator starts to flash, press the AX3's H button; wait until the add-on router's indicator shows it is connected. Supported: WS5800, WS7100, WS7200. Source: AX3 quick start PDF p.11.",
+      "new_session": true,
+      "keywords_all": [
+        "H button"
+      ],
+      "grade": true
+    },
+    {
+      "q": "What is the maximum Wi-Fi speed of the HUAWEI WiFi AX3 in Mbps?",
+      "product": "huawei",
+      "outcome": "rejected",
+      "layer": "refusal",
+      "requires_deepseek": true,
+      "reference": "Not in the documents: the quick start gives no Mbps figure. Must not invent one. Source: absent.",
+      "new_session": true
+    },
+    {
+      "q": "How do I reset it?",
+      "product": "huawei",
+      "outcome": "clarify",
+      "layer": "refusal",
+      "requires_deepseek": true,
+      "reference": "Vague: reset which product (a watch or the router)? Should ask back. Source: -.",
+      "new_session": true
+    },
+    {
+      "q": "How do I charge my WATCH GT 4, and how do I know when it's full?",
+      "product": "huawei",
+      "outcome": "answered",
+      "layer": "retrieval",
+      "requires_deepseek": true,
+      "reference": "Connect the charging cradle and cable, connect the adapter to power, rest the watch on the cradle with the metal contacts aligned until the charging icon shows. Full when the icon shows 100%; charging then stops automatically. Source: GT 4 guide PDF p.34.",
+      "new_session": true,
+      "keywords_all": [
+        "cradle",
+        "100%"
+      ],
+      "grade": true
     }
   ]
 }

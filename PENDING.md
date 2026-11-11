@@ -134,4 +134,40 @@ indexed and kept in step, including changes and deletions.
 up in the index on the next sync, with only that file's chunks touched, and
 the app holds read-only access to the chosen folders only.
 
+## Open — found in the general test of 2026-11-11
+
+From `docs/general-test-20261111.md` (Tesla, Microsoft, Huawei manuals). The
+same code is on v17.3, so each may also apply there.
+
+### 7. A comparison refused because the draft misread one side
+**Why.** "Which has the bigger front trunk, the Model 3 or the Model Y
+Performance?" retrieved both manuals' pages, but the draft said the Model 3's
+figure was missing (it is on p.230). The checker rejected it, so the visitor
+got a refusal. Repeated 2 of 2.
+**Done when.** That question is answered with both figures (3.1 vs 4.1 cu
+ft) on 3 of 3 runs, with no new wrong answers on `src/eval_cases.json`.
+
+### 8. The copy-the-checklist shortcut picks the wrong lines
+**Why.** "How do I add a second HUAWEI router wirelessly using the H
+button?" was answered in 2 seconds with five loose lines from the indicator
+table, copied with no model call and no check, instead of the steps on p.11.
+**Done when.** The shortcut copies only a block that answers the question
+(or hands over to the normal path), and that question gets the p.11 steps.
+
+### 9. A vague question across products is answered for one of them
+**Why.** "How do I reset it?" in a range with two watches and a router got
+the router's reset without asking which device.
+**Done when.** It asks which product, offering the three, and a test covers
+a vague question whose results span several products.
+
+### 10. A procedure answer dropped the key step
+**Why.** "Make the Model Y liftgate open lower" was answered "save the
+height" without saying how (hold the button under the liftgate until the
+chime, or the touchscreen prompts), though p.34 was retrieved.
+**Done when.** The answer includes the save step on 3 of 3 runs.
+
+### 11. README screenshots show the ITL ranges
+**Done when.** `docs/img/*` re-taken (`tools/capture_screenshots.py`) on a
+neutral demo corpus whose documents may be shown publicly.
+
 ## Resolved

@@ -2869,9 +2869,31 @@ def _product_aliases() -> dict[str, list[str]]:
                     if isinstance(raw, str):
                         raw = [raw]
                     out[key] = [str(a) for a in raw if str(a).strip()]
+                    out[key] += _listed_models(p.get("name") or "")
     except Exception as exc:
         logger.warning(f"Could not read product aliases: {exc}")
     return _variant_short_forms(_product_names(), out)
+
+
+def _listed_models(name: str) -> list[str]:
+    """The models a product's display name lists, each a name for it.
+
+    One manual often covers several models, and the product is then named
+    for all of them: "Surface Pro and Surface Pro 2", "WATCH GT 5 and GT 5
+    Pro". A question naming one ("Surface Pro 2 vs Surface Pro 3") matched
+    no product, so a comparison searched only the other side and refused
+    (general test 2026-11-11, M1/M4). A part counts only if it carries a
+    digit or starts with the first part's first word, so "Salt and Pepper
+    Grinder" stays one name.
+    """
+    # ponytail: word heuristic for model lists; an admin alias overrides when it misfires.
+    parts = [p.strip() for p in re.split(r"\s+(?:and|&)\s+|\s*/\s*|\s*,\s*", name) if p.strip()]
+    if len(parts) < 2:
+        return []
+    first = parts[0].split()[0].lower()
+    if all(re.search(r"\d", p) or p.split()[0].lower() == first for p in parts):
+        return parts
+    return []
 
 
 def _product_alias_tokens(key: str, name: str, aliases=()) -> set[str]:
