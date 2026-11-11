@@ -1,14 +1,13 @@
 """Product families: look-alike products customers mix up (CEO 2026-11-05).
 
-A customer who writes "smart hopper" may have a SMART Hopper 3 or a SMART
-Hopper 4, and the answers differ; "ICU" may be an ICU Lite or an ICU Pro.
-The catalogue could not say so: "SMART Hopper" was an alias of the SMART
-Coin System, so every "smart hopper" question was answered from the SH4's
-manuals -- even in a chat scoped to the Smart Hopper 3 (lab, 2026-11-05).
+A customer who writes "my X200" may have an X200 or an X200 Pro, and the
+answers differ. Without families, a family name that was also one model's
+alias sent every such question to that model's manuals, even in a chat
+scoped to the other model (lab, 2026-11-05).
 
-A family is the name customers use ("SMART Hopper") and its members, each
+A family is the name customers use ("X200") and its members, each
 with the catalogue product whose documents answer for it (members may share
-one: ICU Lite and ICU Pro are both filed under "icu"), what tells it apart,
+one: X200 Lite and X200 Pro both filed under "x200"), what tells it apart,
 and a picture. When a question names the family but no member, the reply
 asks which one, with a card per member; "not sure" gets the differences.
 Composed here: no model call on the chat path.
@@ -41,81 +40,10 @@ MARKER = "pick yours below"
 # The "general question" button's text, so it reads as every member.
 GENERAL = "general question for every"
 
-_SH_FEEDER = ("If a coin feeder sits on top of the hopper, it is a SMART "
-              "Hopper 4 fitted as a SMART Coin System.")
-
-# The CEO's list (2026-11-05). Features only where the CEO or the SH3->SH4
-# replacement document states them; the rest is drafted from the manuals by
-# refresh_auto() and shown in the console for checking.
-_SEED = {"families": [
-    {"key": "smart_hopper", "name": "SMART Hopper",
-     "aliases": ["smart hopper", "smart hoppers"],
-     "questions": [
-         {"q": "Is there an SD card slot on the front of the hopper?", "yes": ["SMART Hopper 4"]},
-         {"q": "Does a coin feeder sit on top of the hopper?", "yes": ["SMART Hopper 4"]}],
-     "members": [
-         {"name": "SMART Hopper 4", "aliases": ["SH4", "Smart Hopper 4", "hopper 4"],
-          "product": "sku_scs",
-          "features": "Has an SD card slot on the front. The configuration "
-                      "button is pressed and held for 5 seconds and switches "
-                      "between SSP and CC2 only. " + _SH_FEEDER},
-         {"name": "SMART Hopper 3", "aliases": ["SH3", "Smart Hopper 3", "hopper 3"],
-          "product": "smart_hopper_3",
-          "features": "No SD card slot on the front. The configuration button "
-                      "cycles between SSP, CC2 and CC1."}]},
-    {"key": "scs", "name": "SMART Coin System",
-     "aliases": ["SCS", "coin system"],
-     "questions": [
-         {"q": "Are there two hoppers in it, side by side?", "yes": ["Twin SMART Coin System"]}],
-     "members": [
-         {"name": "SMART Coin System", "aliases": ["single SCS"],
-          "product": "sku_scs", "features": ""},
-         {"name": "Twin SMART Coin System", "aliases": ["Twin SCS", "TSCS"],
-          "product": "sku_scs", "features": ""}]},
-    {"key": "nv200", "name": "NV200", "aliases": [],
-     "questions": [
-         {"q": "Is the validator fitted to a payout module that stores notes and pays them out?",
-          "yes": ["SMART Payout", "Spectral Payout"]},
-         {"q": "Does its label say Spectral?", "yes": ["NV200 Spectral", "Spectral Payout"]}],
-     "members": [
-         {"name": "NV200", "aliases": [], "product": "nv200s",
-          "features": "The note validator on its own, with no payout module."},
-         {"name": "SMART Payout", "aliases": ["NV200 Payout", "Smart Payout"],
-          "product": "nv200s",
-          "features": "An NV200 fitted to a payout module, which stores notes "
-                      "and pays them out."},
-         {"name": "NV200 Spectral", "aliases": ["NV200S"], "product": "nv200s",
-          "features": "The NV200 Spectral note validator on its own, with no "
-                      "payout module."},
-         {"name": "Spectral Payout", "aliases": ["NV200 Spectral Payout"],
-          "product": "nv200s",
-          "features": "An NV200 Spectral fitted to a payout module."}]},
-    {"key": "nv9", "name": "NV9", "aliases": [],
-     "questions": [
-         {"q": "Is a note float (a round drum that stores notes) fitted on top?",
-          "yes": ["NV11", "NV11 Spectral"]},
-         {"q": "Is a multi-note float fitted on top?", "yes": ["NV22 Spectral"]},
-         {"q": "Does its label say Spectral?",
-          "yes": ["NV9 Spectral", "NV11 Spectral", "NV22 Spectral"]}],
-     "members": [
-         {"name": "NV9USB+", "aliases": ["NV9 USB", "NV9USB", "NV9 USB+"],
-          "product": "nv9usb",
-          "features": "The NV9USB+ note validator on its own."},
-         {"name": "NV9 Spectral", "aliases": ["NV9S"], "product": "nv9_spectral",
-          "features": "The NV9 Spectral note validator on its own."},
-         {"name": "NV11", "aliases": ["NV11+"], "product": "nv9usb",
-          "features": "An NV9USB+ with a note float recycler fitted on top."},
-         {"name": "NV11 Spectral", "aliases": ["NV11S"], "product": "nv9_spectral",
-          "features": "An NV9 Spectral with a note float recycler fitted on top."},
-         {"name": "NV22 Spectral", "aliases": ["NV22", "NV22S"],
-          "product": "nv9_spectral",
-          "features": "An NV9 Spectral with a multi-note float fitted on top. "
-                      "The multi-note float fits only the NV9 Spectral."}]},
-    {"key": "icu", "name": "ICU", "aliases": [],
-     "members": [
-         {"name": "ICU Lite", "aliases": [], "product": "icu", "features": ""},
-         {"name": "ICU Pro", "aliases": [], "product": "icu", "features": ""}]},
-], "dismissed": [], "seen_products": None}
+# Empty on a new install: families are set up in the console's Products
+# page, or drafted by refresh_auto() from products whose names share a
+# model code.
+_SEED = {"families": [], "dismissed": [], "seen_products": None}
 
 
 # ── storage ─────────────────────────────────────────────────────────────

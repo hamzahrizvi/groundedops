@@ -24,6 +24,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# The product -> category map comes from the catalogue; a new install's seed
+# has none of these products, so the test brings its own.
+import json  # noqa: E402
+import tempfile  # noqa: E402
+os.environ["CATALOG_CONFIG"] = os.path.join(tempfile.mkdtemp(), "catalog.json")
+with open(os.environ["CATALOG_CONFIG"], "w") as _fh:
+    json.dump({"categories": [
+        {"key": "biometrics", "name": "Biometrics", "products": [
+            {"key": "mycheckr", "name": "MyCheckr", "sources": []},
+            {"key": "mycheckr_mini", "name": "MyCheckr Mini", "sources": []}]},
+        {"key": "note", "name": "Note", "products": [
+            {"key": "bv30", "name": "BV30", "sources": []},
+            {"key": "nv9usb", "name": "NV9USB+", "sources": []}]}]}, _fh)
+
 import retrieval_db as R  # noqa: E402
 
 # No index here, so no copies (D-20261026-91): without this _matches_scope

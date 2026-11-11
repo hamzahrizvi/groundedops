@@ -6,14 +6,14 @@ one hostname forever. One-time setup, on the machine that will serve
 (PENDING.md 9.1: a company server, not yet provisioned).
 
 Needs: a Cloudflare account that manages the DNS zone (e.g.
-`innovative-technology.com`), and `cloudflared`
+`example.com`), and `cloudflared`
 (`winget install --id Cloudflare.cloudflared`).
 
 ```powershell
 cloudflared tunnel login                     # browser; writes ~\.cloudflared\cert.pem
-cloudflared tunnel create chat.innovative-technology.com
+cloudflared tunnel create chat.example.com
                                              # writes ~\.cloudflared\<UUID>.json
-cloudflared tunnel route dns chat.innovative-technology.com chat.innovative-technology.com
+cloudflared tunnel route dns chat.example.com chat.example.com
 ```
 
 Name the tunnel **exactly the hostname**: `serve.ps1` runs
@@ -23,7 +23,7 @@ the value is used as the tunnel name as well as the address.
 Then add one line to `src\.env`:
 
 ```
-TUNNEL_HOSTNAME=chat.innovative-technology.com
+TUNNEL_HOSTNAME=chat.example.com
 ```
 
 and install the service as the same Windows user that ran `login`

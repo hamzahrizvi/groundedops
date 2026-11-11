@@ -56,10 +56,10 @@ _lock = threading.Lock()
 LEVELS = ("basic", "support", "root")
 _LEVEL_RANK = {"basic": 0, "support": 1, "root": 2}
 
-# Accounts may only be created for company addresses. Set to "" to allow any
-# domain (e.g. if an outside contractor genuinely needs an account).
+# Set to your company's domain (e.g. example.com) to allow accounts only for
+# its addresses. Empty (the default) allows any domain.
 ALLOWED_EMAIL_DOMAIN = os.getenv(
-    "ALLOWED_EMAIL_DOMAIN", "innovative-technology.com").strip().lower()
+    "ALLOWED_EMAIL_DOMAIN", "").strip().lower()
 
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", str(12 * 3600)))
 

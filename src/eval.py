@@ -516,7 +516,7 @@ def preflight(skip: bool, do_grade: bool = False) -> bool:
     try:
         r = requests.post(
             URL,
-            json={"q": "what is MyCheckr", "session_id": f"preflight-{uuid.uuid4()}"},
+            json={"q": "how do I reset the device?", "session_id": f"preflight-{uuid.uuid4()}"},
             timeout=300,  # generous: this doubles as the model warm-up call
         )
         r.raise_for_status()

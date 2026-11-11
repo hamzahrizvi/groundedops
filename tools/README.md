@@ -3,26 +3,19 @@
 Verification scripts. These were written during the v16.2/v16.3 work and
 kept because each one caught something that reading the code did not.
 
-All of them expect a backend already running, except `overnight_eval.sh`,
-which starts (and stops) its own.
+All of them expect a backend already running.
 
 For a release-facing gate, use `src/eval.py --repeats 3`. Cases can be marked
 as `faq`, `retrieval`, `comparison`, `refusal`, or `grounding`; use
 `--layer retrieval` with `skip_faq: true` to measure retrieval rather than the
 curated-answer shortcut. A repeated case is stable only when every run passes.
-The starter retrieval suite is `src/eval_cases_retrieval.json`; review three
-runs, then lock it separately with `--baseline eval_baseline_retrieval.json
---update-baseline`.
+`src/eval_cases.json` is a sample suite for the general test corpus
+(`docs/general-test-20261111.md`); a customer's own suite replaces it.
 
 | Script | What it is for |
 |---|---|
-| `eval_battery.py` | 19 grounded questions × 3 repeats against `/query`, across all four product ranges. **Repeats are the point** — a single pass cannot tell a fix from noise (see HANDOFF.md). |
-| `verifier_probe.py` | Scores the production LLM verifier (`main._llm_verified`: its prompt, thinking gate and parsing) on 26 cases in four groups (correct, wrong incl. fault-code mispairings, absence "No"s, stated-"No" controls), N runs each. `--judge deepseek\|anthropic\|openai` swaps the vendor. Use before changing the verifier prompt. |
-| `grader_ab.py` | Re-grades one batch's frozen graded answers N times with the eval grader as-is and N times inside `llm.judging()`, and checks both against `src/eval_labels.json`. Writes `<batch>/grader_ab.json`. |
 | `console_audit.py` | Logs into a throwaway console and screenshots every page in both themes, reporting JS errors. Catches render breakage no unit test sees. |
 | `capture_screenshots.py` | Regenerates `docs/img/*` for the README, driving the real widget against the real backend. |
-| `overnight_eval.sh` | PENDING.md session 4 as one unattended job: starts its **own** HEAD backend and proves it is HEAD, runs the M4 repeats, `run_live --path both`, the v16.3 blind2 side on a copied index, and the M13 sweep, then writes `eval_runs/<stamp>/summary.json`. `STEPS="m4 summary"` runs a subset. |
-| `eval_batch_summary.py` | Turns one batch directory into that `summary.json`: flip tables, blind per-case flips, widget agreement, and the M2-labelled log window. Offline. |
 
 ## The throwaway console
 
@@ -58,8 +51,8 @@ the code.
 Then three commands, from `src/`:
 
 ```bash
-EVAL_URL=http://127.0.0.1:8000/query python eval.py --cases eval_cases_blind2.json --repeats 3 --results results_A.json
-EVAL_URL=http://127.0.0.1:8099/query python eval.py --cases eval_cases_blind2.json --repeats 3 --results results_B.json
+EVAL_URL=http://127.0.0.1:8000/query python eval.py --cases eval_cases.json --repeats 3 --results results_A.json
+EVAL_URL=http://127.0.0.1:8099/query python eval.py --cases eval_cases.json --repeats 3 --results results_B.json
 python eval.py --compare-results results_A.json results_B.json
 ```
 

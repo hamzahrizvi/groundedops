@@ -6,7 +6,7 @@
  * Version:           15.3
  * Requires at least: 5.6
  * Requires PHP:      7.4
- * Author:            Innovative Technology
+ * Author:            GroundedOps
  * License:           MIT
  */
 

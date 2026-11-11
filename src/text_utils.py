@@ -38,7 +38,7 @@ MIN_UNIT_LEN = 12
 
 # Known multi-word brand/technical terms that must survive the camelCase
 # splitter intact (see fix_camel_case below).
-PROTECTED_TERMS = ["MyConnect", "MyCheckr", "WiFi", "GPIO"]
+PROTECTED_TERMS = ["WiFi", "GPIO"]
 
 # Words that, when they're the LAST word of a line, strongly suggest the
 # line was cut off mid-thought (table-cell or chunk-boundary truncation)
@@ -540,10 +540,10 @@ Latest user message: "{current_query}"
 
 Task: If the latest message depends on the conversation history to make sense (for example it uses words like "that", "it", "more", "step 1", or is otherwise incomplete on its own), rewrite it into a single, self-contained search query that includes the necessary context from the history.
 
-IMPORTANT — entity switches: if the latest message names a DIFFERENT product or thing than the history was about (e.g. "what about the MyCheckr?" after discussing the MyCheckr Mini), the rewritten query MUST be about the NEW entity, carrying over only the TOPIC from history. Examples:
-- History about "what network does MyCheckr Mini support"; latest: "what about the MyCheckr?" -> "what network does the MyCheckr support"
-- History about "how do I reset the Hub"; latest: "and the app?" -> "how do I reset the MyConnect app"
-- History about "MyCheckr Mini weight"; latest: "tell me more about what network connections it supports" -> "what network connections does the MyCheckr Mini support"
+IMPORTANT — entity switches: if the latest message names a DIFFERENT product or thing than the history was about (e.g. "what about the X200?" after discussing the X200 Mini), the rewritten query MUST be about the NEW entity, carrying over only the TOPIC from history. Examples:
+- History about "what network does the X200 Mini support"; latest: "what about the X200?" -> "what network does the X200 support"
+- History about "how do I reset the Hub"; latest: "and the app?" -> "how do I reset the companion app"
+- History about "X200 Mini weight"; latest: "tell me more about what network connections it supports" -> "what network connections does the X200 Mini support"
 
 If the latest message is ALREADY a complete, self-contained question that does not depend on the history, return it EXACTLY AS-IS, unchanged.
 
@@ -775,16 +775,16 @@ _R2_ONE = re.compile(rf"\b{_DETERMINER}\b(?:\s+\w+){{0,2}}\s+ones?\b",
 
 
 
-# Generic domain vocabulary for this corpus (MyConnect/MyCheckr
-# installation, networking, and registration docs). Deliberately broad
+# Generic domain vocabulary for product documentation (installation,
+# networking, and registration docs). Deliberately broad
 # and topic-level rather than product-specific — the point is NOT to
 # match a specific manual, just to tell apart "this query is clearly
 # about something in our domain but underspecified" (e.g. "explain why
-# device registration might fail" — which device? MyCheckr? the Hub?)
+# device registration might fail" — which device?)
 # from "this query has nothing to do with our domain at all" (e.g.
 # "what is the capital of france").
 _DOMAIN_VOCABULARY = {
-    "device", "devices", "hub", "tablet", "mycheckr", "myconnect",
+    "device", "devices", "hub", "tablet",
     "install", "installation", "installer", "verify", "verification",
     "registration", "register", "system", "network", "wifi", "app",
     "connect", "connection", "connected", "power", "relay", "log",
@@ -1027,7 +1027,7 @@ def capability_target(query: str) -> str | None:
 def _product_label_for_source(source: str) -> str | None:
     """Map a source filename to a friendly product/area label, or None.
 
-    e.g. "MyCheckr Mini User Manual-v2.pdf" -> "MyCheckr Mini".
+    e.g. "X200 Mini User Manual-v2.pdf" -> "X200 Mini".
     Deliberately lightweight/string-based — used only to offer
     human-readable clarification choices, never for retrieval.
     """
@@ -1058,18 +1058,6 @@ def _product_label_for_source(source: str) -> str | None:
                             return name
     except Exception:
         pass
-    s = source.lower()
-    # Order matters: check more specific labels before their prefixes
-    # ("MyCheckr Mini" before "MyCheckr").
-    known = [
-        ("mycheckr mini", "MyCheckr Mini"),
-        ("mycheckr", "MyCheckr"),
-        ("myconnect", "MyConnect"),
-        ("biometrics", "Biometrics Range"),
-    ]
-    for needle, label in known:
-        if needle in s:
-            return label
     return None
 
 

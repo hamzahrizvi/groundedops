@@ -727,9 +727,9 @@ def grounding_retries() -> int:
 
 _VERIFY_PROMPT = """You are checking an ANSWER a support assistant wants to send to a customer. The SOURCE is text extracted from product manuals.
 
-The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Note path open" means the values in that row belong together.
+The SOURCE may contain tables that have been flattened into pipe-separated or label:value rows. Read those rows as data: a row like "1 | 1 | Door open" means the values in that row belong together.
 
-Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label. The product a passage's label names ("from the X documentation") is the product its facts belong to even when the passage text uses another product's name: manuals reuse sentences written for a sibling product. Inside a passage, rows read out under a heading that lists products (Read cell by cell under "BV Range (BV20, BV30, BV50 and BV100)":) belong to each product that heading lists, even when the passage's label names no product; they are not about a product the heading does not list.
+Each passage of the SOURCE starts with a label in square brackets: its document, its page and, when known, the product it documents. A fact belongs to the product and document its passage's label names, even when the passage text does not repeat the product name. Passages from different documents can give different values for the same thing (one product's pin mapping or supply voltage is not another's); that is not a contradiction. An ANSWER that gives each product its own value is supported when each value appears under that product's label. The product a passage's label names ("from the X documentation") is the product its facts belong to even when the passage text uses another product's name: manuals reuse sentences written for a sibling product. Inside a passage, rows read out under a heading that lists products (Read cell by cell under "X Series (X10, X20 and X30)":) belong to each product that heading lists, even when the passage's label names no product; they are not about a product the heading does not list.
 
 Judge two things separately.
 
@@ -1070,7 +1070,7 @@ Support is often conditional. When the context qualifies it by firmware version,
 A value read from a table is conditional in the same way. When its row or cell carries a condition — an operating mode or load, a product variant with its own column, a minimum or maximum, a tolerance, "if no other coins in device", "whichever is greater" — give the value together with that condition, in the manual's own words, even if the question did not ask about it. A figure quoted without the condition it depends on is a wrong answer, not a shorter one.
 The passages are numbered in the order a retrieval system ranked them, so [Passage 1] is the most likely to contain the answer. That is a hint, not a rule: use whichever passage actually answers the question, and prefer an earlier one when two say the same thing.
 If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
-A passage header can name the manual heading the passage sits under (under "Supply Currents › NV11+"). That heading says which product, model, module, option or condition its table belongs to; the table's own rows often do not, so look-alike tables can have identical rows. Take a figure only from a passage whose heading matches what the question names (the product or model, the module or option such as replenishment cassette or bezel, a supply voltage, a specification rather than a test limit), even when a look-alike table under another heading ranks earlier. A heading that names another product or model is that product's table, not the asked one's. Give the matching row's values as written, with their units. When the context holds look-alike tables, say which one your figure is from in the manual's words ("For the Replenishment Cassette: ..."). When the question asks about two conditions that have separate tables, give each figure with its condition; never say they are the same unless the figures are. When two tables for the same thing disagree, give both and say they differ.
+A passage header can name the manual heading the passage sits under (under "Supply Currents › Model X20"). That heading says which product, model, module, option or condition its table belongs to; the table's own rows often do not, so look-alike tables can have identical rows. Take a figure only from a passage whose heading matches what the question names (the product or model, the module or option such as replenishment cassette or bezel, a supply voltage, a specification rather than a test limit), even when a look-alike table under another heading ranks earlier. A heading that names another product or model is that product's table, not the asked one's. Give the matching row's values as written, with their units. When the context holds look-alike tables, say which one your figure is from in the manual's words ("For the Replenishment Cassette: ..."). When the question asks about two conditions that have separate tables, give each figure with its condition; never say they are the same unless the figures are. When two tables for the same thing disagree, give both and say they differ.
 If the context is silent on the topic of the question, respond with exactly:
 "I could not find that in the knowledge base."
 The context is not silent when it states the range, limit, default, code or figures that settle the question in other words than the customer's; answer from those.
@@ -1098,7 +1098,7 @@ another product's name).
 If the question names a product or model that none of the context is about,
 do not answer with another product's facts; respond with the exact sentence
 above. A shortened or informal name for a product the context does cover
-("NV9" for "NV9 Spectral") is that product, not a different one. A product
+("X20" for "X20 Pro") is that product, not a different one. A product
 name in brackets at the very end of the question is the customer's selected
 product, added automatically; when the question itself names a different
 product or model, the one it names is what they are asking about.
@@ -1516,7 +1516,7 @@ Write at most four sentences, in this order:
 2. One or two sentences stating ONLY facts written in <context>. Every one
    of these must be something a reader could point to in the passages.
    State them as a product expert would state them, NOT as a description of
-   the source: write "the ICU Lite is reachable at 192.168.137.8 over HTTP",
+   the source: write "the hub is reachable at 192.168.1.10 over HTTP",
    never "the passages describe", "they also state that", "the
    documentation says" or "Passage 7 shows". A sentence about the passages
    is a claim about a document rather than about the product, so nothing

@@ -225,26 +225,26 @@ def plan(q: str) -> list[tuple[str, str, str]]:
 
 
 if __name__ == "__main__":
-    forms = {"nv9usb": "nv9usb+", "bv30": "bv30", "nv200s": "nv200 spectral"}
+    forms = {"x100": "x100", "y200": "y200", "z300": "z300 pro"}
     named = lambda line: [k for k, f in forms.items() if f in line.lower()]  # noqa: E731
-    k = ["nv9usb", "bv30"]
-    assert parse_split("1. What supply does the NV9USB+ need?\n"
-                       "2. What supply does the BV30 need?", k, named) == [
-        "What supply does the NV9USB+ need?", "What supply does the BV30 need?"]
+    k = ["x100", "y200"]
+    assert parse_split("1. What supply does the X100 need?\n"
+                       "2. What supply does the Y200 need?", k, named) == [
+        "What supply does the X100 need?", "What supply does the Y200 need?"]
     # Either order; back in the order asked.
-    assert parse_split("1. BV30 supply?\n2. NV9USB+ supply?", k, named) == [
-        "NV9USB+ supply?", "BV30 supply?"]
-    assert parse_split("1. NV9USB+ vs BV30 supply?\n2. BV30 supply?", k, named) is None
-    assert parse_split("1. BV30 supply?\n2. BV30 size?", k, named) is None
-    assert parse_split("Only one line about the NV9USB+", k, named) is None
-    assert parse_split("1. NV9USB+ vs other products?\n2. BV30 vs other products?",
+    assert parse_split("1. Y200 supply?\n2. X100 supply?", k, named) == [
+        "X100 supply?", "Y200 supply?"]
+    assert parse_split("1. X100 vs Y200 supply?\n2. Y200 supply?", k, named) is None
+    assert parse_split("1. Y200 supply?\n2. Y200 size?", k, named) is None
+    assert parse_split("Only one line about the X100", k, named) is None
+    assert parse_split("1. X100 vs other products?\n2. Y200 vs other products?",
                        k, named) is None
     # Open "what's the difference" tables stand; a named attribute does not.
     cat = {"role": "catalogue", "answer": "| table |"}
-    assert not worth_it("What is the difference between the NV9USB+ and the BV30?",
-                        cat, ["NV9USB+", "BV30", "nv9usb", "bv30"])
-    assert worth_it("NV9USB+ vs BV30 - which draws less current when idle?",
-                    cat, ["NV9USB+", "BV30", "nv9usb", "bv30"])
+    assert not worth_it("What is the difference between the X100 and the Y200?",
+                        cat, ["X100", "Y200", "x100", "y200"])
+    assert worth_it("X100 vs Y200 - which draws less current when idle?",
+                    cat, ["X100", "Y200", "x100", "y200"])
     assert worth_it("x", {"role": "clarify", "needs_clarification": True}, [])
     assert not worth_it("x", {"role": "fast", "answer": "a"}, [])
     assert not worth_it("x", {"needs_clarification": True, "needs_sign_in": True}, [])

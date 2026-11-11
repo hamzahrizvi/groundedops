@@ -39,7 +39,7 @@ def main() -> int:
     if "--only" in argv:
         i = argv.index("--only")
         if i + 1 >= len(argv):
-            print("--only needs a pattern, e.g. --only 'NV9*'")
+            print("--only needs a pattern, e.g. --only 'Manual*'")
             return 2
         only = argv[i + 1]
 

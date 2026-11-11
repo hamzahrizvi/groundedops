@@ -59,10 +59,10 @@ def test_unscoped_off_topic_overview_is_declined():
 
 def test_unknown_model_answers_before_the_catalogue():
     text = "I have no documentation for a product called NV99. Did you mean the NV9 Spectral?"
-    out, ans, _ = _sales("which of your validators is the NV99 Titan", "product", unknown=text)
+    out, ans, _ = _sales("which of your models is the NV99 Titan", "product", unknown=text)
     assert out["kind"] == "unknown_model" and out["answer"] == text
     assert not ans.called
-    _, _, unk = _sales("which of your validators is the NV99 Titan", "product",
+    _, _, unk = _sales("which of your models is the NV99 Titan", "product",
                        unknown=text, scoped=True)
     assert not unk.called
 

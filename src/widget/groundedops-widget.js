@@ -15,7 +15,7 @@
  *   <script
  *     src="/widget/groundedops-widget.js"
  *     data-api="https://your-backend.example.com"
- *     data-title="Innovative Technology"
+ *     data-title="Your Company"
  *     data-accent="#E4002B"
  *     data-agent-name="David"
  *     data-sales-email="sales@example.com"
@@ -2457,7 +2457,7 @@
         // they may not know. Tapping one sends it as the next message, which
         // is the same path as typing it: the backend resolves a short
         // fragment against the previous turn.
-        // "Which SMART Hopper do you have?": a card per model, its picture
+        // "Which X200 do you have?": a card per model, its picture
         // and what tells it apart. Tapping one asks the question again for
         // that model.
         if ((d.family_options || []).length) {

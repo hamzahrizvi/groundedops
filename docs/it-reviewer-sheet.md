@@ -89,7 +89,7 @@ Who can read it: Admin and Owner accounts. Every console screen that shows visit
 | Originals and figures token-gated except for header-less callers from a private address; exclusions | `main.py` `_TOKEN_GATED_PREFIXES`, `_restrict_private_surface`; `routes_documents.py` `source_file`, `EXCLUDED_SOURCES` |
 | Admin LAN-only, allowlist | `README.md` `ADMIN_ALLOWED_IPS`; `main.py` `_restrict_private_surface`, `_admin_ip_allowed` |
 | No TLS in the app | `README.md` `ENABLE_HSTS` row |
-| Levels and names | `accounts.py` `LEVELS`; `docs/website-brief.md` section 0 |
+| Levels and names | `accounts.py` `LEVELS` |
 | 12 hour sessions | `accounts.py` `SESSION_TTL_SECONDS`; `README.md` |
 | Keys encrypted, limits of that | `keyvault.py` module docstring |
 | What a log row holds, 10 MB rotation, 500 chars | `logger.py` `log_interaction`, `_trace_fields`, `MAX_LOG_BYTES`, `MAX_ANSWER_LEN` |
@@ -100,4 +100,4 @@ Who can read it: Admin and Owner accounts. Every console screen that shows visit
 | No single-conversation delete screen | `admin.html` has no conversation view; `routes_settings.py` `conversations_delete` is an API call needing the visitor's user id |
 | Delete a staff account | `routes_admin_auth.py` `DELETE /admin/users/{user_id}` (`_require_root`) |
 | Single tenant | `README.md` Known limitations |
-| No certifications | `docs/website-brief.md` section 0 "Do not invent" |
+| No certifications | this sheet |

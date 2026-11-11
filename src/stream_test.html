@@ -47,15 +47,10 @@
 
   <div class="row">
     <select id="prod">
-      <option value="nv9_spectral">NV9 Spectral</option>
-      <option value="nv9usb">NV9USB+</option>
-      <option value="mycheckr">MyCheckr</option>
-      <option value="mycheckr_mini">MyCheckr mini</option>
-      <option value="sku_scs">SMART Coin System</option>
       <option value="">(no product scope)</option>
     </select>
     <input id="q" placeholder="Ask something from the manuals…"
-           value="How much does the NV9S validator weigh on its own?">
+           value="How much does it weigh?">
     <button id="go">Ask</button>
   </div>
 
@@ -73,11 +68,10 @@
 
 <script>
 const SAMPLES = [
-  ["How much does the NV9S validator weigh on its own?", "nv9_spectral"],
-  ["What is the operating temperature range?", "nv9_spectral"],
-  ["What is the note float capacity on the NV11+?", "nv9usb"],
-  ["Does this support a 24 volt supply?", "nv9_spectral"],
-  ["What is the default WiFi password?", "nv9_spectral"],
+  ["How much does it weigh?", ""],
+  ["What is the operating temperature range?", ""],
+  ["Does this support a 24 volt supply?", ""],
+  ["What is the default WiFi password?", ""],
 ];
 const $ = id => document.getElementById(id);
 SAMPLES.forEach(([q, p]) => {

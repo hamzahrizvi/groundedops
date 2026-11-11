@@ -145,7 +145,7 @@ jobs:
           GENERATION_MODE: local
         run: |
           cd src
-          for f in eval_cases.json eval_cases_blind.json eval_cases_blind2.json eval_cases_retrieval.json; do
+          for f in eval_cases.json; do
             python eval.py --selfcheck --cases "$f"
           done
 

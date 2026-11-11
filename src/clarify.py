@@ -61,7 +61,7 @@ just still again also very really thing things one ok hi hello thanks thank
 """.split())
 
 # A reference to a device the visitor has not named.
-_DEVICE_NOUNS = ("machine", "device", "unit", "validator", "hopper", "reader",
+_DEVICE_NOUNS = ("machine", "device", "unit", "appliance", "charger", "reader",
                  "scanner", "camera", "screen", "product", "kit", "system",
                  "thing", "box")
 _DEVICE_REF = re.compile(

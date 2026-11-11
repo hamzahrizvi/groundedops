@@ -20,7 +20,7 @@ BODY = "<p>" + "Fit the hopper to the rail and tighten both screws. " * 6 + "</p
 class FakeApi:
     """Website (page) / Smart Hopper 3 (folder) / Installation (page, with a PDF)
        Website / Overview (a short page, not offered)"""
-    site = "itl.atlassian.net"
+    site = "acme.atlassian.net"
     tree = {
         ("pages", "1"): [{"type": "folder", "id": "10", "title": "Smart Hopper 3"},
                          {"type": "page", "id": "30", "title": "Overview"}],
@@ -138,13 +138,13 @@ class World:
 
 def test_folder_url():
     assert cs.parse_folder_url(
-        "https://itl.atlassian.net/wiki/spaces/WEB/folder/123?atlOrigin=x") == ("itl.atlassian.net", "folders", "123")
+        "https://acme.atlassian.net/wiki/spaces/WEB/folder/123?atlOrigin=x") == ("acme.atlassian.net", "folders", "123")
     assert cs.parse_folder_url(
-        "https://itl.atlassian.net/wiki/spaces/CS/pages/1069318147/Website") == ("itl.atlassian.net", "pages", "1069318147")
+        "https://acme.atlassian.net/wiki/spaces/CS/pages/1069318147/Website") == ("acme.atlassian.net", "pages", "1069318147")
     assert cs.normalise_folder_url(
-        "https://itl.atlassian.net/wiki/spaces/CS/pages/1069318147/Website").endswith("/pages/1069318147")
+        "https://acme.atlassian.net/wiki/spaces/CS/pages/1069318147/Website").endswith("/pages/1069318147")
     for bad in ("https://evil.example/wiki/spaces/WEB/folder/1",
-                "http://itl.atlassian.net/wiki/spaces/WEB/folder/1", ""):
+                "http://acme.atlassian.net/wiki/spaces/WEB/folder/1", ""):
         try:
             cs.parse_folder_url(bad)
             assert False, bad
@@ -186,7 +186,7 @@ def test_page_text_keeps_where_links_point():
                      'Support Hub</a>.</p></ac:adf-content><ac:adf-fallback><p>Visit the '
                      '<a href="https://itl.com/hub/">Support Hub</a>.</p></ac:adf-fallback></ac:adf-extension>'
                      '<p><a href="https://itl.com/x">https://itl.com/x</a> <a href="#Steps">Steps</a> '
-                     '<a href="https://itl.atlassian.net/wiki/spaces/CS/pages/456#Sides">Sides</a> '
+                     '<a href="https://acme.atlassian.net/wiki/spaces/CS/pages/456#Sides">Sides</a> '
                      '<a href="https://outlook.office.com/local/path/file://fs1/Shared">fs1</a> '
                      '<a href="mailto:support@itl.com">Email us</a></p>'
                      '<p><ac:link><ri:attachment ri:filename="Update V2.zip" /><ac:plain-text-link-body>'
@@ -195,9 +195,9 @@ def test_page_text_keeps_where_links_point():
                      '</ri:attachment></ac:link></p>'
                      '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
                      '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>',
-                     page_id="456", site="itl.atlassian.net",
-                     hosts=["itl.com", "dropbox.com", "itl.atlassian.net"])
-    att = "https://itl.atlassian.net/wiki/download/attachments/456/"
+                     page_id="456", site="acme.atlassian.net",
+                     hosts=["itl.com", "dropbox.com", "acme.atlassian.net"])
+    att = "https://acme.atlassian.net/wiki/download/attachments/456/"
     assert "Latest GBP SMART Update Package\nhttps://www.dropbox.com/scl/fo/cob/AFH?rlkey=1wo&dl=1\n" in t, t
     assert "download-zip-icon" not in t                      # a picture is not a link
     assert t.count("Support Hub (https://itl.com/hub/)") == 1
@@ -212,53 +212,53 @@ def test_page_text_keeps_where_links_point():
 
 def test_synced_links_reach_only_allowlisted_hosts():
     # Security 2026-11-03: internal hosts, page ids and attachment names reached the index.
-    os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
-    html = ('<p><a href="https://www.innovative-technology.com/support">Support</a> '
+    os.environ["CONFLUENCE_LINK_HOSTS"] = "acme-widgets.com, dropbox.com"
+    html = ('<p><a href="https://www.acme-widgets.com/support">Support</a> '
             '<a href="https://jira.internal/browse/DS-1">DS-1</a> '
             '<a href="https://jira.internal/browse/DS-2">https://jira.internal/browse/DS-2</a> '
-            '<a href="https://innovative-technology.com@evil.example/x">trick</a> '
+            '<a href="https://acme-widgets.com@evil.example/x">trick</a> '
             '<a href="mailto:ops@corp.internal">ops</a> '
-            '<a href="mailto:sales@innovative-technology.com?cc=ops@corp.internal">sales</a> '
-            '<a href="https://svc:pw@innovative-technology.com/x">creds</a> '
-            '<a href="https://evil.example\\@innovative-technology.com/x">slash</a></p>'
-            '<pre>curl https://build.corp.internal/api or https://www.innovative-technology.com/dl.</pre>'
+            '<a href="mailto:sales@acme-widgets.com?cc=ops@corp.internal">sales</a> '
+            '<a href="https://svc:pw@acme-widgets.com/x">creds</a> '
+            '<a href="https://evil.example\\@acme-widgets.com/x">slash</a></p>'
+            '<pre>curl https://build.corp.internal/api or https://www.acme-widgets.com/dl.</pre>'
             '<ac:structured-macro ac:name="code"><ac:plain-text-body>'
             '<![CDATA[GET https://jira.internal/rest]]></ac:plain-text-body></ac:structured-macro>'
             '<p><ac:link><ri:attachment ri:filename="Secret plan.pdf" /></ac:link></p>'
             '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name">'
             '<ri:attachment ri:filename="Manual.pdf" /></ac:parameter></ac:structured-macro>')
-    t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
+    t = cs.page_text("P", html, page_id="789", site="acme-widgets.atlassian.net",
                      hosts=cs.link_hosts())
-    assert "Support (https://www.innovative-technology.com/support)" in t, t
+    assert "Support (https://www.acme-widgets.com/support)" in t, t
     for leak in ("jira.internal", "evil.example", "corp.internal", "atlassian.net", "789"):
         assert leak not in t, (leak, t)
     assert "DS-1" in t and "trick" in t and "ops" in t          # the text stays
-    assert "sales (mailto:sales@innovative-technology.com)" in t, t   # no ?cc=
+    assert "sales (mailto:sales@acme-widgets.com)" in t, t   # no ?cc=
     assert "svc" not in t and "pw@" not in t and "creds" in t and "slash" in t
-    assert "https://www.innovative-technology.com/dl." in t and "curl  or" in t, t
+    assert "https://www.acme-widgets.com/dl." in t and "curl  or" in t, t
     assert "Secret plan.pdf" in t and "\nManual.pdf" in t       # file names, no address
     # Other address shapes, and one split by markup (D-20261104-10).
     t = cs.page_text("P", "<p>mail ops@corp.internal now</p><pre>ssh://git.corp.internal/repo</pre>"
                      "<pre>build.corp.internal:8080/api</pre><pre>\\\\fs1.corp.internal\\share</pre>"
                      "<p>https://corp.<b>internal</b>/x</p>", hosts=cs.link_hosts())
     assert "internal" not in t, t
-    keep = "write to sales@innovative-technology.com, see 3.5:100 and v1.2.3 and config.yaml"
+    keep = "write to sales@acme-widgets.com, see 3.5:100 and v1.2.3 and config.yaml"
     assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
-    assert "ssh://git.innovative-technology.com/r" in cs.page_text(
-        "P", "<p>ssh://git.innovative-technology.com/r</p>", hosts=cs.link_hosts())
+    assert "ssh://git.acme-widgets.com/r" in cs.page_text(
+        "P", "<p>ssh://git.acme-widgets.com/r</p>", hosts=cs.link_hosts())
     # The site listed (a public space): its attachments keep their address.
-    t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
-                     hosts=["innovative-technology.atlassian.net"])
-    assert "https://innovative-technology.atlassian.net/wiki/download/attachments/789/Manual.pdf" in t, t
+    t = cs.page_text("P", html, page_id="789", site="acme-widgets.atlassian.net",
+                     hosts=["acme-widgets.atlassian.net"])
+    assert "https://acme-widgets.atlassian.net/wiki/download/attachments/789/Manual.pdf" in t, t
     assert "jira.internal" not in t
 
 
 def test_link_hosts_setting():
     old = os.environ.pop("CONFLUENCE_LINK_HOSTS", None)
     try:
-        assert cs.link_hosts() == ["innovative-technology.com", "dropbox.com"]
-        os.environ["CONFLUENCE_LINK_HOSTS"] = "https://Docs.Example.com/x, *.dropbox.com  itl.atlassian.net:443"
-        assert cs.link_hosts() == ["docs.example.com", "dropbox.com", "itl.atlassian.net"]
+        assert cs.link_hosts() == []   # no default: an operator lists their own hosts
+        os.environ["CONFLUENCE_LINK_HOSTS"] = "https://Docs.Example.com/x, *.dropbox.com  acme.atlassian.net:443"
+        assert cs.link_hosts() == ["docs.example.com", "dropbox.com", "acme.atlassian.net"]
         assert cs._host_ok("https://a.docs.example.com/p", cs.link_hosts())
         assert not cs._host_ok("https://notdocs.example.com/p", cs.link_hosts())
         assert not cs._host_ok("http://[docs.example.com/p", cs.link_hosts())    # malformed

@@ -247,7 +247,7 @@ def is_meaningful_line(line: str) -> bool:
         "working", "trigger", "available",
         "power", "network", "device", "hub",
         "tablet", "alert", "relay", "log",
-        "mycheckr", "myconnect", "connect",
+        "connect",
         "download", "launch", "wifi", "app", "sign",
     ])
 

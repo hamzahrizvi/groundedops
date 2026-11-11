@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 _CROSS = re.compile(
     # Nouns that only ever mean "across the catalogue".
     r"\b(which|what)\b(?:\s+\w+){0,3}\s+"
-    r"\b(products?|models?|validators?|hoppers?)\b"
+    r"\b(products?|models?)\b"
     # "range" moved below on 2026-10-20: in a manual it is a voltage or
     # temperature range far more often than a product range. "what range
     # does it take with and without the IF5", asked in an NV9USB+ chat, got
@@ -50,9 +50,11 @@ _CROSS = re.compile(
     # Ads mode", "what units is the threshold in" are all questions about
     # ONE product. Measured: they were 4 of the 10 support questions this
     # module was hijacking. So those nouns count only with an explicit
-    # "your" framing, which no in-manual question has.
+    # "your" framing, which no in-manual question has. With that framing any
+    # plural is the catalogue's own word for its products ("which of your
+    # watches", "which of your note validators").
     r"|\b(which|what)\b(?:\s+of)?\s+your\s+(?:\w+\s+){0,2}"
-    r"\b(devices?|units?|options?|ones?|machines?|ranges?)\b"
+    r"\b(devices?|units?|options?|ones?|machines?|ranges?|\w+s)\b"
     r"|\bdo\s+you\s+(have|make|sell|offer|do|stock)\b"
     r"|\banything\s+(that|which|for)\b"
     # "I need A validator" is someone buying. "I need TO mount it" is

@@ -1,8 +1,8 @@
 """Category -> Product catalog with persistence (v10.3).
 
 Two-level hierarchy:
-  Category (Note Validators, Coin Hoppers, Biometrics)
-    └─ Product (e.g. NV200, SMART Hopper, MyCheckr)
+  Category (e.g. Laptops, Phones, Accessories)
+    └─ Product (e.g. X200, X200 Mini)
          └─ doc sources (filename substrings)
 
 A chat scopes to a CATEGORY (searches every product's docs in it) or
@@ -28,41 +28,11 @@ logger = logging.getLogger(__name__)
 _PATH = os.getenv("CATALOG_CONFIG", "catalog_config.json")
 _lock = threading.Lock()
 
-# Seed catalog. Note Validators / Coin Hoppers / Biometrics as requested;
-# the age-verification devices we already have docs for sit under
-# Biometrics (MyCheckr is biometric age estimation). Add products/docs
-# via the admin panel — this is only the starting point.
+# Seed catalogue: one empty range to start from. Ranges, products and
+# their documents are added in the console.
 _SEED = {
     "categories": [
-        {
-            "key": "note_validators",
-            "name": "Note Validators",
-            "products": [
-                {"key": "nv_shared", "name": "General", "sources": []},
-            ],
-        },
-        {
-            "key": "coin_hoppers",
-            "name": "Coin Hoppers",
-            "products": [
-                {"key": "ch_shared", "name": "General", "sources": []},
-            ],
-        },
-        {
-            "key": "biometrics",
-            "name": "Biometrics",
-            "products": [
-                {"key": "biometrics_general", "name": "General (shared docs)",
-                 "sources": []},
-                {"key": "mycheckr", "name": "MyCheckr",
-                 "sources": ["MyCheckr_User_Manual"]},
-                {"key": "mycheckr_mini", "name": "MyCheckr Mini",
-                 "sources": ["MyCheckr_Mini"]},
-                {"key": "bio_shared", "name": "Shared / MyConnect",
-                 "sources": ["MyConnect_Environment", "ICU_Network_API",
-                             "Certificate_and_USB"]},
-            ],
-        },
+        {"key": "products", "name": "Products", "products": []},
     ]
 }
 

@@ -17,6 +17,10 @@ with open(os.environ["CATALOG_CONFIG"], "w") as fh:
         {"key": "smart_hopper_3", "name": "Smart Hopper 3", "sources": []},
         {"key": "sku_scs", "name": "SMART Coin System", "sources": []},
         {"key": "bv20", "name": "BV20", "sources": []}]}]}, fh)
+# A new install has no families; the family-card test uses the sample list.
+import shutil  # noqa: E402
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
+                         "families_fixture.json"), os.environ["FAMILIES_CONFIG"])
 
 import catalog  # noqa: E402
 import main  # noqa: E402

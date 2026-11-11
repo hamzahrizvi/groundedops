@@ -1,6 +1,7 @@
 """Product families (CEO 2026-11-05): ask which look-alike model before
-answering a question that names only the family. Runs on the seed list."""
+answering a question that names only the family. Runs on a sample list."""
 import os
+import shutil
 import sys
 import tempfile
 
@@ -11,7 +12,11 @@ import families as F  # noqa: E402
 # Not through os.environ: this file runs in pytest's own process, and every
 # own-process test file after it inherited the scratch families it saved
 # (test_two_products then lost its two-product turn).
-F._PATH = os.path.join(tempfile.mkdtemp(), "none.json")
+F._PATH = os.path.join(tempfile.mkdtemp(), "families.json")
+# A new install starts with no families; these tests run on a sample list
+# (made-up data for the logic, not a corpus).
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
+                         "families_fixture.json"), F._PATH)
 
 
 def _asked(r):

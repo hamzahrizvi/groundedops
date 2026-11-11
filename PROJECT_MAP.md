@@ -66,9 +66,7 @@ groundedops/
 ├── backend.log(.err)  tunnel.log(.err)  testpage.log(.err)   gitignored
 ├── corpus/                       source docs ingested by /ingest/reload_folder
 │   ├── README.md
-│   └── 7 vendor PDFs — MyCheckr User Manual v7, MyCheckr Mini v5, MyConnect
-│       Environment v4, MyConnect Quick Start, MyCheckr install checklist,
-│       Linux access guide, ICU_Network_API v1.0.50        gitignored
+│   └── your product documents                        gitignored
 └── src/                          backend lives here; uvicorn runs with src as cwd
     ├── .claude/
     ├── .env                                    secrets, gitignored
@@ -141,13 +139,10 @@ groundedops/
     ├── _harness.py               imports main.py with ML modules stubbed, so the v13
     │                             routes can be tested without Chroma/Ollama
     ├── eval.py                   regression harness, gates changes on a baseline diff
-    ├── eval_cases.json  eval_cases_api.json  eval_cases_extensive.json
-    ├── eval_cases_retrieval.json  eval_baseline_retrieval.json
-    ├── eval_baseline.json                            committed on purpose (eval.py:11)
+    ├── eval_cases.json           sample suite for the general test corpus (docs/general-test-20261111.md)
     ├── eval_results.json                             gitignored
     ├── run_tests.py              runs tests/ without pytest
-    ├── test_queries.py           end-to-end smoke test against a running server
-    ├── requirements.txt  BENCHMARKS.md
+    ├── requirements.txt
     ├── tests/
     │   ├── test_chunking.py  test_structure.py  test_text_utils.py  test_memory.py
     │   ├── test_router.py  test_rrf.py  test_llm.py  test_keyvault.py
@@ -184,50 +179,6 @@ groundedops/
     │           (AdminPanel.jsx removed — it duplicated admin.html/Nocturne and
     │            shipped admin code into the public chat bundle; its three
     │            trigger buttons now open /admin in a new tab instead)
-    └── legacy/                   ~500 files. Reference only — nothing imports it.
-        │                         Each release folder holds only that release's changed
-        │                         files, plus files.zip and a CHANGELOG_*.md.
-        ├── v3/                   flat, 21 files: app.py bm25.py chunking.py db.py
-        │                         embeddings.py grounding.py ingest.py llm.py logger.py
-        │                         main.py memory.py parsing.py reranker.py
-        │                         retrieval_db.py router.py structure.py test.py
-        │                         test_queries.py + deepseek key artifacts
-        ├── v4/    v4.0  v4.1
-        ├── v5/                   empty
-        ├── v6/    v6.0/tests  v6.2  v6.3_changed_files/tests
-        │          v6.4_changed_files/tests  v6.5_changed_files/tests
-        ├── v7/    v7.0_changed_files/tests
-        │          v7.1  v7.1.1–v7.1.4 (each with .streamlit/)
-        │          v7.1.5–v7.1.7 (.streamlit/ + assets/icons/)
-        │          v7.2_react_base/frontend/{public,src/components}   ← React starts here
-        │          v7.2.1/frontend/…  v7.2.2/frontend/…
-        ├── v8/    v8.0_general_improvements  v8.1_breadcrumbs
-        │          v8.2_simultaneous_llms  v8.3
-        │          v8.4/{8.4.1,8.4.2,8.4.3}
-        ├── v9/    v9.0_doc2_query
-        │          v9.1_online_default/{v9.1.1_bug_fix, v9.1.2_toggle_fix,
-        │                               v9.1.3_force_pick, v9.1.4_chats, v9.1.5_chats2}
-        │          v9.2_full_release_1.0/v9.2.1
-        ├── v10/   v10.0_Docker_I_hardly_know  v10.1_multi_product  v10.2_ingest_fix
-        │          v10.3_chat_fix/v10.3.1  v10.4_ci_cd  v10.5_ingest_cat  v10.6  v10.7
-        │          v10.8_admin_panel  v10.9_FAQ  v10.10  v10.11  v10.12  v10.13
-        │          v10.14_FAQ_ans/v10.14.1  v10.15_remove_ingest_faq
-        │          v10.16_remove_obsolete/{v10.16.1, v10.16.2}
-        ├── v11/   v11.1_widget
-        │          v11.2_FAQ_match/{v11.2.1/files, v11.2.2}
-        │          v11.3_FAQ_suggest/{v11.3.1, v11.3.2, v11.3.3}   ← current HEAD release
-        ├── v12/   v12.0_Securityyy        quota.py + widget_api.py land here
-        │          v12.1_cloud/{v12.1.1 … v12.1.5}   main.py 1842 ln, PHP plugin
-        │          v12.2_admin_rebuild     admin.html + main.py 2077 ln
-        │          v12.3_redesign/v12.3.1  admin.html, styles.css, main.py 2077 ln
-        └── v13/   v13.0    the raw drop that caused BROKEN STATE. DEPLOY_v13.md,
-                            admin.html, main.py, faq_store.py, gaps.py,
-                            widget_config.py, styles.css, _harness.py,
-                            test_new_routes.py, test_ui.py
-                   v13.1    ← current release. Same v13.0 intent, actually merged
-                            onto v12.3's main.py instead of replacing it — see
-                            CHANGELOG_v13.1.md. main.py, faq_store.py, admin.html,
-                            _harness.py, test_new_routes.py, files.zip
 ```
 
 ---
@@ -241,7 +192,6 @@ run.cmd                                  build + LAN + tunnel + token + test pag
 run.cmd -Local -NoTunnel -NoTestPage    plain local run only
 python run_tests.py              unit + route tests, no pytest needed
 pytest tests/                    if pytest is installed
-python test_queries.py           e2e against a running server
 python eval.py                   regression gate; --update-baseline to relock
 ```
 

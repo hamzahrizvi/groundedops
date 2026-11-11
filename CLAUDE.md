@@ -20,9 +20,9 @@ Other traps when committing in this repo:
 
 ## Where the plan lives
 
-`PENDING.md` is the single source of what to do next. Its section "How to run
-the plan: sessions, not steps" says which steps each session does and on which
-model.
+`PENDING.md` is the single source of what to do next. On `main` it is the
+general product's plan; the Innovative Technology product line's plan is on
+`experimental/v17.3`.
 
 `PENDING.md` is also the product owner's diary: the PO edits it by hand and
 works through it too. Uncommitted changes to it may be the PO's, so keep

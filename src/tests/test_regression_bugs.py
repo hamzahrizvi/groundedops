@@ -15,15 +15,7 @@ from text_utils import (
 )
 
 
-# ── Bug: "MyConnect" / "MyCheckr" / "WiFi" mangled by camelCase fix ──────
-
-def test_camelcase_preserves_myconnect():
-    assert fix_camel_case("Open MyConnect App") == "Open MyConnect App"
-
-
-def test_camelcase_preserves_mycheckr():
-    assert fix_camel_case("Register the MyCheckr") == "Register the MyCheckr"
-
+# ── Bug: "WiFi" mangled by camelCase fix ─────────────────────────────────
 
 def test_camelcase_preserves_wifi():
     assert fix_camel_case("Connect to the WiFi network") == "Connect to the WiFi network"
@@ -449,23 +441,43 @@ def test_clarification_options_followup_offers_recent_topics_newest_first():
     assert opts == ["how to connect tablet to hub", "default login credentials"]
 
 
+def _catalogue_labels():
+    """The labels come from the catalogue: its products and their documents."""
+    from unittest.mock import patch
+    import catalog
+    cat = {"categories": [{"key": "p", "name": "Products", "products": [
+        {"key": "p_general", "name": "General (shared docs)"},
+        {"key": "hub", "name": "Hub"}, {"key": "x200", "name": "X200"},
+        {"key": "x200_mini", "name": "X200 Mini"}]}]}
+    owner = {"Hub Setup-v4.pdf": ["hub"], "X200 User Manual-v6.pdf": ["x200"],
+             "X200 Mini User Manual-v2.pdf": ["x200_mini"], "Shared.pdf": ["p_general"]}
+    return (patch.object(catalog, "catalog", lambda: cat),
+            patch.object(catalog, "product_for_source", lambda s: owner.get(s, [])))
+
+
 def test_clarification_options_in_domain_offers_product_labels_from_sources():
     from text_utils import build_clarification_options
     results = [
-        {"source": "MyConnect Environment-v4.pdf"},
-        {"source": "MyCheckr User Manual-v6.pdf"},
-        {"source": "MyCheckr Mini User Manual-v2.pdf"},
-        {"source": "MyConnect Environment-v4.pdf"},  # dup source
+        {"source": "Hub Setup-v4.pdf"},
+        {"source": "X200 User Manual-v6.pdf"},
+        {"source": "X200 Mini User Manual-v2.pdf"},
+        {"source": "Hub Setup-v4.pdf"},  # dup source
     ]
-    opts = build_clarification_options("ambiguous_in_domain", [], results)
-    assert opts == ["MyConnect", "MyCheckr", "MyCheckr Mini"]
+    a, b = _catalogue_labels()
+    with a, b:
+        opts = build_clarification_options("ambiguous_in_domain", [], results)
+    assert opts == ["Hub", "X200", "X200 Mini"]
 
 
-def test_clarification_options_mini_before_plain_mycheckr():
+def test_clarification_options_label_is_the_documents_own_product():
     from text_utils import _product_label_for_source
-    # "MyCheckr Mini" must not be mislabelled as plain "MyCheckr".
-    assert _product_label_for_source("MyCheckr Mini User Manual-v2.pdf") == "MyCheckr Mini"
-    assert _product_label_for_source("MyCheckr User Manual-v6.pdf") == "MyCheckr"
+    a, b = _catalogue_labels()
+    with a, b:
+        # "X200 Mini" must not be mislabelled as plain "X200".
+        assert _product_label_for_source("X200 Mini User Manual-v2.pdf") == "X200 Mini"
+        assert _product_label_for_source("X200 User Manual-v6.pdf") == "X200"
+        # A range's shared bucket is not a choice.
+        assert _product_label_for_source("Shared.pdf") is None
 
 
 def test_clarification_options_empty_when_nothing_concrete():

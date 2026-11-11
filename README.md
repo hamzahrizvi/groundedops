@@ -127,8 +127,8 @@ The hard part is deciding what "matches" means, and two attempts at
 deciding it automatically failed in production. Lexical matching only
 fired on near-verbatim repeats, leaving the FAQ effectively dead. A
 semantic matcher with a cross-encoder verifier then answered *"Does the
-MyCheckr have WiFi or Ethernet ports?"* with the curated answer to *"Does
-MyCheckr require an internet connection?"* — semantically adjacent,
+the X200 have WiFi or Ethernet ports?"* with the curated answer to *"Does
+the X200 require an internet connection?"* — semantically adjacent,
 factually opposite. The verifier was a passage-**relevance** ranker, for
 which a high score on that pair is correct: the texts genuinely are about
 the same topic. Relevance is not equivalence.
@@ -178,7 +178,7 @@ resolved / refused / handed-off / speed counts.
 
 > **Writing curated answers:** make them self-contained statements. "No,
 > instant results with no internet requirement" reads as a fragment
-> answering some other question. "MyCheckr does not require an internet
+> answering some other question. "The X200 does not require an internet
 > connection; processing is local and results are instant" reads
 > correctly on its own.
 
@@ -236,7 +236,7 @@ set `WIDGET_ALLOWED_ORIGINS`.
 
 Answers cite the page a fact came from and link to the original file:
 
-> **MyCheckr User Manual v7** — *pages 12, 14*
+> **X200 User Manual v7** — *pages 12, 14*
 > Download source
 
 This required capturing pages at parse time: text extraction previously
@@ -410,7 +410,7 @@ See [.env.example](.env.example) for the annotated full list.
 | `WIDGET_QUESTIONS_PER_SESSION` | `0` | Questions per conversation, 0 = unlimited. |
 | `WIDGET_TOKENS_PER_SESSION` | `0` | Tokens per conversation, 0 = unlimited. |
 | `SESSION_SECRET` | *(none)* | **Required.** Signs admin session tokens; sign-in refuses everything until it is set. `python -c "import secrets;print(secrets.token_hex(32))"` |
-| `ALLOWED_EMAIL_DOMAIN` | `innovative-technology.com` | Accounts may only be created for this domain. Blank allows any. |
+| `ALLOWED_EMAIL_DOMAIN` | (blank) | Accounts may only be created for this domain. Blank allows any. |
 | `SESSION_TTL_SECONDS` | `43200` | How long a signed-in session lasts (12h). |
 | `ACCOUNTS_PATH` | `accounts.json` | Account store. Gitignored, **not regenerable** — back it up. |
 | `ACCOUNT_REQUESTS_PATH` | `account_requests.json` | Pending self-enrolment requests. Contains staff email addresses and scrypt password hashes; root backups include it with the account store. |
@@ -461,7 +461,6 @@ dependency isn't installed.
 ```bash
 python3 run_tests.py        # no pytest required
 pytest tests/               # or, if you have pytest
-python test_queries.py      # end-to-end smoke test against a running server
 ```
 
 `tests/test_regression_bugs.py` locks in fixes for bugs found via

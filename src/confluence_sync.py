@@ -71,7 +71,7 @@ _FILE_TYPES = (".pdf", ".docx", ".txt")
 # hosts, page ids and attachment names never reach a customer's answer.
 # Listing the Confluence site itself (x.atlassian.net) marks its space public:
 # links to its pages and attached files are then kept too.
-LINK_HOSTS_DEFAULT = "innovative-technology.com, dropbox.com"
+LINK_HOSTS_DEFAULT = ""
 # A page with less text than this is a wrapper round its attachment or a
 # list of child pages, not a manual, and is not offered.
 _MIN_PAGE_TEXT = 200

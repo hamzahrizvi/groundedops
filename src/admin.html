@@ -2355,7 +2355,7 @@ function flashDocRow(name) {
 const OCR_WARNING =
   "OCR reads the page as a picture and guesses the characters.\n\n" +
   "• Numbers, part codes and units can come out wrong (1.O5 for 1.05, " +
-  "NV95 for NV9S).\n" +
+  "X2OO for X200).\n" +
   "• Tables are read as loose lines, not as rows and columns.\n" +
   "• Answers drawn from these pages are marked \"(OCR)\" in their sources " +
   "so readers know.\n\n" +
@@ -3028,7 +3028,7 @@ function ssoCard() {
       + "so the providers know where to send people back."));
 
     const spec = {
-      microsoft: { extra: "tenant", ph: "Directory (tenant) ID or domain, e.g. innovative-technology.com",
+      microsoft: { extra: "tenant", ph: "Directory (tenant) ID or domain, e.g. example.com",
         help: "Entra admin centre → App registrations → New registration "
           + "(single tenant, Web). Add the redirect URI below, then create a client secret." },
       google: { extra: "domain", ph: "Workspace domain (optional but recommended)",
@@ -3608,7 +3608,7 @@ function viewAdvanced() {
       + "product's documents (15/18 against 7/18). Answers take a little "
       + "longer (median 5.4s against 4.5s). It costs about 10x more: "
       + "~$0.006 per answer against ~$0.0006 (~$56 per 10,000 answers "
-      + "against ~$6; up to $0.024 for one NV200 Spectral answer). The "
+      + "against ~$6; up to $0.024 for one answer about a product with many manuals). The "
       + "cost grows as documents are added.",
       "Performance mode costs about 10x more per answer.\n\n"
       + "Each question sends the product's whole documentation to the AI: "
@@ -3640,8 +3640,8 @@ function viewAdvanced() {
   const salesCard = card("Price and buying questions",
     "Price, fees, ordering, stock and resellers — things no manual "
     + "contains, so a person is the honest answer. Questions across the "
-    + "range (“which validators run on 24V?”, “do you have "
-    + "anything that sorts coins?”) are technical and are always answered "
+    + "range (“which models run on 24V?”, “do you have "
+    + "anything waterproof?”) are technical and are always answered "
     + "from the product list and spec tables; this setting does not affect them.",
     el("label", { class: "flabel", style: "margin-top:14px" }, "How to handle them"),
     salesSel, salesReplyWrap,
@@ -4087,7 +4087,7 @@ function cfFileDialog(keys, after, opts = {}) {
   // Creating a product (and its range, if that is new too).
   const NEW = "__new__";
   // No range pre-chosen unless a product's name resembles this one: a wrong
-  // default ("Obsolete" in Coin Hoppers) is easier to miss than an empty one.
+  // default ("Obsolete" in Laptops) is easier to miss than an empty one.
   const rangeSel = el("select", { class: "input" },
     el("option", { value: "" }, "Choose a range"),
     (cache.catalog || []).map(c => el("option", { value: c.key }, c.name)),
@@ -5439,9 +5439,9 @@ let docFilter = { cat: "", prod: "" };
 // never leave a hidden document in a bulk Remove.
 let docSelected = new Set();
 
-// Products whose manuals keep naming another product: a CashGenic's manual
-// names the NV200 Spectral inside it, but the answers sit in the NV200's
-// manuals, which a CashGenic chat never searches until they are filed under
+// Products whose manuals keep naming another product: a kiosk's manual
+// names the X200 module inside it, but the answers sit in the X200's
+// manuals, which a kiosk chat never searches until they are filed under
 // it too. The scan reads every section (seconds), so it runs again only when
 // the document list changes -- an upload finishing, a refile -- not on every
 // render. "Not related" is remembered in this browser only.
@@ -5520,7 +5520,7 @@ function viewDocuments() {
   syncProductOptions();
 
   // A document can belong to more than one product (an installation guide
-  // covering the MyCheckr and the Mini). Extra products ride along in the
+  // covering the X200 and the X200 Mini). Extra products ride along in the
   // same header, comma-joined; the server tags every chunk with each and
   // files the source under each in the catalogue.
   const also = new Set();
@@ -5715,7 +5715,7 @@ function viewDocuments() {
   // docs are their own pinned-first group, same idea as viewGaps' scope
   // grouping.
   // A document can belong to SEVERAL products -- an installation guide
-  // covering the MyCheckr and the MyCheckr Mini belongs to both, and filing
+  // covering the X200 and the X200 Mini belongs to both, and filing
   // it under one meant the other product's visitors were never offered it.
   // A chip per product, because a multi-select is a control nobody can use
   // without being told to hold ctrl.
@@ -6825,7 +6825,7 @@ function viewGaps() {
   // Reloads from the server rather than filtering in the browser: grouping
   // needs the embedding model, and the scope list has to include keys that
   // are no longer catalogue products but still have questions filed under
-  // them (nv9st, coin_hoppers) -- the browser cannot know those.
+  // them (keys of deleted products) -- the browser cannot know those.
   const reload = async () => {
     try {
       const qs = "?sort=" + encodeURIComponent(gapFilter.sort)
@@ -7047,8 +7047,8 @@ function shortDate(iso) {
 /** Deleting a product, with its documents, answers and questions dealt
  *  with explicitly.
  *
- *  Deleting only the catalogue row is what produced the orphaned `nv9st`
- *  and `coin_hoppers` keys: real content behind a product that no longer
+ *  Deleting only the catalogue row is what produced the orphaned product
+ *  keys: real content behind a product that no longer
  *  exists, which this console cannot show because it builds every list
  *  FROM the catalogue. So the choice is put to the operator, with the
  *  actual counts in front of them rather than an abstract warning. */
@@ -7736,9 +7736,9 @@ function championPicker(p) {
 function viewCatalog() {
   loadObsSuggest();
   const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  const cName = el("input", { class: "input", type: "text", placeholder: "Coin hoppers" });
+  const cName = el("input", { class: "input", type: "text", placeholder: "Laptops" });
   const pCat = el("select", { class: "input" }, cache.catalog.map(c => el("option", { value: c.key }, c.name)));
-  const pName = el("input", { class: "input", type: "text", placeholder: "SMART Hopper" });
+  const pName = el("input", { class: "input", type: "text", placeholder: "Model X200" });
 
   const rows = cache.catalog.length ? cache.catalog.map(c =>
     el("div", { class: "card elev-sm", style: "margin-bottom:12px;padding:16px 20px 8px;gap:0" },
@@ -7766,7 +7766,7 @@ function viewCatalog() {
         : el("p", { class: "sec-hint", style: "margin:10px 0 10px" }, "No products in this range yet.")))
     : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
         el("b", {}, "No ranges yet"),
-        "A range groups related products \u2014 Coin hoppers, Note validators, Biometrics."))];
+        "A range groups related products \u2014 Laptops, Phones, Accessories."))];
 
   return [
     el("h1", {}, "Products"),
@@ -7778,7 +7778,7 @@ function viewCatalog() {
                 "data-tour": "cat-range", "data-sec": "Add a range or product" },
       el("div", { class: "sec-title" }, "Add a range or product"),
       el("div", { class: "sec-hint" },
-        "A range is a family, such as Coin hoppers. A product sits inside one, "
+        "A range is a family, such as Laptops. A product sits inside one, "
         + "and is what documents are filed against."),
       el("div", { class: "row", style: "align-items:flex-end" },
         el("div", {}, el("label", { class: "flabel" }, "New range"), cName),
@@ -7848,7 +7848,7 @@ function obsoleteRow(p) {
         el("div", {}, el("label", { class: "flabel" }, "Obsolete since"), inp("month", "date")),
         el("div", {}, el("label", { class: "flabel" }, "Service and repairs until (optional)"), inp("month", "service_end")),
         el("div", { style: "flex:2" }, el("label", { class: "flabel" }, "Which units, if not all"), inp("text", "versions", "e.g. Blue label, made before 2016")),
-        el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Replaced by (optional)"), inp("text", "replacement", "e.g. SMART Hopper 4"))),
+        el("div", { style: "flex:1" }, el("label", { class: "flabel" }, "Replaced by (optional)"), inp("text", "replacement", "e.g. Model X300"))),
       el("details", { style: "margin-top:10px" }, el("summary", { style: "cursor:pointer;font-weight:600" }, "Advanced"),
         tick("block_answers", "Stop the chatbot answering about it (internal only)",
              "From the date above, its documents are left out of every answer and a question about it is told it is obsolete, since when, and to contact support. Documents it shares with a current product still answer for that product."),
@@ -7898,7 +7898,7 @@ function obsoleteRow(p) {
 }
 
 /** Product families (families.py): look-alike products customers mix up.
- *  When a question names the family but not the model ("my smart hopper"),
+ *  When a question names the family but not the model ("my X200"),
  *  the chat asks which one, with each member's picture and what tells it
  *  apart. Found and filled in automatically after an upload; everything
  *  here can be changed, and what is typed here is never overwritten. */
@@ -7914,7 +7914,7 @@ function familiesPanel() {
       el("div", { class: "sec-title" }, "Product families"),
       el("div", { class: "sec-hint" },
         "Products customers mix up. When someone names the family but not the model "
-        + "(“my smart hopper”, “the ICU”), the chat asks which one they have, "
+        + "(“my X200”, “the router”), the chat asks which one they have, "
         + "showing each model's picture and how to tell it apart, before it answers. "
         + "Each model answers from the product its documents are filed under; several models may share one."),
       famDraft === null ? el("p", { class: "sec-hint" }, "Loading…") : famDraft.map(famCard),
@@ -7985,7 +7985,7 @@ function familiesPanel() {
         } }, "Choose picture")),
       el("div", { style: "flex:1;display:flex;flex-direction:column;gap:6px" },
         el("div", { class: "row", style: "gap:8px" },
-          el("input", { class: "input", placeholder: "Model name, e.g. SMART Hopper 3", value: m.name, oninput: e => { m.name = e.target.value; } }),
+          el("input", { class: "input", placeholder: "Model name, e.g. X200 Pro", value: m.name, oninput: e => { m.name = e.target.value; } }),
           el("input", { class: "input", placeholder: "Other names (comma-separated)", value: (m.aliases || []).join(", "), oninput: e => { m.aliases = list(e.target.value); } }),
           el("select", { class: "input", onchange: e => { m.product = e.target.value; } },
             el("option", { value: "" }, "Answers from…"),
@@ -8529,7 +8529,7 @@ function viewTest() {
       });
       setGhost(replies[0] || null);
 
-      // "Which SMART Hopper do you have?" (families.py): the widget's cards,
+      // "Which X200 do you have?" (families.py): the widget's cards,
       // so the test chat shows what a customer sees.
       const fams = r.family_options || [];
       if (fams.length) {
@@ -8742,7 +8742,7 @@ const tourStepsByView = {
   ],
   catalog: [
     { ref: "cat-range", title: "Start with a range",
-      text: "A range is a family of products \u2014 Coin hoppers, Note validators. It is the first thing a visitor picks in the widget." },
+      text: "A range is a family of products \u2014 Laptops, Phones. It is the first thing a visitor picks in the widget." },
     { ref: "cat-product", title: "Then add products",
       text: "Every product added here becomes something the widget can be asked about, and something a document can be filed against." },
     { ref: "cat-list", title: "Your catalogue",
