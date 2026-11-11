@@ -119,12 +119,14 @@ def reset(token) -> None:
             pass
 
 
-def mark(stage: str, note: str | None = None) -> None:
+def mark(stage: str, note: str | None = None, **live) -> None:
     """Record that the turn reached `stage`.
 
     `note` is the evidence: the score that decided it, how many passages
     survived, which provider answered. It is what turns "it refused" into
     "it refused because the best match scored 0.204".
+
+    `live` fields go to the listener only (the widget's wait line), never into the stored trace.
     """
     try:
         cur = _current.get()
@@ -139,7 +141,7 @@ def mark(stage: str, note: str | None = None) -> None:
         cur["stages"].append(entry)
         lis = _listener.get()
         if lis is not None:
-            lis[0].call_soon_threadsafe(lis[1], entry)
+            lis[0].call_soon_threadsafe(lis[1], {**entry, **live} if live else entry)
     except Exception:
         pass
 

@@ -3449,6 +3449,23 @@ def _build_sources(results: list[dict], picture: tuple[str, str] | None = None) 
     return out
 
 
+def _found_pages(chunks: list[dict], limit: int = 3) -> list[dict]:
+    """D-20261109-05: the documents and pages a turn is reading, for the
+    widget's wait line: [{"source", "pages"}], best-ranked document first,
+    at most `limit` documents and five pages each. Called on the passages
+    the citation chips are built from, after _drop_hidden."""
+    found: dict[str, list[int]] = {}
+    for c in chunks:
+        src = c.get("source")
+        if not src or (src not in found and len(found) >= limit):
+            continue
+        pages = found.setdefault(src, [])
+        pg = c.get("page")
+        if isinstance(pg, int) and pg not in pages:
+            pages.append(pg)
+    return [{"source": s, "pages": sorted(p)[:5]} for s, p in found.items()]
+
+
 def _product_keys_in(results, limit: int) -> list[str]:
     """The individual products a result set spans, as KEYS.
 
@@ -5026,7 +5043,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # passage filed only under a blocked product is dropped here.
         return chunks if payload.source_filter else _drop_hidden(chunks)
     top_chunks = _completed(top_chunks)
-    ptrace.mark("procedures", f"{len(top_chunks)} passage(s) in hand")
+    ptrace.mark("procedures", f"{len(top_chunks)} passage(s) in hand", found=_found_pages(top_chunks))
 
     # PERFORMANCE MODE (S29): a product chat also reads the product's whole
     # documentation, as a <documentation> block ahead of everything else

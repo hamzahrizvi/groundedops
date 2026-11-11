@@ -21,12 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_live  # noqa: E402
 
 client = TestClient(main.app)
+FOUND = [{"source": "NV9 Manual.pdf", "pages": [14, 15]}]
 ANSWER = ".NET is not needed. Is it quick?\n?Yes.\n| a | b |\n|---|---|"
 
 
 def _fake_pipeline(payload, x_user_id=None):
     for stage in ("condense", "retrieve", "rerank", "procedures", "generate", "ground"):
-        ptrace.mark(stage)
+        ptrace.mark(stage, found=FOUND) if stage == "procedures" else ptrace.mark(stage)
         time.sleep(0.03)
     return {"answer": ANSWER, "sources": [], "role": "fast", "request_id": "r811"}
 
@@ -81,3 +82,30 @@ def test_a_mark_outside_a_listener_costs_nothing():
         assert ptrace.snapshot()["stages"][0]["id"] == "retrieve"
     finally:
         ptrace.reset(tok)
+
+
+def test_the_pages_found_ride_on_the_procedures_status():
+    statuses = [d for k, d in _events() if k == "status"]
+    for d in statuses:
+        if d["id"] == "procedures":
+            assert d["found"] == FOUND
+        else:
+            assert "found" not in d, d
+
+
+def test_found_is_not_kept_in_the_trace():
+    tok = ptrace.start()
+    try:
+        ptrace.mark("procedures", "x", found=FOUND)
+        assert "found" not in ptrace.snapshot()["stages"][0]
+    finally:
+        ptrace.reset(tok)
+
+
+def test_found_pages_lists_three_documents_in_rank_order():
+    chunks = [{"source": "a.pdf", "page": 3}, {"source": "a.pdf", "page": 1},
+              {"source": "a.pdf", "page": 3}, {"source": "b.pdf", "page": None},
+              {"source": "c.pdf", "page": "7"}, {"source": "d.pdf", "page": 2}]
+    assert main._found_pages(chunks) == [{"source": "a.pdf", "pages": [1, 3]},
+                                         {"source": "b.pdf", "pages": []},
+                                         {"source": "c.pdf", "pages": []}]
