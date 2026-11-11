@@ -1185,11 +1185,12 @@ def register(app, answer_query, draft_enquiry=None):
             # then compared (stepwise.py). Only where the model is reachable
             # and this chat is under its cap, so the split call is never made
             # for a question that would be refused.
-            steps = []
+            steps, gate = [], None
+            caller = _caller(request, payload.visitor_id)
             if (stepwise.enabled() and payload.session_id
                     and not payload.faq_id and not payload.skip_faq
                     and payload.effort in (None, "standard")
-                    and (_caller(request, payload.visitor_id)["tier"] != "anonymous"
+                    and (caller["tier"] != "anonymous"
                          or quota.anon_llm_enabled())):
                 keys = await run_in_threadpool(stepwise.products, payload.q)
                 from main import _product_names
@@ -1197,7 +1198,16 @@ def register(app, answer_query, draft_enquiry=None):
                 if (keys and stepwise.worth_it(payload.q, result, names)
                         and (await run_in_threadpool(
                             quota.session_check, payload.session_id))["allowed"]):
-                    steps = await run_in_threadpool(stepwise.plan, payload.q)
+                    # D-20261109-11: the split and the comparison are two model
+                    # calls made for this visitor: one standard credit, reserved
+                    # before the split, given back below unless a comparison is
+                    # shown. No credit left, no split.
+                    gate = await run_in_threadpool(
+                        quota.check, caller, quota.EFFORT["standard"]["credits"], True)
+                    if gate["allowed"]:
+                        steps = await run_in_threadpool(stepwise.plan, payload.q)
+                    else:
+                        gate = None
             shown = []   # (name, result) of each part sent, unflagged
             for i, (key, name, own_q) in enumerate(steps):
                 yield sse("status", {"stage": f"Looking up the {name}",
@@ -1232,12 +1242,12 @@ def register(app, answer_query, draft_enquiry=None):
 
             # Both halves answered: the comparison is written from them, so
             # it cannot contradict what the visitor just read. No sources of
-            # its own (each part shows its pages) and no credit or chat turn:
-            # the normal answer it replaces counted both. Anything less, and
+            # its own (each part shows its pages) and no chat turn of its own;
+            # its credit was reserved before the split. Anything less, and
             # the normal answer stands.
             if len(shown) == 2:
                 text = await run_in_threadpool(
-                    stepwise.compare, payload.q,
+                    stepwise.compare, [s[2] for s in steps],
                     [(n, (r.get("answer") or "").strip()) for n, r in shown])
                 if text:
                     import pipeline_trace
@@ -1251,7 +1261,12 @@ def register(app, answer_query, draft_enquiry=None):
                     last = shown[-1][1]
                     result = {"answer": "### Comparison\n\n" + text, "role": "comparison",
                               "request_id": rid, "sources": [], "flagged": False,
-                              "quota": last.get("quota"), "session": last.get("session")}
+                              "session": last.get("session")}
+            if gate:
+                if result.get("role") != "comparison":
+                    await run_in_threadpool(lambda: quota.consume(
+                        caller, -quota.EFFORT["standard"]["credits"], win=gate["window"]))
+                result = {**result, "quota": await run_in_threadpool(quota.status, caller)}
 
             answer = (result.get("answer") or "").strip()
             yield sse("meta", {k: result.get(k) for k in
