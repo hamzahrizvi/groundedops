@@ -216,8 +216,8 @@ def resolve(text: str, history: list | None = None, product: str | None = None,
     """What the families make of one message.
 
     ask: the family to ask about, with `offer` (member indexes), when the
-    message names it only generically, the chat's product is not exactly
-    one of its members, no earlier turn chose, and the message is not a
+    message names it only generically, the chat has no product or one several
+    of its members share, the message names no product outside the family, no earlier turn chose, and the message is not a
     comparison (`named`: catalogue products it names, two or more).
     products: the catalogue products the members it settles on stand for.
     """
@@ -231,10 +231,16 @@ def resolve(text: str, history: list | None = None, product: str | None = None,
         if not got and not after:
             got = _chosen_before(fam, history)
             member_products = [m.get("product") for m in ms]
-            # Two products named is a comparison ("SH3 vs the SMART Coin
-            # System"), answered for what it names.
-            settled = (product and member_products.count(product) == 1) or \
-                len(set(named)) >= 2
+            # D-20261107-02: asked only when nothing picks the model. A chat
+            # on a product outside this family is about that product (the
+            # family is named in passing, "a DA3 updating an NV9", or is that
+            # product's own range the list does not hold, a Compact SMART
+            # Coin System chat); a chat on exactly one member has it. A
+            # product the message names that is no member is what it asks
+            # about, and two named is a comparison. Asked: no chat product,
+            # or one several members share (an NV200S chat: which NV200?).
+            settled = (product and member_products.count(product) < 2) or \
+                len(set(named)) >= 2 or any(k not in member_products for k in named)
             if not got and ask is None and not settled:
                 ask = {"family": fam, "offer": _offered(fam, product)}
         prods += [ms[i]["product"] for i in got if ms[i].get("product")]
