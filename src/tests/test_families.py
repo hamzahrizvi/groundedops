@@ -57,6 +57,25 @@ def test_the_chats_own_product_settles_it_unless_it_is_shared():
     assert names == ["NV9USB+", "NV11"], names
 
 
+def test_a_chat_on_another_product_is_not_asked_about():
+    # D-20261107-02: the chat's product is no member of the family it names:
+    # named in passing, or the chat product's own range the list lacks.
+    for q, p in (("is a g-scs ok in a kiosk at 1 degree?", "global_smart_coin_system"),
+                 ("how do i split the compact coin system?", "compact_smart_coin_system"),
+                 ("da3 went red halfway through updating an NV9", "da3"),
+                 ("mine flashes 1 long 1 short, on his nv9 that means the path is open", "nv10usb"),
+                 ("red 5 flashes on the plain hopper, not the coin system", "smart_hopper_3"),
+                 ("which calibration paper for an NV200 Spectral?", "da3"),
+                 ("does the icu fit beside the mycheckr", "mycheckr")):
+        assert not F.resolve(q, product=p)["ask"], (q, p)
+    # A product the message names that is no member is what it asks about.
+    assert not F.resolve("da3 went red updating an NV9", named=["da3"])["ask"]
+    # Still asked: nothing picked or named, or a chat product several share.
+    assert _asked(F.resolve("nv9 calibration paper")) == "NV9"
+    assert _asked(F.resolve("nv200 power supply", product="nv200s")) == "NV200"
+    assert _asked(F.resolve("nv200 power supply", named=["nv200s"])) == "NV200"
+
+
 def test_a_pick_and_a_general_question_are_answered():
     asked = [{"q": "nv11 weight", "a": "Which NV9 do you have? ... " + F.MARKER}]
     # Straight after we asked, a generic member name ("NV11" is inside
