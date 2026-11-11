@@ -1168,8 +1168,11 @@ def register(app, answer_query, draft_enquiry=None):
                 line = PROGRESS_LINES.get(stage.get("id"))
                 if line and line not in sent:
                     sent.add(line)
-                    yield sse("status", {"stage": line, "id": stage["id"],
-                                         "at_ms": stage.get("at_ms")})
+                    data = {"stage": line, "id": stage["id"], "at_ms": stage.get("at_ms")}
+                    if stage.get("found"):
+                        data["found"] = [{"source": str(f.get("source") or ""), "pages": [p for p in (f.get("pages") or []) if isinstance(p, int)]}
+                                         for f in stage["found"][:3]]
+                    yield sse("status", data)
             try:
                 box["result"] = task.result()
             except HTTPException as e:
