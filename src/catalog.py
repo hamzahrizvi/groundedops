@@ -352,13 +352,58 @@ def obsolete_of(product_key: str | None) -> dict | None:
     return dict(o, key=product_key, name=p["name"])
 
 
+# The blocking rules {product key: obsolete month} from the last catalogue
+# that could be read (D-20261107-08). None until the first read.
+_last_block_rules = None
+
+
+def _blocked_copy_path() -> str:
+    return _PATH + ".blocked"
+
+
+def _block_rules(data) -> dict:
+    """{product key: obsolete month} for products whose answers are blocked.
+    Raises on anything that is not a catalogue."""
+    return {p["key"]: (p["obsolete"].get("date") or "9999")
+            for c in data["categories"] for p in c.get("products", [])
+            if (p.get("obsolete") or {}).get("block_answers")}
+
+
 def blocked_products() -> set[str]:
     """Products whose documents may answer nobody: obsolete, date come,
-    answers blocked."""
+    answers blocked.
+
+    A catalogue file that exists but cannot be read keeps blocking what the
+    last readable one blocked -- from memory, or after a restart from the
+    copy kept beside it -- never the seed's "nothing" (D-20261107-08). A
+    missing file is a first run: the seed blocks nothing."""
+    global _last_block_rules
+    data = jsonstore.load(_PATH, None, label="catalogue")
+    rules = None
+    if data is None and not os.path.exists(_PATH):
+        rules = {}
+    elif isinstance(data, dict) and isinstance(data.get("categories"), list):
+        try:
+            rules = _block_rules(data)
+        except Exception:
+            rules = None
+    if rules is not None:
+        if rules != _last_block_rules:
+            _last_block_rules = rules
+            try:
+                jsonstore.save(_blocked_copy_path(), rules, label="blocked products")
+            except Exception as exc:
+                logger.warning("could not keep a copy of the blocked products: %s", exc)
+    else:
+        rules = _last_block_rules
+        if rules is None:
+            rules = jsonstore.load(_blocked_copy_path(), {}, label="blocked products")
+            if not isinstance(rules, dict):
+                rules = {}
+        logger.warning("catalogue unreadable: still blocking %s, as when it was "
+                       "last readable", sorted(rules) or "nothing")
     now = _this_month()
-    return {p["key"] for c in _load()["categories"] for p in c.get("products", [])
-            if (p.get("obsolete") or {}).get("block_answers")
-            and (p["obsolete"].get("date") or "9999") <= now}
+    return {k for k, d in rules.items() if str(d) <= now}
 
 
 def month_name(ym: str) -> str:

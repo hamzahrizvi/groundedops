@@ -59,6 +59,7 @@ faq_store.json
 faq_gaps.json
 gaps_store.json
 catalog_config.json
+catalog_config.json.blocked
 product_families.json
 confluence_sync.json
 internal_sources.json
