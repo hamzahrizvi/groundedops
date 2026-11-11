@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
+import widget_api
 import main
 import quota
 from fastapi.testclient import TestClient
@@ -44,7 +45,7 @@ def test_keys_and_provider_in_the_widget_body_are_not_used():
          patch.object(main, "log_interaction", lambda *a, **k: None), \
          patch.object(main, "add_to_memory", lambda *a, **k: None):
         r = TestClient(main.app).post("/widget/ask", json={
-            "q": "How do I clear a jam?", "session_id": sid,
+            "q": "How do I clear a jam?", "session_id": sid, "delete_token": widget_api.delete_token(sid),
             "deepseek_api_key": "sk-caller-ds", "openai_api_key": "sk-caller-oa",
             "anthropic_api_key": "sk-caller-an",
             "force_provider": "caller-provider", "force_model": "caller-model"},
@@ -67,10 +68,12 @@ def test_the_quota_gates_both_widget_question_routes():
     with patch.object(quota, "check", return_value=denied), \
          patch.object(main, "_traced_query", lambda *a, **k: calls.append(1)):
         client = TestClient(main.app)
-        r = client.post("/widget/ask", json={"q": "hello there", "session_id": sid},
+        r = client.post("/widget/ask", json={"q": "hello there", "session_id": sid,
+                                                 "delete_token": widget_api.delete_token(sid)},
                         headers=_hdr(sid))
         assert r.status_code == 429, r.text
-        r = client.post("/widget/ask/stream", json={"q": "hello there", "session_id": sid},
+        r = client.post("/widget/ask/stream", json={"q": "hello there", "session_id": sid,
+                                                 "delete_token": widget_api.delete_token(sid)},
                         headers=_hdr(sid))
         assert "event: error" in r.text and "429" in r.text, r.text
     assert not calls

@@ -35,7 +35,7 @@ def _run(replies):
 
 def _post(uid, effort, sid="s1", q="How do I reset the unit?"):
     main.APP_STATE["ready"] = True
-    r = client.post("/widget/ask", json={"q": q, "session_id": sid, "product": "nv9",
+    r = client.post("/widget/ask", json={"q": q, "session_id": sid, "delete_token": widget_api.delete_token(sid), "product": "nv9",
                                          "effort": effort},
                     headers={"Authorization": "Bearer " + run_live.member_token(uid)})
     assert r.status_code == 200, r.text
@@ -117,7 +117,7 @@ def test_effort_widens_the_prompt():
 
 def _post_raw(uid, effort, q, sid="cap-chat"):
     main.APP_STATE["ready"] = True
-    return client.post("/widget/ask", json={"q": q, "session_id": sid, "product": "nv9",
+    return client.post("/widget/ask", json={"q": q, "session_id": sid, "delete_token": widget_api.delete_token(sid), "product": "nv9",
                                             "effort": effort},
                        headers={"Authorization": "Bearer " + run_live.member_token(uid)})
 

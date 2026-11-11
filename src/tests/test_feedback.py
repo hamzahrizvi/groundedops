@@ -125,8 +125,12 @@ def test_asking_with_a_quoted_chat_id_gives_no_proof_to_rate_it():
         assert r.status_code == 200
         s = _guest_ask("/widget/ask/stream", sid)
         assert tok not in r.text and tok not in s.text
-        assert "rating_ticket" not in r.json() and "delete_token" not in r.json()
-        for proof in ("", r.json().get("rating_ticket") or "", r.json().get("request_id") or ""):
+        # D-20261108-01: the quoted id is answered in a fresh chat; the reply
+        # carries that chat's own token, never one for the quoted id.
+        assert "rating_ticket" not in r.json()
+        assert r.json().get("session_id") not in (None, sid)
+        for proof in ("", r.json().get("rating_ticket") or "", r.json().get("request_id") or "",
+                      r.json().get("delete_token") or ""):
             assert _rate(sid, 1, "replaced", token=proof).status_code == 403
         assert sid not in feedback_store.jsonstore.load(feedback_store.RATINGS_PATH, {})
     finally:

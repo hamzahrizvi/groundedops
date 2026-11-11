@@ -35,7 +35,7 @@ def _events(q="How long is the warranty?", sid="live-811"):
     main.APP_STATE["ready"] = True
     with patch.object(main, "query_any_language", _fake_pipeline), \
          patch.object(main, "log_interaction", lambda *a, **k: None):
-        r = client.post("/widget/ask/stream", json={"q": q, "session_id": sid},
+        r = client.post("/widget/ask/stream", json={"q": q, "session_id": sid, "delete_token": widget_api.delete_token(sid)},
                         headers={"Authorization": "Bearer " + run_live.member_token(sid)})
     assert r.status_code == 200, r.text
     out = []

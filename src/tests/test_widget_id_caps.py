@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 client = TestClient(main.app)
 LONG = "x" * 10000
-ASK_FIELDS = ("session_id", "visitor_id", "product", "category", "faq_id", "language", "effort")
+ASK_FIELDS = ("session_id", "delete_token", "visitor_id", "product", "category", "faq_id", "language", "effort")
 
 
 def test_widget_minted_values_pass_the_models():

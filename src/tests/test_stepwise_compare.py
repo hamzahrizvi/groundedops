@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
+import widget_api
 import main
 import stepwise
 from fastapi.testclient import TestClient
@@ -61,7 +62,7 @@ def _events(steps, compare=_fake_compare, first=WHICH):
          patch.object(stepwise, "compare", compare), \
          patch.object(stepwise, "record", lambda *a: recorded.append(a)):
         r = client.post("/widget/ask/stream",
-                        json={"q": Q, "session_id": sid},
+                        json={"q": Q, "session_id": sid, "delete_token": widget_api.delete_token(sid)},
                         headers={"Authorization": "Bearer " + run_live.member_token(sid)})
     assert r.status_code == 200, r.text
     out = []

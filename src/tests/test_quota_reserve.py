@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
+import widget_api
 import main
 import quota
 from fastapi.testclient import TestClient
@@ -33,7 +34,7 @@ def _fresh_db():
 
 def _post(uid, expect=200):
     main.APP_STATE["ready"] = True
-    r = client.post("/widget/ask", json={"q": "How do I reset the unit?", "session_id": "s1",
+    r = client.post("/widget/ask", json={"q": "How do I reset the unit?", "session_id": "s1", "delete_token": widget_api.delete_token("s1"),
                                          "product": "nv9", "effort": "standard"},
                     headers={"Authorization": "Bearer " + run_live.member_token(uid)})
     assert r.status_code == expect, r.text

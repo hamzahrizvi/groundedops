@@ -280,7 +280,8 @@
   // D-20261104-08: just before a chat's first question the server names the
   // chat and hands back the token that can delete it; the id alone, which
   // the visitor may quote to support, cannot. A chat that has already asked
-  // (or a failed call) keeps its id and has no token: support deletes it.
+  // (or a failed call) has no token; its next answer starts a server chat and
+  // hands one back (D-20261108-01).
   function ensureChat() {
     var asked = state.messages.some(function (m) { return m.role === "user"; });
     if (state.deleteToken || asked) return Promise.resolve();
@@ -2333,12 +2334,14 @@
     var headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["Authorization"] = "Bearer " + cfg.token;
 
+    var chat = state;
     ready.then(function () { return fetch(cfg.api + "/widget/ask/stream", {
       method: "POST",
       headers: headers,
       body: JSON.stringify({
         q: q,
         session_id: state.sessionId,
+        delete_token: state.deleteToken,
         visitor_id: visitorId(),
         effort: opts.effort || (quotaState && quotaState.ai_available ? "standard" : "faq_only"),
         product: state.product ? state.product.key : null,
@@ -2376,6 +2379,14 @@
         // served with no re-matching. "Something else" logs a FAQ gap and
         // answers from the documents instead.
         if (d.quota) quotaState = d.quota;
+        // D-20261108-01: an id the server could not prove (no token: /widget/chat
+        // failed, or a chat saved before tokens) was answered in a fresh chat;
+        // carry on in it so follow-ups, votes, rating and delete work.
+        if (chat === state && d.session_id && d.delete_token) {
+          state.sessionId = d.session_id;
+          state.deleteToken = d.delete_token;
+          save();
+        }
 
         // Backend says a full answer needs an account.
         if (d.needs_sign_in) {
