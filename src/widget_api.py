@@ -73,6 +73,8 @@ Transcript = Annotated[list[dict[str, _TurnValue]], Field(max_length=50)]
 class AskRequest(BaseModel):
     q: str = Field(..., min_length=1, max_length=MAX_QUESTION_CHARS)
     session_id: str | None = Field(None, max_length=MAX_ID_CHARS)
+    # D-20261108-01: the token /widget/chat gave with this id.
+    delete_token: str | None = Field(None, max_length=MAX_ID_CHARS)
     visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)
     product: str | None = Field(None, max_length=MAX_ID_CHARS)
     category: str | None = Field(None, max_length=MAX_ID_CHARS)
@@ -240,8 +242,9 @@ def erase_sessions(session_ids) -> int:
 def delete_token(session_id: str) -> str:
     """D-20261104-08: proof that the caller is the browser that started this
     chat: /widget/forget and /widget/rating (D-20261106-11) both require it.
-    An HMAC of the id under the server's session secret, handed out only by
-    /widget/chat for an id the server itself chose, so the id alone (which a
+    An HMAC of the id under the server's session secret, handed out by
+    /widget/chat, or by an ask that started a fresh chat (D-20261108-01),
+    only for an id the server itself chose, so the id alone (which a
     visitor quotes to support) deletes or rates nothing. '' when no secret is set;
     /widget/forget then refuses every visitor delete."""
     import keystore
@@ -250,6 +253,31 @@ def delete_token(session_id: str) -> str:
         return ""
     return hmac.new(secret.encode(), b"widget-forget|" + session_id.encode(),
                     hashlib.sha256).hexdigest()
+
+
+def _own_chat(payload, request):
+    """D-20261108-01: the ask routes act on a chat id only with the token
+    /widget/chat gave for it, the proof /widget/forget and /widget/rating
+    already ask for. An id without it (quoted, guessed, or from an old cached
+    widget) gets a fresh server-chosen chat instead of an error, so it adds
+    nothing to that chat and spends none of its caps. Kept as named: no id;
+    a comparison part (its id derives from an already checked one); no
+    SESSION_SECRET (no chat can carry a proof then); a test-prefixed id from
+    this box or the LAN (run_live --path widget, D-20261008-14's rule)."""
+    sid = payload.session_id
+    if not sid or stepwise.PART.get():
+        return payload
+    expected = delete_token(sid)
+    local = is_local_caller(request)
+    pipeline_trace.set_local_caller(local)
+    if (not expected
+            or hmac.compare_digest(expected.encode(), (payload.delete_token or "").encode())
+            or (local and pipeline_trace.origin_for(sid, "widget") != "widget")):
+        return payload
+    fresh = str(uuid.uuid4())
+    logger.info("widget ask: a chat id came without its token; started a fresh chat")
+    return payload.model_copy(update={"session_id": fresh,
+                                      "delete_token": delete_token(fresh)})
 
 
 # 8.11: what the visitor is told while the pipeline runs. A stage is marked
@@ -659,6 +687,16 @@ def register(app, answer_query, draft_enquiry=None):
 
     @router.post("/ask")
     async def widget_ask(payload: AskRequest, request: Request):
+        asked = payload.session_id
+        payload = _own_chat(payload, request)
+        result = await _widget_ask(payload, request)
+        if payload.session_id != asked:
+            # The fresh chat's id and token, so the widget carries on in it.
+            result = result | {"session_id": payload.session_id,
+                               "delete_token": payload.delete_token}
+        return result
+
+    async def _widget_ask(payload: AskRequest, request: Request):
         # D-20261008-14: a test session prefix counts only from the box or the
         # LAN. Set in this request's context; run_in_threadpool copies it into
         # the pipeline, and /ask/stream runs this handler in its own copy.
@@ -1045,11 +1083,9 @@ def register(app, answer_query, draft_enquiry=None):
         Not tied to a remembered answer like /feedback: a guest's chat is
         curated FAQs only and never lands in _RECENT_ANSWERS, and guests are
         most visitors. A rating needs the delete token /widget/chat gave the
-        browser that started this chat (403 without it). No answer reply
-        carries a per-chat proof, because /widget/ask takes any chat id the
-        caller names; so a quoted or made-up id cannot replace a rating or
-        push real ones out. The daily limit (quota "rating") and RATINGS_MAX
-        stay as backstops.
+        browser that started this chat (403 without it), so a quoted or
+        made-up id cannot replace a rating or push real ones out. The daily
+        limit (quota "rating") and RATINGS_MAX stay as backstops.
         """
         expected = delete_token(payload.session_id)
         if not expected or not hmac.compare_digest(expected.encode(),
@@ -1093,6 +1129,10 @@ def register(app, answer_query, draft_enquiry=None):
         factored out first. That refactor touches the paid path, so it is not
         something to do unverified.
         """
+        asked = payload.session_id
+        payload = _own_chat(payload, request)
+        new_chat = ({"session_id": payload.session_id, "delete_token": payload.delete_token}
+                    if payload.session_id != asked else {})
         from fastapi.responses import StreamingResponse
         import json as _json
 
@@ -1243,7 +1283,7 @@ def register(app, answer_query, draft_enquiry=None):
                                 "clarification_options", "family_options",
                                 "suggested_replies",
                                 "flagged", "quota", "session", "deep_done")}
-                      | {"product_options": _public_product_options(result.get("product_options"))})
+                      | {"product_options": _public_product_options(result.get("product_options"))} | new_chat)
 
             # Whole sentences, not tokens: a sentence is the unit the
             # grounding gate verifies, so releasing anything smaller would

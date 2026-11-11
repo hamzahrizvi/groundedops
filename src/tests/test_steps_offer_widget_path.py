@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import _harness  # noqa: F401 -- stubs and the test token secret first
+import widget_api
 import main
 from fastapi.testclient import TestClient
 
@@ -27,7 +28,7 @@ def _ask(q, sid):
     with patch.object(main, "_steps_answer", return_value=STEPS), \
          patch.object(main, "log_interaction", lambda *a, **k: None), \
          patch.object(main, "add_to_memory", lambda *a, **k: None):
-        r = client.post("/widget/ask", json={"q": q, "session_id": sid},
+        r = client.post("/widget/ask", json={"q": q, "session_id": sid, "delete_token": widget_api.delete_token(sid)},
                         headers={"Authorization": "Bearer " + run_live.member_token(sid)})
     assert r.status_code == 200, r.text
     return r.json()

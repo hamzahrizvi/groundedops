@@ -41,7 +41,8 @@ def test_a_real_widget_answer_can_be_voted_on():
     with patch.object(main, "_steps_answer", return_value="**Step 1: Do it**"), \
          patch.object(main, "log_interaction", lambda *a, **k: None), \
          patch.object(main, "add_to_memory", lambda *a, **k: None):
-        r = client.post("/widget/ask", json={"q": "Yes, show me the steps", "session_id": sid},
+        r = client.post("/widget/ask", json={"q": "Yes, show me the steps", "session_id": sid,
+                              "delete_token": widget_api.delete_token(sid)},
                         headers={"Authorization": "Bearer " + run_live.member_token(sid)})
     rid = r.json()["request_id"]
     assert rid, "the widget answer carries its request_id"
