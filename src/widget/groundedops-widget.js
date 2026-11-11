@@ -447,7 +447,7 @@
     ".go-b code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:rgba(0,0,0,.06);padding:.1em .32em;border-radius:3px}" +
     ".go-b.usr{background:#2f3a45;color:#fff;border-bottom-right-radius:5px}" +
     ".go-b.warn{background:#fdf6e7;border:1px solid #e8d9b0}" +
-    ".go-status{font-size:12.5px;color:var(--mut);display:flex;align-items:center;gap:7px;padding:2px 0}" +
+    ".go-status{font-size:12.5px;color:var(--mut);display:flex;flex-wrap:wrap;align-items:center;gap:7px;padding:2px 0}" +
     // Waiting: three dots in the accent colour bob in turn, and a light sweep
     // runs across the wait line, so a long answer still looks alive.
     ".go-dots{display:inline-flex;gap:3px;padding:0 2px}" +
@@ -461,6 +461,7 @@
     // The wait line fades in rather than snapping to the next string. An
     // instant swap of one short phrase for another reads as a flicker.
     ".go-elapsed{margin-left:auto;font-variant-numeric:tabular-nums;font-size:11.5px}" +
+    ".go-found{flex-basis:100%;padding-left:22px;font-size:11.5px;color:var(--mut)}" +
     ".go-waitin{animation:go-waitfade .5s ease}" +
     "@keyframes go-waitfade{from{opacity:.25}to{opacity:1}}" +
     "@media (prefers-reduced-motion:reduce){.go-waitin{animation:none}}" +
@@ -1338,6 +1339,16 @@
    * being cleared by hand: the status line is removed on an answer, on a
    * failure and on a reset, and one missed clear would leave a detached
    * node ticking for the life of the page. */
+  /* D-20261109-05: a quick answer shows nothing extra (finding: under 4 s);
+   * past this the wait line also lists the pages found. */
+  var FOUND_AFTER = 4000;
+  function foundText(list) {
+    var parts = (list || []).slice(0, 3).map(function (f) {
+      var pages = (f.pages || []).slice(0, 5);
+      return pretty(f.source) + (pages.length ? " p. " + pages.join(", ") : "");
+    });
+    return parts.length ? "Found: " + parts.join("; ") : "";
+  }
   function waiting() {
     var d = status(WAIT_LINES[0]);
     var label = d.lastChild, i = 0;
@@ -1373,6 +1384,21 @@
       if (!text || !d.parentNode) return;
       real = true;
       if (label.textContent !== text) show(text);
+    };
+    /* The pages show under the line, only past FOUND_AFTER. The line lives
+     * inside the status node, so it goes when the node is removed on ANY
+     * outcome (answer, refusal, error): it never sits beside an answer it
+     * may not back. textContent only: these are file names. */
+    var found = null, foundTimer = null;
+    d.setFound = function (list) {
+      clearTimeout(foundTimer);
+      var text = foundText(list);
+      if (!text) { if (found) { found.remove(); found = null; } return; }
+      foundTimer = setTimeout(function () {
+        if (!d.parentNode) return;
+        if (!found) { found = document.createElement("div"); found.className = "go-found"; d.appendChild(found); }
+        found.textContent = text;
+      }, Math.max(0, FOUND_AFTER - (Date.now() - t0)));
     };
     function step() {
       if (real || !d.parentNode || i >= WAIT_LINES.length - 1) return;
@@ -2322,6 +2348,7 @@
     // before the comparison itself; each shows as soon as it lands, and the
     // wait line moves back below it.
     s.onPart = function (v) {
+      if (s.setFound) s.setFound(null);
       say("### " + v.title + "\n\n" + v.answer, {
         reveal: !v.flagged,
         flagged: !!v.flagged,
@@ -2776,7 +2803,7 @@
       });
       if (!data) return;
       var v = JSON.parse(data);
-      if (ev === "status") { if (wait.setStage) wait.setStage(v.stage); }
+      if (ev === "status") { if (wait.setStage) wait.setStage(v.stage); if (v.found && wait.setFound) wait.setFound(v.found); }
       else if (ev === "meta") d = v;
       else if (ev === "part") { if (wait.onPart) wait.onPart(v); }
       else if (ev === "delta") text += v.text;
