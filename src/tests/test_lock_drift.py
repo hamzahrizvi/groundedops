@@ -2,6 +2,10 @@ import os, sys, tempfile
 from importlib.metadata import version
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "tools"))
 from lock_drift import drift
+from unittest.mock import patch
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import _harness  # noqa: E402,F401 -- temp CATALOG_CONFIG, light main
+import main  # noqa: E402
 
 def _lock(text):
     d = tempfile.mkdtemp()
@@ -26,3 +30,21 @@ def test_hashed_lock_lines_are_read():
     text = (f"packaging=={have} \\\n    --hash=sha256:{'0'*64} \\\n    --hash=sha256:{'1'*64}\n"
             f"    # via x\nno-such-package-xyz==1.0 \\\n    --hash=sha256:{'2'*64}\n")
     assert drift(_lock(text)) == ["no-such-package-xyz: installed none, lock 1.0"]
+
+def test_startup_warns_once_naming_the_drifted_package():
+    with patch.object(main.logger, "warning") as warn:
+        off = main._warn_lock_drift(_lock("no-such-package-xyz==1.0\n"))
+    assert off == ["no-such-package-xyz: installed none, lock 1.0"]
+    assert warn.call_count == 1
+    assert "no-such-package-xyz: installed none, lock 1.0" in (warn.call_args[0][0] % warn.call_args[0][1:])
+
+def test_startup_is_silent_when_the_venv_matches():
+    have = version("packaging")
+    with patch.object(main.logger, "warning") as warn:
+        assert main._warn_lock_drift(_lock(f"packaging=={have}\n")) == []
+    assert warn.call_count == 0
+
+def test_a_broken_check_warns_but_never_raises():
+    with patch.object(main.logger, "warning") as warn:
+        assert main._warn_lock_drift(_lock("this is not a requirement ===\n")) == []
+    assert warn.call_count == 1

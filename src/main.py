@@ -1221,8 +1221,35 @@ def _warmup_stack():
         logger.warning("System warmup finished with at least one failed stage")
 
 
+def _warn_lock_drift(lock=None):
+    """D-20261021-04: say at start-up when this environment's packages are not
+    the audited src/requirements.lock. A warning, never a refusal: a dev who
+    installs one package by hand is not blocked. The .exe has no tools/ beside
+    it and its build already refuses on drift (packaging/groundedops.spec)."""
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "tools" / "lock_drift.py"
+    if not path.exists():
+        return []
+    try:
+        spec = importlib.util.spec_from_file_location("lock_drift", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        off = mod.drift(lock or mod.LOCK)
+    except Exception as exc:  # never block start-up over the check itself
+        logger.warning("Could not compare installed packages with the lock: %s", exc)
+        return []
+    if off:
+        logger.warning(
+            "Installed packages differ from src/requirements.lock (%d): %s. "
+            "Fix: .venv\\Scripts\\pip.exe install --require-hashes -r src\\requirements.lock",
+            len(off), "; ".join(off))
+    return off
+
+
 @app.on_event("startup")
 def startup_event():
+    _warn_lock_drift()
     # sentence_transformers (torch underneath) is imported on first use --
     # see embeddings.py -- and that first use has to happen HERE, on the
     # main thread, not inside the warmup thread. Initialised from a worker
