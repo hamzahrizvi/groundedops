@@ -74,7 +74,7 @@ the exact test commands, so it can be followed without judgement calls. Make
 the worktree now:
 `git -C REPO worktree add REPO/.claude/worktrees/dev-<id> -b agents/dev-<id>` from
 REPO's current HEAD. A work order that changes the office's own tooling
-(OFFICE `tools/` or `ops/`) branches from `experimental/agent-org-phase1` instead.
+(OFFICE `tools/` or `ops/`) branches from `experimental/agent-org-phase1` instead. A work order that changes both REPO and OFFICE keeps the product half on `agents/dev-<id>` and puts the office half on `agents/dev-<id>-office` (branched from `experimental/agent-org-phase1`); the office merge takes both. Name the companion in the hand-back's Branch line.
 
 ## Phase BUILD
 You run it when the plan says `Builder: senior`, or when the junior's

@@ -15,6 +15,7 @@ branch for product fixes, experimental/agent-org-phase1 (this checkout) for offi
 fixes. Merges with --no-ff so the merge commit names the branch, py_compiles the merged
 .py files and reverts the merge if one fails. Prints MERGED / WAIT <why> / FAILED <why>.
 Never pushes.
+Companion (office half of a work order) = agents/office-<id> or agents/dev-<id>-office.
 """
 import argparse
 import glob
@@ -105,10 +106,12 @@ def joined_in(target, branch):
 def merge(did, ops, repo, office=OFFICE):
     """The product branch, then any office-tooling companion Dev made for the same work order."""
     first = merge_branch(did, f"agents/dev-{did}", ops, repo, office)
-    companion = f"agents/office-{did}"
-    if not first.startswith("MERGED") or git(repo, "rev-parse", "--verify", "-q", companion)[0]:
+    if not first.startswith("MERGED"):
         return first
-    return first + "\n" + merge_branch(did, companion, ops, repo, office)
+    for companion in (f"agents/office-{did}", f"agents/dev-{did}-office"):
+        if not git(repo, "rev-parse", "--verify", "-q", companion)[0]:
+            first += "\n" + merge_branch(did, companion, ops, repo, office)
+    return first
 
 
 def merge_branch(did, branch, ops, repo, office=OFFICE):
@@ -207,6 +210,7 @@ def selftest():
         w(os.path.join(repo, "a.py"), "x = 1\n")
         run("add", "."), run("commit", "-qm", "base")
         for did, f, body in (("D-20261008-91", "b.py", "y = 2\n"), ("D-20261008-92", "a.py", "x = 3\n"), ("D-20261008-93", "c.py", "def (\n"),
+                             ("D-20261008-96", "e.py", "w = 6\n"),
                              ("D-20261008-94", "b.py", "y = 5\n"),    # 94 built in parallel with 91, same file
                              ("D-20261008-95", "d.py", "x = 1\ny = f(a),          g(b)\n")):   # a lost backslash-newline
             run("checkout", "-qb", f"agents/dev-{did}", "main")
@@ -217,23 +221,28 @@ def selftest():
         run("checkout", "-qb", "agents/office-D-20261008-91", "main")                  # its tooling companion
         w(os.path.join(repo, "tools", "t.py"), "z = 4\n")
         run("add", "."), run("commit", "-qm", "companion")
+        run("checkout", "-qb", "agents/dev-D-20261008-96-office", "main")              # the other companion name
+        w(os.path.join(repo, "tools", "u.py"), "v = 7\n")
+        run("add", "."), run("commit", "-qm", "companion 96")
         run("checkout", "-q", "main")
         w(os.path.join(ops, "decisions", "20261008.md"), "".join(
-            f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95")))
+            f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95", "D-20261008-96")))
         assert merge("D-20261008-91", ops, repo, repo).startswith("WAIT the product owner"), "needs READY TO MERGE"
         w(os.path.join(ops, "decisions", "20261009.md"), "".join(
-            f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95")))
+            f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95", "D-20261008-96")))
         w(os.path.join(ops, "inbox", "dev", "D-20261008-94.md"), "Status: READY\n")
         w(os.path.join(repo, "a.py"), "x = 1  # someone's work in progress\n")         # dirty, not in D-1
         r = merge("D-20261008-91", ops, repo, repo)
         assert r.count("MERGED") == 2 and os.path.exists(os.path.join(repo, "tools", "t.py")), r   # companion too
         assert merge("D-20261008-91", ops, repo, repo) == "MERGED agents/dev-D-20261008-91 already\nMERGED agents/office-D-20261008-91 already"
+        r = merge("D-20261008-96", ops, repo, repo)
+        assert r.count("MERGED") == 2 and os.path.exists(os.path.join(repo, "tools", "u.py")), r
         assert "work in progress" in open(os.path.join(repo, "a.py")).read(), "their edit is untouched"
         r = merge("D-20261008-94", ops, repo, repo)
         assert r.startswith("FAILED merge conflict") and "b.py" in r, r
         assert open(os.path.join(repo, "b.py")).read() == "y = 2\n", "the conflicting merge was aborted"
         dev = os.path.join(ops, "inbox", "dev")
-        assert sorted(os.listdir(dev)) == ["D-20261008-91.gate", "D-20261008-92.gate", "D-20261008-93.gate", "D-20261008-94.gate.1", "D-20261008-94.md.1", "D-20261008-95.gate"], os.listdir(dev)
+        assert sorted(os.listdir(dev)) == ["D-20261008-91.gate", "D-20261008-92.gate", "D-20261008-93.gate", "D-20261008-94.gate.1", "D-20261008-94.md.1", "D-20261008-95.gate", "D-20261008-96.gate"], os.listdir(dev)
         assert os.path.exists(os.path.join(ops, "inbox", "security", "review-D-20261008-94.md.1")), "Security reviews the rebase again"
         assert any("Verdict: SENT BACK" in open(p).read() for p in glob.glob(os.path.join(ops, "decisions", "*.md")))
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
