@@ -504,7 +504,8 @@ def _faq_turn(payload, *args, **kwargs) -> dict:
     try:
         import pipeline_trace as ptrace
         from logger import log_interaction
-        outcome = ("clarify" if resp["needs_clarification"] else
+        outcome = ("handoff" if resp.get("role") == "handoff" else
+                   "clarify" if resp["needs_clarification"] else
                    ("faq.picked" if payload.faq_id else "faq.answer")
                    if resp["from_faq"] else "refusal")
         tok = ptrace.start()
@@ -523,11 +524,16 @@ def _faq_turn(payload, *args, **kwargs) -> dict:
 def _faq_response(answer: str, caller: dict, matched: str | None = None,
                   candidates: list | None = None, clarify: bool = False,
                   needs_sign_in: bool = False, faq_language: str = "en",
-                  reviewed: bool = False) -> dict:
+                  reviewed: bool = False, offer_support: bool = False,
+                  role: str | None = None) -> dict:
     return {
         "answer": answer,
         "sources": [],
-        "from_faq": not needs_sign_in and not clarify,
+        "from_faq": not needs_sign_in and not clarify and not offer_support,
+        # A guest can always reach a person (the CEO, 2026-11-12): the widget
+        # shows "Email support" beside the sign-in chip, and on a handoff.
+        "offer_support": offer_support,
+        "role": role,
         # 9.6: the widget shows "Reviewed answer" only when this is true.
         "faq_reviewed": reviewed,
         "faq_matched_question": matched,
@@ -537,7 +543,7 @@ def _faq_response(answer: str, caller: dict, matched: str | None = None,
         # the honest offer -- but only once an answer has actually been
         # given: a clarify is a live conversation and a sign-in prompt is not
         # an answer, so neither is a dead end needing an escape hatch.
-        "more_context": None if (clarify or needs_sign_in) else {
+        "more_context": None if (clarify or needs_sign_in or offer_support) else {
             "kind": "support", "support": True, "document": None,
             "passages": [], "label": "Contact support for more information",
         },
@@ -763,6 +769,19 @@ def register(app, answer_query, draft_enquiry=None):
                     "error": "not_found", "message": "That answer is no longer available."})
 
             lang = _resolve_anon_language(payload.language, payload.q)
+
+            # "I want to talk to a person" from a guest: a person, not a
+            # sign-in prompt. The member path answers this in query(); a
+            # guest never reaches it. Wording kept in step with main.py's.
+            import intents
+            if intents.is_handoff_request(payload.q):
+                return _faq_turn(payload,
+                    "Of course — I'll hand this over to a person. Use the "
+                    "support button below to leave your details and a short "
+                    "note of what you need, and our support team will pick "
+                    "it up from there.",
+                    caller, offer_support=True, role="handoff", faq_language=lang)
+
             faq = await run_in_threadpool(
                 faq_store.suggest_candidates, payload.q,
                 payload.product or payload.category, True, lang)
@@ -796,10 +815,11 @@ def register(app, answer_query, draft_enquiry=None):
             # answer" failure suggest_candidates's own design exists to
             # prevent. record_gap (inside suggest_candidates) already
             # captured this as language-tagged demand.
-            return _faq_turn(payload, 
+            return _faq_turn(payload,
                 "I don't have a reviewed answer for that yet. Sign in to your "
-                "account and I can search the full product documentation for you.",
-                caller, needs_sign_in=True, faq_language=lang)
+                "account and I can search the full product documentation for you, "
+                "or I can pass it to our support team.",
+                caller, needs_sign_in=True, offer_support=True, faq_language=lang)
 
         # ── Member / staff: full pipeline, charged in credits ─────────
         gate = quota.check(caller, spec["credits"], reserve=True)

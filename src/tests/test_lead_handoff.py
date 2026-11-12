@@ -161,6 +161,26 @@ try:
 finally:
     widget_config._save_leads(existing)
 
+print("\n== the spam guard (the CEO, 2026-11-12) ==")
+before = len(widget_config._load_leads())
+sent = []
+with patch.object(mailer, "is_configured", lambda: True), \
+     patch.object(mailer, "send", lambda *a, **k: sent.append(a)):
+    trap = post(hp="https://spam.example", fill_ms=9000)
+    fast = post(fill_ms=300)
+    human = post(fill_ms=9000)
+    old_widget = post()
+check(trap.status_code == 200 and trap.json().get("reference"),
+      "a filled trap field still looks accepted to the bot")
+check(fast.status_code == 200, "a send faster than a person types looks accepted too")
+kept = {l["id"] for l in widget_config._load_leads()}
+check(trap.json()["id"] not in kept and fast.json()["id"] not in kept,
+      "but neither is stored")
+check(human.json()["id"] in kept and old_widget.json()["id"] in kept,
+      "a person's send, and one from a widget without the guard fields, are stored")
+check(len(widget_config._load_leads()) == before + 2, "exactly two new leads")
+check(len(sent) == 2, f"and only those two are emailed ({len(sent)})")
+
 print("\n== X-User-Id grants nothing ==")
 q = client.get("/widget/quota?visitor_id=x", headers={"x-user-id": "admin"}).json()
 check(q.get("tier") == "anonymous", f"/widget/quota ignores X-User-Id ({q.get('tier')})")
