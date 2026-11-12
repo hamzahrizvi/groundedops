@@ -362,7 +362,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261021-04 | Security item D-20261021-04, details in the office | built, waiting for the check | the pre-ship check |
+| D-20261021-04 | Security item D-20261021-04, details in the office | ready to merge | merges once Security clears it |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | waiting for CEO | your yes |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
