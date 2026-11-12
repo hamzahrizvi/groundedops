@@ -7,6 +7,30 @@ commits: eight of code and this report. Nothing was pushed, merged or deleted fr
 The job was to merge duplicated features, delete dead code and fix measured
 inefficiencies, without changing how the chatbot behaves.
 
+## This copy is on `main`
+
+The same eight code commits were cherry-picked onto `main` at `e02b9ec` later the same
+day. Everything below was written for `experimental/v17.3`, so read it with these
+differences:
+
+- Line numbers are the v17.3 ones. In `src/main.py`, `src/llm.py`, `src/router.py`,
+  `src/structure.py` and `src/tests/test_llm.py` they are a few lines off on `main`.
+- `main` has no `src/legacy`, so that entry under "Left alone" does not apply. It was
+  the only conflict in the port: the `PROJECT_MAP.md` lines about that folder, resolved
+  by keeping `main`'s text.
+- Checks on `main`, before (`e02b9ec`) and after:
+
+| Measure | Before | After |
+|---|---|---|
+| `run_tests.py` | 414 / 415 passed, 1 skipped, 0 failed, 453 s | 410 / 411 passed, 1 skipped, 0 failed, 154 s |
+| `tests/run_scenarios.py` | 154 passed | 154 passed |
+| `eval.py --repeats 2 --skip-preflight` | 3 / 30 stable | 3 / 30 stable, 30 of 30 cases unchanged |
+
+  The four missing tests are the same four as on v17.3. The eval figure says nothing
+  about quality: `main`'s 30 generic cases were run against this install's own manuals,
+  which they were not written for, and `main` has no retrieval suite. It shows only that
+  no answer changed.
+
 ## Summary
 
 - **Tests:** 417 passed, 1 skipped, 0 failed before; 413 passed, 1 skipped, 0 failed
