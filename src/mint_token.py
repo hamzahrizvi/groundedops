@@ -29,13 +29,8 @@ def main():
 
     # Load .env the same way the app does, so the secret matches without
     # having to export it by hand.
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if os.path.exists(env_path) and not os.getenv("WIDGET_TOKEN_SECRET"):
-        for line in open(env_path):
-            line = line.strip()
-            if line.startswith("WIDGET_TOKEN_SECRET=") and "=" in line:
-                os.environ["WIDGET_TOKEN_SECRET"] = line.split("=", 1)[1].strip()
-                break
+    import keystore
+    keystore.load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
     if not os.getenv("WIDGET_TOKEN_SECRET"):
         print("ERROR: WIDGET_TOKEN_SECRET is not set (in .env or the environment).")

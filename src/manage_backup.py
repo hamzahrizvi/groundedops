@@ -34,13 +34,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # backup.py resolves store paths from the environment at call time, so .env
 # has to be loaded first — same ordering constraint main.py documents.
-_env = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-if os.path.exists(_env):
-    for _line in open(_env, encoding="utf-8"):
-        _line = _line.strip()
-        if _line and not _line.startswith("#") and "=" in _line:
-            _k, _v = _line.split("=", 1)
-            os.environ.setdefault(_k.strip(), _v.strip())
+import keystore  # noqa: E402
+keystore.load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 import backup  # noqa: E402
 

@@ -136,11 +136,7 @@ if __name__ == "__main__":
     # the cwd-relative logs and the .env store paths resolve alike.
     here = os.path.dirname(os.path.abspath(__file__))
     os.chdir(here)
-    if os.path.exists(".env"):
-        for line in open(".env", encoding="utf-8-sig"):
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    import keystore
+    keystore.load_env_file(".env")
     logging.basicConfig(level=logging.INFO)
     print(prune())
