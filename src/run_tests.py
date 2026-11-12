@@ -3,7 +3,7 @@
 Minimal test runner — discovers and runs every test_* function in
 tests/test_*.py without requiring pytest to be installed.
 
-Usage: python3 run_tests.py
+Usage: python3 run_tests.py        (TEST_JOBS=1 to run one file at a time)
 (pytest works too, if installed: pip install pytest && pytest tests/)
 """
 
@@ -16,17 +16,24 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Keep in-process test files off the real src/.env and src/.secrets.enc.
 # setdefault: a file or caller that sets its own path still wins.
 _SCRATCH = tempfile.mkdtemp(prefix="go-tests-")
 atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
-os.environ.setdefault("ENV_FILE_PATH", os.path.join(_SCRATCH, "test.env"))
-os.environ.setdefault("SECRETS_VAULT_PATH", os.path.join(_SCRATCH, "secrets.enc"))
-os.environ.setdefault("DOC_KINDS_PATH", os.path.join(_SCRATCH, "doc_kinds.json"))
+_SCRATCH_FILES = {"ENV_FILE_PATH": "test.env", "SECRETS_VAULT_PATH": "secrets.enc",
+                  "DOC_KINDS_PATH": "doc_kinds.json"}
+for _name, _file in _SCRATCH_FILES.items():
+    os.environ.setdefault(_name, os.path.join(_SCRATCH, _file))
 
 OWN_PROCESS_TIMEOUT = 600
+# Own-process files are separate interpreters, so they run side by side: 121
+# of the 150 files. Measured 2026-11-12 on an idle 12-thread box, same 414
+# results each time: 466 s one at a time, 253 s at 4, 147 s at 8.
+# TEST_JOBS=1 runs them one at a time, as before.
+JOBS = max(1, int(os.getenv("TEST_JOBS") or min(8, os.cpu_count() or 1)))
 # Name endings an own-process child must see blank. main.py loads src/.env for
 # any key not already in the environment ("" counts as present), so blanking
 # every secret-shaped name -- from the parent AND from src/.env -- keeps the
@@ -56,6 +63,13 @@ def own_process_env():
     """Environment for an own-process test child: secrets blanked, PYTHONPATH set."""
     env = dict(os.environ)
     env.update({k: "" for k in secret_names()})
+    # Its own copy of each scratch path this runner set (a caller's own path is
+    # left alone): files running at the same time must not share one test.env,
+    # and a file no longer starts on what the file before it wrote there.
+    own = tempfile.mkdtemp(dir=_SCRATCH)
+    for name, file in _SCRATCH_FILES.items():
+        if os.environ.get(name) == os.path.join(_SCRATCH, file):
+            env[name] = os.path.join(own, file)
     # PYTHONPATH, because a subprocess puts sys.path[0] at the SCRIPT's
     # directory (tests/), not this one -- _harness.py lives beside run_tests.py.
     here = str(Path(__file__).parent)
@@ -119,10 +133,54 @@ def needs_own_process(source):
     )
 
 
+def _run_own_process(path):
+    """One own-process file -> (verdict, note, output); verdict is PASS, SKIP
+    or FAIL. These files exit non-zero on failure, so the return code is the
+    result."""
+    try:
+        proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER), str(path)],
+                              cwd=str(Path(__file__).parent), env=own_process_env(),
+                              capture_output=True, text=True,
+                              timeout=OWN_PROCESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return ("FAIL", "own process, timed out",
+                f"(timed out) after {OWN_PROCESS_TIMEOUT}s")
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 0:
+        if re.search(r"^SKIP(?::| )", out, re.MULTILINE):
+            return "SKIP", "own process", out
+        return "PASS", "own process", out
+    # A missing OPTIONAL dependency is a skip here too. The in-process branch
+    # has said so since it was written, but this one only sees a non-zero
+    # exit code, so a file needing BOTH its own process and an optional
+    # package could never skip -- it could only fail.
+    #
+    # test_streaming_and_tables is exactly that file: it needs isolation
+    # because it loads the real NLI model, and that model needs
+    # sentence-transformers, which CI's `unit` job deliberately does not
+    # install. So it failed CI while passing locally, and the two paths
+    # disagreed about the same policy.
+    _m = re.search(r"ModuleNotFoundError: No module named '([^']+)'", out)
+    if _m:
+        return "SKIP", f"needs {_m.group(1)}, own process", out
+    return "FAIL", "own process", out.strip()
+
+
 def discover_and_run():
     test_files = sorted(TESTS_DIR.glob("test_*.py"))
     total, passed, skipped, failed = 0, 0, 0, []
     load_errors = []
+
+    # The own-process files first, JOBS at a time; their results are reported
+    # below in file order, between the in-process files, as they always were.
+    # Nothing in-process runs meanwhile: those tests swap sys.modules around.
+    own = [p for p in test_files
+           if needs_own_process(p.read_text(encoding="utf-8", errors="ignore"))]
+    if own:
+        print(f"  ({len(own)} own-process files, {JOBS} at a time; results follow in file order)",
+              flush=True)
+    with ThreadPoolExecutor(max_workers=JOBS) as pool:
+        own_results = dict(zip(own, pool.map(_run_own_process, own)))
 
     for path in test_files:
         # _harness.py stubs real modules into sys.modules (text_utils,
@@ -152,53 +210,16 @@ def discover_and_run():
         # A process is the honest isolation boundary for a test that rewrites
         # the module registry. These files exit non-zero on failure, so the
         # return code is the result.
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        needs_process = needs_own_process(source)
-        if needs_process:
+        if path in own_results:
             total += 1
-            _env = own_process_env()
-            _here = str(Path(__file__).parent)
-            try:
-                proc = subprocess.run([sys.executable, str(ISOLATED_RUNNER),
-                                       str(path)],
-                                      cwd=_here, env=_env,
-                                      capture_output=True, text=True,
-                                      timeout=OWN_PROCESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                failed.append((path.stem, "(own process)",
-                               f"(timed out) after {OWN_PROCESS_TIMEOUT}s"))
-                print(f"  FAIL  {path.stem}  (own process, timed out)")
-                continue
-            out = (proc.stdout or "") + (proc.stderr or "")
-            if proc.returncode == 0:
-                if re.search(r"^SKIP(?::| )", out, re.MULTILINE):
-                    skipped += 1
-                    print(f"  SKIP  {path.stem}  (own process)")
-                else:
-                    passed += 1
-                    print(f"  PASS  {path.stem}  (own process)")
+            verdict, note, out = own_results[path]
+            print(f"  {verdict}  {path.stem}  ({note})")
+            if verdict == "PASS":
+                passed += 1
+            elif verdict == "SKIP":
+                skipped += 1
             else:
-                # A missing OPTIONAL dependency is a skip here too. The
-                # in-process branch below has said so since it was written,
-                # but this branch only sees a non-zero exit code, so a file
-                # needing BOTH its own process and an optional package could
-                # never skip -- it could only fail.
-                #
-                # test_streaming_and_tables is exactly that file: it needs
-                # isolation because it loads the real NLI model, and that
-                # model needs sentence-transformers, which CI's `unit` job
-                # deliberately does not install. So it failed CI while
-                # passing locally, and the two paths disagreed about the
-                # same policy.
-                _m = re.search(r"ModuleNotFoundError: No module named '([^']+)'",
-                               out)
-                if _m:
-                    skipped += 1
-                    print(f"  SKIP  {path.stem}  (needs {_m.group(1)}, "
-                          f"own process)")
-                else:
-                    failed.append((path.stem, "(own process)", out.strip()))
-                    print(f"  FAIL  {path.stem}  (own process)")
+                failed.append((path.stem, "(own process)", out))
             continue
 
         saved_modules = sys.modules.copy()
