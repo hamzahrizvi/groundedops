@@ -34,9 +34,6 @@ LOG_DIR = os.path.dirname(os.path.abspath(__file__))
 _REFUSED_OUTCOMES = {"none.reject", "suppress", "refusal"}
 _CLARIFY_OUTCOMES = {"none.follow", "none.vague", "clarify", "faq.ask",
                      "span.ask", "symptom.ask"}
-_ANSWER_OUTCOMES = {"respond", "faq.answer", "faq.picked", "extract",
-                    "verbatim", "steps", "more", "sales", "capability",
-                    "inference"}
 # The plan's 'resolved' exits (docs/upgrade-plan-7-to-10.md 10.1).
 _RESOLVED_OUTCOMES = {"respond", "faq.answer", "extract", "verbatim", "steps"}
 

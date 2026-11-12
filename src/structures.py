@@ -34,11 +34,6 @@ except Exception as _exc:                                  # pragma: no cover
 _CACHE: dict[tuple, list] = {}
 _CACHE_MAX = 256
 
-# A heading looks like "5C. Final outro checklist - before you leave" or
-# "Pre-Requisites Checklist". Kept loose: the point is to find the START of a
-# checklist, and the extractor below stops at the next heading-ish line.
-_HEADING_RE = re.compile(r"^\s*(\d+[A-Za-z]?[.)]\s+|[A-Z][A-Za-z ]{0,40}$)")
-
 
 def _unwrap_cell(text: str, vocab: set | None = None) -> str:
     """Join a cell's wrapped lines without splitting words.
@@ -605,84 +600,3 @@ def faq_pairs_for_document(path: str, source: str,
             if len(pairs) >= max_pairs:
                 return pairs
     return pairs
-
-
-# ── discovery ("what is X?") entries ──────────────────────────────────────
-#
-# The first thing a new customer types is "what is X and what does it do?",
-# and a 42-question assessment found that exact shape being REFUSED across
-# products while specification lookups passed. Retrieval was fine (0.9993);
-# the answers are syntheses, which the grounding gate scored near zero.
-#
-# The gate is fixed, but these belong in the FAQ store regardless: an
-# overview is the most-asked and least-changing question a product has, it
-# is stated verbatim in the manual's opening page, and serving it from the
-# store costs no model call and cannot be refused.
-
-_OVERVIEW_RE = re.compile(
-    r"\b(is an?|are|provides|enables|eliminates|offers|designed to|"
-    r"performs)\b", re.I)
-_OVERVIEW_SKIP = re.compile(
-    r"^(this (page|section|document|guide)|the (following|table|diagram)|"
-    r"note:|warning:|for more|please )", re.I)
-
-
-def overview_pairs_for_document(path: str, source: str,
-                                product_name: str = "",
-                                scan_pages: int = 8,
-                                max_pairs: int = 3) -> list[dict]:
-    """"What is X?" entries, taken verbatim from the manual's opening pages.
-
-    Deliberately narrow: only the first `scan_pages`, only sentences that
-    read like a product definition, and at most `max_pairs` per document.
-    An overview harvested from deep inside a manual would be a feature
-    description masquerading as a product definition.
-    """
-    if pdfplumber is None or not os.path.exists(path):
-        return []
-    name = product_name or _doc_title(source)
-    try:
-        with pdfplumber.open(path) as pdf:
-            pages = [(i + 1, pdf.pages[i].extract_text() or "")
-                     for i in range(min(scan_pages, len(pdf.pages)))]
-    except Exception as exc:
-        logger.warning(f"overview scan failed for {path}: {exc}")
-        return []
-
-    out, seen = [], set()
-    for pno, text in pages:
-        for raw in re.split(r"(?<=[.!?])\s+|\n", text):
-            s = raw.strip()
-            if not (60 <= len(s) <= 400):
-                continue
-            if _OVERVIEW_SKIP.match(s) or not _OVERVIEW_RE.search(s):
-                continue
-            # Must name something: a definition without a subject is prose.
-            if not re.match(r"^(The\s+)?[A-Z][\w+\- ]{2,40}\s+(is|are|from)\b", s):
-                continue
-            key = s[:60].lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            subject = re.match(r"^(The\s+)?([\w+\- ]{2,40}?)\s+(is|are|from)\b", s)
-            subj = (subject.group(2) if subject else name).strip()
-            # The subject must read like a product name. Without this the
-            # regex happily lifted "key features of the MyCheckr Mini" and
-            # "MyCheckr Mini just like the MyCheckr" out of ordinary prose
-            # and turned them into FAQ questions.
-            if (len(subj.split()) > 4
-                    or not subj[0].isupper()
-                    or re.search(r"\b(just|like|key|features?|process|"
-                                 r"following|above|below|section|page)\b",
-                                 subj, re.I)):
-                continue
-            out.append({
-                "question": f"What is the {subj} and what does it do?",
-                "answer": f"{s}\n\n(Source: {source}, page {pno})",
-                "verbatim": "overview",
-                "kind": "overview",
-                "page": pno,
-            })
-            if len(out) >= max_pairs:
-                return out
-    return out
