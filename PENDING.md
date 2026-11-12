@@ -370,7 +370,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
 | D-20261112-02 | A yes/no answer quotes the right figures and then says the opposite: a 2-year-old unit called "still covered" by a 1-year warranty | waiting for CEO | your yes |
 | D-20261112-06 | The "Email support" form promises contact, but no email is sent on this install | waiting for CEO | your yes |
-| D-20261112-11 | The failure labels never reached the test runs: the office half of D-20261109-01 was left unmerged | approved, queued | Dev builds it |
+| D-20261112-11 | The failure labels never reached the test runs: the office half of D-20261109-01 was left unmerged | built, waiting for the check | the pre-ship check |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
 | customer/20261015-grader-refusal-scoring | Grader finding: a refusal of a documented fact scored 3, and the grader missed a false claim | proposed | the product owner triages it |
