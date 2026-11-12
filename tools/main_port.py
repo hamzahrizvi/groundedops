@@ -15,7 +15,7 @@ fixes that help any customer as one item (.claude/agents/product-owner.md "Port 
   - Verdict: NEEDS CEO
   - [ ] CEO approved
 
-Once the CEO ticks it, apply picks those commits onto main in a scratch worktree (a Dev merge as its
+Once the CEO ticks it, apply picks those commits onto GitHub's main (origin/main) in a scratch worktree (a Dev merge as its
 first-parent diff, with -x so the next offer knows it is there), skips any that conflict, runs the full suite on
 main's code with them, and pushes main only if it passes: a fix that does not fit main's code never reaches it.
 One attempt per approval. It reports to OPS/inbox/port/<id>-done.md, which wakes the product owner to close it.
@@ -100,7 +100,9 @@ def offer(ops, repo, now=None):
         return [f"NOT DUE (last offer {datetime.date.fromtimestamp(st['asked'])})"]
     head = git(repo, "rev-parse", LINE).stdout.strip()
     since = st.get("since") or git(repo, "merge-base", MAIN, LINE).stdout.strip()
-    there = set(re.findall(r"cherry picked from commit ([0-9a-f]{40})", git(repo, "log", MAIN, "--format=%b").stdout))
+    git(repo, "fetch", "-q", "origin", MAIN)
+    there = set(re.findall(r"cherry picked from commit ([0-9a-f]{40})",
+                           git(repo, "log", MAIN, "origin/" + MAIN, "--format=%b").stdout))
     out = []
     for line in git(repo, "log", "--first-parent", "--reverse", "--format=%H%x1f%P%x1f%s", f"{since}..{head}").stdout.splitlines():
         sha, parents, subject = line.split("\x1f", 2)
@@ -121,7 +123,10 @@ def _port(ops, repo, i, shas, test_cmd):
     wt = os.path.join(ops, "scratch", f"port-{i}")
     git(repo, "worktree", "remove", "--force", wt)
     shutil.rmtree(wt, ignore_errors=True)
-    base = git(repo, "rev-parse", MAIN).stdout.strip()
+    # GitHub's main, never the local branch: a session's unpushed commits on local main are not ours to push
+    # (2026-11-12: a cleanup session had 10 there)
+    git(repo, "fetch", "-q", "origin", MAIN)
+    base = git(repo, "rev-parse", "origin/" + MAIN).stdout.strip()
     r = git(repo, "worktree", "add", "--detach", wt, base)
     if r.returncode:
         return f"NOT PUSHED {i}: no scratch worktree ({r.stderr.strip()[:200]})", ""
@@ -155,8 +160,10 @@ def _port(ops, repo, i, shas, test_cmd):
             p = git(wt, "push", "origin", "HEAD:refs/heads/main")
             pushed = p.returncode == 0
             why = f"{base[:8]}..{head[:8]}" if pushed else f"push refused ({(p.stderr.strip().splitlines() or ['?'])[-1]})"
-            if pushed:
-                git(repo, "update-ref", "refs/heads/main", head, base)
+            if pushed and git(repo, "merge-base", "--is-ancestor", MAIN, base).returncode == 0:
+                git(repo, "update-ref", "refs/heads/" + MAIN, head)   # local main had nothing of its own: it follows
+            elif pushed:
+                why += "; local main has unpushed commits of its own, left as it was (merge origin/main into it)"
         body = (f"Pushed to main: {'yes, ' if pushed else 'no, '}{why}\n" + "".join(f"Picked {x}\n" for x in picked)
                 + "".join(f"Skipped {x}\n" for x in skipped) + f"Tests on main with them: {summary}\n")
         if t.returncode:
@@ -212,6 +219,8 @@ def selftest():
     itl = commit("ITL wording", {"src/b.py": "b = 'ITL'\n"})
     run(repo, "git", "checkout", "-q", MAIN)
     commit("main moved", {"src/b.py": "b = 'general'\n"})
+    run(repo, "git", "push", "-q", "origin", "main")
+    local = commit("a session's unpushed work", {"src/d.py": "d = 1\n"})
     os.makedirs(os.path.join(ops, "decisions"))
     os.makedirs(os.path.join(ops, "state"))
     os.makedirs(os.path.join(ops, "scratch"))
@@ -235,9 +244,10 @@ def selftest():
     assert got[0].startswith("PUSHED D-20261112-01: 2 picked, 1 skipped"), got   # the ITL edit conflicts with main's
     note = open(os.path.join(ops, "inbox", "port", "D-20261112-01-done.md")).read()
     assert f"Skipped {itl[:8]}: conflicts" in note and "3/3 passed" in note, note
-    assert git(origin, "rev-parse", "main").stdout == git(repo, "rev-parse", "main").stdout, "main pushed and local main moved"
-    shown = git(repo, "show", "main:src/c.py").stdout + git(repo, "show", "main:src/a.py").stdout
+    shown = git(origin, "show", "main:src/c.py").stdout + git(origin, "show", "main:src/a.py").stdout
     assert shown == "c = 1\na = 2\n", shown
+    assert git(origin, "cat-file", "-e", "main:src/d.py").returncode, "a session's unpushed commit on local main is not pushed"
+    assert git(repo, "rev-parse", "main").stdout.strip() == local and "left as it was" in got[0], got
     assert approved(ops) == {} and apply(ops, repo, test_cmd=ok) == ["NONE"], "one attempt per approval"
     assert not os.listdir(os.path.join(ops, "scratch")), "the scratch worktree is gone"
     st = load(ops)
@@ -256,6 +266,14 @@ def selftest():
     got = apply(ops, repo, test_cmd=bad)
     assert got[0].startswith("NOT PUSHED D-20261112-02") and "2/3 passed" in got[0], got
     assert git(origin, "rev-parse", "main").stdout == before, "nothing pushed on a red suite"
+
+    # local main with nothing of its own follows the push
+    run(repo, "git", "fetch", "-q", "origin")
+    run(repo, "git", "reset", "-q", "--hard", "origin/main")
+    open(dp, "a").write(f"\n## D-20261112-03 | Port\n- Port: {fix2}\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
+    got = apply(ops, repo, test_cmd=ok)
+    assert got[0].startswith("PUSHED D-20261112-03") and "left as it was" not in got[0], got
+    assert git(origin, "rev-parse", "main").stdout == git(repo, "rev-parse", "main").stdout, "local main moved with it"
     shutil.rmtree(d, ignore_errors=True)
     print("selftest ok")
 
