@@ -1914,6 +1914,19 @@
       wrap.appendChild(ccNote);
     }
 
+    // Spam guard (the CEO, 2026-11-12): a field no person sees or tabs to,
+    // which form-filling bots fill in, and how long the form was open. The
+    // server quietly drops a filled trap or a send faster than a person types.
+    var trap = document.createElement("input");
+    trap.type = "text";
+    trap.name = "company_website";
+    trap.tabIndex = -1;
+    trap.autocomplete = "off";
+    trap.setAttribute("aria-hidden", "true");
+    trap.style.cssText = "position:absolute;left:-9999px;width:1px;height:1px;opacity:0";
+    wrap.appendChild(trap);
+    var openedAt = Date.now();
+
     var err = document.createElement("div");
     err.className = "go-ferr";
     wrap.appendChild(err);
@@ -1960,6 +1973,8 @@
           enquiry: enqBox ? enqBox.value.trim() : "",
           summary_source: enqBox && enqBox.value.trim() ? source : "none",
           visitor_id: visitorId(),
+          hp: trap.value,
+          fill_ms: Date.now() - openedAt,
         }),
       })
         .then(function (r) {
@@ -2385,12 +2400,32 @@
           // happen. The backend's WIDGET_SIGN_IN_URL has no idea which page
           // the visitor was on.
           var signIn = cfg.signInUrl || secureUrl(d.sign_in_url);
+          var gChips = [];
           if (signIn) {
-            chips([{
+            gChips.push({
               label: "Sign in for a full answer",
               onClick: function () { goSignIn(signIn, q); },
-            }], null);
+            });
           }
+          // A guest can always reach a person (the CEO, 2026-11-12).
+          if (d.offer_support) {
+            gChips.push({
+              label: "Email support",
+              style: signIn ? "alt" : "",
+              onClick: function () { openContactForm("support"); },
+            });
+            var gPhone = formFor("support").phone;
+            if (gPhone) {
+              gChips.push({
+                label: "Call " + gPhone,
+                style: "alt",
+                onClick: function () {
+                  window.location.href = "tel:" + gPhone.replace(/[^\d+]/g, "");
+                },
+              });
+            }
+          }
+          if (gChips.length) chips(gChips, null);
           return;
         }
 
