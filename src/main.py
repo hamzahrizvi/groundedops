@@ -5360,6 +5360,10 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
               f"{sum(len(c.get('text') or '') for c in _verify_chunks)} chars")
     logger.info("verifier shown: %s", _shown)
     ptrace.set_meta(verify_shown=_shown)
+    # D-20261109-01: which pages the prompt held (passages + any whole-manual
+    # block) and which the verifier read besides, for blind_eval's buckets.
+    ptrace.add_pages("pages_prompt", top_chunks + _bundle)
+    ptrace.add_pages("pages_shown", _cited)
 
     # ── Grounding check ──────────────────────
     # Two clocks, because one was measuring the wrong thing. `t_grounding`
