@@ -41,7 +41,6 @@ purpose role) rather than crashing the query pipeline.
 """
 
 import logging
-import os
 import threading
 
 from text_utils import classify_by_similarity
@@ -186,9 +185,9 @@ def route_model(query: str) -> tuple[str, tuple[str, str]]:
     # extraction and rethink behavior downstream), but ALL answering goes
     # to DeepSeek. Single switch, no per-role config drift.
     if get_generation_mode() == "api":
-        # Eighth copy of the retired "deepseek-chat" alias. Read the env var
-        # every other deepseek call site reads instead of pinning a name.
-        return role, ("deepseek",
-                      os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash"))
+        # keystore owns the default model name; this was the eighth copy of
+        # the retired "deepseek-chat" alias before it read the setting.
+        import keystore
+        return role, ("deepseek", keystore.get_model("deepseek"))
 
     return role, MODEL_MAP[role]

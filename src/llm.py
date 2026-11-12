@@ -196,7 +196,7 @@ FALLBACK_CHAIN: dict[str, list[tuple[str, str]]] = {
     # fails, it fails rather than silently escalating query + context to a
     # third-party API. DeepSeek is still available as a DELIBERATE choice:
     # as the selected Online provider (api mode, see _chain_for) and in the
-    # manual "Rethink" menu (RETHINK_OPTIONS) — neither of which is a
+    # manual "Rethink" menu (_rethink_options) — neither of which is a
     # fallback.
     "accurate":  [("local", "mistral")],
     "reasoning": [("local", "mistral")],
@@ -246,7 +246,7 @@ def _online_provider_model(job: str = "default") -> tuple[str, str]:
         model = keystore.model_for_role(job, provider)
     except Exception as exc:
         logger.warning(f"model lookup failed for {job}/{provider}: {exc}")
-        model = os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")
+        model = keystore.get_model("deepseek")
     return provider, model
 
 
@@ -333,16 +333,14 @@ def outside_providers() -> list[str]:
 # The manual "Re-answer with another model" menu. deepseek was pinned to
 # "deepseek-chat" here, retired by DeepSeek on 24 July 2026 -- the FOURTH copy
 # of that alias in the codebase, and the reason every option in that menu was
-# dead. Read it from env like every other deepseek call site.
+# dead. keystore owns the name now, like every other deepseek call site.
 def _rethink_options() -> list[tuple[str, str]]:
+    import keystore
     return [
         ("local", "phi"),
         ("local", "mistral"),
-        ("deepseek", os.getenv("ONLINE_DEEPSEEK_MODEL", "deepseek-v4-flash")),
+        ("deepseek", keystore.get_model("deepseek")),
     ]
-
-
-RETHINK_OPTIONS: list[tuple[str, str]] = _rethink_options()
 
 # Model used for query condensation — phi, since this is a short,
 # latency-sensitive auxiliary call on every turn beyond the first.
@@ -467,7 +465,7 @@ def _call_ollama(
 
 def _call_deepseek(
     prompt: str,
-    model: str = "deepseek-v4-flash",
+    model: str,            # no default: keystore.get_model owns the names
     timeout: int = 60,
     api_key: str | None = None,
 ) -> dict | None:
@@ -519,7 +517,7 @@ def _call_deepseek(
         return None
 
 
-def _call_openai(prompt: str, model: str = "gpt-4o-mini",
+def _call_openai(prompt: str, model: str,
                  api_key: str | None = None, timeout: int = 60) -> dict | None:
     """OpenAI chat completions (v9.1.1 — multi-provider Online mode)."""
     key = api_key or os.getenv("OPENAI_API_KEY")
@@ -558,7 +556,7 @@ def _call_openai(prompt: str, model: str = "gpt-4o-mini",
         return None
 
 
-def _call_anthropic(prompt: str, model: str = "claude-sonnet-4-6",
+def _call_anthropic(prompt: str, model: str,
                     api_key: str | None = None, timeout: int = 60) -> dict | None:
     """Anthropic messages API (v9.1.1 — multi-provider Online mode)."""
     key = api_key or os.getenv("ANTHROPIC_API_KEY")
