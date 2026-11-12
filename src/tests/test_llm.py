@@ -346,6 +346,30 @@ def test_deepseek_calls_disable_thinking_unless_asked(monkeypatch=None):
             os.environ["DEEPSEEK_THINKING"] = saved
 
 
+def test_stream_generate_honours_the_answer_questions_tick():
+    """generate() refuses a key not ticked for answering; the streaming path
+    (Test chat, FAQ drafting) must too (D-20261106-09). The ticked half is the
+    control: it proves the stub is reachable, so "no call" is the guard."""
+    posts = []
+
+    def stub_post(url, **kw):
+        posts.append(url)
+        raise RuntimeError("stubbed: no network in tests")
+
+    real_post = llm._HTTP.post
+    llm._HTTP.post = stub_post
+    try:
+        for p in ("deepseek", "openai"):
+            env = f"KEY_USES_{p.upper()}"
+            for tick, calls in (("", 0), ("answers", 1)):
+                posts.clear()
+                with patch.dict(os.environ, {env: tick}):
+                    list(llm.stream_generate(p, "x", "m", api_keys={p: "sk-dummy"}))
+                assert len(posts) == calls, (p, repr(tick), posts)
+    finally:
+        llm._HTTP.post = real_post
+
+
 def test_a_provider_in_cooldown_is_skipped_when_the_chain_has_another():
     """The gateway that answered 5xx a moment ago is not asked again on the
     very next question -- unless it is the only provider there is."""
