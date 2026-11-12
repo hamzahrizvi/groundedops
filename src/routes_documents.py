@@ -94,16 +94,23 @@ _INGEST_JOBS: dict = {}
 _INGEST_LOCK = threading.Lock()
 
 
-def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
-                   category_key: str | None = None, product_key: str | None = None,
-                   ingest_provider: str | None = None,
-                   replace_source: str | None = None,
-                   describe_pictures: bool = False):
+def _job_progress(job_id: str):
+    """The progress reporter a worker hands to ingest: writes stage and
+    percentage into the job's /upload/status entry."""
     def _progress(stage, done, total):
         with _INGEST_LOCK:
             _INGEST_JOBS[job_id].update(
                 stage=stage, done=done, total=total,
                 pct=round(done / total * 100, 1) if total else 0.0)
+    return _progress
+
+
+def _ingest_worker(job_id: str, content: bytes, filename: str, api_keys: dict,
+                   category_key: str | None = None, product_key: str | None = None,
+                   ingest_provider: str | None = None,
+                   replace_source: str | None = None,
+                   describe_pictures: bool = False):
+    _progress = _job_progress(job_id)
     # v10.6: per-upload provider override. Set the env var the ingest code
     # reads, scoped to this thread's run. (Simple + effective for the
     # single-worker setup; if you later parallelize ingest, pass it
@@ -381,11 +388,7 @@ class OcrRequest(BaseModel):
 
 
 def _ocr_worker(job_id: str, source: str, pages: list[int]):
-    def _progress(stage, done, total):
-        with _INGEST_LOCK:
-            _INGEST_JOBS[job_id].update(
-                stage=stage, done=done, total=total,
-                pct=round(done / total * 100, 1) if total else 0.0)
+    _progress = _job_progress(job_id)
     try:
         # Imported here, not at module top: the route tests stand in a stub
         # for `ingest` that knows only ingest_file.
@@ -398,7 +401,7 @@ def _ocr_worker(job_id: str, source: str, pages: list[int]):
                 "ocr_pages": pages,
                 "warning": None if count else "OCR found no legible text on those pages",
                 "done": True, "pct": 100.0}
-    except Exception as e:
+    except Exception:
         logger.exception(f"OCR job {job_id} failed")
         with _INGEST_LOCK:
             # The detail is in the log (logger.exception above); exception
