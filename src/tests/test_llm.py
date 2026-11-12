@@ -545,3 +545,37 @@ def test_api_mode_condensation_falls_over_to_the_backup():
                 assert llm.condense_query("and the current?", hist) == "and the current?"
     finally:
         llm._provider_down.clear()
+
+
+def test_a_refused_for_credit_reply_starts_the_provider_cooldown():
+    """D-20261109-09: a no-credit reply cools the provider, so the next
+    question goes straight to the backup. (Was src/test_llm_credit_cooldown.py,
+    a script no runner collected.)"""
+    import credit_watch
+
+    class Res:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+
+    def cooled(provider, code, text=""):
+        llm._provider_down.clear()
+        llm._note_credit_failure(provider, Res(code, text))
+        return llm.provider_cooling(provider)
+
+    called = []
+    try:
+        with patch.object(credit_watch, "report_exhausted", lambda p: None):
+            assert cooled("openai", 429, '{"error":{"code":"insufficient_quota"}}')
+            assert cooled("deepseek", 402)
+            assert not cooled("openai", 429, "rate limit reached")
+            assert cooled("anthropic", 400, "Your credit balance is too low")
+
+            llm._provider_down.clear()
+            llm._note_credit_failure("openai", Res(429, "insufficient_quota"))
+            with patch.object(llm, "_chain_for", lambda role: [("openai", "m"), ("deepseek", "m")]), \
+                    patch.object(llm, "generate",
+                                 lambda provider, *a, **k: (called.append(provider) or {"text": "x"})):
+                llm.generate_with_fallback("accurate", "q")
+            assert called == ["deepseek"], called
+    finally:
+        llm._provider_down.clear()
