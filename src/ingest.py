@@ -266,6 +266,18 @@ def _drop_shadowed(texts: list[str], pageno: list[int], sections: list[str],
             [sections[i] for i in keep])
 
 
+def _reporter(progress):
+    """`progress(stage, done, total)` wrapped so a broken reporter cannot
+    fail the ingest it reports on; a no-op when there is no reporter."""
+    def _step(stage, done=0, total=0):
+        if progress:
+            try:
+                progress(stage, done, total)
+            except Exception:
+                pass
+    return _step
+
+
 def ingest_file(content: bytes, filename: str,
                 api_keys: dict | None = None,  # accepted for call-site compat; unused since doc2query removal (v10.16)
                 progress=None,
@@ -298,12 +310,7 @@ def ingest_file(content: bytes, filename: str,
     # created with until the job finished. Every upload read "working 0%" for
     # its whole run -- on a 200-page manual that is minutes of a progress
     # indicator that looks stuck.
-    def _step(stage, done=0, total=0):
-        if progress:
-            try:
-                progress(stage, done, total)
-            except Exception:      # a broken reporter must not fail an ingest
-                pass
+    _step = _reporter(progress)
 
     # v12.0: keep the ORIGINAL file so answers can offer a download link
     # back to the source document. Previously the upload lived only in a
@@ -705,12 +712,7 @@ def ingest_ocr_pages(filename: str, pages: list[int], progress=None) -> int:
     if not pages:
         return 0
 
-    def _step(stage, done=0, total=0):
-        if progress:
-            try:
-                progress(stage, done, total)
-            except Exception:
-                pass
+    _step = _reporter(progress)
 
     entry = docstore.load_manifest()["documents"].get(
         docstore._safe_basename(filename)) or {}
@@ -987,12 +989,7 @@ def index_figure_text(filename: str, progress=None, describe_pictures: bool = Fa
     if not path.lower().endswith(".pdf"):
         return 0
 
-    def _step(stage, done=0, total=0):
-        if progress:
-            try:
-                progress(stage, done, total)
-            except Exception:
-                pass
+    _step = _reporter(progress)
 
     if not _figures.figures_for(filename):
         _step("cutting out figures", 0, 1)
