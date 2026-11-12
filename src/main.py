@@ -22,32 +22,11 @@ from urllib.parse import quote
 # verification. ADMIN_PASSWORD and the provider API keys were being
 # ignored the same way.
 #
-# Hand-parsed rather than adding python-dotenv, so no new dependency and
-# no reinstall for anyone who has already run the installer.
-def _load_env_file(path: str) -> int:
-    if not os.path.isfile(path):
-        return 0
-    loaded = 0
-    try:
-        with open(path, "r", encoding="utf-8-sig") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                # Real environment variables win, so a shell export or a
-                # Docker -e flag can still override the file.
-                if key and key not in os.environ:
-                    os.environ[key] = value
-                    loaded += 1
-    except Exception as exc:  # pragma: no cover
-        print(f"WARNING: could not read {path}: {exc}")
-    return loaded
+# keystore is safe to import this early: standard library only, and it
+# reads nothing from the environment at import.
+import keystore
 
-
-_ENV_COUNT = _load_env_file(
+_ENV_COUNT = keystore.load_env_file(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 
@@ -56,7 +35,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import more_context
-import keystore
 import policy
 from app_state import APP_STATE, APP_STATE_LOCK, _run_stage, _set_app_state, capability
 from db import get_collection
