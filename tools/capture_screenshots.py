@@ -3,11 +3,10 @@
 Runs the real widget against the real backend, so every answer and citation
 in the docs is one the system actually produced.
 """
-import os, sys, time
+import os, sys
 from playwright.sync_api import sync_playwright
 
 DEMO = "http://127.0.0.1:5599/demo.html"
-OUT  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "img")
 OUT  = sys.argv[1] if len(sys.argv) > 1 else "docs/img"
 os.makedirs(OUT, exist_ok=True)
 W, H = 1180, 900
@@ -34,12 +33,6 @@ def shot(page, name, clip="panel"):
     page.screenshot(path=p, clip=c)
     print("  wrote", p)
 
-def widget_box(page):
-    b = page.evaluate("""() => {
-      const r = document.querySelector('#go-panel, .go-panel, [class*=go-]')
-        ?.getBoundingClientRect();
-      return r ? {x:r.x, y:r.y, width:r.width, height:r.height} : null; }""")
-    return b
 
 with sync_playwright() as pw:
     br = pw.chromium.launch()

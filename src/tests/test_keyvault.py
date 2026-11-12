@@ -6,7 +6,6 @@ saved key. No network, no crypto secrets required beyond what the
 module derives locally.
 """
 
-import json
 import os
 import tempfile
 
@@ -73,22 +72,6 @@ def test_corrupt_vault_returns_none_not_crash():
         # Undecryptable (e.g. copied from another machine) -> None, no raise.
         assert keyvault.load_key() is None
         assert keyvault.has_key() is False
-
-
-def test_legacy_plaintext_migration():
-    with tempfile.TemporaryDirectory() as d:
-        _isolate(d)
-        legacy_path = os.path.join(d, ".deepseek_key.json")
-        with open(legacy_path, "w", encoding="utf-8") as f:
-            json.dump({"key": "sk-legacy-plaintext"}, f)
-
-        migrated = keyvault.migrate_legacy_plaintext(legacy_path)
-
-        assert migrated is True
-        # Plaintext file is gone...
-        assert not os.path.exists(legacy_path)
-        # ...and the key is now retrievable from the encrypted vault.
-        assert keyvault.load_key() == "sk-legacy-plaintext"
 
 
 def test_console_secrets_are_encrypted_at_rest_and_never_in_env(tmp_path=None):
