@@ -51,6 +51,7 @@ from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from office_diary import due as diary_due  # noqa: E402
 from office_merge import OFFICE, git as _git, in_the_way  # noqa: E402
+from main_port import approved as port_approved, due as port_due  # noqa: E402
 
 TASK = "groundedops-office-"
 IN_FLIGHT = {"approved, queued", "sent back, rebuilding", "built, waiting for the check", "check passed", "check failed", "ready to merge", "blocked"}
@@ -566,6 +567,16 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
             out.append(("product-owner", f"{slots} of {mode[0]} slots free; {why}", "product-owner"))
         else:   # one run does both
             out[po] = (out[po][0], f"{out[po][1]}; {why}", out[po][2])
+    # the CEO, 2026-11-12: once a week the product owner offers the product line's fixes to main, and its next run
+    # ports the ones the CEO approved (tools/main_port.py, from ops/schedules/product-owner.md)
+    ported = sorted(port_approved(ops))
+    port = f"port to main: {', '.join(ported)}" if ported else "weekly port to main due" if port_due(ops, now.timestamp()) else ""
+    if port:
+        po = next((n for n, (d, _, k) in enumerate(out) if d == "product-owner" and k), None)
+        if po is None:
+            out.append(("product-owner", port, "product-owner"))
+        else:
+            out[po] = (out[po][0], f"{out[po][1]}; {port}", out[po][2])
     asked =_mtime(os.path.join(ops, "state", "refresh_request"))   # the CEO's refresh button, via tools/ceo_inbox.py
     if asked > last_run:   # first in the queue until a run finishes after the press
         out.insert(0, ("customer", "the CEO asked for a fresh score", "customer"))

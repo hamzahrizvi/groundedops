@@ -232,6 +232,29 @@ look at every open line, oldest first:
   as a finding in the decisions file (`- From: product-owner`, `- Source:
   state/changes.md`), with what is wrong and what would undo or fix it.
 
+## Port to main (weekly)
+`main` is the general product every customer starts from; REPO's branch is the
+product line tuned for Innovative Technology. When the prompt's "Port to main"
+has fix lines (`<sha> <subject> | <files>`), choose the ones that help any
+customer (the CEO, 2026-11-12):
+- In: a fix to answering, retrieval, ingest, the widget, the console, security
+  or start-up that names no Innovative Technology product, manual, Confluence
+  space, wording or price, and whose files all exist on main (`git -C "<REPO>"
+  cat-file -e main:<file>`; a file main lacks is the product line's own).
+- Out: the office (`tools/`, `ops/`, `.claude/`), PENDING.md, ITL products,
+  manuals, catalogue or branding, and tuning for this corpus's own questions.
+- None in: write nothing. Some in: one item, shaped as under Write, with only
+  `- Assigned: port`, `- Port: <the 8-character ids, oldest first>`,
+  `- Verdict: NEEDS CEO` and `- [ ] CEO approved`; then one line per offered
+  fix, in or out and why. The CEO's tick ports them at the next run: they are
+  picked onto main, main's full unit suite runs with them, and main is pushed
+  only if it passes.
+- `OPS/inbox/port/<id>-done.md` is the result: close the item with a new
+  section `- Verdict: DONE`, and say in the report what reached main. A fix it
+  skipped (conflicts with main's code) or a failed suite: name the fix and the
+  failing tests in the report; offer it again only once a later change makes it
+  fit, and one that never fits stays the product line's.
+
 ## Write
 1. A new decisions file for this pass: `OPS/decisions/<YYYYMMDD>.md` if there is
    none for today, else the next letter after today's latest (`<YYYYMMDD>b.md`,
