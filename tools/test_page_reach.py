@@ -1,4 +1,4 @@
-"""Self-check for tools/page_reach.py case_set: pages_now wins over pages, gold_gone is skipped,
+"""Self-check for tools/page_reach.py case_set, gold_reach and failure_cause: pages_now wins over pages, gold_gone is skipped,
 a question seen in two runs is one entry.
 
   python tools/lab_lock.py python tools/test_page_reach.py
@@ -10,7 +10,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from page_reach import case_set, gold_pages, internal_gold, reach_flags, resolve_name, supervise  # noqa: E402
+from page_reach import case_set, failure_cause, gold_pages, gold_reach, internal_gold, reach_flags, resolve_name, supervise  # noqa: E402
 
 
 def case(i, q, **kw):
@@ -57,6 +57,27 @@ def main():
     g = ["A p1", "I p2"]
     assert reach_flags(g, g, ["I p2"], ["A p1"]) == (False, True)
     assert reach_flags(g, g, [], ["A p1"]) == (False, False)
+    idx = {("A.pdf", "3"), ("A.pdf", "4"), ("B-v2.pdf", "1")}
+    srcs = {"A.pdf", "B-v2.pdf"}
+    tr = lambda got, kept: {"stages": [{"id": "retrieve"}], "meta": {"pages_retrieved": got, "pages_prompt": kept}}
+    one = case("x", "q", pages=["A.pdf p3"])
+    assert gold_reach(one, tr({"A.pdf": [3]}, {"A.pdf": [3]}), idx, srcs) == "prompt"
+    assert gold_reach(one, tr({"A.pdf": [3]}, {"A.pdf": [4]}), idx, srcs) == "cut"
+    assert gold_reach(one, tr({"A.pdf": [4]}, {}), idx, srcs) == "never"
+    assert gold_reach(one, {"stages": [{"id": "sales"}], "meta": {}}, idx, srcs) == "never"   # never searched
+    assert gold_reach(one, {"stages": [{"id": "retrieve"}], "meta": {}}, idx, srcs) == "no_trace"   # old code
+    assert gold_reach(one, None, idx, srcs) == "no_trace"
+    assert gold_reach(case("y", "q"), tr({}, {}), idx, srcs) == "no_gold"
+    assert gold_reach(case("z", "q", pages=["A.pdf p9"]), tr({}, {}), idx, srcs) == "stale"
+    assert gold_reach(case("w", "q", pages=["B.pdf p1"]), tr({"B-v2.pdf": [1]}, {"B-v2.pdf": [1]}), idx, srcs) == "prompt"   # renamed
+    two = case("m", "q", pages=["A.pdf p3", "B.pdf p1"])
+    assert gold_reach(two, tr({"A.pdf": [3], "B-v2.pdf": [1]}, {"A.pdf": [3]}), idx, srcs) == "cut"
+    assert gold_reach(two, tr({"A.pdf": [3]}, {"A.pdf": [3]}), idx, srcs) == "never"
+    assert failure_cause("prompt", "safe_decline") == "found_and_declined"
+    assert failure_cause("prompt", "wrong") == failure_cause("prompt", "partial") == "found_and_misread"
+    assert failure_cause("cut", "wrong") == "found_and_cut" and failure_cause("never", "partial") == "never_found"
+    assert failure_cause("no_gold", "wrong") == "no_page"
+    assert all(failure_cause(r, "wrong") == "unknown" for r in (None, "stale", "no_trace", "error: X"))
     print("ok")
 
 

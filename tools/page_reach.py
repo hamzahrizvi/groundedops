@@ -17,6 +17,7 @@ the prompt (decline, clarify, FAQ).
           saves every 25 questions; a crash or a question stuck past 300 s restarts the reading from --out by itself
   report  python -I page_reach.py report reading.json [--diff older.json] [--fault fault.json] > readout.md
   index   python -I page_reach.py index --out DIR --drop-pdfs PRODUCT   (a TEST copy; never the live one)
+  gold_reach / failure_cause: blind_eval's per-failure bucket (D-20261109-01), from the answer's trace.
 
 `pages_now` on a case is today's page for it (preferred over `pages`, which stays as the run's grader reads it);
 `gold_gone` skips the case. Both are set in OPS runs/*/cases.json.
@@ -47,6 +48,41 @@ def reach_flags(gold, live_gold, internal, ctx):
     """(reach_all_live, reach_all_public); same "s pN" form or (s, p) tuples throughout."""
     pub = [g for g in live_gold if g not in internal]
     return (bool(live_gold) and all(g in ctx for g in live_gold), bool(pub) and all(g in ctx for g in pub))
+
+
+CAUSES = ("never_found", "found_and_cut", "found_and_misread", "found_and_declined", "unknown")
+
+
+def gold_reach(case, pipeline, in_index, sources, copy_of=None, renames=None):
+    """D-20261109-01: where a case's answer pages went on one turn, from the trace's pages_retrieved /
+    pages_prompt (src/pipeline_trace.add_pages). "prompt": every gold page was in the prompt; "cut": a gold
+    page missing from the prompt was retrieved, and none was never retrieved; "never": a gold page was never
+    retrieved (or the turn ended before any search); "stale": a gold page is not in today's index, its
+    document does not resolve, or the case is gold_gone; "no_gold": the case names no page; "no_trace": no
+    trace, or one from code that did not record pages. Names resolve as in run() (resolve_name, copies)."""
+    if case.get("gold_gone"): return "stale"
+    gold = gold_pages(case)
+    if not gold: return "no_gold"
+    if not pipeline: return "no_trace"
+    meta = pipeline.get("meta") or {}
+    if "pages_retrieved" not in meta and any(s.get("id") == "retrieve" for s in pipeline.get("stages") or []):
+        return "no_trace"
+    copy_of = copy_of or {}
+    def pages(key): return {(copy_of.get(s, s), str(p)) for s, ps in (meta.get(key) or {}).items() for p in ps}
+    got, kept = pages("pages_retrieved"), pages("pages_prompt")
+    gold = [(resolve_name(s, sources, renames, copy_of)[0], p) for s, p in gold]
+    if any(s is None or (s, p) not in in_index for s, p in gold): return "stale"
+    missing = [g for g in gold if g not in kept]
+    if not missing: return "prompt"
+    return "cut" if all(g in got for g in missing) else "never"
+
+
+def failure_cause(reach, verdict):
+    """The bucket of an answer graded under 3: one of CAUSES, or "no_page" for a case that names no page
+    (expected rejected or clarify: nothing to find, so it is kept out of the five)."""
+    if reach == "no_gold": return "no_page"
+    if reach == "prompt": return "found_and_declined" if verdict == "safe_decline" else "found_and_misread"
+    return {"never": "never_found", "cut": "found_and_cut"}.get(reach, "unknown")
 
 
 def gold_pages(c):
