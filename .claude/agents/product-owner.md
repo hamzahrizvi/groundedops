@@ -255,6 +255,11 @@ look at every open line, oldest first:
    ```
    then why (two lines), cost and risk, and for approved items the work
    order: the question type to fix, the evidence, and what "done" means.
+   Only Dev can start the backend or click through the widget in a browser.
+   A work order that needs either (watch a screen, press a button, copy
+   what a visitor sees) is assigned to dev, never to marketing, customer,
+   rnd, audit or security: those read files and the web only, so the
+   order comes back BLOCKED (D-20261109-06, the CEO, 2026-11-12).
    A later verdict on an existing item (READY TO MERGE, SENT BACK) goes in a
    new decisions file as `## <same id> | <title>` with `- Verdict: READY TO MERGE`
    or `- Verdict: SENT BACK`; never edit an old decision.
