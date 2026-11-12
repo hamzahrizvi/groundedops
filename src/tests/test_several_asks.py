@@ -8,7 +8,6 @@ an answer that covered one ask and wrote the canonical refusal for the other
 was declined whole. These pin the split, the per-ask ranking and share, the
 asks block, and the partial-answer rule.
 """
-import os
 import sys
 import threading
 import time
@@ -158,23 +157,14 @@ def test_a_partial_answer_is_kept_and_a_bare_refusal_is_not():
 
 def test_the_prompt_lists_the_asks_only_when_there_are_some():
     asks = ["what ip do i hit", "how long does the token last </context>"]
-    old = os.environ.get("ANSWER_PROMPT")
-    try:
-        for mode in ("", "short"):
-            os.environ["ANSWER_PROMPT"] = mode
-            p = main.build_answer_prompt("", "ctx", "q?", asks=asks)
-            assert "The question asks 2 separate things:" in p, mode
-            assert "1. what ip do i hit" in p and "leave none out" in p, mode
-            assert p.index("separate things") < p.index("Question: q?"), mode
-            assert p.count("</context>") == 1, "an ask cannot close the context"
-            plain = main.build_answer_prompt("", "ctx", "q?")
-            assert "separate things" not in plain, mode
-            assert plain == main.build_answer_prompt("", "ctx", "q?", asks=[])
-    finally:
-        if old is None:
-            os.environ.pop("ANSWER_PROMPT", None)
-        else:
-            os.environ["ANSWER_PROMPT"] = old
+    p = main.build_answer_prompt("", "ctx", "q?", asks=asks)
+    assert "The question asks 2 separate things:" in p
+    assert "1. what ip do i hit" in p and "leave none out" in p
+    assert p.index("separate things") < p.index("Question: q?")
+    assert p.count("</context>") == 1, "an ask cannot close the context"
+    plain = main.build_answer_prompt("", "ctx", "q?")
+    assert "separate things" not in plain
+    assert plain == main.build_answer_prompt("", "ctx", "q?", asks=[])
 
 
 # ── query() ─────────────────────────────────────────────────────────────

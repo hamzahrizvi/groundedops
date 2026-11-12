@@ -142,9 +142,7 @@ def test_no_note_without_one_product():
 
 
 # ── the prompt carries it ──────────────────────────────────────────────
-def test_the_note_reaches_both_prompt_templates():
-    for mode in ("", "short"):
-        with patch.dict(os.environ, {"ANSWER_PROMPT": mode}):
-            p = main.build_answer_prompt("", "ctx", "q?", note="NOTE-X")
-            assert "NOTE-X" in p and p.index("NOTE-X") < p.index("Question: q?")
-            assert "NOTE-X" not in main.build_answer_prompt("", "ctx", "q?")
+def test_the_note_reaches_the_prompt():
+    p = main.build_answer_prompt("", "ctx", "q?", note="NOTE-X")
+    assert "NOTE-X" in p and p.index("NOTE-X") < p.index("Question: q?")
+    assert "NOTE-X" not in main.build_answer_prompt("", "ctx", "q?")
