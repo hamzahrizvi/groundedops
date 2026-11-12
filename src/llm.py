@@ -901,6 +901,10 @@ def stream_generate(provider, prompt, model, api_keys=None, timeout=180):
     else:
         logger.warning(f"stream_generate: provider {provider!r} cannot stream")
         return
+    import keystore
+    if not keystore.may(provider, "answers"):
+        logger.warning(f"stream_generate: {provider} key is not ticked for answering; not called")
+        return
     if not key:
         logger.info(f"stream_generate: no key for {provider}")
         return
