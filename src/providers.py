@@ -8,38 +8,21 @@ import keystore
 from runtime_config import get_settings
 
 
-# Sensible default per provider when an override provider is chosen but
-# no specific model is typed — mirrors the retired AdminPanel.jsx's
-# curated model lists.
-# Default model when an override provider is chosen but no model is typed.
-#
-# deepseek was pinned to "deepseek-chat" here, which DeepSeek RETIRED on
-# 24 July 2026 — so every console-initiated generation with the DeepSeek
-# provider selected failed with "returned nothing", including "generate
-# questions". The escalation path in query() already learned this and reads
-# ONLINE_DEEPSEEK_MODEL; read it here too rather than keeping a second copy
-# of a value that goes stale.
-_PROVIDER_STATIC_MODEL = {
-    "local": "mistral",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4-6",
-}
-
-
 def _default_model_for(provider: str) -> str:
-    """The provider's configured model (ONLINE_<PROVIDER>_MODEL, which the
-    console writes), falling back to the static default.
+    """Default model when an override provider is chosen but no model is
+    typed: the provider's configured model (ONLINE_<PROVIDER>_MODEL, which
+    the console writes), else keystore's floor for that provider.
 
-    The same lesson twice: deepseek was pinned here to a retired alias, and
-    "openai" still was on 2026-09-27 -- "gpt-4o-mini", with the slot pointed
-    at the on-prem gateway (ONLINE_OPENAI_MODEL=itl-gpt-flash), which answers
-    400 for a model it does not have. Every backup escalation and console
-    generation on that slot failed. keystore.get_model is what the answering
-    path already reads, so both now agree."""
+    keystore.get_model is the ONE place an online provider's default lives.
+    This file used to keep its own table, and so did llm.py and router.py;
+    the copies went stale separately (deepseek pinned to an alias DeepSeek
+    retired on 24 July 2026, then "gpt-4o-mini" sent to an on-prem gateway
+    that does not have it, 2026-09-27), and each time every console
+    generation and backup escalation on that slot failed."""
     try:
         return keystore.get_model(provider)
     except Exception:                    # "local", or a provider keystore does not know
-        return _PROVIDER_STATIC_MODEL.get(provider, "")
+        return "mistral" if provider == "local" else ""
 
 
 # Which providers this install can actually reach. An online provider needs

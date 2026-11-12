@@ -121,29 +121,6 @@ def clear_key() -> None:
         os.remove(_VAULT_FILE)
 
 
-def migrate_legacy_plaintext(legacy_path: str = ".deepseek_key.json") -> bool:
-    """One-time migration: if an old plaintext .deepseek_key.json exists,
-    re-encrypt its key into the vault and delete the plaintext file.
-
-    Returns True if a migration happened. Safe to call on every startup.
-    """
-    abs_legacy = legacy_path
-    if not os.path.isabs(abs_legacy):
-        abs_legacy = os.path.join(os.path.dirname(__file__), legacy_path)
-    if not os.path.exists(abs_legacy):
-        return False
-    try:
-        import json
-        with open(abs_legacy, "r", encoding="utf-8") as f:
-            legacy_key = json.load(f).get("key", "")
-        if legacy_key.strip():
-            save_key(legacy_key)
-        os.remove(abs_legacy)  # remove plaintext regardless
-        return bool(legacy_key.strip())
-    except Exception:
-        return False
-
-
 # ── Named secrets ───────────────────────────────────────────────────────
 #
 # The console saves an SMTP password and the SSO client secrets. They used

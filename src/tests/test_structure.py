@@ -4,7 +4,6 @@ from structure import (
     starts_with_verb,
     is_bad_line,
     is_meaningful_line,
-    simple_similarity,
     reports_failure,
     reports_symptom,
     asks_for_procedure,
@@ -152,21 +151,6 @@ def test_is_meaningful_line():
     assert is_meaningful_line("Verify the network is connected") is True
     assert is_meaningful_line("Check power status") is True
     assert is_meaningful_line("Random unrelated sentence here") is False
-
-
-# ── simple_similarity ────────────────────────────────────────────────
-
-def test_simple_similarity_identical():
-    assert simple_similarity("check the power", "check the power") == 1.0
-
-
-def test_simple_similarity_disjoint():
-    assert simple_similarity("check the power", "verify the network") < 0.5
-
-
-def test_simple_similarity_empty():
-    assert simple_similarity("", "anything") == 0
-    assert simple_similarity("anything", "") == 0
 
 
 def test_reports_failure_true_for_failure_reports():

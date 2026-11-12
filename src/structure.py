@@ -252,14 +252,6 @@ def is_meaningful_line(line: str) -> bool:
     ])
 
 
-def simple_similarity(a: str, b: str) -> float:
-    a_words = set(a.split())
-    b_words = set(b.split())
-    if not a_words or not b_words:
-        return 0.0
-    return len(a_words & b_words) / len(a_words | b_words)
-
-
 def _query_overlap_score(query: str | None, lines: list[str]) -> float:
     if not query:
         return 0.0

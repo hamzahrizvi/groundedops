@@ -151,7 +151,7 @@ os.environ["BACKUP_SNAPSHOT_DIR"] = _scratch("snapshots")
 # Forced empty, NOT setdefault: main.py loads the developer's real src/.env
 # at import and would otherwise leak their local BACKUP_ALLOW_PLAINTEXT in,
 # breaking the "a passphrase is required" assertions on whichever machine
-# has it switched on. _load_env_file skips keys already in os.environ, so
+# has it switched on. keystore.load_env_file skips keys already in os.environ, so
 # setting it empty here wins. Tests that want the plaintext path set it
 # themselves, explicitly.
 os.environ["BACKUP_ALLOW_PLAINTEXT"] = ""
@@ -170,7 +170,7 @@ os.environ["BACKUP_PASSPHRASE"] = ""
 # at import, so a key present there made "an unset provider masks to None"
 # fail on their machine while passing in CI.
 #
-# Blanked, not popped — _load_env_file skips keys already in os.environ, and
+# Blanked, not popped — keystore.load_env_file skips keys already in os.environ, and
 # popping would let the real value back in when main is imported below. Every
 # keystore read strips before testing, so "" is indistinguishable from unset.
 for _leaky in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
@@ -282,7 +282,7 @@ stub("grounding", check_grounding=lambda a, c, threshold=0.55: (True, 0.9),
      _get_nli_model=lambda: None)
 stub("llm", generate=lambda *a, **k: dict(GEN_RESPONSE),
      generate_with_fallback=_generate_with_fallback,
-     warmup_local_models=lambda m=None: {}, RETHINK_OPTIONS=[],
+     warmup_local_models=lambda m=None: {},
      condense_query=lambda q, h: q, effort_model=lambda model_env: None,
      escalation_role=lambda: "backup")
 stub("runtime_config", get_settings=lambda: {"mode": "free"},

@@ -155,9 +155,7 @@ groundedops/
     │   └── test_new_routes.py    FAQ/gaps/autogenerate route tests via _harness.py,
     │                             all passing — test_ui.py needs playwright, not installed
     ├── assets/
-    │   ├── logo.svg  logo2.png  icon2.svg  groundedops-logo-animated.svg
-    │   └── icons/  all.png folder.png key.png new.png reset.png
-    │               theme_dark.png theme_light.png toggle.png  README.txt
+    │   └── logo.svg  logo-mark.svg  icon2.svg  groundedops-logo-animated.svg
     ├── chroma_db/                vector store, gitignored
     │   └── 8f903bd4-341e-464d-8c9d-3ec4833253f1/      the collection
     ├── corpus/                   second copy of the source docs
@@ -184,7 +182,8 @@ groundedops/
     │           (AdminPanel.jsx removed — it duplicated admin.html/Nocturne and
     │            shipped admin code into the public chat bundle; its three
     │            trigger buttons now open /admin in a new tab instead)
-    └── legacy/                   ~500 files. Reference only — nothing imports it.
+    └── legacy/                   793 files, 16 MB. Reference only — nothing imports
+        │                         it; release.py writes each release's drop here.
         │                         Each release folder holds only that release's changed
         │                         files, plus files.zip and a CHANGELOG_*.md.
         ├── v3/                   flat, 21 files: app.py bm25.py chunking.py db.py

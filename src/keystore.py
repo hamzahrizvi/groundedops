@@ -96,6 +96,35 @@ def _env_path() -> str:
         os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 
+def load_env_file(path: str) -> int:
+    """Load KEY=VALUE lines from the .env into os.environ; returns how many
+    were set. The one reader of that file: the server (main.py, before any
+    other project import) and the command-line tools all call this, so a
+    quoted value or a BOM means the same thing to each of them.
+
+    Real environment variables win ("" counts as set), so a shell export or
+    a Docker -e flag can still override the file. Hand-parsed rather than
+    adding python-dotenv, so no new dependency."""
+    if not os.path.isfile(path):
+        return 0
+    loaded = 0
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+                    loaded += 1
+    except Exception as exc:  # pragma: no cover
+        print(f"WARNING: could not read {path}: {exc}")
+    return loaded
+
+
 _write_lock = threading.Lock()
 
 
@@ -198,7 +227,7 @@ def _rewrite_env_line(key: str, value: str | None) -> None:
     Locked because two admins saving different keys at once must not race
     on read-modify-write of the same file.
     """
-    # One line per setting is the whole format (main.py's _load_env_file). A
+    # One line per setting is the whole format (load_env_file above). A
     # line break inside a value would write a SECOND setting of the value's
     # choosing -- e.g. a pasted "key\nOPENAI_BASE_URL=https://attacker"
     # redirecting every provider call, key attached.

@@ -37,7 +37,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 
 def load_env(path):
-    """GO_DATA's .env, same rules as main._load_env_file (never overrides)."""
+    """GO_DATA's .env, same rules as keystore.load_env_file (never overrides)."""
     if not os.path.isfile(path):
         return
     for line in open(path, encoding="utf-8-sig"):
