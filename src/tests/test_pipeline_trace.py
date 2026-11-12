@@ -244,6 +244,22 @@ def test_the_real_logger_reads_the_trace_and_tolerates_its_absence():
     assert f["verified_by"] == "llm" and f["verifier"] == "SUPPORT: YES"
 
 
+def test_the_trace_keeps_the_pages_the_prompt_held():
+    """D-20261109-01: pages only, merged per document, no duplicates."""
+    trace = _ask()["pipeline"]
+    assert trace["meta"]["pages_prompt"] == {"Manual.pdf": [1]}
+    t = pipeline_trace.start()
+    try:
+        pipeline_trace.add_pages("pages_retrieved", [{"source": "A.pdf", "page": 3, "text": "x"},
+                                                     {"source": "A.pdf", "page": 3}, {"source": "B.pdf", "page": 1},
+                                                     {"source": "C.pdf", "page": None}, {"page": 2}])
+        pipeline_trace.add_pages("pages_retrieved", [{"source": "A.pdf", "page": 5}])
+        assert pipeline_trace.snapshot()["meta"]["pages_retrieved"] == {"A.pdf": [3, 5], "B.pdf": [1]}
+    finally:
+        pipeline_trace.reset(t)
+    pipeline_trace.add_pages("pages_prompt", [{"source": "A.pdf", "page": 1}])   # no trace open: must not raise
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
