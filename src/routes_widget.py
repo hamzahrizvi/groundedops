@@ -7,6 +7,7 @@ app.include_router; paths, parameters and responses are unchanged.
 
 import logging
 import os
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -212,6 +213,22 @@ class LeadReq(BaseModel):
     enquiry: str | None = None
     summary_source: str = Field("none", max_length=MAX_WORD_CHARS)  # "chat" | "written" | "none"
     visitor_id: str | None = Field(None, max_length=MAX_ID_CHARS)  # the widget's own id, for the daily cap
+    # Spam guard: a hidden field people never see, and how long the form was
+    # open. None from a widget older than this field, which is let through.
+    hp: str = Field("", max_length=MAX_WORD_CHARS)
+    fill_ms: int | None = None
+
+
+# A person reads the form and types a name and an address; a form bot posts
+# at once. ponytail: both signals come from the browser, so a bot scripted
+# against this endpoint can fake them -- the daily caps still bound it, and a
+# challenge (e.g. Cloudflare Turnstile) is the upgrade if spam gets through.
+LEAD_MIN_FILL_MS = int(os.getenv("WIDGET_LEAD_MIN_FILL_MS", "2500"))
+
+
+def _looks_like_bot(payload: LeadReq) -> bool:
+    return bool(payload.hp.strip()) or (
+        payload.fill_ms is not None and payload.fill_ms < LEAD_MIN_FILL_MS)
 
 
 _proxy_warned = False
@@ -291,6 +308,12 @@ def widget_submit_lead(payload: LeadReq, request: Request,
         raise HTTPException(status_code=429, detail=(
             "We have already received several messages from you today. "
             "Please try again tomorrow, or contact us directly."))
+    if _looks_like_bot(payload):
+        # Looks accepted, so the bot learns nothing; nothing is stored or
+        # emailed. Counted against the caps above all the same.
+        logger.info("widget lead dropped by the spam guard (trap field or too fast)")
+        fake = str(uuid.uuid4())
+        return {"received": True, "id": fake, "reference": widget_config.lead_ref(fake)}
     try:
         lead = widget_config.add_lead(
             payload.kind, payload.values or {},
