@@ -46,6 +46,22 @@ def test_a_reranker_outage_is_reported_as_one():
         'if _retrieved and _retrieved[0].get("rerank_failed")')[1][:800]
 
 
+def test_the_ranker_records_the_pages_it_was_given():
+    """D-20261109-01: every search's candidates reach the trace, even on an outage."""
+    import pipeline_trace
+    import reranker
+    real = reranker._get
+    reranker._get = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no model"))
+    t = pipeline_trace.start()
+    try:
+        reranker.rerank("q", [{"id": "a", "text": "x", "source": "M.pdf", "page": 4},
+                              {"id": "b", "text": "y", "source": "N.pdf", "page": 1}], top_k=1)
+        assert pipeline_trace.snapshot()["meta"]["pages_retrieved"] == {"M.pdf": [4], "N.pdf": [1]}
+    finally:
+        pipeline_trace.reset(t)
+        reranker._get = real
+
+
 def test_a_provider_call_has_an_overall_deadline():
     """requests' timeout bounds each read; a provider that keeps the socket
     alive could hold a call open for hours. The deadline ends the wait."""

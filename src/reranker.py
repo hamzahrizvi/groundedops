@@ -75,6 +75,10 @@ def rerank(query, chunks, top_k=3):
     if not chunks:
         return []
 
+    # D-20261109-01: the pages every search handed the ranker, for the trace.
+    import pipeline_trace
+    pipeline_trace.add_pages("pages_retrieved", chunks)
+
     try:
         model = _get()
         pairs = [(query, c["text"]) for c in chunks]

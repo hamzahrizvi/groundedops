@@ -31,6 +31,7 @@ Pipeline check panel.
 """
 from __future__ import annotations
 
+import threading
 import time
 from contextvars import ContextVar
 
@@ -207,6 +208,31 @@ def get_meta(key: str):
         return (cur or {}).get("meta", {}).get(key)
     except Exception:
         return None
+
+
+_pages_lock = threading.Lock()
+
+
+def add_pages(key: str, chunks) -> None:
+    """D-20261109-01: merge each chunk's (source, page) into meta[key] as
+    {source: [page, ...]}, first-seen order: the pages a turn's search found
+    ("pages_retrieved"), its prompt held ("pages_prompt") and its verifier
+    also read ("pages_shown"). Pages only, never text. Locked: the asks are
+    ranked in threads that share this trace."""
+    try:
+        cur = _current.get()
+        if cur is None:
+            return
+        with _pages_lock:
+            got = cur.setdefault("meta", {}).setdefault(key, {})
+            for c in chunks or []:
+                src, pg = c.get("source"), c.get("page")
+                if src and pg is not None:
+                    pages = got.setdefault(src, [])
+                    if pg not in pages:
+                        pages.append(pg)
+    except Exception:
+        pass
 
 
 # The stages that are an OUTCOME rather than a step along the way. "respond"
