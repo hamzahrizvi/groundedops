@@ -11,13 +11,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+_last_blocked: set = set()
+
+
 def blocked() -> set:
+    """catalog.blocked_products; on an error, the last set it gave, never
+    "nothing" (D-20261107-08)."""
+    global _last_blocked
     try:
         import catalog
-        return set(catalog.blocked_products())
+        _last_blocked = set(catalog.blocked_products())
     except Exception as exc:
-        logger.warning("obsolete products unreadable: %s", exc)
-        return set()
+        logger.warning("obsolete products unreadable, keeping the last blocked "
+                       "set %s: %s", sorted(_last_blocked), exc)
+    return set(_last_blocked)
 
 
 def _key(name: str) -> str:
