@@ -191,7 +191,8 @@ def test_phone_header_buttons_meet_the_touch_target_minimum():
         })""")
     assert boxes
     for b in boxes:
-        assert b["w"] >= 44 and b["h"] >= 44, boxes
+        # 0.01 px: the browser reports the 44 px boxes as 43.999996.
+        assert b["w"] >= 43.99 and b["h"] >= 43.99, boxes
 
 
 def test_desktop_layout_is_unaffected():
