@@ -366,8 +366,8 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | waiting for CEO | your yes |
 | D-20261104-11 | Security item D-20261104-11, details in the office | waiting for CEO | your yes |
 | D-20261107-08 | Security item D-20261107-08, details in the office | built, waiting for the check | the pre-ship check |
-| D-20261109-01 | The weekly table cannot say whether a failed answer's page was never found, found and cut, or found and misread | built, waiting for the check | the pre-ship check |
-| D-20261112-01 | The phone header test fails on a 0.000004-pixel rounding, so every full test run reports one false failure | approved, queued | Dev builds it |
+| D-20261109-01 | The weekly table cannot say whether a failed answer's page was never found, found and cut, or found and misread | ready to merge | merges once Security clears it |
+| D-20261112-01 | The phone header test fails on a 0.000004-pixel rounding, so every full test run reports one false failure | built, waiting for the check | the pre-ship check |
 | D-20261112-02 | A yes/no answer quotes the right figures and then says the opposite: a 2-year-old unit called "still covered" by a 1-year warranty | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
