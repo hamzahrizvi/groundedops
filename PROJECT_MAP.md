@@ -150,9 +150,7 @@ groundedops/
     │   └── test_new_routes.py    FAQ/gaps/autogenerate route tests via _harness.py,
     │                             all passing — test_ui.py needs playwright, not installed
     ├── assets/
-    │   ├── logo.svg  logo2.png  icon2.svg  groundedops-logo-animated.svg
-    │   └── icons/  all.png folder.png key.png new.png reset.png
-    │               theme_dark.png theme_light.png toggle.png  README.txt
+    │   └── logo.svg  logo-mark.svg  icon2.svg  groundedops-logo-animated.svg
     ├── chroma_db/                vector store, gitignored
     │   └── 8f903bd4-341e-464d-8c9d-3ec4833253f1/      the collection
     ├── corpus/                   second copy of the source docs
