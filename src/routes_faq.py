@@ -274,7 +274,7 @@ def faq_gaps_dismiss_bulk(payload: GapIds, x_admin_password: str | None = Header
 @router.post("/faq/gaps/spam")
 def faq_gaps_mark_spam(payload: GapIds, x_admin_password: str | None = Header(default=None)):
     """Flag gaps as spam (kept, never resurfaces) rather than deleting —
-    see faq_store.mark_spam for why this is distinct from dismiss."""
+    see faq_store.mark_spam_bulk for why this is distinct from dismiss."""
     _require_admin(x_admin_password)
     n = faq_store.mark_spam_bulk(payload.ids)
     return {"marked": n}

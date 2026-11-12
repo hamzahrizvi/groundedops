@@ -662,14 +662,20 @@ def _gap_key(question: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (question or "").lower())).strip()
 
 
+def _parse_gaps():
+    """The gap log as stored, or raise. The only place the file is opened
+    for reading; callers that must not write after a failed read use this
+    inside their own try, the rest use _read_gaps."""
+    with open(_GAP_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _read_gaps() -> list[dict]:
-    """The gap log, or an empty list. Six places opened this file by hand
-    with slightly different error handling; this is that, once."""
+    """The gap log, or an empty list when it is absent or unreadable."""
     if not os.path.exists(_GAP_PATH):
         return []
     try:
-        with open(_GAP_PATH, encoding="utf-8") as f:
-            data = json.load(f)
+        data = _parse_gaps()
         return data if isinstance(data, list) else []
     except Exception as e:
         logger.warning(f"gap log read failed: {e}")
@@ -677,6 +683,7 @@ def _read_gaps() -> list[dict]:
 
 
 def _write_gaps(gaps: list[dict]) -> None:
+    """The only place the gap log is written."""
     with open(_GAP_PATH, "w", encoding="utf-8") as f:
         json.dump(gaps, f, indent=2)
 
@@ -782,8 +789,7 @@ def record_gap(question: str, scope_key: str | None,
             gaps = []
             if os.path.exists(_GAP_PATH):
                 try:
-                    with open(_GAP_PATH, encoding="utf-8") as f:
-                        gaps = json.load(f)
+                    gaps = _parse_gaps()
                 except Exception:
                     gaps = []
             for g in gaps:
@@ -812,8 +818,7 @@ def record_gap(question: str, scope_key: str | None,
                         g["suggestions_shown"] = shown
                     if not g.get("language"):
                         g["language"] = norm_lang(language) or "en"
-                    with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                        json.dump(gaps, f, indent=2)
+                    _write_gaps(gaps)
                     return
             gaps.append({
                 "id": key,
@@ -832,8 +837,7 @@ def record_gap(question: str, scope_key: str | None,
             })
             if len(gaps) > 500:
                 gaps = gaps[-500:]            # keep it bounded
-            with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                json.dump(gaps, f, indent=2)
+            _write_gaps(gaps)
     except Exception as e:
         logger.warning(f"could not record FAQ gap (non-fatal): {e}")
 
@@ -848,13 +852,11 @@ def stamp_gap(fields: dict, gap_id: str | None = None,
         return False
     try:
         with _lock:
-            with open(_GAP_PATH, encoding="utf-8") as f:
-                gaps = json.load(f)
+            gaps = _parse_gaps()
             for g in gaps:
                 if g.get("id") == key:
                     g.update(fields)
-                    with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                        json.dump(gaps, f, indent=2)
+                    _write_gaps(gaps)
                     return True
     except Exception as e:
         logger.warning(f"could not stamp FAQ gap (non-fatal): {e}")
@@ -893,8 +895,7 @@ def list_gaps(scope_key: str | None = None, include_resolved: bool = False,
     if not os.path.exists(_GAP_PATH):
         return []
     try:
-        with open(_GAP_PATH, encoding="utf-8") as f:
-            gaps = json.load(f)
+        gaps = _parse_gaps()
     except Exception:
         return []
     gaps = [_normalize_gap(g) for g in gaps]
@@ -1262,8 +1263,7 @@ def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:
         return 0
     try:
         with _lock:
-            with open(_GAP_PATH, encoding="utf-8") as f:
-                gaps = json.load(f)
+            gaps = _parse_gaps()
             n = 0
             for g in gaps:
                 if (g.get("id") or _gap_key(g.get("question"))) == key and not g.get("resolved"):
@@ -1272,8 +1272,7 @@ def resolve_gap_matching(question: str, faq_id: str | None = None) -> int:
                     g["resolved_at"] = __import__("time").time()
                     n += 1
             if n:
-                with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                    json.dump(gaps, f, indent=2)
+                _write_gaps(gaps)
             return n
     except Exception as e:
         logger.warning(f"could not resolve FAQ gap (non-fatal): {e}")
@@ -1284,8 +1283,7 @@ def gap_stats() -> dict:
     if not os.path.exists(_GAP_PATH):
         return {"open": 0, "resolved": 0, "total_asks": 0}
     try:
-        with open(_GAP_PATH, encoding="utf-8") as f:
-            gaps = json.load(f)
+        gaps = _parse_gaps()
     except Exception:
         return {"open": 0, "resolved": 0, "total_asks": 0}
     open_gaps = [g for g in gaps if not g.get("resolved")]
@@ -1319,20 +1317,18 @@ def prune_before(cutoff) -> int:
 
 def dismiss_gap(gap_id: str) -> bool:
     """Hard-delete every recorded entry for one normalized question — a
-    one-off clear. Unlike mark_spam, a dismissed question that gets asked
+    one-off clear. Unlike mark_spam_bulk, a dismissed question that gets asked
     again starts a fresh entry, since record_gap only checks IDs still in
     the file. Returns whether anything was actually removed."""
     if not os.path.exists(_GAP_PATH):
         return False
     try:
         with _lock:
-            with open(_GAP_PATH, encoding="utf-8") as f:
-                gaps = json.load(f)
+            gaps = _parse_gaps()
             n = len(gaps)
             gaps = [g for g in gaps
                     if (g.get("id") or _gap_key(g.get("question"))) != gap_id]
-            with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                json.dump(gaps, f, indent=2)
+            _write_gaps(gaps)
             return len(gaps) < n
     except Exception as e:
         logger.warning(f"could not dismiss FAQ gap (non-fatal): {e}")
@@ -1346,61 +1342,35 @@ def dismiss_gap_bulk(gap_ids: list[str]) -> int:
     ids = set(gap_ids)
     try:
         with _lock:
-            with open(_GAP_PATH, encoding="utf-8") as f:
-                gaps = json.load(f)
+            gaps = _parse_gaps()
             n = len(gaps)
             gaps = [g for g in gaps
                     if (g.get("id") or _gap_key(g.get("question"))) not in ids]
-            with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                json.dump(gaps, f, indent=2)
+            _write_gaps(gaps)
             return n - len(gaps)
     except Exception as e:
         logger.warning(f"could not bulk-dismiss FAQ gaps (non-fatal): {e}")
         return 0
 
 
-def mark_spam(gap_id: str) -> bool:
-    """Flag a gap as spam rather than deleting it — unlike dismiss_gap,
-    record_gap's merge-by-id keeps finding this entry on a repeat ask, so
-    it never resurfaces on the working list even if asked again. Returns
-    whether a matching entry was found."""
-    if not os.path.exists(_GAP_PATH):
-        return False
-    try:
-        with _lock:
-            with open(_GAP_PATH, encoding="utf-8") as f:
-                gaps = json.load(f)
-            found = False
-            for g in gaps:
-                if (g.get("id") or _gap_key(g.get("question"))) == gap_id:
-                    g["spam"] = True
-                    found = True
-            if found:
-                with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                    json.dump(gaps, f, indent=2)
-            return found
-    except Exception as e:
-        logger.warning(f"could not mark FAQ gap as spam (non-fatal): {e}")
-        return False
-
-
 def mark_spam_bulk(gap_ids: list[str]) -> int:
-    """mark_spam for many at once. Returns how many were flagged."""
+    """Flag gaps as spam rather than deleting them — unlike dismiss_gap,
+    record_gap's merge-by-id keeps finding a flagged entry on a repeat ask,
+    so it never resurfaces on the working list even if asked again. Returns
+    how many were flagged."""
     if not gap_ids or not os.path.exists(_GAP_PATH):
         return 0
     ids = set(gap_ids)
     try:
         with _lock:
-            with open(_GAP_PATH, encoding="utf-8") as f:
-                gaps = json.load(f)
+            gaps = _parse_gaps()
             n = 0
             for g in gaps:
                 if (g.get("id") or _gap_key(g.get("question"))) in ids:
                     g["spam"] = True
                     n += 1
             if n:
-                with open(_GAP_PATH, "w", encoding="utf-8") as f:
-                    json.dump(gaps, f, indent=2)
+                _write_gaps(gaps)
             return n
     except Exception as e:
         logger.warning(f"could not bulk-mark FAQ gaps as spam (non-fatal): {e}")
