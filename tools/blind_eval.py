@@ -46,6 +46,7 @@ Env:
            "lab stopped at the cap": answers so far are saved, a re-mark keeps its old grades.
   reset    drops every sys_* answer, the grades and the summary but keeps the
            baseline answers, so a copied run dir re-measures new code cheaply.
+  grade    also labels each sys_* answer under 3 with "cause" (never_found, found_and_cut, found_and_misread, found_and_declined, unknown; "no_page" for a case naming no page) from row.reach, which the system phase sets from the trace's pages (page_reach.gold_reach); summary.<sys_*>.causes and .by_type_cause count them (D-20261109-01). The stream path carries no trace: its failures are "unknown".
   grade    shows the grader the full text of each case's cited pages (manuals/, capped at 30000 chars),
            plus the pages of the case's own manual(s) an answer copies 3+ eight-word runs from (2 per
            answer, 12000 chars, D-20261019-05), and stores the blind A/B labels per case.
@@ -63,6 +64,7 @@ from functools import lru_cache
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also when run via runpy
 from lab_lock import lab_lock
 from market_compare import under, clamp_refusal
+from page_reach import gold_reach, failure_cause, RENAMES
 
 if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own process (PERFORMANCE_MODE, torch)
     _i = sys.argv.index("--repeats"); _n = int(sys.argv[_i + 1]); _argv = sys.argv[1:_i] + sys.argv[_i + 2:]
@@ -276,6 +278,18 @@ if phase == "system":
     r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
     src, arm = os.environ["ADAPTIVE_FROM"].rsplit(":", 1) if os.environ.get("ADAPTIVE_FROM") else (R1, "sys_normal")
     done = (right(json.load(open(src, encoding="utf-8")), arm) if r1 else set()) & set(r1.get(f"sys_{mode}", {}))
+    _idx = []
+    def reach(c, d):
+        """D-20261109-01: where the case's answer pages went on this turn (page_reach.gold_reach); never stops a run."""
+        try:
+            if not _idx:
+                import db, retrieval_db
+                meta = db.get_collection().get(include=["metadatas"])["metadatas"]
+                _idx[:] = [{(m.get("source"), str(m.get("page"))) for m in meta}, {m.get("source") for m in meta},
+                           retrieval_db.copies_of(), json.load(open(RENAMES, encoding="utf-8")) if os.path.exists(RENAMES) else {}]
+            return gold_reach(c, d.get("pipeline"), *_idx)
+        except Exception as e:
+            return f"error: {type(e).__name__}: {e}"[:120]
     for c in cases:
         if c["id"] in rows: continue
         if c["id"] in done:   # ADAPTIVE: right first time, so this repeat is the same answer at no cost
@@ -303,6 +317,7 @@ if phase == "system":
                          "completion_tokens": sum(u.get("completion_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
                          "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
+                         "reach": reach(c, d),   # D-20261109-01: prompt | cut | never | stale | no_gold | no_trace
                          "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
                          "figures": {s["source"]: [f.get("name") for f in s.get("figures") or []] for s in d.get("sources") or []
                                      if isinstance(s, dict) and s.get("figures")},   # pictures shown beside the answer (D-20261022-14)
@@ -491,6 +506,15 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
                       "usd_mean": round(st.mean(cost), 6), "usd_median": round(st.median(cost), 6), "usd_max": max(cost),
                       "by_type": {t: f"{sum(grades[c['id']][s]['score'] for c in ok if c['type'] == t)}/{3 * sum(1 for c in ok if c['type'] == t)}"
                                   for t in sorted({c['type'] for c in ok})}}
+        if s.startswith("sys_"):   # D-20261109-01: where each failure broke
+            from collections import Counter
+            bad = [c for c in ok if grades[c["id"]][s]["score"] < 3]
+            for c in bad:
+                g = grades[c["id"]][s]
+                grades[c["id"]][s] = {**g, "cause": failure_cause(state[s][c["id"]].get("reach"), g.get("verdict"))}
+            summary[s]["causes"] = dict(Counter(grades[c["id"]][s]["cause"] for c in bad))
+            summary[s]["by_type_cause"] = {t: dict(Counter(grades[c["id"]][s]["cause"] for c in bad if c["type"] == t))
+                                           for t in sorted({c["type"] for c in bad})}
         stp = {c["id"]: state[s][c["id"]]["steps"] for c in ok if state[s][c["id"]].get("steps")}
         if stp:   # D-20261109-08: the step rule on the stream path
             summary[s]["stepwise"] = {"fired": len(stp), "compared": sum(1 for v in stp.values() if v["compared"]),
