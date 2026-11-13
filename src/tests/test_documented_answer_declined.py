@@ -1,5 +1,9 @@
 """D-20261102-06: a documented question on a named product is answered, not
 declined, deflected or asked "which section?"."""
+import sys
+from contextlib import nullcontext
+from unittest.mock import patch
+
 import _harness  # noqa: F401 -- installs the lightweight main.py stubs first
 import main
 import sales
@@ -52,6 +56,31 @@ def test_no_product_in_the_middling_band_still_asks():
     result, calls, _ = _ask(["unused"], band="ambiguous", product=None)
     assert result.get("role") == "clarify"
     assert not calls
+
+
+def test_a_category_in_the_product_slot_in_the_middling_band_still_asks():
+    real = main._category_keys
+    main._category_keys = lambda: {"validators"}
+    try:
+        result, calls, _ = _ask(["unused"], band="ambiguous", product="validators")
+    finally:
+        main._category_keys = real
+    assert result.get("role") == "clarify", result.get("role")
+    assert not calls
+
+
+def test_the_real_verifier_keeps_its_reason_for_the_answer_it_judged():
+    real_gen, real_on = main.generate_with_fallback, main.llm_verify_enabled
+    main.generate_with_fallback = lambda *a, **k: {"text": WHY, "provider": "stub"}
+    main.llm_verify_enabled = lambda: True
+    try:
+        # the harness's llm stub has no judging(); the verifier imports it
+        with patch.object(sys.modules["llm"], "judging", nullcontext, create=True):
+            assert main._llm_verified(FIRST, [{"text": "Red 4: Coin Jam"}], None, "red 4?") is False
+    finally:
+        main.generate_with_fallback, main.llm_verify_enabled = real_gen, real_on
+    assert main._rejection_for(FIRST) == WHY
+    assert main._rejection_for(SECOND) == ""
 
 
 def test_a_warranty_ask_beside_a_price_ask_is_not_deflected():

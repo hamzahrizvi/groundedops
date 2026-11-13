@@ -4734,8 +4734,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # D-20261102-06: one product in hand (picked, or named in the wording) is
     # never "which section?": the sources listed are that product's own
     # manuals (C20261102-25 NV4000 SD card 0.639, C20261112c-17 G-SCS 0.616).
-    # The answer is still verified like any other.
-    if confidence == "ambiguous" and (_halves or payload.product):
+    # The answer is still verified like any other. A category key in the
+    # product slot ("ask across the whole range") is several products, so it
+    # still asks.
+    if confidence == "ambiguous" and (_halves or (
+            payload.product and payload.product not in _category_keys())):
         confidence = "confident"
 
     # The product came from the wording ("my nv4000 is showing an error").
