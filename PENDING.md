@@ -365,7 +365,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | ready to merge | merges once Security clears it |
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
-| D-20261112-13 | Security item D-20261112-13, details in the office | built, waiting for the check | the pre-ship check |
+| D-20261112-13 | Security item D-20261112-13, details in the office | ready to merge | merges once Security clears it |
 | D-20261113-02 | Port to main, second try: the seven fixes that pass main's tests | waiting for CEO | your yes |
 | D-20261113-03 | Security item D-20261113-03, details in the office | waiting for CEO | your yes |
 | D-20261113-04 | The damaged-catalogue fix cannot go to main: its test needs a product in the shipped catalogue | approved, queued | Dev builds it |
