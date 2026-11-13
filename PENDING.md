@@ -366,7 +366,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261102-06 | A clear question on a named product, with the answer in the manual, gets a decline, a sales deflection or "which section?" | approved, queued | Dev builds it |
 | D-20261104-11 | Security item D-20261104-11, details in the office | approved, queued | Dev builds it |
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
-| D-20261112-11 | The failure labels never reached the test runs: the office half of D-20261109-01 was left unmerged | built, waiting for the check | the pre-ship check |
+| D-20261112-11 | The failure labels never reached the test runs: the office half of D-20261109-01 was left unmerged | ready to merge | merges once Security clears it |
 | D-20261113-02 | Port to main, second try: the seven fixes that pass main's tests | waiting for CEO | your yes |
 | D-20261113-03 | Security item D-20261113-03, details in the office | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
