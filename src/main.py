@@ -786,6 +786,36 @@ def _verify_label(chunk: dict, names: dict) -> str:
     return f"[{src}{f', page {pg}' if pg else ''}{_passage_product(chunk, names)}{_passage_heading(chunk)}]\n"
 
 
+# The LLM verifier's last verdict and the answer it judged (D-20261102-06).
+# Keyed by the answer, so a retry only uses a reason about the text it is
+# rewriting; per request through the context, like pipeline_trace.
+_LAST_VERDICT: contextvars.ContextVar = contextvars.ContextVar(
+    "last_verdict", default=("", ""))
+
+
+def _rejection_for(answer: str) -> str:
+    """The verifier's reply on `answer`, or "" when it judged something else."""
+    judged, verdict = _LAST_VERDICT.get()
+    return verdict if answer and judged == answer else ""
+
+
+def _with_correction(prompt: str, rejected: str, why: str) -> str:
+    """The answer prompt again, with the rejected answer and the checker's
+    reason just above the question, so the retry fixes the slip it named
+    instead of repeating it. The prompt unchanged when it has no question line."""
+    head, sep, tail = prompt.rpartition("\nQuestion: ")
+    if not sep:
+        return prompt
+    note = ("\nA checker compared an earlier answer to this question with the "
+            "context and rejected it.\n"
+            f"Earlier answer: {_escape_prompt_boundaries(rejected[:1500])}\n"
+            f"Checker's reason: {_escape_prompt_boundaries(why[:600])}\n"
+            "Answer again from the context only: correct or leave out what the "
+            "checker named, and keep what the context does state for the "
+            "product, row or step the question asks about.\n")
+    return head + note + sep + tail
+
+
 def _llm_verified(answer: str, chunks: list[dict],
                   deepseek_api_key: str | None = None,
                   question: str = "") -> bool:
@@ -848,6 +878,7 @@ def _llm_verified(answer: str, chunks: list[dict],
                     ctx=ctx, ans=answer),
                 deepseek_api_key=deepseek_api_key)
         verdict = ((out or {}).get("text") or "").strip()
+        _LAST_VERDICT.set((answer, verdict))
         # Both judgments must be present and YES; anything else fails closed.
         sup = re.search(r"SUPPORT\W*\s*(YES|NO)\b", verdict, re.I)
         rel = re.search(r"RELEVANCE\W*\s*(YES|NO)\b", verdict, re.I)
@@ -4700,7 +4731,11 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
     # "a smart coin system and an nv4000 ... which one pulls more max
     # current?" (C20261021e-37, best 0.528).
     # D-20261102-04: two asks or a comparison within one product are not ambiguous either (C20261030f-03, -40).
-    if confidence == "ambiguous" and _halves:
+    # D-20261102-06: one product in hand (picked, or named in the wording) is
+    # never "which section?": the sources listed are that product's own
+    # manuals (C20261102-25 NV4000 SD card 0.639, C20261112c-17 G-SCS 0.616).
+    # The answer is still verified like any other.
+    if confidence == "ambiguous" and (_halves or payload.product):
         confidence = "confident"
 
     # The product came from the wording ("my nv4000 is showing an error").
@@ -5585,12 +5620,19 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             and role != "rethink" and grounding_retries() > 0
             and not (_wm_first or _wm_none)):
         _max_retries = grounding_retries()
+        _rejected = answer
         for _attempt in range(1, _max_retries + 1):
             logger.info(
                 f"Grounding retry {_attempt}/{_max_retries} "
                 f"(score={grounding_score}) for: {redact(resolved_query)}")
+            # D-20261102-06: a blind retry repeated the slip the verifier had
+            # named (C20261102-36 red 4, C20261112c-33 ccTalk row) and the turn
+            # became "I don't have that". The retry now reads the reason.
+            _why = _rejection_for(_rejected)
+            ptrace.mark("retry", "told why the checker said no" if _why else "blind")
             _retry = _billed(_timed("regen", generate_with_fallback,
-                                    role, prompt, deepseek_api_key=deepseek_api_key,
+                                    role, _with_correction(prompt, _rejected, _why) if _why else prompt,
+                                    deepseek_api_key=deepseek_api_key,
                                     api_keys=api_keys))
             _text = _kept(normalize_markdown_tables(_strip_meta(
                 _strip_preamble((_retry or {}).get("text", "").strip()))))
@@ -5625,6 +5667,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 logger.info(f"Grounding retry {_attempt} succeeded "
                             f"(score={_score})")
                 break
+            _rejected = _text
             # Keep the best score seen, so the log shows how close it got.
             if isinstance(_score, float) and (
                     not isinstance(grounding_score, float)
