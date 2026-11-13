@@ -52,9 +52,32 @@ cd "$BASE"   # sudo -u keeps the cwd; the service user cannot read $HOME of whoe
 # ── 3. Code ─────────────────────────────────────────────────────────────
 say "Code: $REPO_URL ($BRANCH)"
 if [ -d "$APP/.git" ]; then
+  # An update is the one moment this install can be made worse, so take the
+  # two things a revert needs FIRST: the data as it stands, and the commit
+  # it is running. SKIP_BACKUP=1 for a second run minutes after the first.
+  OLD_SHA=$(as_svc git -C "$APP" rev-parse HEAD)
+  if [ "${SKIP_BACKUP:-0}" != "1" ] && [ -f /etc/systemd/system/$SVC-backup.service ]; then
+    echo "   backing up before the update..."
+    if systemctl start $SVC-backup.service; then
+      echo "   backed up to $BASE/backups"
+    else
+      echo
+      echo "   BACKUP FAILED - not updating. Fix it, or re-run with SKIP_BACKUP=1"
+      echo "   if you accept updating with no way back. Last lines:"
+      journalctl -u $SVC-backup -n 10 --no-pager | sed 's/^/     /'
+      exit 1
+    fi
+  fi
   as_svc git -C "$APP" fetch -q origin "$BRANCH"
   as_svc git -C "$APP" checkout -q "$BRANCH"
   as_svc git -C "$APP" merge -q --ff-only "origin/$BRANCH"
+  NEW_SHA=$(as_svc git -C "$APP" rev-parse HEAD)
+  if [ "$OLD_SHA" != "$NEW_SHA" ]; then
+    printf '%s  %s -> %s\n' "$(date -Is)" "${OLD_SHA:0:12}" "${NEW_SHA:0:12}" \
+      >> "$BASE/releases.log"
+    echo "   updated from ${OLD_SHA:0:12}; to go back:"
+    echo "     sudo -u $SVC git -C $APP checkout $OLD_SHA && sudo systemctl restart $SVC"
+  fi
 else
   as_svc git clone -q --branch "$BRANCH" "$REPO_URL" "$APP"
 fi
