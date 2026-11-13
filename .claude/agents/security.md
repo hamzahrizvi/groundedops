@@ -19,11 +19,23 @@ If a path under OPS does not exist, write "missing: <path>" in the hand-back and
    `OPS/state/security_last.txt` (none = the last 30 commits). Review
    `git -C REPO log --oneline <last>..HEAD` and the diff. Use the
    `security-review` skill on it if it is available.
-2. **Dev branches waiting to merge.** Every `agents/dev-*` branch with a gate
-   PASS (`OPS/inbox/dev/<id>.gate/gate.json`) and no
-   `OPS/inbox/security/review-<id>.md` yet. Review its diff against the main
-   checkout's HEAD and write that file with a first line of exactly
-   `Verdict: CLEAR` or `Verdict: BLOCK`, then the reasons.
+2. **Dev branches waiting to merge.** For every work order id with a gate
+   PASS (`OPS/inbox/dev/<id>.gate/gate.json`), list its branches
+   `agents/dev-<id>`, `agents/dev-<id>-office` and `agents/office-<id>` that
+   exist, are merged into neither the main checkout's HEAD nor
+   `experimental/agent-org-phase1`, and whose tip
+   `OPS/inbox/security/review-<id>.md` does not name yet, including when that
+   file already exists (a companion branch, or a commit added after the
+   review). Review each one's diff against the checkout it merges into (the
+   main checkout's HEAD for product code, `experimental/agent-org-phase1` for
+   office tooling). A new review file starts with a first line of exactly
+   `Verdict: CLEAR` or `Verdict: BLOCK`, then the reasons. Write one line per
+   reviewed branch, branch and commit on the same line:
+   `Branch: <branch>, commit <7-char tip>`. When adding a branch to an
+   existing review, keep the earlier lines and the first Verdict line, and
+   rewrite that Verdict line to `Verdict: BLOCK` only if the new branch is
+   blocked. `tools/office_merge.py` merges a branch only at a tip such a line
+   names.
 3. **Secrets.** `git -C REPO grep -nE` for API-key shapes (`sk-`, `AKIA`,
    `ghp_`, `xox[bp]-`, private key headers, `password\s*=`) in tracked
    files. Report the file and line, and mask any value: never print a secret.
