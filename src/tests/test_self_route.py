@@ -25,7 +25,8 @@ def _refusal(text):
 
 
 def _ask(replies, *, product="nv9usb", band="confident", grounded=True,
-         bundle=BUNDLE, policy=None, tokens=None):
+         bundle=BUNDLE, policy=None, tokens=None,
+         verified=lambda *a, **k: False):
     """Run one turn; replies are what each generate call returns, in order."""
     CITED.clear()
     calls = []
@@ -54,7 +55,7 @@ def _ask(replies, *, product="nv9usb", band="confident", grounded=True,
             (main, "generate_with_fallback", gen),
             (main, "check_grounding", lambda *a, **k: (grounded, 0.9 if grounded else 0.1)),
             (main, "_lexically_supported", lambda *a, **k: False),
-            (main, "_llm_verified", lambda *a, **k: False),
+            (main, "_llm_verified", verified),
             (main, "_structures_for", lambda *a, **k: []),
             (main, "_vague_fault_checklist", lambda *a, **k: None),
             (main, "is_refusal", _refusal),
