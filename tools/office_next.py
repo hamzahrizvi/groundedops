@@ -573,7 +573,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     # does not re-wake it for the ones it just left parked, unless a merge freed something or a day passed
     stages = {i: stage_of(it, ops, merged, reverted) for i, it in items.items() if it.get("assigned", "dev") != "ceo"}
     slots = mode[0] - sum(s in IN_FLIGHT for s in stages.values())
-    top = sorted((i for i, s in stages.items() if s == "deferred"), key=lambda i: (items[i].get("priority", 99), i))[:min(slots, 3)]
+    top = sorted((i for i, s in stages.items() if s == "deferred"), key=lambda i: (items[i].get("priority", 99), i))[:max(0, min(slots, 3))]
     triaged = _mtime(os.path.join(ops, "decisions", "*.md"))
     try:
         seen = open(os.path.join(ops, *PARKED), encoding="utf-8").read().split()
@@ -1002,6 +1002,10 @@ def selftest():
                                     "## D-20261008-32 | Parked two\n- Assigned: dev\n- Verdict: DEFER\n- Priority: 1\n")
         p = plan(ops, ops, 11, 38, resets, now)
         assert any("1 of 3 slots free; parked to check: D-20261008-32" in x for x in p), "highest priority first, one per free slot"
+        w("decisions/20261008q.md", "## D-20261008-33 | Over one\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n\n"
+                                    "## D-20261008-34 | Over two\n- Assigned: dev\n- Verdict: AUTO-APPROVED\n- Still broken: yes\n")
+        assert not any("parked to check" in x for x in plan(ops, ops, 11, 38, resets, now)), "over the cap: nothing parked is handed over"
+        os.remove(os.path.join(ops, "decisions", "20261008q.md"))
         w("state/parked_review", "D-20261008-32")
         assert not any("parked to check" in x for x in plan(ops, ops, 11, 38, resets, now)), "same set: not again"
         os.remove(os.path.join(ops, "decisions", "20261008p.md")); os.remove(os.path.join(ops, "state", "parked_review"))
