@@ -435,7 +435,7 @@ dialog.pop::backdrop{background:rgba(10,15,20,.55)}
             <h3 class="pvh">Is the product getting better?</h3>
             <p class="tverdict" id="trVerdict"></p>
             <div class="seg" role="group" aria-label="Time range"><span class="lbl">Show</span>
-              <button type="button" data-trange="7" aria-pressed="false">7 days</button><button type="button" data-trange="30" aria-pressed="false">30 days</button><button type="button" data-trange="0" aria-pressed="true">All</button></div>
+              <button type="button" data-trange="0" aria-pressed="true">All time</button><button type="button" data-trange="365" aria-pressed="false">Year</button><button type="button" data-trange="30" aria-pressed="false">Month</button><button type="button" data-trange="7" aria-pressed="false">Week</button><button type="button" data-trange="1" aria-pressed="false" title="The day of the latest test run">Today</button></div>
             <div class="trwrap" id="trWrap"><svg id="trAxis" aria-hidden="true"></svg><div class="trscroll" id="trScroll"><svg id="trChart" role="img" aria-labelledby="trVerdict"></svg></div></div>
             <p class="lnote" id="trNote">Adjusted for difficulty: every question type counts the same in every run, so a set heavy on hard questions does not look like a worse bot. The shaded band is where the true score probably sits, given how few questions one run asks (90%). A move inside the noise, which is never under 3 points, is the bot and the marker flickering, not a change. Numbered marks are fixes merged into the product.</p>
             <ul class="tsteps" id="trSteps"></ul>
