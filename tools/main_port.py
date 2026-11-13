@@ -151,10 +151,16 @@ def _port(ops, repo, i, shas, test_cmd):
         t = subprocess.run(test_cmd or [os.path.join(repo, ".venv", "Scripts", "python.exe"), "run_tests.py"], cwd=src,
                            env=dict(os.environ, PYTHONPATH=src, HF_HUB_OFFLINE="1"),
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
-        tail = (t.stdout + t.stderr).strip().splitlines()[-30:]
-        summary = next((l.strip() for l in reversed(tail) if re.search(r"\d+/\d+ passed", l)), f"exit code {t.returncode}")
+        log = os.path.join(ops, "state", f"port-{i}-suite.log")
+        os.makedirs(os.path.dirname(log), exist_ok=True)
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(t.stdout + "\n--- stderr ---\n" + t.stderr)
+        out = t.stdout.strip().splitlines()
+        summary = next((l.strip() for l in reversed(out) if re.search(r"\d+/\d+ passed", l)), f"exit code {t.returncode}")
+        fails = [l.strip() for l in out if l.strip().startswith("FAIL")][:15]
+        tail = (fails + [""] if fails else []) + (out[-30:] if out else t.stderr.strip().splitlines()[-30:])
         if t.returncode:
-            pushed, why = False, f"the suite failed on main with them ({summary})"
+            pushed, why = False, f"the suite failed on main with them ({summary}" + (f"; first failure: {fails[0]})" if fails else ")")
         else:
             head = git(wt, "rev-parse", "HEAD").stdout.strip()
             p = git(wt, "push", "origin", "HEAD:refs/heads/main")
@@ -167,7 +173,7 @@ def _port(ops, repo, i, shas, test_cmd):
         body = (f"Pushed to main: {'yes, ' if pushed else 'no, '}{why}\n" + "".join(f"Picked {x}\n" for x in picked)
                 + "".join(f"Skipped {x}\n" for x in skipped) + f"Tests on main with them: {summary}\n")
         if t.returncode:
-            body += "\nThe suite's last lines:\n" + "\n".join("    " + l for l in tail) + "\n"
+            body += "\nThe suite's last lines:\n" + "\n".join("    " + l for l in tail) + f"\nFull suite output: {log}\n"
         line = f"{'PUSHED' if pushed else 'NOT PUSHED'} {i}: {len(picked)} picked, {len(skipped)} skipped; {why}"
         return line, body
     finally:
@@ -262,10 +268,15 @@ def selftest():
     run(repo, "git", "checkout", "-q", MAIN)
     open(dp, "a").write(f"\n## D-20261112-02 | Port\n- Port: {fix2}\n- Verdict: NEEDS CEO\n- [x] CEO approved\n")
     before = git(origin, "rev-parse", "main").stdout
-    bad = [sys.executable, "-c", "print('  2/3 passed, 0 skipped, 1 failed'); raise SystemExit(1)"]
+    bad = [sys.executable, "-c", "import sys; print('  FAIL  test_x::test_y'); print('  2/3 passed, 0 skipped, 1 failed'); sys.stderr.write('log line\\n' * 60); raise SystemExit(1)"]
     got = apply(ops, repo, test_cmd=bad)
     assert got[0].startswith("NOT PUSHED D-20261112-02") and "2/3 passed" in got[0], got
     assert git(origin, "rev-parse", "main").stdout == before, "nothing pushed on a red suite"
+    assert "test_x::test_y" in got[0], got
+    slog = os.path.join(ops, "state", "port-D-20261112-02-suite.log")
+    note = open(os.path.join(ops, "inbox", "port", "D-20261112-02-done.md"), encoding="utf-8").read()
+    assert "test_x::test_y" in note and slog in note, note
+    assert open(slog, encoding="utf-8").read().count("log line") == 60, "full output kept in the log"
 
     # local main with nothing of its own follows the push
     run(repo, "git", "fetch", "-q", "origin")
