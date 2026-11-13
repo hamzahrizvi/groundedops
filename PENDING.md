@@ -364,11 +364,13 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
-| D-20261107-01 | A made-up variant of a real product (e.g. "MyCheckr Max") is answered as if it existed | approved, queued | Dev builds it |
+| D-20261107-01 | A made-up variant of a real product (e.g. "MyCheckr Max") is answered as if it existed | built, waiting for the check | the pre-ship check |
+| D-20261112-18 | The eval gate fails on unchanged code: 34 of 51 against a pass mark of 46, so its PASS or FAIL means nothing | approved, queued | Dev builds it |
+| D-20261112-20 | Remove the old release copies kept inside the product (793 files, 16 MB) | approved, queued | Dev builds it |
 | D-20261112-22 | When more work is in flight than the cap allows, the office hands the product owner the whole parked list instead of none | approved, queued | Dev builds it |
-| D-20261113-01 | The product status figures no longer upload to the office page: the file is over the page's size limit | approved, queued | Dev builds it |
+| D-20261113-01 | The product status figures no longer upload to the office page: the file is over the page's size limit | built, waiting for the check | the pre-ship check |
 | D-20261113-03 | Security item D-20261113-03, details in the office | approved, queued | Dev builds it |
-| D-20261113-06 | Security item D-20261113-06, details in the office | ready to merge | merges once Security clears it |
+| D-20261113-06 | Security item D-20261113-06, details in the office | sent back, rebuilding | Dev rebuilds it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | audit/D-20261112-16-wrong-vs-incomplete | D-20261112-16: how many "Wrong" answers are only incomplete? | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
@@ -421,9 +423,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261112-06 | The "Email support" form promises contact, but no email is sent on this install | deferred | parked |
 | D-20261112-08 | "I'll describe it myself" still shows an AI-written summary box | deferred | parked |
 | D-20261112-14 | A product filed under a combined name ("Surface Pro and Surface Pro 2") answers to each model's name | deferred | parked |
-| D-20261112-18 | The eval gate fails on unchanged code: 34 of 51 against a pass mark of 46, so its PASS or FAIL means nothing | deferred | parked |
 | D-20261112-19 | Twelve admin routes nothing in the product calls | deferred | parked |
-| D-20261112-20 | Remove the old release copies kept inside the product (793 files, 16 MB) | deferred | parked |
 | D-20261112-21 | Three of 32 model calls waited 5 seconds on a name lookup for the provider | deferred | parked |
 | D-20261113-05 | A failed port does not say which test failed | deferred | parked |
 
