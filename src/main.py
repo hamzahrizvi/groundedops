@@ -610,7 +610,27 @@ _ABSENCE_RE = re.compile(
     r"|\bnot\s+(?:stated|given|listed|specified|documented|provided|mentioned)\b", re.I)
 
 
-def _lexically_supported(answer: str, chunks: list[dict], comparing: bool = False) -> bool:
+# A verdict on the customer's own figure (D-20261112-02): the question gives
+# a value ("2 years old", "a 26mm coin", "our 12v rail") and the answer sets
+# it against the manual's figures with a yes/no ("still covered", "does not
+# fit"). Like a comparison's winner, number containment cannot tell which way
+# that verdict goes ("Yes, it is still covered" beside "warranty 1 year" had
+# every number in the manual), and judged fast it passed (C20261112-11, -20).
+# A number glued to letters ("NV9", "CBA9") is a product name, not a value.
+_OWN_VALUE_RE = re.compile(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?")
+_FIT_VERDICT_RE = re.compile(
+    r"\b(?:yes|no|not|fits?|covered|within|outside|exceeds?|beyond|too)\b|n't\b", re.I)
+
+
+def _value_verdict(question: str, answer: str) -> bool:
+    """Whether `answer` gives a yes/no on a figure the customer stated in
+    `question`, beside figures of its own. See above."""
+    a = answer or ""
+    return bool(_OWN_VALUE_RE.search(question or "") and _OWN_VALUE_RE.search(a)
+                and _FIT_VERDICT_RE.search(a))
+
+
+def _lexically_supported(answer: str, chunks: list[dict], comparing: bool = False, question: str = "") -> bool:
     """Second chance for grounding failures on table-like text (v8.4.2).
 
     The NLI grounding model is unreliable at entailment against shredded
@@ -667,6 +687,9 @@ def _lexically_supported(answer: str, chunks: list[dict], comparing: bool = Fals
     # stated ... halves it to 100,000" had every number in the context and
     # were served on this rescue. The LLM verifier judges those.
     if comparing and (_VERDICT_RE.search(answer) or _ABSENCE_RE.search(answer)):
+        return False
+    # The same holds for a yes/no on the customer's own figure (D-20261112-02).
+    if _value_verdict(question, answer):
         return False
     context = " ".join(c.get("text", "") for c in chunks)
     # Whole numbers only. Plain containment let "30 notes" be supported by
@@ -754,6 +777,9 @@ ANSWER:
 # the 09-25 answers through thinking (SSP commands, bezel options) where
 # the fast verdict was already right; this set is 9 of 44 and catches
 # every flash-code turn. VERIFIER_THINKING=always restores 1f594c0.
+# Also judged thinking: a comparison's verdict (D-20261016-08) and a yes/no
+# on a figure the customer gave (D-20261112-02): the verdict is a claim the
+# fast check does not test against the figures beside it.
 _JUDGEMENT_RE = re.compile(
     r"\b(flash\w*|blink\w*|leds?|lights?|beep\w*|"
     r"red|blue|green|amber|yellow|orange|"
@@ -771,6 +797,12 @@ def _needs_judgement(question: str, answer: str) -> bool:
     # it 3/3 and passed the right answer 3/3.
     if _is_comparison(question) and (_VERDICT_RE.search(answer or "")
                                      or _ABSENCE_RE.search(answer or "")):
+        return True
+    # A yes/no on the customer's own figure (D-20261112-02, see _value_verdict):
+    # judged fast, "a 2-year-old CBA9 ... Yes, it is still covered" beside
+    # "warranty 1 year" and "the Single Hoppers do not take a 26 mm coin"
+    # beside "Position 3 is 24-33 mm" passed 3 of 3 (C20261112-11, -20).
+    if _value_verdict(question, answer):
         return True
     return bool(_JUDGEMENT_RE.search(f"{question or ''}\n{answer or ''}"))
 
@@ -5503,7 +5535,7 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         # lexical second chance (see _lexically_supported docstring).
         if (not is_grounded and not verifier_unavailable
                 and _timed("verify", _lexically_supported, answer, top_chunks,
-                           comparing=len(_both_named) >= 2)):
+                           comparing=len(_both_named) >= 2, question=resolved_query)):
             is_grounded, ground_via = True, "lexical"
             logger.info("Grounding rescued by lexical containment "
                         f"(nli={grounding_score}) for: {redact(resolved_query)}")
@@ -5585,7 +5617,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
                 if (not is_grounded and not verifier_unavailable
                         and _timed("verify", _lexically_supported,
                                    answer, top_chunks,
-                                   comparing=len(_both_named) >= 2)):
+                                   comparing=len(_both_named) >= 2,
+                                   question=resolved_query)):
                     is_grounded, ground_via = True, "lexical"
                     logger.info("Escalated answer rescued by lexical "
                                 f"containment (nli={grounding_score})")
@@ -5657,7 +5690,8 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
             _via = "nli"
             if not _ok and _timed("verify", _lexically_supported,
                                   _text, top_chunks,
-                                  comparing=len(_both_named) >= 2):
+                                  comparing=len(_both_named) >= 2,
+                                  question=resolved_query):
                 _ok, _via = True, "lexical"
             elif not _ok and _timed("verify", _llm_verified,
                                     _text, _verify_chunks, deepseek_api_key,
