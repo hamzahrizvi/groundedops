@@ -47,6 +47,7 @@ account that can see only what customers may see. Scoped tokens work only
 through api.atlassian.com, addressed by the site's cloud id.
 """
 import hashlib
+import ipaddress
 import logging
 import os
 import re
@@ -804,7 +805,7 @@ def _kept(url: str, hosts: list[str]) -> str:
 
 
 # An address typed as text (a code or pre block): no trailing punctuation.
-# Any scheme, mailto, www., a bare e-mail, a UNC share, host:port. Not a bare host name.
+# Any scheme, mailto, www., a bare e-mail, a UNC share, host:port. Bare host names and IPv4 are handled in _scrub.
 _TAIL = r"""[^\s<>"'()\[\]{}]*[^\s<>"'()\[\]{}.,;:!?]"""
 _URL = re.compile(
     r"[a-z][a-z0-9+.-]*://" + _TAIL + r"|mailto:" + _TAIL + r"|www\." + _TAIL
@@ -813,9 +814,30 @@ _URL = re.compile(
     + r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}:\d{2,5}(?:/" + _TAIL + r")?", re.I)
 
 
+# Not an address in _URL: an IPv4 (with or without port or path), and a bare host name under
+# a reserved internal suffix or an operator's CONFLUENCE_INTERNAL_DOMAINS (comma list). A general
+# host-name rule would hit file names and versions, so only these suffixes are read as hosts.
+_OCT = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+# After "/" it is a path segment of a link _URL already judged (a version folder): left alone.
+_IPV4 = re.compile(r"(?<![\w./])(?P<ip>" + _OCT + r"(?:\." + _OCT + r"){3})(?!\.?\w)"
+                   r"(?P<rest>(?::\d{1,5})?(?:/" + _TAIL + r")?)")
+_INTERNAL_SUFFIXES = ("internal", "local", "lan", "corp", "intranet", "localdomain")
+
+
+def _bare_host(extra: str) -> "re.Pattern":
+    doms = [d.strip().lstrip("*.").lower() for d in extra.split(",") if d.strip()]
+    sfx = "|".join(re.escape(d) for d in (*_INTERNAL_SUFFIXES, *doms))
+    return re.compile(r"(?<![\w.@/-])(?:[a-z0-9-]+\.)+(?:" + sfx + r")(?![\w-]|\.\w)(?::\d{1,5})?", re.I)
+
+
 def _scrub(text: str, hosts: list[str]) -> str:
-    """An address in the text itself is held to the allowlist too."""
-    return _URL.sub(lambda m: _kept(m[0], hosts), text)
+    """An address in the text itself is held to the allowlist too: links, IPv4
+    (a bare one stays only when public, with no port or path: a firmware version
+    reads the same), and bare internal host names (D-20261104-11)."""
+    text = _URL.sub(lambda m: _kept(m[0], hosts), text)
+    text = _IPV4.sub(lambda m: m[0] if not m["rest"] and not ipaddress.ip_address(m["ip"]).is_private
+                     else _kept(m[0], hosts), text)
+    return _bare_host(os.getenv("CONFLUENCE_INTERNAL_DOMAINS", "")).sub(lambda m: _kept(m[0], hosts), text)
 
 
 class _Text(HTMLParser):
@@ -949,7 +971,7 @@ def page_text(title: str, storage_html: str, page_id: str = "", site: str = "", 
     body = re.sub(r"\n\s*\n", "\n", body)
     body = re.sub(r"\s*\x00[\s\x00]*", "\n\n", body).strip()
     body = _scrub(body, p.hosts)       # once, whole: an address split by markup is one again
-    return f"{title}\n\n{body}" if body else ""
+    return f"{_scrub(title, p.hosts)}\n\n{body}" if body else ""
 
 
 def _body(full: dict) -> str:

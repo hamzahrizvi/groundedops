@@ -246,6 +246,22 @@ def test_synced_links_reach_only_allowlisted_hosts():
     assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
     assert "ssh://git.innovative-technology.com/r" in cs.page_text(
         "P", "<p>ssh://git.innovative-technology.com/r</p>", hosts=cs.link_hosts())
+    # D-20261104-11: title, IPv4 and bare internal host names.
+    t = cs.page_text("see https://wiki.corp.internal/x",
+                     "<p>see 10.20.0.5:8080/admin and host fs1.corp.internal, 192.168.1.1 and 172.20.1.1/a</p>",
+                     hosts=cs.link_hosts())
+    assert "internal" not in t and "10.20.0.5" not in t and "192.168" not in t and "172.20" not in t, t
+    os.environ["CONFLUENCE_INTERNAL_DOMAINS"] = "itl-corp.com"
+    try:
+        t = cs.page_text("P", "<p>nas.itl-corp.com:22 and itl-corp.com</p>", hosts=cs.link_hosts())
+        assert "nas." not in t and "itl-corp.com" in t, t
+    finally:
+        os.environ.pop("CONFLUENCE_INTERNAL_DOMAINS", None)
+    keep = "firmware 3.90.1.2, v1.2.3.4, 8.8.8.8, appsettings.local.json, 3.5:100, a.innovative-technology.com"
+    assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
+    assert "192.168.1.1" in cs.page_text("P", "<p>default 192.168.1.1</p>", hosts=["192.168.1.1"])
+    link = "https://innovative-technology.com/fw/3.90.1.2/notes.pdf"    # a version folder in a kept link
+    assert link in cs.page_text("P", f"<p>{link}</p>", hosts=cs.link_hosts())
     # The site listed (a public space): its attachments keep their address.
     t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
                      hosts=["innovative-technology.atlassian.net"])
