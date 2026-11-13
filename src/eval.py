@@ -68,6 +68,16 @@ def _deepseek_key():
     if k:
         return k
     try:
+        # The backend's own .env, read the way main.py reads it: beside this
+        # file, or the cwd's when eval.py runs from a worktree with no data.
+        import keystore
+        for d in (HERE, Path.cwd()):
+            keystore.load_env_file(str(d / ".env"))
+        if keystore.has_key("deepseek"):
+            return keystore.get_key("deepseek")
+    except Exception:
+        pass
+    try:
         import keyvault
         return keyvault.load_key()
     except Exception:
