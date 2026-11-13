@@ -13,6 +13,43 @@ English. A session that finds edits here it did not make keeps them: it
 edits around them, never reverts or rewrites them, and asks before
 committing them.
 
+## For the PO: weekly releases to the server
+
+**New, from the CEO, 2026-11-13.** GroundedOps now runs on a Linux server
+on the company network (`10.10.15.170`), which is what support staff test
+against and what customers will eventually reach. That makes "what is on
+the server" a thing with its own version, separate from what is on a
+branch. The full process is in `docs/release-process.md` (on branch
+`claude/linux-server-cb4876` until it is merged); what it needs
+from you:
+
+**Categorise every item as major fix, minor fix, or feature.**
+
+- **Major fix** — wrong with the version on the server *now*, too serious
+  to sit for a week. Raise the alarm: it goes to the CEO as an urgent
+  update, and the CEO decides whether to push it immediately or hold it for
+  the weekly. Major is about harm, not effort: a one-line change can be
+  major.
+- **Minor fix** — wrong, but it can wait a few days. Goes in the weekly.
+- **Feature** — new behaviour rather than a correction. Never goes in a
+  weekly update; it waits for the next feature release.
+
+The test for the weekly list is whether the item affects the release on the
+server, not whether the work is finished.
+
+**Decide what goes in the next feature release.** That is the piece the
+CEO has specifically asked you to own: which accumulated features are ready
+to move together. The version numbering follows from it — a feature release
+moves the minor number (17.0 -> 17.1), a weekly fix release moves the patch
+(17.0 -> 17.0.1).
+
+**Worth knowing while you do this:** the eval gate currently fails on
+unchanged v17.3 (office item D-20261112-18, and the 11-13 Friday review
+notes it too), so it cannot presently tell you whether a week's fixes made
+anything worse. A capped lab instance now exists on the server for exactly
+this kind of long run - `/srv/groundedops/lab`, nightly at 19:30 UK. Fixing
+the gate and pointing it there is the obvious first use.
+
 **Friday review.** Once a week this file gets a pass, not just additions:
 
 1. Tick off anything now done — strike it through, name the commit or PR,
@@ -251,6 +288,35 @@ labelling non-`console-` session ids as `script`; old rows are not
 relabelled. The only widget turns are one two-question conversation on
 11-02 about the SMART Update download. Next week's figure should be the
 first clean one. Nothing was committed; this file is modified in the tree.
+
+**Friday review 2026-11-13 (automated, not yet reviewed by hand).** About
+90 code commits since 11-06: office merges (D-20261102-04/-06,
+D-20261105-04/-08, D-20261106-07 to -15, D-20261107-02/-08, D-20261108-*,
+D-20261109-*, D-20261112-*, D-20261113-04), the step-by-step comparison
+(`394a60b`), the widget's large window, Confluence internal-page
+suggestions, and the 11-12 cleanup (`36bc065`, `docs/cleanup-report.md`).
+Ticked off: `backup/pre-build-drop` (the branch is gone). Obsolete:
+nothing. Corrected: **the LiteLLM gateway resolves again** (10.10.76.3,
+`:4000/health/liveliness` 200) after seven weeks of NXDOMAIN; the SMTP
+item (the send code has existed since 09-25, only the settings are
+missing); the gap-log note under code-scan finding 1 (one write site, not
+eight). Updated with evidence: the lost-backslash item (two more repair
+commits). Added, all under **In progress**: the test suite writes rows
+into the live log, twelve routes nothing calls, and 5-second DNS lookups
+on the answer path. Checked in this review: `run_tests.py` **414/415
+passed, 1 skipped, 0 failed** (11-06: 409/410; the cleanup report's 413
+plus one). Retrieval baseline `--selfcheck` OK (35 cases, armed); note
+that the eval gate itself fails on unchanged code (office item
+D-20261112-18), so "armed" says only that the file is there. `log_report
+--since 7d`: 15 questions, 0 answered, 12 refused, 3 asked back, 0
+handoffs, 0 of 2 conversations resolved, 0 votes, p50 1794239864s / p90
+1794522866s (11-06: 70 / 44 / 22 / 4, p50 13.63s / p90 35.67s). **This
+was not the clean week hoped for:** 12 of the 15 and both speed figures
+are rows the test suite wrote (new item). By hand, the week's real use is
+3 widget turns in 2 conversations (two guest FAQ-only misses on 11-12,
+one refusal), none answered; the 23 R&D runs are now correctly labelled
+`script` and left out, so `d205158` works for those. Nothing was
+committed; this file is modified in the tree.
 
 **2026-09-27 - the 7 -> 10 upgrade plan is written:
 `docs/upgrade-plan-7-to-10.md`.** Built from nine subsystem readers, five
@@ -2678,8 +2744,61 @@ see *Shipped — the four follow-ups* above; kept for the record.
 
 ## In progress / known gaps
 
+- **The test suite writes four rows into the live `src/logs.jsonl` on
+  every run, and the weekly report counts them as customers.** Found in
+  the Friday review 2026-11-13. `tests/test_obsolete.py:57`, `:142` and
+  `:150` call `main._obsolete_reply(question, ..., "rid", 0.0, "s1")`
+  directly. That function logs the turn to the real log with no origin and
+  no session, and its start time is the `0.0` the test passes, so
+  `timing.total_time` is the clock itself (1794586230.5 "seconds"). Measured:
+  this review's own `run_tests.py` added four such rows at 16:10:30 on
+  11-13; the 7-day window holds 16 of them (11-09, 11-12, 11-13) against
+  3 real widget turns. `log_report --since 7d` reports them as "real use;
+  tests excluded" with the note "12 rows predate M2", which is wrong (they
+  are days old), and they are the whole of this week's p50 1794239864s /
+  p90 1794522866s. Why it matters: `d205158` (11-04) was meant to make this
+  report clean, and the only real-use number the project has is still
+  mostly test rows. This may also be part of the parked D-20261108-02
+  (nonsense speed figures for clarifying questions and refusals); check
+  that one against real rows before treating them as the same. Done looks
+  like: a `run_tests.py` run leaves `src/logs.jsonl` byte-for-byte
+  unchanged (the test points the logger at a scratch file, as
+  `run_tests.py:26-29` already does for `test.env`), and `log_report`
+  drops or labels a row whose `total_time` is over a day. The 16 rows
+  already in the log are not relabelled.
+
+- **Twelve HTTP routes are called by nothing in the repo; removing them
+  is the owner's call.** From the cleanup of 2026-11-12
+  (`docs/cleanup-report.md`, "Left alone on purpose"): `GET
+  /admin/champions`, `POST /admin/attach_source`, `GET /ingest/version`,
+  `GET /admin/source_sample`, `GET /rethink_options`, `POST
+  /clear_session`, `POST /settings/online_provider`, `GET /models/status`,
+  `POST /models/pull`, `GET /models/pull_status`, `POST /models/warmup`,
+  `POST /models/unload`. No page, script or test in the repo or the office
+  branch calls them; they total about 150 lines in `routes_settings.py`,
+  `routes_catalog.py` and `routes_documents.py`. Why it matters: each is
+  attack surface and a thing to keep working for no caller. They were left
+  because a grep cannot see a caller outside the repo. Done looks like:
+  the owner says keep or remove for each; removed ones return 404 and the
+  suite still passes.
+
+- **Some answers wait 5 seconds on a DNS lookup for the model host.**
+  Same report ("Where an answer's time goes"): profiling 12 pipeline
+  questions (383 s) found three lookups of the DeepSeek host that took
+  5.0 s each, 4% of the total, each after a kept-alive connection had
+  dropped. Five seconds is a resolver timeout, so it points at this
+  machine's DNS settings, not the code. Why it matters: it is a 5 s stall
+  a customer would see on an otherwise 5-10 s answer, and nothing in the
+  log names it. Not yet known: whether a hosted box would show it. Done
+  looks like: the same profile on the staging host shows no lookup over
+  1 s, or the machine's resolver order is fixed and the profile re-run.
+
 - **The office's Dev builds lose backslash-newlines, and a person repairs
-  them afterwards.** **Still happening (Friday review 2026-11-06):** since
+  them afterwards.** **Still happening (Friday review 2026-11-13):** two
+  more repair commits this week, `fe390de` (11-06, "split the joined
+  with-statements onto lines", D-20261102-04) and `dbe860c` (11-07,
+  "restore the line break in the guest-ask helper", D-20261106-11); still
+  no guard in the tree. **Still happening (Friday review 2026-11-06):** since
   10-16 at least four more repair commits: `21bae9f` (D-20261019-20),
   `09009c3` (D-20261030-09), `01a22d0` (11-04, twelve continuations
   restored across `src/tests` by a one-off "joined_lines" scan that was
@@ -2723,7 +2842,17 @@ see *Shipped — the four follow-ups* above; kept for the record.
   not been run since the compose file changed, and the WordPress plugin edit
   was not PHP-linted (no php binary available here).
 
-- **SMTP is the one thing standing between enquiries and a person.** Each
+- **SMTP is the one thing standing between enquiries and a person.**
+  **Corrected in the Friday review 2026-11-13:** the sentence below,
+  "wiring send means one function plus credentials", is stale. The
+  function exists: `src/mailer.py` (plain smtplib, since `bd5e6b5c`,
+  2026-09-25) and `routes_widget._notify_lead`, which emails a new lead to
+  its form's address and marks it notified. What is left is settings only:
+  on this machine `mailer.is_configured()` returns False (checked 11-13),
+  so nothing is sent and leads stay `notified: false`. Done looks like:
+  the mail host and sender are saved on the console, "send test email"
+  arrives, and one real enquiry reaches its inbox (S25, IT's email API,
+  is the same wait). Each
   form now also carries a phone number to offer, and every lead records
   `cc_email` (the visitor's own address) so the reply can copy them in the
   moment sending exists. Every other piece is built: the widget renders the console-configured sales and
@@ -2824,7 +2953,13 @@ see *Shipped — the four follow-ups* above; kept for the record.
      catalogue now write through `jsonstore.save` (temp file, fsync,
      `os.replace`). The gap log `faq_gaps.json` still uses bare
      `open(..., "w")` in `faq_store.py` (8 sites). That is a regenerable
-     log, not customer data. Original text:
+     log, not customer data. **Updated 2026-11-13:** since `59b9498`
+     (11-12) every gap-log write goes through one helper,
+     `faq_store._write_gaps` (`faq_store.py:685`), still a bare
+     `open(..., "w")`. Making it atomic is now one line, but
+     `docs/cleanup-report.md` says to measure first: `jsonstore.save`
+     forces the file to disk and the gap log is written while a customer
+     waits. Original text:
      `accounts.py`, `policy.py`, `keystore.py` and `docstore.py` write via
      temp-file + `os.replace`. `widget_config.py:314` (leads),
      `faq_store.py:113` (curated answers) and `catalog.py:81` do not — they
@@ -3350,7 +3485,9 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   prompt construction, response parser and merge-top-3 fallback are
   unit-tested; what a real model actually picks when asked "which passages
   answer this" has never run, because the LiteLLM gateway is still NXDOMAIN
-  (re-checked 2026-09-18, see the infrastructure item below). Done looks
+  (re-checked 2026-09-18, see the infrastructure item below). **Friday
+  review 2026-11-13: the gateway resolves again** (see that item), so this
+  check is no longer blocked by DNS; nobody has run it yet. Done looks
   like: exercise the "read the sources again" button against a live NV9
   question once the gateway resolves, and confirm the selected-passage
   answer beats the merged-top-3 fallback on at least the case that motivated
@@ -3380,10 +3517,16 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   during the 25th's stress test; back that night; NXDOMAIN again now. Anything that depends on the gateway should
   re-check DNS on the day and not trust this file. The owner of the host
   has never been named here, and naming them is the useful next step.
-- **`backup/pre-build-drop` still pins 290MB in `.git`.** The safety net for
-  the `f33b22b` rebase. Once the rebase is trusted:
-  `git branch -D backup/pre-build-drop && git reflog expire --expire=now
-  --all && git gc --prune=now`.
+
+  **CORRECTION (Friday review 2026-11-13): it is back.** Every Friday
+  review from 09-25 to 11-06 found NXDOMAIN. Today `Resolve-DnsName`
+  returns **10.10.76.3** (it was 10.10.76.7 in September, so the host
+  moved), port 4000 accepts a connection and `GET :4000/health/liveliness`
+  returns 200. Port 80 is closed. Not checked: whether the stored key
+  still works and which models it lists (no key was sent; the key was due
+  to be rotated). This unblocks the `reanswer.py` check above and any
+  measurement that was waiting on the company gateway. The advice above
+  still holds: re-check DNS on the day.
 
 ## Lower priority
 
@@ -3420,6 +3563,15 @@ the work. Branch `experimental/pipeline-hardening`, PR #13.
   (parked).
 
 ## Resolved (kept for the Monday diff, trim periodically)
+
+- **2026-11-13 (Friday review) — ticked off from the open list:**
+  - ~~**`backup/pre-build-drop` still pins 290MB in `.git`.**~~ — **Gone.**
+    `git branch --list "backup/*"` returns nothing and the whole `.git`
+    folder is 229 MB (checked 11-13), so the branch was deleted and its
+    objects pruned. No commit records who did it or when. Original text:
+    the safety net for the `f33b22b` rebase; once the rebase is trusted,
+    `git branch -D backup/pre-build-drop && git reflog expire --expire=now
+    --all && git gc --prune=now`.
 
 - **2026-11-04 (sweep) — ticked off from the open list:**
   - ~~**Comparison synthesis.**~~ — **Done in 10.4** (`c8a8353`, S21): when a
