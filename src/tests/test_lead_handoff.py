@@ -161,25 +161,62 @@ try:
 finally:
     widget_config._save_leads(existing)
 
-print("\n== the spam guard (the CEO, 2026-11-12) ==")
-before = len(widget_config._load_leads())
+print("\n== the spam guard keeps suspected spam (D-20261112-13) ==")
+import log_report
 sent = []
 with patch.object(mailer, "is_configured", lambda: True), \
      patch.object(mailer, "send", lambda *a, **k: sent.append(a)):
     trap = post(hp="https://spam.example", fill_ms=9000)
     fast = post(fill_ms=300)
-    human = post(fill_ms=9000)
+    autofill = post(fill_ms=1500)
     old_widget = post()
-check(trap.status_code == 200 and trap.json().get("reference"),
-      "a filled trap field still looks accepted to the bot")
-check(fast.status_code == 200, "a send faster than a person types looks accepted too")
-kept = {l["id"] for l in widget_config._load_leads()}
-check(trap.json()["id"] not in kept and fast.json()["id"] not in kept,
-      "but neither is stored")
-check(human.json()["id"] in kept and old_widget.json()["id"] in kept,
-      "a person's send, and one from a widget without the guard fields, are stored")
-check(len(widget_config._load_leads()) == before + 2, "exactly two new leads")
-check(len(sent) == 2, f"and only those two are emailed ({len(sent)})")
+for name, r_ in (("trap", trap), ("fast", fast), ("autofill", autofill), ("old widget", old_widget)):
+    check(r_.status_code == 200 and r_.json().get("reference"), f"{name}: 200 with a reference")
+tid, fid = trap.json()["id"], fast.json()["id"]
+raw = {l["id"]: l for l in widget_config._load_leads()}
+for r_ in (trap, fast):
+    check(r_.json()["reference"] == widget_config.lead_ref(r_.json()["id"])
+          and r_.json()["id"] in raw, "the reference matches a stored lead")
+check(raw[tid].get("suspected_spam") == "trap", "trap lead is flagged trap")
+check(raw[fid].get("suspected_spam") == "fast", "fast lead is flagged fast")
+check(raw[tid]["notified"] is False and raw[fid]["notified"] is False, "flagged leads are not emailed")
+check(len(sent) == 2, f"only autofill and old widget are emailed ({len(sent)})")
+lst = client.get("/admin/leads?suspected_spam=true", headers=ADMIN).json()
+reasons = {l["id"]: l.get("suspected_spam") for l in lst["leads"]}
+check(reasons.get(tid) == "trap" and reasons.get(fid) == "fast", "the spam view lists both with reasons")
+dflt = {l["id"] for l in client.get("/admin/leads", headers=ADMIN).json()["leads"]}
+check(tid not in dflt and fid not in dflt, "the default list shows neither")
+counted = {l["id"] for l in log_report.load_leads()}
+check(tid not in counted and fid not in counted, "log_report does not count them")
+check(lst["stats"]["suspected_spam"] >= 2, "stats count the flagged leads")
+
+sent = []
+with patch.object(mailer, "is_configured", lambda: True), \
+     patch.object(mailer, "send", lambda *a, **k: sent.append(a)):
+    r = client.post(f"/admin/leads/{fid}/not_spam", headers=ADMIN)
+    check(r.status_code == 200, f"rescue is accepted ({r.status_code})")
+    check(len(sent) == 1, f"and the lead is emailed once ({len(sent)})")
+    check(stored(fid) is not None and stored(fid)["notified"] is True, "and marked notified")
+    r = client.post(f"/admin/leads/{fid}/not_spam", headers=ADMIN)
+    check(r.status_code == 404, f"rescuing it again is 404 ({r.status_code})")
+
+existing = widget_config._load_leads()
+widget_config._save_leads([])
+try:
+    with patch.object(widget_config, "MAX_SPAM_LEADS", 2), \
+         patch.object(widget_config, "MAX_LEADS", 1):
+        real = post().json()["id"]
+        flagged = [post(fill_ms=300) for _ in range(3)]
+        check(all(r_.status_code == 200 for r_ in flagged), "flagged posts are 200 on a full real store")
+        fl_ids = [r_.json()["id"] for r_ in flagged]
+        left = widget_config._load_leads()
+        check([l["id"] for l in left if l.get("suspected_spam")] == fl_ids[1:],
+              "the oldest flagged lead is dropped at the cap")
+        check(any(l["id"] == real for l in left), "the real lead is still stored")
+        check(widget_config.lead_stats()["full"] is True, "full counts the one real lead")
+        check(post(fill_ms=300).status_code == 200, "a 4th flagged post is still 200, not 503")
+finally:
+    widget_config._save_leads(existing)
 
 print("\n== X-User-Id grants nothing ==")
 q = client.get("/widget/quota?visitor_id=x", headers={"x-user-id": "admin"}).json()

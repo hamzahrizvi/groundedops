@@ -7,7 +7,6 @@ app.include_router; paths, parameters and responses are unchanged.
 
 import logging
 import os
-import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -220,15 +219,20 @@ class LeadReq(BaseModel):
 
 
 # A person reads the form and types a name and an address; a form bot posts
-# at once. ponytail: both signals come from the browser, so a bot scripted
+# at once; 1 s catches instant posts with fewer autofill false hits
+# (D-20261112-13). ponytail: both signals come from the browser, so a bot scripted
 # against this endpoint can fake them -- the daily caps still bound it, and a
 # challenge (e.g. Cloudflare Turnstile) is the upgrade if spam gets through.
-LEAD_MIN_FILL_MS = int(os.getenv("WIDGET_LEAD_MIN_FILL_MS", "2500"))
+LEAD_MIN_FILL_MS = int(os.getenv("WIDGET_LEAD_MIN_FILL_MS", "1000"))
 
 
-def _looks_like_bot(payload: LeadReq) -> bool:
-    return bool(payload.hp.strip()) or (
-        payload.fill_ms is not None and payload.fill_ms < LEAD_MIN_FILL_MS)
+def _spam_reason(payload: LeadReq) -> str:
+    """Why the guard suspects a bot ("trap" or "fast"), or "" for a person."""
+    if payload.hp.strip():
+        return "trap"
+    if payload.fill_ms is not None and payload.fill_ms < LEAD_MIN_FILL_MS:
+        return "fast"
+    return ""
 
 
 _proxy_warned = False
@@ -299,7 +303,8 @@ def widget_submit_lead(payload: LeadReq, request: Request,
     Capped per visitor and per IP (quota.check_public_write), and the store
     refuses new leads once full instead of trimming old ones. The lead is
     stored first; the email goes out after the response, so a slow or broken
-    mail server never loses or delays a submission.
+    mail server never loses or delays a submission. Spam-guard hits are stored
+    flagged and not emailed.
     """
     from widget_api import _client_ip
     _warn_if_shared_ip(request)
@@ -308,25 +313,26 @@ def widget_submit_lead(payload: LeadReq, request: Request,
         raise HTTPException(status_code=429, detail=(
             "We have already received several messages from you today. "
             "Please try again tomorrow, or contact us directly."))
-    if _looks_like_bot(payload):
-        # Looks accepted, so the bot learns nothing; nothing is stored or
-        # emailed. Counted against the caps above all the same.
-        logger.info("widget lead dropped by the spam guard (trap field or too fast)")
-        fake = str(uuid.uuid4())
-        return {"received": True, "id": fake, "reference": widget_config.lead_ref(fake)}
+    reason = _spam_reason(payload)
     try:
         lead = widget_config.add_lead(
             payload.kind, payload.values or {},
             product=payload.product, transcript=payload.transcript,
             enquiry=payload.enquiry or "",
-            summary_source=payload.summary_source)
+            summary_source=payload.summary_source, suspected_spam=reason)
     except widget_config.LeadStoreFull:
         raise HTTPException(status_code=503, detail=(
             "We cannot take new messages through this form right now. "
             "Please contact us directly."))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    background.add_task(_notify_lead, lead)
+    if reason:
+        # Kept, labelled and not emailed: a person rescues it from the console.
+        # The reply looks the same, so a bot learns nothing.
+        logger.info(f"widget lead {widget_config.lead_ref(lead['id'])} kept as "
+                    f"suspected spam ({reason}); not emailed")
+    else:
+        background.add_task(_notify_lead, lead)
     # Deliberately does not echo the stored lead back to a public caller.
     return {"received": True, "id": lead["id"],
             "reference": widget_config.lead_ref(lead["id"])}
@@ -334,9 +340,11 @@ def widget_submit_lead(payload: LeadReq, request: Request,
 
 @router.get("/admin/leads")
 def admin_list_leads(kind: str | None = None, unhandled_only: bool = False,
+                     suspected_spam: bool = False,
                      x_admin_password: str | None = Header(default=None)):
     _require_admin(x_admin_password)
-    return {"leads": widget_config.list_leads(kind, not unhandled_only),
+    return {"leads": widget_config.list_leads(kind, not unhandled_only,
+                                              suspected_spam=suspected_spam),
             "stats": widget_config.lead_stats()}
 
 
@@ -347,6 +355,18 @@ def admin_mark_lead(lead_id: str, handled: bool = True,
     if not widget_config.mark_lead(lead_id, handled):
         raise HTTPException(status_code=404, detail="Lead not found")
     return {"ok": True, "handled": handled}
+
+
+@router.post("/admin/leads/{lead_id}/not_spam")
+def admin_rescue_lead(lead_id: str, background: BackgroundTasks,
+                      x_admin_password: str | None = Header(default=None)):
+    """A flagged enquiry is real: unflag it and email it like any other."""
+    _require_admin(x_admin_password)
+    lead = widget_config.clear_suspected_spam(lead_id)
+    if lead is None:
+        raise HTTPException(status_code=404, detail="No suspected-spam enquiry with that id")
+    background.add_task(_notify_lead, lead)
+    return {"ok": True}
 
 
 @router.delete("/admin/leads/{lead_id}")

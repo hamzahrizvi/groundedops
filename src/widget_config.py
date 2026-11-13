@@ -80,6 +80,10 @@ MAX_WELCOME = 400
 MAX_INTRO_OPTIONS = 6
 MAX_FORM_FIELDS = 8
 MAX_LEADS = int(os.getenv("MAX_LEADS", "5000"))
+# Suspected spam (D-20261112-13) is kept for a person to rescue, under its own
+# cap: the oldest flagged lead goes first, and flagged leads never count
+# toward MAX_LEADS, so a bot flood cannot lock real visitors out.
+MAX_SPAM_LEADS = int(os.getenv("MAX_SPAM_LEADS", "200"))
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -353,8 +357,10 @@ SUMMARY_SOURCES = ("chat", "written", "none")
 
 def add_lead(kind: str, values: dict, product: str | None = None,
              transcript: list | None = None, enquiry: str = "",
-             summary_source: str = "none") -> dict:
+             summary_source: str = "none", suspected_spam: str = "") -> dict:
     """Record a form submission from the widget.
+
+    `suspected_spam` is the spam guard's reason ("trap" or "fast"); such a lead is kept but never emailed.
 
     `values` is matched against the CONFIGURED fields for this form —
     keys that are not configured fields are dropped rather than stored.
@@ -431,12 +437,18 @@ def add_lead(kind: str, values: dict, product: str | None = None,
         # Where it is emailed, and whether that has happened yet.
         "notify_email": form.get("notify_email", ""),
         "notified": False,
+        "suspected_spam": suspected_spam,
     }
     with _leads_lock:
         items = _load_leads()
+        if suspected_spam:
+            flagged = [l.get("id") for l in items if l.get("suspected_spam")]
+            drop = set(flagged[:max(0, len(flagged) - MAX_SPAM_LEADS + 1)])
+            items = [l for l in items if l.get("id") not in drop]
         # Full: refuse rather than drop the oldest. Trimming used to delete
         # real enquiries silently, so a bot flood could wipe the store.
-        if sum(1 for l in items if not l.get("notified")) >= MAX_LEADS:
+        elif sum(1 for l in items if not l.get("notified")
+                 and not l.get("suspected_spam")) >= MAX_LEADS:
             logger.warning(f"widget leads store is full ({MAX_LEADS}); "
                            "refusing a new enquiry. Delete handled ones in the console.")
             raise LeadStoreFull(f"the enquiry store is full ({MAX_LEADS})")
@@ -513,12 +525,15 @@ def erase_email(email: str) -> int:
 
 
 def list_leads(kind: str | None = None, include_handled: bool = True,
-               limit: int = 200, include_sent: bool = False) -> list[dict]:
+               limit: int = 200, include_sent: bool = False,
+               suspected_spam: bool = False) -> list[dict]:
     """The console's list: enquiries not yet emailed. `include_sent` adds the
-    stubs of emailed ones, for counting (log_report)."""
+    stubs of emailed ones, for counting (log_report). The default lists real
+    enquiries only; `suspected_spam=True` lists only the flagged ones."""
     items = _load_leads()
     if not include_sent:
         items = [l for l in items if not l.get("notified")]
+    items = [l for l in items if bool(l.get("suspected_spam")) == suspected_spam]
     if kind:
         items = [l for l in items if l.get("kind") == kind]
     if not include_handled:
@@ -538,6 +553,19 @@ def mark_lead(lead_id: str, handled: bool = True) -> bool:
     return False
 
 
+def clear_suspected_spam(lead_id: str) -> dict | None:
+    """A person says a flagged lead is real: unflag it and return it for
+    emailing. None when there is no flagged lead with that id."""
+    with _leads_lock:
+        items = _load_leads()
+        for l in items:
+            if l.get("id") == lead_id and l.get("suspected_spam"):
+                l["suspected_spam"] = ""
+                _save_leads(items)
+                return dict(l)
+    return None
+
+
 def delete_lead(lead_id: str) -> bool:
     with _leads_lock:
         items = _load_leads()
@@ -548,7 +576,9 @@ def delete_lead(lead_id: str) -> bool:
 
 
 def lead_stats() -> dict:
-    items = [l for l in _load_leads() if not l.get("notified")]
+    all_items = _load_leads()
+    items = [l for l in all_items
+             if not l.get("notified") and not l.get("suspected_spam")]
     return {
         "total": len(items),
         "unhandled": len([l for l in items if not l.get("handled")]),
@@ -556,4 +586,5 @@ def lead_stats() -> dict:
         "support": len([l for l in items if l.get("kind") == "support"]),
         "unsent": len([l for l in items if not l.get("notified")]),
         "full": len(items) >= MAX_LEADS,
+        "suspected_spam": len([l for l in all_items if l.get("suspected_spam")]),
     }

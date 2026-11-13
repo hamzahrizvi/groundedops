@@ -1943,7 +1943,8 @@
 
     // Spam guard (the CEO, 2026-11-12): a field no person sees or tabs to,
     // which form-filling bots fill in, and how long the form was open. The
-    // server quietly drops a filled trap or a send faster than a person types.
+    // server keeps a filled trap or a send faster than a person types as
+    // suspected spam, not emailed, for staff to check.
     var trap = document.createElement("input");
     trap.type = "text";
     trap.name = "company_website";

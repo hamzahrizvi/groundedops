@@ -1402,7 +1402,7 @@ async function refresh() {
     api("/faq").catch(() => ({ faq: [] })),
     api("/faq/gaps").catch(() => ({ gaps: [], stats: {} })),
     api("/admin/widget/config").catch(() => null),
-    api("/admin/leads").catch(() => ({ leads: [], stats: {} })),
+    api("/admin/leads" + (leadSpamView ? "?suspected_spam=true" : "")).catch(() => ({ leads: [], stats: {} })),
     api("/admin/providers").catch(() => ({ providers: [] })),
     api("/admin/report").catch(() => null),
     api("/admin/feedback").catch(() => null),
@@ -7511,6 +7511,7 @@ function viewWidget() {
 }
 
 /* ---------------- enquiries (leads) ---------------- */
+let leadSpamView = false;
 function viewLeads() {
   const rows = cache.leads.length ? cache.leads.map(l => {
     const vals = Object.values(l.values || {});
@@ -7518,6 +7519,10 @@ function viewLeads() {
                 (l.handled ? ";opacity:.6" : "") },
       el("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:8px" },
         el("span", { class: "tag " + (l.kind === "sales" ? "tag-accent" : "tag-neutral") }, l.kind),
+        l.suspected_spam
+          ? el("span", { class: "tag tag-neutral", style: "color:var(--color-warn,#c98a00)" },
+              l.suspected_spam === "trap" ? "Suspected spam: hidden field filled" : "Suspected spam: sent too fast")
+          : null,
         l.product ? el("span", { class: "tag tag-neutral mono" }, l.product) : null,
         el("span", { class: "mono", style: "font-size:12px" }, "GO-" + String(l.id || "").slice(0, 8).toUpperCase()),
         el("span", { style: "flex:1" }),
@@ -7540,7 +7545,11 @@ function viewLeads() {
         : null,
       // Says plainly when it was not emailed, rather than letting someone
       // assume the destination address means it was delivered.
-      l.notify_email
+      l.suspected_spam
+        ? el("div", { style: "margin-top:8px;font-size:11.5px;color:var(--color-warn,#c98a00)" },
+            "Held back as suspected spam, not emailed. If it is real, press Not spam to send it to "
+            + (l.notify_email || "its form's address") + ".")
+      : l.notify_email
         ? el("div", { style: "margin-top:8px;font-size:11.5px;color:color-mix(in srgb,var(--color-text) 50%,transparent)" },
             l.notified ? "Emailed to " + l.notify_email
                        : "For " + l.notify_email + " — not emailed (mail server not set, or the send failed)")
@@ -7560,16 +7569,25 @@ function viewLeads() {
                           { method: "POST" });
                 await refresh(); render(); } catch (e) { toast(e.message, true); }
         } }, l.handled ? "Mark unhandled" : "Mark handled"),
+        l.suspected_spam
+          ? el("button", { class: "btn btn-secondary", style: "font-size:12.5px;padding:5px 11px", onclick: async () => {
+              try { await api("/admin/leads/" + l.id + "/not_spam", { method: "POST" });
+                    toast("Sent on as a real enquiry"); await refresh(); render(); } catch (e) { toast(e.message, true); }
+            } }, "Not spam")
+          : null,
         el("button", { class: "btn btn-ghost", style: "font-size:12.5px", onclick: async () => {
           if (!confirm("Delete this enquiry? It cannot be recovered.")) return;
           try { await api("/admin/leads/" + l.id, { method: "DELETE" });
                 toast("Deleted"); await refresh(); render(); } catch (e) { toast(e.message, true); }
         } }, "Delete")));
   }) : [el("div", { class: "card elev-sm" }, el("div", { class: "empty" },
-        el("b", {}, "Nothing yet"),
-        "Sales and support forms submitted through the widget arrive here. " +
-        "Set the fields and the destination address under Widget design, and " +
-        "try it yourself from Test chat."))];
+        leadSpamView
+          ? [el("b", {}, "Nothing here"),
+             "No suspected spam. Forms the spam guard flags (a hidden field filled, or sent in under a second) are kept here, not emailed."]
+          : [el("b", {}, "Nothing yet"),
+             "Sales and support forms submitted through the widget arrive here. " +
+             "Set the fields and the destination address under Widget design, and " +
+             "try it yourself from Test chat."]))];
 
   const s = cache.leadStats || {};
   return [
@@ -7584,6 +7602,9 @@ function viewLeads() {
       el("div", {}, el("div", { class: "lbl" }, "Total"), el("b", {}, String(s.total || 0))),
       el("div", { class: s.unsent ? "warn" : "" },
         el("div", { class: "lbl" }, "Not emailed"), el("b", {}, String(s.unsent || 0)))),
+    el("button", { class: "btn btn-ghost", style: "font-size:12.5px;margin:8px 0", onclick: async () => {
+        leadSpamView = !leadSpamView; await refresh(); render(); } },
+      leadSpamView ? "Back to enquiries" : "Suspected spam (" + (s.suspected_spam || 0) + ")"),
     el("div", { "data-tour": "leads-list" }, rows),
     eraseCard(),
   ];
