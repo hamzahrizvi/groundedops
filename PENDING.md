@@ -364,9 +364,9 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261102-01 | Security item D-20261102-01, details in the office | approved, queued | Dev builds it |
 | D-20261106-08 | Security item D-20261106-08, details in the office | waiting for CEO | your yes |
-| D-20261112-02 | A yes/no answer quotes the right figures and then says the opposite: a 2-year-old unit called "still covered" by a 1-year warranty | built, waiting for the check | the pre-ship check |
+| D-20261112-02 | A yes/no answer quotes the right figures and then says the opposite: a 2-year-old unit called "still covered" by a 1-year warranty | ready to merge | merges once Security clears it |
 | D-20261113-03 | Security item D-20261113-03, details in the office | approved, queued | Dev builds it |
-| D-20261113-04 | The damaged-catalogue fix cannot go to main: its test needs a product in the shipped catalogue | built, waiting for the check | the pre-ship check |
+| D-20261113-04 | The damaged-catalogue fix cannot go to main: its test needs a product in the shipped catalogue | ready to merge | merges once Security clears it |
 | D-20261113-06 | Security item D-20261113-06, details in the office | approved, queued | Dev builds it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | audit/D-20261112-16-wrong-vs-incomplete | D-20261112-16: how many "Wrong" answers are only incomplete? | proposed | the product owner triages it |
