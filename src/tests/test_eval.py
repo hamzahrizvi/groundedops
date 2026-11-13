@@ -12,6 +12,19 @@ def test_case_key_is_layer_qualified():
             == "retrieval::What is it?")
 
 
+def test_every_pass_mark_names_a_case_read_as_utf8():
+    """D-20261112-18: read in the locale's cp1252, "¿Cuánto" became
+    "Â¿CuÃ¡nto", the bot was asked that, and the mark kept the garbled key."""
+    import json
+    here = rag_eval.HERE
+    for cases, mark in (("eval_cases.json", "eval_baseline.json"),
+                        ("eval_cases_retrieval.json", "eval_baseline_retrieval.json")):
+        keys = {rag_eval.case_key(c) for c in
+                json.loads((here / cases).read_text(encoding="utf-8"))["cases"]}
+        missing = set(json.loads((here / mark).read_text())["cases"]) - keys
+        assert not missing, (mark, missing)
+
+
 def test_run_case_forwards_skip_faq_and_checks_sources():
     sent = {}
 

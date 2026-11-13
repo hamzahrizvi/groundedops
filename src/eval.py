@@ -636,7 +636,7 @@ def main():
     if "--selfcheck" in sys.argv or os.getenv("EVAL_SELFCHECK") == "1":
         try:
             cases_path = Path(_arg_value("cases", str(CASES_FILE)))
-            spec = json.loads(cases_path.read_text())
+            spec = json.loads(cases_path.read_text(encoding="utf-8"))
             cases = spec["cases"]
             assert isinstance(cases, list) and cases, "no cases"
             for i, c in enumerate(cases):
@@ -678,7 +678,8 @@ def main():
         print(f"Invalid --layer {layer_filter!r}; choose from {sorted(VALID_LAYERS)}")
         return 2
 
-    spec = json.loads(cases_path.read_text())
+    # utf-8, not the locale's cp1252: "¿Cuánto" was sent as "Â¿CuÃ¡nto".
+    spec = json.loads(cases_path.read_text(encoding="utf-8"))
     cases = spec["cases"]
     if layer_filter:
         cases = [c for c in cases if case_layer(c) == layer_filter]
