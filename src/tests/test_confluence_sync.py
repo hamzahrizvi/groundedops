@@ -260,6 +260,8 @@ def test_synced_links_reach_only_allowlisted_hosts():
     keep = "firmware 3.90.1.2, v1.2.3.4, 8.8.8.8, appsettings.local.json, 3.5:100, a.innovative-technology.com"
     assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
     assert "192.168.1.1" in cs.page_text("P", "<p>default 192.168.1.1</p>", hosts=["192.168.1.1"])
+    link = "https://innovative-technology.com/fw/3.90.1.2/notes.pdf"    # a version folder in a kept link
+    assert link in cs.page_text("P", f"<p>{link}</p>", hosts=cs.link_hosts())
     # The site listed (a public space): its attachments keep their address.
     t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
                      hosts=["innovative-technology.atlassian.net"])

@@ -818,7 +818,8 @@ _URL = re.compile(
 # a reserved internal suffix or an operator's CONFLUENCE_INTERNAL_DOMAINS (comma list). A general
 # host-name rule would hit file names and versions, so only these suffixes are read as hosts.
 _OCT = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
-_IPV4 = re.compile(r"(?<![\w.])(?P<ip>" + _OCT + r"(?:\." + _OCT + r"){3})(?!\.?\w)"
+# After "/" it is a path segment of a link _URL already judged (a version folder): left alone.
+_IPV4 = re.compile(r"(?<![\w./])(?P<ip>" + _OCT + r"(?:\." + _OCT + r"){3})(?!\.?\w)"
                    r"(?P<rest>(?::\d{1,5})?(?:/" + _TAIL + r")?)")
 _INTERNAL_SUFFIXES = ("internal", "local", "lan", "corp", "intranet", "localdomain")
 
