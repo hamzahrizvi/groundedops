@@ -80,6 +80,38 @@ def _judging_seen(q, a):
 def test_llm_verified_sends_thinking_only_when_needed():
     assert _judging_seen(*THINK[0]) is True
     assert _judging_seen(*FAST[0]) is False
+    assert _judging_seen(*VALUE_VERDICT[0]) is True
+
+
+VALUE_VERDICT = [
+    ("got a cba9 that's 2 years old, is it still covered",
+     "Yes, it is still covered. The CBA9 has a standard warranty of 1 year or 200,000 cycles."),
+    ("which hopper takes a 26mm coin that's 2.5mm thick",
+     "The Single Hoppers do not: Position 3 is 24-33 mm, limited to 1-3 mm thickness."),
+    ("can the nv200 spectral run off our 12v rail", "No, it needs 24 V DC."),
+]
+
+
+def test_verdict_on_customers_own_figure_thinks():
+    for q, a in VALUE_VERDICT:
+        assert main._needs_judgement(q, a), (q, a)
+
+
+def test_product_digits_are_not_a_customers_figure():
+    # "CBA9" and "NV9USB+" name products; no value given, so fast as before
+    assert not main._needs_judgement("is the CBA9 covered by warranty",
+                                     "Yes, it has a 1 year warranty.")
+    assert not main._needs_judgement("does the NV9USB+ take euros",
+                                     "Yes, it accepts 5 to 500 euro notes.")
+
+
+def test_number_match_does_not_pass_a_verdict_on_customers_figure():
+    q, a = VALUE_VERDICT[0]
+    chunks = [{"text": "Standard warranty: 1 year or 200,000 cycles. 2 tiers."}]
+    # every number is in the passage: passes without the question, as before
+    assert main._lexically_supported(a, chunks)
+    # with the question giving the customer's figure, the model checker decides
+    assert not main._lexically_supported(a, chunks, question=q)
 
 
 if __name__ == "__main__":
