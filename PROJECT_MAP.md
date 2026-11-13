@@ -161,72 +161,27 @@ groundedops/
     ├── corpus/                   second copy of the source docs
     ├── faq_store.json  faq_gaps.json  catalog_config.json
     ├── logs.json  logs.jsonl  conversations.db  quota.db        runtime, gitignored
-    ├── frontend/                 React + Vite; the built dist is served by FastAPI
-    │   ├── package.json  package-lock.json  vite.config.js  index.html
-    │   ├── dev.mjs  README.md  nginx.conf  widget-nginx.conf  widget-test.html
-    │   ├── node_modules/                             gitignored
-    │   ├── dist/                 built output, gitignored (npm run build)
-    │   │   ├── assets/  widget/
-    │   ├── public/
-    │   │   ├── logo.svg
-    │   │   └── widget/
-    │   │       ├── groundedops-widget.js     embeddable widget, no deps (967)
-    │   │       └── groundedops-widget.php    WordPress plugin wrapper, untracked
-    │   └── src/
-    │       ├── main.jsx  App.jsx (661)  api.js  styles.css (521)
-    │       ├── Logo.jsx  icons.jsx
-    │       └── components/
-    │           ├── ChatsPage.jsx  ChatFaqDrawer.jsx
-    │           ├── DetailsPanel.jsx  Dialogs.jsx  Message.jsx  Rail.jsx
-    │           └── FaqPage.jsx  FaqChoices.jsx    (FaqChoices is written but unwired)
-    │           (AdminPanel.jsx removed — it duplicated admin.html/Nocturne and
-    │            shipped admin code into the public chat bundle; its three
-    │            trigger buttons now open /admin in a new tab instead)
-    └── legacy/                   793 files, 16 MB. Reference only — nothing imports
-        │                         it; release.py writes each release's drop here.
-        │                         Each release folder holds only that release's changed
-        │                         files, plus files.zip and a CHANGELOG_*.md.
-        ├── v3/                   flat, 21 files: app.py bm25.py chunking.py db.py
-        │                         embeddings.py grounding.py ingest.py llm.py logger.py
-        │                         main.py memory.py parsing.py reranker.py
-        │                         retrieval_db.py router.py structure.py test.py
-        │                         test_queries.py + deepseek key artifacts
-        ├── v4/    v4.0  v4.1
-        ├── v5/                   empty
-        ├── v6/    v6.0/tests  v6.2  v6.3_changed_files/tests
-        │          v6.4_changed_files/tests  v6.5_changed_files/tests
-        ├── v7/    v7.0_changed_files/tests
-        │          v7.1  v7.1.1–v7.1.4 (each with .streamlit/)
-        │          v7.1.5–v7.1.7 (.streamlit/ + assets/icons/)
-        │          v7.2_react_base/frontend/{public,src/components}   ← React starts here
-        │          v7.2.1/frontend/…  v7.2.2/frontend/…
-        ├── v8/    v8.0_general_improvements  v8.1_breadcrumbs
-        │          v8.2_simultaneous_llms  v8.3
-        │          v8.4/{8.4.1,8.4.2,8.4.3}
-        ├── v9/    v9.0_doc2_query
-        │          v9.1_online_default/{v9.1.1_bug_fix, v9.1.2_toggle_fix,
-        │                               v9.1.3_force_pick, v9.1.4_chats, v9.1.5_chats2}
-        │          v9.2_full_release_1.0/v9.2.1
-        ├── v10/   v10.0_Docker_I_hardly_know  v10.1_multi_product  v10.2_ingest_fix
-        │          v10.3_chat_fix/v10.3.1  v10.4_ci_cd  v10.5_ingest_cat  v10.6  v10.7
-        │          v10.8_admin_panel  v10.9_FAQ  v10.10  v10.11  v10.12  v10.13
-        │          v10.14_FAQ_ans/v10.14.1  v10.15_remove_ingest_faq
-        │          v10.16_remove_obsolete/{v10.16.1, v10.16.2}
-        ├── v11/   v11.1_widget
-        │          v11.2_FAQ_match/{v11.2.1/files, v11.2.2}
-        │          v11.3_FAQ_suggest/{v11.3.1, v11.3.2, v11.3.3}   ← current HEAD release
-        ├── v12/   v12.0_Securityyy        quota.py + widget_api.py land here
-        │          v12.1_cloud/{v12.1.1 … v12.1.5}   main.py 1842 ln, PHP plugin
-        │          v12.2_admin_rebuild     admin.html + main.py 2077 ln
-        │          v12.3_redesign/v12.3.1  admin.html, styles.css, main.py 2077 ln
-        └── v13/   v13.0    the raw drop that caused BROKEN STATE. DEPLOY_v13.md,
-                            admin.html, main.py, faq_store.py, gaps.py,
-                            widget_config.py, styles.css, _harness.py,
-                            test_new_routes.py, test_ui.py
-                   v13.1    ← current release. Same v13.0 intent, actually merged
-                            onto v12.3's main.py instead of replacing it — see
-                            CHANGELOG_v13.1.md. main.py, faq_store.py, admin.html,
-                            _harness.py, test_new_routes.py, files.zip
+    └── frontend/                 React + Vite; the built dist is served by FastAPI
+        ├── package.json  package-lock.json  vite.config.js  index.html
+        ├── dev.mjs  README.md  nginx.conf  widget-nginx.conf  widget-test.html
+        ├── node_modules/                             gitignored
+        ├── dist/                 built output, gitignored (npm run build)
+        │   ├── assets/  widget/
+        ├── public/
+        │   ├── logo.svg
+        │   └── widget/
+        │       ├── groundedops-widget.js     embeddable widget, no deps (967)
+        │       └── groundedops-widget.php    WordPress plugin wrapper, untracked
+        └── src/
+            ├── main.jsx  App.jsx (661)  api.js  styles.css (521)
+            ├── Logo.jsx  icons.jsx
+            └── components/
+                ├── ChatsPage.jsx  ChatFaqDrawer.jsx
+                ├── DetailsPanel.jsx  Dialogs.jsx  Message.jsx  Rail.jsx
+                └── FaqPage.jsx  FaqChoices.jsx    (FaqChoices is written but unwired)
+                (AdminPanel.jsx removed — it duplicated admin.html/Nocturne and
+                 shipped admin code into the public chat bundle; its three
+                 trigger buttons now open /admin in a new tab instead)
 ```
 
 ---

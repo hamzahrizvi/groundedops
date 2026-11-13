@@ -3,9 +3,7 @@
 ## Supported versions
 
 This isn't a library with parallel maintained release branches — only
-the latest commit on `main` receives fixes. `src/legacy/` is a historical
-reference archive of past releases (v3 through v13.1) and is never
-patched; do not run anything from it.
+the latest commit on `main` receives fixes. Older releases (the git tags) are never patched.
 
 ## Reporting a vulnerability
 
@@ -44,7 +42,7 @@ In scope: the FastAPI backend (`src/main.py` and friends), the React
 chat app and admin console (`src/frontend/`, `src/admin.html`), and the
 embeddable widget (`src/frontend/public/widget/groundedops-widget.js`).
 
-Out of scope: `src/legacy/` (historical, unmaintained), and
+Out of scope:
 vulnerabilities in third-party dependencies (chromadb, sentence-transformers,
 FastAPI, React, etc.) — please report those upstream; `.github/dependabot.yml`
 tracks version updates here.
