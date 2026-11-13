@@ -47,10 +47,10 @@ langdetect
 
 # Security floors (D-20261008-17, D-20261020-05, D-20261021-23, D-20261031-01, D-20261106-10). Transitive except pypdf; listed so the
 # lock cannot fall back below the fixed versions.
-pypdf>=6.21.4
+pypdf>=7.0.0
 urllib3>=2.8.0
-multidict>=6.9.1
+multidict>=7.2.1
 oauthlib>=4.0.1
 pillow>=13.0.0
-aiohttp>=3.14.4
-certifi>=2026.10.19
+aiohttp>=3.14.5
+certifi>=2026.10.23
