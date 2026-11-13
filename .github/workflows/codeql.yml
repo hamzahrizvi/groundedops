@@ -73,16 +73,8 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-        # The whole reason this repo runs an advanced setup rather than the
-        # default one: default setup ignores config files, so there was no way
-        # to stop it scanning src/legacy/ -- the byte-for-byte archives of what
-        # shipped in each release. Nothing imports, serves or executes them,
-        # but every new release drop copied main.py, admin.html and the rest
-        # into a new folder, and CodeQL counted those copies as newly
-        # INTRODUCED vulnerabilities: "16 new alerts including 14 high
-        # severity", none new, none reachable, and unfixable without editing
-        # archives to make them lie about history. The LIVE equivalent of each
-        # was fixed in v15.2. See .github/codeql/codeql-config.yml.
+        # Advanced setup, because the default setup ignores config files and so
+        # cannot honour paths-ignore. See .github/codeql/codeql-config.yml.
         config-file: ./.github/codeql/codeql-config.yml
         # If you wish to specify custom queries, you can do so here or in a config file.
         # By default, queries listed here will override any specified in a config file.
