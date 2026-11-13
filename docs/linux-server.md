@@ -133,15 +133,33 @@ Keep this window open and check in a **new** PowerShell window that
 your way back in: delete that file and reload again.
 
 **Firewall (ufw).** Allow SSH, and GroundedOps only from the office
-network. `ip -4 addr` shows the server's address with its range, e.g.
-`192.168.1.50/24`, which means the range `192.168.1.0/24`:
+network.
+
+**Find the right range first, and don't assume it's the one your own PC is
+on.** Office networks often translate addresses between subnets, so the
+server may see your PC as something else entirely. Ask the server what it
+sees:
+
+```bash
+echo "$SSH_CLIENT"      # the address the server sees you arriving from
+ip -4 route show scope link proto kernel | awk '{print $1}'   # its own range
+```
+
+On the first install here, the server's own range was `10.10.8.0/21`, but a
+PC on the office Wi-Fi (`192.168.1.42`) arrived as `10.242.2.216`. Allowing
+the Wi-Fi range did nothing; the translated range had to be allowed instead.
+Use both:
 
 ```bash
 sudo ufw allow OpenSSH
-sudo ufw allow from 192.168.1.0/24 to any port 8000 proto tcp
+sudo ufw allow from 10.10.8.0/21 to any port 8000 proto tcp
+sudo ufw allow from 10.242.0.0/16 to any port 8000 proto tcp
 sudo ufw enable
 sudo ufw status
 ```
+
+Check it from your own PC afterwards — `curl http://<server>:8000/health`
+should answer `200`, not hang.
 
 **Automatic security updates.** These are installed and on by default.
 Check that, and let the server restart itself at 3am when an update needs
@@ -187,15 +205,21 @@ widget settings, accounts and enquiries in one encrypted file.
    ..\.venv\Scripts\python manage_backup.py export --out $HOME\go.gobk
    scp $HOME\go.gobk goadmin@192.168.1.50:
    ```
-3. On the server, restore it with accounts, then run the script again,
-   which starts the app:
+3. On the server, restore it with accounts, then start the app.
+
+   `/srv/groundedops` belongs to the service account, so **your own user
+   can't `cd` into it** — "Permission denied" looks like the folder is
+   missing. Every command below therefore runs as `groundedops`:
    ```bash
-   sudo install -o groundedops -g groundedops -m 600 ~/go.gobk /srv/groundedops/
-   cd /srv/groundedops/app/src
-   sudo -u groundedops -H ../.venv/bin/python manage_backup.py restore /srv/groundedops/go.gobk --accounts
-   cd ~ && sudo bash setup.sh
-   rm ~/go.gobk && sudo rm /srv/groundedops/go.gobk     # it holds password hashes
+   sudo install -o groundedops -g groundedops -m 600 ~/go.gobk /srv/groundedops/ && rm ~/go.gobk
+   sudo -u groundedops -H bash -c 'cd /srv/groundedops/app/src && ../.venv/bin/python manage_backup.py restore /srv/groundedops/go.gobk --accounts'
+   sudo systemctl start groundedops
+   sudo rm /srv/groundedops/go.gobk     # it holds password hashes; delete your Windows copy too
    ```
+   The restore asks for the passphrase, and nothing appears as you type.
+   **If `BACKUP_PASSPHRASE` is set in `src/.env`** (on both machines — copy
+   the line across) neither the export nor the restore prompts at all, and
+   `--yes` skips the confirmation too, so the whole move can run unattended.
 
 ### B. Start empty
 
@@ -208,7 +232,9 @@ from the console's Documents page.
 
 ### Either way, then
 
-- Open `http://192.168.1.50:8000/admin` and sign in.
+- Open `http://192.168.1.50:8000/admin` **in a browser on your own PC** and
+  sign in. You never need to touch the server's own screen and keyboard
+  again after step 3.
 - **API keys page: paste the provider key.** Keys saved in the Windows
   console are locked to that PC and don't come across with the backup.
 - Check it can answer. This must say `"ready": true` (allow about a
