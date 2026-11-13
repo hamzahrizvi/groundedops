@@ -238,11 +238,18 @@ _YES_NO = re.compile(
     r"^\s*(?:can|could|will|would|does|do|is|are|should)\s+(?!there\b|you\b)", re.I)
 
 
+# Warranty terms are documented (CBA9: 1 year or 200,000 cycles), so a
+# warranty clause beside a price clause is another ask, not part of the price
+# (D-20261102-06). A clause that prices the warranty is still a price.
+_WARRANTY = re.compile(r"\bwarrant(?:y|ies)\b|\bguarantee\b", re.I)
+
+
 def _asks_something_else(q: str) -> bool:
     """True when some clause of q is a question that is not commercial."""
     for clause in _CLAUSE_SPLIT.split(q or ""):
         stripped = _ADJ_PRICE.sub("", _AMOUNT.sub("", clause))
-        if _COMMERCIAL.search(stripped):
+        if _COMMERCIAL.search(stripped) and not (
+                _WARRANTY.search(stripped) and not _PRICE.search(stripped)):
             continue
         if stripped != clause:
             if _YES_NO.search(stripped):
