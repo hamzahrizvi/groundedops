@@ -296,6 +296,48 @@ Still not set up: public access through a Cloudflare named tunnel. The
 steps are in `TUNNEL_SETUP.md`, written for Windows; on Linux use
 `cloudflared service install`.
 
+### The lab: long jobs without disturbing anyone
+
+`/srv/groundedops/lab` is a second copy for evals, reindexes and anything
+else that runs for hours. It has its own checkout, index, documents and
+`src/.env`, and **shares the app's `.venv`** — a virtualenv doesn't care
+where the code it runs lives, which saves 6 GB and a long install.
+
+It deliberately holds **no accounts, conversations, leads or provider
+keys**. Retrieval work needs none of them, and leaving them out means the
+lab is not another copy of your customer and staff data.
+
+| | |
+|---|---|
+| Nightly jobs | `/srv/groundedops/lab/nightly.sh` — plain bash, edit it freely; systemd only calls it |
+| When | 19:30 UK time, after the cap lifts |
+| Results | `/srv/groundedops/lab/eval_runs/` |
+| Run it now | `sudo systemctl start groundedops-lab-nightly` |
+| Watch it | `journalctl -u groundedops-lab-nightly -f` |
+| Refresh its index from the live one | `sudo rm -rf /srv/groundedops/lab/src/chroma_db` then re-run `lab-setup.sh` |
+
+**The cap.** Everything lab runs sits in `groundedops-lab.slice`, limited to
+**3 of 8 cores and 6 GB** during the day, lifted to the full machine at
+19:00 UK time and reinstated at 08:00. The daytime limit lives in the unit
+file, so it survives a reboot; the evening lift is applied with
+`--runtime`, so a crash overnight can't leave the machine uncapped. The
+timers are set in `Europe/London`, so British Summer Time is handled while
+the server itself stays on UTC, as the AWS image will be.
+
+This matters more than it looks. The ONNX embedder trial recorded in
+`PENDING.md` produced unusable timings because a Confluence sync was eating
+800% CPU on the same machine. A cap is what stops a long job quietly
+corrupting both its own numbers and everyone else's experience.
+
+**A provider key is deliberately absent**, so nothing can spend money
+unattended by accident. Jobs that call an LLM (`eval.py`, the blind sets)
+will fail until you put one in `/srv/groundedops/lab/src/.env`. The
+retrieval eval needs none: the embedder and reranker run locally.
+
+You'll see warnings about `SESSION_SECRET` not being set when lab jobs run.
+That's expected — the lab doesn't serve anything, so it has no sign-in to
+protect.
+
 ### Who can reach it
 
 The firewall decides who can open port 8000, and that is the only thing
