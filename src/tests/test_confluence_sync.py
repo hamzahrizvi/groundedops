@@ -475,8 +475,20 @@ def test_titles_reach_no_one_with_an_internal_address():
         # A title with no address is left exactly as it was, spaces and all.
         assert cs._clean_title(" Old  name ", cs.link_hosts()) == " Old  name "
         assert leaks() == [], leaks()
+        # D-20261113-06 r2: a title that lost an address was a staff page; auto mode files it internal
+        items = w.items()
+        got = {t: items[t]["decision"] for t in ("Docs on", "notes", "Cmd B", "Wiring v2.pdf")}
+        assert got == dict.fromkeys(got, "internal"), got
+        # an admin's approval stands, but the console still points it out until dismissed
+        w.decide(["notes"], decision="approved")
+        flag = w.items()["notes"]["name_flag"]
+        assert flag == {"suggest": "internal", "reason": "The title named an internal address"}, flag
+        w.decide(["notes"], dismiss_flag=True)
+        assert "name_flag" not in w.items()["notes"]
+        w.decide(["notes"], decision="internal")
         w._with(lambda: cs.set_bundle(["Area", "Docs on"], True))
         w.run(api)
+        assert w.items()["Docs on"]["decision"] == "internal", w.items()["Docs on"]
         assert "Docs on.txt" in w.texts and w.texts["Docs on.txt"].startswith("Docs on\n"), w.texts
         assert leaks() == [], leaks()
 
@@ -767,6 +779,10 @@ def test_name_flag_rules():
     }
     got = {t: (cs.name_flag(t) or {}).get("suggest") for t in want}
     assert got == want, got
+    assert cs.name_flag("Docs on", scrubbed=True) == {"suggest": "internal",
+                                                      "reason": "The title named an internal address"}
+    assert cs.name_flag("Docs on DRAFT", scrubbed=True)["suggest"] == "excluded"   # unfinished still wins
+    assert {t: cs.name_flag(t, scrubbed=False) for t in want} == {t: cs.name_flag(t) for t in want}
     assert cs.name_flag("x DO NOT USE")["reason"] == "The title says “DO NOT USE”"
 
 

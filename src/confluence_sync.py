@@ -116,14 +116,17 @@ def service_level(text: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def name_flag(title: str | None, level: int | None = None) -> dict | None:
+def name_flag(title: str | None, level: int | None = None, scrubbed: bool = False) -> dict | None:
     """{"suggest": "excluded"|"internal", "reason": ...} when a title says the
     document is unfinished or staff-only, or its text states a service level
-    above 1, else None. Pure."""
+    above 1, else None. A title the address scrub changed (scrubbed) suggests
+    internal: it named an internal host or a private address (D-20261113-06). Pure."""
     for decision, rx in _NAME_FLAGS:
         m = rx.search(title or "")
         if m:
             return {"suggest": decision, "reason": f"The title says “{m.group(0)}”"}
+    if scrubbed:
+        return {"suggest": "internal", "reason": "The title named an internal address"}
     if level and level > 1:
         return {"suggest": "internal", "reason": f"It says Service Level {level}"}
     return None
@@ -498,7 +501,7 @@ def overview() -> dict:
         row["is_updated"] = _recent(it.get("updated_at"))
         row["key"] = key
         row["status"] = status_of(it)
-        flag = name_flag(it.get("title"), it.get("level"))
+        flag = name_flag(it.get("title"), it.get("level"), it.get("title_scrubbed"))
         # Shown while the item is filed less strictly than the title suggests
         # and nobody has dismissed this reason for it.
         if flag and _STRICT[flag["suggest"]] > _STRICT.get(it.get("decision"), 2) \
@@ -644,7 +647,7 @@ def set_items(keys: list[str], decision: str | None = None,
             if not it:
                 continue
             if dismiss_flag:
-                it["flag_dismissed"] = (name_flag(it.get("title"), it.get("level")) or {}).get("reason")
+                it["flag_dismissed"] = (name_flag(it.get("title"), it.get("level"), it.get("title_scrubbed")) or {}).get("reason")
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
@@ -1045,7 +1048,9 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
         full = api.page(pid)
         # Every title is scrubbed where it is first read: names, paths, bundle
         # titles and section headings are all made from these (D-20261113-06).
-        here = [_clean_title(t, hosts) for t in trail + [full.get("title") or page["title"]]]
+        raw = trail + [full.get("title") or page["title"]]
+        here = [_clean_title(t, hosts) for t in raw]
+        lost = [h != r for h, r in zip(here, raw)]   # titles the scrub changed: suggested internal
         trail, title, here_ids = here[:-1], here[-1], ids + [pid]
         if pid != root_id:
             for b in [b for b in by_path if here[:len(b["path"])] == b["path"]]:
@@ -1065,7 +1070,8 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 b = combined[key] = {
                     "kind": "bundle", "id": key, "title": inside[-1], "path": inside[:-1],
                     "name": _safe_name(inside[-1]) + ".txt", "members": [], "stamp": [],
-                    "modified_at": None, "url": None, "level": None}
+                    "modified_at": None, "url": None, "level": None,
+                    "title_scrubbed": lost[deep]}
                 _note(inside[-1], "bundle", inside[:-1], "found")
             if here == inside:           # the folder is itself a page: link to it
                 b["url"] = _link(api, (full.get("_links") or {}).get("webui"))
@@ -1086,17 +1092,20 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             found[f"page:{pid}"] = {
                 "kind": "page", "id": pid, "title": title, "path": trail,
                 "name": _safe_name(title) + ".txt", "level": service_level(text),
+                "title_scrubbed": lost[-1],
                 "version": (full.get("version") or {}).get("number"),
                 "modified_at": (full.get("version") or {}).get("createdAt"),
                 "url": _link(api, (full.get("_links") or {}).get("webui"))}
             _note(title, "page", trail, "found")
         for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
-            att_title = _clean_title(att.get("title") or "", hosts)
+            att_raw = att.get("title") or ""
+            att_title = _clean_title(att_raw, hosts)
             name = _safe_name(att_title)
             if not name.lower().endswith(_FILE_TYPES):
                 continue
             found[f"att:{att['id']}"] = {
                 "kind": "file", "id": att["id"], "page_id": pid, "title": att_title,
+                "title_scrubbed": att_title != att_raw,
                 "path": trail + ([title] if title else []), "name": name,
                 "version": (att.get("version") or {}).get("number"),
                 "modified_at": (att.get("version") or {}).get("createdAt"),
@@ -1143,7 +1152,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
                 decision = "excluded"
                 if st["mode"] == "auto":
-                    decision = (name_flag(f["title"], f.get("level")) or {}).get("suggest", "approved")
+                    decision = (name_flag(f["title"], f.get("level"), f.get("title_scrubbed")) or {}).get("suggest", "approved")
                 chosen = False
                 if f["kind"] == "bundle":
                     pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]
