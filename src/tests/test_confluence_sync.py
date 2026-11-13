@@ -262,6 +262,14 @@ def test_synced_links_reach_only_allowlisted_hosts():
     assert "192.168.1.1" in cs.page_text("P", "<p>default 192.168.1.1</p>", hosts=["192.168.1.1"])
     link = "https://innovative-technology.com/fw/3.90.1.2/notes.pdf"    # a version folder in a kept link
     assert link in cs.page_text("P", f"<p>{link}</p>", hosts=cs.link_hosts())
+    # D-20261113-06: leading zeros, an address after a bare "/", CGNAT, private IPv6.
+    for leak, s in (("020", "ssh 010.020.000.005 now"), ("10.20", "path /10.20.0.5:8080/admin x"),
+                    ("100.64", "cgnat 100.64.1.2 here"), ("fe80", "fe80::1 and fd00::5"),
+                    ("fd00", "fe80::1 and fd00::5"), ("corp", "see /fs1.corp.internal/x")):
+        t = cs.page_text("P", f"<p>{s}</p>", hosts=cs.link_hosts())
+        assert leak not in t, (s, t)
+    keep = "at 10:30:45, mac 00:1a:2b:3c:4d:5e, std::vector, 2001:4860::8888, Data 2.0.9.0"
+    assert keep in cs.page_text("P", f"<p>{keep}</p>", hosts=cs.link_hosts())
     # The site listed (a public space): its attachments keep their address.
     t = cs.page_text("P", html, page_id="789", site="innovative-technology.atlassian.net",
                      hosts=["innovative-technology.atlassian.net"])
@@ -431,6 +439,44 @@ def test_combining_a_folder_into_one_document():
         assert sorted(items) == ["Cmd B", "Manual", "Wiring.pdf"], sorted(items)
         assert all(i["decision"] == "approved" and i["status"] == "synced" for i in items.values())
         assert w.removed[-1] == "Manual.txt"
+
+
+class LeakyTitlesApi(FakeApi):
+    """Website / Area fs2.corp.internal (folder) / Docs on fs1.corp.internal (page,
+    with a file) / wiki.corp.internal notes and Cmd B 10.0.0.5 (pages)."""
+    tree = {("pages", "1"): [{"type": "folder", "id": "50", "title": "Area fs2.corp.internal"}],
+            ("folders", "50"): [{"type": "page", "id": "40", "title": "Docs on fs1.corp.internal"}],
+            ("pages", "40"): [{"type": "page", "id": "41", "title": "wiki.corp.internal notes"},
+                              {"type": "page", "id": "42", "title": "Cmd B 10.0.0.5"}]}
+    attachments = {"40": [{"id": "att9", "title": "Wiring fs3.corp.internal v2.pdf",
+                           "version": {"number": 1}}]}
+
+    def page(self, pid):
+        return {"title": {"1": "Website", "40": "Docs on fs1.corp.internal",
+                          "41": "wiki.corp.internal notes", "42": "Cmd B 10.0.0.5"}[pid],
+                "version": {"number": 1}, "body": {"storage": {"value": BODY}}}
+
+
+def test_titles_reach_no_one_with_an_internal_address():
+    """D-20261113-06: a title is scrubbed where the check first reads it, so
+    document names, paths, a combined document's title and its section
+    headings hold no internal address."""
+    with tempfile.TemporaryDirectory() as d:
+        w, api = World(os.path.join(d, "s.json")), LeakyTitlesApi()
+        w._with(lambda: cs.set_mode("auto"))
+
+        def leaks():
+            with open(w.state, encoding="utf-8") as f:
+                blob = f.read() + json.dumps([w.ingested, w.texts])
+            return [x for x in ("corp.internal", "10.0.0.5") if x in blob]
+
+        w.run(api)
+        assert sorted(w.texts) == ["Cmd B.txt", "Docs on.txt", "Wiring  v2.pdf", "notes.txt"], sorted(w.texts)
+        assert leaks() == [], leaks()
+        w._with(lambda: cs.set_bundle(["Area", "Docs on"], True))
+        w.run(api)
+        assert "Docs on.txt" in w.texts and w.texts["Docs on.txt"].startswith("Docs on\n"), w.texts
+        assert leaks() == [], leaks()
 
 
 class MovableApi(ManualApi):
