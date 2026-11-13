@@ -12,16 +12,6 @@ updates:
       backend-deps:
         patterns: ["*"]
 
-  # Frontend (React + Vite)
-  - package-ecosystem: "npm"
-    directory: "/src/frontend"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    groups:
-      frontend-deps:
-        patterns: ["*"]
-
   # The CI workflow's own actions (actions/checkout, actions/setup-python, …)
   - package-ecosystem: "github-actions"
     directory: "/"
