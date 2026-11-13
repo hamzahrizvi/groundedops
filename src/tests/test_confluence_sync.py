@@ -471,7 +471,9 @@ def test_titles_reach_no_one_with_an_internal_address():
             return [x for x in ("corp.internal", "10.0.0.5") if x in blob]
 
         w.run(api)
-        assert sorted(w.texts) == ["Cmd B.txt", "Docs on.txt", "Wiring  v2.pdf", "notes.txt"], sorted(w.texts)
+        assert sorted(w.texts) == ["Cmd B.txt", "Docs on.txt", "Wiring v2.pdf", "notes.txt"], sorted(w.texts)
+        # A title with no address is left exactly as it was, spaces and all.
+        assert cs._clean_title(" Old  name ", cs.link_hosts()) == " Old  name "
         assert leaks() == [], leaks()
         w._with(lambda: cs.set_bundle(["Area", "Docs on"], True))
         w.run(api)

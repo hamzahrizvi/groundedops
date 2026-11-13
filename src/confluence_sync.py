@@ -860,6 +860,13 @@ def _scrub(text: str, hosts: list[str]) -> str:
     return "".join(out) + loose(text[at:])
 
 
+def _clean_title(t: str, hosts: list[str]) -> str:
+    """A title held to the allowlist: unchanged when it holds no address (so no
+    item is renamed), else with its spaces closed up ("Wiring v2.pdf")."""
+    s = _scrub(t, hosts)
+    return t if s == t else " ".join(s.split())
+
+
 class _Text(HTMLParser):
     """Confluence storage format to plain text: paragraphs on consecutive
     lines, a blank line only at a heading or a table, tables fenced as the PDF
@@ -1038,7 +1045,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
         full = api.page(pid)
         # Every title is scrubbed where it is first read: names, paths, bundle
         # titles and section headings are all made from these (D-20261113-06).
-        here = [_scrub(t, hosts).strip() for t in trail + [full.get("title") or page["title"]]]
+        here = [_clean_title(t, hosts) for t in trail + [full.get("title") or page["title"]]]
         trail, title, here_ids = here[:-1], here[-1], ids + [pid]
         if pid != root_id:
             for b in [b for b in by_path if here[:len(b["path"])] == b["path"]]:
@@ -1084,7 +1091,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 "url": _link(api, (full.get("_links") or {}).get("webui"))}
             _note(title, "page", trail, "found")
         for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
-            att_title = _scrub(att.get("title") or "", hosts).strip()
+            att_title = _clean_title(att.get("title") or "", hosts)
             name = _safe_name(att_title)
             if not name.lower().endswith(_FILE_TYPES):
                 continue
