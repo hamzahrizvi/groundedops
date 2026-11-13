@@ -11,7 +11,7 @@ real_categorised.json for the website questions), and writes per-run
 aggregates the office page pivots, plus `trend`: the difficulty-adjusted score per
 run with its noise band, the product fixes merged between runs (from REPO's git
 merges and their gate.json) and a plain verdict on whether the product got
-better. A run answered more than once (blind_eval.py --repeats: cases_state.r2.json ...,
+better. The doc is fitted to BUDGET bytes as the page counts them: the oldest full run is slimmed, then the oldest run's questions dropped; still over -> error. A run answered more than once (blind_eval.py --repeats: cases_state.r2.json ...,
 D-20261018-02) reads each question's mean mark over its repeats ("bot", "bot_n" repeats) and calls it
 "wrong" only when most repeats were; every aggregate cell carries a 90% interval for bot_pct
 (bot_lo/bot_hi). Export: writes RUN/real_counts.json, the week's website-widget
@@ -38,8 +38,9 @@ from retrofit_gate import repeat_paths   # noqa: E402  one naming rule for a run
 DIMS = ("category", "type", "product")
 RIGHT = ("correct", "correct_refusal", "clarified")   # the page's Right tab; its Wrong tab is verdict "wrong"
 REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens its questions
-FULL_RUNS = 2        # ponytail: only the newest runs keep answers and traces, so the page's doc stays under 256 KB
+FULL_RUNS = 2        # at most this many newest runs keep answers and traces; fit() slims more when the doc is over BUDGET
 SLIM = ("id", "q", "product", "type", "category", "bot", "base", "verdict")
+BUDGET = 250_000     # bytes as the page's db counts them (compact UTF-8 JSON); its hard limit is 262,144 (D-20261113-01)
 KEEP_RUNS = 12       # ponytail: the page shows the last 12 runs; ops/runs keeps every run
 NOISE_PTS = 3.0      # the trend's noise floor: moves under 3 points are the bot's and the marker's own flicker (the gate's own bar is 4, D-20261019-06)
 VISITOR_FILES = ("widget_feedback.json", "real_questions.json", "real_categorised.json")  # D-20261010-22: visitor text in a run
@@ -302,6 +303,27 @@ def test_runs(ops):
                                                                  for f in ("DONE", "cases.json", "cases_state.json")))
 
 
+def sent_size(o):
+    """Bytes as the office page's database counts a document: compact JSON, UTF-8."""
+    return len(json.dumps(o, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def fit(p, budget=None):
+    """D-20261113-01: trim the review's cases until the doc fits the page: slim the oldest full run,
+    then drop the oldest run; still over with no cases left -> ValueError naming the size, before any upload."""
+    budget = budget or BUDGET
+    cases = p["cases"]   # oldest run first
+    while (n := sent_size(p)) > budget:
+        full = [r for r, cs in cases.items() if cs and "answer" in cs[0]]
+        if full:
+            cases[full[0]] = [{f: c.get(f) for f in SLIM} for c in cases[full[0]]]
+        elif cases:
+            del cases[next(iter(cases))]
+        else:
+            raise ValueError(f"pivot is {n} bytes as sent, over the {budget}-byte budget with no review cases left")
+    return p
+
+
 def build(ops, repo=None):
     runs = test_runs(ops)
     runs = [d for d in runs if run_facts(d)][-KEEP_RUNS:]
@@ -332,14 +354,14 @@ def build(ops, repo=None):
         latest = facts
     cats = os.path.join(ops, "categories.json")
     recent = list(zip(runs, names))[-REVIEW_RUNS:]
-    return {"updated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    return fit({"updated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "runs": names, "categories": _load(cats) if os.path.exists(cats) else {},
             "overall": overall, "blind": {k: dict(v) for k, v in blind.items()}, "real": real,
             "trend": trend(by_run, ends, merged_fixes(repo, ops) if repo else []),
             "cases": {n: review(d) if k >= len(recent) - FULL_RUNS else [{f: c.get(f) for f in SLIM} for c in review(d)]
                       for k, (d, n) in enumerate(recent)},
             "latest": {"run": names[-1] if names else None,
-                       "cases": [dict(f, q=f["q"][:160]) for f in latest]}}
+                       "cases": [dict(f, q=f["q"][:160]) for f in latest]}})
 
 
 def export_real(run, src, days):
@@ -455,6 +477,7 @@ def copy_reports(src, run):
 
 
 def _selftest():
+    global BUDGET
     import tempfile
     ops = tempfile.mkdtemp()
     for name, scores in (("20261005", [3, 0, 1]), ("20261012", [3, 3, 2])):
@@ -617,6 +640,35 @@ def _selftest():
     assert diagnose({"verdict": "correct", "bot": 3, "base": 3}, {}, t) is None
     d = diagnose({"verdict": "wrong", "bot": 1, "base": 3}, {}, {"exit_id": "extract", "exit": "Copied a checklist", "stages": []})
     assert [x[0] for x in d] == ["extract", "retrieve"], d
+    # D-20261113-01: the doc fits the page's size limit; the oldest review detail gives way first
+    ops3 = tempfile.mkdtemp()
+    for name in ("20261020", "20261027", "20261103"):
+        d = os.path.join(ops3, "runs", name)
+        os.makedirs(d)
+        json.dump({"cases": [{"id": f"C-{i}", "q": f"q{i}", "type": "lookup", "category": "simple"} for i in range(20)]}, open(os.path.join(d, "cases.json"), "w"))
+        json.dump({"grades": {f"C-{i}": {"sys_normal": {"score": 3, "verdict": "correct"}} for i in range(20)},
+                   "sys_normal": {f"C-{i}": {"answer": "x" * 600} for i in range(20)}}, open(os.path.join(d, "cases_state.json"), "w"))
+        open(os.path.join(d, "DONE"), "w").close()
+    saved_budget = BUDGET
+    try:
+        p0 = build(ops3)                                            # fits: the newest two runs keep their answers
+        assert [("answer" in cs[0]) for cs in p0["cases"].values()] == [False, True, True], p0["cases"]
+        BUDGET = sent_size(p0) - 1                                  # one byte over: the oldest full run is slimmed
+        p1 = build(ops3)
+        assert sent_size(p1) <= BUDGET, sent_size(p1)
+        assert list(p1["cases"]) == ["20261020", "20261027", "20261103"]
+        assert [("answer" in cs[0]) for cs in p1["cases"].values()] == [False, False, True], p1["cases"]
+    finally:
+        BUDGET = saved_budget
+    slim = [{f: c.get(f) for f in SLIM} for c in p1["cases"]["20261103"]]
+    room = sent_size(dict(p1, cases={"20261103": slim}))            # room for the newest run, slimmed, and nothing else
+    p2 = fit(json.loads(json.dumps(p1)), room)
+    assert list(p2["cases"]) == ["20261103"] and "answer" not in p2["cases"]["20261103"][0], p2["cases"]
+    try:
+        fit(json.loads(json.dumps(p1)), sent_size(dict(p1, cases={})) - 1)
+        raise AssertionError("an impossible budget must stop the build")
+    except ValueError as e:
+        assert "bytes as sent" in str(e), e
     print("selftest ok")
 
 
