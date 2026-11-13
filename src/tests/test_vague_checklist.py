@@ -150,6 +150,40 @@ def test_the_gate_is_scoped_first_turn_only():
     assert code.index("_vague_fault_checklist(") < code.index('if confidence == "none":')
 
 
+def test_a_variant_word_on_a_real_product_is_unknown():
+    # D-20261107-01: "the mycheckr max?" got the MyCheckr's 640x480.
+    forms = {"mycheckr": ["MyCheckr"], "mycheckr_mini": ["MyCheckr mini", "MyCheckr Mini"],
+             "icu": ["ICU"], "nv9usb": ["NV9USB+", "NV11+", "NV9 USB"],
+             "nv9_spectral": ["NV9 Spectral", "NV9S"], "nv200s": ["NV200S", "NV200"]}
+    vocab = {w: {"mycheckr"} for w in ("max", "camera", "temperature", "pro", "lite",
+                                       "plus", "default", "password", "nv9", "waterproof")}
+    pre = clarify.model_prefixes([n for v in forms.values() for n in v])
+    printed = lambda words: words in (["icu", "pro"], ["icu", "lite"])  # noqa: E731
+    find = lambda q: clarify.unknown_variant_name(q, forms, vocab, pre, printed)  # noqa: E731
+    assert find("whats the max camera resolution on the mycheckr max? thinking of it") == \
+        ("mycheckr max", ["mycheckr", "mycheckr_mini"])
+    assert find("whats the default admin password on the ICU Titan X? just got one") == \
+        ("ICU Titan X", ["icu"])
+    assert find("whats the max note width on the NV9 Ultra Pro 2? thinking") == \
+        ("NV9 Ultra Pro 2", ["nv9usb", "nv9_spectral"])
+    for q in ("default password on the ICU Pro?", "ICU Lite setup",
+              "need an ICU Lite talking to linux", "mycheckr mini camera?",
+              "my nv9usb plus?", "mycheckr max temperature", "is the icu waterproof?",
+              "what is the max payout of the nv200?", "nv9s weight"):
+        assert find(q) is None, q
+
+
+def test_the_unknown_check_names_a_variant():
+    names = {"mycheckr": "MyCheckr", "icu": "ICU", "biometrics_general": "General (shared docs)"}
+    with mock.patch.object(main, "_product_names", return_value=names), \
+            mock.patch.object(main, "_product_aliases", return_value={}), \
+            mock.patch.object(clarify, "product_vocabulary", return_value={"max": {"mycheckr"}}), \
+            mock.patch.object(clarify, "printed_phrase", return_value=False):
+        text = main._unknown_product_text("whats the max camera resolution on the mycheckr max?")
+    assert text == ("I have no documentation for a product called mycheckr max. "
+                    "Did you mean the MyCheckr?")
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-q"]))

@@ -2372,20 +2372,27 @@ def _obsolete_reply(q: str, products: list[str], request_id: str,
 
 def _unknown_product_text(q: str) -> str | None:
     """"I have no documentation for a product called NV300..." when the question names a
-    model shaped like ours that no product is and no manual prints."""
+    model shaped like ours that no product is and no manual prints, or a real
+    product with variant words no manual prints ("the MyCheckr Max",
+    D-20261107-01)."""
     try:
         import clarify as _clarify
         names = _product_names()
         shown = [n for k, n in names.items() if not k.endswith("_general")]
-        found = _clarify.unknown_model_name(
-            q, _product_words(), _clarify.product_vocabulary(), _model_prefix_set())
-        if not found:
-            return None
         aliases = _product_aliases()
-        close = _clarify.close_model_names(
-            found, {k: [n] + list(aliases.get(k, [])) for k, n in names.items()
-                    if not k.endswith("_general")})
-        return _clarify.unknown_product_reply(found, shown, close)
+        forms = {k: [n] + list(aliases.get(k, [])) for k, n in names.items()
+                 if not k.endswith("_general")}
+        vocab, prefixes = _clarify.product_vocabulary(), _model_prefix_set()
+        found = _clarify.unknown_model_name(q, _product_words(), vocab, prefixes)
+        if found:
+            return _clarify.unknown_product_reply(
+                found, shown, _clarify.close_model_names(found, forms))
+        variant = _clarify.unknown_variant_name(q, forms, vocab, prefixes,
+                                                _clarify.printed_phrase)
+        if not variant:
+            return None
+        return _clarify.unknown_product_reply(
+            variant[0], shown, [names[k] for k in variant[1]])
     except Exception as _exc:
         logger.warning(f"unknown-product check skipped: {_exc}")
         return None

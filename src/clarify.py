@@ -534,6 +534,97 @@ def documented_model_products(query: str, known_words: set[str], vocab: dict,
     return out
 
 
+# ── A variant word on a real product (D-20261107-01) ───────────────────
+# Words a maker puts after a model name for a bigger, smaller or newer one.
+VARIANT_WORDS = {"max", "plus", "pro", "mini", "ultra", "lite", "x", "xl",
+                 "se", "neo", "prime", "elite", "evo"}
+_CLAUSE_END = re.compile(r"\s*(?:$|[?.!,;:)])")
+
+
+def _flat(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def unknown_variant_name(query: str, forms: dict[str, list[str]], vocab: dict,
+                         prefixes: set[str], printed) -> tuple[str, list[str]] | None:
+    """A real product's name followed by variant words no catalogue entry
+    and no manual has ("the mycheckr max?", "ICU Titan X", "NV9 Ultra Pro
+    2"), as written, with the product keys whose names begin like it; else
+    None. `forms` is product key -> [display name, *aliases]; `printed(words)`
+    says whether an answerable passage prints those words in a row, so the
+    "ICU Pro" the manuals describe still answers.
+
+    A variant word must end the clause or come with a second one: "mycheckr
+    max temperature" asks for a maximum, "mycheckr max?" names a model. A
+    word no manual prints joins only capitalised ("Titan") or before a
+    variant word ("quantum pro"). "plus" after a "+" product is that product."""
+    flat_keys: dict[str, list[str]] = {}
+    plus_keys = set()
+    for key, names in forms.items():
+        for n in names:
+            if f := _flat(n):
+                flat_keys.setdefault(f, []).append(key)
+            if "+" in (n or ""):
+                plus_keys.add(key)
+    toks = list(re.finditer(r"[A-Za-z0-9]+", query or ""))
+    low = [t.group(0).lower() for t in toks]
+
+    def unknown(k: int) -> bool:
+        return low[k].isalpha() and low[k] not in flat_keys and not _lookup(vocab, low[k])
+
+    def capital(k: int) -> bool:
+        return toks[k].group(0)[0].isupper()
+
+    i = 0
+    while i < len(toks):
+        end, keys, acc = None, [], ""
+        for j in range(i, min(len(toks), i + 6)):     # longest catalogue form wins
+            acc += low[j]
+            if acc in flat_keys:
+                end, keys = j, flat_keys[acc]
+        code = re.fullmatch(r"([a-z]{2,4})\d{1,5}[a-z]*", low[i])
+        if end is None and code and code.group(1) in prefixes and _lookup(vocab, low[i]):
+            end = i                                     # a code the manuals print: "NV9"
+        if end is None:
+            i += 1
+            continue
+        tail, k = [], end + 1
+        while k < len(toks) and not re.search(r"[?.!,;:]",
+                                              query[toks[k - 1].end():toks[k].start()]):
+            w = low[k]
+            if w == "plus" and set(keys) & plus_keys:
+                break
+            if (w in VARIANT_WORDS or (tail and re.fullmatch(r"\d{1,2}", w))
+                    or (unknown(k) and (capital(k) or (k + 1 < len(toks)
+                                                       and low[k + 1] in VARIANT_WORDS)))):
+                tail.append(k)
+                k += 1
+                continue
+            break
+        named = any(low[t] in VARIANT_WORDS or (unknown(t) and capital(t)) for t in tail)
+        if (named and (len(tail) >= 2 or _CLAUSE_END.match(query, toks[tail[-1]].end()))
+                and not printed(low[i:tail[-1] + 1])):
+            base = "".join(low[i:end + 1])
+            close = [key for key, names in forms.items()
+                     if any(_flat(n).startswith(base) for n in names)]
+            return query[toks[i].start():toks[tail[-1]].end()], close
+        i = end + 1
+    return None
+
+
+def printed_phrase(words: list[str]) -> bool:
+    """True when an answerable passage prints `words` in a row, with any
+    spacing or hyphen between them: ["icu", "pro"] -> "ICU Pro". The same
+    passages and exclusions as product_vocabulary; runs only for a question
+    unknown_variant_name already suspects."""
+    import db
+    import retrieval_db
+    _, chunks = retrieval_db._get_bm25_index(db.get_collection())
+    pat = re.compile(r"\b" + r"\W*".join(map(re.escape, words)) + r"(?![a-z0-9])", re.I)
+    return any(pat.search(c.get("text") or "") for c in chunks
+               if not retrieval_db.is_excluded(c.get("source")))
+
+
 def unknown_product_reply(name: str, product_names: list[str],
                           close: list[str] | None = None) -> str:
     if close:
