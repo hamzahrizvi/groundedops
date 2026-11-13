@@ -271,10 +271,42 @@ from the console's Documents page.
 | Restart | `sudo systemctl restart groundedops` |
 | Update to the latest on GitHub | `sudo bash /srv/groundedops/app/deploy/linux/setup.sh` (once this script is merged into the branch; until then, `sudo bash ~/setup.sh`) |
 
-Not set up yet: nightly backups (`manage_backup.py export` from cron with
-`BACKUP_PASSPHRASE`, sent off the box) and public access through a
-Cloudflare named tunnel. The tunnel steps are in `TUNNEL_SETUP.md`, written
-for Windows; on Linux use `cloudflared service install`.
+### Backups
+
+A `groundedops-backup` timer runs every night at 02:30 and writes an
+encrypted archive to `/srv/groundedops/backups/go-<date>.gobk`, keeping 14
+days. It needs `BACKUP_PASSPHRASE` set in `src/.env`; without it the run
+fails rather than writing a readable archive.
+
+| To | Run on the server |
+|---|---|
+| Back up now | `sudo systemctl start groundedops-backup` |
+| See the last run | `journalctl -u groundedops-backup -n 20` |
+| List archives | `sudo ls -lh /srv/groundedops/backups/` |
+| Check one really opens | `sudo -u groundedops -H bash -c 'cd /srv/groundedops/app/src && ../.venv/bin/python manage_backup.py inspect /srv/groundedops/backups/<file>'` |
+| Restore one | as the restore command in 5A, pointing at the archive |
+
+**These sit on the same machine as the thing they protect.** That covers a
+bad restore, a wrong deletion or a corrupt index; it does not cover losing
+the machine. Copy them somewhere else — a share, another box, object
+storage — before this is relied on. On AWS, EBS snapshots cover the volume
+as well.
+
+Still not set up: public access through a Cloudflare named tunnel. The
+steps are in `TUNNEL_SETUP.md`, written for Windows; on Linux use
+`cloudflared service install`.
+
+### Who can reach it
+
+The firewall decides who can open port 8000, and that is the only thing
+standing in front of the chatbot. **Questions are not authenticated**: any
+address allowed through can `POST /query` and spend provider credit, with
+only the per-IP quota (200/day by default) in the way. The admin console is
+separate and does require a sign-in — its data endpoints answer 401/404
+without one.
+
+So the ufw ranges are the access-control decision, not a formality. Keep
+them as narrow as the people testing actually need.
 
 ---
 
