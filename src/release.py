@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""release.py — bump the version and snapshot the release into src/legacy/.
+"""release.py — bump VERSION and draft the release notes from git.
 
 WHY THIS EXISTS
 
-The legacy drops (v13.0, v13.1, v14.0, v15.0) were assembled by hand: work out
-which files changed, copy them into a new folder, write a CHANGELOG with a
-"what deploys" table, zip them. Done manually it gets skipped under pressure,
-and a drop that misses a file is worse than no drop — it looks complete.
-
-This does the mechanical half. You still write the prose; the file list, the
-table, the version bump and the zip are derived from git so they cannot drift
-from what actually changed.
+Every release is a git tag (v16.0, v17.0, ...). Until November 2026 this script also copied each
+release's changed files into src/legacy/; that folder is gone (D-20261112-20), because git history and
+the tags already hold every release. What is left is the mechanical half: the version bump, the
+changed-file table and the commit list are derived from git so they cannot drift from what actually
+changed. You still write the prose.
 
 VERSION lives at the repo root, as its own file. Deliberately NOT reusing
 INGEST_VERSION in main.py: that value tells the app whether the index needs
@@ -24,25 +21,23 @@ USAGE
   python release.py --minor --dry-run    # show what would happen
   python release.py --minor --base main  # scope changes against another base
 
-It stages everything it writes, so the release is part of your next commit:
+It bumps VERSION, stages it, and prints the release notes to paste
+into the tag message:
 
   python release.py --minor
   git commit -m "release: v15.1 — <what changed>"
 """
 import argparse
 import os
-import shutil
 import subprocess
 import sys
-import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 VERSION_FILE = os.path.join(ROOT, "VERSION")
-LEGACY = os.path.join(HERE, "legacy")
 
-# Never snapshot these: runtime state, secrets, or the drops themselves.
-SKIP_PREFIXES = ("src/legacy/", "documents/", "corpus/")
+# Never list these: runtime state, secrets, or the documents.
+SKIP_PREFIXES = ("documents/", "corpus/")
 SKIP_NAMES = {"logs.jsonl", "handover.txt", "conversations.db", "quota.db",
               "VERSION",
               # Deliberately untracked: it enumerates this system's weaknesses
@@ -61,27 +56,13 @@ def sh(*args: str) -> str:
 
 
 def read_version() -> tuple[int, int]:
-    if os.path.isfile(VERSION_FILE):
+    try:
         raw = open(VERSION_FILE, encoding="utf-8").read().strip().lstrip("v")
-        try:
-            major, minor = raw.split(".")[:2]
-            return int(major), int(minor)
-        except Exception:
-            pass
-    # No VERSION file yet: infer from the highest legacy drop so the first run
-    # continues the existing sequence instead of restarting at 1.0.
-    best = (0, 0)
-    if os.path.isdir(LEGACY):
-        for name in os.listdir(LEGACY):
-            if not name.startswith("v"):
-                continue
-            for sub in os.listdir(os.path.join(LEGACY, name)):
-                try:
-                    mj, mn = sub.lstrip("v").split(".")[:2]
-                    best = max(best, (int(mj), int(mn)))
-                except Exception:
-                    continue
-    return best
+        major, minor = raw.split(".")[:2]
+        return int(major), int(minor)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"Cannot read {VERSION_FILE} ({e}): write the current "
+                         "version, e.g. 17.3, into it.")
 
 
 def changed_files(base: str) -> list[str]:
@@ -112,29 +93,6 @@ def changed_files(base: str) -> list[str]:
         keep.append(f)
     return keep
 
-
-def snapshot(files: list[str], root: str, dest: str) -> None:
-    """Copy each repo-relative path to the same relative path under dest.
-
-    The drop mirrors the repo, so README.md and tools/README.md both survive
-    (the old flat drop let one overwrite the other).
-    """
-    for f in files:
-        target = os.path.join(dest, f)
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.copy2(os.path.join(root, f), target)
-
-
-def zip_drop(dest: str) -> str:
-    """Zip everything under dest into dest/files.zip, keeping relative paths."""
-    zpath = os.path.join(dest, "files.zip")
-    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        for dirpath, _dirs, names in os.walk(dest):
-            for name in sorted(names):
-                path = os.path.join(dirpath, name)
-                if path != zpath:
-                    z.write(path, os.path.relpath(path, dest))
-    return zpath
 
 
 def changelog(version: str, files: list[str], base: str) -> str:
@@ -175,11 +133,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
-    major, minor = read_version()
+    old_major, old_minor = read_version()
     if a.major:
-        major, minor = major + 1, 0
+        major, minor = old_major + 1, 0
     else:
-        minor += 1
+        major, minor = old_major, old_minor + 1
     version = f"{major}.{minor}"
 
     files = changed_files(a.base)
@@ -187,39 +145,26 @@ def main() -> int:
         print(f"No changed files against {a.base} — nothing to release.")
         return 1
 
-    dest = os.path.join(LEGACY, f"v{major}", f"v{version}")
-    print(f"version    : {read_version()[0]}.{read_version()[1]} -> {version}")
-    print(f"snapshot   : {os.path.relpath(dest, ROOT)}")
+    print(f"version    : {old_major}.{old_minor} -> {version}")
     print(f"files      : {len(files)}")
     for f in files:
         print(f"    {f}")
 
-    if os.path.isdir(dest) and not a.dry_run:
-        print(f"\nREFUSING: {os.path.relpath(dest, ROOT)} already exists.")
+    if sh("git", "rev-parse", "--verify", "--quiet", f"refs/tags/v{version}") and not a.dry_run:
+        print(f"\nREFUSING: tag v{version} already exists.")
         return 1
 
     if a.dry_run:
         print("\n[dry run] nothing written")
         return 0
 
-    os.makedirs(dest, exist_ok=True)
-    snapshot(files, ROOT, dest)
-
-    cl = os.path.join(dest, f"CHANGELOG_v{version}.md")
-    with open(cl, "w", encoding="utf-8") as fh:
-        fh.write(changelog(version, files, a.base))
-
-    zip_drop(dest)
-
     with open(VERSION_FILE, "w", encoding="utf-8") as fh:
         fh.write(version + "\n")
+    subprocess.run(["git", "add", "VERSION"], cwd=ROOT)
 
-    subprocess.run(["git", "add", "VERSION",
-                    os.path.relpath(dest, ROOT).replace(os.sep, "/")], cwd=ROOT)
-
-    print(f"\nwrote {len(files)} file(s) + CHANGELOG + files.zip, and staged them.")
-    print(f"Next:  write the prose in {os.path.relpath(cl, ROOT)}")
-    print(f"       git commit -m \"release: v{version} - <what changed>\"")
+    print("\n" + changelog(version, files, a.base))
+    print(f"VERSION is now {version} and staged. Put the prose above in the tag message.")
+    print(f"Next:  git commit -m \"release: v{version} - <what changed>\"")
     return 0
 
 
