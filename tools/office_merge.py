@@ -6,7 +6,8 @@
 Merges agents/dev-<id> only when all of these hold:
   - OPS/inbox/dev/<id>.gate/gate.json says PASS,
   - the product owner's latest verdict for <id> is READY TO MERGE,
-  - OPS/inbox/security/review-<id>.md says "Verdict: CLEAR",
+  - OPS/inbox/security/review-<id>.md says "Verdict: CLEAR" and has a line naming the branch and its tip commit
+    (7+ hex chars): a companion, or a commit added after the review, waits for Security,
   - no uncommitted change in the target checkout touches a file the branch changes,
   - no Python line the branch adds holds two lines joined by a lost backslash-newline
     (sent back to Dev, like a merge conflict).
@@ -103,6 +104,14 @@ def joined_in(target, branch):
     return out
 
 
+def names_tip(text, branch, tip):
+    """True when one line of a Security review names the branch (not a longer name that starts with it, like its
+    -office companion) and a 7+ hex prefix of its tip commit: a CLEAR covers only the code it read (D-20261112-11)."""
+    return any(re.search(re.escape(branch) + r"(?![\w-])", line)
+               and any(tip.startswith(h) for h in re.findall(r"\b[0-9a-f]{7,40}\b", line))
+               for line in text.splitlines())
+
+
 def merge(did, ops, repo, office=OFFICE):
     """The product branch, then any office-tooling companion Dev made for the same work order."""
     first = merge_branch(did, f"agents/dev-{did}", ops, repo, office)
@@ -131,6 +140,9 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
         return f"FAILED no branch {branch}"
     if ahead[target][1] == "0":
         return f"MERGED {branch} already"
+    tip = git(target, "rev-parse", branch)[1]
+    if not names_tip(open(review, encoding="utf-8").read(), branch, tip):   # a companion, or a commit added after the review
+        return f"WAIT Security has not reviewed {branch}@{tip[:7]}"
     glued = joined_in(target, branch)
     if glued:
         send_back(did, ops, f"{branch} has two lines joined into one where a backslash-newline was lost (it still "
@@ -200,11 +212,16 @@ def selftest():
             'y = f(a)          # why it is f\nwith patch.object(m, "a", 1), \\\n        patch.object(m, "b", 2):\n'
             'TABS = (("faq",        "FAQ search"),)\n"""Usage:\n  --out live.md           transcript (markdown) path\n"""\n')
     assert joined_lines(fine) == [], joined_lines(fine)
+    assert names_tip("Branch: agents/dev-X, commit abc1234 (the only one)", "agents/dev-X", "abc1234" + "0" * 33)
+    assert not names_tip("Branch: agents/dev-X-office (abc1234)", "agents/dev-X", "abc1234" + "0" * 33), "a longer name"
+    assert not names_tip("Branch: agents/dev-X\ncommit abc1234", "agents/dev-X", "abc1234" + "0" * 33), "one line names both"
+    assert not names_tip("Branch: agents/dev-X, commit abc1234", "agents/dev-X", "fff1234" + "0" * 33), "another commit"
     os.environ.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
     with tempfile.TemporaryDirectory() as tmp:
         repo, ops = os.path.join(tmp, "repo"), os.path.join(tmp, "ops")
         w = lambda p, s: (os.makedirs(os.path.dirname(p), exist_ok=True), open(p, "w", encoding="utf-8").write(s))
         run = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, check=True)
+        tip = lambda b: run("rev-parse", b).stdout.decode().strip()
         os.makedirs(repo)
         run("init", "-q", "-b", "main")
         w(os.path.join(repo, "a.py"), "x = 1\n")
@@ -217,10 +234,15 @@ def selftest():
             w(os.path.join(repo, f), body)
             run("add", "."), run("commit", "-qm", did)
             w(os.path.join(ops, "inbox", "dev", did + ".gate", "gate.json"), '{"verdict": "PASS"}')
-            w(os.path.join(ops, "inbox", "security", f"review-{did}.md"), "# Review\nVerdict: CLEAR\n")
+            w(os.path.join(ops, "inbox", "security", f"review-{did}.md"), f"# Review\nVerdict: CLEAR\n\nBranch: agents/dev-{did}, commit {tip(f'agents/dev-{did}')[:7]}\n")
         run("checkout", "-qb", "agents/office-D-20261008-91", "main")                  # its tooling companion
         w(os.path.join(repo, "tools", "t.py"), "z = 4\n")
         run("add", "."), run("commit", "-qm", "companion")
+        open(os.path.join(ops, "inbox", "security", "review-D-20261008-91.md"), "a", encoding="utf-8").write(
+            f"Branch: agents/office-D-20261008-91, commit {tip('agents/office-D-20261008-91')[:7]}\n")
+        run("checkout", "-q", "agents/dev-D-20261008-96")                              # a commit added after the CLEAR
+        w(os.path.join(repo, "e.py"), "w = 66\n")
+        run("add", "."), run("commit", "-qm", "late commit")
         run("checkout", "-qb", "agents/dev-D-20261008-96-office", "main")              # the other companion name
         w(os.path.join(repo, "tools", "u.py"), "v = 7\n")
         run("add", "."), run("commit", "-qm", "companion 96")
@@ -235,8 +257,17 @@ def selftest():
         r = merge("D-20261008-91", ops, repo, repo)
         assert r.count("MERGED") == 2 and os.path.exists(os.path.join(repo, "tools", "t.py")), r   # companion too
         assert merge("D-20261008-91", ops, repo, repo) == "MERGED agents/dev-D-20261008-91 already\nMERGED agents/office-D-20261008-91 already"
+        review96 = os.path.join(ops, "inbox", "security", "review-D-20261008-96.md")
         r = merge("D-20261008-96", ops, repo, repo)
-        assert r.count("MERGED") == 2 and os.path.exists(os.path.join(repo, "tools", "u.py")), r
+        assert r == f"WAIT Security has not reviewed agents/dev-D-20261008-96@{tip('agents/dev-D-20261008-96')[:7]}", r   # added after the CLEAR
+        open(review96, "a", encoding="utf-8").write(f"Branch: agents/dev-D-20261008-96, commit {tip('agents/dev-D-20261008-96')[:7]}\n")
+        r = merge("D-20261008-96", ops, repo, repo)
+        assert r.startswith("MERGED agents/dev-D-20261008-96 into") and r.endswith(
+            f"\nWAIT Security has not reviewed agents/dev-D-20261008-96-office@{tip('agents/dev-D-20261008-96-office')[:7]}"), r   # companion: own line
+        assert not os.path.exists(os.path.join(repo, "tools", "u.py")), "the unreviewed companion never merged"
+        open(review96, "a", encoding="utf-8").write(f"Branch: agents/dev-D-20261008-96-office, commit {tip('agents/dev-D-20261008-96-office')[:7]}\n")
+        r = merge("D-20261008-96", ops, repo, repo)
+        assert r.startswith("MERGED agents/dev-D-20261008-96 already\nMERGED agents/dev-D-20261008-96-office into") and os.path.exists(os.path.join(repo, "tools", "u.py")), r
         assert "work in progress" in open(os.path.join(repo, "a.py")).read(), "their edit is untouched"
         r = merge("D-20261008-94", ops, repo, repo)
         assert r.startswith("FAILED merge conflict") and "b.py" in r, r
