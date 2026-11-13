@@ -237,6 +237,13 @@ from the console's Documents page.
   again after step 3.
 - **API keys page: paste the provider key.** Keys saved in the Windows
   console are locked to that PC and don't come across with the backup.
+
+  **DeepSeek is the default provider on this server** (CEO, 2026-11-13) and
+  stays that way until he says otherwise — even though the Windows install
+  runs gpt-5-mini. Don't "helpfully" match the two. Note this sits
+  alongside D-20261008-09, which has Anthropic replacing DeepSeek before the
+  hosted launch; that decision is about the hosted launch, not this internal
+  server.
 - Check it can answer. This must say `"ready": true` (allow about a
   minute after start):
   ```bash

@@ -83,6 +83,11 @@ else
 fi
 as_svc git -C "$APP" log -1 --format='   at %h %s'
 install -d -o "$SVC" -g "$SVC" -m 750 "$APP/documents"
+# git clone creates directories with the service account's umask (002 on
+# Ubuntu), which leaves the checkout group-writable. /srv/groundedops above
+# it is 750, so nothing else can traverse in, but src/ holds .env and the
+# index: normalise it on every run rather than relying on the parent alone.
+chmod 750 "$APP" "$APP/src"
 
 # ── 4. Python environment (~6 GB: the Linux torch wheel brings CUDA libs) ─
 say "Python environment"
