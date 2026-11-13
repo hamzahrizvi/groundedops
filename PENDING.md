@@ -369,7 +369,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261113-01 | The product status figures no longer upload to the office page: the file is over the page's size limit | approved, queued | Dev builds it |
 | D-20261113-02 | Port to main, second try: the seven fixes that pass main's tests | waiting for CEO | your yes |
 | D-20261113-03 | Security item D-20261113-03, details in the office | waiting for CEO | your yes |
-| D-20261113-04 | The damaged-catalogue fix cannot go to main: its test needs a product in the shipped catalogue | built, waiting for the check | the pre-ship check |
+| D-20261113-04 | The damaged-catalogue fix cannot go to main: its test needs a product in the shipped catalogue | sent back, rebuilding | Dev rebuilds it |
 | D-20261113-06 | Security item D-20261113-06, details in the office | waiting for CEO | your yes |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | audit/D-20261112-16-wrong-vs-incomplete | D-20261112-16: how many "Wrong" answers are only incomplete? | proposed | the product owner triages it |
