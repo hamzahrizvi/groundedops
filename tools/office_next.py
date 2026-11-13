@@ -50,7 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ops_ledger import answered, decisions, git_sets, stage_of  # noqa: E402
 from ops_costs import cap_status  # noqa: E402
 from office_diary import due as diary_due  # noqa: E402
-from office_merge import OFFICE, git as _git, in_the_way  # noqa: E402
+from office_merge import OFFICE, git as _git, in_the_way, names_tip  # noqa: E402
 from main_port import approved as port_approved, due as port_due  # noqa: E402
 
 TASK = "groundedops-office-"
@@ -450,6 +450,17 @@ def take(ops, repo, five, week, resets, now, lane):
     return ([r[0] for r in rows] or ["IDLE"]) + ["TOOK nothing"]
 
 
+BRANCHES = ("agents/dev-{}", "agents/office-{}", "agents/dev-{}-office")   # what tools/office_merge.py merge() merges, in order
+COMPANIONS = BRANCHES[1:]
+
+
+def open_branches(i, repo, heads, names=BRANCHES):
+    """{branch: tip} for work order i's branches (of names) that exist and are merged into neither the checkout's HEAD
+    nor the office line, read the way ops_ledger.git_sets reads merged; heads = {branch: tip} of refs/heads/agents/."""
+    return {b: heads[b] for b in (n.format(i) for n in names) if b in heads
+            and all(_git(repo, "merge-base", "--is-ancestor", b, into)[0] for into in ("HEAD", "experimental/agent-org-phase1"))}
+
+
 def blocking(i, repo):
     """(checkout, [files]) for a ready Dev branch: the uncommitted edits in the checkout it merges into that the
     merge would go over (tools/office_merge.py in_the_way; a stray copy of the branch's own file is not one)."""
@@ -481,21 +492,29 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     review = lambda i: os.path.join(ops, "inbox", "security", f"review-{i}.md")
     # a review older than Dev's latest hand-back judged an earlier round: it counts as none, so Security reviews again
     # (2026-10-23: round 1's BLOCK outlived round 2's fix, and D-20261022-03 plus three builds behind it sat for a day)
-    reviewed = lambda i: os.path.exists(review(i)) and _mtime(review(i)) >= _mtime(os.path.join(ops, "inbox", "dev", i + ".md"))
+    # D-20261112-11: and only when it names the tip of every branch of the item still to merge (tools/office_merge.py
+    # merges nothing else); a work order merged without its office companion still waits, for Security and the merge
+    heads = dict(l.split(" ", 1) for l in _git(repo, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/agents/")[1].splitlines())
+    ready = {i: s for i, s in dev.items() if s in ("check passed", "ready to merge")}
+    ready.update({i: "ready to merge" if items[i]["history"][-1:] == ["READY TO MERGE"] else "check passed" for i, s in dev.items()
+                  if s == "merged" and (items[i].get("gate") or {}).get("verdict") == "PASS" and open_branches(i, repo, heads, COMPANIONS)})
+    text = lambda i: open(review(i), encoding="utf-8").read() if os.path.exists(review(i)) else ""
+    reviewed = lambda i: (os.path.exists(review(i)) and _mtime(review(i)) >= _mtime(os.path.join(ops, "inbox", "dev", i + ".md"))
+                          and all(names_tip(text(i), b, t) for b, t in open_branches(i, repo, heads, COMPANIONS if dev[i] == "merged" else BRANCHES).items()))
     def verdict(i):   # Security's review of the branch: CLEAR, BLOCK or ""
         if not reviewed(i):
             return ""
         m = re.search(r"(?mi)^Verdict:\s*(CLEAR|BLOCK)", open(review(i), encoding="utf-8").read())
         return m.group(1).upper() if m else ""
     out = [("product-owner", f"check {i} waits: its gate stopped without a verdict; it runs again after the next commit", None) for i in stuck]
-    for i in sorted(i for i, s in dev.items() if s == "ready to merge" and verdict(i) == "CLEAR"):   # tools/office_merge.py
+    for i in sorted(i for i, s in ready.items() if s == "ready to merge" and verdict(i) == "CLEAR"):   # tools/office_merge.py
         # someone's uncommitted edit in the way waits, and the lanes take the next work (2026-10-16: one such merge
         # came first in every lane's plan, so nothing else ran for hours)
         target, busy = blocking(i, repo)
         out.append(("merge", f"{i} waits: uncommitted changes in {target} touch {', '.join(busy)}; commit or undo them", None)
                    if busy else ("merge", i, "merge"))
     blocked = [os.path.join(ops, "inbox", "dev", i + ".md") for i, s in dev.items() if s == "blocked"]
-    blocked += [review(i) for i, s in dev.items() if s in ("check passed", "ready to merge") and verdict(i) == "BLOCK"]
+    blocked += [review(i) for i in ready if verdict(i) == "BLOCK"]
     findings = [p for p in set(glob.glob(os.path.join(ops, "inbox", "*", "*.md")) + blocked)   # a BLOCKED hand-back needs a decision
                 # every department report wakes the product owner, notes too (the CEO, 2026-10-10); a Security review is read with its branch
                 # a BLOCKED hand-back or BLOCK review counts until a triage newer than it (decisions/*.md) has seen it
@@ -591,7 +610,7 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
         else: out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
                     "the gate tests each fix on its own questions" if busy else
                     "the customer fixes are all through: a new blind bank to find more issues", "customer" if not busy else None))
-    unreviewed = [i for i, s in dev.items() if s in ("check passed", "ready to merge") and not reviewed(i)]
+    unreviewed = [i for i in ready if not reviewed(i)]
     if unreviewed or age(_mtime(os.path.join(ops, "state", "security_last_run.txt"))) >= 13:
         out.append(("security", "review " + ", ".join(unreviewed) if unreviewed else "fortnightly review due", "security"))
     if age(_mtime(os.path.join(ops, "inbox", "audit", "*-weekly.md"))) >= 7:
@@ -935,6 +954,31 @@ def selftest():
         assert any("security" in x and "review D-20261008-01" in x for x in p) and not any(x.startswith("MERGE") for x in p), p
         os.utime(hb, (time.time() - 100, time.time() - 100))
         os.utime(gj, (time.time() - 100, time.time() - 100))
+        # D-20261112-11: a review counts only when it names the tip of every branch of the item still to merge
+        g = os.path.join(ops, "git2")
+        gr = lambda *a: subprocess.run(["git", "-C", g, "-c", "user.name=t", "-c", "user.email=t", *a], capture_output=True, text=True, check=True).stdout.strip()
+        def commit_on(b, f):   # a new branch off main with one commit, then back on main
+            gr("checkout", "-qb", b)
+            open(os.path.join(g, f), "w").write(b)
+            gr("add", "."), gr("commit", "-qm", b), gr("checkout", "-q", "main")
+        os.makedirs(g); gr("init", "-q", "-b", "main"); gr("commit", "-q", "--allow-empty", "-m", "base")
+        commit_on("agents/dev-D-20261008-01", "f.py")
+        sm = lambda: [(d, x) for d, x, _ in waiting(ops, g, now) if d == "merge" or x.startswith("review ")]
+        named = lambda b: f"Branch: {b}, commit {gr('rev-parse', b)[:7]}\n"
+        w("inbox/security/review-D-20261008-01.md", "Verdict: CLEAR\n")
+        p = sm()
+        assert any(d == "security" and "D-20261008-01" in x for d, x in p) and not any(d == "merge" for d, _ in p), p   # no line: Security, not MERGE
+        w("inbox/security/review-D-20261008-01.md", "Verdict: CLEAR\n" + named("agents/dev-D-20261008-01"))
+        p = sm()
+        assert ("merge", "D-20261008-01") in p and not any(d == "security" and "D-20261008-01" in x for d, x in p), p
+        gr("merge", "-q", "--no-ff", "agents/dev-D-20261008-01", "-m", "merge")       # the product branch merged ...
+        commit_on("agents/dev-D-20261008-01-office", "g.py")                       # ... its office companion not
+        p = sm()
+        assert any(d == "security" and "D-20261008-01" in x for d, x in p) and not any(d == "merge" for d, _ in p), p   # merged id, unreviewed companion
+        open(os.path.join(ops, "inbox/security/review-D-20261008-01.md"), "a", encoding="utf-8").write(named("agents/dev-D-20261008-01-office"))
+        p = sm()
+        assert ("merge", "D-20261008-01") in p and not any(d == "security" and "D-20261008-01" in x for d, x in p), p   # named and CLEAR: MERGE
+        w("inbox/security/review-D-20261008-01.md", "Verdict: BLOCK\n")           # as the rest of the test expects
         w("state/refresh_request", "2026-10-08 07:00 x\n")
         os.utime(os.path.join(ops, "state/refresh_request"), (time.time() + 5, time.time() + 5))
         p = plan(ops, ops, 11, 38, resets, now)
