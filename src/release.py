@@ -89,10 +89,9 @@ def changed_files(base: str) -> list[str]:
         if os.path.basename(f) in SKIP_NAMES:
             continue
         if not os.path.isfile(os.path.join(ROOT, f)):
-            continue          # deleted; nothing to snapshot
+            continue          # deleted; nothing to list
         keep.append(f)
     return keep
-
 
 
 def changelog(version: str, files: list[str], base: str) -> str:
