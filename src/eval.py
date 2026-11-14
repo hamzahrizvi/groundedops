@@ -7,6 +7,8 @@ up to three checks:
   1. outcome   — answered vs clarify vs rejected matches expectation
   2. keywords  — required substrings present / forbidden substrings absent
   3. grade     — LLM-graded correctness against a reference (optional per case)
+A reply asking which family member the visitor has gets its card tapped
+(card_to_tap), as the widget's visitor does, and the answer after it is scored.
 
 It then DIFFS the run against a committed baseline (eval_baseline.json) and
 FAILS (exit 1) if any case that used to pass now fails (a regression), or if
@@ -65,6 +67,16 @@ def _deepseek_key():
     k = os.getenv("DEEPSEEK_API_KEY")
     if k:
         return k
+    try:
+        # The backend's own .env, read the way main.py reads it: beside this
+        # file, or the cwd's when eval.py runs from a worktree with no data.
+        import keystore
+        for d in (HERE, Path.cwd()):
+            keystore.load_env_file(str(d / ".env"))
+        if keystore.has_key("deepseek"):
+            return keystore.get_key("deepseek")
+    except Exception:
+        pass
     try:
         import keyvault
         return keyvault.load_key()
@@ -168,6 +180,23 @@ def fine_outcome(data: dict) -> str | None:
     return None
 
 
+def card_to_tap(case: dict, data: dict) -> dict | None:
+    """The member card a visitor would tap when the reply asks which family
+    member they have (families.resolve: the chat product is shared by two or
+    more members, so a case that carries a product still gets the card).
+    The card the question names (longest label: "NV200 Spectral" over
+    "NV200"), else the first card for the case's product, else None. A case
+    expecting "clarify" scores the question itself, as blind_eval.py does."""
+    if case.get("outcome") == "clarify":
+        return None
+    cards = [o for o in data.get("family_options") or [] if (o or {}).get("product")]
+    low = (case.get("q") or "").lower()
+    named = [o for o in cards if o.get("label") and o["label"].lower() in low]
+    if named:
+        return max(named, key=lambda o: len(o["label"]))
+    return next((o for o in cards if o["product"] == case.get("product")), None)
+
+
 def llm_grade(question: str, reference: str, answer: str) -> tuple[bool, str]:
     """Ask a model whether `answer` is correct given `reference`. Returns
     (passed, reason). Fails closed (returns False) if the grader is
@@ -224,10 +253,17 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
     # M3: wall seconds for the request alone (grading excluded: it is the
     # instrument's cost, not the visitor's). 8.11 and 10.1 read this field.
     t0 = time.perf_counter()
+    family_ask = None
     try:
         r = requests.post(URL, json=body, timeout=180)
         r.raise_for_status()
         data = r.json()
+        pick = card_to_tap(case, data)
+        if pick:   # the widget's tap: the card's send text, same session and product
+            family_ask = {"answer": data.get("answer", ""), "tapped": pick["label"]}
+            r = requests.post(URL, json=dict(body, q=pick["send"]), timeout=180)
+            r.raise_for_status()
+            data = r.json()
     except Exception as e:
         return {"q": q, "layer": case_layer(case), "error": str(e),
                 "wall": round(time.perf_counter() - t0, 3),
@@ -275,7 +311,7 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
         checks["_grade_reason"] = reason
 
     passed = all(v for k, v in checks.items() if not k.startswith("_"))
-    return {
+    out = {
         "q": q,
         "layer": case_layer(case),
         "outcome": outcome,
@@ -294,6 +330,9 @@ def run_case(case: dict, session_id: str, do_grade: bool) -> dict:
         "passed": passed,
         "skipped": skipped,
     }
+    if family_ask:
+        out["family_ask"] = family_ask
+    return out
 
 
 MEASURE_ONLY_BANNER = (
@@ -597,7 +636,7 @@ def main():
     if "--selfcheck" in sys.argv or os.getenv("EVAL_SELFCHECK") == "1":
         try:
             cases_path = Path(_arg_value("cases", str(CASES_FILE)))
-            spec = json.loads(cases_path.read_text())
+            spec = json.loads(cases_path.read_text(encoding="utf-8"))
             cases = spec["cases"]
             assert isinstance(cases, list) and cases, "no cases"
             for i, c in enumerate(cases):
@@ -639,7 +678,8 @@ def main():
         print(f"Invalid --layer {layer_filter!r}; choose from {sorted(VALID_LAYERS)}")
         return 2
 
-    spec = json.loads(cases_path.read_text())
+    # utf-8, not the locale's cp1252: "¿Cuánto" was sent as "Â¿CuÃ¡nto".
+    spec = json.loads(cases_path.read_text(encoding="utf-8"))
     cases = spec["cases"]
     if layer_filter:
         cases = [c for c in cases if case_layer(c) == layer_filter]
@@ -693,6 +733,8 @@ def main():
             cks = " ".join(f"{k}={v}" for k, v in res.get("checks", {}).items() if not k.startswith("_"))
             print(f"[{repeat}.{i:02d}] {mark} [{res['layer']}] outcome={res.get('outcome','?'):8} {cks}")
             print(f"      Q: {res['q']}")
+            if res.get("family_ask"):
+                print(f"      tapped: {res['family_ask']['tapped']}")
             if res.get("grounding") is not None or res.get("retrieval") is not None:
                 print(f"      scores: retrieval={res.get('retrieval')}  grounding={res.get('grounding')}  provider={res.get('provider')}")
             if res.get("checks", {}).get("_grade_reason"):

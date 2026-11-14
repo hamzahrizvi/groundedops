@@ -12,6 +12,19 @@ def test_case_key_is_layer_qualified():
             == "retrieval::What is it?")
 
 
+def test_every_pass_mark_names_a_case_read_as_utf8():
+    """D-20261112-18: read in the locale's cp1252, "¿Cuánto" became
+    "Â¿CuÃ¡nto", the bot was asked that, and the mark kept the garbled key."""
+    import json
+    here = rag_eval.HERE
+    for cases, mark in (("eval_cases.json", "eval_baseline.json"),
+                        ("eval_cases_retrieval.json", "eval_baseline_retrieval.json")):
+        keys = {rag_eval.case_key(c) for c in
+                json.loads((here / cases).read_text(encoding="utf-8"))["cases"]}
+        missing = set(json.loads((here / mark).read_text())["cases"]) - keys
+        assert not missing, (mark, missing)
+
+
 def test_run_case_forwards_skip_faq_and_checks_sources():
     sent = {}
 
@@ -294,6 +307,66 @@ def test_fine_outcomes_mirror_run_live_and_leave_old_cases_alone():
             res = rag_eval.run_case({"q": "price?", "outcome": want}, "s", do_grade=False)
         assert res["checks"]["outcome"] is ok, want
         assert res["fine_outcome"] == "deflect"
+
+
+_NV200_CARDS = [
+    {"label": "NV200", "product": "nv200s", "send": "Which SSP command? (NV200)"},
+    {"label": "NV200 Spectral", "product": "nv200s",
+     "send": "Which SSP command? (NV200 Spectral)"},
+    {"label": "I'm not sure which I have", "product": "",
+     "send": "I'm not sure which NV200 I have"},
+]
+
+
+def test_run_case_taps_the_family_card_the_question_names():
+    """D-20261112-18: a family question gets its card tapped, as the widget's
+    visitor does, and the answer after the tap is scored."""
+    sent = []
+
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.data
+
+    ask = {"answer": "Which NV200 do you have? Please pick yours below.",
+           "role": "clarify", "needs_clarification": True,
+           "family_options": _NV200_CARDS}
+    answer = {"answer": "Use the Poll command.", "role": "fast", "sources": []}
+
+    def fake_post(url, json, timeout):
+        sent.append(dict(json))
+        return Response(ask if len(sent) == 1 else answer)
+
+    q = "Which SSP command polls the NV200 Spectral for events?"
+    with patch.object(rag_eval.requests, "post", side_effect=fake_post):
+        res = rag_eval.run_case({"q": q, "product": "nv200s", "outcome": "answered",
+                                 "keywords_all": ["poll"]}, "s1", do_grade=False)
+    assert len(sent) == 2
+    assert sent[1]["q"] == "Which SSP command? (NV200 Spectral)"
+    assert sent[1]["session_id"] == "s1" and sent[1]["product"] == "nv200s"
+    assert res["outcome"] == "answered" and res["passed"] is True
+    assert res["family_ask"]["tapped"] == "NV200 Spectral"
+    assert res["q"] == q
+
+    sent.clear()
+    with patch.object(rag_eval.requests, "post", side_effect=fake_post):
+        res = rag_eval.run_case({"q": q, "product": "nv200s", "outcome": "clarify"},
+                                "s2", do_grade=False)
+    assert len(sent) == 1, "a case expecting clarify scores the question itself"
+    assert res["outcome"] == "clarify" and "family_ask" not in res
+
+
+def test_card_to_tap_falls_back_to_the_case_product_else_none():
+    data = {"family_options": _NV200_CARDS}
+    pick = rag_eval.card_to_tap({"q": "How fast is it?", "product": "nv200s"}, data)
+    assert pick["label"] == "NV200"
+    assert rag_eval.card_to_tap({"q": "How fast is it?", "product": "sku_scs"}, data) is None
+    assert rag_eval.card_to_tap({"q": "How fast is it?", "product": "nv200s"}, {}) is None
 
 
 def test_breakdown_counts_layers_and_the_faq_share():
