@@ -436,7 +436,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261114-02 | The gate's extra re-asks run even when another question has already failed the fix | ready to merge | merges once Security clears it |
 | D-20261114-05 | Where a long table is cut in two, the first row of the second half takes its name from the wrong row (47 wrong rows in 37 documents) | waiting for CEO | your yes |
 | D-20261114-06 | A supply-current question never gets the short spec page that answers it, so the bot quotes a figure from a nearby page | waiting for CEO | your yes |
-| D-20261114-07 | One of the office's own tests fails on unchanged office code, so "all office tests pass" can no longer be said | approved, queued | Dev builds it |
+| D-20261114-07 | One of the office's own tests fails on unchanged office code, so "all office tests pass" can no longer be said | built, waiting for the check | the pre-ship check |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | audit/D-20261112-16-wrong-vs-incomplete | D-20261112-16: how many "Wrong" answers are only incomplete? | proposed | the product owner triages it |
 | customer/20261014-troubleshooting-gets-setup-steps | "I did the step and it failed" gets the setup steps back, not the fix on the same page | proposed | the product owner triages it |
