@@ -1087,7 +1087,7 @@ Support is often conditional. When the context qualifies it by firmware version,
 A value read from a table is conditional in the same way. When its row or cell carries a condition — an operating mode or load, a product variant with its own column, a minimum or maximum, a tolerance, "if no other coins in device", "whichever is greater" — give the value together with that condition, in the manual's own words, even if the question did not ask about it. A figure quoted without the condition it depends on is a wrong answer, not a shorter one.
 The passages are numbered in the order a retrieval system ranked them, so [Passage 1] is the most likely to contain the answer. That is a hint, not a rule: use whichever passage actually answers the question, and prefer an earlier one when two say the same thing.
 If the context contains multiple similar-looking facts serving different purposes (e.g. different credential sets for different actions), give ONLY the one matching the question's subject and briefly note what the other is for.
-A passage header can name the manual heading the passage sits under (under "Supply Currents › NV11+"). That heading says which product, model, module, option or condition its table belongs to; the table's own rows often do not, so look-alike tables can have identical rows. Take a figure only from a passage whose heading matches what the question names (the product or model, the module or option such as replenishment cassette or bezel, a supply voltage, a specification rather than a test limit), even when a look-alike table under another heading ranks earlier. A heading that names another product or model is that product's table, not the asked one's. Give the matching row's values as written, with their units. When the context holds look-alike tables, say which one your figure is from in the manual's words ("For the Replenishment Cassette: ..."). When the question asks about two conditions that have separate tables, give each figure with its condition; never say they are the same unless the figures are. When two tables for the same thing disagree, give both and say they differ.
+A passage header can name the manual heading the passage sits under (under "Supply Currents › NV11+"). That heading says which product, model, module, option or condition its table belongs to; the table's own rows often do not, so look-alike tables can have identical rows. Take a figure only from a passage whose heading matches what the question names (the product or model, the module or option such as replenishment cassette or bezel, a supply voltage, a specification rather than a test limit), even when a look-alike table under another heading ranks earlier. A heading that names another product or model is that product's table, not the asked one's. Give the matching row's values as written, with their units. When the context holds look-alike tables, say which one your figure is from in the manual's words ("For the Replenishment Cassette: ..."). When the question asks about two conditions that have separate tables, give each figure with its condition; never say they are the same unless the figures are. When two passages give different figures for the same thing (a cable length, a current, a weight, a minimum or a maximum), take the figure from the passage that names the customer's set-up: a passage from the asked product's own documentation (its header says "from the <product> documentation") over one whose header names several products or none, and a passage about the link, interface, module, accessory or option the question names (in its heading or in its own text) over the product's general note. Give that figure with what it applies to, not both. Only when no passage names the customer's set-up, give both figures and say which applies to what.
 If the context is silent on the topic of the question, respond with exactly:
 "I could not find that in the knowledge base."
 The context is not silent when it states the range, limit, default, code or figures that settle the question in other words than the customer's; answer from those.
@@ -2831,6 +2831,37 @@ def _passage_heading(chunk: dict) -> str:
     sec = " ".join((chunk.get("section") or "").split())
     sec = sec.replace('"', "'").replace("[", "(").replace("]", ")")[:200]
     return f', under "{sec}"' if sec else ""
+
+
+def _codes(text: str) -> set[str]:
+    """Model, part and interface codes in `text`: whole words holding both a
+    letter and a digit ("if17", "rs232", "cc2"), lowercased."""
+    return {w for w in re.findall(r"[a-z0-9]+", (text or "").lower())
+            if re.search(r"[a-z]", w) and re.search(r"\d", w)}
+
+
+def _titled_for(question: str, ranked: list[dict], have: set, limit: int = 2) -> list[dict]:
+    """D-20261112-04: passages from a document whose title names a code the
+    question names (a link, interface, module or accessory, never a catalogue
+    product), best rank first, at most `limit`, none already in `have`. "a
+    smart hopper ... through an IF17 usb link. how long can the usb cable be"
+    ranked the IF17 sheet (3 m) 13th of 19 behind the hopper manual's own USB
+    port note (5 m), so the sheet never reached the prompt."""
+    product_forms: set[str] = set()
+    for t in _catalogue_terms():
+        product_forms |= _codes(t)
+    codes = _codes(question) - product_forms
+    if not codes:
+        return []
+    out = []
+    for r in ranked:
+        if r.get("id") in have:
+            continue
+        if codes & _codes((r.get("source") or "").rsplit(".", 1)[0]):
+            out.append(r)
+            if len(out) >= limit:
+                break
+    return out
 
 
 def _numbered_passages(chunks: list[dict], label=lambda r: "") -> str:
@@ -4984,6 +5015,15 @@ def query(payload: QueryRequest, x_user_id: str | None = None):
         _qty = _qty[:3 * max(1, len(_both_named))]
         top_chunks = top_chunks + [_strip_breadcrumb(r) for r in _qty]
         ptrace.mark("retrieve.quantity", f"{len(_qty)} limit row(s) for the value asked")
+    # A DOCUMENT TITLED BY THE QUESTION'S CODE TAKES A SLOT (D-20261112-04).
+    # The cross-encoder ranks the product manual's general note above a short
+    # sheet for the link or module the customer named; the sheet holds the
+    # figure for their set-up. The answer prompt then prefers it.
+    _titled = _titled_for(f"{q} {resolved_query}", _retrieved,
+                          {c.get("id") for c in top_chunks})
+    if _titled:
+        top_chunks = top_chunks + [_strip_breadcrumb(r) for r in _titled]
+        ptrace.mark("retrieve.titled", f"{len(_titled)} passage(s) from a document the question names")
     # A FIX-IT ASK GETS THE MANUAL'S STEPS FOR THE FAULT FIRST (D-20261029-03).
     # "note stuck in our bv30, how do i get it out?" ranked Cashbox Options,
     # Escrow Control and Low Power Mode 1-9 and Clearing a Jam 10th (0.50),

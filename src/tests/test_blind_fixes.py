@@ -86,6 +86,32 @@ def test_the_answer_shows_the_picture_the_model_read_it_from():
     assert main._answer_picture("285 mm. PICTURE: p18_2", [page, fig]) == ("M.pdf", "p18_2.png")
 
 
+def test_a_figure_comes_from_the_passage_naming_the_set_up():
+    """D-20261112-04: two figures for one thing; the set-up's passage wins."""
+    p = main.build_answer_prompt("", "[Passage 1 of 1]\nx", "q")
+    assert "take the figure from the passage that names the customer's set-up" in p
+    assert "give both and say they differ" not in p
+
+
+def test_a_document_titled_by_the_questions_code_gets_a_slot():
+    """D-20261112-04: the IF17 sheet ranked 13th of 19 and was cut."""
+    from unittest.mock import patch
+    ranked = [{"id": "m1", "source": "SMART Hopper 3 User Manual-v1.pdf"},
+              {"id": "m2", "source": "NV200 Spectral Manual.pdf"},
+              {"id": "i1", "source": "IF17 - Improved USB Stability.txt"},
+              {"id": "i2", "source": "IF17 - Improved USB Stability.txt"},
+              {"id": "i3", "source": "IF17 - Improved USB Stability.txt"}]
+    q = "smart hopper through an IF17 usb link and an nv200, how long can the usb cable be?"
+    with patch.object(main, "_catalogue_terms", lambda: ["smart_hopper_3", "NV200 Spectral", "nv200"]):
+        got = main._titled_for(q, ranked, {"m1"})
+        assert [r["id"] for r in got] == ["i1", "i2"], got          # code match, capped at 2
+        assert main._titled_for(q, ranked, {"i1", "i2", "i3"}) == []  # already in the context
+        assert main._titled_for("how long can the usb cable be?", ranked, set()) == []
+        # a catalogue product's code is never a title match
+        assert main._titled_for("nv200 usb cable length", ranked, set()) == []
+    assert main._codes("IF17 - Improved USB Stability") == {"if17"}
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
