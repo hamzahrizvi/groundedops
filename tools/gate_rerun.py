@@ -9,8 +9,10 @@ One blind pass is noisy: C20261008-22 scored 0 in 2 passes of 6 on unchanged cod
 with a score drop that is under --noise once those cases are held at their before scores
 (D-20261010-05: one 3 -> 0 flip is 2.5 pts of 40 cases), each of
 those cases is asked 6 times on the branch and 6 times on its base code, interleaved.
-A case stays wrong only if the branch answers it wrong (0 marks or verdict "wrong") at least 2 passes more
-often than the base, or a pass has no grade (fail closed). gate.json gains "rerun" (the
+A case stays wrong only if the branch answers it wrong (0 marks or verdict "wrong") at least 2 passes in 6 more
+often than the base, or a pass has no grade (fail closed). Exactly 2 more in the first 6 is on the line: that case
+is asked 6 more times on each side and stays wrong only at 4 or more in 12 (D-20261113-07: a case wrong 1 time in
+5 on any code failed 13% of gates by chance on 6 passes; 4.6% now). gate.json gains "rerun" (the
 per-pass grades) and a recomputed verdict; the drop is recomputed with the cleared cases
 held before ruling. Siblings, a drop at or beyond noise, 3+ cases or a FAIL on the paired interval
 (D-20261019-06: it cannot be rebuilt from gate.json, so it fails closed): untouched.
@@ -133,13 +135,16 @@ def rerate(gate, head_states, base_states):
     rerun, kept = {}, []
     show = lambda g: f'{g["score"]} {g.get("verdict", "")}'.strip() if g else "no grade"
     for cid in gate["became_wrong"]:
-        h = [grade_of(s, cid) for s in head_states]
-        b = [grade_of(s, cid) for s in base_states]
+        # the first ROUNDS passes always count; a later (on-the-line) pass only for the cases it asked
+        pick = lambda ss: [grade_of(s, cid) for i, s in enumerate(ss) if i < ROUNDS or cid in s.get("grades", {})]
+        h, b = pick(head_states), pick(base_states)
         hw = sum(1 for g in h if g and wrong(g))
         bw = sum(1 for g in b if g and wrong(g))
-        keep = not h or not b or None in h + b or hw - bw >= MARGIN
+        bad = not h or not b or None in h + b
+        keep = bad or hw - bw >= MARGIN * len(h) / ROUNDS   # 2 in 6, 4 in 12
         rerun[cid] = {"head": [show(g) for g in h], "base": [show(g) for g in b],
-                      "head_wrong": hw, "base_wrong": bw, "kept": keep}
+                      "head_wrong": hw, "base_wrong": bw, "kept": keep,
+                      "line": not bad and len(h) == ROUNDS and hw - bw == MARGIN}
         if keep:
             kept.append(cid)
     rates = ", ".join(f"{c} wrong {rerun[c]['head_wrong']}/{len(rerun[c]['head'])} on branch vs "
@@ -192,11 +197,13 @@ def run(dev, run_dir, out):
         ids = set(gate["became_wrong"])
         cases = json.load(open(os.path.join(run_dir, "cases.json"), encoding="utf-8"))["cases"]
         sides = {"head": os.path.join(dev, "src"), "base": os.path.join(code, "src")}
+        def put_cases(d, keep_ids):
+            json.dump({"cases": [c for c in cases if c["id"] in keep_ids]},
+                      open(os.path.join(d, "cases.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
         for side in sides:
             d = os.path.join(rr, side)
             os.makedirs(d)
-            json.dump({"cases": [c for c in cases if c["id"] in ids]},
-                      open(os.path.join(d, "cases.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+            put_cases(d, ids)
             shutil.copy(os.path.join(run_dir, "cases_state.json"), d)   # keeps the baseline answers
             shutil.copytree(os.path.join(run_dir, "manuals"), os.path.join(d, "manuals"))
         be, states = os.path.join(here, "blind_eval.py"), {"head": [], "base": []}
@@ -210,9 +217,11 @@ def run(dev, run_dir, out):
         # The lab once for all the passes (minutes), not per pass: between passes another job took it and, wrapped
         # whole in lab_lock.py, would have held it for hours with the gate half done (lane 3's evals, 2026-11-03).
         # Held while they run (the handle lives to the end of run()); the passes see GO_LAB_LOCK_HELD and don't wait for it themselves.
-        if len(states["head"]) < ROUNDS:
-            lab = lab_lock()[0]
-        for n in range(len(states["head"]) + 1, ROUNDS + 1):
+        lab = None
+        def ask(n, asked):   # pass n of the cases <asked> on the branch, then on base
+            nonlocal lab
+            if lab is None:
+                lab = lab_lock()[0]
             for side, src in sides.items():
                 d = os.path.join(rr, side)
                 env = {**os.environ, "GO_CODE": src, "GO_DATA": data, "SYSTEMS": "sys_normal,baseline", HELD: "1"}
@@ -224,8 +233,21 @@ def run(dev, run_dir, out):
                         raise RuntimeError(" ".join(cmd))
                 keep = os.path.join(d, f"cases_state.run{n}.json")
                 shutil.copy(os.path.join(d, "cases_state.json"), keep)
-                states[side].append(json.load(open(keep, encoding="utf-8")))
-        gate = rerate(gate, states["head"], states["base"])
+                x = json.load(open(keep, encoding="utf-8"))
+                # a later pass carries only the cases it asked; a missing grade stays a "no grade" (fail closed)
+                states[side].append(x if n <= ROUNDS else {"grades": {c: x.get("grades", {}).get(c, {}) for c in asked}})
+        for n in range(len(states["head"]) + 1, ROUNDS + 1):
+            ask(n, ids)
+        rated = rerate(gate, states["head"], states["base"])
+        line = [c for c, r in rated["rerun"].items() if r["line"]]
+        if line:   # D-20261113-07: exactly MARGIN apart in 6 passes: ROUNDS more for those cases only
+            log.write(f"on the line: {len(line)} case(s), {ROUNDS} more passes\n"); log.flush()
+            for side in sides:
+                put_cases(os.path.join(rr, side), set(line))
+            for n in range(ROUNDS + 1, 2 * ROUNDS + 1):
+                ask(n, line)
+            rated = rerate(gate, states["head"], states["base"])
+        gate = rated
     except Exception as e:                        # unconfirmed, but the single-pass FAIL still stands
         gate = {**gate, "rerun": {"error": str(e)}}
     finally:
@@ -317,6 +339,39 @@ def _selftest():
         assert g["sys_normal"]["passes"] == [1, 3, 1, 1, 1, 1] and g["sys_normal"]["score"] == 1, g
         assert g["sys_before"]["passes"] == [3, 3, 2, 3, 3, 3] and g["sys_before"]["score"] == 3, g
     assert json.load(open(os.path.join(d3, "cases_state.r2.json")))["grades"]["s9"]["sys_normal"]["single_pass"] == 3
+    # D-20261113-07: the false-fail chance worked exactly, by driving rerate() as run() does
+    from math import comb
+    pmf = lambda p: [comb(ROUNDS, k) * p ** k * (1 - p) ** (ROUNDS - k) for k in range(ROUNDS + 1)]
+    mk = lambda w: [{"grades": {"c": {"sys_normal": {"score": 0 if i < w else 3}}}} for i in range(ROUNDS)]
+    def chance(ph, pb, extend=True):   # P(FAIL) when the branch is wrong at rate ph and base at pb
+        tot = 0.0
+        for h1, a in enumerate(pmf(ph)):
+            for b1, b in enumerate(pmf(pb)):
+                r = rerate(one, mk(h1), mk(b1))
+                if not (extend and r["rerun"]["c"]["line"]):
+                    tot += a * b * (r["verdict"] == "FAIL"); continue
+                for h2, c in enumerate(pmf(ph)):
+                    for b2, e in enumerate(pmf(pb)):
+                        r = rerate(one, mk(h1) + mk(h2), mk(b1) + mk(b2))
+                        tot += a * b * c * e * (r["verdict"] == "FAIL")
+        return tot
+    old, new = chance(.2, .2, extend=False), chance(.2, .2)
+    assert old > .13 and new < .05, (old, new)
+    assert chance(.5, 0) > .85, "a branch wrong half the time against a base never wrong still fails"
+    print(f"false fail, a case wrong 1 time in 5 on any code: {100 * new:.1f}% (6 passes alone: {100 * old:.1f}%)")
+    r = rerate(one, mk(5), mk(2))                                       # 7 Nov trim-and-serve: 5 of 6 vs 2 of 6
+    assert r["verdict"] == "FAIL" and not r["rerun"]["c"]["line"], r
+    r = rerate(one, mk(2), mk(0))                                       # on the line
+    assert r["verdict"] == "FAIL" and r["rerun"]["c"]["line"], r
+    r = rerate(one, mk(2) + mk(1), mk(0) + mk(0))                       # 3 of 12 vs 0 of 12: cleared
+    assert r["verdict"] == "PASS" and r["rerun"]["c"]["head_wrong"] == 3 and len(r["rerun"]["c"]["head"]) == 12, r
+    r = rerate(one, mk(2) + mk(2), mk(0) + mk(0))                       # 4 of 12 vs 0: stays wrong
+    assert r["verdict"] == "FAIL" and not r["rerun"]["c"]["line"] and "4/12 on branch vs 0/12" in r["reasons"][0], r
+    two = {**one, "became_wrong": ["c", "d"]}                           # a later pass that asked only "c"
+    r = rerate(two, mk(2) + mk(0), mk(0) + mk(0))
+    assert len(r["rerun"]["d"]["head"]) == ROUNDS and r["rerun"]["d"]["head"][0] == "no grade", r   # "d" never graded: fail closed
+    r = rerate(one, mk(2) + [{"grades": {"c": {}}}] * ROUNDS, mk(0) + mk(0))   # an extra pass with no grade
+    assert r["verdict"] == "FAIL" and "no grade" in r["rerun"]["c"]["head"], r
     print("selftest ok")
 
 
