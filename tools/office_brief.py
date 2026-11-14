@@ -187,7 +187,8 @@ def alerts(ops, cards, stalled, off, repo=None, now=None):
             if busy:
                 out.append({"id": f"merge-{i}-" + "-".join(busy), "title": f"“{c['title']}” is ready but cannot be merged",
                             "why": f"It changes {', '.join(busy)}, and {where} has uncommitted or untracked edits to "
-                                   f"{'that file' if len(busy) == 1 else 'those files'}. The office never merges over someone's work.",
+                                   f"{'that file' if len(busy) == 1 else 'those files'} that clash with the fix (or are staged or untracked). "
+                                   "Edits that merge cleanly are carried over and stay uncommitted; the office never merges over a clash.",
                             "suggest": "Commit, move or undo those edits (ask Claude in any session if you do not know whose they are);"
                                        " the next lane check then merges it.", "actions": []})
         if c["stage"] == "blocked":

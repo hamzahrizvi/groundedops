@@ -8,7 +8,9 @@ Merges agents/dev-<id> only when all of these hold:
   - the product owner's latest verdict for <id> is READY TO MERGE,
   - OPS/inbox/security/review-<id>.md says "Verdict: CLEAR" and has a line naming the branch and its tip commit
     (7+ hex chars): a companion, or a commit added after the review, waits for Security,
-  - no uncommitted change in the target checkout touches a file the branch changes,
+  - no uncommitted change in the target checkout clashes with the branch: an edit to a file the branch changes
+    that merges cleanly with it, line by line, is carried over and left uncommitted; a clash, or a staged or
+    untracked file, waits for a person,
   - no Python line the branch adds holds two lines joined by a lost backslash-newline
     (sent back to Dev, like a merge conflict).
 The target is the checkout the branch is fewest commits ahead of: the main checkout's
@@ -49,7 +51,41 @@ def in_the_way(branch, target):
     fix that (D-20261021-11 went back three times over a draft left untracked in the main checkout)."""
     changed = set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
     dirty = {line[3:].split(" -> ")[-1] for line in git(target, "status", "--porcelain", "--untracked-files=all")[1].splitlines()}
-    return sorted((changed & dirty) - set(strays(branch, target)))   # a stray copy is moved aside by the merge, not waited on
+    return sorted((changed & dirty) - set(strays(branch, target)) - set(carried(branch, target)))   # both handled by the merge
+
+
+def carried(branch, target):
+    """{path: blob of the uncommitted edit} for edited files the branch also changes where the edit and the branch's
+    change merge cleanly, line by line: the merge carries the edit over and leaves it uncommitted, so a person's
+    edit in progress (PENDING.md, a doc, a tool) no longer holds the merge up (2026-11-14: the CEO's hand edits did).
+    Only plain worktree edits (status " M") of files the branch changes; a staged, deleted or untracked file, or an
+    edit that clashes with the fix, still waits for a person."""
+    rc, out, _ = git(target, "merge-tree", "--write-tree", "HEAD", branch)
+    if rc:   # the merge itself conflicts: office_merge sends it back to Dev, nothing to carry
+        return {}
+    tree, changed = out.splitlines()[0], set(git(target, "diff", "--name-only", f"HEAD...{branch}")[1].splitlines())
+    keep = {}
+    for line in git(target, "status", "--porcelain")[1].splitlines():
+        p = line[3:]
+        if line[:3] != " M " or p not in changed:
+            continue
+        mine = git(target, "hash-object", "-w", "--", p)[1]   # cleaned like a commit would store it (eol=lf)
+        base, theirs = git(target, "rev-parse", f"HEAD:{p}")[1], git(target, "rev-parse", f"{tree}:{p}")
+        if not theirs[0] and not git(target, "merge-file", "--object-id", mine, base, theirs[1])[0]:
+            keep[p] = (mine, base)
+    return keep
+
+
+def put_back(target, edits):
+    """Lay each carried edit over its file as it now is at HEAD: merged, or unchanged after an abort or a revert
+    (then the edit comes back as it was)."""
+    for p, (mine, base) in edits.items():
+        now = git(target, "rev-parse", f"HEAD:{p}")[1]
+        rc, oid, _ = git(target, "merge-file", "--object-id", mine, base, now)
+        data = subprocess.run(["git", "-C", target, "cat-file", "--filters", f"--path={p}", mine if rc else oid],
+                              capture_output=True, check=True).stdout
+        with open(os.path.join(target, p), "wb") as f:
+            f.write(data)
 
 
 def strays(branch, target):
@@ -158,6 +194,20 @@ def merge_branch(did, branch, ops, repo, office=OFFICE):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.move(os.path.join(target, p), dst)
     note = f" (moved aside untracked copies of {moved} to OPS/state/displaced)" if moved else ""
+    carry = carried(branch, target)
+    for p in carry:   # a copy in OPS too, then the file goes back to HEAD for the merge and the edit is laid over after
+        dst = os.path.join(ops, "state", "displaced", time.strftime("%Y%m%d-%H%M%S-carried-") + p.replace("/", "__"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(target, p), dst)
+        git(target, "checkout", "HEAD", "--", p)
+    note += f" (kept the uncommitted edits to {sorted(carry)}, still uncommitted; copies in OPS/state/displaced)" if carry else ""
+    try:
+        return merge_carried(did, branch, ops, target, changed, note)
+    finally:
+        put_back(target, carry)
+
+
+def merge_carried(did, branch, ops, target, changed, note):
     into = git(target, "rev-parse", "--abbrev-ref", "HEAD")[1]
     title = decisions(ops).get(did, {}).get("title", "")
     rc, out, err = git(target, "merge", "--no-ff", branch, "-m",
@@ -225,9 +275,11 @@ def selftest():
         os.makedirs(repo)
         run("init", "-q", "-b", "main")
         w(os.path.join(repo, "a.py"), "x = 1\n")
+        w(os.path.join(repo, "f.py"), "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n")
         run("add", "."), run("commit", "-qm", "base")
         for did, f, body in (("D-20261008-91", "b.py", "y = 2\n"), ("D-20261008-92", "a.py", "x = 3\n"), ("D-20261008-93", "c.py", "def (\n"),
                              ("D-20261008-96", "e.py", "w = 6\n"),
+                             ("D-20261008-97", "f.py", "a = 10\nb = 2\nc = 3\nd = 4\ne = 5\n"),   # lines from their edit
                              ("D-20261008-94", "b.py", "y = 5\n"),    # 94 built in parallel with 91, same file
                              ("D-20261008-95", "d.py", "x = 1\ny = f(a),          g(b)\n")):   # a lost backslash-newline
             run("checkout", "-qb", f"agents/dev-{did}", "main")
@@ -248,10 +300,10 @@ def selftest():
         run("add", "."), run("commit", "-qm", "companion 96")
         run("checkout", "-q", "main")
         w(os.path.join(ops, "decisions", "20261008.md"), "".join(
-            f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95", "D-20261008-96")))
+            f"## {d} | t\n- Verdict: NEEDS CEO\n- [x] CEO approved\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95", "D-20261008-96", "D-20261008-97")))
         assert merge("D-20261008-91", ops, repo, repo).startswith("WAIT the product owner"), "needs READY TO MERGE"
         w(os.path.join(ops, "decisions", "20261009.md"), "".join(
-            f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95", "D-20261008-96")))
+            f"## {d} | t\n- Verdict: READY TO MERGE\n\n" for d in ("D-20261008-91", "D-20261008-92", "D-20261008-93", "D-20261008-94", "D-20261008-95", "D-20261008-96", "D-20261008-97")))
         w(os.path.join(ops, "inbox", "dev", "D-20261008-94.md"), "Status: READY\n")
         w(os.path.join(repo, "a.py"), "x = 1  # someone's work in progress\n")         # dirty, not in D-1
         r = merge("D-20261008-91", ops, repo, repo)
@@ -273,10 +325,18 @@ def selftest():
         assert r.startswith("FAILED merge conflict") and "b.py" in r, r
         assert open(os.path.join(repo, "b.py")).read() == "y = 2\n", "the conflicting merge was aborted"
         dev = os.path.join(ops, "inbox", "dev")
-        assert sorted(os.listdir(dev)) == ["D-20261008-91.gate", "D-20261008-92.gate", "D-20261008-93.gate", "D-20261008-94.gate.1", "D-20261008-94.md.1", "D-20261008-95.gate", "D-20261008-96.gate"], os.listdir(dev)
+        assert sorted(os.listdir(dev)) == ["D-20261008-91.gate", "D-20261008-92.gate", "D-20261008-93.gate", "D-20261008-94.gate.1", "D-20261008-94.md.1", "D-20261008-95.gate", "D-20261008-96.gate", "D-20261008-97.gate"], os.listdir(dev)
         assert os.path.exists(os.path.join(ops, "inbox", "security", "review-D-20261008-94.md.1")), "Security reviews the rebase again"
         assert any("Verdict: SENT BACK" in open(p).read() for p in glob.glob(os.path.join(ops, "decisions", "*.md")))
         assert merge("D-20261008-92", ops, repo, repo).startswith("WAIT uncommitted"), "never merges over their edit"
+        w(os.path.join(repo, "f.py"), "a = 1\nb = 2\nc = 3\nd = 4\ne = 50\n")          # their edit, lines from the fix
+        assert in_the_way("agents/dev-D-20261008-97", repo) == [], "an edit that merges cleanly never holds up the plan"
+        r = merge("D-20261008-97", ops, repo, repo)
+        assert r.startswith("MERGED") and "kept the uncommitted edits to ['f.py']" in r, r
+        assert open(os.path.join(repo, "f.py")).read() == "a = 10\nb = 2\nc = 3\nd = 4\ne = 50\n", "the fix and their edit"
+        assert " M f.py" in run("status", "--porcelain").stdout.decode().splitlines(), "their edit is still uncommitted"
+        assert [open(p).read() for p in glob.glob(os.path.join(ops, "state", "displaced", "*-carried-f.py"))] == [
+            "a = 1\nb = 2\nc = 3\nd = 4\ne = 50\n"], "a copy of their edit"
         w(os.path.join(repo, "c.py"), "someone else's c\n")                              # the path the branch adds, other bytes
         r = merge("D-20261008-93", ops, repo, repo)
         assert r.startswith("WAIT uncommitted") and "c.py" in r and "D-20261008-93.gate" in os.listdir(dev), r   # not sent back
