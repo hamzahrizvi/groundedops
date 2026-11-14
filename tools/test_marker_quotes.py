@@ -48,7 +48,7 @@ def main():
         assert "p3" not in quoted and "Other Manual" not in quoted and "Prod Manual.pdf p1" not in quoted, quoted
         assert P1 in cited, "cited page missing"
         assert "mark the verdict first" in out and "Where pages of the product's own manual disagree" in out
-        assert "leaves out any one of them scores at most 2" in out and 'Verdict "clarified" always scores 3' in out, out
+        assert "leaves out any one of them scores at most 2" in out and 'Verdict "clarified" is for this type only and always scores 3' in out, out
         assert "whether or not a product is selected in the chat" in out
         assert "it also counts as present when the answer gives it as another page" in out   # cap never beats the disagreement rule
         assert prompt("c2").split("MANUAL PAGES THE ANSWERS QUOTE", 1)[1].split("The reference is an extract", 1)[0].rstrip().endswith(": none")
