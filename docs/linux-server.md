@@ -161,6 +161,24 @@ sudo ufw status
 Check it from your own PC afterwards — `curl http://<server>:8000/health`
 should answer `200`, not hang.
 
+**Never sleep.** `setup.sh` masks the sleep, suspend and hibernate targets
+and tells logind to ignore an idle machine and a closed lid. To do it on
+its own:
+
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+printf '[Login]\nIdleAction=ignore\nHandleLidSwitch=ignore\n' | sudo tee /etc/systemd/logind.conf.d/10-groundedops-no-sleep.conf
+sudo systemctl restart systemd-logind
+```
+
+Check it with `systemctl status sleep.target` — it should say `masked`.
+
+This cannot help with a power cut or a firmware sleep setting, so set
+**"Restore on AC power loss" to Power On** in the BIOS too (step 3). A
+machine that went unreachable while nobody was near it was most likely
+powered off or off the network, not asleep — check the power and the
+Ethernet light before suspecting software.
+
 **Automatic security updates.** These are installed and on by default.
 Check that, and let the server restart itself at 3am when an update needs
 it (GroundedOps starts again on its own):

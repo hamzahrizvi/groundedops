@@ -43,6 +43,29 @@ apt-get install -y -q git curl ca-certificates openssl \
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
   || { echo "Python 3.11+ needed; this is $(python3 --version)."; exit 1; }
 
+# ── 1b. Never sleep ─────────────────────────────────────────────────────
+# A server that suspends is a server that is down, and nobody is sitting at
+# this one to wake it. Ubuntu Server does not suspend on its own, but the
+# targets exist and a desktop package or a stray setting can start using
+# them, so mask them outright. Masking is reversible: systemctl unmask.
+#
+# This cannot stop the BIOS or a power cut. Set "Restore on AC power loss"
+# to Power On in the firmware as well - see docs/linux-server.md step 3.
+say "Making sure it never sleeps"
+systemctl mask -q sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+install -d -m 755 /etc/systemd/logind.conf.d
+cat > /etc/systemd/logind.conf.d/10-groundedops-no-sleep.conf <<'EOF'
+# Never suspend when idle, and ignore a closed lid: this machine is a
+# server, and the only person who would reopen it is not in the room.
+[Login]
+IdleAction=ignore
+HandleLidSwitch=ignore
+HandleLidSwitchDocked=ignore
+HandleLidSwitchExternalPower=ignore
+EOF
+systemctl restart systemd-logind 2>/dev/null || true
+echo "   sleep, suspend and hibernate are masked"
+
 # ── 2. Service account and folders ──────────────────────────────────────
 say "Service account '$SVC'"
 id "$SVC" >/dev/null 2>&1 || useradd --system --home-dir "$BASE" --shell /usr/sbin/nologin "$SVC"
