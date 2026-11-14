@@ -604,12 +604,16 @@ def waiting(ops, repo, now, taken=(), mode=MODES["high"]):
     elif last_merge > last_run or age(last_run) >= 7:
         # the CEO, 2026-10-12: each fix is proven on its own failure type's hidden siblings by the retrofit gate;
         # a new 40-question bank only once Customer's fixes in flight are all through, to find the next issues
+        # the CEO, 2026-11-14: the gate already re-asks a fix's 40 before it merges, so the re-ask waits until all of
+        # Customer's fixes are through and then asks the questions tied to the merged ones (tools/question_tags.py reask)
         busy = sorted(i for i, s in dev.items() if items[i].get("from") == "customer" and s in IN_FLIGHT)
-        if busy and last_merge > last_run:   # the CEO, 2026-10-13: the score shows each fix, so re-ask the last bank
-            out.append(("customer", "re-ask the last 40 questions: a fix merged since the last test run", "customer"))
-        else: out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
-                    "the gate tests each fix on its own questions" if busy else
-                    "the customer fixes are all through: a new blind bank to find more issues", "customer" if not busy else None))
+        if busy:
+            out.append(("customer", f"waits until {len(busy)} customer fixes in flight are through ({', '.join(busy[:3])}); "
+                        "the gate tests each fix on its own questions", None))
+        elif last_merge > last_run:
+            out.append(("customer", "re-ask the questions tied to the fixes merged since the last test run: "
+                        "the customer fixes are all through", "customer"))
+        else: out.append(("customer", "the customer fixes are all through: a new blind bank to find more issues", "customer"))
     unreviewed = [i for i in ready if not reviewed(i)]
     if unreviewed or age(_mtime(os.path.join(ops, "state", "security_last_run.txt"))) >= 13:
         out.append(("security", "review " + ", ".join(unreviewed) if unreviewed else "fortnightly review due", "security"))
@@ -1068,8 +1072,10 @@ def selftest():
         subprocess.run(f'git init -q "{git}" && git -C "{git}" -c user.name=t -c user.email=t commit -q --allow-empty '
                        "-m \"Merge branch 'agents/dev-D-20261008-02'\"", shell=True, check=True)
         p = plan(ops, git, 11, 38, resets, now)
-        assert any(x.startswith("RUN  groundedops-office-customer  re-ask the last 40") for x in p), p
+        assert not any(x.startswith("RUN  groundedops-office-customer") for x in p), "no re-ask while a customer fix is in flight"
         os.remove(os.path.join(ops, "decisions/20261008d.md"))
+        p = plan(ops, git, 11, 38, resets, now)
+        assert any(x.startswith("RUN  groundedops-office-customer  re-ask the questions tied") for x in p), p
         assert cust().startswith("RUN") and "all through" in cust(), "a new bank once they are through"
         old = now.timestamp() - 15 * 86400
         os.utime(os.path.join(ops, "runs/20261008/DONE"), (old, old))

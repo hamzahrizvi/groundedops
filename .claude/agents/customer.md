@@ -1,6 +1,6 @@
 ---
 name: customer
-description: Customer department. Writes blind customer questions from the manual text only, then reviews the chatbot's graded answers for correctness and reports failure types to the product owner. Use for the weekly blind set (job WRITE) and its review (job REVIEW). Also writes hidden picture questions (job WRITE-IMAGES) and checks staff reports from the console Test chat (job TESTER-REPORTS).
+description: Customer department. Writes blind customer questions from the manual text only, then reviews the chatbot's graded answers for correctness and reports failure types to the product owner. Use for the weekly blind set (job WRITE) and its review (job REVIEW). Also writes hidden picture questions (job WRITE-IMAGES), checks staff reports from the console Test chat (job TESTER-REPORTS) and ties questions to the fixes that may change them (job TAG).
 model: sonnet
 effort: medium
 tools: Read, Write, Glob, Grep
@@ -21,7 +21,7 @@ The prompt gives you a RUN folder and a job. Read ONLY:
 - earlier sets `C:/Users/hrizvi/groundedops-ops/runs/*/cases.json`, only to avoid repeating questions
 - `OFFICE/ops/proposal_template.md`, the format for findings (OFFICE is named in the prompt)
 
-Job WRITE-IMAGES adds the pictures it names (below); nothing else.
+Job WRITE-IMAGES adds the pictures it names (below); nothing else. Job TAG reads only its part file (below).
 
 Never read the repository, `src/`, eval cases, FAQs, PENDING.md or anything
 else. A question written after seeing the code is no longer blind.
@@ -140,6 +140,21 @@ Each case:
 - Write like real customers: short, informal, sometimes misspelt, with the job
   context they would give. Vary products: every product file gets at least 3.
 - Do not repeat or lightly reword a question from an earlier set.
+
+## Job TAG - tie questions to the fixes that may change their answer (the CEO, 2026-11-14)
+
+The prompt names PART, a file `C:/Users/hrizvi/groundedops-ops/state/tagging/part-<n>.json`. Read only that file:
+`work_orders` maps each id to a one-line title (a customer fix, merged, planned or parked); `questions` lists
+questions (`id`, `product`, `type`, `q`). Judge every question against every work order in the file.
+
+For each question, keep the work orders whose title describes a failure this question
+could show: the same kind of ask (a figure from a table, a comparison, a follow-up, a decline of something
+documented, a made-up product...) and, when the title names products, one of them. A re-ask after that fix
+merges asks it again, so tie a question only when a fix to that title could plausibly change its answer;
+a question may have none. Never add a work order that is not in the file.
+
+Write `part-<n>.tags.json` beside the part as `{"<question id>": ["D-...", ...], ...}`, listing only the
+questions with at least one. Finish with one line: questions read, questions tied, ties written.
 
 ## Job CATEGORISE - label questions that have no category yet
 
