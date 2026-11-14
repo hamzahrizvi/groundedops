@@ -116,14 +116,17 @@ def service_level(text: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def name_flag(title: str | None, level: int | None = None) -> dict | None:
+def name_flag(title: str | None, level: int | None = None, scrubbed: bool = False) -> dict | None:
     """{"suggest": "excluded"|"internal", "reason": ...} when a title says the
     document is unfinished or staff-only, or its text states a service level
-    above 1, else None. Pure."""
+    above 1, else None. A title the address scrub changed (scrubbed) suggests
+    internal: it named an internal host or a private address (D-20261113-06). Pure."""
     for decision, rx in _NAME_FLAGS:
         m = rx.search(title or "")
         if m:
             return {"suggest": decision, "reason": f"The title says “{m.group(0)}”"}
+    if scrubbed:
+        return {"suggest": "internal", "reason": "The title named an internal address"}
     if level and level > 1:
         return {"suggest": "internal", "reason": f"It says Service Level {level}"}
     return None
@@ -498,7 +501,7 @@ def overview() -> dict:
         row["is_updated"] = _recent(it.get("updated_at"))
         row["key"] = key
         row["status"] = status_of(it)
-        flag = name_flag(it.get("title"), it.get("level"))
+        flag = name_flag(it.get("title"), it.get("level"), it.get("title_scrubbed"))
         # Shown while the item is filed less strictly than the title suggests
         # and nobody has dismissed this reason for it.
         if flag and _STRICT[flag["suggest"]] > _STRICT.get(it.get("decision"), 2) \
@@ -644,7 +647,7 @@ def set_items(keys: list[str], decision: str | None = None,
             if not it:
                 continue
             if dismiss_flag:
-                it["flag_dismissed"] = (name_flag(it.get("title"), it.get("level")) or {}).get("reason")
+                it["flag_dismissed"] = (name_flag(it.get("title"), it.get("level"), it.get("title_scrubbed")) or {}).get("reason")
             if decision:
                 it["decision"] = decision
                 it.pop("error", None)
@@ -817,27 +820,54 @@ _URL = re.compile(
 # Not an address in _URL: an IPv4 (with or without port or path), and a bare host name under
 # a reserved internal suffix or an operator's CONFLUENCE_INTERNAL_DOMAINS (comma list). A general
 # host-name rule would hit file names and versions, so only these suffixes are read as hosts.
-_OCT = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
-# After "/" it is a path segment of a link _URL already judged (a version folder): left alone.
-_IPV4 = re.compile(r"(?<![\w./])(?P<ip>" + _OCT + r"(?:\." + _OCT + r"){3})(?!\.?\w)"
+_OCT = r"0*(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"      # leading zeros too: 010.020.000.005
+_IPV4 = re.compile(r"(?<![\w.])(?P<ip>" + _OCT + r"(?:\." + _OCT + r"){3})(?!\.?\w)"
                    r"(?P<rest>(?::\d{1,5})?(?:/" + _TAIL + r")?)")
+# An IPv6 with at least one hex digit (a lone "::" is text); a time or a MAC address does not parse.
+_IPV6 = re.compile(r"(?<![\w:.])(?=[0-9a-f:]*[0-9a-f])[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}(?:%\w+)?(?![\w:])", re.I)
 _INTERNAL_SUFFIXES = ("internal", "local", "lan", "corp", "intranet", "localdomain")
 
 
 def _bare_host(extra: str) -> "re.Pattern":
     doms = [d.strip().lstrip("*.").lower() for d in extra.split(",") if d.strip()]
     sfx = "|".join(re.escape(d) for d in (*_INTERNAL_SUFFIXES, *doms))
-    return re.compile(r"(?<![\w.@/-])(?:[a-z0-9-]+\.)+(?:" + sfx + r")(?![\w-]|\.\w)(?::\d{1,5})?", re.I)
+    return re.compile(r"(?<![\w.@-])(?:[a-z0-9-]+\.)+(?:" + sfx + r")(?![\w-]|\.\w)(?::\d{1,5})?", re.I)
+
+
+def _routable(ip: str) -> bool | None:
+    """True for a public address; False for a private, CGNAT (100.64/10),
+    loopback, link-local or unique-local one; None when ip is no address."""
+    try:
+        return ipaddress.ip_address(".".join(str(int(o)) for o in ip.split(".")) if "." in ip else ip).is_global
+    except ValueError:
+        return None
 
 
 def _scrub(text: str, hosts: list[str]) -> str:
     """An address in the text itself is held to the allowlist too: links, IPv4
     (a bare one stays only when public, with no port or path: a firmware version
-    reads the same), and bare internal host names (D-20261104-11)."""
-    text = _URL.sub(lambda m: _kept(m[0], hosts), text)
-    text = _IPV4.sub(lambda m: m[0] if not m["rest"] and not ipaddress.ip_address(m["ip"]).is_private
-                     else _kept(m[0], hosts), text)
-    return _bare_host(os.getenv("CONFLUENCE_INTERNAL_DOMAINS", "")).sub(lambda m: _kept(m[0], hosts), text)
+    reads the same), private IPv6 and bare internal host names (D-20261104-11).
+    Those are read only between links: a version folder inside a kept link
+    stays, an address after any other "/" goes (D-20261113-06)."""
+    bare = _bare_host(os.getenv("CONFLUENCE_INTERNAL_DOMAINS", ""))
+
+    def loose(s: str) -> str:
+        s = _IPV4.sub(lambda m: m[0] if not m["rest"] and _routable(m["ip"]) else _kept(m[0], hosts), s)
+        s = _IPV6.sub(lambda m: "" if _routable(m[0]) is False else m[0], s)
+        return bare.sub(lambda m: _kept(m[0], hosts), s)
+
+    out, at = [], 0
+    for m in _URL.finditer(text):
+        out += [loose(text[at:m.start()]), _kept(m[0], hosts)]
+        at = m.end()
+    return "".join(out) + loose(text[at:])
+
+
+def _clean_title(t: str, hosts: list[str]) -> str:
+    """A title held to the allowlist: unchanged when it holds no address (so no
+    item is renamed), else with its spaces closed up ("Wiring v2.pdf")."""
+    s = _scrub(t, hosts)
+    return t if s == t else " ".join(s.split())
 
 
 class _Text(HTMLParser):
@@ -1010,13 +1040,18 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
     paths: dict[str, list] = {}          # id -> its titles now, for the console
     combined: dict[str, dict] = {}       # bundle key -> the item being built
     members_of: set[str] = set()         # page items now inside a combined one
+    hosts = link_hosts()
     for page, trail, ids in _walk(api, root_kind, root_id):
         _stop_point()
         pid = page["id"]
         _progress.update(phase="checking", done=len(found))
         full = api.page(pid)
-        title = full.get("title") or page["title"]
-        here, here_ids = trail + [title], ids + [pid]
+        # Every title is scrubbed where it is first read: names, paths, bundle
+        # titles and section headings are all made from these (D-20261113-06).
+        raw = trail + [full.get("title") or page["title"]]
+        here = [_clean_title(t, hosts) for t in raw]
+        lost = [h != r for h, r in zip(here, raw)]   # titles the scrub changed: suggested internal
+        trail, title, here_ids = here[:-1], here[-1], ids + [pid]
         if pid != root_id:
             for b in [b for b in by_path if here[:len(b["path"])] == b["path"]]:
                 by_path.remove(b)
@@ -1035,7 +1070,8 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 b = combined[key] = {
                     "kind": "bundle", "id": key, "title": inside[-1], "path": inside[:-1],
                     "name": _safe_name(inside[-1]) + ".txt", "members": [], "stamp": [],
-                    "modified_at": None, "url": None, "level": None}
+                    "modified_at": None, "url": None, "level": None,
+                    "title_scrubbed": lost[deep]}
                 _note(inside[-1], "bundle", inside[:-1], "found")
             if here == inside:           # the folder is itself a page: link to it
                 b["url"] = _link(api, (full.get("_links") or {}).get("webui"))
@@ -1056,22 +1092,26 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
             found[f"page:{pid}"] = {
                 "kind": "page", "id": pid, "title": title, "path": trail,
                 "name": _safe_name(title) + ".txt", "level": service_level(text),
+                "title_scrubbed": lost[-1],
                 "version": (full.get("version") or {}).get("number"),
                 "modified_at": (full.get("version") or {}).get("createdAt"),
                 "url": _link(api, (full.get("_links") or {}).get("webui"))}
             _note(title, "page", trail, "found")
         for att in api.each(f"/wiki/api/v2/pages/{pid}/attachments", limit=250):
-            name = _safe_name(att.get("title") or "")
+            att_raw = att.get("title") or ""
+            att_title = _clean_title(att_raw, hosts)
+            name = _safe_name(att_title)
             if not name.lower().endswith(_FILE_TYPES):
                 continue
             found[f"att:{att['id']}"] = {
-                "kind": "file", "id": att["id"], "page_id": pid, "title": att.get("title"),
+                "kind": "file", "id": att["id"], "page_id": pid, "title": att_title,
+                "title_scrubbed": att_title != att_raw,
                 "path": trail + ([title] if title else []), "name": name,
                 "version": (att.get("version") or {}).get("number"),
                 "modified_at": (att.get("version") or {}).get("createdAt"),
                 "size": att.get("fileSize"),
                 "url": _link(api, att.get("webuiLink"))}
-            _note(att.get("title") or name, "file", trail + ([title] if title else []), "found")
+            _note(att_title or name, "file", trail + ([title] if title else []), "found")
 
     for key, b in combined.items():
         if b["members"]:
@@ -1112,7 +1152,7 @@ def _check(api: _Api, root_kind: str, root_id: str) -> dict:
                 cat, prod = _suggest(f["path"] + ([f["title"]] if f["kind"] == "bundle" else []))
                 decision = "excluded"
                 if st["mode"] == "auto":
-                    decision = (name_flag(f["title"], f.get("level")) or {}).get("suggest", "approved")
+                    decision = (name_flag(f["title"], f.get("level"), f.get("title_scrubbed")) or {}).get("suggest", "approved")
                 chosen = False
                 if f["kind"] == "bundle":
                     pages = [items[f"page:{m[0]}"] for m in f["members"] if f"page:{m[0]}" in items]
