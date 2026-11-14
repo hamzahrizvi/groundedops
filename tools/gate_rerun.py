@@ -176,6 +176,14 @@ def base_code(dev, data, dest):
     return base
 
 
+def on_line(rated):
+    """Cases to ask ROUNDS more passes: those exactly MARGIN apart, unless another case already fails the branch outright (kept, not on the line): then the passes cannot change the verdict (D-20261114-02)."""
+    rr = rated["rerun"]
+    if any(r["kept"] and not r["line"] for r in rr.values()):
+        return []
+    return [c for c, r in rr.items() if r["line"]]
+
+
 def run(dev, run_dir, out):
     gp = os.path.join(out, "gate.json")
     try:
@@ -239,7 +247,7 @@ def run(dev, run_dir, out):
         for n in range(len(states["head"]) + 1, ROUNDS + 1):
             ask(n, ids)
         rated = rerate(gate, states["head"], states["base"])
-        line = [c for c, r in rated["rerun"].items() if r["line"]]
+        line = on_line(rated)
         if line:   # D-20261113-07: exactly MARGIN apart in 6 passes: ROUNDS more for those cases only
             log.write(f"on the line: {len(line)} case(s), {ROUNDS} more passes\n"); log.flush()
             for side in sides:
@@ -367,6 +375,15 @@ def _selftest():
     assert r["verdict"] == "PASS" and r["rerun"]["c"]["head_wrong"] == 3 and len(r["rerun"]["c"]["head"]) == 12, r
     r = rerate(one, mk(2) + mk(2), mk(0) + mk(0))                       # 4 of 12 vs 0: stays wrong
     assert r["verdict"] == "FAIL" and not r["rerun"]["c"]["line"] and "4/12 on branch vs 0/12" in r["reasons"][0], r
+    two2 = {**one, "became_wrong": ["c", "d"]}
+    both = lambda c, d: [{"grades": {"c": {"sys_normal": {"score": 0 if i < c else 3}}, "d": {"sys_normal": {"score": 0 if i < d else 3}}}} for i in range(ROUNDS)]
+    r = rerate(two2, both(5, 2), both(0, 0))        # c fails outright, d on the line
+    assert r["rerun"]["d"]["line"] and not r["rerun"]["c"]["line"] and r["verdict"] == "FAIL"
+    assert on_line(r) == [], "another case already fails: no extra pass"
+    r = rerate(two2, both(2, 2), both(0, 0))        # both on the line: still asked
+    assert on_line(r) == ["c", "d"], r
+    r = rerate(two2, both(0, 2), both(0, 0))        # c cleared, d on the line: still asked
+    assert on_line(r) == ["d"], r
     two = {**one, "became_wrong": ["c", "d"]}                           # a later pass that asked only "c"
     r = rerate(two, mk(2) + mk(0), mk(0) + mk(0))
     assert len(r["rerun"]["d"]["head"]) == ROUNDS and r["rerun"]["d"]["head"][0] == "no grade", r   # "d" never graded: fail closed
