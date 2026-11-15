@@ -394,7 +394,6 @@ def _limit_row(text: str, units: set, words: set) -> bool:
     return False
 
 
-
 def _quantity_ranking(query: str, collection, limit: int,
                       source_filter: str | None, scope: dict | None) -> list[str]:
     """In-scope chunk ids holding a min/max/nominal row in a unit the
