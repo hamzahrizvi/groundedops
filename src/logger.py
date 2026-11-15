@@ -26,7 +26,7 @@ import os
 import threading
 from datetime import datetime, timezone
 
-LOG_FILE      = "logs.jsonl"
+LOG_FILE      = os.environ.get("LOG_FILE_PATH") or "logs.jsonl"
 MAX_LOG_BYTES = 10 * 1024 * 1024   # 10 MB
 MAX_ANSWER_LEN = 500
 

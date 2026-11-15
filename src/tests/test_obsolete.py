@@ -4,6 +4,7 @@ blocked from the date, the reply gives the dates and points to support.
 Imports main, so the suite runs it in its own process; no pytest fixtures.
 """
 import json
+import time
 import os
 import sys
 import tempfile
@@ -54,14 +55,14 @@ def test_its_documents_answer_nobody_unless_shared():
 def test_the_reply_gives_the_dates_and_support():
     catalog.set_obsolete("smart_hopper_3", {"date": "2025-12", "service_end": "2099-12",
                                             "replacement": "SMART Hopper 4"})
-    r = main._obsolete_reply("how do I reset it", ["smart_hopper_3"], "rid", 0.0, "s1")
+    r = main._obsolete_reply("how do I reset it", ["smart_hopper_3"], "rid", time.time(), "s1")
     assert r["reason"] == "obsolete_product" and r["offer_support"], r
     assert r["answer"].startswith("The Smart Hopper 3 was made obsolete in December 2025; "
                                   "service and repairs continue until December 2099."), r["answer"]
     assert "replacement is the SMART Hopper 4" in r["answer"] and "support team" in r["answer"]
     # A comparison with a current product is answered.
-    assert main._obsolete_reply("q", ["smart_hopper_3", "sku_scs"], "rid", 0.0, "s1") is None
-    assert main._obsolete_reply("q", [], "rid", 0.0, "s1") is None
+    assert main._obsolete_reply("q", ["smart_hopper_3", "sku_scs"], "rid", time.time(), "s1") is None
+    assert main._obsolete_reply("q", [], "rid", time.time(), "s1") is None
 
 
 def test_confluence_import_follows_the_setting():
@@ -139,19 +140,19 @@ def test_an_answer_carries_the_obsolete_note():
 def test_some_units_obsolete_asks_which_is_yours_once():
     catalog.set_obsolete("sku_scs", {"date": "2021-06", "block_answers": False,
                                      "versions": "BR29 & Below label; BR30 label"})
-    r = main._obsolete_reply("how do I reset it", ["sku_scs"], "rid", 0.0, "s2", [])
+    r = main._obsolete_reply("how do I reset it", ["sku_scs"], "rid", time.time(), "s2", [])
     assert r["reason"] == "obsolete_version" and main.VERSION_ASK in r["answer"], r
     labels = [o["label"] for o in r["family_options"]]
     assert labels == ["BR29 & Below label", "BR30 label", "Mine is a newer one"], labels
     picked = r["family_options"][0]["send"]
-    r2 = main._obsolete_reply(picked, ["sku_scs"], "rid", 0.0, "s2", [])
+    r2 = main._obsolete_reply(picked, ["sku_scs"], "rid", time.time(), "s2", [])
     assert r2["reason"] == "obsolete_product" and "(BR29 & Below label)" in r2["answer"], r2
     # Later in that chat, still the obsolete reply.
-    r3 = main._obsolete_reply("and the fuse?", ["sku_scs"], "rid", 0.0, "s2", [{"q": picked, "a": "x"}])
+    r3 = main._obsolete_reply("and the fuse?", ["sku_scs"], "rid", time.time(), "s2", [{"q": picked, "a": "x"}])
     assert r3["reason"] == "obsolete_product"
     # A current unit, or the question already asked once: answered.
-    assert main._obsolete_reply(r["family_options"][-1]["send"], ["sku_scs"], "rid", 0.0, "s2", []) is None
-    assert main._obsolete_reply("q", ["sku_scs"], "rid", 0.0, "s2", [{"q": "x", "a": r["answer"]}]) is None
+    assert main._obsolete_reply(r["family_options"][-1]["send"], ["sku_scs"], "rid", time.time(), "s2", []) is None
+    assert main._obsolete_reply("q", ["sku_scs"], "rid", time.time(), "s2", [{"q": "x", "a": r["answer"]}]) is None
     catalog.set_obsolete("sku_scs", None)
 
 
