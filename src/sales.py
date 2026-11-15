@@ -826,8 +826,25 @@ def _shared_differences(named: list[str], index: list[dict],
     # "spectral" and the recycler-capacity question got the temperature row.
     # Retrieval reads the manuals for it instead.
     terms = _asked(question, names_text + " " + " ".join(named))
+    # D-20261114-06: "running current on the NV9 Spectral at 12V vs the
+    # NV9USB+" answered the shared "Interface logic levels > Maximum Current
+    # Sink" row (50 mA) on the one word "current", with no search, while each
+    # manual's own Running row matched more of the ask; the tables are titled
+    # differently so they never paired. A shared row answers only when no
+    # single manual has a row matching more of the ask; otherwise retrieval
+    # reads both manuals. Own rows are deliberately not filtered by
+    # _is_spec_row (the NV9 Spectral's Running row is header-bleed and would
+    # be dropped). Ties keep the shared row.
     if terms:
-        return [(a, v) for a, v in documented if terms & _terms(a)]
+        hits = [(a, v) for a, v in documented if terms & _terms(a)]
+        if hits:
+            shared = max(len(terms & _terms(a)) for a, _ in hits)
+            own = max((len(terms & _terms((r.get("table") or "") + " " + r["attribute"]))
+                       for r in index if r["product"] in wanted
+                       and any(v and v != "---" for v in (r.get("values") or []))), default=0)
+            if own > shared:
+                return []
+        return hits
     # Open-ended: the rows they disagree on ARE the difference.
     return differing[:12]                 # a table nobody reads is not an answer
 

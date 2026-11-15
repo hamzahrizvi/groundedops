@@ -112,6 +112,44 @@ def test_a_document_titled_by_the_questions_code_gets_a_slot():
     assert main._codes("IF17 - Improved USB Stability") == {"if17"}
 
 
+def test_a_named_quantity_finds_its_limit_rows():
+    """D-20261114-06: a question that names a quantity but gives no value."""
+    import retrieval_db as R
+    u, w = R._named_quantity("what current does it pull when idle vs when its actually running")
+    assert u == {"a", "ma"} and w == {"current"}, (u, w)
+    bv30 = ("[BV30 — Power Requirements — Supply Currents]\nSupply Current: Maximum\n"
+            "Standby: 0.15A\nRunning: 0.54A\nPeak: 1.50A")
+    assert R._limit_row(bv30, u, w)
+    # a measured test table has the unit but no limit: not a spec row
+    assert not R._limit_row("Table 1: Average Current Comparison\n545187 | 0.19A | 0.18A", u, w)
+    u, w = R._named_quantity("will the device take username 'admin' or is there a minimum length?")
+    assert R._limit_row("Username | String | Must be a string of length <= 50 and >= 7", u, w)
+    assert not R._limit_row("Username | String | The new API username.", u, w)
+    for q in ("what's the current firmware version?", "need to size a psu", "how do I clear a jam?"):
+        assert R._named_quantity(q) == (set(), set()), q
+    # a value still works as before
+    assert R._limit_row("Supply Voltage (VDC) | Minimum | +21.6VDC", R._units("our 12v rail"), set())
+
+
+def test_a_comparison_searches_when_one_manual_matches_the_ask_better():
+    """D-20261114-06: the shared 50 mA sink row answered a running-current question."""
+    import sales
+    idx = [
+        {"product": "a", "source": "A.pdf", "page": 27, "table": "Interface logic levels",
+         "attribute": "Maximum Current Sink", "values": ["50mA per Output"]},
+        {"product": "b", "source": "B.pdf", "page": 15, "table": "Interface Logic Levels",
+         "attribute": "Maximum Current Sink", "values": ["50mA per Output"]},
+        {"product": "a", "source": "A.pdf", "page": 26, "table": "Supply currents",
+         "attribute": "Running", "values": ["12V", "2 A", "Running"]},
+        {"product": "b", "source": "B.pdf", "page": 14, "table": "B", "attribute": "Running", "values": ["1.0A"]},
+    ]
+    names = {"a": "Alpha", "b": "Beta"}
+    assert sales.compare("psu sizing, whats the running current on the Alpha at 12V vs the Beta?",
+                         idx, ["a", "b"], names) is None
+    out = sales.compare("whats the max current sink on the Alpha vs the Beta?", idx, ["a", "b"], names)
+    assert out and "50mA per Output" in out["answer"], out
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
