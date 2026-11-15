@@ -353,11 +353,55 @@ def _units(text: str) -> set:
     return {_UNIT_NORM.get(u.lower(), u.lower()) for _, u in _QTY.findall(text or "")}
 
 
+# D-20261114-06: the BV30 Supply Currents row was dense #1 but the
+# cross-encoder scored it 0.0002 and it was cut; a question that NAMES a
+# quantity ("what current does it pull") now gets that quantity's limit rows
+# too, as one that gives a value does.
+_NAMED_QTY = (
+    (re.compile(r"\b(?:current(?!\s+(?:firmware|version|software|settings?|config\w*|status|state|mode|model"
+                r"|date|time|user|page|screen|session|interface|protocol|dataset|location|position))"
+                r"|amps?|amperage)\b", re.I), {"a", "ma"}),
+    (re.compile(r"\b(?:voltage|volts?)\b", re.I), {"v"}),
+    (re.compile(r"\b(?:wattage|watts?|power\s+(?:consumption|draw|usage|rating))\b", re.I), {"w"}),
+    (re.compile(r"\b(?:weight|weighs?|heavy)\b", re.I), {"kg"}),
+    (re.compile(r"\b(?:dimensions?|(?<!to )size|length|width|height|depth)\b", re.I), {"mm", "cm"}),
+    (re.compile(r"\btemperatures?\b", re.I), {"°c"}),
+    (re.compile(r"\bfrequency\b", re.I), {"hz"}),
+)
+_BOUND = re.compile(r"<=|>=|≤|≥|\bmin(?:imum)?\b|\bmax(?:imum)?\b|\bat\s+least\b|\bup\s+to\b", re.I)
+
+
+def _named_quantity(query: str) -> tuple[set, set]:
+    """(units, words) of the quantities the question names without a value."""
+    units, words = set(), set()
+    for rx, us in _NAMED_QTY:
+        for m in rx.finditer(query or ""):
+            units |= us
+            words.add(m.group(0).lower())
+    return units, words
+
+
+def _limit_row(text: str, units: set, words: set) -> bool:
+    """A min/max/nominal row in one of `units`, or a line naming one of
+    `words` with a bound and a number ("length <= 50 and >= 7" has no unit)."""
+    if units & _units(text) and _LIMIT_WORD.search(text or ""):
+        return True
+    for line in (text or "").splitlines():
+        low = line.lower()
+        if (any(re.search(r"\b" + re.escape(w) + r"\b", low) for w in words)
+                and _BOUND.search(line) and re.search(r"\d", line)):
+            return True
+    return False
+
+
+
 def _quantity_ranking(query: str, collection, limit: int,
                       source_filter: str | None, scope: dict | None) -> list[str]:
     """In-scope chunk ids holding a min/max/nominal row in a unit the
-    question gives a value in, best dense rank first."""
-    units = _units(query)
+    question gives a value in or names, or a line naming the quantity with
+    a bound, best dense rank first."""
+    named, words = _named_quantity(query)
+    units = _units(query) | named
     if not units or limit <= 0:
         return []
     _, chunks = _get_bm25_index(collection)
@@ -366,7 +410,7 @@ def _quantity_ranking(query: str, collection, limit: int,
     for cid in _dense_ranking(query, collection, min(collection.count(), 400),
                               source_filter, scope):
         text = (by_id.get(cid) or {}).get("text") or ""
-        if _LIMIT_WORD.search(text) and units & _units(text):
+        if _limit_row(text, units, words):
             out.append(cid)
             if len(out) >= limit:
                 break
