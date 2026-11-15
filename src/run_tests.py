@@ -24,7 +24,8 @@ from pathlib import Path
 _SCRATCH = tempfile.mkdtemp(prefix="go-tests-")
 atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
 _SCRATCH_FILES = {"ENV_FILE_PATH": "test.env", "SECRETS_VAULT_PATH": "secrets.enc",
-                  "DOC_KINDS_PATH": "doc_kinds.json"}
+                  "DOC_KINDS_PATH": "doc_kinds.json",
+                  "LOG_FILE_PATH": "logs.jsonl"}
 for _name, _file in _SCRATCH_FILES.items():
     os.environ.setdefault(_name, os.path.join(_SCRATCH, _file))
 

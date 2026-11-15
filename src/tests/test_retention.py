@@ -29,6 +29,7 @@ os.environ.update({
 os.environ.pop("FAQ_GAP_VECTOR_CACHE", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(TMP)                     # logger writes logs.jsonl to the cwd
+os.environ.pop("LOG_FILE_PATH", None)   # keep the cwd default: the test reads logs.jsonl there
 
 import conversations   # noqa: E402
 import faq_store       # noqa: E402
