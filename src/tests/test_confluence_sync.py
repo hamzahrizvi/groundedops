@@ -6,6 +6,7 @@ is a temp file.
 """
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -172,6 +173,50 @@ def test_page_text_keeps_a_table_row_on_one_line():
                      '<ac:adf-fallback><p>Check the PSU.</p></ac:adf-fallback></ac:adf-extension>')
     assert "Supply Current | Maximum\nPeak | 1.50A at 12V\n" in t
     assert t.count("Check the PSU.") == 1 and "baad7fce" not in t and "note" not in t
+
+
+def _span(colour, text):
+    return f'<p><span style="background-color: rgb({colour});">{text}</span></p>'
+
+
+def _row(colour, *cells):
+    return "<tr>" + "".join(f"<td>{_span(colour, c)}</td>" for c in cells) + "</tr>"
+
+
+_GREEN, _ORANGE = "211,241,167", "254,222,200"
+_HEAD = ('<tr><td data-highlight-colour="#deebff"><h2>Country</h2></td>'
+         '<td data-highlight-colour="#deebff"><h2>Dataset</h2></td></tr>')
+
+
+def test_page_text_writes_a_rows_key_label_on_the_row():
+    # D-20261109-10 (the SMART Coin System dataset page's real markup): each
+    # row's cells sit on a colour and a key above the tables names the
+    # colours. The text kept neither, so a Pending Qualification dataset was
+    # answered "listed as released for customers" (KZT05, 3 of 3).
+    t = cs.page_text("Matrix", "<h1>Labeling</h1>" + _span(_GREEN, "Released for Customers")
+                     + _span(_ORANGE, "Pending Qualification (pre-release)")
+                     + "<table><tbody>" + _HEAD + _row(_GREEN, "Japan", "JPY01")
+                     + _row(_ORANGE, "Kazakhstan", "KZT05")
+                     + f"<tr><td>{_span(_GREEN, 'Mixed')}</td><td>{_span(_ORANGE, 'MIX01')}</td></tr>"
+                     + "</tbody></table>")
+    assert "\nCountry | Dataset\n" in t, t                     # its colour is not in the key
+    assert "\nJapan | JPY01 | Released for Customers\n" in t, t
+    assert "\nKazakhstan | KZT05 | Pending Qualification (pre-release)\n" in t, t
+    assert "\nMixed | MIX01\n" in t, t                          # two key colours: no guess
+    assert ("Colour key: Released for Customers\n"
+            "Colour key: Pending Qualification (pre-release)\n") in t, t
+
+
+def test_page_text_leaves_colours_without_a_key_alone():
+    # No key (the customer copy of that page colours every row green), one
+    # highlighted note (one colour is not a key), a key whose colours colour
+    # no table: the text is what the page gives with no colour at all.
+    table = "<table><tbody>" + _HEAD + _row(_GREEN, "Japan", "JPY01") + _row(_ORANGE, "Peru", "PEN10") + "</tbody></table>"
+    plain = "<table><tbody>" + _HEAD + "<tr><td>Japan</td><td>JPY01</td></tr></tbody></table>"
+    for html in (table, _span(_GREEN, "Check the PSU first.") + table,
+                 _span(_GREEN, "Released") + _span(_ORANGE, "Pending") + plain):
+        bare = re.sub(r' (?:style|data-highlight-colour)="[^"]*"', "", html)
+        assert cs.page_text("P", html) == cs.page_text("P", bare), html
 
 
 def test_page_text_keeps_where_links_point():

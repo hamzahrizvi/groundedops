@@ -870,7 +870,103 @@ def _clean_title(t: str, hosts: list[str]) -> str:
     return t if s == t else " ".join(s.split())
 
 
-class _Text(HTMLParser):
+_BG = re.compile(r"background(?:-color)?\s*:\s*([^;]+)", re.I)
+
+
+def _colour(attrs: dict) -> str | None:
+    """A tag's own background colour, spaces and case evened out: a style's
+    background-color (a span or cell) or a cell's data-highlight-colour."""
+    m = _BG.search(attrs.get("style") or "")
+    c = m.group(1) if m else attrs.get("data-highlight-colour")
+    return re.sub(r"\s+", "", c).lower() if c else None
+
+
+class _Colours(HTMLParser):
+    """Which background colour each piece of text is on. Subclasses read it
+    from handle_data with self.colour(). A tag closes everything opened
+    inside it, so an unclosed <br> cannot leave a colour on for the page."""
+
+    def __init__(self):
+        super().__init__()
+        self.open: list[tuple[str, str | None]] = []
+
+    def handle_starttag(self, tag, attrs):
+        self.open.append((tag, _colour(dict(attrs))))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.open) - 1, -1, -1):
+            if self.open[i][0] == tag:
+                del self.open[i:]
+                break
+
+    def colour(self) -> str | None:
+        return next((c for _, c in reversed(self.open) if c), None)
+
+
+class _Key(_Colours):
+    """A page's colour key (D-20261109-10): a line of its own outside any
+    table whose whole text sits on one background colour, as the SMART Coin
+    System dataset page prints "Released for Customers" on green and
+    "Pending Qualification (pre-release)" on orange above its tables.
+    key(): colour -> that text, only for colours that also colour table
+    text, and only when at least two colours qualify: one highlighted note
+    is not a key. A colour given two different texts means nothing."""
+
+    def __init__(self):
+        super().__init__()
+        self.table = self.skip = 0
+        self.line: list[tuple[str | None, str]] = []
+        self.lines: dict[str, set[str]] = {}
+        self.in_table: set[str] = set()
+
+    def _end_line(self):
+        text = " ".join("".join(t for _, t in self.line).split())
+        used = {c for c, t in self.line if t.strip()}
+        if text and len(text) <= 80 and len(used) == 1 and None not in used:
+            self.lines.setdefault(used.pop(), set()).add(text)
+        self.line = []
+
+    def handle_starttag(self, tag, attrs):
+        super().handle_starttag(tag, attrs)
+        if tag in _Text._SKIP:
+            self.skip += 1
+        elif tag == "table":
+            self.table += 1
+        if tag in _Text._BLOCK:
+            self._end_line()
+
+    def handle_endtag(self, tag):
+        super().handle_endtag(tag)
+        if tag in _Text._SKIP:
+            self.skip = max(0, self.skip - 1)
+        elif tag == "table":
+            self.table = max(0, self.table - 1)
+        if tag in _Text._BLOCK:
+            self._end_line()
+
+    def handle_data(self, data):
+        if self.skip:
+            return
+        if self.table:
+            if data.strip() and self.colour():
+                self.in_table.add(self.colour())
+        else:
+            self.line.append((self.colour(), data))
+
+    def key(self) -> dict[str, str]:
+        self._end_line()
+        key = {c: next(iter(t)) for c, t in self.lines.items()
+               if len(t) == 1 and c in self.in_table}
+        return key if len(key) >= 2 else {}
+
+
+def colour_key(storage_html: str) -> dict[str, str]:
+    k = _Key()
+    k.feed(storage_html or "")
+    return k.key()
+
+
+class _Text(_Colours):
     """Confluence storage format to plain text: paragraphs on consecutive
     lines, a blank line only at a heading or a table, tables fenced as the PDF
     parser fences them, a table row on one line with its cells split by " | "
@@ -891,6 +987,8 @@ class _Text(HTMLParser):
     def __init__(self, page_id: str = "", site: str = "", hosts=None):
         super().__init__()
         self.out, self.skip, self.cell, self.first = [], 0, 0, True
+        self.key: dict[str, str] = {}    # colour_key(): colour -> the page's label for it
+        self.row: set[str] = set()       # key colours the open table row's text sits on
         self.page_id, self.site = page_id, site
         self.hosts = link_hosts() if hosts is None else hosts
         self.links: list[list] = []      # open <a>/<ac:link>: [where its text starts, url, file name]
@@ -907,6 +1005,7 @@ class _Text(HTMLParser):
         return url if _host_ok(url, self.hosts) else ""
 
     def handle_starttag(self, tag, attrs):
+        super().handle_starttag(tag, attrs)
         a = dict(attrs)
         if tag == "ac:structured-macro":
             self.macros.append(a.get("ac:name") or "")
@@ -951,6 +1050,7 @@ class _Text(HTMLParser):
                 self.first = True
 
     def handle_endtag(self, tag):
+        super().handle_endtag(tag)
         if tag == "ac:structured-macro" and self.macros:
             self.macros.pop()
         elif tag == "ac:image":
@@ -970,7 +1070,15 @@ class _Text(HTMLParser):
         elif tag in ("td", "th"):
             self.cell = max(0, self.cell - 1)
         elif tag == "tr":
-            pass                        # the next row's <tr> breaks the line
+            # The next row's <tr> breaks the line. A row whose text sits on
+            # one colour of the page's key says that colour's label as its
+            # last cell: the colour alone never reaches the text
+            # (D-20261109-10). Two key colours in one row: no label. A row of
+            # a table inside a cell counts toward the row around it.
+            if not self.cell:
+                if len(self.row) == 1:
+                    self.out.append(f" | {self.key[self.row.pop()]}")
+                self.row = set()
         elif tag == "table" and not self.cell:
             self.out.append(f"\n{self.fence[1]}{_HARD}")
         elif tag in self._HEADINGS and not self.cell:
@@ -981,6 +1089,14 @@ class _Text(HTMLParser):
     def handle_data(self, data):
         if not self.skip:
             self.out.append(data)
+            c = self.colour() if self.key and data.strip() else None
+            if c in self.key:
+                if self.cell:
+                    self.row.add(c)
+                elif " ".join(data.split()) == self.key[c]:
+                    # The key's own line: said as a key, so its words no
+                    # longer read as a heading over the table below.
+                    self.out[-1] = f"Colour key: {self.key[c]}"
 
     def unknown_decl(self, data):       # code macros keep their body in CDATA
         if data.startswith("CDATA["):
@@ -991,6 +1107,7 @@ def page_text(title: str, storage_html: str, page_id: str = "", site: str = "", 
     """page_id and site make links to the page's attached files whole URLs;
     hosts: the link allowlist, default link_hosts()."""
     p = _Text(page_id, site, hosts)
+    p.key = colour_key(storage_html)
     p.feed(storage_html or "")
     body = re.sub(r"[ \t]+\n", "\n", "".join(p.out))
     body = "\n".join(re.sub(r"\s{2,}", " ", l).strip() if " | " in l else l
