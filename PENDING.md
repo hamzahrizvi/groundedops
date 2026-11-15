@@ -430,7 +430,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
 | D-20261109-10 | Security item D-20261109-10, details in the office | approved, queued | Dev builds it |
 | D-20261113-03 | Security item D-20261113-03, details in the office | approved, queued | Dev builds it |
-| D-20261113-09 | Security item D-20261113-09, details in the office | built, waiting for the check | the pre-ship check |
+| D-20261113-09 | Security item D-20261113-09, details in the office | ready to merge | merges once Security clears it |
 | D-20261114-06 | A supply-current question never gets the short spec page that answers it, so the bot quotes a figure from a nearby page | ready to merge | merges once Security clears it |
 | audit/D-20261106-05-cost | D-20261106-05: what describing the manuals' pictures costs (cost half; gain half waits) | proposed | the product owner triages it |
 | audit/D-20261112-16-wrong-vs-incomplete | D-20261112-16: how many "Wrong" answers are only incomplete? | proposed | the product owner triages it |
