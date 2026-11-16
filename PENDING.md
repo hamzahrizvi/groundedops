@@ -428,7 +428,7 @@ To change an item, tell the product owner or answer it on the office page; edits
 | Item | What | Stage | Next |
 |---|---|---|---|
 | D-20261008-07 | The manuals contradict each other; for the product team | waiting for CEO | your yes |
-| D-20261106-08 | Security item D-20261106-08, details in the office | approved, queued | Dev builds it |
+| D-20261106-08 | Security item D-20261106-08, details in the office | ready to merge | merges once Security clears it |
 | D-20261113-03 | Security item D-20261113-03, details in the office | approved, queued | Dev builds it |
 | D-20261114-05 | Where a long table is cut in two, the first row of the second half takes its name from the wrong row (47 wrong rows in 37 documents) | approved, queued | Dev builds it |
 | D-20261115-02 | The failure label says "found and cut" when the passage that holds the answer was never found, and the test tool answers from an empty index without a warning | approved, queued | Dev builds it |
