@@ -17,7 +17,7 @@ the prompt (decline, clarify, FAQ).
           saves every 25 questions; a crash or a question stuck past 300 s restarts the reading from --out by itself
   report  python -I page_reach.py report reading.json [--diff older.json] [--fault fault.json] > readout.md
   index   python -I page_reach.py index --out DIR --drop-pdfs PRODUCT   (a TEST copy; never the live one)
-  gold_reach / failure_cause: blind_eval's per-failure bucket (D-20261109-01), from the answer's trace.
+  gold_reach / failure_cause: blind_eval's per-failure bucket (D-20261109-01), from the answer's trace; passage_reach judges it per passage (D-20261115-02).
 
 `pages_now` on a case is today's page for it (preferred over `pages`, which stays as the run's grader reads it);
 `gold_gone` skips the case. Both are set in OPS runs/*/cases.json.
@@ -83,6 +83,60 @@ def failure_cause(reach, verdict):
     if reach == "no_gold": return "no_page"
     if reach == "prompt": return "found_and_declined" if verdict == "safe_decline" else "found_and_misread"
     return {"never": "never_found", "cut": "found_and_cut"}.get(reach, "unknown")
+
+
+QUOTED = re.compile(r"[\"\u201c\u2018']([^\"\u201d\u2019']{12,})[\"\u201d\u2019']")
+
+
+def answer_terms(case):
+    """D-20261115-02: what a passage must hold to hold the answer: the case's must_include values, else the quoted
+    spans of its reference; [] when the case gives nothing to match on."""
+    terms = [str(t).strip() for t in case.get("must_include") or [] if str(t).strip()]
+    return terms or [m.strip() for m in QUOTED.findall(case.get("reference") or "")]
+
+
+def _flat(s):
+    return re.sub(r"\s+", " ", re.sub(r"[\u2010-\u2015]", "-", s or "")).casefold()
+
+
+def holds(text, terms):
+    """Every term is in the text, any case or spacing, as a whole word or figure ("7" is not in "70")."""
+    t = _flat(text)
+    return bool(terms) and all(re.search(r"(?<!\w)" + re.escape(_flat(x)) + r"(?!\w)", t) for x in terms)
+
+
+def passage_reach(case, pipeline, in_index, sources, copy_of=None, renames=None, passages=None):
+    """(reach, level): gold_reach's reach judged per passage (D-20261115-02). passages = {"pages_retrieved":
+    [(source, page, text)], "pages_prompt": [...], "index": {(source, page): [text, ...]}}: the chunks this turn
+    handed the ranker and the prompt (blind_eval keeps them at pipeline_trace.add_pages, where the trace's pages
+    come from) and every chunk of each page in today's index. On a page stored as several passages, "found" means a
+    ranked passage holds the answer (answer_terms, holds) and "kept" that such a passage reached the prompt. A page
+    of one passage reads as the page. A page where no passage holds the terms, or a case with none, keeps the
+    page-level reading and level is "page"; so is every row without passages (old rows, the stream path)."""
+    r = gold_reach(case, pipeline, in_index, sources, copy_of, renames)
+    if passages is None or r not in ("prompt", "cut"):
+        return r, ("passage" if passages is not None and r == "never" else "page")
+    copy_of = copy_of or {}
+    meta = (pipeline or {}).get("meta") or {}
+    def pages(key): return {(copy_of.get(s, s), str(p)) for s, ps in (meta.get(key) or {}).items() for p in ps}
+    def chunks(key): return [((copy_of.get(s, s), str(p)), t) for s, p, t in passages.get(key) or []]
+    got_pg, kept_pg = pages("pages_retrieved"), pages("pages_prompt")
+    got, kept = chunks("pages_retrieved"), chunks("pages_prompt")
+    terms, level, missing, found = answer_terms(case), "passage", 0, True
+    for s, p in gold_pages(case):
+        g = (resolve_name(s, sources, renames, copy_of)[0], p)
+        texts = passages["index"].get(g) or []
+        here = [t for t in terms if any(holds(x, [t]) for x in texts)]   # the terms this page states
+        if len(texts) > 1 and here and any(holds(x, here) for x in texts):
+            is_kept = any(k == g and holds(x, here) for k, x in kept)
+            is_found = any(k == g and holds(x, here) for k, x in got)
+        else:
+            if len(texts) > 1: level = "page"
+            is_kept, is_found = g in kept_pg, g in got_pg
+        if not is_kept:
+            missing += 1; found = found and is_found
+    if not missing: return "prompt", level
+    return ("cut" if found else "never"), level
 
 
 def gold_pages(c):
