@@ -383,7 +383,37 @@ def _context_above(above: str | None):
     labels, data = got if got else (None, 1)
     body = rows[data:] or rows
     filled = _fill_down(body, len(rows[0]))
-    return len(rows[0]), labels, filled[-1]
+    return len(rows[0]), labels, (rows[:data] if rows[data:] else []) + filled
+
+
+def _norm(cs: list[str]) -> str:
+    return "|".join(" ".join(c.split()) for c in cs)
+
+
+def _fill_continuation(rows: list[list[str]], width: int,
+                       above_rows: list[list[str]]) -> list[list[str]]:
+    """Fill the rows a continuation chunk opens with, from the table that
+    ends the chunk above (`above_rows`, its merged cells already filled).
+
+    D-20261114-05: a chunk opens with an overlap, a replay of the last lines
+    of the chunk above, and its first line can be the cut tail of a row
+    ("| JPY | 1 Yen ... | JPY01", cut from "Japan | JPY | ..."). Filled from
+    the LAST row above, 47 rows in 37 documents took the wrong name
+    ("Malaysia | JPY"). So each replayed row takes its blank leading cells
+    from the row it replays; only the rows after the replay are filled
+    down from the last row above.
+    """
+    src: list[list[str]] = []
+    for j in range(len(above_rows)):
+        run = []
+        for r, a in zip(rows, above_rows[j:]):
+            if not (any(r) and _norm(a).endswith(_norm(r))):
+                break
+            run.append(a)
+        if run and len(run) >= len(src):
+            src = run
+    out = [_fill_down([r], len(a), above=a)[0] for r, a in zip(rows, src)]
+    return out + _fill_down(rows[len(src):], width, above=above_rows[-1])
 
 
 def spell_out(text: str, above: str | None = None) -> str:
@@ -448,9 +478,9 @@ def spell_out(text: str, above: str | None = None) -> str:
             elif bi == 0 and carried and len(header) == carried[0]:
                 # A continuation: the header and the merged cell's value
                 # are in the previous chunk.
-                width, labels, last = carried
+                width, labels, above_rows = carried
                 data = 0
-                filled = _fill_down(rows, width, above=last)
+                filled = _fill_continuation(rows, width, above_rows)
             else:
                 labels, data = None, 1
                 filled = _fill_down(rows, width) if header and header[0] else rows
@@ -483,7 +513,7 @@ def split_prefix(text: str) -> tuple[str, str]:
 
 
 def _table_tail(text: str) -> tuple[list[str] | None, list[str] | None]:
-    """(header cells, last row cells) of the LAST table in `text`."""
+    """(header cells, all rows filled) of the LAST table in `text`."""
     lines = split_prefix(text)[1].split("\n")
     blocks = _blocks(lines)
     if not blocks:
@@ -496,7 +526,7 @@ def _table_tail(text: str) -> tuple[list[str] | None, list[str] | None]:
         return None, None
     rows = [cells(l) for l in lines[s:e]]
     filled = _fill_down(rows, len(rows[0])) if rows[0] and rows[0][0] else rows
-    return rows[0], filled[-1]
+    return rows[0], filled
 
 
 def _starts_with_rows(body: str) -> bool:
@@ -523,7 +553,7 @@ def carry_table_context(texts: list[str], sections: list[str],
         prefix, body = split_prefix(texts[i])
         if not _starts_with_rows(body):
             continue
-        header, last = _table_tail(texts[i - 1])
+        header, above_rows = _table_tail(texts[i - 1])
         if not header:
             continue
         lines = body.split("\n")
@@ -533,7 +563,7 @@ def carry_table_context(texts: list[str], sections: list[str],
         if not any(abs(len(r) - width) <= 0 for r in rows[:3]):
             continue                      # a different table, not a continuation
         if rows[0] != header:
-            rows = [header] + _fill_down(rows, width, above=last)
+            rows = [header] + _fill_continuation(rows, width, above_rows)
         new_body = "\n".join(lines[:s] + [_join(r) for r in rows] + lines[e:])
         sec = sections[i - 1]
         if sec:

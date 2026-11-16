@@ -223,11 +223,18 @@ def chunk_text(text: str, size: int = 500, overlap: int = 50) -> list[str]:
 
             if overlap and chunks:
                 prev = chunks[-1]
-                # Try to cut the carried-forward overlap at a word boundary
-                # rather than mid-word.
+                # D-20261114-05: the overlap starts at a line start when its
+                # window holds a line break, so a chunk never opens in the
+                # middle of a table row (the cut row's blank first cell was
+                # then filled with another row's name). Else it is cut at a
+                # word boundary rather than mid-word.
                 overlap_text = prev[-overlap:].strip()
+                s = len(prev) - overlap
+                nl_idx = prev.find("\n", s - 1) if s > 0 else -1
                 space_idx = overlap_text.find(" ")
-                if space_idx > 0:
+                if nl_idx >= 0:
+                    overlap_text = prev[nl_idx + 1:].strip()
+                elif space_idx > 0:
                     overlap_text = overlap_text[space_idx + 1:]
 
                 if "\n" in unit:

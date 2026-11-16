@@ -40,3 +40,18 @@ def test_no_chunk_exceeds_size_drastically():
     chunks = chunk_text(text, size=100, overlap=10)
     for c in chunks:
         assert len(c) < 200  # generous upper bound, no runaway growth
+
+
+def test_overlap_starts_at_a_line_start():
+    """D-20261114-05: a chunk never opens in the middle of a table row."""
+    rows = [f"Country{i:02d} | CU{i:02d} | 1-5 | DS{i:02d}" for i in range(60)]
+    chunks = chunk_text("\n".join(rows), size=300, overlap=100)
+    assert len(chunks) >= 3
+    for c in chunks[1:]:
+        assert c.split("\n")[0] in rows, c.split("\n")[0]
+
+
+def test_overlap_without_a_line_break_still_cuts_at_a_word():
+    chunks = chunk_text("Alpha beta gamma. " * 60, size=300, overlap=50)
+    assert len(chunks) > 1
+    assert all(c.startswith(("Alpha", "beta", "gamma")) for c in chunks)
