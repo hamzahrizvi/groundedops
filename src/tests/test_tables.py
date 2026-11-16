@@ -339,6 +339,53 @@ def test_one_count_read_outs_are_idempotent():
         assert _readout(once, above) == once
 
 
+# D-20261114-05: chunk 14013 of "SMART Coin System Range Dataset & Type
+# Matrix" opened with the cut tail of the Japan row and was stored as
+# "Malaysia | JPY ... | JPY01".
+COIN_ABOVE = ("[SMART Coin System Range Dataset & Type Matrix]\n"
+              "Country | Currency | Coins | Dataset\n"
+              "Japan | JPY | 1 Yen, 5 Yen, 10 Yen, 50 Yen, 100 Yen, 500 Yen | JPY01\n"
+              "Malaysia | MYR | 10 Sen, 20 Sen, 50 Sen | MYR10")
+COIN_CONT = ("[SMART Coin System Range Dataset & Type Matrix]\n"
+             "| JPY | 1 Yen, 5 Yen, 10 Yen, 50 Yen, 100 Yen, 500 Yen | JPY01\n"
+             "Malaysia | MYR | 10 Sen, 20 Sen, 50 Sen | MYR10\n"
+             "Mexico | MXN | 1 Peso, 2 Peso | MXN01")
+
+
+def test_a_replayed_cut_row_keeps_its_own_name_at_ingest():
+    texts, secs = tables.carry_table_context(
+        [COIN_ABOVE, COIN_CONT], ["Datasets", ""], "M")
+    assert "Japan | JPY | 1 Yen" in texts[1]
+    assert "Malaysia | JPY" not in texts[1]
+    again, _ = tables.carry_table_context(texts, secs, "M")
+    assert again == texts
+
+
+def test_a_replayed_cut_row_keeps_its_own_name_at_answer_time():
+    out = tables.spell_out(COIN_CONT, above=COIN_ABOVE)
+    assert "Japan | JPY | 1 Yen" in out
+    assert "Malaysia | JPY" not in out
+    assert tables.spell_out(out, above=COIN_ABOVE) == out
+
+
+def test_replayed_merged_rows_keep_their_group_and_new_rows_fill_from_the_last():
+    above = "[D]\nRed | Blue | Error\n3 | 1 | A\n| 2 | B\n4 | 1 | C"
+    cont = "[D]\n| 2 | B\n4 | 1 | C\n| 2 | D"
+    out = tables.spell_out(cont, above=above)
+    assert "3 | 2 | B" in out and "4 | 2 | B" not in out
+    assert "4 | 2 | D" in out
+
+
+def test_a_replay_whose_last_row_has_a_heading_glued_on_still_matches():
+    """BV50 chunk 14712: the next heading is joined onto the last replayed row."""
+    above = ("[D]\nEvent | State | Code\nNote entered | Busy | 120\n"
+             "Note accepted | Ready | 121\n| Escrow | 2")
+    cont = "[D]\n| Busy | 120\nNote accepted | Ready | 121\n| Escrow | 2 Pin Table"
+    out = tables.spell_out(cont, above=above)
+    assert "Note entered | Busy | 120" in out
+    assert "Note accepted | Busy" not in out
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
