@@ -961,6 +961,10 @@ let view = "documents";
 let pendingAnswer = null;
 let cache = { catalog: null, sources: [], faq: [], gaps: [], providers: [],
               widget: null, leads: [], leadStats: {} };
+// True while /admin/sources is still in flight. It is the one slow read
+// (see refresh()), so the console is drawn without it and the pages that
+// count documents say "counting" rather than claiming there are none.
+let sourcesLoading = false;
 
 /* ---------------- startup state ---------------- */
 // The server warms six things at boot (see main.py's _WARMUP_STAGES) and
@@ -1394,11 +1398,29 @@ async function api(path, opts = {}) {
 /* ---------------- data ---------------- */
 async function refresh() {
   obsSuggest = null; loadObsSuggest();
+  // /admin/sources is the odd one out: it walks every chunk in the index
+  // and stats each document, which is ~14s once there are 12k chunks.
+  // Awaiting it with the rest held up the FIRST PAINT, so the console sat
+  // blank that whole time and read as a hung server. It is started here
+  // and awaited by nobody: when it lands it fills the cache and redraws.
+  // Everything below answers in well under a second.
+  sourcesLoading = true;
+  api("/admin/sources").catch(() => ({ sources: [] })).then(src => {
+    cache.sources = src.sources || src || [];
+    sourcesLoading = false;
+    // Redraw only when there is something to redraw INTO: on a small index
+    // this can land before the awaited reads below, and render() walks
+    // cache.catalog, which is still null until they finish. The caller's
+    // own render() then picks these rows up anyway.
+    // Never over a page the reader is part way through typing into either:
+    // those pages stage edits locally and a redraw would discard them.
+    if (tok && cache.catalog !== null
+        && !document.querySelector(".input:focus, [contenteditable]:focus")) render();
+  });
   // All independent reads — run them together rather than in series, so
   // opening the console is one round trip's worth of latency, not six.
-  const [cat, src, faq, gaps, widget, leads, prov, report, feedback] = await Promise.all([
+  const [cat, faq, gaps, widget, leads, prov, report, feedback] = await Promise.all([
     api("/catalog").catch(() => ({ categories: [] })),
-    api("/admin/sources").catch(() => ({ sources: [] })),
     api("/faq").catch(() => ({ faq: [] })),
     api("/faq/gaps").catch(() => ({ gaps: [], stats: {} })),
     api("/admin/widget/config").catch(() => null),
@@ -1409,7 +1431,6 @@ async function refresh() {
   ]);
   cache.feedback = feedback;
   cache.catalog = cat.categories || [];
-  cache.sources = src.sources || src || [];
   cache.faq = faq.faq || [];
   cache.gaps = gaps.gaps || [];
   cache.gapStats = gaps.stats || {};
@@ -5371,7 +5392,10 @@ function viewOverview() {
         "Documents are filed against a product, and the widget asks visitors to pick one. Nothing else works until at least one exists.",
         [goTo("catalog", "Add a product", true)]));
 
-  steps.push(cache.sources.length
+  steps.push(sourcesLoading
+    ? step("idle", "Counting the documents…",
+        "Reading the index. This step fills in on its own in a few seconds.", [])
+    : cache.sources.length
     ? step(un.length ? "todo" : "done",
         un.length ? un.length + " document" + (un.length === 1 ? "" : "s") + " need a product"
                   : cache.sources.length + " documents, all filed",
@@ -5411,8 +5435,9 @@ function viewOverview() {
         el("p", { class: "lede" }, "Everything the support widget knows comes from this console. Work down the list; anything needing attention is marked.")),
       ),
     el("div", { class: "readout", "data-tour": "ov-readout" },
-      stat("Documents", cache.sources.length, "", "documents",
-           cache.sources.length ? "Manage documents" : "Add the first one"),
+      stat("Documents", sourcesLoading ? "…" : cache.sources.length, "", "documents",
+           sourcesLoading ? "Counting…"
+             : cache.sources.length ? "Manage documents" : "Add the first one"),
       stat("Need filing", un.length, un.length ? "warn" : "", "documents",
            un.length ? "File them" : "All filed"),
       stat("Reviewed answers", ans.length, "", "faq",
@@ -6107,9 +6132,11 @@ function viewDocuments() {
         + " · " + docs.length + (docs.length === 1 ? " document" : " documents")),
       docs.map(docRow)))
     : [el("div", { class: "empty" },
-        el("b", {}, cache.sources.length ? "Nothing matches that filter"
-                                         : "No documents yet"),
-        cache.sources.length ? "Clear the filters to see the rest."
+        el("b", {}, sourcesLoading ? "Still counting the documents…"
+              : cache.sources.length ? "Nothing matches that filter"
+                                     : "No documents yet"),
+        sourcesLoading ? "This takes a few seconds on a large index. The list appears on its own."
+          : cache.sources.length ? "Clear the filters to see the rest."
           : "Add a manual or datasheet above and the widget can start answering from it.")];
 
   // After mount: range ticks and the bar follow a selection kept across a re-render.
