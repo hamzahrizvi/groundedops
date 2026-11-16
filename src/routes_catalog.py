@@ -20,12 +20,23 @@ router = APIRouter()
 
 
 @router.get("/catalog")
-def get_catalog():
+def get_catalog(x_admin_password: str | None = Header(default=None)):
     """Category -> product tree for the pre-chat picker (v10.3).
     v10.14: each product/category is annotated with doc_count (distinct
     ingested sources tagged to it) so the UI can block starting a chat
-    for a product that has no documents."""
+    for a product that has no documents.
+    Obsolete settings in full only to a console session (D-20261106-08)."""
     cat = catalog_mod.catalog()
+    # Without a console session (support or above), an obsolete tick shows
+    # its month only once the month has come; the console's Products tab
+    # sends its session and gets the full settings (D-20261106-08).
+    if not accounts.has_level(accounts.verify_session(x_admin_password), "support"):
+        for category in cat["categories"]:
+            for prod in category["products"]:
+                shown = catalog_mod.public_obsolete(prod)
+                prod.pop("obsolete", None)
+                prod.pop("obsolete_dismissed", None)
+                prod.update(shown)
     try:
         from docindex import doc_counts
         prod_counts, cat_counts = doc_counts()

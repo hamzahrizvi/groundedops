@@ -340,6 +340,18 @@ def _this_month() -> str:
     return datetime.date.today().strftime("%Y-%m")
 
 
+def obsolete_due(o: dict | None) -> bool:
+    """True once an obsolete tick's month has come (a later month is not yet)."""
+    return bool(o) and (o.get("date") or "9999") <= _this_month()
+
+
+def public_obsolete(p: dict) -> dict:
+    """What a caller without a session may see of a product's obsolete tick:
+    its month only, and only once that month has come (D-20261106-08)."""
+    o = p.get("obsolete")
+    return {"obsolete": {"date": o["date"]}} if obsolete_due(o) else {}
+
+
 def obsolete_of(product_key: str | None) -> dict | None:
     """The product's obsolete settings with its name, once its date has
     come; None for a current product or one obsolete only from a later date."""
@@ -347,7 +359,7 @@ def obsolete_of(product_key: str | None) -> dict | None:
         return None
     p = _product_by_key(_load(), product_key)
     o = (p or {}).get("obsolete")
-    if not o or (o.get("date") or "9999") > _this_month():
+    if not obsolete_due(o):
         return None
     return dict(o, key=product_key, name=p["name"])
 

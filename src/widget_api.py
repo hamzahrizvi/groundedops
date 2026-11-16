@@ -350,9 +350,9 @@ def widget_catalog():
     for c in (cat.get("categories") or []):
         prods = [{"key": p["key"], "name": p["name"],
                   "doc_count": prod_counts.get(p["key"], 0),
-                  # Its date only, for the picker's "(obsolete)" label.
-                  **({"obsolete": {"date": p["obsolete"].get("date", "")}}
-                     if p.get("obsolete") else {})}
+                  # Its date only, once its month has come, for the
+                  # picker's "(obsolete)" label (D-20261106-08).
+                  **catalog_mod.public_obsolete(p)}
                  for p in (c.get("products") or [])]
         # A range's shared-documents entry is a bucket, not something a
         # visitor owns (catalog.is_shared_product); its documents already

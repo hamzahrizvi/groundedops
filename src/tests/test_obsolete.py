@@ -21,6 +21,10 @@ with open(os.environ["CATALOG_CONFIG"], "w") as fh:
 
 import catalog  # noqa: E402
 import main  # noqa: E402
+import accounts  # noqa: E402
+import docindex  # noqa: E402
+import routes_catalog  # noqa: E402
+import widget_api  # noqa: E402
 
 
 def test_a_tick_blocks_from_its_date_and_is_checked():
@@ -184,6 +188,46 @@ def test_a_product_is_named_by_its_longest_form():
         assert main._products_named_in("smart hopper 3 power", ["sku_scs", "smart_hopper_3"]) ==             ["smart_hopper_3"]
     finally:
         main._product_names, main._product_aliases = real_names, real_aliases
+
+def _ticks():
+    catalog.set_obsolete("smart_hopper_3", {"date": "2025-12", "replacement": "SMART Hopper 4"})
+    catalog.set_obsolete("bv20", {"date": "2099-01", "replacement": "BV30"})   # not yet
+    catalog.dismiss_obsolete_suggestion("sku_scs", "2025-06")
+
+
+def _products(cat):
+    return {p["key"]: p for c in cat["categories"] for p in c["products"]}
+
+
+def test_the_widget_catalogue_shows_an_obsolete_month_only_once_it_has_come():
+    _ticks()
+    real = docindex.doc_counts
+    docindex.doc_counts = lambda: ({"smart_hopper_3": 1, "sku_scs": 1, "bv20": 1}, {"coin": 3})
+    try:
+        prods = _products(widget_api.widget_catalog())
+    finally:
+        docindex.doc_counts = real
+    assert prods["smart_hopper_3"]["obsolete"] == {"date": "2025-12"}, prods
+    assert "obsolete" not in prods["bv20"], prods
+    assert "obsolete_dismissed" not in prods["sku_scs"], prods
+
+
+def test_the_open_catalogue_hides_the_settings_without_a_session():
+    _ticks()
+    prods = _products(routes_catalog.get_catalog(x_admin_password=None))
+    assert prods["smart_hopper_3"]["obsolete"] == {"date": "2025-12"}, prods
+    assert "obsolete" not in prods["bv20"], prods
+    assert "obsolete_dismissed" not in prods["sku_scs"], prods
+    real = accounts.verify_session
+    for level, full in (("basic", False), ("support", True)):
+        accounts.verify_session = lambda t, level=level: {"level": level}
+        try:
+            prods = _products(routes_catalog.get_catalog(x_admin_password="tok"))
+        finally:
+            accounts.verify_session = real
+        assert ("block_answers" in prods["bv20"].get("obsolete", {})) is full, (level, prods)
+        assert (prods["sku_scs"].get("obsolete_dismissed") == "2025-06") is full, (level, prods)
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
