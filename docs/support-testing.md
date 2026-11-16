@@ -5,18 +5,22 @@ running on a test server on the company network so you can try it before
 customers do.
 
 **What we need from you:** ask it the questions customers actually ask you,
-and tell us where it gets things wrong. Section 4 is the part that matters.
+and tell us where it gets things wrong. Section 5 is the part that matters.
 
 ---
 
 ## 1. Getting an account
 
-Email **hrizvi@innovative-technology.com** and say which products you
-support. You will get a **Basic** account.
+Go to **http://10.10.15.170:8000/admin** and click **"Request one"** at the
+bottom of the sign-in box.
 
-Basic means the test chat and nothing else — you cannot change documents,
-answers or settings, even by accident. That is deliberate, not a limitation
-to work around.
+You choose your own email, name and password (at least 12 characters). A
+root user then approves it before you can sign in — you will not get in
+immediately.
+
+> **Ask for a Support-level account.** Say so in your request, or tell
+> Hamza. This matters — see the warning in section 3. A Basic account
+> cannot do the testing we need.
 
 ---
 
@@ -28,30 +32,65 @@ to be connected first.
 > If the page will not load at all, **check the VPN before anything else.**
 > That is almost always the reason.
 
-1. Open **http://10.10.15.170:8000/admin**
-2. Sign in with your work email and the password you were given
-3. **Change your password straight away** — "Change password", top right.
-   Minimum 12 characters.
+Open **http://10.10.15.170:8000/admin** and sign in.
 
 ---
 
-## 3. Testing it
+## 3. Always test as signed in — never as guest
 
-You land on one page: **Test chat**. It is the assistant exactly as a
-customer sees it.
+This is the single most important setting, and it is easy to miss.
 
-- Pick a product first
+The assistant behaves **completely differently** depending on whether it
+thinks it is talking to an anonymous website visitor or a signed-in
+customer:
+
+| | What it does |
+|---|---|
+| **Guest** | Only answers from a short list of pre-approved answers. For anything else it says *"I don't have a reviewed answer for that yet"* and offers to email support. **It does not read the manuals at all.** |
+| **Signed in** | Searches the full product documentation and answers from it. **This is what we need you to test.** |
+
+On the Test chat page there is a button at the top right of the chat that
+reads **"Viewing as guest"**. **Click it so it reads "Viewing as
+signed-in", then test.**
+
+> **If the assistant tells you to "sign in" or offers to email support, you
+> are still in guest mode.** Click the button and ask again. That is not a
+> bug and is not worth reporting.
+
+If you do not see that button at all, your account is Basic rather than
+Support — ask for it to be upgraded, because you cannot do useful testing
+without it.
+
+---
+
+## 4. Testing it
+
+The chat opens with a few options — *Speak to sales*, *Request technical
+support*, *Find a product*, *Get spare parts & accessories*.
+
+For product testing, choose **Request technical support**, then:
+
+1. Pick the **product range** — Coin Hoppers, Biometrics, Note Validator
+2. Pick the **specific model** — NV200, NV4000, BV50, NV201 Spectral and so
+   on, or **"Not sure — ask across the whole range"**
+3. Ask your question
+
+**Change** at the top of the chat switches product without starting over.
+
+Then:
+
 - Ask real questions, in the words customers use — not tidied-up versions
 - Follow-up questions work; carry the conversation on like a customer would
+- Try the awkward ones: the vague question, the wrong model number, the
+  question the manual answers badly
 
 **Give it a moment after a quiet spell.** The first question after the
-server has been idle, or just after an update, can come back asking you to
-clarify instead of answering. Ask again and it will be fine. That is not a
-bug worth reporting.
+server has been idle, or just after an update, can be slow or come back
+asking you to clarify. Ask again and it will be fine. Not worth reporting.
 
 ---
 
-## 4. Reporting problems — the important bit
+## 5. Reporting problems — the important bit
 
 When an answer is wrong, incomplete or odd:
 
@@ -66,9 +105,9 @@ screenshot anything, copy the chat, or write a summary of what you asked.
 
 | Good | Why |
 |---|---|
-| "Wrong — the XR500 runs on 24V, not 12V. It's on page 14 of the install manual." | Says what is wrong *and* where the right answer is |
-| "Didn't answer my question — it told me about the XR400 instead." | Names the actual failure |
-| "Right answer, but it left out the isolation warning." | Specific and checkable |
+| "Wrong — the NV4000 clears from the top cover, not the cash box. Install manual page 14." | Says what is wrong *and* where the right answer is |
+| "Didn't answer my question — it told me about the NV200 instead." | Names the actual failure |
+| "Right answer, but it left out the power-isolation step." | Specific and checkable |
 
 "Doesn't work" or "bad answer" cannot be acted on. One line of detail is
 enough.
@@ -86,17 +125,20 @@ for the weekly review.
 
 ---
 
-## 5. Worth reporting
+## 6. Worth reporting
 
 - Wrong facts: figures, part numbers, settings, procedures
-- Says it cannot find something that **is** in the manual
-- Answers about the wrong product
+- Says it cannot find something that **is** in the manual *(while signed
+  in — see section 3)*
+- Answers about the wrong product or model
 - Missing or wrong safety warnings ← urgent, see above
 - Tone that would embarrass us in front of a customer
 
-## 6. Not worth reporting
+## 7. Not worth reporting
 
-- A slow or clarifying first answer after an idle period (section 3)
+- A slow or clarifying first answer after an idle period (section 4)
+- The "I don't have a reviewed answer" deflection **in guest mode** — that
+  is the guest mode working as designed (section 3)
 - Refusing to answer something that genuinely is not in the manuals — that
   is correct behaviour, not a failure
 - Prices, stock levels, order status, lead times — it has no access to any
@@ -104,13 +146,15 @@ for the weekly review.
 
 ---
 
-## 7. If something is broken
+## 8. If something is broken
 
 | Problem | First thing to check |
 |---|---|
 | Page will not load | VPN connected? Then the address in section 2 |
+| Everything deflects to "email support" | You are in guest mode — section 3 |
+| No "Viewing as guest" button | Your account is Basic, not Support — section 1 |
 | Signed in but no chat appears | Reload the page |
-| "Sign in failed" | Password was changed, or the account is new and not set up yet — email Hamza |
+| "Sign in failed" | Your request may not be approved yet — ask Hamza |
 | Everything looks down | Email Hamza; the server may be mid-update |
 
 ---
