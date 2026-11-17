@@ -142,14 +142,14 @@ class judging:
 # The OpenAI-compatible endpoint, overridable. It was hardcoded at both call
 # sites, which meant the "openai" provider could only ever mean OpenAI's own
 # servers -- and an OpenAI-compatible gateway is how most on-prem model
-# hosting is exposed, ITL's LiteLLM included. Pointing this at one keeps every
+# hosting is exposed (a LiteLLM proxy, for one). Pointing this at one keeps every
 # customer question inside the building and off a metered API, with no other
 # change: same request shape, same auth header, same streaming format.
 #
-#   OPENAI_BASE_URL=http://ukman-hsp-litellm.local.innovative-technology.co.uk:4000/v1
+#   OPENAI_BASE_URL=http://litellm.internal.example:4000/v1
 #   OPENAI_API_KEY=<the gateway key -- set it on the API keys page>
 #   ONLINE_PROVIDER=openai
-#   ONLINE_OPENAI_MODEL=itl-gpt-pro
+#   ONLINE_OPENAI_MODEL=my-gateway-model
 #
 # Default unchanged, so an install that sets nothing still talks to OpenAI.
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")

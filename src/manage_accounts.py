@@ -7,12 +7,12 @@ or an install where nobody ever created the first account. That is what this
 is for. It edits accounts.json directly and needs no running server.
 
     python manage_accounts.py list
-    python manage_accounts.py create alice@innovative-technology.com --level support
-    python manage_accounts.py passwd alice@innovative-technology.com
-    python manage_accounts.py level alice@innovative-technology.com root
-    python manage_accounts.py enable alice@innovative-technology.com
-    python manage_accounts.py disable alice@innovative-technology.com
-    python manage_accounts.py delete alice@innovative-technology.com
+    python manage_accounts.py create alice@example.com --level support
+    python manage_accounts.py passwd alice@example.com
+    python manage_accounts.py level alice@example.com root
+    python manage_accounts.py enable alice@example.com
+    python manage_accounts.py disable alice@example.com
+    python manage_accounts.py delete alice@example.com
 
 Passwords are prompted for, never passed as arguments — an argument would
 land in shell history and in the process list.

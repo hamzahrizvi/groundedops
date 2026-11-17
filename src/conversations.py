@@ -14,7 +14,7 @@ Right now it trusts an X-User-Id header, which is NOT SECURE — anyone
 could impersonate any user by setting it. This is deliberate scaffolding
 so the storage + UI can be built and tested now. BEFORE this faces real
 customers, replace the body of resolve_user_id() with verification of
-the signed token issued by innovative-technology.com's auth system
+the signed token issued by the operator's auth system
 (verify signature -> extract user id). Until then, do not deploy this
 to a public endpoint. The security integration is tracked separately.
 """
