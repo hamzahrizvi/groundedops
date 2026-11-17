@@ -43,6 +43,12 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 LEGACY_DIR = os.getenv("LEGACY_SOURCE_DIR", "/data/source_files")
 MANIFEST_NAME = "manifest.json"
 _HASH_CACHE: dict[str, tuple[int, int, str]] = {}
+# The console's document list asks find(), ocr_state() and freshness() once
+# per document. Each used to re-list the store folder and re-parse the whole
+# manifest (~880 KB for 1,000 documents): ~20s per sign-in. Both are now
+# reused until the folder or the file changes.
+_LISTING_CACHE: dict[str, frozenset] = {}
+_MANIFEST_CACHE: dict = {}
 
 
 def store_dir() -> str:
@@ -115,10 +121,20 @@ def find(filename: str) -> str | None:
         # input -- CodeQL flagged it (py/path-injection) and the objection is
         # reasonable. Comparing names and returning a listdir entry means no
         # caller-supplied text ever reaches the filesystem path at all.
-        for entry in os.listdir(d):
-            if entry == base and os.path.isfile(os.path.join(d, entry)):
-                return os.path.join(d, entry)
+        # A cached listing can be stale either way: a hit is confirmed on disk,
+        # and anything short of a confirmed hit lists the folder afresh. (The
+        # folder's mtime is no use as a key: on Windows it lags a new file.)
+        for fresh in (False, True):
+            for entry in _listing(d, fresh):
+                if entry == base and os.path.isfile(os.path.join(d, entry)):
+                    return os.path.join(d, entry)
     return None
+
+
+def _listing(d: str, fresh: bool) -> frozenset:
+    if fresh or d not in _LISTING_CACHE:
+        _LISTING_CACHE[d] = frozenset(os.listdir(d))
+    return _LISTING_CACHE[d]
 
 
 def save(filename: str, content: bytes) -> str:
@@ -220,6 +236,22 @@ def load_manifest() -> dict:
     return data
 
 
+def _manifest_docs() -> dict:
+    """The manifest's documents for READING ONLY, reused while the file is
+    unchanged. Never modify what this returns; writers use load_manifest()."""
+    p = _manifest_path()
+    try:
+        st = os.stat(p)
+    except OSError:
+        return {}
+    # jsonstore.save writes a new file and swaps it in, so st_ino changes on
+    # every write even when mtime and size do not.
+    key = (p, st.st_ino, st.st_mtime_ns, st.st_size)
+    if _MANIFEST_CACHE.get("key") != key:
+        _MANIFEST_CACHE.update(key=key, docs=load_manifest()["documents"])
+    return _MANIFEST_CACHE["docs"]
+
+
 def record(filename: str, *, content: bytes | None = None,
            chunks: int | None = None, pages: int | None = None,
            settings: dict | None = None, ocr: dict | None = None) -> dict:
@@ -288,7 +320,7 @@ def ocr_state(filename: str) -> dict:
     {"candidates": [...], "done": [...], "pending": [...]} -- pending being
     the candidates not yet OCR'd, which is what the console offers.
     """
-    entry = load_manifest()["documents"].get(_safe_basename(filename)) or {}
+    entry = _manifest_docs().get(_safe_basename(filename)) or {}
     state = entry.get("ocr") or {}
     candidates = sorted({int(p) for p in state.get("candidates") or []})
     done = sorted({int(p) for p in state.get("done") or []})
@@ -299,7 +331,7 @@ def ocr_state(filename: str) -> dict:
 def freshness(filename: str, indexed_version: str | None = None) -> dict:
     """Describe whether a retained source, manifest and index still agree."""
     name = _safe_basename(filename)
-    entry = load_manifest()["documents"].get(name) or {}
+    entry = _manifest_docs().get(name) or {}
     path = find(name)
     reasons: list[str] = []
     actual_hash = None
