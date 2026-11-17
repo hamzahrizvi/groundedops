@@ -360,8 +360,15 @@ def needed(ops, lane, free=()):
     Lanes 2 and 3 exist for when a long job (a build, a check) holds a lane, so the
     rest of the work is not stuck behind it: they run only while another lane holds work, or when lane 1
     has not looked for work in LANE_ONE_LATE (the CEO, 2026-10-19: most of their wake-ups found nothing)."""
+    stamp = os.path.join(ops, "state", "lane-1-refreshed")
+    def refresh(why):   # hourly, and at once after the power button: the page draws the button from the last refresh
+        # (2026-11-17: no refresh after "off" left the page showing "Office on", so pressing it sent "off" again)
+        if lane != 1 or (time.time() - _mtime(stamp) < REFRESH and _mtime(os.path.join(ops, "state", "power")) <= _mtime(stamp)):
+            return False, why
+        open(stamp, "w").close()
+        return False, why + "; refresh due"
     if is_off(ops):   # red for every lane; lane 1's step 0 still reads the page first, so its power button turns it back on
-        return False, "the office is off"
+        return refresh("the office is off")
     held = claims(ops).values()
     if lane == 1:
         os.makedirs(os.path.join(ops, "state"), exist_ok=True)
@@ -370,11 +377,7 @@ def needed(ops, lane, free=()):
             return True, "lane 1 holds a leftover claim"
         if free:
             return True, f"work is free: {free[0]}"
-        stamp = os.path.join(ops, "state", "lane-1-refreshed")
-        if time.time() - _mtime(stamp) < REFRESH:
-            return False, "nothing to do"
-        open(stamp, "w").close()
-        return False, "nothing to do; refresh due"
+        return refresh("nothing to do")
     if any(c.get("lane") == lane for c in held):   # a leftover claim of this lane's last run: run, so take() drops it (else it blocks every lane until STALE)
         return True, f"lane {lane} holds a leftover claim"
     _, week, old = latest_usage(HISTORY, fallback=os.path.join(ops, "state", "usage.json"))   # HISTORY read now: the selftest swaps it
@@ -1024,8 +1027,11 @@ def selftest():
         w("state/claims/dev-D-1.json", json.dumps({"lane": 1, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 1 is busy") and needed(ops, 3)[0]
         assert needed(ops, 1) == (True, "lane 1 holds a leftover claim"), "lane 1 must run to drop its leftover claim"
-        w("state/office_off", "x\n")
+        w("state/office_off", "x\n"), w("state/lane-1-refreshed", "")
         assert needed(ops, 3) == needed(ops, 1, ["RUN  x"]) == (False, "the office is off"), "off: every lane stops at the check"
+        time.sleep(0.05), w("state/power", "")   # the power button was pressed after the last refresh
+        assert needed(ops, 1) == (False, "the office is off; refresh due"), "the page learns it is off at once"
+        assert needed(ops, 1) == needed(ops, 2) == (False, "the office is off"), "once, and only lane 1 refreshes"
         os.remove(os.path.join(ops, "state", "office_off"))
         w("state/claims/dev-D-2.json", json.dumps({"lane": 2, "at": "x", "line": "RUN dev"}))
         assert needed(ops, 2) == (True, "lane 2 holds a leftover claim"), "own leftover claim: lane must run to drop it"
@@ -1141,6 +1147,8 @@ def main():
         end_tick(a.ops, a.lane)
         want, path = lane_cron(a.lane, every(a.ops)), os.path.join(a.ops, "state", f"cron-{a.lane}")
         have = open(path, encoding="utf-8").read().strip() if os.path.exists(path) else ""
+        if want != have:   # recorded now: tried once per page change, so a schedule the CEO sets in the app is never fought
+            open(path, "w", encoding="utf-8").write(want)   # (2026-11-17: an app edit made every tick retry a refused update)
         return print(f"RELEASED lane {a.lane}" + (f"\nCRON {want}" if want != have else ""))
     if a.cron_set:   # the lane set its scheduled task to the CRON line --release printed
         return open(os.path.join(a.ops, "state", f"cron-{a.lane}"), "w", encoding="utf-8").write(lane_cron(a.lane, every(a.ops)))

@@ -93,6 +93,7 @@ def apply(ops, folder, now=None):
                 open(path, "w", encoding="utf-8").write(f"{stamp} {doc_id}\n")
             elif os.path.exists(path):
                 os.remove(path)
+            open(os.path.join(ops, "state", "power"), "w").close()   # office_next.needed: the page is refreshed at once
             out.append(f"APPLIED {doc_id} {choice}")
             continue
         if choice == "mo" and str(d.get("note") or "") in ("call", "home"):   # the page's Call Mo / Send Mo home (office_next.sweep)
