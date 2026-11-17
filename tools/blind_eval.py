@@ -46,7 +46,7 @@ Env:
            "lab stopped at the cap": answers so far are saved, a re-mark keeps its old grades.
   reset    drops every sys_* answer, the grades and the summary but keeps the
            baseline answers, so a copied run dir re-measures new code cheaply.
-  grade    also labels each sys_* answer under 3 with "cause" (never_found, found_and_cut, found_and_misread, found_and_declined, unknown; "no_page" for a case naming no page) from row.reach, which the system phase sets from the trace's pages (page_reach.gold_reach); summary.<sys_*>.causes and .by_type_cause count them (D-20261109-01). The stream path carries no trace: its failures are "unknown".
+  grade    also labels each sys_* answer under 3 with "cause" (never_found, found_and_cut, found_and_misread, found_and_declined, unknown; "no_page" for a case naming no page) from row.reach, which the system phase sets from the trace's pages (page_reach.gold_reach); summary.<sys_*>.causes and .by_type_cause count them (D-20261109-01). The stream path carries no trace: its failures are "unknown". Each cause also gets "cause_level": "passage" when judged on the passages that hold the answer (must_include, else quoted reference), "page" when only the page could be judged (D-20261115-02). A system phase on an index with no passages stops before asking anything.
   grade    shows the grader the full text of each case's cited pages (manuals/, capped at 30000 chars),
            plus the pages of the case's own manual(s) an answer copies 3+ eight-word runs from (2 per
            answer, 12000 chars, D-20261019-05), and stores the blind A/B labels per case.
@@ -64,7 +64,7 @@ from functools import lru_cache
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/, also when run via runpy
 from lab_lock import lab_lock
 from market_compare import under, clamp_refusal
-from page_reach import gold_reach, failure_cause, RENAMES
+from page_reach import passage_reach, failure_cause, RENAMES
 
 if "--repeats" in sys.argv:   # the parent only loops; each repeat is its own process (PERFORMANCE_MODE, torch)
     _i = sys.argv.index("--repeats"); _n = int(sys.argv[_i + 1]); _argv = sys.argv[1:_i] + sys.argv[_i + 2:]
@@ -200,6 +200,15 @@ if phase in ("system", "baseline"):
     import main, llm, logger
     logger.LOG_FILE = os.path.join(RUN, "app_logs.jsonl")
     main.capability = lambda *_a, **_k: True
+    if phase == "system":   # D-20261115-02: an index with no passages rejects every question at 0 s and warns of nothing
+        try:
+            import db
+        except ModuleNotFoundError as e:   # the stub src of the office's tools/test_*.py has no db
+            if e.name != "db": raise
+            db = None
+        if db is not None and (not os.path.isdir(db.CHROMA_DIR) or db.get_collection().count() == 0):
+            sys.exit(f"blind_eval: the index at {os.path.abspath(db.CHROMA_DIR)} holds no passages; nothing asked. "
+                     f"Point GO_DATA at a src/ with its chroma_db (REPO/src). GO_CODE={CODE}")
 import requests
 
 def chat(model, messages, effort=None, timeout=300):
@@ -273,6 +282,23 @@ if phase == "system":
     else:
         def ask(q, product, sid):
             return main._traced_query(main.QueryRequest(q=q, product=product, session_id=sid), None, attach=True)
+    _seen = {"pages_retrieved": [], "pages_prompt": []}   # D-20261115-02: this turn's chunks with their text
+    try:
+        import pipeline_trace as _pt
+    except ModuleNotFoundError as e:   # stub src in tools/test_*.py
+        if e.name != "pipeline_trace": raise
+        _pt = None
+    if _pt:
+        _add = _pt.add_pages
+        def _add_pages(key, chunks):
+            if key in _seen:
+                _seen[key].extend((c.get("source"), str(c.get("page")), c.get("text") or "") for c in chunks or [])
+            return _add(key, chunks)
+        _pt.add_pages = _add_pages
+    _ask = ask
+    def ask(q, product, sid):
+        for v in _seen.values(): v.clear()
+        return _ask(q, product, sid)
     names = main._product_names()
     def norm(s): return re.sub(r"[^a-z0-9]", "", (s or "").lower())
     r1 = json.load(open(R1, encoding="utf-8")) if ADAPT and REPEAT > 1 and os.path.exists(R1) else {}
@@ -280,16 +306,22 @@ if phase == "system":
     done = (right(json.load(open(src, encoding="utf-8")), arm) if r1 else set()) & set(r1.get(f"sys_{mode}", {}))
     _idx = []
     def reach(c, d):
-        """D-20261109-01: where the case's answer pages went on this turn (page_reach.gold_reach); never stops a run."""
+        """D-20261109-01 / D-20261115-02: (reach, level) of the case's answer pages on this turn
+        (page_reach.passage_reach); never stops a run."""
         try:
             if not _idx:
                 import db, retrieval_db
-                meta = db.get_collection().get(include=["metadatas"])["metadatas"]
-                _idx[:] = [{(m.get("source"), str(m.get("page"))) for m in meta}, {m.get("source") for m in meta},
-                           retrieval_db.copies_of(), json.load(open(RENAMES, encoding="utf-8")) if os.path.exists(RENAMES) else {}]
-            return gold_reach(c, d.get("pipeline"), *_idx)
+                got = db.get_collection().get(include=["metadatas", "documents"])
+                meta, copy_of = got["metadatas"], retrieval_db.copies_of()
+                texts = {}
+                for m, doc in zip(meta, got["documents"]):
+                    texts.setdefault((copy_of.get(m.get("source"), m.get("source")), str(m.get("page"))), []).append(doc or "")
+                _idx[:] = [{(m.get("source"), str(m.get("page"))) for m in meta}, {m.get("source") for m in meta}, copy_of,
+                           json.load(open(RENAMES, encoding="utf-8")) if os.path.exists(RENAMES) else {}, texts]
+            psg = {**{k: list(v) for k, v in _seen.items()}, "index": _idx[4]} if _pt else None
+            return passage_reach(c, d.get("pipeline"), *_idx[:4], passages=psg)
         except Exception as e:
-            return f"error: {type(e).__name__}: {e}"[:120]
+            return f"error: {type(e).__name__}: {e}"[:120], "page"
     for c in cases:
         if c["id"] in rows: continue
         if c["id"] in done:   # ADAPTIVE: right first time, so this repeat is the same answer at no cost
@@ -317,7 +349,7 @@ if phase == "system":
                          "completion_tokens": sum(u.get("completion_tokens", 0) for u in usage),
                          "flagged": d.get("flagged"), "role": d.get("role"), "model": d.get("model"),
                          "pipeline": d.get("pipeline"),   # where the answer went (pipeline_trace), for the office review
-                         "reach": reach(c, d),   # D-20261109-01: prompt | cut | never | stale | no_gold | no_trace
+                         "reach": (_rl := reach(c, d))[0], "reach_level": _rl[1],   # D-20261109-01: prompt | cut | never | stale | no_gold | no_trace; level passage | page (D-20261115-02)
                          "sources": {(s.get("source") if isinstance(s, dict) else str(s)): (s.get("pages") if isinstance(s, dict) else None) or [] for s in d.get("sources") or []},   # cited manual -> pages (D-20261017-11)
                          "figures": {s["source"]: [f.get("name") for f in s.get("figures") or []] for s in d.get("sources") or []
                                      if isinstance(s, dict) and s.get("figures")},   # pictures shown beside the answer (D-20261022-14)
@@ -511,7 +543,7 @@ Reply with JSON only: {{{shape}, "best": {best}, "why": "<one sentence>"}}"""
             bad = [c for c in ok if grades[c["id"]][s]["score"] < 3]
             for c in bad:
                 g = grades[c["id"]][s]
-                grades[c["id"]][s] = {**g, "cause": failure_cause(state[s][c["id"]].get("reach"), g.get("verdict"))}
+                grades[c["id"]][s] = {**g, "cause": failure_cause(state[s][c["id"]].get("reach"), g.get("verdict")), "cause_level": state[s][c["id"]].get("reach_level", "page")}
             summary[s]["causes"] = dict(Counter(grades[c["id"]][s]["cause"] for c in bad))
             summary[s]["by_type_cause"] = {t: dict(Counter(grades[c["id"]][s]["cause"] for c in bad if c["type"] == t))
                                            for t in sorted({c["type"] for c in bad})}
