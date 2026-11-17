@@ -3,7 +3,9 @@
 How work gets from the office to the chatbot support staff and customers
 actually use. Set by the CEO, 2026-11-13.
 
-The server is `10.10.15.170` (see [linux-server.md](linux-server.md)). It
+The server's address is deliberately not recorded in this repo, which is
+public — ask the CEO for it. How it was built is in
+[linux-server.md](linux-server.md). It
 runs whatever is on `experimental/v17.3` **on GitHub** — pushing is what
 makes a change releasable, and nothing reaches the server until someone runs
 the update.

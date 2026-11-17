@@ -16,7 +16,7 @@ committing them.
 ## For the PO: weekly releases to the server
 
 **New, from the CEO, 2026-11-13.** GroundedOps now runs on a Linux server
-on the company network (`10.10.15.170`), which is what support staff test
+on the company network, which is what support staff test
 against and what customers will eventually reach. That makes "what is on
 the server" a thing with its own version, separate from what is on a
 branch. The full process is in `docs/release-process.md` (on branch

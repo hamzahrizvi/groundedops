@@ -14,7 +14,8 @@ as a Claude doc — ask Hamza for the link.
 
 You request your own account — nobody has to create one for you.
 
-1. Go to **http://10.10.15.170:8000/admin**
+1. Go to the console address — Hamza sends it on Teams; it is not written
+   down in the repo
 2. Click **Request one** at the bottom of the sign-in box
 3. Choose your email, name and a password of at least 12 characters
 4. Click **Send request**
@@ -35,7 +36,7 @@ we actually need.
 
 ## 2. Getting in
 
-The address is **http://10.10.15.170:8000/admin**.
+The address is the one Hamza sent you on Teams. It ends in **:8000/admin**.
 
 ![The GroundedOps sign-in box](img/support/signin.jpg)
 
