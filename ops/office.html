@@ -1115,8 +1115,12 @@ const METRICS = {
 };
 /* the CEO reviews one group's questions in one run: the bot's answer, the grade, a comment for the product owner */
 /* pick/title: a headline tile's own selection (all, fully right, wrong, said not found) instead of one pivot group */
-function openReview(g, run, pick, title){
-  const P = live.pivot || SAMPLE_PIVOT, cases = (((P.cases || {})[run]) || []).filter(pick || (c => c[pv.dim] === g));
+/* each run's answers, grader reasons and traces live in their own doc, answers/<run> (tools/ops_pivot.py --answers):
+   one 80-question run with them is ~180 KB and a doc caps at 256 KB. Read once per run; a missing doc is asked again next time. */
+const ANSWERS = {};
+async function openReview(g, run, pick, title){
+  if(live.db && !ANSWERS[run]) try { const s = await live.db.doc("answers/" + run).get(); if(s.exists) ANSWERS[run] = s.data().cases || {}; } catch(e) {}
+  const P = live.pivot || SAMPLE_PIVOT, A = ANSWERS[run] || {}, cases = (((P.cases || {})[run]) || []).filter(pick || (c => c[pv.dim] === g)).map(c => ({...c, ...A[c.id]}));
   const nodes = [el("p", "small", `${cases.length} questions in ${runLabel(run)}, weakest first. Comments go to the product owner's next triage as your note.`)];
   if(!cases.length) nodes.push(el("p", "empty", g === "picture" && !pick ? "Picture questions stay hidden so Dev cannot fit fixes to them; only their counts come here."
     : "The questions behind these figures appear once the live figures are in."));

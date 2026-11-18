@@ -1,6 +1,7 @@
 """Product status pivot: how the bot does by question category, type and product, run by run.
 
   python tools/ops_pivot.py [--ops C:/Users/hrizvi/groundedops-ops] [--repo <REPO>] > pivot.json
+  python tools/ops_pivot.py --answers <STAMP> [--ops <OPS>] > answers.json
   python tools/ops_pivot.py --export-real <RUN> --src <REPO>/src [--days 7]
   python tools/ops_pivot.py --prune [--ops <OPS>]
   python tools/ops_pivot.py --selftest
@@ -11,7 +12,9 @@ real_categorised.json for the website questions), and writes per-run
 aggregates the office page pivots, plus `trend`: the difficulty-adjusted score per
 run with its noise band, the product fixes merged between runs (from REPO's git
 merges and their gate.json) and a plain verdict on whether the product got
-better. The doc is fitted to BUDGET bytes as the page counts them: the oldest full run is slimmed, then the oldest run's questions dropped; still over -> error. A run answered more than once (blind_eval.py --repeats: cases_state.r2.json ...,
+better. The doc is fitted to BUDGET bytes as the page counts them: the oldest run's questions are dropped; still over -> error.
+The review's answers, grader reasons and traces go in a doc of their own per run (--answers RUN -> the page's
+"answers/<RUN>"), since one 80-question run with them is ~180 KB and the page's doc limit is 256 KB. A run answered more than once (blind_eval.py --repeats: cases_state.r2.json ...,
 D-20261018-02) reads each question's mean mark over its repeats ("bot", "bot_n" repeats) and calls it
 "wrong" only when most repeats were; every aggregate cell carries a 90% interval for bot_pct
 (bot_lo/bot_hi). Export: writes RUN/real_counts.json, the week's website-widget
@@ -38,7 +41,6 @@ from retrofit_gate import repeat_paths   # noqa: E402  one naming rule for a run
 DIMS = ("category", "type", "product")
 RIGHT = ("correct", "correct_refusal", "clarified")   # the page's Right tab; its Wrong tab is verdict "wrong"
 REVIEW_RUNS = 8      # the page shows the last 8 runs' columns; each cell opens its questions
-FULL_RUNS = 2        # at most this many newest runs keep answers and traces; fit() slims more when the doc is over BUDGET
 SLIM = ("id", "q", "product", "type", "category", "bot", "base", "verdict")
 BUDGET = 250_000     # bytes as the page's db counts them (compact UTF-8 JSON); its hard limit is 262,144 (D-20261113-01)
 KEEP_RUNS = 12       # ponytail: the page shows the last 12 runs; ops/runs keeps every run
@@ -309,19 +311,29 @@ def sent_size(o):
 
 
 def fit(p, budget=None):
-    """D-20261113-01: trim the review's cases until the doc fits the page: slim the oldest full run,
-    then drop the oldest run; still over with no cases left -> ValueError naming the size, before any upload."""
+    """D-20261113-01: drop the oldest run's review cases until the doc fits the page;
+    still over with no cases left -> ValueError naming the size, before any upload."""
     budget = budget or BUDGET
     cases = p["cases"]   # oldest run first
     while (n := sent_size(p)) > budget:
-        full = [r for r, cs in cases.items() if cs and "answer" in cs[0]]
-        if full:
-            cases[full[0]] = [{f: c.get(f) for f in SLIM} for c in cases[full[0]]]
-        elif cases:
-            del cases[next(iter(cases))]
-        else:
+        if not cases:
             raise ValueError(f"pivot is {n} bytes as sent, over the {budget}-byte budget with no review cases left")
+        del cases[next(iter(cases))]
     return p
+
+
+def answers(run_dir, budget=None):
+    """One run's review detail for the page's "answers/<run>" doc, keyed by question id. Over the budget,
+    the right answers give theirs up first, then the best-marked of the rest (the CEO reviews the misses)."""
+    budget = budget or BUDGET
+    rows = sorted(review(run_dir), key=lambda c: (c["verdict"] not in RIGHT, -c["bot"]))   # first to go first
+    doc = {"run": os.path.basename(os.path.normpath(run_dir)),
+           "cases": {c["id"]: {k: c[k] for k in ("answer", "base_answer", "why", "trace")} for c in rows}}
+    for c in rows:
+        if sent_size(doc) <= budget:
+            break
+        del doc["cases"][c["id"]]
+    return doc
 
 
 def build(ops, repo=None):
@@ -358,8 +370,7 @@ def build(ops, repo=None):
             "runs": names, "categories": _load(cats) if os.path.exists(cats) else {},
             "overall": overall, "blind": {k: dict(v) for k, v in blind.items()}, "real": real,
             "trend": trend(by_run, ends, merged_fixes(repo, ops) if repo else []),
-            "cases": {n: review(d) if k >= len(recent) - FULL_RUNS else [{f: c.get(f) for f in SLIM} for c in review(d)]
-                      for k, (d, n) in enumerate(recent)},
+            "cases": {n: [{f: c.get(f) for f in SLIM} for c in review(d)] for d, n in recent},   # answers: --answers
             "latest": {"run": names[-1] if names else None,
                        "cases": [dict(f, q=f["q"][:160]) for f in latest]}})
 
@@ -651,24 +662,27 @@ def _selftest():
         open(os.path.join(d, "DONE"), "w").close()
     saved_budget = BUDGET
     try:
-        p0 = build(ops3)                                            # fits: the newest two runs keep their answers
-        assert [("answer" in cs[0]) for cs in p0["cases"].values()] == [False, True, True], p0["cases"]
-        BUDGET = sent_size(p0) - 1                                  # one byte over: the oldest full run is slimmed
+        p0 = build(ops3)                                            # the review is slim: answers go in their own doc
+        assert list(p0["cases"]) == ["20261020", "20261027", "20261103"] and not any("answer" in cs[0] for cs in p0["cases"].values())
+        BUDGET = sent_size(p0) - 1                                  # one byte over: the oldest run's questions go
         p1 = build(ops3)
-        assert sent_size(p1) <= BUDGET, sent_size(p1)
-        assert list(p1["cases"]) == ["20261020", "20261027", "20261103"]
-        assert [("answer" in cs[0]) for cs in p1["cases"].values()] == [False, False, True], p1["cases"]
+        assert sent_size(p1) <= BUDGET and list(p1["cases"]) == ["20261027", "20261103"], list(p1["cases"])
     finally:
         BUDGET = saved_budget
-    slim = [{f: c.get(f) for f in SLIM} for c in p1["cases"]["20261103"]]
-    room = sent_size(dict(p1, cases={"20261103": slim}))            # room for the newest run, slimmed, and nothing else
-    p2 = fit(json.loads(json.dumps(p1)), room)
-    assert list(p2["cases"]) == ["20261103"] and "answer" not in p2["cases"]["20261103"][0], p2["cases"]
     try:
         fit(json.loads(json.dumps(p1)), sent_size(dict(p1, cases={})) - 1)
         raise AssertionError("an impossible budget must stop the build")
     except ValueError as e:
         assert "bytes as sent" in str(e), e
+    # the answers doc: every question by id; over the budget the right ones give theirs up first
+    run = os.path.join(ops3, "runs", "20261103")
+    st = _load(os.path.join(run, "cases_state.json"))
+    st["grades"]["C-7"]["sys_normal"] = {"score": 0, "verdict": "wrong"}
+    json.dump(st, open(os.path.join(run, "cases_state.json"), "w"))
+    a = answers(run)
+    assert a["run"] == "20261103" and len(a["cases"]) == 20 and a["cases"]["C-7"]["answer"] == "x" * 600, a["run"]
+    small = answers(run, sent_size(dict(a, cases={})) + 1000)
+    assert "C-7" in small["cases"] and 0 < len(small["cases"]) < 20, len(small["cases"])
     print("selftest ok")
 
 
@@ -682,13 +696,16 @@ if __name__ == "__main__":
     ap.add_argument("--src")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--prune", action="store_true", help="delete visitor text from runs older than RETENTION_DAYS")
+    ap.add_argument("--answers", metavar="RUN", help="print RUN's answers doc for the page's answers/<RUN>")
     o = ap.parse_args()
     if o.prune:
         days = retention_days(o.repo)
         gone = prune_runs(o.ops, days)
         print(len(gone), "visitor-text files deleted or trimmed (older than", days, "days)")
         sys.exit(0)
-    if o.export_real:
+    if o.answers:
+        json.dump(answers(os.path.join(o.ops, "runs", o.answers)), sys.stdout, indent=1)
+    elif o.export_real:
         export_real(o.export_real, o.src, o.days)
     else:
         json.dump(build(o.ops, o.repo), sys.stdout, indent=1)   # ASCII escapes: the dispatcher redirects stdout on a cp1252 console
