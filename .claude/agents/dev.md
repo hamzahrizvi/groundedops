@@ -29,6 +29,13 @@ Always, in every phase:
   guessing when the work needs credentials, an outside service, a reindex,
   an .exe rebuild, or a decision that belongs to the CEO, or when a test
   still fails after two tries. Never push, merge, tag or publish a release.
+- The Linux server (10.10.15.170) is the one exception to "a reindex": its
+  root jobs go through `groundedops-office` only (OFFICE/ops/server/README.md),
+  over `ssh hamzahrizvi@10.10.15.170 'sudo -n /usr/local/sbin/groundedops-office <status|reindex|export-index>'`.
+  `status` needs no approval. `reindex` and `export-index` stop the service,
+  so run them only for a work order the CEO approved. Never use any other sudo
+  command, and never type a password. If `sudo -n` asks for one, the rule is
+  not installed: hand back BLOCKED.
 - Never end your turn while a job you started is still running: you are a
   subagent, so ending your turn ends your run and your results are lost (on
   2026-10-08 round 3 of D-20261008-01 handed back with nothing measured that

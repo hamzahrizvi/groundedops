@@ -1,0 +1,163 @@
+#!/bin/bash
+# groundedops-office: the few root jobs the office may run on the Linux server.
+#
+# Installed root-owned at /usr/local/sbin/groundedops-office; the sudoers rule
+# (ops/server/README.md) lets the office's login run exactly these three forms
+# with no password, and nothing else:
+#
+#   status        read-only: release, code has the fix, service, versions,
+#                 index counts, and a checksum of every document (for comparing
+#                 with Windows before copying an index across)
+#   reindex       backup, stop, reindex.py, per-document check (restores the
+#                 backup on any loss), start, wait for /health?deep=1
+#   export-index  stop, tar the index, start; prints where the tarball is
+#
+# Root itself only runs systemctl, cp, tar, chown and curl. Every Python and
+# git command runs as the service user, so nothing the service user can edit
+# ever runs as root.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 027
+
+SVC=groundedops
+BASE=/srv/groundedops
+APP=$BASE/app
+SRC=$APP/src
+PY=$APP/.venv/bin/python
+HF=$BASE/hf-cache
+INDEX=$SRC/chroma_db
+PORT=8000
+FIX=2a73b32            # D-20261114-05: the table-row fix the re-index must run with
+
+[ "$(id -u)" = 0 ] || { echo "run with sudo"; exit 2; }
+cd "$BASE"
+as_svc() { sudo -u "$SVC" -H env HF_HOME="$HF" HF_HUB_OFFLINE=1 "$@"; }
+
+# Per-source chunk and figure_text counts, read-only from the index's sqlite.
+counts() {
+  as_svc "$PY" - "$INDEX/chroma.sqlite3" <<'PY'
+import sqlite3, sys
+con = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+src = dict(con.execute("select id, string_value from embedding_metadata where key='source'"))
+fig = {i for (i,) in con.execute("select id from embedding_metadata where key='figure_text'")}
+out = {}
+for i, s in src.items():
+    c = out.setdefault(s, [0, 0]); c[0] += 1; c[1] += i in fig
+for s in sorted(out):
+    print(f"{s}\t{out[s][0]}\t{out[s][1]}")
+PY
+}
+
+wait_ready() {
+  for _ in $(seq 60); do
+    curl -fsS -o /dev/null --max-time 10 "http://127.0.0.1:$PORT/health?deep=1" && return 0
+    sleep 5
+  done
+  return 1
+}
+
+bytes() { find "$1" -type f -printf '%s\n' | awk '{s+=$1} END {print s+0}'; }
+
+has_fix() { as_svc git -C "$APP" merge-base --is-ancestor "$FIX" HEAD 2>/dev/null; }
+
+cmd_status() {
+  echo "release : $(tail -1 $BASE/releases.log 2>/dev/null || echo 'no releases.log')"
+  echo "code    : $(as_svc git -C "$APP" log -1 --format='%h %ci %s')"
+  echo "branch  : $(as_svc git -C "$APP" rev-parse --abbrev-ref HEAD)"
+  has_fix && echo "fix     : has $FIX" || echo "fix     : MISSING $FIX (release first: sudo bash ~/setup.sh)"
+  echo "service : $(systemctl is-active $SVC || true)"
+  echo "disk    : $(df -h --output=avail "$BASE" | tail -1 | tr -d ' ') free; index $(du -sh "$INDEX" | cut -f1)"
+  as_svc "$PY" -c 'import importlib.metadata as m; print("versions: " + " ".join(f"{p}={m.version(p)}" for p in ("chromadb","sentence-transformers","torch")))'
+  as_svc "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import model_pins; print("pins    : " + repr({k: v for k, v in vars(model_pins).items() if k.isupper()}))' "$SRC" 2>/dev/null \
+    || echo "pins    : (src/model_pins.py not readable)"
+  echo "--- index: source<TAB>chunks<TAB>figure_text"
+  counts
+  echo "--- documents: sha256  path (relative to documents/)"
+  (cd "$APP/documents" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum)
+}
+
+cmd_reindex() {
+  has_fix || { echo "REFUSED: server code lacks $FIX. Release first: sudo bash ~/setup.sh"; exit 3; }
+  local stamp work
+  stamp=$(date +%Y%m%d-%H%M%S)
+  work=$BASE/office/reindex-$stamp
+  install -d -o "$SVC" -g "$SVC" -m 750 "$BASE/office" "$work"
+  echo "work dir: $work"
+
+  (cd "$SRC" && as_svc "$PY" reindex.py --check) > "$work/check.log" 2>&1 \
+    || { tail -5 "$work/check.log"; echo "REFUSED: reindex.py --check failed (a source has no original)"; exit 3; }
+  counts > "$work/before.tsv"
+  echo "before  : $(wc -l < "$work/before.tsv") sources, $(awk -F'\t' '{s+=$2} END {print s}' "$work/before.tsv") chunks"
+
+  if [ -f /etc/systemd/system/$SVC-backup.service ]; then
+    systemctl start $SVC-backup.service || { echo "REFUSED: the backup service failed"; exit 3; }
+    echo "backup  : $SVC-backup.service ran (stores + documents + index)"
+  fi
+
+  trap 'systemctl start '"$SVC"' || true' EXIT
+  systemctl stop $SVC
+  echo "stopped : $SVC at $(date +%H:%M:%S)"
+  cp -a "$INDEX" "$work/chroma_db.bak"
+  [ "$(bytes "$INDEX")" = "$(bytes "$work/chroma_db.bak")" ] \
+    || { echo "REFUSED: index copy size differs"; exit 3; }
+
+  local rc=0
+  (cd "$SRC" && as_svc "$PY" reindex.py) > "$work/reindex.log" 2>&1 || rc=$?
+  tail -2 "$work/reindex.log"
+
+  local why=""
+  if [ $rc != 0 ]; then
+    why="reindex.py exited $rc"
+  else
+    counts > "$work/after.tsv"
+    # STOP rule (D-20261116-01 plan step 5): a source missing or at 0, fewer
+    # figure_text chunks, or more than max(2, 5%) of its chunks gone.
+    why=$(awk -F'\t' 'NR==FNR {a[$1]=$2; f[$1]=$3; next}
+      { if (!($1 in a) || a[$1]==0) print $1 ": gone";
+        else if (a[$1] < $2 - ($2*0.05 > 2 ? $2*0.05 : 2)) print $1 ": " $2 " -> " a[$1] " chunks";
+        else if (f[$1] < $3) print $1 ": figure text " $3 " -> " f[$1] }' \
+      "$work/after.tsv" "$work/before.tsv")
+  fi
+
+  if [ -n "$why" ]; then
+    rm -rf "$INDEX"
+    cp -a "$work/chroma_db.bak" "$INDEX"
+    printf '%s\n' "$why" > "$work/stop.txt"
+  fi
+  systemctl start $SVC
+  trap - EXIT
+  local ready=yes
+  wait_ready || ready=no
+  echo "started : $SVC at $(date +%H:%M:%S), ready=$ready"
+
+  if [ -n "$why" ]; then
+    echo "RESTORED: the old index is back. Why (first 20; all in $work/stop.txt):"
+    sed -n '1,20s/^/  /p' "$work/stop.txt"; exit 4
+  fi
+  echo "after   : $(wc -l < "$work/after.tsv") sources, $(awk -F'\t' '{s+=$2} END {print s}' "$work/after.tsv") chunks"
+  [ $ready = yes ] || { echo "REINDEXED but /health?deep=1 not ready after 5 min"; exit 5; }
+  echo "REINDEXED. Backup kept at $work/chroma_db.bak"
+}
+
+cmd_export_index() {
+  local out
+  out=$(mktemp -d /var/tmp/groundedops-index.XXXXXX)
+  trap 'systemctl start '"$SVC"' || true' EXIT
+  systemctl stop $SVC
+  tar -C "$SRC" -czf "$out/chroma_db.tar.gz" chroma_db
+  systemctl start $SVC
+  trap - EXIT
+  as_svc git -C "$APP" log -1 --format='built by code %h %ci' > "$out/code.txt"
+  chown -R "${SUDO_USER:?}" "$out"
+  wait_ready && echo "service ready" || echo "service NOT ready after 5 min"
+  echo "EXPORTED $out/chroma_db.tar.gz ($(du -h "$out/chroma_db.tar.gz" | cut -f1))"
+}
+
+[ $# = 1 ] || set -- usage
+exec 9>/run/groundedops-office.lock
+case "$1" in
+  status)       cmd_status ;;
+  reindex)      flock -n 9 || { echo "BUSY: another groundedops-office job is running"; exit 6; }; cmd_reindex ;;
+  export-index) flock -n 9 || { echo "BUSY: another groundedops-office job is running"; exit 6; }; cmd_export_index ;;
+  *) echo "usage: groundedops-office status|reindex|export-index"; exit 2 ;;
+esac
